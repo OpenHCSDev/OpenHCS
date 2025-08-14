@@ -55,7 +55,7 @@ def _save_materialized_data(filemanager, memory_data: List, materialized_paths: 
     """Save data to materialized location using appropriate backend."""
     if materialized_backend == Backend.ZARR.value:
         n_channels, n_z, n_fields = _calculate_zarr_dimensions(materialized_paths, context.microscope_handler)
-        row, col = context.microscope_handler.parser.extract_row_column(well_id)
+        row, col = context.microscope_handler.parser.extract_component_coordinates(well_id)
         filemanager.save_batch(memory_data, materialized_paths, materialized_backend,
                              chunk_name=well_id, zarr_config=step_plan.get("zarr_config"),
                              n_channels=n_channels, n_z=n_z, n_fields=n_fields,
@@ -828,8 +828,8 @@ class FunctionStep(AbstractStep):
                 conversion_paths = _generate_materialized_paths(memory_paths, Path(step_input_dir), Path(input_conversion_dir))
 
                 # Parse actual filenames to determine dimensions
-                # Calculate zarr dimensions from zarr paths (which contain the filenames)
-                n_channels, n_z, n_fields = _calculate_zarr_dimensions(zarr_paths, context.microscope_handler)
+                # Calculate zarr dimensions from conversion paths (which contain the filenames)
+                n_channels, n_z, n_fields = _calculate_zarr_dimensions(conversion_paths, context.microscope_handler)
                 # Parse well to get row and column for zarr structure
                 row, col = context.microscope_handler.parser.extract_component_coordinates(well_id)
 
