@@ -518,24 +518,25 @@ class PipelineEditorWidget(QWidget):
     
     def load_pipeline_from_file(self, file_path: Path):
         """
-        Load pipeline from file (extracted from Textual version).
-        
+        Load pipeline from file with automatic migration for backward compatibility.
+
         Args:
             file_path: Path to pipeline file
         """
         try:
-            import dill as pickle
-            with open(file_path, 'rb') as f:
-                steps = pickle.load(f)
-            
-            if isinstance(steps, list):
+            # Use migration utility to load with backward compatibility
+            from openhcs.io.pipeline_migration import load_pipeline_with_migration
+
+            steps = load_pipeline_with_migration(file_path)
+
+            if steps is not None:
                 self.pipeline_steps = steps
                 self.update_step_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Loaded {len(steps)} steps from {file_path.name}")
             else:
                 self.status_message.emit(f"Invalid pipeline format in {file_path.name}")
-                
+
         except Exception as e:
             logger.error(f"Failed to load pipeline: {e}")
             self.service_adapter.show_error_dialog(f"Failed to load pipeline: {e}")
