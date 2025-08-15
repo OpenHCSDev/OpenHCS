@@ -40,36 +40,6 @@ class GroupBy(Enum):
         """Get the wrapped VariableComponents enum."""
         return self.value
 
-    @classmethod
-    def from_string(cls, component_type: str) -> Optional['GroupBy']:
-        """
-        Create GroupBy enum from string value.
-
-        Provides a clean, unified lookup mechanism that encapsulates the conversion logic
-        within the enum class itself, eliminating the need for manual iteration and
-        nested conditionals in calling code.
-
-        Args:
-            component_type: String value to convert (e.g., "channel", "site", "well")
-
-        Returns:
-            Matching GroupBy enum member, or None if no match found
-
-        Examples:
-            >>> GroupBy.from_string("channel")
-            <GroupBy.CHANNEL: VariableComponents.CHANNEL>
-            >>> GroupBy.from_string("invalid")
-            None
-        """
-        if not component_type:
-            return cls.NONE
-
-        for group_by in cls:
-            if group_by.value is not None and group_by.value.value == component_type:
-                return group_by
-
-        return None
-
     def __eq__(self, other):
         """Support equality with both GroupBy and VariableComponents."""
         if isinstance(other, GroupBy):
