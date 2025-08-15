@@ -411,23 +411,35 @@ class FunctionPaneWidget(QWidget):
     
     def reset_all_parameters(self):
         """Reset all parameters to default values (extracted from Textual version)."""
-        
-        for param_name, default_value in self.param_defaults.items():
-            # Update internal kwargs
-            self._internal_kwargs[param_name] = default_value
-            
-            # Update form manager
-            if self.form_manager:
-                self.form_manager.reset_parameter(param_name, default_value)
-            
-            # Update UI widget
-            if param_name in self.parameter_widgets:
-                widget = self.parameter_widgets[param_name]
-                self.update_widget_value(widget, default_value)
-            
-            # Emit parameter changed signal
-            self.parameter_changed.emit(self.index, param_name, default_value)
-        
+
+        # Use the enhanced PyQt6 form manager for proper widget reset if available
+        if hasattr(self, 'enhanced_form_manager') and self.enhanced_form_manager:
+            # Use the PyQt6 form manager's reset functionality which properly handles widgets
+            self.enhanced_form_manager.reset_all_parameters()
+
+            # Update internal kwargs to match the reset values
+            for param_name, default_value in self.param_defaults.items():
+                self._internal_kwargs[param_name] = default_value
+                # Emit parameter changed signal
+                self.parameter_changed.emit(self.index, param_name, default_value)
+        else:
+            # Fallback to manual reset for backward compatibility
+            for param_name, default_value in self.param_defaults.items():
+                # Update internal kwargs
+                self._internal_kwargs[param_name] = default_value
+
+                # Update form manager
+                if self.form_manager:
+                    self.form_manager.reset_parameter(param_name, default_value)
+
+                # Update UI widget
+                if param_name in self.parameter_widgets:
+                    widget = self.parameter_widgets[param_name]
+                    self.update_widget_value(widget, default_value)
+
+                # Emit parameter changed signal
+                self.parameter_changed.emit(self.index, param_name, default_value)
+
         self.reset_parameters.emit(self.index)
         logger.debug(f"Reset all parameters for function {self.index}")
     
