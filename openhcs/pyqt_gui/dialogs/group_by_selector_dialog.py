@@ -27,23 +27,23 @@ class GroupBySelectorDialog(QDialog):
     # Signals
     selection_changed = pyqtSignal(list)  # Selected components
     
-    def __init__(self, available_components: List[str], selected_components: List[str], 
-                 component_type: str = "channel", orchestrator=None, parent=None):
+    def __init__(self, available_components: List[str], selected_components: List[str],
+                 group_by, orchestrator=None, parent=None):
         """
         Initialize group by selector dialog.
-        
+
         Args:
             available_components: List of available components
             selected_components: List of currently selected components
-            component_type: Type of component (for display)
+            group_by: GroupBy enum for component type
             orchestrator: Orchestrator for metadata access
             parent: Parent widget
         """
         super().__init__(parent)
-        
+
         self.available_components = available_components.copy()
         self.selected_components = selected_components.copy()
-        self.component_type = component_type
+        self.group_by = group_by
         self.orchestrator = orchestrator
         
         # Calculate initial lists (same logic as Textual TUI) - sorted for consistency
@@ -58,14 +58,17 @@ class GroupBySelectorDialog(QDialog):
     
     def setup_ui(self):
         """Setup the user interface (mirrors Textual TUI layout)."""
-        self.setWindowTitle(f"Select {self.component_type.title()}s")
+        from openhcs.ui.shared.pyqt6_widget_strategies import _get_enum_display_text
+        component_display = _get_enum_display_text(self.group_by).title()
+
+        self.setWindowTitle(f"Select {component_display}s")
         self.setModal(True)
         self.resize(500, 400)
-        
+
         layout = QVBoxLayout(self)
-        
+
         # Title
-        title_label = QLabel(f"Select {self.component_type.title()}s")
+        title_label = QLabel(f"Select {component_display}s")
         title_font = QFont()
         title_font.setBold(True)
         title_font.setPointSize(12)
@@ -188,15 +191,13 @@ class GroupBySelectorDialog(QDialog):
         Returns:
             Formatted display string (e.g., "Channel 1 | HOECHST 33342" or "Channel 1")
         """
-        base_text = f"{self.component_type.title()} {component_key}"
+        from openhcs.ui.shared.pyqt6_widget_strategies import _get_enum_display_text
+        component_display = _get_enum_display_text(self.group_by).title()
+        base_text = f"{component_display} {component_key}"
 
         # Get metadata name if orchestrator is available
         if self.orchestrator:
-            # Convert component_type string back to GroupBy enum
-            from openhcs.constants.constants import GroupBy
-            group_by = GroupBy(self.component_type)
-            metadata_name = self.orchestrator.get_component_metadata(group_by, component_key)
-
+            metadata_name = self.orchestrator.get_component_metadata(self.group_by, component_key)
             if metadata_name:
                 return f"{base_text} | {metadata_name}"
 
@@ -263,22 +264,22 @@ class GroupBySelectorDialog(QDialog):
         return self.current_selected.copy()
     
     @staticmethod
-    def select_components(available_components: List[str], selected_components: List[str], 
-                         component_type: str = "channel", orchestrator=None, parent=None) -> Optional[List[str]]:
+    def select_components(available_components: List[str], selected_components: List[str],
+                         group_by, orchestrator=None, parent=None) -> Optional[List[str]]:
         """
         Static method to show group by selector and return selected components.
-        
+
         Args:
             available_components: List of available components
             selected_components: List of currently selected components
-            component_type: Type of component (for display)
+            group_by: GroupBy enum for component type
             orchestrator: Orchestrator for metadata access
             parent: Parent widget
-            
+
         Returns:
             Selected components or None if cancelled
         """
-        dialog = GroupBySelectorDialog(available_components, selected_components, component_type, orchestrator, parent)
+        dialog = GroupBySelectorDialog(available_components, selected_components, group_by, orchestrator, parent)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             return dialog.get_selected_components()
         return None

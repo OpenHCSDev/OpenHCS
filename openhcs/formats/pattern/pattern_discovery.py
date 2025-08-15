@@ -231,7 +231,7 @@ class PatternDiscoveryEngine:
                     raise TypeError(f"Pattern generator returned invalid type: {type(pattern).__name__}")
 
             result[axis_value] = (
-                self.group_patterns_by_component(patterns, component=group_by)
+                self.group_patterns_by_component(patterns, component=group_by.value.value)
                 if group_by else patterns
             )
 
