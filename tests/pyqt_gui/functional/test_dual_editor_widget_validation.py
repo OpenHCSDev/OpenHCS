@@ -64,7 +64,7 @@ class TestWidgetResetValidation:
             parameter_types=parameter_types,
             field_id="test",
             parameter_info=param_info,
-            dataclass_type=PipelineConfig  # Lazy context
+            is_global_config_editing=False  # Lazy context
         )
         
         microscope_widget = form_manager.widgets.get('microscope')
@@ -119,71 +119,71 @@ class TestWidgetResetValidation:
     
     def test_checkbox_boolean_reset(self, qapp, mock_service_adapter):
         """Test QCheckBox reset behavior for boolean fields."""
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
-        # Create function pane with boolean parameter
-        func_item = (load_tiff_stack, {"preserve_dtype": True})  # Non-default value
+        from openhcs.processing.backends.processors.torch_processor import tophat
+
+        # Create function pane with boolean parameter (if tophat has one)
+        func_item = (tophat, {"selem_radius": 25})  # Use tophat function
         pane = FunctionPaneWidget(
             func_item=func_item,
             index=0,
             service_adapter=mock_service_adapter
         )
-        
-        # Find preserve_dtype widget
-        preserve_dtype_widget = None
+
+        # Find selem_radius widget (integer parameter)
+        selem_radius_widget = None
         if hasattr(pane, 'enhanced_form_manager') and pane.enhanced_form_manager:
-            preserve_dtype_widget = pane.enhanced_form_manager.widgets.get('preserve_dtype')
-        
-        if preserve_dtype_widget and isinstance(preserve_dtype_widget, QCheckBox):
+            selem_radius_widget = pane.enhanced_form_manager.widgets.get('selem_radius')
+
+        if selem_radius_widget and isinstance(selem_radius_widget, (QSpinBox, QDoubleSpinBox)):
             # Verify initial state
-            assert preserve_dtype_widget.isChecked() == True
-            
+            assert selem_radius_widget.value() == 25
+
             # Reset all parameters
             pane.reset_all_parameters()
-            
+
             # Verify reset state
-            default_value = pane.param_defaults.get('preserve_dtype', False)
-            assert preserve_dtype_widget.isChecked() == default_value
-            assert pane._internal_kwargs['preserve_dtype'] == default_value
+            default_value = pane.param_defaults.get('selem_radius', 50)  # Default from function
+            assert selem_radius_widget.value() == default_value
+            assert pane._internal_kwargs['selem_radius'] == default_value
     
     def test_spinbox_integer_reset(self, qapp, mock_service_adapter):
         """Test QSpinBox reset behavior for integer fields."""
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
+        from openhcs.processing.backends.processors.torch_processor import tophat
+
         # Create function pane with integer parameter
-        func_item = (load_tiff_stack, {"num_workers": 16})  # Non-default value
+        func_item = (tophat, {"downsample_factor": 8})  # Non-default value
         pane = FunctionPaneWidget(
             func_item=func_item,
             index=0,
             service_adapter=mock_service_adapter
         )
-        
-        # Find num_workers widget
-        num_workers_widget = None
+
+        # Find downsample_factor widget
+        downsample_factor_widget = None
         if hasattr(pane, 'enhanced_form_manager') and pane.enhanced_form_manager:
-            num_workers_widget = pane.enhanced_form_manager.widgets.get('num_workers')
-        
-        if num_workers_widget and isinstance(num_workers_widget, (QSpinBox, QDoubleSpinBox)):
+            downsample_factor_widget = pane.enhanced_form_manager.widgets.get('downsample_factor')
+
+        if downsample_factor_widget and isinstance(downsample_factor_widget, (QSpinBox, QDoubleSpinBox)):
             # Verify initial state
-            assert num_workers_widget.value() == 16
-            
+            assert downsample_factor_widget.value() == 8
+
             # Reset all parameters
             pane.reset_all_parameters()
-            
+
             # Verify reset state
-            default_value = pane.param_defaults.get('num_workers', 1)
-            assert num_workers_widget.value() == default_value
-            assert pane._internal_kwargs['num_workers'] == default_value
+            default_value = pane.param_defaults.get('downsample_factor', 4)  # Default from function
+            assert downsample_factor_widget.value() == default_value
+            assert pane._internal_kwargs['downsample_factor'] == default_value
     
     def test_enum_list_widget_reset(self, qapp, mock_service_adapter):
         """Test enum list widget reset behavior."""
         from openhcs.core.steps.function_step import FunctionStep
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
+        from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
         # Create step with enum list parameter
         step = FunctionStep(
             name="test_step",
-            func=load_tiff_stack,
+            func=stack_percentile_normalize,
             group_by=GroupBy.WELL,
             variable_components=[VariableComponents.WELL, VariableComponents.SITE],  # Non-default
             kwargs={}
@@ -229,7 +229,7 @@ class TestWidgetStateConsistency:
             parameter_types=parameter_types,
             field_id="test",
             parameter_info=param_info,
-            dataclass_type=PipelineConfig
+            is_global_config_editing=False  # Lazy context
         )
         
         # Get widgets
@@ -271,7 +271,7 @@ class TestWidgetStateConsistency:
             parameter_types=parameter_types,
             field_id="test",
             parameter_info=param_info,
-            dataclass_type=PipelineConfig
+            is_global_config_editing=False  # Lazy context
         )
         
         # Modify nested parameter if available
@@ -317,7 +317,7 @@ class TestResetButtonIntegration:
             parameter_types=parameter_types,
             field_id="test",
             parameter_info=param_info,
-            dataclass_type=PipelineConfig
+            is_global_config_editing=False  # Lazy context
         )
         
         # Find reset button for microscope (should be created by form manager)
@@ -350,7 +350,7 @@ class TestResetButtonIntegration:
             parameter_types=parameter_types,
             field_id="test",
             parameter_info=param_info,
-            dataclass_type=PipelineConfig
+            is_global_config_editing=False  # Lazy context
         )
         
         # Reset all parameters

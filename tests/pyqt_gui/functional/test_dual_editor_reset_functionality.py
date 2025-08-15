@@ -52,14 +52,14 @@ def mock_service_adapter():
 @pytest.fixture
 def sample_function_step():
     """Create a sample function step for testing."""
-    from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-    
+    from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
     step = FunctionStep(
         name="test_step",
-        func=load_tiff_stack,
+        func=stack_percentile_normalize,
         group_by=GroupBy.WELL,
         variable_components=[VariableComponents.WELL],
-        kwargs={"preserve_dtype": True, "num_workers": 4}
+        kwargs={"low_percentile": 1.0, "high_percentile": 99.0, "target_max": 65535.0}
     )
     return step
 
@@ -84,22 +84,22 @@ class TestStepParameterEditorReset:
         )
         
         # Modify a parameter
-        original_num_workers = editor.step.num_workers
-        editor.step.num_workers = 16
-        editor.form_manager.update_parameter('num_workers', 16)
-        
+        original_low_percentile = editor.step.low_percentile
+        editor.step.low_percentile = 5.0
+        editor.form_manager.update_parameter('low_percentile', 5.0)
+
         # Verify parameter was changed
-        assert editor.step.num_workers == 16
-        
+        assert editor.step.low_percentile == 5.0
+
         # Reset the parameter
-        editor.reset_parameter('num_workers')
-        
+        editor.reset_parameter('low_percentile')
+
         # Verify parameter was reset to default
-        assert editor.step.num_workers == original_num_workers
-        
+        assert editor.step.low_percentile == original_low_percentile
+
         # Verify form manager was updated
         current_values = editor.form_manager.get_current_values()
-        assert current_values['num_workers'] == original_num_workers
+        assert current_values['low_percentile'] == original_low_percentile
     
     def test_step_editor_reset_all_parameters(self, qapp, mock_service_adapter, sample_function_step):
         """Test reset all parameters in step editor."""
@@ -114,13 +114,13 @@ class TestStepParameterEditorReset:
             original_values[param_name] = getattr(editor.step, param_name)
         
         # Modify multiple parameters
-        if hasattr(editor.step, 'num_workers'):
-            editor.step.num_workers = 99
-            editor.form_manager.update_parameter('num_workers', 99)
-        
-        if hasattr(editor.step, 'preserve_dtype'):
-            editor.step.preserve_dtype = False
-            editor.form_manager.update_parameter('preserve_dtype', False)
+        if hasattr(editor.step, 'low_percentile'):
+            editor.step.low_percentile = 5.0
+            editor.form_manager.update_parameter('low_percentile', 5.0)
+
+        if hasattr(editor.step, 'high_percentile'):
+            editor.step.high_percentile = 95.0
+            editor.form_manager.update_parameter('high_percentile', 95.0)
         
         # Reset all parameters
         editor.reset_all_parameters()
@@ -173,9 +173,9 @@ class TestFunctionPaneReset:
     
     def test_function_pane_reset_all_parameters(self, qapp, mock_service_adapter):
         """Test reset all parameters in function pane."""
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
-        func_item = (load_tiff_stack, {"preserve_dtype": False, "num_workers": 8})
+        from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
+        func_item = (stack_percentile_normalize, {"low_percentile": 5.0, "high_percentile": 95.0})
         pane = FunctionPaneWidget(
             func_item=func_item,
             index=0,
@@ -186,8 +186,8 @@ class TestFunctionPaneReset:
         original_defaults = pane.param_defaults.copy()
         
         # Modify parameters
-        pane._internal_kwargs['preserve_dtype'] = True
-        pane._internal_kwargs['num_workers'] = 16
+        pane._internal_kwargs['low_percentile'] = 10.0
+        pane._internal_kwargs['high_percentile'] = 90.0
         
         # Reset all parameters
         pane.reset_all_parameters()
@@ -198,9 +198,9 @@ class TestFunctionPaneReset:
     
     def test_function_pane_enhanced_form_manager_reset(self, qapp, mock_service_adapter):
         """Test that function pane uses enhanced form manager for reset."""
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
-        func_item = (load_tiff_stack, {"preserve_dtype": True})
+        from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
+        func_item = (stack_percentile_normalize, {"low_percentile": 1.0})
         pane = FunctionPaneWidget(
             func_item=func_item,
             index=0,
@@ -220,47 +220,47 @@ class TestFunctionPaneReset:
     
     def test_function_pane_widget_state_after_reset(self, qapp, mock_service_adapter):
         """Test widget state consistency after reset in function pane."""
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
-        func_item = (load_tiff_stack, {"preserve_dtype": False, "num_workers": 4})
+        from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
+        func_item = (stack_percentile_normalize, {"low_percentile": 5.0, "target_max": 32767.0})
         pane = FunctionPaneWidget(
             func_item=func_item,
             index=0,
             service_adapter=mock_service_adapter
         )
-        
+
         # Find widgets
-        preserve_dtype_widget = None
-        num_workers_widget = None
-        
+        low_percentile_widget = None
+        target_max_widget = None
+
         if hasattr(pane, 'enhanced_form_manager') and pane.enhanced_form_manager:
             widgets = pane.enhanced_form_manager.widgets
-            preserve_dtype_widget = widgets.get('preserve_dtype')
-            num_workers_widget = widgets.get('num_workers')
-        
-        # Test boolean widget reset
-        if preserve_dtype_widget and isinstance(preserve_dtype_widget, QCheckBox):
+            low_percentile_widget = widgets.get('low_percentile')
+            target_max_widget = widgets.get('target_max')
+
+        # Test float widget reset
+        if low_percentile_widget and isinstance(low_percentile_widget, (QSpinBox, QDoubleSpinBox)):
             # Change value
-            preserve_dtype_widget.setChecked(True)
-            
+            low_percentile_widget.setValue(10.0)
+
             # Reset
             pane.reset_all_parameters()
-            
+
             # Verify widget state matches default
-            expected_state = pane.param_defaults.get('preserve_dtype', False)
-            assert preserve_dtype_widget.isChecked() == expected_state
-        
-        # Test integer widget reset
-        if num_workers_widget and isinstance(num_workers_widget, QSpinBox):
+            expected_state = pane.param_defaults.get('low_percentile', 1.0)
+            assert low_percentile_widget.value() == expected_state
+
+        # Test target_max widget reset
+        if target_max_widget and isinstance(target_max_widget, (QSpinBox, QDoubleSpinBox)):
             # Change value
-            num_workers_widget.setValue(99)
-            
+            target_max_widget.setValue(99999.0)
+
             # Reset
             pane.reset_all_parameters()
-            
+
             # Verify widget state matches default
-            expected_value = pane.param_defaults.get('num_workers', 1)
-            assert num_workers_widget.value() == expected_value
+            expected_value = pane.param_defaults.get('target_max', 65535.0)
+            assert target_max_widget.value() == expected_value
 
 
 class TestDualEditorIntegration:
@@ -277,35 +277,35 @@ class TestDualEditorIntegration:
         )
         
         # Modify parameters
-        original_num_workers = getattr(sample_function_step, 'num_workers', 1)
-        step_editor.step.num_workers = 99
-        
+        original_low_percentile = getattr(sample_function_step, 'low_percentile', 1.0)
+        step_editor.step.low_percentile = 10.0
+
         # Reset all
         step_editor.reset_all_parameters()
-        
+
         # Verify reset
-        assert step_editor.step.num_workers == original_num_workers
+        assert step_editor.step.low_percentile == original_low_percentile
     
     def test_dual_editor_function_tab_reset(self, qapp, mock_service_adapter):
         """Test reset functionality in dual editor function tab."""
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
-        func_item = (load_tiff_stack, {"preserve_dtype": True})
+        from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
+        func_item = (stack_percentile_normalize, {"low_percentile": 1.0})
         function_pane = FunctionPaneWidget(
             func_item=func_item,
             index=0,
             service_adapter=mock_service_adapter
         )
-        
+
         # Modify parameters
-        function_pane._internal_kwargs['preserve_dtype'] = False
-        
+        function_pane._internal_kwargs['low_percentile'] = 10.0
+
         # Reset all
         function_pane.reset_all_parameters()
-        
+
         # Verify reset
-        expected_default = function_pane.param_defaults.get('preserve_dtype', True)
-        assert function_pane._internal_kwargs['preserve_dtype'] == expected_default
+        expected_default = function_pane.param_defaults.get('low_percentile', 1.0)
+        assert function_pane._internal_kwargs['low_percentile'] == expected_default
 
 
 class TestPlaceholderTextBehavior:
@@ -327,7 +327,7 @@ class TestPlaceholderTextBehavior:
             parameter_types=parameter_types,
             field_id="config",
             parameter_info=param_info,
-            dataclass_type=PipelineConfig  # Lazy context
+            is_global_config_editing=False  # Lazy context
         )
         
         # Find microscope widget
@@ -366,7 +366,7 @@ class TestPlaceholderTextBehavior:
             parameter_types=parameter_types,
             field_id="config",
             parameter_info=param_info,
-            dataclass_type=PipelineConfig
+            is_global_config_editing=False  # Lazy context
         )
         
         # Test nested string field if available

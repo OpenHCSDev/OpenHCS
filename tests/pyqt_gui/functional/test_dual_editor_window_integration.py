@@ -50,14 +50,14 @@ def mock_service_adapter():
 @pytest.fixture
 def sample_function_step():
     """Create a sample function step for testing."""
-    from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-    
+    from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
     step = FunctionStep(
         name="test_step",
-        func=load_tiff_stack,
+        func=stack_percentile_normalize,
         group_by=GroupBy.WELL,
         variable_components=[VariableComponents.WELL],
-        kwargs={"preserve_dtype": True, "num_workers": 4}
+        kwargs={"low_percentile": 1.0, "high_percentile": 99.0}
     )
     return step
 
@@ -80,40 +80,40 @@ class TestDualEditorWindowIntegration:
         )
         
         # Modify step parameters
-        original_num_workers = getattr(sample_function_step, 'num_workers', 1)
-        step_editor.step.num_workers = 99
-        step_editor.form_manager.update_parameter('num_workers', 99)
-        
+        original_low_percentile = getattr(sample_function_step, 'low_percentile', 1.0)
+        step_editor.step.low_percentile = 10.0
+        step_editor.form_manager.update_parameter('low_percentile', 10.0)
+
         # Verify parameter was changed
-        assert step_editor.step.num_workers == 99
-        
+        assert step_editor.step.low_percentile == 10.0
+
         # Reset all parameters
         step_editor.reset_all_parameters()
-        
+
         # Verify parameters were reset
-        assert step_editor.step.num_workers == original_num_workers
-        
+        assert step_editor.step.low_percentile == original_low_percentile
+
         # Verify form manager was updated
         current_values = step_editor.form_manager.get_current_values()
-        assert current_values['num_workers'] == original_num_workers
+        assert current_values['low_percentile'] == original_low_percentile
     
     def test_function_editor_component_reset(self, qapp, mock_service_adapter):
         """Test function editor component reset functionality."""
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
+        from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
         # Create function list editor with sample functions
-        initial_functions = [(load_tiff_stack, {"preserve_dtype": True, "num_workers": 8})]
-        
+        initial_functions = [(stack_percentile_normalize, {"low_percentile": 5.0, "high_percentile": 95.0})]
+
         function_editor = FunctionListEditorWidget(
             initial_functions=initial_functions,
             service_adapter=mock_service_adapter
         )
-        
+
         # Verify initial setup
         assert len(function_editor.functions) == 1
         func, kwargs = function_editor.functions[0]
-        assert kwargs['preserve_dtype'] == True
-        assert kwargs['num_workers'] == 8
+        assert kwargs['low_percentile'] == 5.0
+        assert kwargs['high_percentile'] == 95.0
         
         # Test function pane reset (if function panes are created)
         # Note: This depends on the internal implementation of FunctionListEditorWidget
@@ -121,13 +121,13 @@ class TestDualEditorWindowIntegration:
             pane = function_editor.function_panes[0]
             if hasattr(pane, 'reset_all_parameters'):
                 # Modify parameters
-                pane._internal_kwargs['preserve_dtype'] = False
-                
+                pane._internal_kwargs['low_percentile'] = 10.0
+
                 # Reset
                 pane.reset_all_parameters()
-                
+
                 # Verify reset
-                assert pane._internal_kwargs['preserve_dtype'] == True  # Back to original
+                assert pane._internal_kwargs['low_percentile'] == 5.0  # Back to original
 
 
 class TestTabSwitchingWithReset:
@@ -141,43 +141,43 @@ class TestTabSwitchingWithReset:
         )
         
         # Modify parameters
-        step_editor.step.num_workers = 99
-        step_editor.form_manager.update_parameter('num_workers', 99)
-        
+        step_editor.step.low_percentile = 10.0
+        step_editor.form_manager.update_parameter('low_percentile', 10.0)
+
         # Simulate tab switch (step editor should maintain state)
         # In real dual editor, this would involve hiding/showing widgets
-        
+
         # Verify state is maintained
-        assert step_editor.step.num_workers == 99
+        assert step_editor.step.low_percentile == 10.0
         current_values = step_editor.form_manager.get_current_values()
-        assert current_values['num_workers'] == 99
-        
+        assert current_values['low_percentile'] == 10.0
+
         # Reset and verify
         step_editor.reset_all_parameters()
-        original_value = step_editor.param_defaults.get('num_workers', 1)
-        assert step_editor.step.num_workers == original_value
+        original_value = step_editor.param_defaults.get('low_percentile', 1.0)
+        assert step_editor.step.low_percentile == original_value
     
     def test_function_tab_state_preservation(self, qapp, mock_service_adapter):
         """Test that function tab state is preserved during tab switches."""
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
-        initial_functions = [(load_tiff_stack, {"preserve_dtype": False})]
-        
+        from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
+        initial_functions = [(stack_percentile_normalize, {"low_percentile": 5.0})]
+
         function_editor = FunctionListEditorWidget(
             initial_functions=initial_functions,
             service_adapter=mock_service_adapter
         )
-        
+
         # Verify initial state
         assert len(function_editor.functions) == 1
         func, kwargs = function_editor.functions[0]
-        assert kwargs['preserve_dtype'] == False
-        
+        assert kwargs['low_percentile'] == 5.0
+
         # Simulate tab switch and verify state preservation
         # Function editor should maintain its function list
         assert len(function_editor.functions) == 1
         func, kwargs = function_editor.functions[0]
-        assert kwargs['preserve_dtype'] == False
+        assert kwargs['low_percentile'] == 5.0
 
 
 class TestResetOperationSignaling:
@@ -252,9 +252,9 @@ class TestErrorHandlingDuringReset:
     def test_function_pane_reset_error_handling(self, qapp, mock_service_adapter):
         """Test error handling in function pane reset."""
         from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        
-        func_item = (load_tiff_stack, {"preserve_dtype": True})
+        from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+
+        func_item = (stack_percentile_normalize, {"low_percentile": 1.0})
         pane = FunctionPaneWidget(
             func_item=func_item,
             index=0,
@@ -283,27 +283,27 @@ class TestResetConsistencyAcrossTabs:
             service_adapter=mock_service_adapter
         )
         
-        from openhcs.processing.backends.loaders.tiff_loader import load_tiff_stack
-        initial_functions = [(load_tiff_stack, {"preserve_dtype": True})]
+        from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+        initial_functions = [(stack_percentile_normalize, {"low_percentile": 1.0})]
         function_editor = FunctionListEditorWidget(
             initial_functions=initial_functions,
             service_adapter=mock_service_adapter
         )
-        
+
         # Modify step parameters
-        step_editor.step.num_workers = 99
-        
+        step_editor.step.low_percentile = 10.0
+
         # Reset step parameters
         step_editor.reset_all_parameters()
-        
+
         # Verify step was reset
-        original_value = step_editor.param_defaults.get('num_workers', 1)
-        assert step_editor.step.num_workers == original_value
-        
+        original_value = step_editor.param_defaults.get('low_percentile', 1.0)
+        assert step_editor.step.low_percentile == original_value
+
         # Function editor should be unaffected
         assert len(function_editor.functions) == 1
         func, kwargs = function_editor.functions[0]
-        assert kwargs['preserve_dtype'] == True
+        assert kwargs['low_percentile'] == 1.0
 
 
 if __name__ == "__main__":
