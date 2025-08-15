@@ -112,9 +112,19 @@ class WidgetRegistry:
                            if checker(resolved_type)), None):
             return creator(param_name, resolved_type, current_value, widget_id, parameter_info)
 
-        # Fail-loud fallback
+        # Fail-loud fallback with special handling for known problematic types
         if fallback := self._creators.get(str):
             return fallback(param_name, resolved_type, current_value, widget_id, parameter_info)
+
+        # Special handling for CuPy arrays and other array types - fallback to string
+        type_name = getattr(resolved_type, '__name__', str(resolved_type))
+        if 'cupy' in type_name.lower() or 'ndarray' in type_name.lower():
+            # Create a simple string widget for array types
+            from PyQt6.QtWidgets import QLineEdit
+            widget = QLineEdit()
+            widget.setText(f"<{type_name} object>")
+            widget.setReadOnly(True)  # Make it read-only since arrays aren't editable as text
+            return widget
 
         raise ValueError(f"No widget creator registered for type: {resolved_type}")
 
