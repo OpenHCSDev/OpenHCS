@@ -692,8 +692,10 @@ class PipelineOrchestrator:
         # Convert GroupBy enum to VariableComponents if needed
         from openhcs.constants.constants import GroupBy, VariableComponents
         if isinstance(component, GroupBy):
-            # GroupBy enum values are VariableComponents enum members
-            component = component.value
+            # GroupBy enum values are now strings, convert to VariableComponents
+            component_string = component.value
+            # Find the corresponding VariableComponents enum member
+            component = next(vc for vc in VariableComponents if vc.value == component_string)
 
         # Use component directly - let natural errors occur for wrong types
         component_name = component.value
@@ -701,7 +703,7 @@ class PipelineOrchestrator:
         # Try metadata cache first (preferred source)
         if component in self._metadata_cache and self._metadata_cache[component]:
             all_components = list(self._metadata_cache[component].keys())
-            logger.debug(f"Using metadata cache for {component.value}: {len(all_components)} components")
+            logger.debug(f"Using metadata cache for {component_name}: {len(all_components)} components")
         else:
             # Fall back to filename parsing cache
             all_components = self._component_keys_cache[component]  # Let KeyError bubble up naturally
