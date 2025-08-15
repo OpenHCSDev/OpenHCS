@@ -428,7 +428,7 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         return self.parser.construct_filename(extension=extension, **component_values)
 
     def auto_detect_patterns(self, folder_path: Union[str, Path], filemanager: FileManager, backend: str,
-                           well_filter=None, extensions=None, group_by='channel', variable_components=None):
+                           well_filter=None, extensions=None, group_by=None, variable_components=None):
         """
         Delegate to pattern engine.
 
@@ -438,7 +438,7 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
             backend: Backend to use for file operations (required)
             well_filter: Optional list of wells to include
             extensions: Optional list of file extensions to include
-            group_by: Component to group patterns by (e.g., 'channel', 'z_index', 'well')
+            group_by: GroupBy enum to group patterns by (e.g., GroupBy.CHANNEL, GroupBy.Z_INDEX)
             variable_components: List of components to make variable (e.g., ['site', 'z_index'])
 
         Returns:
@@ -453,6 +453,11 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         # Ensure the path exists using FileManager abstraction
         if not filemanager.exists(str(folder_path), backend):
             raise ValueError(f"Folder path does not exist: {folder_path}")
+
+        # Set default GroupBy if none provided
+        if group_by is None:
+            from openhcs.constants.constants import GroupBy
+            group_by = GroupBy.CHANNEL
 
         # Create pattern engine on demand with the provided filemanager
         from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine

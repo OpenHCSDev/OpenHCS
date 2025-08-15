@@ -778,7 +778,7 @@ class FunctionStep(AbstractStep):
                 read_backend,                  # backend
                 well_filter=[well_id],         # well_filter
                 extensions=DEFAULT_IMAGE_EXTENSIONS,  # extensions
-                group_by=group_by.value if group_by else None,             # group_by
+                group_by=group_by,             # Pass GroupBy enum directly
                 variable_components=[vc.value for vc in variable_components] if variable_components else []  # variable_components
             )
 

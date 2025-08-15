@@ -207,7 +207,7 @@ class PatternDiscoveryEngine:
         folder_path: Union[str, Path],
         well_filter: List[str],
         extensions: List[str],
-        group_by: Optional[str],
+        group_by,  # Accept GroupBy enum or None
         variable_components: List[str],
         backend: str
     ) -> Dict[str, Any]:
@@ -230,10 +230,15 @@ class PatternDiscoveryEngine:
                 if not isinstance(pattern, str):
                     raise TypeError(f"Pattern generator returned invalid type: {type(pattern).__name__}")
 
-            result[axis_value] = (
-                self.group_patterns_by_component(patterns, component=group_by.value.value)
-                if group_by else patterns
-            )
+            if group_by:
+                # Extract string value from GroupBy enum for pattern grouping
+                component_string = group_by.value.value if group_by.value else None
+                if component_string:
+                    result[axis_value] = self.group_patterns_by_component(patterns, component=component_string)
+                else:
+                    result[axis_value] = patterns
+            else:
+                result[axis_value] = patterns
 
         return result
 

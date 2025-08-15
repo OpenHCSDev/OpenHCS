@@ -32,7 +32,7 @@ class PatternDetector(Protocol):
         well_filter: List[str],
         variable_components: List[str],
         backend: str,
-        group_by: Optional[str] = None,
+        group_by=None,  # Accept GroupBy enum or None
         recursive: bool = False
     ) -> Dict[str, Any]:
         """Detect patterns in the given directory."""
