@@ -56,9 +56,11 @@ def sample_function_step():
         name="test_step",
         func=stack_percentile_normalize,
         group_by=GroupBy.WELL,
-        variable_components=[VariableComponents.WELL],
-        kwargs={"low_percentile": 1.0, "high_percentile": 99.0}
+        variable_components=[VariableComponents.WELL]
     )
+    # Set function parameters as attributes after creation
+    step.low_percentile = 1.0
+    step.high_percentile = 99.0
     return step
 
 

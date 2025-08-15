@@ -16,7 +16,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QLineEdit, QCheckBox, QSpinBox, 
+    QApplication, QComboBox, QLineEdit, QCheckBox, QSpinBox,
     QDoubleSpinBox, QWidget
 )
 from PyQt6.QtCore import Qt
@@ -185,8 +185,7 @@ class TestWidgetResetValidation:
             name="test_step",
             func=stack_percentile_normalize,
             group_by=GroupBy.WELL,
-            variable_components=[VariableComponents.WELL, VariableComponents.SITE],  # Non-default
-            kwargs={}
+            variable_components=[VariableComponents.WELL, VariableComponents.SITE]  # Non-default
         )
         
         editor = StepParameterEditorWidget(
