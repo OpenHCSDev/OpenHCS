@@ -380,8 +380,8 @@ def _generate_step_parameters(step, default_step, clean_mode=False):
     sig = inspect.signature(FunctionStep.__init__)
 
     for param_name, param in sig.parameters.items():
-        # Skip constructor-specific parameters
-        if param_name in ['self', 'func']:
+        # Skip constructor-specific parameters and **kwargs
+        if param_name in ['self', 'func', 'kwargs']:
             continue
 
         current_val = getattr(step, param_name, param.default)
