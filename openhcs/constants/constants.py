@@ -6,7 +6,7 @@ These constants are governed by various doctrinal clauses.
 """
 
 from enum import Enum
-from typing import Any, Callable, Dict, List, Set, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
 
 class VariableComponents(Enum):
     SITE = "site"
@@ -20,13 +20,59 @@ class Microscope(Enum):
     IMAGEXPRESS = "ImageXpress"
     OPERAPHENIX = "OperaPhenix"
 
-class GroupBy(Enum):
-    # Use VariableComponents string values to maintain UI compatibility
-    CHANNEL = VariableComponents.CHANNEL.value  # "channel"
-    Z_INDEX = VariableComponents.Z_INDEX.value  # "z_index"
-    SITE = VariableComponents.SITE.value        # "site"
-    WELL = VariableComponents.WELL.value        # "well"
-    NONE = "" # Added for allow_blank in Select
+class GroupBy:
+    """
+    Wrapper around VariableComponents for grouping operations.
+
+    This eliminates the need for separate enum definitions and conversion logic
+    while maintaining type safety and backward compatibility.
+    """
+
+    def __init__(self, component: Optional[VariableComponents] = None):
+        self._component = component
+
+    @property
+    def value(self) -> str:
+        """Get the string value of the wrapped component."""
+        return self._component.value if self._component else ""
+
+    @property
+    def component(self) -> Optional[VariableComponents]:
+        """Get the wrapped VariableComponents enum."""
+        return self._component
+
+    @property
+    def name(self) -> str:
+        """Get the name of the wrapped component for compatibility."""
+        return self._component.name if self._component else "NONE"
+
+    def __eq__(self, other):
+        """Support equality with both GroupBy and VariableComponents."""
+        if isinstance(other, GroupBy):
+            return self._component == other._component
+        elif isinstance(other, VariableComponents):
+            return self._component == other
+        return False
+
+    def __hash__(self):
+        """Support using GroupBy as dictionary keys."""
+        return hash(self._component)
+
+    def __str__(self):
+        """String representation for debugging."""
+        return f"GroupBy({self._component})"
+
+    def __repr__(self):
+        """Detailed representation for debugging."""
+        return f"GroupBy({self._component!r})"
+
+
+# Create class constants for backward compatibility
+GroupBy.CHANNEL = GroupBy(VariableComponents.CHANNEL)
+GroupBy.SITE = GroupBy(VariableComponents.SITE)
+GroupBy.WELL = GroupBy(VariableComponents.WELL)
+GroupBy.Z_INDEX = GroupBy(VariableComponents.Z_INDEX)
+GroupBy.NONE = GroupBy(None)  # Special case for "no grouping"
 
 class OrchestratorState(Enum):
     """Simple orchestrator state tracking - no complex state machine."""

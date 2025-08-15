@@ -689,13 +689,12 @@ class PipelineOrchestrator:
         if not self.is_initialized():
             raise RuntimeError("Orchestrator must be initialized before getting component keys.")
 
-        # Convert GroupBy enum to VariableComponents if needed
+        # Extract VariableComponents from GroupBy wrapper if needed
         from openhcs.constants.constants import GroupBy, VariableComponents
         if isinstance(component, GroupBy):
-            # GroupBy enum values are now strings, convert to VariableComponents
-            component_string = component.value
-            # Find the corresponding VariableComponents enum member
-            component = next(vc for vc in VariableComponents if vc.value == component_string)
+            component = component.component
+            if component is None:
+                raise ValueError("Cannot get component keys for GroupBy.NONE")
 
         # Use component directly - let natural errors occur for wrong types
         component_name = component.value

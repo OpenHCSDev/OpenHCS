@@ -74,8 +74,8 @@ def migrate_legacy_group_by(group_by_value: Any) -> Any:
     
     # Import here to avoid circular imports
     from openhcs.constants.constants import GroupBy, VariableComponents
-    
-    # Map old string values to new GroupBy enum members
+
+    # Map old string values to new GroupBy wrapper instances
     string_to_groupby = {
         'channel': GroupBy.CHANNEL,
         'z_index': GroupBy.Z_INDEX,
@@ -266,7 +266,7 @@ class LegacyGroupByUnpickler(pickle.Unpickler):
                     # Import here to avoid circular imports
                     from openhcs.constants.constants import GroupBy
 
-                    # Map legacy string values to new GroupBy enum members
+                    # Map legacy string values to new GroupBy wrapper instances
                     string_to_groupby = {
                         'channel': GroupBy.CHANNEL,
                         'z_index': GroupBy.Z_INDEX,
