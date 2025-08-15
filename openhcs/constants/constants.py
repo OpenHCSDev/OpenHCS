@@ -20,59 +20,41 @@ class Microscope(Enum):
     IMAGEXPRESS = "ImageXpress"
     OPERAPHENIX = "OperaPhenix"
 
-class GroupBy:
+class GroupBy(Enum):
     """
-    Wrapper around VariableComponents for grouping operations.
+    Enum wrapper around VariableComponents for grouping operations.
 
     This eliminates the need for separate enum definitions and conversion logic
-    while maintaining type safety and backward compatibility.
+    while maintaining type safety, backward compatibility, and proper enum detection.
     """
 
-    def __init__(self, component: Optional[VariableComponents] = None):
-        self._component = component
-
-    @property
-    def value(self) -> str:
-        """Get the string value of the wrapped component."""
-        return self._component.value if self._component else ""
+    # Use VariableComponents as enum values for direct wrapping
+    CHANNEL = VariableComponents.CHANNEL
+    SITE = VariableComponents.SITE
+    WELL = VariableComponents.WELL
+    Z_INDEX = VariableComponents.Z_INDEX
+    NONE = None  # Special case for "no grouping"
 
     @property
     def component(self) -> Optional[VariableComponents]:
         """Get the wrapped VariableComponents enum."""
-        return self._component
-
-    @property
-    def name(self) -> str:
-        """Get the name of the wrapped component for compatibility."""
-        return self._component.name if self._component else "NONE"
+        return self.value
 
     def __eq__(self, other):
         """Support equality with both GroupBy and VariableComponents."""
         if isinstance(other, GroupBy):
-            return self._component == other._component
+            return self.value == other.value
         elif isinstance(other, VariableComponents):
-            return self._component == other
+            return self.value == other
         return False
-
-    def __hash__(self):
-        """Support using GroupBy as dictionary keys."""
-        return hash(self._component)
 
     def __str__(self):
         """String representation for debugging."""
-        return f"GroupBy({self._component})"
+        return f"GroupBy.{self.name}"
 
     def __repr__(self):
         """Detailed representation for debugging."""
-        return f"GroupBy({self._component!r})"
-
-
-# Create class constants for backward compatibility
-GroupBy.CHANNEL = GroupBy(VariableComponents.CHANNEL)
-GroupBy.SITE = GroupBy(VariableComponents.SITE)
-GroupBy.WELL = GroupBy(VariableComponents.WELL)
-GroupBy.Z_INDEX = GroupBy(VariableComponents.Z_INDEX)
-GroupBy.NONE = GroupBy(None)  # Special case for "no grouping"
+        return f"GroupBy.{self.name}"
 
 class OrchestratorState(Enum):
     """Simple orchestrator state tracking - no complex state machine."""
