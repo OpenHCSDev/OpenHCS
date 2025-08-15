@@ -209,15 +209,15 @@ class TestFunctionPaneReset:
             index=0,
             service_adapter=mock_service_adapter
         )
-        
-        # Verify enhanced form manager exists
+
+        # Verify enhanced form manager exists (required, no fallback)
         assert hasattr(pane, 'enhanced_form_manager')
         assert pane.enhanced_form_manager is not None
-        
+
         # Mock the enhanced form manager's reset method
         with patch.object(pane.enhanced_form_manager, 'reset_all_parameters') as mock_reset:
             pane.reset_all_parameters()
-            
+
             # Verify enhanced form manager reset was called
             mock_reset.assert_called_once()
     

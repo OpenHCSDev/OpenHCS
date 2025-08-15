@@ -240,16 +240,12 @@ class TestErrorHandlingDuringReset:
             step=sample_function_step,
             service_adapter=mock_service_adapter
         )
-        
+
         # Mock form manager to raise exception
         with patch.object(step_editor.form_manager, 'reset_all_parameters', side_effect=Exception("Test error")):
-            # Reset should not crash
-            try:
+            # Reset should fail loudly (no fallback)
+            with pytest.raises(Exception, match="Test error"):
                 step_editor.reset_all_parameters()
-                # Should fall back to manual reset
-                assert True  # If we get here, fallback worked
-            except Exception as e:
-                pytest.fail(f"Reset should not raise exception: {e}")
     
     def test_function_pane_reset_error_handling(self, qapp, mock_service_adapter):
         """Test error handling in function pane reset."""
@@ -262,16 +258,12 @@ class TestErrorHandlingDuringReset:
             index=0,
             service_adapter=mock_service_adapter
         )
-        
+
         # Mock enhanced form manager to raise exception
-        if hasattr(pane, 'enhanced_form_manager') and pane.enhanced_form_manager:
-            with patch.object(pane.enhanced_form_manager, 'reset_all_parameters', side_effect=Exception("Test error")):
-                # Reset should not crash and should fall back
-                try:
-                    pane.reset_all_parameters()
-                    assert True  # If we get here, fallback worked
-                except Exception as e:
-                    pytest.fail(f"Reset should not raise exception: {e}")
+        with patch.object(pane.enhanced_form_manager, 'reset_all_parameters', side_effect=Exception("Test error")):
+            # Reset should fail loudly (no fallback)
+            with pytest.raises(Exception, match="Test error"):
+                pane.reset_all_parameters()
 
 
 class TestResetConsistencyAcrossTabs:

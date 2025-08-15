@@ -237,31 +237,20 @@ class StepParameterEditorWidget(QScrollArea):
             default_value = self.param_defaults[param_name]
             setattr(self.step, param_name, default_value)
 
-            # Use proper reset method instead of update_parameter for correct widget behavior
-            if hasattr(self.form_manager, '_reset_parameter'):
-                self.form_manager._reset_parameter(param_name)
-            else:
-                # Fallback to update_parameter for backward compatibility
-                self.form_manager.update_parameter(param_name, default_value)
+            # Use proper reset method for correct widget behavior
+            self.form_manager._reset_parameter(param_name)
 
             self.step_parameter_changed.emit()
             logger.debug(f"Reset parameter {param_name} to default: {default_value}")
 
     def reset_all_parameters(self):
-        """Reset all parameters to default values."""
-        # Use the form manager's reset_all_parameters method for proper widget reset
-        if hasattr(self.form_manager, 'reset_all_parameters'):
-            # Update step attributes first
-            for param_name, default_value in self.param_defaults.items():
-                setattr(self.step, param_name, default_value)
+        """Reset all parameters to default values using PyQt6 form manager."""
+        # Update step attributes first
+        for param_name, default_value in self.param_defaults.items():
+            setattr(self.step, param_name, default_value)
 
-            # Use form manager's reset functionality which properly handles widgets
-            self.form_manager.reset_all_parameters()
-        else:
-            # Fallback to manual reset for backward compatibility
-            for param_name, default_value in self.param_defaults.items():
-                setattr(self.step, param_name, default_value)
-                self.form_manager.update_parameter(param_name, default_value)
+        # Use form manager's reset functionality which properly handles widgets
+        self.form_manager.reset_all_parameters()
 
         self.step_parameter_changed.emit()
         logger.debug("Reset all step parameters to defaults")
