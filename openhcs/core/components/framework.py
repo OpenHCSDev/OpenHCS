@@ -167,14 +167,21 @@ class ComponentConfigurationFactory:
     def create_openhcs_default_configuration():
         """
         Create the default OpenHCS configuration.
-        
+
         This maintains backward compatibility with the current OpenHCS setup:
         - Well as multiprocessing axis
         - Site as default variable component
         - Channel as default group_by
         """
-        from openhcs.constants.constants import VariableComponents
-        
+        # Import here to avoid circular import with constants.py
+        from enum import Enum
+
+        class VariableComponents(Enum):
+            SITE = "site"
+            CHANNEL = "channel"
+            Z_INDEX = "z_index"
+            WELL = "well"
+
         return ComponentConfigurationFactory.create_configuration(
             VariableComponents,
             multiprocessing_axis=VariableComponents.WELL,

@@ -50,15 +50,26 @@ DEFAULT_MICROSCOPE: Microscope = Microscope.AUTO
 
 # Generic component configuration system
 # This provides the new configurable component system while maintaining backward compatibility
-try:
-    from openhcs.core.components.framework import ComponentConfigurationFactory
+# Using lazy initialization to avoid circular imports
+OPENHCS_CONFIG = None
 
-    # Default OpenHCS configuration - maintains current behavior
-    OPENHCS_CONFIG = ComponentConfigurationFactory.create_openhcs_default_configuration()
+def get_openhcs_config():
+    """Get the OpenHCS configuration, initializing it if needed."""
+    global OPENHCS_CONFIG
+    if OPENHCS_CONFIG is None:
+        try:
+            from openhcs.core.components.framework import ComponentConfigurationFactory
+            OPENHCS_CONFIG = ComponentConfigurationFactory.create_openhcs_default_configuration()
+        except ImportError:
+            # Fallback for cases where the new system isn't available yet
+            OPENHCS_CONFIG = None
+        except Exception:
+            # Fallback for any other errors (like circular imports)
+            OPENHCS_CONFIG = None
+    return OPENHCS_CONFIG
 
-except ImportError:
-    # Fallback for cases where the new system isn't available yet
-    OPENHCS_CONFIG = None
+# Don't initialize on module load to avoid circular imports
+# OPENHCS_CONFIG will be None until get_openhcs_config() is called
 
 
 
