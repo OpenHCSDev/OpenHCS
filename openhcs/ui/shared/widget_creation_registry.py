@@ -6,6 +6,25 @@ from pathlib import Path
 from typing import Any, Type, Callable, Dict, get_origin, get_args, Union
 
 
+def _get_enum_display_text(enum_value: Enum) -> str:
+    """
+    Get display text for enum value, handling nested enums.
+
+    For simple enums like VariableComponents.SITE, returns the string value.
+    For nested enums like GroupBy.CHANNEL = VariableComponents.CHANNEL,
+    returns the nested enum's string value.
+    """
+    if isinstance(enum_value.value, Enum):
+        # Nested enum (e.g., GroupBy.CHANNEL = VariableComponents.CHANNEL)
+        return enum_value.value.value
+    elif isinstance(enum_value.value, str):
+        # Simple string enum
+        return enum_value.value
+    else:
+        # Fallback to string representation
+        return str(enum_value.value)
+
+
 @dataclasses.dataclass(frozen=True)
 class TypeResolution:
     """Immutable type resolution configuration."""
@@ -128,14 +147,14 @@ def create_textual_widget(param_name: str, param_type: Type, current_value: Any,
         return Input(value=str(current_value or ""), type="number", id=widget_id)
     elif param_type == str:
         return Input(value=str(current_value or ""), type="text", id=widget_id)
-    elif is_enum(param_type):
+    elif TypeCheckers.is_enum(param_type):
         from openhcs.textual_tui.widgets.shared.enum_radio_set import EnumRadioSet
         return EnumRadioSet(param_type, current_value, id=widget_id)
     elif dataclasses.is_dataclass(param_type):
         return Collapsible(title=param_name.replace('_', ' ').title(), collapsed=current_value is None)
-    elif is_list_of_enums(param_type):
+    elif TypeCheckers.is_list_of_enums(param_type):
         from openhcs.textual_tui.widgets.shared.enum_radio_set import EnumRadioSet
-        enum_type = get_enum_from_list(param_type)
+        enum_type = TypeCheckers.get_enum_from_list(param_type)
         display_value = (current_value[0].value if current_value and isinstance(current_value, list) and current_value else None)
         return EnumRadioSet(enum_type, display_value, id=widget_id)
     else:
@@ -147,7 +166,7 @@ def create_pyqt6_widget(param_name: str, param_type: Type, current_value: Any, w
     from PyQt6.QtWidgets import QCheckBox, QLineEdit, QComboBox, QGroupBox, QVBoxLayout
     from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
 
-    param_type = resolve_optional(param_type)
+    param_type = TypeResolution.resolve_optional(param_type)
 
     if param_type == bool:
         widget = QCheckBox()
@@ -171,10 +190,12 @@ def create_pyqt6_widget(param_name: str, param_type: Type, current_value: Any, w
         from openhcs.pyqt_gui.widgets.enhanced_path_widget import EnhancedPathWidget
         from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
         return EnhancedPathWidget(param_name, current_value, parameter_info, PyQt6ColorScheme())
-    elif is_enum(param_type):
+    elif TypeCheckers.is_enum(param_type):
         widget = NoScrollComboBox()
         for enum_value in param_type:
-            widget.addItem(enum_value.value, enum_value)
+            # Handle nested enums (e.g., GroupBy.CHANNEL = VariableComponents.CHANNEL)
+            display_text = _get_enum_display_text(enum_value)
+            widget.addItem(display_text, enum_value)
         if current_value:
             for i in range(widget.count()):
                 if widget.itemData(i) == current_value:
@@ -185,11 +206,13 @@ def create_pyqt6_widget(param_name: str, param_type: Type, current_value: Any, w
         group_box = QGroupBox(param_name.replace('_', ' ').title())
         QVBoxLayout(group_box)
         return group_box
-    elif is_list_of_enums(param_type):
-        enum_type = get_enum_from_list(param_type)
+    elif TypeCheckers.is_list_of_enums(param_type):
+        enum_type = TypeCheckers.get_enum_from_list(param_type)
         widget = QComboBox()
         for enum_value in enum_type:
-            widget.addItem(enum_value.value, enum_value)
+            # Handle nested enums (e.g., GroupBy.CHANNEL = VariableComponents.CHANNEL)
+            display_text = _get_enum_display_text(enum_value)
+            widget.addItem(display_text, enum_value)
         if current_value and isinstance(current_value, list) and current_value:
             first_item = current_value[0]
             for i in range(widget.count()):

@@ -3,6 +3,7 @@
 import dataclasses
 import logging
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Type, Callable
 
@@ -18,6 +19,25 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from .widget_creation_registry import WidgetRegistry, TypeCheckers, TypeResolution
 
 logger = logging.getLogger(__name__)
+
+
+def _get_enum_display_text(enum_value: Enum) -> str:
+    """
+    Get display text for enum value, handling nested enums.
+
+    For simple enums like VariableComponents.SITE, returns the string value.
+    For nested enums like GroupBy.CHANNEL = VariableComponents.CHANNEL,
+    returns the nested enum's string value.
+    """
+    if isinstance(enum_value.value, Enum):
+        # Nested enum (e.g., GroupBy.CHANNEL = VariableComponents.CHANNEL)
+        return enum_value.value.value
+    elif isinstance(enum_value.value, str):
+        # Simple string enum
+        return enum_value.value
+    else:
+        # Fallback to string representation
+        return str(enum_value.value)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -75,7 +95,9 @@ def create_enum_widget_unified(enum_type: Type, current_value: Any, **kwargs) ->
     """Unified enum widget creator."""
     widget = NoScrollComboBox()
     for enum_value in enum_type:
-        widget.addItem(enum_value.value, enum_value)
+        # Handle nested enums (e.g., GroupBy.CHANNEL = VariableComponents.CHANNEL)
+        display_text = _get_enum_display_text(enum_value)
+        widget.addItem(display_text, enum_value)
 
     # Set current selection
     if current_value and hasattr(current_value, '__class__') and isinstance(current_value, enum_type):
