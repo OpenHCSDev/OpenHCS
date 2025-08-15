@@ -6,23 +6,51 @@ from pathlib import Path
 from typing import Any, Type, Callable, Dict, get_origin, get_args, Union
 
 
-def _get_enum_display_text(enum_value: Enum) -> str:
+def _get_enum_display_text(enum_value: Enum, _visited: set = None) -> str:
     """
-    Get display text for enum value, handling nested enums.
+    Get display text for enum value, handling arbitrarily deep enum nesting.
 
-    For simple enums like VariableComponents.SITE, returns the string value.
-    For nested enums like GroupBy.CHANNEL = VariableComponents.CHANNEL,
-    returns the nested enum's string value.
+    Recursively traverses enum values until finding a non-enum value (typically a string).
+    Handles edge cases like circular references and maintains backward compatibility.
+
+    Args:
+        enum_value: The enum value to get display text for
+        _visited: Internal parameter to track visited enums for circular reference detection
+
+    Returns:
+        String representation of the deepest non-enum value
+
+    Examples:
+        VariableComponents.SITE → "site"
+        GroupBy.CHANNEL → "channel" (via VariableComponents.CHANNEL)
+        DeeplyNested.VALUE → "final_string" (via multiple enum levels)
     """
-    if isinstance(enum_value.value, Enum):
-        # Nested enum (e.g., GroupBy.CHANNEL = VariableComponents.CHANNEL)
-        return enum_value.value.value
-    elif isinstance(enum_value.value, str):
-        # Simple string enum
-        return enum_value.value
-    else:
-        # Fallback to string representation
-        return str(enum_value.value)
+    if _visited is None:
+        _visited = set()
+
+    # Circular reference detection
+    enum_id = id(enum_value)
+    if enum_id in _visited:
+        # Circular reference detected, fallback to string representation
+        return str(enum_value.name).lower()
+
+    _visited.add(enum_id)
+
+    try:
+        current_value = enum_value.value
+
+        if isinstance(current_value, Enum):
+            # Recursive case: nested enum
+            return _get_enum_display_text(current_value, _visited)
+        elif isinstance(current_value, str):
+            # Base case: string value
+            return current_value
+        else:
+            # Base case: non-enum, non-string value
+            return str(current_value)
+    finally:
+        # Clean up visited set for this branch
+        _visited.discard(enum_id)
 
 
 @dataclasses.dataclass(frozen=True)
