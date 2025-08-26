@@ -451,7 +451,7 @@ See Also
 
 **Related Guides**:
 
-- :doc:`intermediate_usage` - Advanced TUI usage patterns
+- :doc:`../concepts/function_patterns` - Function pattern documentation
 - :doc:`../guides/complete_examples` - Complete workflow examples
 
 **Development**:

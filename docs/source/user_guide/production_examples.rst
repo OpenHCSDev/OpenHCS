@@ -223,5 +223,5 @@ Next Steps
 ==========
 
 - See :doc:`../architecture/index` for detailed system architecture
-- See :doc:`intermediate_usage` for custom pipeline creation
+- See :doc:`../concepts/pipelines_and_steps` for pipeline creation concepts
 - See :doc:`../api/index` for complete API reference

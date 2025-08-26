@@ -7,9 +7,6 @@ This section provides information for developers who want to contribute to OpenH
    :maxdepth: 2
 
    ui-patterns
-   extending
-   testing
-   contributing
    pipeline_debugging_guide
    parameter_analysis_audit
    unified_parameter_analyzer_migration

@@ -7,6 +7,4 @@ This section provides additional reference material for OpenHCS.
    :maxdepth: 2
 
    glossary
-   file_formats
-   microscope_formats
    research_impact

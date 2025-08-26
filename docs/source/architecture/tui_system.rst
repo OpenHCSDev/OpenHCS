@@ -414,7 +414,7 @@ See Also
 
 **Practical Usage**:
 
-- :doc:`../user_guide/basic_usage` - Getting started with the TUI
+- :doc:`../getting_started/getting_started` - Getting started with OpenHCS
 - :doc:`../guides/pipeline_compilation_workflow` - TUI workflow for pipeline creation
 - :doc:`../api/config` - Configuration options for TUI system
 

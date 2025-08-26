@@ -312,5 +312,5 @@ See Also
 **Practical Usage**:
 
 - :doc:`../guides/complete_examples` - Complete workflow examples
-- :doc:`../user_guide/intermediate_usage` - Advanced TUI usage patterns
+- :doc:`../user_guide/code_ui_editing` - Code/UI editing patterns
 - :doc:`../development/extending` - Extending the code generation system
