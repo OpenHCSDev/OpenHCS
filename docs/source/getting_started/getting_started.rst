@@ -73,17 +73,33 @@ The basic example demonstrates key OpenHCS concepts:
 Interactive Development
 ----------------------
 
-For interactive pipeline building, use the TUI:
+OpenHCS provides two interface options:
+
+**Desktop GUI (Recommended for local use):**
 
 .. code-block:: bash
 
+    # Install with GUI support
+    pip install "openhcs[gui]"
+
+    # Launch desktop application
+    openhcs-gui
+
+**Terminal Interface (For remote/SSH use):**
+
+.. code-block:: bash
+
+    # Install with TUI support
+    pip install "openhcs[tui]"
+
+    # Launch terminal interface
     openhcs-tui
 
-This launches an interactive interface for:
-- Selecting microscopy data directories
-- Configuring processing pipelines
-- Monitoring execution progress
-- Viewing results
+Both interfaces provide:
+- Microscopy data directory selection
+- Pipeline configuration and editing
+- Real-time execution monitoring
+- Results visualization
 
 Next Steps
 ----------

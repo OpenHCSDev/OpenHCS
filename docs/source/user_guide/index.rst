@@ -6,6 +6,9 @@ Under Construction
 
 The user guide is currently being rewritten to reflect the latest OpenHCS architecture and workflows.
 
+.. note::
+   **Interface Options**: OpenHCS provides both a PyQt6 desktop GUI (recommended for local use) and a Textual TUI (for remote/SSH environments). Most documentation applies to both interfaces.
+
 **For immediate help, use these resources**:
 
 - :doc:`../guides/complete_examples` - Complete examples and code patterns

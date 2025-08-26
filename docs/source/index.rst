@@ -18,10 +18,12 @@ Quick Start
 
 .. code-block:: bash
 
-    # Install OpenHCS
-    pip install openhcs
+    # Install OpenHCS with desktop GUI
+    pip install "openhcs[gui]"
+    openhcs-gui
 
-    # Launch interactive interface
+    # Or install with terminal interface (for remote/SSH use)
+    pip install "openhcs[tui]"
     openhcs-tui
 
 For complete installation and basic examples, see :doc:`getting_started/getting_started`.

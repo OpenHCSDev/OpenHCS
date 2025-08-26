@@ -1,6 +1,9 @@
 TUI System Architecture
 =======================
 
+.. note::
+   The Textual TUI is currently in maintenance mode. The PyQt6 GUI is the recommended interface for new users. The TUI remains available for remote/SSH environments where GUI is not practical.
+
 Overview
 --------
 
