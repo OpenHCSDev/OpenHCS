@@ -254,7 +254,7 @@ Each system is documented in detail in dedicated architecture documents:
 🔥 `Function Registry System <function-registry-system.md>`__
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**574+ unified GPU functions with type-safe contracts**
+**Unified GPU function ecosystem with type-safe contracts**
 
 The most comprehensive GPU imaging function ecosystem in scientific
 computing, automatically discovering and unifying functions from
@@ -264,7 +264,7 @@ interfaces and memory type safety.
 🖥️ `TUI System <tui-system.md>`__
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Production-grade terminal interface**
+**Advanced terminal interface**
 
 A sophisticated Textual-based interface that works anywhere a terminal
 works - unprecedented for scientific computing tools. Includes real-time
@@ -300,7 +300,7 @@ scientific contributions targeting Nature Methods publication.
 
 These innovations work together to create a scientific computing
 platform that is fundamentally different from traditional academic tools
-- providing production-grade reliability, unprecedented scale handling,
+- providing enterprise-level reliability, unprecedented scale handling,
 and comprehensive GPU acceleration in a unified, user-friendly
 interface.
 
@@ -451,7 +451,7 @@ OpenHCS proves that researchers don’t need to become software engineers
 - they need to become effective collaborators with AI systems that have
 architectural expertise.
 
-**The result**: Production-grade scientific computing infrastructure
+**The result**: Enterprise-level scientific computing infrastructure
 that enables better research through better tools.
 
 --------------

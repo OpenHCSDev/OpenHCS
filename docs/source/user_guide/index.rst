@@ -1,18 +1,12 @@
 User Guide
 ==========
 
-🚧 **Under Construction** 🚧
-----------------------------
+Under Construction
+------------------
 
 The user guide is currently being rewritten to reflect the latest OpenHCS architecture and workflows.
 
 **For immediate help, use these resources**:
-
-📁 **Complete Working Example**: `openhcs/debug/example_export.py <https://github.com/trissim/toolong/blob/openhcs/openhcs/debug/example_export.py>`_
-
-This production script demonstrates every major OpenHCS feature with real parameters and working code.
-
-📚 **Current Documentation**:
 
 - :doc:`../guides/complete_examples` - Complete examples and code patterns
 - :doc:`../api/index` - API reference with working examples  

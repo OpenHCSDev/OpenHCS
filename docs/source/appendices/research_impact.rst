@@ -195,9 +195,9 @@ Research Contributions
 
    Technical Contributions:
    ├── Memory Management: Intelligent backend switching for 100GB+ datasets
-   ├── GPU Integration: Unified access to 574+ GPU imaging functions
+   ├── GPU Integration: Unified access to comprehensive GPU imaging function library
    ├── Error Handling: Comprehensive fail-loud philosophy
-   ├── User Interface: Production-grade TUI for scientific computing
+   ├── User Interface: Advanced TUI for scientific computing
    └── Architecture: Modular, extensible design for future research
 
 Validation Studies
@@ -385,5 +385,5 @@ Planned Scientific Applications
 
 This real-world deployment demonstrates that OpenHCS bridges the
 critical gap between academic proof-of-concept tools and the
-production-grade software that research labs actually need to analyze
+robust software that research labs actually need to analyze
 modern high-content screening datasets at scale.

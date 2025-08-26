@@ -396,7 +396,7 @@ Validation Integration
            self.show_validation_error(step_data.id, str(e))
 
 This TUI system represents a paradigm shift in scientific computing
-interfaces - providing production-grade functionality in a
+interfaces - providing comprehensive functionality in a
 terminal-native environment that works anywhere researchers need to
 process data.
 

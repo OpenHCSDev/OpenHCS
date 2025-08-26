@@ -1,7 +1,7 @@
 Function Registry System
 ========================
 
-OpenHCS implements a unified function registry that automatically discovers and integrates 574+ GPU-accelerated functions from multiple libraries (pyclesperanto, scikit-image, CuCIM) with type-safe contracts and memory management.
+OpenHCS implements a unified function registry that automatically discovers and integrates GPU-accelerated functions from multiple libraries (pyclesperanto, scikit-image, CuCIM) with type-safe contracts and memory management.
 
 ## Why Unified Function Discovery
 
@@ -58,7 +58,7 @@ The registry automatically scans and registers functions from multiple GPU libra
 - **CuPy scipy.ndimage functions**: GPU-accelerated NumPy equivalents
 - **Native OpenHCS functions**: Custom implementations for specific workflows
 
-**Total**: 574+ functions with unified contracts and automatic memory type conversion.
+**Total**: Comprehensive function library with unified contracts and automatic memory type conversion.
 
 ## Contract Classification and Type Safety
 
@@ -117,7 +117,7 @@ Pipelines access registered functions through a simple, consistent interface:
 ## Design Benefits
 
 ### **Developer Experience**
-- **Single interface**: All 574+ functions work identically
+- **Single interface**: All functions work identically
 - **Type safety**: Compile-time validation of function contracts
 - **GPU transparency**: Automatic GPU acceleration without code changes
 - **Library agnostic**: Switch between implementations without pipeline changes
