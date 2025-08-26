@@ -187,15 +187,15 @@ Running the Example
 .. code-block:: bash
 
     # Clone repository
-    git clone https://github.com/trissim/toolong.git
-    cd toolong
-    
+    git clone https://github.com/trissim/openhcs.git
+    cd openhcs
+
     # View the complete script
     cat openhcs/debug/example_export.py
-    
+
     # Modify plate path for your data
     # Edit line 33: plate_paths = ['/path/to/your/plate']
-    
+
     # Run the complete pipeline
     python openhcs/debug/example_export.py
 

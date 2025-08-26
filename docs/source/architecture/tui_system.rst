@@ -2,7 +2,7 @@ TUI System Architecture
 =======================
 
 .. note::
-   The Textual TUI is currently in maintenance mode. The PyQt6 GUI is the recommended interface for new users. The TUI remains available for remote/SSH environments where GUI is not practical.
+   OpenHCS provides both a Textual TUI and PyQt6 GUI with complete feature parity. The TUI is specifically designed for remote/SSH environments, while the PyQt6 GUI provides enhanced desktop integration. Both interfaces are actively maintained.
 
 Overview
 --------

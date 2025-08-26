@@ -31,7 +31,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
 
 **What's Coming**:
 
-- **TUI Workflow Guide** - Complete tutorial for the interactive interface
+- **Interface Workflow Guide** - Complete tutorial for both GUI and TUI interfaces
 - **Script Generation Guide** - How OpenHCS generates self-contained scripts
 - **Integration Patterns** - Real-world usage examples and best practices
 - **Performance Optimization** - GPU acceleration and large dataset handling
@@ -51,6 +51,6 @@ The existing user guide sections contain outdated references and examples. We're
 **Timeline**:
 
 - **Phase 1**: Complete example integration ✅ **Done**
-- **Phase 2**: TUI workflow documentation 🚧 **In Progress**  
+- **Phase 2**: Interface workflow documentation 🚧 **In Progress**
 - **Phase 3**: Practical integration examples 📋 **Planned**
 - **Phase 4**: Performance and troubleshooting guides 📋 **Planned**
