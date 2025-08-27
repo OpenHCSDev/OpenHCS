@@ -6,55 +6,77 @@ Pickle to Python Converter - Convert OpenHCS debug pickle files to runnable Pyth
 import sys
 import dill as pickle
 import inspect
-import dataclasses
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 from enum import Enum
+from dataclasses import is_dataclass, fields
 
-# It's better to have these imports at the top level
 from openhcs.core.config import GlobalPipelineConfig, PathPlanningConfig, VFSConfig, ZarrConfig
 from openhcs.core.steps.function_step import FunctionStep
 
 def collect_imports_from_data(data_obj):
-    """Extract function and enum imports by traversing data structure."""
+    """Extract function, enum, and dataclass imports by traversing data structure."""
     function_imports = defaultdict(set)
     enum_imports = defaultdict(set)
 
-    def find_and_register_imports(obj):
-        if isinstance(obj, Enum):
-            module = obj.__class__.__module__
-            name = obj.__class__.__name__
-            # Only skip built-in modules that don't need imports
-            if module and name and module != 'builtins':
-                enum_imports[module].add(name)
-        elif callable(obj):
-            module = getattr(obj, '__module__', None)
-            name = getattr(obj, '__name__', None)
-            # Only skip built-in modules that don't need imports
-            if module and name and module != 'builtins':
-                function_imports[module].add(name)
-        elif isinstance(obj, (list, tuple)):
-            for item in obj:
-                find_and_register_imports(item)
-        elif isinstance(obj, dict):
-            for value in obj.values():
-                find_and_register_imports(value)
+    # Import mappings for dynamically generated classes
+    LAZY_MAPPINGS = {
+        'LazyStepMaterializationConfig': 'openhcs.core.pipeline_config',
+        'PipelineConfig': 'openhcs.core.pipeline_config',
+    }
 
-    find_and_register_imports(data_obj)
+    def register_imports(obj):
+        if isinstance(obj, Enum):
+            enum_imports[obj.__class__.__module__].add(obj.__class__.__name__)
+        elif is_dataclass(obj):
+            name = obj.__class__.__name__
+            module = LAZY_MAPPINGS.get(name, obj.__class__.__module__)
+            function_imports[module].add(name)
+            [register_imports(getattr(obj, f.name)) for f in fields(obj) if getattr(obj, f.name) is not None]
+        elif callable(obj):
+            function_imports[obj.__module__].add(obj.__name__)
+        elif isinstance(obj, (list, tuple)):
+            [register_imports(item) for item in obj]
+        elif isinstance(obj, dict):
+            [register_imports(value) for value in obj.values()]
+        elif hasattr(obj, '__dict__') and obj.__dict__:
+            [register_imports(value) for value in obj.__dict__.values()]
+
+    register_imports(data_obj)
     return function_imports, enum_imports
 
 def format_imports_as_strings(function_imports, enum_imports):
-    """Convert import dictionaries to list of import strings."""
-    import_lines = []
+    """Convert import dictionaries to list of import strings with collision resolution."""
+    # Merge imports
     all_imports = function_imports.copy()
     for module, names in enum_imports.items():
-        all_imports[module].update(names)
+        all_imports.setdefault(module, set()).update(names)
 
+    # Build collision map
+    name_to_modules = defaultdict(list)
+    for module, names in all_imports.items():
+        for name in names:
+            name_to_modules[name].append(module)
+
+    import_lines, name_mappings = [], {}
     for module, names in sorted(all_imports.items()):
-        import_lines.append(f"from {module} import {', '.join(sorted(names))}")
+        if not module or module == 'builtins' or not names:
+            continue
 
-    return import_lines
+        imports = []
+        for name in sorted(names):
+            if len(name_to_modules[name]) > 1:
+                qualified = f"{name}_{module.split('.')[-1]}"
+                imports.append(f"{name} as {qualified}")
+                name_mappings[(name, module)] = qualified
+            else:
+                imports.append(name)
+                name_mappings[(name, module)] = name
+
+        import_lines.append(f"from {module} import {', '.join(imports)}")
+
+    return import_lines, name_mappings
 
 def generate_complete_function_pattern_code(func_obj, indent=0, clean_mode=False):
     """Generate complete Python code for function pattern with imports."""
@@ -212,66 +234,55 @@ def convert_pickle_to_python(pickle_path, output_path=None, clean_mode=False):
         traceback.print_exc()
 
 
-def generate_readable_function_repr(func_obj, indent=0, clean_mode=False):
-    """
-    Generate a readable and optionally clean Python representation of a function pattern.
-    - Strips default kwargs from function tuples.
-    - Simplifies `(func, {})` to `func`.
-    - Simplifies `[func]` to `func`.
-    """
+def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_mappings=None):
+    """Generate readable Python representation with collision-resolved function names."""
     indent_str = "    " * indent
     next_indent_str = "    " * (indent + 1)
+    name_mappings = name_mappings or {}
+
+    # Get qualified function name for collisions
+    get_name = lambda f: name_mappings.get((f.__name__, f.__module__), f.__name__) if callable(f) else str(f)
 
     if callable(func_obj):
-        return f"{func_obj.__name__}"
+        return get_name(func_obj)
     
     elif isinstance(func_obj, tuple) and len(func_obj) == 2 and callable(func_obj[0]):
         func, args = func_obj
-        
+
         if not args and clean_mode:
-            return f"{func.__name__}"
+            return get_name(func)
 
-        # Get function signature to find default values
+        # Filter out defaults in clean mode
         try:
-            sig = inspect.signature(func)
-            default_params = {
-                k: v.default for k, v in sig.parameters.items()
-                if v.default is not inspect.Parameter.empty
-            }
-        except (ValueError, TypeError): # Handle built-ins or other un-inspectables
-            default_params = {}
+            defaults = {k: v.default for k, v in inspect.signature(func).parameters.items()
+                       if v.default is not inspect.Parameter.empty}
+        except (ValueError, TypeError):
+            defaults = {}
 
-        # Filter out default values in clean_mode
-        final_args = {}
-        for k, v in args.items():
-            if not clean_mode or k not in default_params or v != default_params[k]:
-                final_args[k] = v
-        
+        final_args = {k: v for k, v in args.items()
+                     if not clean_mode or k not in defaults or v != defaults[k]}
+
         if not final_args:
-             return f"{func.__name__}" if clean_mode else f"({func.__name__}, {{}})"
-        
-        args_items = []
-        for k, v in final_args.items():
-            v_repr = generate_readable_function_repr(v, indent + 2, clean_mode)
-            args_items.append(f"{next_indent_str}    '{k}': {v_repr}")
+            return get_name(func) if clean_mode else f"({get_name(func)}, {{}})"
+
+        args_items = [f"{next_indent_str}    '{k}': {generate_readable_function_repr(v, indent + 2, clean_mode, name_mappings)}"
+                     for k, v in final_args.items()]
         args_str = "{\n" + ",\n".join(args_items) + f"\n{next_indent_str}}}"
-        return f"({func.__name__}, {args_str})"
+        return f"({get_name(func)}, {args_str})"
 
     elif isinstance(func_obj, list):
         if clean_mode and len(func_obj) == 1:
-            return generate_readable_function_repr(func_obj[0], indent, clean_mode)
+            return generate_readable_function_repr(func_obj[0], indent, clean_mode, name_mappings)
         if not func_obj:
             return "[]"
-        items = [generate_readable_function_repr(item, indent, clean_mode) for item in func_obj]
+        items = [generate_readable_function_repr(item, indent, clean_mode, name_mappings) for item in func_obj]
         return f"[\n{next_indent_str}{f',\n{next_indent_str}'.join(items)}\n{indent_str}]"
-    
+
     elif isinstance(func_obj, dict):
         if not func_obj:
             return "{}"
-        items = []
-        for key, value in func_obj.items():
-            value_repr = generate_readable_function_repr(value, indent, clean_mode)
-            items.append(f"{next_indent_str}'{key}': {value_repr}")
+        items = [f"{next_indent_str}'{k}': {generate_readable_function_repr(v, indent, clean_mode, name_mappings)}"
+                for k, v in func_obj.items()]
         return f"{{{',\n'.join(items)}\n{indent_str}}}"
         
     else:
@@ -279,62 +290,34 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False):
 
 
 def _format_parameter_value(param_name, value):
-    """Generic parameter formatting with type-based rules."""
-    from enum import Enum
-
-    # Handle different value types generically
+    """Format parameter values with lazy dataclass preservation."""
     if isinstance(value, Enum):
-        # For any enum, use ClassName.VALUE_NAME format
         return f"{value.__class__.__name__}.{value.name}"
     elif isinstance(value, str):
-        # String values need quotes
         return f'"{value}"'
-    elif isinstance(value, list):
-        # Handle lists of enums or other objects
-        if value and isinstance(value[0], Enum):
-            enum_reprs = [f"{item.__class__.__name__}.{item.name}" for item in value]
-            return f"[{', '.join(enum_reprs)}]"
-        else:
-            return repr(value)
+    elif isinstance(value, list) and value and isinstance(value[0], Enum):
+        return f"[{', '.join(f'{item.__class__.__name__}.{item.name}' for item in value)}]"
+    elif is_dataclass(value) and 'Lazy' in value.__class__.__name__:
+        # Preserve lazy behavior by only including explicitly set fields
+        class_name = value.__class__.__name__
+        explicit_args = [
+            f"{f.name}={_format_parameter_value(f.name, object.__getattribute__(value, f.name))}"
+            for f in fields(value)
+            if object.__getattribute__(value, f.name) is not None
+        ]
+        return f"{class_name}({', '.join(explicit_args)})" if explicit_args else f"{class_name}()"
     else:
-        # Use standard repr for everything else (bool, int, float, None, etc.)
         return repr(value)
 
 
-def _collect_enum_classes_from_step(step):
-    """Collect enum classes referenced in step parameters for import generation."""
-    from enum import Enum
-    import inspect
 
-    enum_classes = set()
-    sig = inspect.signature(FunctionStep.__init__)
-
-    for param_name, param in sig.parameters.items():
-        if param_name in ['self', 'func']:
-            continue
-
-        value = getattr(step, param_name, param.default)
-
-        # Collect enum classes from parameter values
-        if isinstance(value, Enum):
-            enum_classes.add(value.__class__)
-        elif isinstance(value, list):
-            for item in value:
-                if isinstance(item, Enum):
-                    enum_classes.add(item.__class__)
-
-    return enum_classes
 
 
 def _collect_dataclass_classes_from_object(obj, visited=None):
     """Recursively collect dataclass classes that will be referenced in generated code."""
-    import dataclasses
-    from enum import Enum
-
     if visited is None:
         visited = set()
 
-    # Avoid infinite recursion
     if id(obj) in visited:
         return set(), set()
     visited.add(id(obj))
@@ -342,27 +325,19 @@ def _collect_dataclass_classes_from_object(obj, visited=None):
     dataclass_classes = set()
     enum_classes = set()
 
-    if dataclasses.is_dataclass(obj):
-        # Add the dataclass class itself
+    if is_dataclass(obj):
         dataclass_classes.add(obj.__class__)
-
-        # Recursively check all fields
-        for field in dataclasses.fields(obj):
-            field_value = getattr(obj, field.name)
-            nested_dataclasses, nested_enums = _collect_dataclass_classes_from_object(field_value, visited)
+        for field in fields(obj):
+            nested_dataclasses, nested_enums = _collect_dataclass_classes_from_object(getattr(obj, field.name), visited)
             dataclass_classes.update(nested_dataclasses)
             enum_classes.update(nested_enums)
-
     elif isinstance(obj, Enum):
-        # Collect enum classes from enum values
         enum_classes.add(obj.__class__)
-
     elif isinstance(obj, (list, tuple)):
         for item in obj:
             nested_dataclasses, nested_enums = _collect_dataclass_classes_from_object(item, visited)
             dataclass_classes.update(nested_dataclasses)
             enum_classes.update(nested_enums)
-
     elif isinstance(obj, dict):
         for value in obj.values():
             nested_dataclasses, nested_enums = _collect_dataclass_classes_from_object(value, visited)
@@ -372,27 +347,18 @@ def _collect_dataclass_classes_from_object(obj, visited=None):
     return dataclass_classes, enum_classes
 
 
-def _generate_step_parameters(step, default_step, clean_mode=False):
-    """Automatically generate all FunctionStep parameters using introspection."""
-    import inspect
+def _generate_step_parameters(step, default_step, clean_mode=False, name_mappings=None):
+    """Generate FunctionStep constructor parameters using functional introspection."""
+    from openhcs.core.steps.abstract import AbstractStep
 
-    step_args = []
-    sig = inspect.signature(FunctionStep.__init__)
+    signatures = [(name, param) for name, param in inspect.signature(FunctionStep.__init__).parameters.items()
+                  if name != 'self' and param.kind != inspect.Parameter.VAR_KEYWORD] + \
+                 [(name, param) for name, param in inspect.signature(AbstractStep.__init__).parameters.items()
+                  if name != 'self']
 
-    for param_name, param in sig.parameters.items():
-        # Skip constructor-specific parameters
-        if param_name in ['self', 'func']:
-            continue
-
-        current_val = getattr(step, param_name, param.default)
-        default_val = getattr(default_step, param_name)
-
-        # Include parameter if it differs from default (clean mode) or always (full mode)
-        if not clean_mode or current_val != default_val:
-            formatted_val = _format_parameter_value(param_name, current_val)
-            step_args.append(f"{param_name}={formatted_val}")
-
-    return step_args
+    return [f"{name}={generate_readable_function_repr(getattr(step, name, param.default), 1, clean_mode, name_mappings) if name == 'func' else _format_parameter_value(name, getattr(step, name, param.default))}"
+            for name, param in signatures
+            if not clean_mode or getattr(step, name, param.default) != getattr(default_step, name, param.default)]
 
 
 def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
@@ -405,20 +371,11 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     all_enum_imports = defaultdict(set)
 
     for step in pipeline_steps:
-        # Get imports from function patterns
+        # Collect all imports from step (functions, enums, dataclasses)
         func_imports, enum_imports = collect_imports_from_data(step.func)
-        # Get imports from step parameters (variable_components, group_by, etc.)
         param_imports, param_enums = collect_imports_from_data(step)
 
-        # Get enum classes referenced in generated code (VariableComponents, GroupBy, etc.)
-        enum_classes = _collect_enum_classes_from_step(step)
-        for enum_class in enum_classes:
-            module = enum_class.__module__
-            name = enum_class.__name__
-            if module and name:
-                all_enum_imports[module].add(name)
-
-        # Merge all imports
+        # Merge imports
         for module, names in func_imports.items():
             all_function_imports[module].update(names)
         for module, names in enum_imports.items():
@@ -432,7 +389,7 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     all_function_imports['openhcs.core.steps.function_step'].add('FunctionStep')
 
     # Format and add all collected imports
-    import_lines = format_imports_as_strings(all_function_imports, all_enum_imports)
+    import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
     if import_lines:
         code_lines.append("# Automatically collected imports")
         code_lines.extend(import_lines)
@@ -446,11 +403,9 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     default_step = FunctionStep(func=lambda: None)
     for i, step in enumerate(pipeline_steps):
         code_lines.append(f"# Step {i+1}: {step.name}")
-        func_repr = generate_readable_function_repr(step.func, indent=1, clean_mode=clean_mode)
 
-        # Generate all FunctionStep parameters automatically
-        step_args = [f"func={func_repr}"]
-        step_args.extend(_generate_step_parameters(step, default_step, clean_mode))
+        # Generate all FunctionStep parameters automatically using introspection
+        step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
 
         args_str = ",\n    ".join(step_args)
         code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
@@ -548,11 +503,9 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
 
         for i, step in enumerate(steps):
             code_lines.append(f"# Step {i+1}: {step.name}")
-            func_repr = generate_readable_function_repr(step.func, indent=1, clean_mode=clean_mode)
 
-            # Generate all FunctionStep parameters automatically
-            step_args = [f"func={func_repr}"]
-            step_args.extend(_generate_step_parameters(step, default_step, clean_mode))
+            # Generate all FunctionStep parameters automatically using introspection
+            step_args = _generate_step_parameters(step, default_step, clean_mode)
 
             args_str = ",\n    ".join(step_args)
             code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")

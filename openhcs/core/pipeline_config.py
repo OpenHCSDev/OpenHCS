@@ -107,36 +107,33 @@ def create_editing_config_from_existing_lazy_config(
 
 
 
-# Auto-create lazy configs for all dataclass fields in GlobalPipelineConfig
-import dataclasses
+# Create LazyStepMaterializationConfig with field-level auto-hierarchy using automatic field path detection
 from openhcs.core.field_path_detection import FieldPathDetector
 
-_step_lazy_configs = {}
+# Use automatic field path detection instead of hardcoded string
+_materialization_field_path = FieldPathDetector.find_field_path_for_type(
+    GlobalPipelineConfig, StepMaterializationConfig
+)
 
-for field in dataclasses.fields(GlobalPipelineConfig):
-    if dataclasses.is_dataclass(field.type):
-        field_path = FieldPathDetector.find_field_path_for_type(GlobalPipelineConfig, field.type)
-        if field_path:
-            lazy_name = f"Lazy{field.type.__name__}"
-            lazy_config = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
-                base_class=field.type,
-                global_config_type=GlobalPipelineConfig,
-                field_path=field_path,
-                lazy_class_name=lazy_name
-            )
-            _step_lazy_configs[lazy_name] = lazy_config
-            globals()[lazy_name] = lazy_config
+# Verify field path was detected correctly (fail-loud if not found)
+if _materialization_field_path is None:
+    raise RuntimeError(
+        f"Could not automatically detect field path for {StepMaterializationConfig.__name__} "
+        f"in {GlobalPipelineConfig.__name__}. This indicates a structural change in the configuration."
+    )
 
-# Export for backward compatibility
-LazyStepMaterializationConfig = _step_lazy_configs.get("LazyStepMaterializationConfig")
+LazyStepMaterializationConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+    base_class=StepMaterializationConfig,
+    global_config_type=GlobalPipelineConfig,
+    field_path=_materialization_field_path,
+    lazy_class_name="LazyStepMaterializationConfig")
 
-# Generate pipeline-specific lazy configuration classes using thread-local resolution
-PipelineConfig = LazyDataclassFactory.make_lazy_thread_local(
+# Generate pipeline-specific lazy configuration classes using auto-hierarchy resolution
+PipelineConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
     base_class=GlobalPipelineConfig,
     global_config_type=GlobalPipelineConfig,
     field_path=None,
-    lazy_class_name="PipelineConfig",
-    use_recursive_resolution=True
+    lazy_class_name="PipelineConfig"
 )
 
 
@@ -173,3 +170,4 @@ _add_to_base_config_method(LazyStepMaterializationConfig, StepMaterializationCon
 # Register type mappings for the placeholder service
 register_lazy_type_mapping(PipelineConfig, GlobalPipelineConfig)
 register_lazy_type_mapping(LazyStepMaterializationConfig, StepMaterializationConfig)
+
