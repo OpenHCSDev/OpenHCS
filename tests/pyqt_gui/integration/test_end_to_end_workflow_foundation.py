@@ -175,7 +175,8 @@ DEFAULT_SCENARIO = TestScenario(
     },
     field_to_test=FieldModificationSpec(
         field_name="well_filter",
-        modification_value=4
+        modification_value=4,
+        config_section="materialization_defaults"  # well_filter is in StepMaterializationConfig, not PathPlanningConfig
     )
 )
 
@@ -929,6 +930,118 @@ def _reset_field(context: WorkflowContext) -> WorkflowContext:
 # PARAMETERIZED VALIDATION FRAMEWORK
 # ============================================================================
 
+def _verify_step_editor_placeholder_resolution(context: WorkflowContext) -> WorkflowContext:
+    """
+    Verify that step editor placeholders show resolved values after plate initialization.
+
+    This test verifies the fix for the placeholder resolution bug where step editor
+    placeholders showed empty/None values instead of proper resolved values from
+    the global configuration hierarchy.
+    """
+    print(f"\n🔍 Verifying step editor placeholder resolution after initialization...")
+
+    # Access pipeline editor (should already be open)
+    if "pipeline_editor" not in context.main_window.floating_windows:
+        raise AssertionError("Pipeline editor window not found in floating_windows")
+
+    pipeline_editor_window = context.main_window.floating_windows["pipeline_editor"]
+
+    # Find the actual pipeline editor widget
+    pipeline_editor = None
+    for child in pipeline_editor_window.findChildren(QWidget):
+        if hasattr(child, 'pipeline_steps'):
+            pipeline_editor = child
+            break
+
+    if not pipeline_editor:
+        raise AssertionError("Pipeline editor widget not found")
+
+    # Click "Add Step" to open step editor
+    if not hasattr(pipeline_editor, 'buttons') or "add_step" not in pipeline_editor.buttons:
+        raise AssertionError("Add Step button not found in pipeline editor buttons")
+
+    add_step_button = pipeline_editor.buttons["add_step"]
+    add_step_button.click()
+    QApplication.processEvents()
+
+    # Wait for step editor to open
+    import time
+    time.sleep(2.0)
+    QApplication.processEvents()
+
+    # Find the step editor window (DualEditorWindow)
+    step_editor_window = None
+    for widget in QApplication.topLevelWidgets():
+        if hasattr(widget, 'step_editor') and hasattr(widget, 'editing_step'):
+            step_editor_window = widget
+            break
+
+    if not step_editor_window:
+        raise AssertionError("Step editor window (DualEditorWindow) not found")
+
+    # Access the step parameter editor widget
+    step_param_editor = step_editor_window.step_editor
+    if not step_param_editor:
+        raise AssertionError("Step parameter editor widget not found in DualEditorWindow")
+
+    # Find the form manager
+    if not hasattr(step_param_editor, 'form_manager'):
+        raise AssertionError("Form manager not found in step parameter editor")
+
+    form_manager = step_param_editor.form_manager
+
+    # Check materialization_config nested form manager for placeholder resolution
+    placeholder_resolution_verified = False
+
+    if hasattr(form_manager, 'nested_managers') and 'materialization_config' in form_manager.nested_managers:
+        nested_manager = form_manager.nested_managers['materialization_config']
+
+        # Check key fields that should have resolved placeholders
+        test_fields = ['output_dir_suffix', 'sub_dir']
+
+        for field_name in test_fields:
+            if hasattr(nested_manager, 'widgets') and field_name in nested_manager.widgets:
+                widget = nested_manager.widgets[field_name]
+                texts = _extract_widget_texts(widget)
+                all_text = " ".join(texts.values())
+
+                print(f"🔍 STEP EDITOR {field_name}:")
+                print(f"  All text: '{all_text}'")
+                print(f"  Individual texts: {texts}")
+
+                # Verify placeholder shows resolved values, not empty/None
+                if "pipeline default:" in all_text.lower():
+                    # Should show resolved value from global pipeline config (e.g., "_openhcs", "_processed", "checkpoints")
+                    # Since orchestrator pipeline config is not modified, resolution should pass through to global config
+                    if "_openhcs" in all_text or "_processed" in all_text or "checkpoints" in all_text or "_outputs" in all_text or "images" in all_text:
+                        print(f"✅ GOOD: {field_name} placeholder shows resolved value: '{all_text}'")
+                        placeholder_resolution_verified = True
+                    else:
+                        print(f"🚨 BUG: {field_name} placeholder should show resolved value but shows: '{all_text}'")
+                        raise AssertionError(
+                            f"Placeholder resolution bug: {field_name} should show resolved value "
+                            f"from global pipeline config but shows: '{all_text}'"
+                        )
+                elif all_text.strip() == "" or "none" in all_text.lower():
+                    print(f"🚨 BUG: {field_name} placeholder is empty/None: '{all_text}'")
+                    raise AssertionError(
+                        f"Placeholder resolution bug: {field_name} placeholder is empty/None instead of showing resolved value"
+                    )
+                else:
+                    print(f"🔍 {field_name} shows direct value (not placeholder): '{all_text}'")
+
+    # Close the step editor window to clean up
+    step_editor_window.close()
+    QApplication.processEvents()
+
+    if not placeholder_resolution_verified:
+        print(f"⚠️  WARNING: Could not verify placeholder resolution - materialization_config form not found")
+    else:
+        print(f"✅ Step editor placeholder resolution verified successfully")
+
+    return context
+
+
 def _validate_placeholder_behavior(context: WorkflowContext) -> WorkflowContext:
     """Parameterized placeholder behavior validation using test scenario configuration."""
     if not context.test_scenario:
@@ -1338,6 +1451,11 @@ class TestPyQtGUIWorkflowFoundation:
                 name="Initialize Plate",
                 operation=_initialize_plate,
                 timing_delay=TIMING.SAVE_DELAY
+            ))
+            .add_step(WorkflowStep(
+                name="Verify Step Editor Placeholder Resolution After Initialization",
+                operation=_verify_step_editor_placeholder_resolution,
+                timing_delay=TIMING.ACTION_DELAY
             ))
             .add_step(WorkflowStep(
                 name="Apply Parameterized Orchestrator Configuration",
