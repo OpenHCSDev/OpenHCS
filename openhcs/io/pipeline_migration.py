@@ -77,21 +77,25 @@ def migrate_legacy_group_by(group_by_value: Any) -> Any:
 
     # Map old string values to new GroupBy wrapper instances
     string_to_groupby = {
-        'channel': GroupBy.CHANNEL,
-        'z_index': GroupBy.Z_INDEX,
-        'site': GroupBy.SITE,
-        'well': GroupBy.WELL,
+        'channel': getattr(GroupBy, 'CHANNEL', None),
+        'z_index': getattr(GroupBy, 'Z_INDEX', None),
+        'site': getattr(GroupBy, 'SITE', None),
+        'well': getattr(GroupBy, 'WELL', None),
         '': GroupBy.NONE,
         'none': GroupBy.NONE,
     }
+
+    # Remove None values (components that don't exist in current config)
+    string_to_groupby = {k: v for k, v in string_to_groupby.items() if v is not None}
     
     migrated_value = string_to_groupby.get(group_by_value.lower())
     if migrated_value is not None:
         logger.debug(f"Migrated group_by: '{group_by_value}' -> {migrated_value}")
         return migrated_value
-    
-    logger.warning(f"Unknown legacy group_by value: '{group_by_value}' - keeping as-is")
-    return group_by_value
+
+    # If the component doesn't exist in current config, migrate to NONE
+    logger.warning(f"Legacy group_by value '{group_by_value}' not available in current config - migrating to NONE")
+    return GroupBy.NONE
 
 
 def migrate_legacy_variable_components(variable_components: List[Any]) -> List[Any]:
@@ -112,11 +116,14 @@ def migrate_legacy_variable_components(variable_components: List[Any]) -> List[A
     
     # Map old string values to new VariableComponents enum members
     string_to_variable = {
-        'channel': VariableComponents.CHANNEL,
-        'z_index': VariableComponents.Z_INDEX,
-        'site': VariableComponents.SITE,
-        'well': VariableComponents.WELL,
+        'channel': getattr(VariableComponents, 'CHANNEL', None),
+        'z_index': getattr(VariableComponents, 'Z_INDEX', None),
+        'site': getattr(VariableComponents, 'SITE', None),
+        'well': getattr(VariableComponents, 'WELL', None),
     }
+
+    # Remove None values (components that don't exist in current config)
+    string_to_variable = {k: v for k, v in string_to_variable.items() if v is not None}
     
     migrated_components = []
     for component in variable_components:
@@ -126,8 +133,7 @@ def migrate_legacy_variable_components(variable_components: List[Any]) -> List[A
                 logger.debug(f"Migrated variable_component: '{component}' -> {migrated_component}")
                 migrated_components.append(migrated_component)
             else:
-                logger.warning(f"Unknown legacy variable_component: '{component}' - keeping as-is")
-                migrated_components.append(component)
+                logger.warning(f"Legacy variable_component '{component}' not available in current config - skipping")
         else:
             # Already an enum or other type - keep as-is
             migrated_components.append(component)
@@ -268,21 +274,23 @@ class LegacyGroupByUnpickler(pickle.Unpickler):
 
                     # Map legacy string values to new GroupBy wrapper instances
                     string_to_groupby = {
-                        'channel': GroupBy.CHANNEL,
-                        'z_index': GroupBy.Z_INDEX,
-                        'site': GroupBy.SITE,
-                        'well': GroupBy.WELL,
+                        'channel': getattr(GroupBy, 'CHANNEL', None),
+                        'z_index': getattr(GroupBy, 'Z_INDEX', None),
+                        'site': getattr(GroupBy, 'SITE', None),
+                        'well': getattr(GroupBy, 'WELL', None),
                         '': GroupBy.NONE,
                         'none': GroupBy.NONE,
                     }
+
+                    # Remove None values (components that don't exist in current config)
+                    string_to_groupby = {k: v for k, v in string_to_groupby.items() if v is not None}
 
                     migrated_value = string_to_groupby.get(value.lower())
                     if migrated_value is not None:
                         logger.debug(f"Unpickler migrated GroupBy: '{value}' -> {migrated_value}")
                         return migrated_value
 
-                    logger.warning(f"Unknown legacy GroupBy value during unpickling: '{value}'")
-                    # Fall back to NONE for unknown values
+                    logger.warning(f"Legacy GroupBy value '{value}' not available in current config - using NONE")
                     return GroupBy.NONE
 
                 # For any other type, try the original class
