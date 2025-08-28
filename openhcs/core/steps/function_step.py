@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 from openhcs.constants.constants import (DEFAULT_IMAGE_EXTENSION,
                                              DEFAULT_IMAGE_EXTENSIONS,
                                              DEFAULT_SITE_PADDING, Backend,
-                                             MemoryType, VariableComponents, GroupBy, OPENHCS_CONFIG)
+                                             MemoryType, VariableComponents, GroupBy)
 from openhcs.constants.input_source import InputSource
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.steps.abstract import AbstractStep, get_step_id

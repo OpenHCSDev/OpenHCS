@@ -18,7 +18,7 @@ import multiprocessing
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Set
 
-from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, OPENHCS_CONFIG
+from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, PipelineConfig, set_current_global_config
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
@@ -606,7 +606,8 @@ class PipelineOrchestrator:
 
                 logger.info("🔥 DEATH_MARKER: BEFORE_TASK_SUBMISSION_LOOP")
                 future_to_axis_id = {}
-                axis_name = OPENHCS_CONFIG.multiprocessing_axis.value if OPENHCS_CONFIG else 'well'
+                config = get_openhcs_config()
+                axis_name = config.multiprocessing_axis.value if config else 'well'
                 for axis_id, context in contexts_snapshot.items():
                     try:
                         logger.info(f"🔥 DEATH_MARKER: SUBMITTING_TASK_FOR_{axis_name.upper()}_{axis_id}")

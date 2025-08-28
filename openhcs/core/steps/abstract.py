@@ -27,7 +27,7 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Union
 
-from openhcs.constants.constants import VariableComponents, GroupBy, DEFAULT_VARIABLE_COMPONENTS, DEFAULT_GROUP_BY
+from openhcs.constants.constants import VariableComponents, GroupBy, get_default_variable_components, get_default_group_by
 from openhcs.constants.input_source import InputSource
 from openhcs.core.config import PathPlanningConfig
 
@@ -129,8 +129,8 @@ class AbstractStep(abc.ABC):
         self,
         *,  # Force keyword-only arguments
         name: Optional[str] = None,
-        variable_components: List[VariableComponents] = DEFAULT_VARIABLE_COMPONENTS,
-        group_by: Optional[GroupBy] = DEFAULT_GROUP_BY,
+        variable_components: List[VariableComponents] = None,
+        group_by: Optional[GroupBy] = None,
         input_source: InputSource = InputSource.PREVIOUS_STEP,
         materialization_config: Optional['LazyStepMaterializationConfig'] = None
     ) -> None:
@@ -153,8 +153,8 @@ class AbstractStep(abc.ABC):
                                    Use LazyStepMaterializationConfig() for safe defaults that prevent path collisions.
         """
         self.name = name or self.__class__.__name__
-        self.variable_components = variable_components
-        self.group_by = group_by
+        self.variable_components = variable_components if variable_components is not None else get_default_variable_components()
+        self.group_by = group_by if group_by is not None else get_default_group_by()
         self.input_source = input_source
         self.materialization_config = materialization_config
 

@@ -16,7 +16,7 @@ import inspect
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from openhcs.constants.constants import VALID_MEMORY_TYPES, OPENHCS_CONFIG
+from openhcs.constants.constants import VALID_MEMORY_TYPES, get_openhcs_config
 from openhcs.core.steps.function_step import FunctionStep
 
 # Import new generic validation system
@@ -200,8 +200,9 @@ class FuncStepContractValidator:
         # No additional restrictions needed - all valid patterns support special contracts
 
         # 3. Validate using new generic validation system if available
-        if GenericValidator and OPENHCS_CONFIG:
-            validator = GenericValidator(OPENHCS_CONFIG)
+        config = get_openhcs_config()
+        if GenericValidator and config:
+            validator = GenericValidator(config)
 
             # Check for constraint violation: group_by ∈ variable_components
             if step.group_by and step.group_by.value in [vc.value for vc in step.variable_components]:

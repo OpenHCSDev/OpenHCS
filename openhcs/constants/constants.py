@@ -6,13 +6,8 @@ These constants are governed by various doctrinal clauses.
 """
 
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Set, Type, TypeVar
 
-class VariableComponents(Enum):
-    SITE = "site"
-    CHANNEL = "channel"
-    Z_INDEX = "z_index"
-    WELL = "well"
 
 class Microscope(Enum):
     AUTO = "auto"
@@ -20,31 +15,54 @@ class Microscope(Enum):
     IMAGEXPRESS = "ImageXpress"
     OPERAPHENIX = "OperaPhenix"
 
-class GroupBy(Enum):
-    """
-    Enum wrapper around VariableComponents for grouping operations.
 
-    This eliminates the need for separate enum definitions and conversion logic
-    while maintaining type safety, backward compatibility, and proper enum detection.
-    """
+# Direct filtered enum definitions using ComponentConfiguration
+def get_openhcs_config():
+    """Get the OpenHCS configuration, initializing it if needed."""
+    from openhcs.core.components.framework import ComponentConfigurationFactory
+    return ComponentConfigurationFactory.create_openhcs_default_configuration()
 
-    # Use VariableComponents as enum values for direct wrapping
-    CHANNEL = VariableComponents.CHANNEL
-    SITE = VariableComponents.SITE
-    WELL = VariableComponents.WELL
-    Z_INDEX = VariableComponents.Z_INDEX
-    NONE = None  # Special case for "no grouping"
 
-    @property
-    def component(self) -> Optional[VariableComponents]:
+def _create_filtered_variable_components():
+    """Create VariableComponents enum with multiprocessing axis filtered out."""
+    config = get_openhcs_config()
+    remaining = config.get_remaining_components()
+
+    # Create enum dict
+    enum_dict = {}
+    for comp in remaining:
+        enum_dict[comp.name] = comp.value
+
+    # Create the enum class
+    FilteredVariableComponents = Enum('FilteredVariableComponents', enum_dict)
+
+    return FilteredVariableComponents
+
+
+def _create_filtered_group_by():
+    """Create GroupBy enum with multiprocessing axis filtered out."""
+    config = get_openhcs_config()
+    remaining = config.get_remaining_components()
+
+    # Create enum dict with VariableComponents as values
+    enum_dict = {}
+    for comp in remaining:
+        enum_dict[comp.name] = comp
+    enum_dict['NONE'] = None
+
+    # Create the base enum class
+    FilteredGroupBy = Enum('FilteredGroupBy', enum_dict)
+
+    # Add the special methods to the enum class
+    def component(self) -> Optional:
         """Get the wrapped VariableComponents enum."""
         return self.value
 
     def __eq__(self, other):
         """Support equality with both GroupBy and VariableComponents."""
-        if isinstance(other, GroupBy):
+        if isinstance(other, FilteredGroupBy):
             return self.value == other.value
-        elif isinstance(other, VariableComponents):
+        elif hasattr(other, 'value'):  # VariableComponents or similar enum
             return self.value == other
         return False
 
@@ -74,6 +92,38 @@ class GroupBy(Enum):
         """Detailed representation for debugging."""
         return f"GroupBy.{self.name}"
 
+    # Add methods to the enum class
+    FilteredGroupBy.component = property(component)
+    FilteredGroupBy.__eq__ = __eq__
+    FilteredGroupBy.__hash__ = __hash__
+    FilteredGroupBy.__str__ = __str__
+    FilteredGroupBy.__repr__ = __repr__
+
+    return FilteredGroupBy
+
+
+# Initialize the filtered enums directly
+# This works because we've resolved the circular import by moving get_openhcs_config here
+try:
+    VariableComponents = _create_filtered_variable_components()
+    GroupBy = _create_filtered_group_by()
+except Exception:
+    # If initialization fails during import, create fallback enums
+    class VariableComponents(Enum):
+        SITE = "site"
+        CHANNEL = "channel"
+        Z_INDEX = "z_index"
+
+    class GroupBy(Enum):
+        SITE = VariableComponents.SITE
+        CHANNEL = VariableComponents.CHANNEL
+        Z_INDEX = VariableComponents.Z_INDEX
+        NONE = None
+
+
+
+
+
 class OrchestratorState(Enum):
     """Simple orchestrator state tracking - no complex state machine."""
     CREATED = "created"         # Object exists, not initialized
@@ -90,32 +140,32 @@ DEFAULT_IMAGE_EXTENSION = ".tif"
 DEFAULT_IMAGE_EXTENSIONS: Set[str] = {".tif", ".tiff", ".TIF", ".TIFF"}
 DEFAULT_SITE_PADDING = 3
 DEFAULT_RECURSIVE_PATTERN_SEARCH = False
-DEFAULT_VARIABLE_COMPONENTS: List[VariableComponents] = [VariableComponents.SITE]
-DEFAULT_GROUP_BY: GroupBy = GroupBy.CHANNEL
+# Lazy defaults using ComponentConfiguration
+_default_variable_components = None
+_default_group_by = None
+
+
+def get_default_variable_components():
+    global _default_variable_components
+    if _default_variable_components is None:
+        config = get_openhcs_config()
+        _default_variable_components = [getattr(VariableComponents, comp.name) for comp in config.default_variable]
+    return _default_variable_components
+
+
+def get_default_group_by():
+    global _default_group_by
+    if _default_group_by is None:
+        config = get_openhcs_config()
+        _default_group_by = getattr(GroupBy, config.default_group_by.name) if config.default_group_by else None
+    return _default_group_by
+
+
+# Note: DEFAULT_VARIABLE_COMPONENTS and DEFAULT_GROUP_BY are now functions
+# to avoid circular imports. Use get_default_variable_components() and get_default_group_by()
 DEFAULT_MICROSCOPE: Microscope = Microscope.AUTO
 
-# Generic component configuration system
-# This provides the new configurable component system while maintaining backward compatibility
-# Using lazy initialization to avoid circular imports
-OPENHCS_CONFIG = None
 
-def get_openhcs_config():
-    """Get the OpenHCS configuration, initializing it if needed."""
-    global OPENHCS_CONFIG
-    if OPENHCS_CONFIG is None:
-        try:
-            from openhcs.core.components.framework import ComponentConfigurationFactory
-            OPENHCS_CONFIG = ComponentConfigurationFactory.create_openhcs_default_configuration()
-        except ImportError:
-            # Fallback for cases where the new system isn't available yet
-            OPENHCS_CONFIG = None
-        except Exception:
-            # Fallback for any other errors (like circular imports)
-            OPENHCS_CONFIG = None
-    return OPENHCS_CONFIG
-
-# Don't initialize on module load to avoid circular imports
-# OPENHCS_CONFIG will be None until get_openhcs_config() is called
 
 
 
