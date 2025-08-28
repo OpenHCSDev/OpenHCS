@@ -59,86 +59,77 @@ def detect_legacy_pipeline(steps: List[Any]) -> bool:
         return False
 
 
-def migrate_legacy_group_by(group_by_value: Any) -> Any:
+def create_migration_mapping(enum_class) -> Dict[str, Any]:
     """
-    Migrate legacy GroupBy string values to new enum structure.
-    
-    Args:
-        group_by_value: Legacy group_by value (string or enum)
-        
-    Returns:
-        Migrated GroupBy enum value or original value if no migration needed
+    Create migration mapping from enum using clean functional approach.
+    Single source of truth for all migration mappings.
     """
-    if not isinstance(group_by_value, str):
-        return group_by_value
-    
-    # Import here to avoid circular imports
-    from openhcs.constants.constants import GroupBy, VariableComponents
+    # Special cases for NONE enum
+    mapping = {'': enum_class.NONE, 'none': enum_class.NONE} if hasattr(enum_class, 'NONE') else {}
 
-    # Map old string values to new GroupBy wrapper instances
-    string_to_groupby = {
-        'channel': getattr(GroupBy, 'CHANNEL', None),
-        'z_index': getattr(GroupBy, 'Z_INDEX', None),
-        'site': getattr(GroupBy, 'SITE', None),
-        'well': getattr(GroupBy, 'WELL', None),
-        '': GroupBy.NONE,
-        'none': GroupBy.NONE,
+    # Generate all variations using dict comprehension - Pythonic and clean
+    variations = {
+        variation: member
+        for member in enum_class
+        if member.value is not None
+        for variation in _generate_string_variations(member)
     }
 
-    # Remove None values (components that don't exist in current config)
-    string_to_groupby = {k: v for k, v in string_to_groupby.items() if v is not None}
-    
-    migrated_value = string_to_groupby.get(group_by_value.lower())
-    if migrated_value is not None:
+    return {**mapping, **variations}
+
+
+def _generate_string_variations(enum_member):
+    """Generate string variations for enum member - clean and functional."""
+    base_strings = [enum_member.name, enum_member.value]
+    return [
+        variant.lower()
+        for base in base_strings
+        for variant in [base, base.replace('_', '')]
+    ]
+
+
+def migrate_legacy_group_by(group_by_value: Any) -> Any:
+    """Clean migration using single mapping source."""
+    if not isinstance(group_by_value, str):
+        return group_by_value
+
+    from openhcs.constants.constants import GroupBy
+
+    migration_map = create_migration_mapping(GroupBy)
+    migrated_value = migration_map.get(group_by_value.lower())
+
+    if migrated_value:
         logger.debug(f"Migrated group_by: '{group_by_value}' -> {migrated_value}")
         return migrated_value
 
-    # If the component doesn't exist in current config, migrate to NONE
-    logger.warning(f"Legacy group_by value '{group_by_value}' not available in current config - migrating to NONE")
+    logger.warning(f"Legacy group_by '{group_by_value}' not available - using NONE")
     return GroupBy.NONE
 
 
 def migrate_legacy_variable_components(variable_components: List[Any]) -> List[Any]:
-    """
-    Migrate legacy VariableComponents string values to new enum structure.
-    
-    Args:
-        variable_components: List of variable components (strings or enums)
-        
-    Returns:
-        List of migrated VariableComponents enum values
-    """
+    """Clean migration for variable components using functional approach."""
     if not variable_components:
         return variable_components
-    
-    # Import here to avoid circular imports
-    from openhcs.constants.constants import VariableComponents
-    
-    # Map old string values to new VariableComponents enum members
-    string_to_variable = {
-        'channel': getattr(VariableComponents, 'CHANNEL', None),
-        'z_index': getattr(VariableComponents, 'Z_INDEX', None),
-        'site': getattr(VariableComponents, 'SITE', None),
-        'well': getattr(VariableComponents, 'WELL', None),
-    }
 
-    # Remove None values (components that don't exist in current config)
-    string_to_variable = {k: v for k, v in string_to_variable.items() if v is not None}
-    
-    migrated_components = []
-    for component in variable_components:
-        if isinstance(component, str):
-            migrated_component = string_to_variable.get(component.lower())
-            if migrated_component is not None:
-                logger.debug(f"Migrated variable_component: '{component}' -> {migrated_component}")
-                migrated_components.append(migrated_component)
+    from openhcs.constants.constants import VariableComponents
+
+    migration_map = create_migration_mapping(VariableComponents)
+
+    # Functional approach using list comprehension
+    migrated = []
+    for comp in variable_components:
+        if isinstance(comp, str):
+            migrated_comp = migration_map.get(comp.lower())
+            if migrated_comp:
+                logger.debug(f"Migrated variable_component: '{comp}' -> {migrated_comp}")
+                migrated.append(migrated_comp)
             else:
-                logger.warning(f"Legacy variable_component '{component}' not available in current config - skipping")
+                logger.warning(f"Legacy variable_component '{comp}' not available - skipping")
         else:
-            # Already an enum or other type - keep as-is
-            migrated_components.append(component)
-    
-    return migrated_components
+            # Already an enum - keep as-is
+            migrated.append(comp)
+
+    return migrated
 
 
 def migrate_pipeline_steps(steps: List[Any]) -> List[Any]:
@@ -257,10 +248,10 @@ class LegacyGroupByUnpickler(pickle.Unpickler):
         return cls
 
     def _create_migrating_groupby_class(self, original_groupby_class):
-        """Create a wrapper class that handles legacy string values."""
+        """Clean unpickler using single migration mapping source."""
 
         class MigratingGroupBy:
-            """Wrapper that migrates legacy string values to new enum structure."""
+            """Wrapper that migrates legacy string values using clean mapping."""
 
             def __new__(cls, value):
                 # If it's already a GroupBy enum, return it as-is
@@ -269,35 +260,23 @@ class LegacyGroupByUnpickler(pickle.Unpickler):
 
                 # Handle legacy string values
                 if isinstance(value, str):
-                    # Import here to avoid circular imports
                     from openhcs.constants.constants import GroupBy
 
-                    # Map legacy string values to new GroupBy wrapper instances
-                    string_to_groupby = {
-                        'channel': getattr(GroupBy, 'CHANNEL', None),
-                        'z_index': getattr(GroupBy, 'Z_INDEX', None),
-                        'site': getattr(GroupBy, 'SITE', None),
-                        'well': getattr(GroupBy, 'WELL', None),
-                        '': GroupBy.NONE,
-                        'none': GroupBy.NONE,
-                    }
+                    # Use same clean migration mapping
+                    migration_map = create_migration_mapping(GroupBy)
+                    migrated_value = migration_map.get(value.lower())
 
-                    # Remove None values (components that don't exist in current config)
-                    string_to_groupby = {k: v for k, v in string_to_groupby.items() if v is not None}
-
-                    migrated_value = string_to_groupby.get(value.lower())
-                    if migrated_value is not None:
-                        logger.debug(f"Unpickler migrated GroupBy: '{value}' -> {migrated_value}")
+                    if migrated_value:
+                        logger.debug(f"Unpickler migrated: '{value}' -> {migrated_value}")
                         return migrated_value
 
-                    logger.warning(f"Legacy GroupBy value '{value}' not available in current config - using NONE")
+                    logger.warning(f"Unpickler: '{value}' not available - using NONE")
                     return GroupBy.NONE
 
-                # For any other type, try the original class
+                # Fallback for other types
                 try:
                     return original_groupby_class(value)
                 except ValueError:
-                    # If original class fails, fall back to NONE
                     logger.warning(f"Failed to create GroupBy from value: {value}")
                     from openhcs.constants.constants import GroupBy
                     return GroupBy.NONE
