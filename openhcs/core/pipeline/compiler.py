@@ -50,8 +50,20 @@ def _normalize_step_attributes(pipeline_definition: List[AbstractStep]) -> None:
     defaults = {name: param.default for name, param in sig.parameters.items()
                 if name != 'self' and param.default is not inspect.Parameter.empty}
 
+    # Add attributes that are set manually in AbstractStep.__init__ but not constructor parameters
+    manual_attributes = {
+        '__input_dir__': None,
+        '__output_dir__': None,
+    }
+
     for i, step in enumerate(pipeline_definition):
+        # Set missing constructor parameters
         for attr_name, default_value in defaults.items():
+            if not hasattr(step, attr_name):
+                setattr(step, attr_name, default_value)
+
+        # Set missing manual attributes (for backwards compatibility with older serialized steps)
+        for attr_name, default_value in manual_attributes.items():
             if not hasattr(step, attr_name):
                 setattr(step, attr_name, default_value)
 
