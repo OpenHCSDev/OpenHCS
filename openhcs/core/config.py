@@ -335,6 +335,12 @@ class LazyDefaultPlaceholderService:
             resolved_value = getattr(temp_instance, field_name)
         else:
             # Use existing lazy class (thread-local resolution)
+            # DEBUG: Check what's in thread-local storage during placeholder resolution
+            current_context = get_current_global_config(GlobalPipelineConfig)
+            print(f"🎨 PLACEHOLDER DEBUG: Thread-local context during resolution: {current_context}")
+            if current_context:
+                print(f"🎨 PLACEHOLDER DEBUG: Context materialization_defaults: {getattr(current_context, 'materialization_defaults', 'NOT_FOUND')}")
+
             temp_instance = dataclass_type()
             print(f"🎨 PLACEHOLDER DEBUG: Created temp_instance of {dataclass_type}")
 

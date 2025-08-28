@@ -428,6 +428,27 @@ class PlateManagerWidget(QWidget):
             if not self.selected_plate_path:
                 self.selected_plate_path = plate_path
                 self.plate_selected.emit(plate_path)
+                # DEBUG: Check thread-local context before setup
+                from openhcs.core.config import get_current_global_config, GlobalPipelineConfig
+                before_context = get_current_global_config(GlobalPipelineConfig)
+                logger.debug(f"🔍 BEFORE context setup - thread-local config: {before_context}")
+
+                # Establish thread-local context first (replicates create_pipeline_config_for_editing pattern)
+                from openhcs.core.pipeline_config import ensure_pipeline_config_context
+                ensure_pipeline_config_context(orchestrator.global_config)
+
+                # DEBUG: Check thread-local context after setup
+                after_context = get_current_global_config(GlobalPipelineConfig)
+                logger.debug(f"🔍 AFTER context setup - thread-local config: {after_context}")
+
+                # Then apply pipeline config with proper context established
+                current_pipeline_cfg = orchestrator.pipeline_config or PipelineConfig()
+                orchestrator.apply_pipeline_config(current_pipeline_cfg)
+
+                # DEBUG: Check thread-local context after apply
+                final_context = get_current_global_config(GlobalPipelineConfig)
+                logger.debug(f"🔍 AFTER apply_pipeline_config - thread-local config: {final_context}")
+                logger.debug(f"Initialized orchestrator context with proper thread-local setup for selected plate: {plate_path}")
 
             self.progress_updated.emit(i + 1)
 
@@ -488,6 +509,16 @@ class PlateManagerWidget(QWidget):
 
         def handle_config_save(new_config: PipelineConfig) -> None:
             """Apply per-orchestrator configuration without global side effects."""
+            # DEBUG: Check what's in the new_config and thread-local context
+            from openhcs.core.config import get_current_global_config, GlobalPipelineConfig
+            from dataclasses import fields
+            context_before_save = get_current_global_config(GlobalPipelineConfig)
+            logger.debug(f"🔍 CONFIG SAVE - thread-local context before apply: {context_before_save}")
+            logger.debug(f"🔍 CONFIG SAVE - new_config type: {type(new_config)}")
+            for field in fields(new_config):
+                raw_value = object.__getattribute__(new_config, field.name)
+                logger.debug(f"🔍 CONFIG SAVE - new_config.{field.name} = {raw_value}")
+
             for orchestrator in selected_orchestrators:
                 # Direct synchronous call - no async needed
                 orchestrator.apply_pipeline_config(new_config)
@@ -1036,6 +1067,20 @@ class PlateManagerWidget(QWidget):
         def on_selected(selected_plates):
             self.selected_plate_path = selected_plates[0]['path']
             self.plate_selected.emit(self.selected_plate_path)
+
+            # Update thread-local context using orchestrator's merged pipeline context
+            if self.selected_plate_path in self.orchestrators:
+                orchestrator = self.orchestrators[self.selected_plate_path]
+                # Establish thread-local context first (replicates create_pipeline_config_for_editing pattern)
+                from openhcs.core.pipeline_config import ensure_pipeline_config_context
+                ensure_pipeline_config_context(orchestrator.global_config)
+                # Then apply pipeline config with proper context established
+                current_pipeline_cfg = orchestrator.pipeline_config or PipelineConfig()
+                orchestrator.apply_pipeline_config(current_pipeline_cfg)
+                logger.debug(f"Applied orchestrator context with proper thread-local setup for selected plate: {self.selected_plate_path}")
+
+                # Refresh placeholders in any open parameter forms to reflect new context
+                self._refresh_all_parameter_form_placeholders()
 
         def on_cleared():
             self.selected_plate_path = ""

@@ -352,6 +352,13 @@ class PipelineEditorWidget(QWidget):
 
         # Create and show editor dialog within the correct config context
         orchestrator = self._get_current_orchestrator()
+
+        # CRITICAL FIX: Apply the merged config to thread-local storage so that
+        # placeholder resolution in the step editor has access to sibling inheritance
+        if orchestrator:
+            current_pipeline_cfg = orchestrator.pipeline_config or PipelineConfig()
+            orchestrator.apply_pipeline_config(current_pipeline_cfg)
+
         with self._scoped_orchestrator_context():
             editor = DualEditorWindow(
                 step_data=new_step,
@@ -823,10 +830,33 @@ class PipelineEditorWidget(QWidget):
         original_config = get_current_global_config(GlobalPipelineConfig)
         orchestrator = self._get_current_orchestrator()
         if orchestrator:
-            effective_config = orchestrator.get_effective_config()
-            set_current_global_config(GlobalPipelineConfig, effective_config)
-            logger.debug(f"Set scoped config context for orchestrator: {orchestrator.plate_path}")
-        
+            # CRITICAL FIX: Create the same merged config that apply_pipeline_config() creates
+            # to preserve None values for sibling inheritance, instead of using get_effective_config()
+            # which resolves all values and breaks the inheritance chain
+            from dataclasses import fields
+
+            pipeline_config = orchestrator.pipeline_config or PipelineConfig()
+            merged_config_values = {}
+
+            for field in fields(GlobalPipelineConfig):
+                try:
+                    # Get raw value from pipeline config
+                    raw_value = object.__getattribute__(pipeline_config, field.name)
+                    if raw_value is not None:
+                        # Use the override value
+                        merged_config_values[field.name] = raw_value
+                    else:
+                        # Use global default for None values
+                        merged_config_values[field.name] = getattr(orchestrator.global_config, field.name)
+                except AttributeError:
+                    # Field doesn't exist in pipeline config, use global default
+                    merged_config_values[field.name] = getattr(orchestrator.global_config, field.name)
+
+            # Create merged config that preserves None values for sibling inheritance
+            merged_config = GlobalPipelineConfig(**merged_config_values)
+            set_current_global_config(GlobalPipelineConfig, merged_config)
+            logger.debug(f"Set merged config context for orchestrator: {orchestrator.plate_path}")
+
         try:
             yield
         finally:

@@ -422,20 +422,45 @@ class ParameterFormManager(QWidget):
                 print(f"🎨 MASKING DEBUG: field_path={field_path} for {base_class}")
 
                 if field_path:
-                    # Get current context and create a masked copy
-                    original_config = get_current_global_config(GlobalPipelineConfig)
+                    # CRITICAL FIX: For step editor, use orchestrator's pipeline config as source
+                    # instead of global config to ensure we see test modifications
+                    from openhcs.pyqt_gui.shared.orchestrator_manager import OrchestratorManager
+                    orchestrator = OrchestratorManager.get_current_orchestrator()
+
+                    # Try orchestrator's pipeline config first, then fall back to global config
+                    original_config = None
+                    if orchestrator and orchestrator.pipeline_config:
+                        original_config = orchestrator.pipeline_config
+                        print(f"🎨 MASKING DEBUG: Using orchestrator's pipeline config")
+                    else:
+                        original_config = get_current_global_config(GlobalPipelineConfig)
+                        print(f"🎨 MASKING DEBUG: Using global config as fallback")
+
                     print(f"🎨 MASKING DEBUG: original_config exists: {original_config is not None}")
 
                     if original_config:
                         # Create a new instance with the specific field masked
                         # Since the config is frozen, we need to create a new instance
                         nested_config = getattr(original_config, field_path)
-                        # Create a new nested config with the field masked
-                        masked_nested = replace(nested_config, **{param_name: None})
+                        original_value = getattr(nested_config, param_name)
+                        print(f"🎨 MASKING DEBUG: Original nested_config.{param_name} = {original_value}")
 
-                        # Create a new global config with the masked nested config
-                        masked_config = replace(original_config, **{field_path: masked_nested})
-                        print(f"🎨 MASKING DEBUG: Successfully masked {field_path}.{param_name}")
+                        # Only mask if the field is None, empty string, or missing
+                        # Don't mask concrete user-set values like "828282"
+                        should_mask = (original_value is None or original_value == "")
+
+                        if should_mask:
+                            # Create a new nested config with the field masked
+                            masked_nested = replace(nested_config, **{param_name: None})
+                            print(f"🎨 MASKING DEBUG: Masked nested_config.{param_name} = {getattr(masked_nested, param_name)}")
+
+                            # Create a new global config with the masked nested config
+                            masked_config = replace(original_config, **{field_path: masked_nested})
+                            print(f"🎨 MASKING DEBUG: Successfully masked {field_path}.{param_name}")
+                        else:
+                            # Don't mask concrete values - use original config
+                            masked_config = original_config
+                            print(f"🎨 MASKING DEBUG: Preserving concrete value '{original_value}' for {field_path}.{param_name}")
 
                         # Temporarily set the masked context
                         set_current_global_config(GlobalPipelineConfig, masked_config)
