@@ -260,9 +260,10 @@ class PipelineCompiler:
             steps_definition: List of AbstractStep objects
             orchestrator: Orchestrator instance for accessing all wells
         """
-        from openhcs.constants.constants import VariableComponents, Backend
+        from openhcs.constants.constants import Backend
+        from openhcs.constants import MULTIPROCESSING_AXIS
 
-        all_wells = orchestrator.get_component_keys(VariableComponents.WELL)
+        all_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
 
         vfs_config = context.get_vfs_config()
 
@@ -597,9 +598,9 @@ def _resolve_step_well_filters(steps_definition: List[AbstractStep], context, or
     """
     from openhcs.core.utils import WellFilterProcessor
 
-    # Get available wells from orchestrator using correct method
-    from openhcs.constants.constants import GroupBy
-    available_wells = orchestrator.get_component_keys(GroupBy.WELL)
+    # Get available wells from orchestrator using multiprocessing axis
+    from openhcs.constants import MULTIPROCESSING_AXIS
+    available_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
     if not available_wells:
         logger.warning("No available wells found for well filter resolution")
         return

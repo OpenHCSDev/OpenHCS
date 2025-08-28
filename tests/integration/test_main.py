@@ -228,9 +228,9 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
 
 def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipeline) -> Dict:
     """Execute compilation and execution phases of the pipeline."""
-    from openhcs.constants.constants import VariableComponents
+    from openhcs.constants import MULTIPROCESSING_AXIS
 
-    wells = orchestrator.get_component_keys(VariableComponents.WELL)
+    wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
     if not wells:
         raise RuntimeError("No wells found for processing")
 

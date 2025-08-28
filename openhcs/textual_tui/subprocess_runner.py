@@ -263,8 +263,8 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
         
         # Step 3: Get wells and prepare pipeline (like test_main.py)
         # NUCLEAR WRAP: Get wells
-        from openhcs.constants.constants import GroupBy
-        wells = force_error_detection("orchestrator_get_wells", lambda: orchestrator.get_component_keys(GroupBy.WELL))
+        from openhcs.constants import MULTIPROCESSING_AXIS
+        wells = force_error_detection("orchestrator_get_wells", lambda: orchestrator.get_component_keys(MULTIPROCESSING_AXIS))
         logger.info(f"🔥 SUBPROCESS: Found {len(wells)} wells: {wells}")
 
         # AGGRESSIVE VALIDATION: Check wells
