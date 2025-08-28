@@ -699,47 +699,34 @@ def create_field_level_hierarchy_provider(
 
             def _resolve_field_through_hierarchy(self, field_name, current_config, actual_global_config, hierarchy_paths, is_inherited):
                 """Resolve field through hierarchy with inheritance-aware logic."""
-                print(f"🔍 HIERARCHY DEBUG: Resolving {field_name}, is_inherited={is_inherited}")
-                print(f"🔍 HIERARCHY DEBUG: hierarchy_paths={hierarchy_paths}")
-                print(f"🔍 HIERARCHY DEBUG: current_config exists={current_config is not None}")
-                print(f"🔍 HIERARCHY DEBUG: actual_global_config exists={actual_global_config is not None}")
-
                 # Special case: if no hierarchy paths (e.g., top-level config), resolve directly from current context
                 if not hierarchy_paths:
-                    print(f"🔍 HIERARCHY DEBUG: No hierarchy paths, resolving directly")
                     # First try current config (might be masked)
                     if current_config:
                         value = _get_raw_field_value(current_config, field_name)
-                        print(f"🔍 HIERARCHY DEBUG: Direct current_config.{field_name} = {value}")
                         if value is not None:
                             return value
 
                     # If current config is None or masked, try actual global config
                     if actual_global_config:
                         value = _get_raw_field_value(actual_global_config, field_name)
-                        print(f"🔍 HIERARCHY DEBUG: Direct actual_global_config.{field_name} = {value}")
                         if value is not None:
                             return value
 
                 for context_type, path in hierarchy_paths:
                     config = current_config if context_type == 'current' else actual_global_config
                     instance = FieldPathNavigator.navigate_to_instance(config, path)
-                    print(f"🔍 HIERARCHY DEBUG: Checking {context_type}.{path}, instance exists={instance is not None}")
 
                     if instance:
                         value = _get_raw_field_value(instance, field_name)
-                        print(f"🔍 HIERARCHY DEBUG: Found {context_type}.{path}.{field_name} = {value}")
 
                         if is_inherited:
                             if value is not None and value != "":
-                                print(f"🔍 HIERARCHY DEBUG: Returning inherited value: {value}")
                                 return value
                         else:
                             if value is not None:
-                                print(f"🔍 HIERARCHY DEBUG: Returning own value: {value}")
                                 return value
 
-                print(f"🔍 HIERARCHY DEBUG: No value found for {field_name}, returning None")
                 return None
 
         return FieldLevelInheritanceConfig()

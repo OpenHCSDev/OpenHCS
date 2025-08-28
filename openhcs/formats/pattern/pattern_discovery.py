@@ -232,7 +232,7 @@ class PatternDiscoveryEngine:
 
             if group_by:
                 # Extract string value from GroupBy enum for pattern grouping
-                component_string = group_by.value.value if group_by.value else None
+                component_string = group_by.value if group_by.value else None
                 if component_string:
                     result[axis_value] = self.group_patterns_by_component(patterns, component=component_string)
                 else:
@@ -364,17 +364,7 @@ class PatternDiscoveryEngine:
                 continue
 
             _, template_metadata = files_metadata[0]
-            pattern_args = {}
-            for comp in self.parser.FILENAME_COMPONENTS:
-                if comp in template_metadata:
-                    if comp in variable_components:
-                        pattern_args[comp] = self.PLACEHOLDER_PATTERN
-                    else:
-                        pattern_args[comp] = template_metadata[comp]
-
-            # 🔒 Clause 93 — Declarative Execution Enforcement
-            # Ensure multiprocessing axis component is present (it's always required)
-            # Use axis_value to determine which component is the multiprocessing axis
+            # Determine multiprocessing axis first
             multiprocessing_axis_key = None
             if axis_value:
                 # Find which component has the axis_value
@@ -387,7 +377,24 @@ class PatternDiscoveryEngine:
             if not multiprocessing_axis_key:
                 multiprocessing_axis_key = 'well'
 
-            if multiprocessing_axis_key not in pattern_args or pattern_args[multiprocessing_axis_key] is None:
+            pattern_args = {}
+            for comp in self.parser.FILENAME_COMPONENTS:
+                if comp in template_metadata:
+                    if comp in variable_components:
+                        pattern_args[comp] = self.PLACEHOLDER_PATTERN
+                    else:
+                        pattern_args[comp] = template_metadata[comp]
+
+            # 🔒 Clause 93 — Declarative Execution Enforcement
+            # Ensure multiprocessing axis component is always present (required for pattern templates)
+            # Even if it's not in variable_components, it must be included with actual value
+            if multiprocessing_axis_key not in pattern_args:
+                if multiprocessing_axis_key in template_metadata:
+                    pattern_args[multiprocessing_axis_key] = template_metadata[multiprocessing_axis_key]
+                else:
+                    raise ValueError(f"Clause 93 Violation: '{multiprocessing_axis_key}' is a required component for pattern templates")
+
+            if pattern_args[multiprocessing_axis_key] is None:
                 raise ValueError(f"Clause 93 Violation: '{multiprocessing_axis_key}' is a required component for pattern templates")
 
             pattern_str = self.parser.construct_filename(
