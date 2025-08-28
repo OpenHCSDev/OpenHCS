@@ -571,10 +571,7 @@ class ParameterFormManager(QWidget):
 
     def reset_parameter(self, param_name: str, default_value: Any = None) -> None:
         """Reset parameter with streamlined logic."""
-        print(f"🔄 RESET DEBUG: reset_parameter called for {param_name}")
-
         if param_name not in self.parameters:
-            print(f"🔄 RESET DEBUG: {param_name} not in parameters, returning")
             return
 
         # Resolve reset value using dispatch
@@ -597,19 +594,14 @@ class ParameterFormManager(QWidget):
         """Get reset value using context dispatch."""
         if self.dataclass_type:
             is_static = not LazyDefaultPlaceholderService.has_lazy_resolution(self.dataclass_type)
-            print(f"🔄 RESET DEBUG: Getting reset value for {param_name}")
-            print(f"🔄 RESET DEBUG: Parameter type: {self.parameter_types.get(param_name)}")
-            print(f"🔄 RESET DEBUG: Dataclass type: {self.dataclass_type}")
-            print(f"🔄 RESET DEBUG: Is static (not lazy): {is_static}")
-
             reset_value = self.service.get_reset_value_for_parameter(
                 param_name, self.parameter_types.get(param_name), self.dataclass_type, is_static)
-
-            print(f"🔄 RESET DEBUG: Service returned reset value: {reset_value}")
             return reset_value
+        else:
+            # Function parameter reset: use param_defaults directly
+            return self.param_defaults.get(param_name)
 
-        return (getattr(self.parameter_info.get(param_name, object()), 'default_value', None)
-                if self.parameter_info and param_name in self.parameter_info else None)
+
 
     def get_current_values(self) -> Dict[str, Any]:
         """

@@ -129,8 +129,8 @@ class AbstractStep(abc.ABC):
         self,
         *,  # Force keyword-only arguments
         name: Optional[str] = None,
-        variable_components: List[VariableComponents] = None,
-        group_by: Optional[GroupBy] = None,
+        variable_components: List[VariableComponents] = get_default_variable_components(),
+        group_by: Optional[GroupBy] = get_default_group_by(),
         input_source: InputSource = InputSource.PREVIOUS_STEP,
         materialization_config: Optional['LazyStepMaterializationConfig'] = None
     ) -> None:
@@ -153,8 +153,8 @@ class AbstractStep(abc.ABC):
                                    Use LazyStepMaterializationConfig() for safe defaults that prevent path collisions.
         """
         self.name = name or self.__class__.__name__
-        self.variable_components = variable_components or get_default_variable_components()
-        self.group_by = group_by or get_default_group_by()
+        self.variable_components = variable_components
+        self.group_by = group_by
         self.input_source = input_source
         self.materialization_config = materialization_config
 
