@@ -95,6 +95,13 @@ def get_default_group_by():
     _, gb = _create_enums()  # Get the enum directly
     config = get_openhcs_config()
     return getattr(gb, config.default_group_by.name) if config.default_group_by else None
+
+@lru_cache(maxsize=1)
+def get_multiprocessing_axis():
+    """Get multiprocessing axis from ComponentConfiguration."""
+    config = get_openhcs_config()
+    return config.multiprocessing_axis
+
 DEFAULT_MICROSCOPE: Microscope = Microscope.AUTO
 
 
