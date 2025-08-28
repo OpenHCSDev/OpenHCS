@@ -1,18 +1,15 @@
 User Guide
 ==========
 
-🚧 **Under Construction** 🚧
-----------------------------
+Under Construction
+------------------
 
 The user guide is currently being rewritten to reflect the latest OpenHCS architecture and workflows.
 
+.. note::
+   **Interface Options**: OpenHCS provides both a PyQt6 desktop GUI (recommended for local use) and a Textual TUI (for remote/SSH environments). Most documentation applies to both interfaces.
+
 **For immediate help, use these resources**:
-
-📁 **Complete Working Example**: `openhcs/debug/example_export.py <https://github.com/trissim/toolong/blob/openhcs/openhcs/debug/example_export.py>`_
-
-This production script demonstrates every major OpenHCS feature with real parameters and working code.
-
-📚 **Current Documentation**:
 
 - :doc:`../guides/complete_examples` - Complete examples and code patterns
 - :doc:`../api/index` - API reference with working examples  
@@ -23,6 +20,7 @@ This production script demonstrates every major OpenHCS feature with real parame
    :maxdepth: 2
    :hidden:
 
+   production_examples
    code_ui_editing
    dtype_conversion
 
@@ -33,7 +31,7 @@ This production script demonstrates every major OpenHCS feature with real parame
 
 **What's Coming**:
 
-- **TUI Workflow Guide** - Complete tutorial for the interactive interface
+- **Interface Workflow Guide** - Complete tutorial for both GUI and TUI interfaces
 - **Script Generation Guide** - How OpenHCS generates self-contained scripts
 - **Integration Patterns** - Real-world usage examples and best practices
 - **Performance Optimization** - GPU acceleration and large dataset handling
@@ -53,6 +51,6 @@ The existing user guide sections contain outdated references and examples. We're
 **Timeline**:
 
 - **Phase 1**: Complete example integration ✅ **Done**
-- **Phase 2**: TUI workflow documentation 🚧 **In Progress**  
+- **Phase 2**: Interface workflow documentation 🚧 **In Progress**
 - **Phase 3**: Practical integration examples 📋 **Planned**
 - **Phase 4**: Performance and troubleshooting guides 📋 **Planned**

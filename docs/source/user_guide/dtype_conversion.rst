@@ -181,7 +181,7 @@ Performance Considerations
 .. code:: python
 
    # Dtype conversion has minimal performance impact:
-   ✅ Only applied to functions that need it (5 out of 574+ functions)
+   ✅ Only applied to functions that need it (small subset of functions)
    ✅ Conversion operations are fast (simple scaling/thresholding)
    ✅ No impact on functions that don't require conversion
    ✅ GPU memory transfers remain optimized

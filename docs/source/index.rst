@@ -1,71 +1,66 @@
 Welcome to OpenHCS Documentation
 =================================
 
-OpenHCS is a production-grade bioimage analysis platform designed for high-content screening datasets that break traditional tools. Built from the ground up for 100GB+ datasets, GPU acceleration, and remote computing environments.
+OpenHCS is a bioimage analysis platform for high-content screening datasets. It provides unified access to Python image processing libraries with automatic GPU acceleration and memory management for large-scale microscopy data analysis.
 
-🚀 **Complete Production Example**
-----------------------------------
+Overview
+--------
 
-**The best way to understand OpenHCS is through our complete, working example:**
+OpenHCS addresses the computational challenges of high-content screening by providing:
 
-📁 **Gold Standard Script**: `openhcs/debug/example_export.py <https://github.com/trissim/toolong/blob/openhcs/openhcs/debug/example_export.py>`_
+- **Unified interface** to major Python image processing libraries (scikit-image, CuCIM, pyclesperanto)
+- **Automatic GPU acceleration** with seamless memory type conversion
+- **Scalable processing** for datasets ranging from single images to 100GB+ experiments
+- **Microscope format compatibility** supporting multiple vendor platforms
 
-This production script demonstrates **every major OpenHCS feature**:
-
-✅ **Complete neurite analysis pipeline** (preprocessing → stitching → analysis)
-✅ **All function patterns** (chains, dictionaries, single functions)
-✅ **GPU acceleration** (CuPy, PyTorch, GPU stitching)
-✅ **100GB+ dataset handling** (ZARR compression, memory backends)
-✅ **Production configuration** (parallel processing, GPU scheduling)
+Quick Start
+-----------
 
 .. code-block:: bash
 
-    # View the complete example
-    git clone https://github.com/trissim/toolong.git
-    cat toolong/openhcs/debug/example_export.py
+    # Install OpenHCS with desktop GUI
+    pip install "openhcs[gui]"
+    openhcs-gui
 
-Getting Started Quickly
------------------------
-
-**Interactive Development**:
-
-.. code-block:: bash
-
-    # Install OpenHCS
-    pip install openhcs
-
-    # Launch the interactive TUI
+    # Or install with terminal interface (for remote/SSH use)
+    pip install "openhcs[tui]"
     openhcs-tui
 
-    # Process your data
-    pipeline.run("path/to/microscopy/data")
+For complete installation and basic examples, see :doc:`getting_started/getting_started`.
 
-For a complete guide including installation and examples, see :doc:`getting_started/getting_started`.
+Core Capabilities
+-----------------
 
-Key Features
-------------
+**Library Integration**
+  Seamless access to scikit-image, CuCIM, and pyclesperanto through unified 3D array interface
 
-- **Unified GPU Function Registry**: 574+ functions from pyclesperanto, CuCIM, scikit-image with unified interfaces
-- **Automatic Memory Management**: Memory type conversion between NumPy ↔ CuPy ↔ PyTorch ↔ TensorFlow
-- **SSH-Native Terminal Interface**: Production-grade TUI that works over SSH without X11 forwarding
-- **Intelligent Storage**: Memory overlay VFS with automatic backend selection (memory, disk, zarr)
-- **GPU Acceleration**: Thread-safe GPU resource management with OOM recovery
-- **Advanced Analysis**: HMM-based neurite tracing, cell counting, skeleton analysis
-- **Multiple Microscope Support**: Works with ImageXpress and Opera Phenix microscopes
-- **Production Architecture**: Handles 100GB+ datasets with comprehensive error handling
+**GPU Acceleration**
+  Automatic memory type conversion between NumPy, CuPy, PyTorch, and pyclesperanto arrays
 
-Quick Start Guide
-=================
+**Scalable Processing**
+  Parallel execution across wells and sites with intelligent memory management
+
+**Format Compatibility**
+  Support for multiple microscope platforms including ImageXpress and Opera Phenix
+
+**Storage Flexibility**
+  Virtual file system with memory, disk, and compressed Zarr backends
+
+**Analysis Functions**
+  Specialized tools for cell counting, neurite tracing, and morphological analysis
+
+Documentation Structure
+======================
 
 **New to OpenHCS?** Follow this learning path:
 
-1. **🚀 Get Started**: :doc:`getting_started/getting_started` - Install and run your first pipeline (5 minutes)
-2. **📖 Learn Basics**: :doc:`user_guide/basic_usage` - Terminal interface and Python API
-3. **🧠 Understand Concepts**: :doc:`concepts/architecture_overview` - Core architecture and design
-4. **⚡ Build Pipelines**: :doc:`user_guide/intermediate_usage` - Create custom workflows with FunctionSteps
-5. **🎯 Best Practices**: :doc:`user_guide/best_practices` - Production-ready development patterns
+1. **Getting Started**: :doc:`getting_started/getting_started` - Installation and basic examples
+2. **Core Concepts**: :doc:`concepts/index` - Understanding pipelines, steps, and data organization
+3. **Function Library**: :doc:`concepts/function_library` - Available processing functions and backends
+4. **User Guide**: :doc:`user_guide/index` - Detailed usage patterns and workflows
+5. **Integration Guides**: :doc:`guides/index` - System integration and advanced topics
 
-**Advanced Users**: Jump to :doc:`guides/index` for system integration guides or :doc:`api/index` for complete API reference.
+**API Reference**: :doc:`api/index` - Class documentation and technical reference
 
 .. toctree::
    :maxdepth: 2
@@ -75,28 +70,15 @@ Quick Start Guide
 
 .. toctree::
    :maxdepth: 2
+   :caption: Core Concepts
+
+   concepts/index
+
+.. toctree::
+   :maxdepth: 2
    :caption: User Guide
 
    user_guide/index
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Core Concepts
-
-   concepts/basic_microscopy
-   concepts/architecture_overview
-   concepts/pipeline_orchestrator
-   concepts/pipeline
-   concepts/step
-   concepts/function_handling
-   concepts/processing_context
-   concepts/directory_structure
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Complete Examples
-
-   guides/complete_examples
 
 .. toctree::
    :maxdepth: 2
@@ -106,15 +88,15 @@ Quick Start Guide
 
 .. toctree::
    :maxdepth: 2
-   :caption: Architecture Reference
-
-   architecture/index
-
-.. toctree::
-   :maxdepth: 2
    :caption: API Reference
 
    api/index
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Architecture Reference
+
+   architecture/index
 
 .. toctree::
    :maxdepth: 2

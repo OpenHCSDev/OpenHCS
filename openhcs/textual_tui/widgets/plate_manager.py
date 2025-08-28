@@ -599,11 +599,15 @@ class PlateManagerWidget(ButtonListWidget):
                 'global_config': self.app.global_config  # Pickle config object directly
             }
 
+            # Resolve all lazy configurations to concrete values before pickling
+            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+            resolved_subprocess_data = resolve_lazy_configurations_for_serialization(subprocess_data)
+
             # Wrap pickle operation in executor to avoid blocking UI
             def _write_pickle_data():
                 import dill as pickle
                 with open(data_file.name, 'wb') as f:
-                    pickle.dump(subprocess_data, f)
+                    pickle.dump(resolved_subprocess_data, f)
                 data_file.close()
 
             await asyncio.get_event_loop().run_in_executor(None, _write_pickle_data)
@@ -1140,18 +1144,11 @@ class PlateManagerWidget(ButtonListWidget):
         # Load existing config or create new one for editing
         representative_orchestrator = selected_orchestrators[0]
 
-        if representative_orchestrator.pipeline_config:
-            # Create editing config from existing orchestrator config with user-set values preserved
-            # Use current global config (not orchestrator's old global config) for updated placeholders
-            from openhcs.core.config import create_editing_config_from_existing_lazy_config
-            current_plate_config = create_editing_config_from_existing_lazy_config(
-                representative_orchestrator.pipeline_config,
-                self.global_config  # Use current global config for updated placeholders
-            )
-        else:
-            # Create new config with placeholders using current global config
-            from openhcs.core.config import create_pipeline_config_for_editing
-            current_plate_config = create_pipeline_config_for_editing(self.global_config)
+        # Use orchestrator's existing config if it exists, otherwise use global config as source
+        source_config = representative_orchestrator.pipeline_config or self.global_config
+
+        from openhcs.core.config import create_pipeline_config_for_editing
+        current_plate_config = create_pipeline_config_for_editing(source_config)
 
         def handle_config_save(new_config: PipelineConfig) -> None:
             """Apply per-orchestrator configuration without global side effects."""

@@ -1,24 +1,21 @@
 TUI System Architecture
 =======================
 
+.. note::
+   OpenHCS provides both a Textual TUI and PyQt6 GUI with complete feature parity. The TUI is specifically designed for remote/SSH environments, while the PyQt6 GUI provides enhanced desktop integration. Both interfaces are actively maintained.
+
 Overview
 --------
 
-OpenHCS provides a sophisticated terminal user interface (TUI) built
-with the Textual framework - unprecedented for scientific computing
-tools. This production-grade interface works anywhere a terminal works,
-including remote servers, containers, and SSH connections.
+OpenHCS provides a terminal user interface (TUI) built with the Textual
+framework. This interface works in terminal environments, including
+remote servers, containers, and SSH connections.
 
 **Note**: This document describes the actual TUI implementation. Some
 features are aspirational and marked as “Future Enhancements”.
 
-The Innovation
---------------
-
-**What Makes It Unique**: Most scientific tools are either command-line
-only or have basic desktop GUIs. OpenHCS provides a **production-grade
-terminal interface** that maintains full functionality in any terminal
-environment.
+Architecture
+------------
 
 Core Components
 ---------------
@@ -402,7 +399,7 @@ Validation Integration
            self.show_validation_error(step_data.id, str(e))
 
 This TUI system represents a paradigm shift in scientific computing
-interfaces - providing production-grade functionality in a
+interfaces - providing comprehensive functionality in a
 terminal-native environment that works anywhere researchers need to
 process data.
 
@@ -413,11 +410,11 @@ See Also
 
 - :doc:`pipeline_compilation_system` - TUI integration with pipeline compilation
 - :doc:`function_registry_system` - TUI function discovery and help system
-- :doc:`configuration_management_system` - TUI configuration management
+- :doc:`configuration_system_architecture` - TUI configuration management
 
 **Practical Usage**:
 
-- :doc:`../user_guide/basic_usage` - Getting started with the TUI
+- :doc:`../getting_started/getting_started` - Getting started with OpenHCS
 - :doc:`../guides/pipeline_compilation_workflow` - TUI workflow for pipeline creation
 - :doc:`../api/config` - Configuration options for TUI system
 

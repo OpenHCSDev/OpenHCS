@@ -1,108 +1,71 @@
-====================
+======================
 Architecture Reference
-====================
+======================
 
-This section provides detailed technical documentation of OpenHCS's architecture and design decisions. These documents are intended for developers who need to understand the internal implementation details.
+Technical documentation of OpenHCS's architecture for developers who need to understand internal implementation details.
 
-**Prerequisites**: Familiarity with :doc:`../concepts/index` is recommended before reading these technical documents.
+**Prerequisites**: :doc:`../concepts/index` | **Integration**: :doc:`../guides/index`
 
-**For Integration**: See :doc:`../guides/index` for practical integration guides that combine these architectural concepts.
+Essential Architecture
+======================
 
-OpenHCS evolved from EZStitcher while preserving core architectural patterns and adding revolutionary new capabilities for GPU-native scientific computing.
-
-Core Systems
-============
+The core systems every OpenHCS developer needs to understand.
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
    function_pattern_system
-   memory_type_system
+   configuration_system_architecture
+   storage_and_memory_system
    pipeline_compilation_system
-
-Advanced Features
-================
-
-.. toctree::
-   :maxdepth: 2
-
    special_io_system
    function_registry_system
-   tui_system
-   code_ui_interconversion
-   vfs_system
-
-Core Infrastructure
-===================
-
-.. toctree::
-   :maxdepth: 2
-
-   gpu_resource_management
-   memory_backend_system
    microscope_handler_integration
-   configuration_management_system
-   concurrency_model
    system_integration
-
-Advanced Topics
-===============
-
-.. toctree::
-   :maxdepth: 2
-
-   compilation_system_detailed
-   pattern_detection_system
-   pipeline_debugging_guide
-   dict_pattern_case_study
    ezstitcher_to_openhcs_evolution
 
-Development and Research
-========================
+Implementation Details
+======================
+
+Deep technical dives for developers working on specific systems.
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
 
-   parameter_analysis_audit
-   unified_parameter_analyzer_migration
-   research_impact
+   compilation_system_detailed
+   gpu_resource_management
+   tui_system
 
-System Overview
-===============
+Development Tools
+=================
 
-OpenHCS Architecture Innovations
---------------------------------
+Practical guides for OpenHCS development workflows.
 
-**Memory Type System**: Automatic conversion between NumPy↔CuPy↔PyTorch↔TensorFlow↔JAX with zero-copy GPU operations and compile-time validation.
+.. toctree::
+   :maxdepth: 1
 
-**Function Registry**: Auto-discovery of 574+ GPU functions from pyclesperanto, scikit-image, CuCIM with decorator-based contracts.
+   code_ui_interconversion
+   step-editor-generalization
 
-**5-Phase Compilation**: Step plan initialization → ZARR store declaration → Materialization → Memory validation → GPU assignment for immutable execution contexts.
+Specialized Topics
+==================
 
-**Special I/O System**: Cross-step communication for analysis results (cell counts, measurements) using declarative decorators.
+Advanced topics for specific use cases.
 
-**TUI System**: Production-grade terminal interface for scientific computing with SSH compatibility and real-time monitoring.
+.. toctree::
+   :maxdepth: 1
 
-**VFS Backend**: Memory overlay with ZARR storage for 100GB+ dataset handling and automatic materialization.
+   pattern_detection_system
+   concurrency_model
+   service-layer-architecture
 
-Preserved from EZStitcher
--------------------------
+Quick Start Paths
+==================
 
-**Function Patterns**: Single, tuple, list, dict patterns with ``variable_components`` and ``group_by`` for intelligent processing.
+**New to OpenHCS?** Start with :doc:`function_pattern_system` → :doc:`configuration_system_architecture` → :doc:`storage_and_memory_system`
 
-**Pipeline Architecture**: PipelineOrchestrator → Pipeline → Step hierarchy with specialized step types.
+**System Integration?** Jump to :doc:`system_integration` → :doc:`special_io_system`
 
-**Microscope Integration**: Native support for Opera Phenix, ImageXpress with extensible handler system.
+**Performance Optimization?** Focus on :doc:`gpu_resource_management` → :doc:`compilation_system_detailed`
 
-**Directory Management**: Automatic workspace creation and file organization with VFS abstraction.
-
-Evolution Summary
-================
-
-OpenHCS represents the evolution of EZStitcher from a CPU-based stitching tool into a GPU-native bioimage analysis platform:
-
-- **Preserved**: Core architectural patterns, function handling, pipeline concepts
-- **Enhanced**: GPU processing, memory type safety, production TUI, large dataset support  
-- **Added**: Special I/O, function registry, compilation system, advanced validation
-
-This architecture enables researchers to build complex bioimage analysis workflows with the same ease as the original stitching operations, while gaining access to cutting-edge GPU acceleration and production-grade tooling.
+**UI Development?** Begin with :doc:`tui_system` → :doc:`code_ui_interconversion`
