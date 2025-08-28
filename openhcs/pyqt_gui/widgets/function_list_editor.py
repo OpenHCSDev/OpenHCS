@@ -72,7 +72,7 @@ class FunctionListEditorWidget(QWidget):
         self.setup_connections()
         
         logger.debug(f"Function list editor initialized with {len(self.functions)} functions")
-    
+
     def _initialize_pattern_data(self, initial_functions):
         """Initialize pattern data from various input formats (mirrors Textual TUI logic)."""
         if initial_functions is None:
@@ -686,6 +686,8 @@ class FunctionListEditorWidget(QWidget):
 
         # Also update navigation buttons when component button is refreshed
         self._update_navigation_buttons()
+
+
 
     def _update_navigation_buttons(self):
         """Update visibility of channel navigation buttons (mirrors Textual TUI)."""
