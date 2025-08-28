@@ -109,6 +109,10 @@ class MetadataHandler(ABC):
         'grid_dimensions': None,  # No grid dimensions by default
     }
 
+    def __init__(self):
+        """Initialize metadata handler with VariableComponents enum."""
+        self.component_enum = VariableComponents
+
     def _get_with_fallback(self, method_name: str, *args, **kwargs):
         try:
             return getattr(self, method_name)(*args, **kwargs)

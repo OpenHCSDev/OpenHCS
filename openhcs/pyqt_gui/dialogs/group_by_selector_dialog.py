@@ -197,7 +197,7 @@ class GroupBySelectorDialog(QDialog):
 
         # Get metadata name if orchestrator is available
         if self.orchestrator:
-            metadata_name = self.orchestrator.get_component_metadata(self.group_by, component_key)
+            metadata_name = self.orchestrator.metadata_cache.get_component_metadata(self.group_by, component_key)
             if metadata_name:
                 return f"{base_text} | {metadata_name}"
 

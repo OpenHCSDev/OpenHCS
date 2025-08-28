@@ -519,7 +519,7 @@ class FunctionListEditorWidget(QWidget):
         """Get display name for component key, using metadata if available (mirrors Textual TUI)."""
         orchestrator = self._get_current_orchestrator()
         if orchestrator and self.current_group_by:
-            metadata_name = orchestrator.get_component_metadata(self.current_group_by, component_key)
+            metadata_name = orchestrator.metadata_cache.get_component_metadata(self.current_group_by, component_key)
             if metadata_name:
                 return metadata_name
         return component_key

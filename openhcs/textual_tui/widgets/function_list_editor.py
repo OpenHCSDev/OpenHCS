@@ -843,7 +843,7 @@ class FunctionListEditorWidget(Container):
         orchestrator = self._get_current_orchestrator()
         if orchestrator and self.current_group_by:
             try:
-                metadata_name = orchestrator.get_component_metadata(self.current_group_by, component_key)
+                metadata_name = orchestrator.metadata_cache.get_component_metadata(self.current_group_by, component_key)
                 if metadata_name:
                     return metadata_name
             except Exception as e:

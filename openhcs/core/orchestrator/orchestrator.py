@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Union, Set
 from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, OPENHCS_CONFIG
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, PipelineConfig, set_current_global_config
+from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
@@ -278,8 +279,8 @@ class PipelineOrchestrator:
         # Component keys cache for fast access
         self._component_keys_cache: Dict['VariableComponents', List[str]] = {}
 
-        # Metadata cache for component key→name mappings
-        self._metadata_cache: Dict['VariableComponents', Dict[str, Optional[str]]] = {}
+        # Metadata cache service
+        self._metadata_cache_service = get_metadata_cache()
 
     def __setattr__(self, name: str, value: Any) -> None:
         """
@@ -366,7 +367,11 @@ class PipelineOrchestrator:
             # Auto-cache component keys and metadata for instant access
             logger.info("Caching component keys and metadata...")
             self.cache_component_keys()
-            self.cache_metadata()
+            self._metadata_cache_service.cache_metadata(
+                self.microscope_handler,
+                self.plate_path,
+                self._component_keys_cache
+            )
 
             logger.info("PipelineOrchestrator fully initialized with cached component keys and metadata.")
             return self
@@ -398,7 +403,7 @@ class PipelineOrchestrator:
         context.workspace_path = self.workspace_path
         context.plate_path = self.plate_path  # Add plate_path for path planner
         # Pass metadata cache for OpenHCS metadata creation
-        context.metadata_cache = dict(self._metadata_cache)  # Copy to avoid pickling issues
+        context.metadata_cache = {}  # Initialize empty - metadata cache is not pickled
         return context
 
     def compile_pipelines(
@@ -758,8 +763,9 @@ class PipelineOrchestrator:
         component_name = component.value
 
         # Try metadata cache first (preferred source)
-        if component in self._metadata_cache and self._metadata_cache[component]:
-            all_components = list(self._metadata_cache[component].keys())
+        cached_metadata = self._metadata_cache_service.get_cached_metadata(component)
+        if cached_metadata:
+            all_components = list(cached_metadata.keys())
             logger.debug(f"Using metadata cache for {component_name}: {len(all_components)} components")
         else:
             # Fall back to filename parsing cache
@@ -862,93 +868,12 @@ class PipelineOrchestrator:
                     logger.debug(f"Cleared cache for {component.value}")
             logger.info(f"Cleared cache for {len(components)} component types")
 
-    def cache_metadata(self) -> None:
-        """
-        Cache all metadata from metadata handler for fast access.
+    @property
+    def metadata_cache(self) -> MetadataCache:
+        """Access to metadata cache service."""
+        return self._metadata_cache_service
 
-        This method calls the metadata handler's parse_metadata() method once
-        and stores the results for instant access to component key→name mappings.
-        Call this after orchestrator initialization to enable metadata-based
-        component names.
-        """
-        if not self.is_initialized() or self.input_dir is None or self.microscope_handler is None:
-            raise RuntimeError("Orchestrator must be initialized before caching metadata.")
 
-        try:
-            # Parse all metadata once using enum→method mapping
-            # Use plate_path for metadata loading since metadata files are in plate root
-            metadata = self.microscope_handler.metadata_handler.parse_metadata(self.plate_path)
-
-            # Import here to avoid circular imports
-            from openhcs.constants.constants import VariableComponents
-
-            # Initialize all VariableComponents with component keys mapped to None
-            for component in VariableComponents:
-                # Get all component keys for this component from filename parsing
-                component_keys = self.get_component_keys(component)
-                # Create dict mapping each key to None (no metadata available)
-                self._metadata_cache[component] = {key: None for key in component_keys}
-
-            # Update with actual metadata from metadata handler where available
-            for component_name, mapping in metadata.items():
-                try:
-                    component = VariableComponents(component_name)  # Convert string to enum
-                    # For OpenHCS plates, metadata keys might be the only source of component keys
-                    # Merge metadata keys with any existing component keys from filename parsing
-                    if component in self._metadata_cache:
-                        # Start with existing component keys (from filename parsing)
-                        combined_cache = self._metadata_cache[component].copy()
-                        # Add any metadata keys that weren't found in filename parsing
-                        for metadata_key in mapping.keys():
-                            if metadata_key not in combined_cache:
-                                combined_cache[metadata_key] = None
-                        # Update with actual metadata values
-                        combined_cache.update(mapping)
-                        self._metadata_cache[component] = combined_cache
-                    else:
-                        self._metadata_cache[component] = mapping
-                    logger.debug(f"Updated metadata for {component.value}: {len(mapping)} entries with real data")
-                except ValueError:
-                    logger.warning(f"Unknown component type in metadata: {component_name}")
-
-            # Log what we have for each component
-            for component in VariableComponents:
-                mapping = self._metadata_cache[component]
-                real_metadata_count = sum(1 for v in mapping.values() if v is not None)
-                total_keys = len(mapping)
-                logger.debug(f"Cached {component.value}: {total_keys} keys, {real_metadata_count} with metadata")
-
-            logger.info(f"Metadata caching complete. All {len(self._metadata_cache)} component types populated.")
-
-        except Exception as e:
-            logger.warning(f"Could not cache metadata: {e}")
-            # Don't fail - metadata is optional enhancement
-
-    def get_component_metadata(self, component: 'VariableComponents', key: str) -> Optional[str]:
-        """
-        Get metadata display name for a specific component key.
-
-        Args:
-            component: VariableComponents enum specifying component type
-            key: Component key (e.g., "1", "2", "A01")
-
-        Returns:
-            Display name from metadata, or None if not available
-            Example: get_component_metadata(VariableComponents.CHANNEL, "1") → "HOECHST 33342"
-        """
-        if component in self._metadata_cache:
-            return self._metadata_cache[component].get(key)
-        return None
-
-    def clear_metadata_cache(self) -> None:
-        """
-        Clear cached metadata to force recomputation.
-
-        Use this when the input directory contents have changed and you need
-        to refresh the metadata cache.
-        """
-        self._metadata_cache.clear()
-        logger.info("Cleared metadata cache")
 
     # Global config management removed - handled by UI layer
 

@@ -137,7 +137,7 @@ class GroupBySelectorWindow(BaseOpenHCSWindow):
             # Convert component_type string back to VariableComponents enum
             from openhcs.constants.constants import VariableComponents
             component = VariableComponents(self.component_type)
-            metadata_name = self.orchestrator.get_component_metadata(component, component_key)
+            metadata_name = self.orchestrator.metadata_cache.get_component_metadata(component, component_key)
 
             if metadata_name:
                 return f"{base_text} | {metadata_name}"
