@@ -21,7 +21,7 @@ from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
 from openhcs.constants.constants import GroupBy, VariableComponents
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.ui.shared.pyqt6_widget_strategies import _get_enum_display_text
+from openhcs.pyqt_gui.widgets.shared.widget_strategies import _get_enum_display_text
 
 logger = logging.getLogger(__name__)
 
