@@ -6,7 +6,7 @@ Handles FunctionStep parameter editing with nested dataclass support.
 """
 
 import logging
-from typing import Any, Optional, Union
+from typing import Any, Optional
 from pathlib import Path
 from contextlib import contextmanager
 
@@ -164,79 +164,19 @@ class StepParameterEditorWidget(QScrollArea):
             # Fallback to standard lazy config if no matching type found
             return inner_type()
 
-        # Generic approach: Check if this dataclass type supports field-level auto-hierarchy
-        # by detecting if it has sibling inheritance capabilities in the global config
+        # Use field-level auto-hierarchy for all step-level configs
         from openhcs.core.config import get_base_type_for_lazy
         base_class = get_base_type_for_lazy(inner_type) or inner_type
 
-        # Check if this dataclass type has sibling fields in GlobalPipelineConfig
-        # (indicating it supports sophisticated hierarchy resolution)
-        if self._has_sibling_inheritance_support(base_class, pipeline_field_name):
-            # Use field-level auto-hierarchy for types that support sibling inheritance
-            StepLevelConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
-                base_class=base_class,
-                global_config_type=GlobalPipelineConfig,
-                field_path=pipeline_field_name,
-                lazy_class_name=f"StepLevel{base_class.__name__}"
-            )
-            return StepLevelConfig()
+        StepLevelConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+            base_class=base_class,
+            global_config_type=GlobalPipelineConfig,
+            field_path=pipeline_field_name,
+            lazy_class_name=f"StepLevel{base_class.__name__}"
+        )
+        return StepLevelConfig()
 
-        # For other types, get pipeline's corresponding field as defaults source
-        pipeline_config = get_current_global_config(GlobalPipelineConfig)
-        if pipeline_config and hasattr(pipeline_config, pipeline_field_name):
-            pipeline_field_value = getattr(pipeline_config, pipeline_field_name)
-            if pipeline_field_value:
-                # Create step-level config that inherits from pipeline's field
-                StepLevelConfig = LazyDataclassFactory.create_lazy_dataclass(
-                    defaults_source=pipeline_field_value,
-                    lazy_class_name=f"StepLevel{inner_type.__name__}",
-                    use_recursive_resolution=False
-                )
-                return StepLevelConfig()
 
-        # Fallback to standard lazy config if no pipeline context
-        return inner_type()
-
-    def _has_sibling_inheritance_support(self, dataclass_type, primary_field_name):
-        """
-        Generic method to detect if a dataclass type supports sibling inheritance
-        by checking if it inherits from another dataclass type that also exists
-        in GlobalPipelineConfig at the same level.
-
-        This uses static reflection to identify inheritance relationships that enable
-        sophisticated hierarchy resolution without hardcoding specific type names.
-
-        Example: StepMaterializationConfig inherits from PathPlanningConfig, and both
-        materialization_defaults (StepMaterializationConfig) and path_planning
-        (PathPlanningConfig) exist in GlobalPipelineConfig, enabling sibling inheritance.
-        """
-        from openhcs.core.config import GlobalPipelineConfig
-        import dataclasses
-
-        # Get the base classes of our dataclass type
-        base_classes = dataclass_type.__bases__
-
-        # Check if any base class also has a field in GlobalPipelineConfig
-        for base_class in base_classes:
-            # Skip object and other non-dataclass bases
-            if not dataclasses.is_dataclass(base_class):
-                continue
-
-            # Look for fields in GlobalPipelineConfig that match this base class
-            for field in dataclasses.fields(GlobalPipelineConfig):
-                field_type = field.type
-                # Handle Optional types
-                if hasattr(field_type, '__origin__') and field_type.__origin__ is Union:
-                    # Extract non-None type from Optional[Type]
-                    non_none_types = [arg for arg in field_type.__args__ if arg is not type(None)]
-                    if len(non_none_types) == 1:
-                        field_type = non_none_types[0]
-
-                # If we find a field that matches a base class, this indicates sibling inheritance
-                if field_type == base_class and field.name != primary_field_name:
-                    return True
-
-        return False
 
 
 

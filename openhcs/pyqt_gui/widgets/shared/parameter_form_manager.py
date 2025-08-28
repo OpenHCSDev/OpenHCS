@@ -422,20 +422,8 @@ class ParameterFormManager(QWidget):
                 print(f"🎨 MASKING DEBUG: field_path={field_path} for {base_class}")
 
                 if field_path:
-                    # CRITICAL FIX: For step editor, use orchestrator's pipeline config as source
-                    # instead of global config to ensure we see test modifications
-                    from openhcs.pyqt_gui.shared.orchestrator_manager import OrchestratorManager
-                    orchestrator = OrchestratorManager.get_current_orchestrator()
-
-                    # Try orchestrator's pipeline config first, then fall back to global config
-                    original_config = None
-                    if orchestrator and orchestrator.pipeline_config:
-                        original_config = orchestrator.pipeline_config
-                        print(f"🎨 MASKING DEBUG: Using orchestrator's pipeline config")
-                    else:
-                        original_config = get_current_global_config(GlobalPipelineConfig)
-                        print(f"🎨 MASKING DEBUG: Using global config as fallback")
-
+                    # Get current context for masking
+                    original_config = get_current_global_config(GlobalPipelineConfig)
                     print(f"🎨 MASKING DEBUG: original_config exists: {original_config is not None}")
 
                     if original_config:

@@ -358,6 +358,8 @@ class PipelineEditorWidget(QWidget):
         if orchestrator:
             current_pipeline_cfg = orchestrator.pipeline_config or PipelineConfig()
             orchestrator.apply_pipeline_config(current_pipeline_cfg)
+        else:
+            logger.info("No orchestrator found for step editor context, This should not happen.")
 
         with self._scoped_orchestrator_context():
             editor = DualEditorWindow(
