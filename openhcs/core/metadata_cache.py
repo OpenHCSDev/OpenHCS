@@ -4,6 +4,9 @@ import threading
 from pathlib import Path
 from typing import Dict, Optional
 
+from openhcs.core.components.validation import convert_enum_by_value
+from openhcs.constants.constants import VariableComponents
+
 
 class MetadataCache:
     """Stores component key→name mappings with basic invalidation and thread safety."""
@@ -18,8 +21,6 @@ class MetadataCache:
         with self._lock:
             # Parse all metadata once
             metadata = microscope_handler.metadata_handler.parse_metadata(plate_path)
-            
-            from openhcs.constants.constants import VariableComponents
             
             # Initialize all components with keys mapped to None
             for component in VariableComponents:
@@ -44,12 +45,16 @@ class MetadataCache:
             if metadata_file and metadata_file.exists():
                 self._metadata_file_mtimes[metadata_file] = metadata_file.stat().st_mtime
     
-    def get_component_metadata(self, component: 'VariableComponents', key: str) -> Optional[str]:
-        """Get metadata display name for a component key."""
+    def get_component_metadata(self, component, key: str) -> Optional[str]:
+        """Get metadata display name for a component key. Accepts GroupBy or VariableComponents."""
         with self._lock:
             if not self._is_cache_valid():
                 self._cache.clear()
                 return None
+
+            # Convert GroupBy to VariableComponents using OpenHCS generic utility
+            component = convert_enum_by_value(component, VariableComponents) or component
+
             return self._cache.get(component, {}).get(key)
     
     def get_cached_metadata(self, component: 'VariableComponents') -> Optional[Dict[str, Optional[str]]]:

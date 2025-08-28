@@ -18,19 +18,25 @@ import multiprocessing
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Set
 
-from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config
+from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, VariableComponents
 from openhcs.constants import Microscope
-from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, PipelineConfig, set_current_global_config
+from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, PipelineConfig, set_current_global_config, set_current_pipeline_config
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
 from openhcs.core.steps.abstract import AbstractStep, get_step_id
+from openhcs.core.components.validation import convert_enum_by_value
+from openhcs.core.pipeline_config import PipelineConfig as CorePipelineConfig
+from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
 from openhcs.io.exceptions import StorageWriteError
 from openhcs.io.filemanager import FileManager
 from openhcs.io.base import storage_registry
+from openhcs.io.zarr import ZarrStorageBackend
 from openhcs.microscopes import create_microscope_handler
 from openhcs.microscopes.microscope_base import MicroscopeHandler
+
+from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
 
 # Import new generic component system
 try:
@@ -47,6 +53,13 @@ except ImportError:
     # Create a placeholder type for type hints when napari is not available
     NapariStreamVisualizer = None
     NapariVisualizerType = Any  # Use Any for type hints when napari is not available
+
+# Optional GPU memory management imports
+try:
+    from openhcs.core.memory.gpu_cleanup import log_gpu_memory_usage, cleanup_all_gpu_frameworks
+except ImportError:
+    log_gpu_memory_usage = None
+    cleanup_all_gpu_frameworks = None
 
 
 logger = logging.getLogger(__name__)
@@ -130,15 +143,7 @@ def _configure_worker_logging(log_file_base: str):
     # The environment variable is inherited from the subprocess runner
     # Note: We don't log this yet because logging isn't configured
 
-    # CRITICAL: Install import hook for auto-discovered functions
-    # Worker processes are fresh Python processes that need the import hook
-    try:
-        from openhcs.processing.func_registry import _install_import_hook
-        _install_import_hook()
-        # Note: We don't log this yet because logging isn't configured
-    except Exception:
-        # Can't log yet, but this is critical - the worker will fail later
-        pass
+    # Note: Import hook system was removed - using existing comprehensive registries
 
     # Create unique worker identifier using PID and timestamp
     worker_pid = os.getpid()
@@ -208,8 +213,7 @@ class PipelineOrchestrator:
         # Initialize per-orchestrator configuration
         # Always ensure orchestrator has a pipeline config - create default if none provided
         if pipeline_config is None:
-            from openhcs.core.pipeline_config import PipelineConfig
-            self.pipeline_config = PipelineConfig()
+            self.pipeline_config = CorePipelineConfig()
             logger.info("PipelineOrchestrator created default pipeline configuration.")
         else:
             self.pipeline_config = pipeline_config
@@ -217,7 +221,6 @@ class PipelineOrchestrator:
 
 
         # Set current pipeline config for MaterializationPathConfig defaults
-        from openhcs.core.config import set_current_pipeline_config
         set_current_pipeline_config(self.global_config)
 
         if plate_path is None:
@@ -255,15 +258,11 @@ class PipelineOrchestrator:
             self.registry = storage_registry
             logger.info("PipelineOrchestrator using provided StorageRegistry instance.")
         else:
-            from openhcs.io.base import storage_registry as global_registry
             # Create a copy of the global registry to avoid modifying shared state
-            self.registry = global_registry.copy()
+            self.registry = storage_registry.copy()
             logger.info("PipelineOrchestrator created its own StorageRegistry instance (copy of global).")
 
         # Override zarr backend with orchestrator's config
-        from openhcs.io.zarr import ZarrStorageBackend
-        from openhcs.constants.constants import Backend
-
         zarr_backend_with_config = ZarrStorageBackend(self.global_config.zarr)
         self.registry[Backend.ZARR.value] = zarr_backend_with_config
         logger.info(f"Orchestrator zarr backend configured with {self.global_config.zarr.compressor.value} compression")
@@ -542,8 +541,8 @@ class PipelineOrchestrator:
 
         # 🔍 VRAM TRACKING: Log initial memory state
         try:
-            from openhcs.core.memory.gpu_cleanup import log_gpu_memory_usage
-            log_gpu_memory_usage("plate execution start")
+            if log_gpu_memory_usage:
+                log_gpu_memory_usage("plate execution start")
         except Exception:
             pass
 
@@ -600,7 +599,6 @@ class PipelineOrchestrator:
                 # This ensures that the contexts are safe for pickling in ProcessPoolExecutor
                 # Note: Don't resolve pipeline_definition as it may overwrite collision-resolved configs
                 logger.info("🔥 ORCHESTRATOR: Resolving lazy dataclasses for multiprocessing compatibility")
-                from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
                 contexts_snapshot = resolve_lazy_configurations_for_serialization(contexts_snapshot)
                 logger.info("🔥 ORCHESTRATOR: Lazy dataclass resolution completed")
 
@@ -664,9 +662,9 @@ class PipelineOrchestrator:
 
             # 🔥 GPU CLEANUP: Clear GPU memory after plate execution
             try:
-                from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
-                cleanup_all_gpu_frameworks()
-                logger.debug("🔥 GPU CLEANUP: Cleared all GPU frameworks after plate execution")
+                if cleanup_all_gpu_frameworks:
+                    cleanup_all_gpu_frameworks()
+                    logger.debug("🔥 GPU CLEANUP: Cleared all GPU frameworks after plate execution")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup GPU memory after plate execution: {cleanup_error}")
 
@@ -676,8 +674,6 @@ class PipelineOrchestrator:
             # Run automatic analysis consolidation if enabled
             if self.global_config.analysis_consolidation.enabled:
                 try:
-                    from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
-
                     # Get results directory from compiled contexts (Option 2: use existing paths)
                     results_dir = None
                     for well_id, context in compiled_contexts.items():
@@ -753,12 +749,11 @@ class PipelineOrchestrator:
         if not self.is_initialized():
             raise RuntimeError("Orchestrator must be initialized before getting component keys.")
 
-        # Extract VariableComponents from GroupBy enum if needed
-        from openhcs.constants.constants import GroupBy, VariableComponents
-        if isinstance(component, GroupBy):
-            component = component.value  # Get the VariableComponents enum
-            if component is None:
-                raise ValueError("Cannot get component keys for GroupBy.NONE")
+        # Convert GroupBy to VariableComponents using OpenHCS generic utility
+        if isinstance(component, GroupBy) and component.value is None:
+            raise ValueError("Cannot get component keys for GroupBy.NONE")
+
+        component = convert_enum_by_value(component, VariableComponents) or component
 
         # Use component directly - let natural errors occur for wrong types
         component_name = component.value
@@ -801,9 +796,6 @@ class PipelineOrchestrator:
         """
         if not self.is_initialized():
             raise RuntimeError("Orchestrator must be initialized before caching component keys.")
-
-        # Import here to avoid circular imports
-        from openhcs.constants.constants import VariableComponents
 
         if components is None:
             components = list(VariableComponents)  # Cache all enum values
@@ -893,7 +885,6 @@ class PipelineOrchestrator:
         # Set up thread-local context for sibling inheritance
         # The existing lazy config system already handles sibling inheritance automatically
         # We just need to provide the pipeline config instance as the context
-        from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
         from dataclasses import fields
 
         # Create a merged config that combines global defaults with pipeline overrides
@@ -938,7 +929,6 @@ class PipelineOrchestrator:
         """Clear per-orchestrator configuration."""
         # Reset thread-local storage to global config
         if self.pipeline_config is not None:
-            from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
             set_current_global_config(GlobalPipelineConfig, self.global_config)
 
         self.pipeline_config = None

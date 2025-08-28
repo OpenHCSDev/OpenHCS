@@ -33,8 +33,9 @@ def _create_enums():
     # VariableComponents
     vc = Enum('VariableComponents', {c.name: c.value for c in remaining})
 
-    # GroupBy: create enum with dict and add methods
-    gb_dict = {c.name: c for c in remaining}
+    # GroupBy: VariableComponents + NONE option
+    # Use same values for interchangeability
+    gb_dict = {member.name: member.value for member in vc}
     gb_dict['NONE'] = None
     GroupBy = Enum('GroupBy', gb_dict)
 
