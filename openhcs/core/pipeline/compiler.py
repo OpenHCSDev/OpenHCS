@@ -500,7 +500,9 @@ class PipelineCompiler:
 
         try:
             compiled_contexts: Dict[str, ProcessingContext] = {}
-            wells_to_process = orchestrator.get_component_keys(VariableComponents.WELL, well_filter)
+            # Get multiprocessing axis values (wells in default config)
+            from openhcs.constants import MULTIPROCESSING_AXIS
+            wells_to_process = orchestrator.get_component_keys(MULTIPROCESSING_AXIS, well_filter)
 
             if not wells_to_process:
                 logger.warning("No wells found to process based on filter.")
