@@ -15,18 +15,16 @@ from openhcs.constants.constants import (  # Backend constants; Memory constants
     DEFAULT_SITE_PADDING, DEFAULT_STITCHED_DIR_SUFFIX, DEFAULT_TILE_OVERLAP,
     get_default_variable_components, FORCE_DISK_WRITE,
     GPU_MEMORY_TYPES, MEMORY_TYPE_CUPY, MEMORY_TYPE_JAX, MEMORY_TYPE_NUMPY,
-    MEMORY_TYPE_TENSORFLOW, MEMORY_TYPE_TORCH, READ_BACKEND,
+    MEMORY_TYPE_TENSORFLOW, MEMORY_TYPE_TORCH, Microscope, READ_BACKEND,
     REQUIRES_DISK_READ, REQUIRES_DISK_WRITE, SUPPORTED_MEMORY_TYPES,
     VALID_GPU_MEMORY_TYPES, VALID_MEMORY_TYPES, WRITE_BACKEND, Backend,
-    GroupBy, MemoryType, Microscope, VariableComponents)
+    GroupBy, MemoryType, VariableComponents)
 
-# Lazy-loaded constants for backward compatibility
-def __getattr__(name):
-    if name == 'DEFAULT_VARIABLE_COMPONENTS':
-        return get_default_variable_components()
-    elif name == 'DEFAULT_GROUP_BY':
-        return get_default_group_by()
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+# Backward compatibility mapping using functional approach
+__getattr__ = lambda name: {
+    'DEFAULT_VARIABLE_COMPONENTS': get_default_variable_components,
+    'DEFAULT_GROUP_BY': get_default_group_by
+}.get(name, lambda: (_ for _ in ()).throw(AttributeError(f"module '{__name__}' has no attribute '{name}'")))()
 from openhcs.constants.input_source import InputSource
 
 __all__ = [

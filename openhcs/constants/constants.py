@@ -6,6 +6,7 @@ These constants are governed by various doctrinal clauses.
 """
 
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Callable, Dict, List, Optional, Set, Type, TypeVar
 
 
@@ -16,109 +17,48 @@ class Microscope(Enum):
     OPERAPHENIX = "OperaPhenix"
 
 
-# Direct filtered enum definitions using ComponentConfiguration
 def get_openhcs_config():
     """Get the OpenHCS configuration, initializing it if needed."""
     from openhcs.core.components.framework import ComponentConfigurationFactory
     return ComponentConfigurationFactory.create_openhcs_default_configuration()
 
 
-def _create_filtered_variable_components():
-    """Create VariableComponents enum with multiprocessing axis filtered out."""
+# Simple lazy initialization - just defer the config call
+@lru_cache(maxsize=1)
+def _create_enums():
+    """Create filtered enums when first needed."""
     config = get_openhcs_config()
     remaining = config.get_remaining_components()
 
-    # Create enum dict
-    enum_dict = {}
-    for comp in remaining:
-        enum_dict[comp.name] = comp.value
+    # VariableComponents
+    vc = Enum('VariableComponents', {c.name: c.value for c in remaining})
 
-    # Create the enum class
-    FilteredVariableComponents = Enum('FilteredVariableComponents', enum_dict)
+    # GroupBy: create enum with dict and add methods
+    gb_dict = {c.name: c for c in remaining}
+    gb_dict['NONE'] = None
+    GroupBy = Enum('GroupBy', gb_dict)
 
-    return FilteredVariableComponents
+    # Add original interface methods
+    GroupBy.component = property(lambda self: self.value)
+    GroupBy.__eq__ = lambda self, other: self.value == getattr(other, 'value', other)
+    GroupBy.__hash__ = lambda self: hash("GroupBy.NONE") if self.value is None else hash(self.value)
+    GroupBy.__str__ = lambda self: f"GroupBy.{self.name}"
+    GroupBy.__repr__ = lambda self: f"GroupBy.{self.name}"
 
-
-def _create_filtered_group_by():
-    """Create GroupBy enum with multiprocessing axis filtered out."""
-    config = get_openhcs_config()
-    remaining = config.get_remaining_components()
-
-    # Create enum dict with VariableComponents as values
-    enum_dict = {}
-    for comp in remaining:
-        enum_dict[comp.name] = comp
-    enum_dict['NONE'] = None
-
-    # Create the base enum class
-    FilteredGroupBy = Enum('FilteredGroupBy', enum_dict)
-
-    # Add the special methods to the enum class
-    def component(self) -> Optional:
-        """Get the wrapped VariableComponents enum."""
-        return self.value
-
-    def __eq__(self, other):
-        """Support equality with both GroupBy and VariableComponents."""
-        if isinstance(other, FilteredGroupBy):
-            return self.value == other.value
-        elif hasattr(other, 'value'):  # VariableComponents or similar enum
-            return self.value == other
-        return False
-
-    def __hash__(self):
-        """
-        Delegate hashing to the wrapped VariableComponents enum.
-
-        This ensures GroupBy enum members are hashable and can be used as dictionary keys.
-        For GroupBy.NONE (value=None), we use a consistent hash value.
-
-        Hash consistency:
-        - GroupBy.CHANNEL and VariableComponents.CHANNEL have the same hash
-        - GroupBy.NONE has a unique, consistent hash value
-        """
-        if self.value is None:
-            # Use a consistent hash for GroupBy.NONE
-            return hash("GroupBy.NONE")
-        else:
-            # Delegate to the wrapped VariableComponents enum's hash
-            return hash(self.value)
-
-    def __str__(self):
-        """String representation for debugging."""
-        return f"GroupBy.{self.name}"
-
-    def __repr__(self):
-        """Detailed representation for debugging."""
-        return f"GroupBy.{self.name}"
-
-    # Add methods to the enum class
-    FilteredGroupBy.component = property(component)
-    FilteredGroupBy.__eq__ = __eq__
-    FilteredGroupBy.__hash__ = __hash__
-    FilteredGroupBy.__str__ = __str__
-    FilteredGroupBy.__repr__ = __repr__
-
-    return FilteredGroupBy
+    return vc, GroupBy
 
 
-# Initialize the filtered enums directly
-# This works because we've resolved the circular import by moving get_openhcs_config here
-try:
-    VariableComponents = _create_filtered_variable_components()
-    GroupBy = _create_filtered_group_by()
-except Exception:
-    # If initialization fails during import, create fallback enums
-    class VariableComponents(Enum):
-        SITE = "site"
-        CHANNEL = "channel"
-        Z_INDEX = "z_index"
+def __getattr__(name):
+    """Lazy enum creation."""
+    if name in ('VariableComponents', 'GroupBy'):
+        vc, gb = _create_enums()
+        globals()['VariableComponents'] = vc
+        globals()['GroupBy'] = gb
+        return globals()[name]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-    class GroupBy(Enum):
-        SITE = VariableComponents.SITE
-        CHANNEL = VariableComponents.CHANNEL
-        Z_INDEX = VariableComponents.Z_INDEX
-        NONE = None
+
+
 
 
 
@@ -140,29 +80,20 @@ DEFAULT_IMAGE_EXTENSION = ".tif"
 DEFAULT_IMAGE_EXTENSIONS: Set[str] = {".tif", ".tiff", ".TIF", ".TIFF"}
 DEFAULT_SITE_PADDING = 3
 DEFAULT_RECURSIVE_PATTERN_SEARCH = False
-# Lazy defaults using ComponentConfiguration
-_default_variable_components = None
-_default_group_by = None
-
-
+# Lazy default resolution using lru_cache
+@lru_cache(maxsize=1)
 def get_default_variable_components():
-    global _default_variable_components
-    if _default_variable_components is None:
-        config = get_openhcs_config()
-        _default_variable_components = [getattr(VariableComponents, comp.name) for comp in config.default_variable]
-    return _default_variable_components
+    """Get default variable components from ComponentConfiguration."""
+    vc, _ = _create_enums()  # Get the enum directly
+    return [getattr(vc, c.name) for c in get_openhcs_config().default_variable]
 
 
+@lru_cache(maxsize=1)
 def get_default_group_by():
-    global _default_group_by
-    if _default_group_by is None:
-        config = get_openhcs_config()
-        _default_group_by = getattr(GroupBy, config.default_group_by.name) if config.default_group_by else None
-    return _default_group_by
-
-
-# Note: DEFAULT_VARIABLE_COMPONENTS and DEFAULT_GROUP_BY are now functions
-# to avoid circular imports. Use get_default_variable_components() and get_default_group_by()
+    """Get default group_by from ComponentConfiguration."""
+    _, gb = _create_enums()  # Get the enum directly
+    config = get_openhcs_config()
+    return getattr(gb, config.default_group_by.name) if config.default_group_by else None
 DEFAULT_MICROSCOPE: Microscope = Microscope.AUTO
 
 

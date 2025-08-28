@@ -153,8 +153,8 @@ class AbstractStep(abc.ABC):
                                    Use LazyStepMaterializationConfig() for safe defaults that prevent path collisions.
         """
         self.name = name or self.__class__.__name__
-        self.variable_components = variable_components if variable_components is not None else get_default_variable_components()
-        self.group_by = group_by if group_by is not None else get_default_group_by()
+        self.variable_components = variable_components or get_default_variable_components()
+        self.group_by = group_by or get_default_group_by()
         self.input_source = input_source
         self.materialization_config = materialization_config
 
