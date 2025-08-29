@@ -570,6 +570,11 @@ class PipelineCompiler:
             StepAttributeStripper.strip_step_attributes(pipeline_definition, {})
 
             orchestrator._state = OrchestratorState.COMPILED
+
+            # Log worker configuration for execution planning
+            effective_config = orchestrator.get_effective_config()
+            logger.info(f"⚙️  EXECUTION CONFIG: {effective_config.num_workers} workers configured for pipeline execution")
+
             logger.info(f"🏁 COMPILATION COMPLETE: {len(compiled_contexts)} wells compiled successfully")
             return compiled_contexts
         except Exception as e:

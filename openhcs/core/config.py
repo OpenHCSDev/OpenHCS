@@ -228,7 +228,7 @@ class StepMaterializationConfig(PathPlanningConfig):
     """
 
     # Override PathPlanningConfig defaults to prevent collisions
-    output_dir_suffix: str = ""  # Uses same output plate path as main pipeline
+    # output_dir_suffix inherited from PathPlanningConfig ("_outputs") - materialization uses same output plate as main pipeline
     sub_dir: str = "checkpoints"  # vs global "images"
 
 

@@ -761,12 +761,19 @@ class PlateManagerWidget(QWidget):
 
             # Pass both pipeline definition and pre-compiled contexts to subprocess
             pipeline_data = {}
+            effective_configs = {}
             for plate_path in plate_paths_to_run:
                 execution_pipeline, compiled_contexts = self.plate_compiled_data[plate_path]
                 pipeline_data[plate_path] = {
                     'pipeline_definition': execution_pipeline,  # Use execution pipeline (stripped)
                     'compiled_contexts': compiled_contexts      # Pre-compiled contexts
                 }
+
+                # Get effective config for this plate (includes pipeline config if set)
+                if plate_path in self.orchestrators:
+                    effective_configs[plate_path] = self.orchestrators[plate_path].get_effective_config()
+                else:
+                    effective_configs[plate_path] = self.global_config
 
             logger.info(f"Starting subprocess for {len(plate_paths_to_run)} plates")
 
@@ -801,7 +808,8 @@ class PlateManagerWidget(QWidget):
             subprocess_data = {
                 'plate_paths': plate_paths_to_run,
                 'pipeline_data': pipeline_data,
-                'global_config': self.global_config
+                'global_config': self.global_config,      # Fallback global config
+                'effective_configs': effective_configs    # Per-plate effective configs (includes pipeline config)
             }
 
             # Resolve all lazy configurations to concrete values before pickling

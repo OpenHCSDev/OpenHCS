@@ -564,15 +564,16 @@ class PipelineOrchestrator:
                 # Start method may already be set, which is fine
                 logger.debug(f"🔥 CUDA: Start method already configured: {e}")
 
-            # Choose executor type based on global config for debugging support
-            executor_type = "ThreadPoolExecutor" if self.global_config.use_threading else "ProcessPoolExecutor"
+            # Choose executor type based on effective config for debugging support
+            effective_config = self.get_effective_config()
+            executor_type = "ThreadPoolExecutor" if effective_config.use_threading else "ProcessPoolExecutor"
             logger.info(f"🔥 ORCHESTRATOR: Creating {executor_type} with {actual_max_workers} workers")
 
             # DEATH DETECTION: Mark executor creation
             logger.info(f"🔥 DEATH_MARKER: BEFORE_{executor_type.upper()}_CREATION")
 
             # Choose appropriate executor class and configure worker logging
-            if self.global_config.use_threading:
+            if effective_config.use_threading:
                 logger.info("🔥 DEBUG MODE: Using ThreadPoolExecutor for easier debugging")
                 executor = concurrent.futures.ThreadPoolExecutor(max_workers=actual_max_workers)
             else:
