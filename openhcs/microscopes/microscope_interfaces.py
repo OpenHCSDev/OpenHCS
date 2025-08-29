@@ -8,7 +8,7 @@ including filename parsing and metadata handling.
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
-from openhcs.constants.constants import VariableComponents
+from openhcs.constants.constants import VariableComponents, AllComponents
 from openhcs.core.components.parser_metaprogramming import GenericFilenameParser
 
 from openhcs.constants.constants import DEFAULT_PIXEL_SIZE
@@ -24,8 +24,9 @@ class FilenameParser(GenericFilenameParser):
     """
 
     def __init__(self):
-        """Initialize the parser with VariableComponents enum."""
-        super().__init__(VariableComponents)
+        """Initialize the parser with AllComponents enum."""
+        from openhcs.constants.constants import AllComponents
+        super().__init__(AllComponents)
 
     @classmethod
     @abstractmethod

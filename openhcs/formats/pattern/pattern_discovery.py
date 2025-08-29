@@ -364,19 +364,7 @@ class PatternDiscoveryEngine:
                 continue
 
             _, template_metadata = files_metadata[0]
-            # Determine multiprocessing axis first
-            multiprocessing_axis_key = None
-            if axis_value:
-                # Find which component has the axis_value
-                for comp in self.parser.FILENAME_COMPONENTS:
-                    if comp in template_metadata and str(template_metadata[comp]) == str(axis_value):
-                        multiprocessing_axis_key = comp
-                        break
-
-            # Default to 'well' if we can't determine the axis (backward compatibility)
-            if not multiprocessing_axis_key:
-                multiprocessing_axis_key = 'well'
-
+            # Generate pattern arguments for all discovered components
             pattern_args = {}
             for comp in self.parser.FILENAME_COMPONENTS:
                 if comp in template_metadata:
@@ -386,16 +374,9 @@ class PatternDiscoveryEngine:
                         pattern_args[comp] = template_metadata[comp]
 
             # 🔒 Clause 93 — Declarative Execution Enforcement
-            # Ensure multiprocessing axis component is always present (required for pattern templates)
-            # Even if it's not in variable_components, it must be included with actual value
-            if multiprocessing_axis_key not in pattern_args:
-                if multiprocessing_axis_key in template_metadata:
-                    pattern_args[multiprocessing_axis_key] = template_metadata[multiprocessing_axis_key]
-                else:
-                    raise ValueError(f"Clause 93 Violation: '{multiprocessing_axis_key}' is a required component for pattern templates")
-
-            if pattern_args[multiprocessing_axis_key] is None:
-                raise ValueError(f"Clause 93 Violation: '{multiprocessing_axis_key}' is a required component for pattern templates")
+            # Ensure pattern generation succeeded
+            if not pattern_args:
+                raise ValueError(f"Clause 93 Violation: No components found in template metadata for pattern generation")
 
             pattern_str = self.parser.construct_filename(
                 well=pattern_args['well'],
