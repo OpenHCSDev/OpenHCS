@@ -221,6 +221,12 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
     setup_global_gpu_registry()
     config = _create_pipeline_config(test_config)
 
+    # CRITICAL: Establish global config context for lazy dataclass resolution
+    # This ensures LazyStepMaterializationConfig can inherit from path planning config
+    from openhcs.core.lazy_config import ensure_global_config_context
+    from openhcs.core.config import GlobalPipelineConfig
+    ensure_global_config_context(GlobalPipelineConfig, config)
+
     orchestrator = PipelineOrchestrator(test_config.plate_dir, global_config=config)
     orchestrator.initialize()
     return orchestrator
