@@ -5,14 +5,14 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from openhcs.core.components.validation import convert_enum_by_value
-from openhcs.constants.constants import VariableComponents
+from openhcs.constants.constants import AllComponents
 
 
 class MetadataCache:
     """Stores component key→name mappings with basic invalidation and thread safety."""
     
     def __init__(self):
-        self._cache: Dict['VariableComponents', Dict[str, Optional[str]]] = {}
+        self._cache: Dict['AllComponents', Dict[str, Optional[str]]] = {}
         self._metadata_file_mtimes: Dict[Path, float] = {}
         self._lock = threading.Lock()
     
@@ -23,13 +23,13 @@ class MetadataCache:
             metadata = microscope_handler.metadata_handler.parse_metadata(plate_path)
             
             # Initialize all components with keys mapped to None
-            for component in VariableComponents:
+            for component in AllComponents:
                 component_keys = component_keys_cache.get(component, [])
                 self._cache[component] = {key: None for key in component_keys}
             
             # Update with actual metadata where available
             for component_name, mapping in metadata.items():
-                component = VariableComponents(component_name)
+                component = AllComponents(component_name)
                 if component in self._cache:
                     combined_cache = self._cache[component].copy()
                     for metadata_key in mapping.keys():
@@ -52,12 +52,12 @@ class MetadataCache:
                 self._cache.clear()
                 return None
 
-            # Convert GroupBy to VariableComponents using OpenHCS generic utility
-            component = convert_enum_by_value(component, VariableComponents) or component
+            # Convert GroupBy to AllComponents using OpenHCS generic utility
+            component = convert_enum_by_value(component, AllComponents) or component
 
             return self._cache.get(component, {}).get(key)
     
-    def get_cached_metadata(self, component: 'VariableComponents') -> Optional[Dict[str, Optional[str]]]:
+    def get_cached_metadata(self, component: 'AllComponents') -> Optional[Dict[str, Optional[str]]]:
         """Get all cached metadata for a component."""
         with self._lock:
             if not self._is_cache_valid():

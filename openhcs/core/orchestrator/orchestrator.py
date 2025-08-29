@@ -18,7 +18,7 @@ import multiprocessing
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Set
 
-from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, VariableComponents
+from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, PipelineConfig, set_current_global_config, set_current_pipeline_config
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
@@ -259,7 +259,8 @@ class PipelineOrchestrator:
             logger.info("PipelineOrchestrator using provided StorageRegistry instance.")
         else:
             # Create a copy of the global registry to avoid modifying shared state
-            self.registry = storage_registry.copy()
+            from openhcs.io.base import storage_registry as global_storage_registry
+            self.registry = global_storage_registry.copy()
             logger.info("PipelineOrchestrator created its own StorageRegistry instance (copy of global).")
 
         # Override zarr backend with orchestrator's config
@@ -275,8 +276,8 @@ class PipelineOrchestrator:
         self._initialized: bool = False
         self._state: OrchestratorState = OrchestratorState.CREATED
 
-        # Component keys cache for fast access
-        self._component_keys_cache: Dict['VariableComponents', List[str]] = {}
+        # Component keys cache for fast access - uses AllComponents (includes multiprocessing axis)
+        self._component_keys_cache: Dict['AllComponents', List[str]] = {}
 
         # Metadata cache service
         self._metadata_cache_service = get_metadata_cache()
@@ -532,7 +533,8 @@ class PipelineOrchestrator:
             logger.warning("No compiled contexts provided for execution.")
             return {}
         
-        actual_max_workers = max_workers if max_workers is not None else self.global_config.num_workers
+        # Use effective config (includes pipeline config) instead of global config directly
+        actual_max_workers = max_workers if max_workers is not None else self.get_effective_config().num_workers
         if actual_max_workers <= 0: # Ensure positive number of workers
             actual_max_workers = 1
 
@@ -726,7 +728,7 @@ class PipelineOrchestrator:
             logger.error(f"Failed to execute compiled plate: {e}")
             raise
 
-    def get_component_keys(self, component: 'VariableComponents', component_filter: Optional[List[Union[str, int]]] = None) -> List[str]:
+    def get_component_keys(self, component: Union['AllComponents', 'VariableComponents'], component_filter: Optional[List[Union[str, int]]] = None) -> List[str]:
         """
         Generic method to get component keys using VariableComponents directly.
 
@@ -736,8 +738,8 @@ class PipelineOrchestrator:
         Tries metadata cache first, falls back to filename parsing cache if metadata is empty.
 
         Args:
-            component: VariableComponents enum specifying which component to extract
-                      (also accepts GroupBy enum which will be converted to VariableComponents)
+            component: AllComponents or VariableComponents enum specifying which component to extract
+                      (also accepts GroupBy enum which will be converted to AllComponents)
             component_filter: Optional list of component values to filter by
 
         Returns:
@@ -749,11 +751,12 @@ class PipelineOrchestrator:
         if not self.is_initialized():
             raise RuntimeError("Orchestrator must be initialized before getting component keys.")
 
-        # Convert GroupBy to VariableComponents using OpenHCS generic utility
+        # Convert GroupBy to AllComponents using OpenHCS generic utility
         if isinstance(component, GroupBy) and component.value is None:
             raise ValueError("Cannot get component keys for GroupBy.NONE")
 
-        component = convert_enum_by_value(component, VariableComponents) or component
+        # Convert to AllComponents for cache lookup (includes multiprocessing axis)
+        component = convert_enum_by_value(component, AllComponents) or component
 
         # Use component directly - let natural errors occur for wrong types
         component_name = component.value
@@ -783,7 +786,7 @@ class PipelineOrchestrator:
         else:
             return all_components
 
-    def cache_component_keys(self, components: Optional[List['VariableComponents']] = None) -> None:
+    def cache_component_keys(self, components: Optional[List['AllComponents']] = None) -> None:
         """
         Pre-compute and cache component keys for fast access using single-pass parsing.
 
@@ -791,19 +794,19 @@ class PipelineOrchestrator:
         extracting all component types in a single pass for maximum efficiency.
 
         Args:
-            components: Optional list of VariableComponents to cache.
-                       If None, caches all components in the VariableComponents enum.
+            components: Optional list of AllComponents to cache.
+                       If None, caches all components in the AllComponents enum.
         """
         if not self.is_initialized():
             raise RuntimeError("Orchestrator must be initialized before caching component keys.")
 
         if components is None:
-            components = list(VariableComponents)  # Cache all enum values
+            components = list(AllComponents)  # Cache all enum values including multiprocessing axis
 
         logger.info(f"Caching component keys for: {[comp.value for comp in components]}")
 
         # Initialize component sets for all requested components
-        component_sets: Dict['VariableComponents', Set[Union[str, int]]] = {}
+        component_sets: Dict['AllComponents', Set[Union[str, int]]] = {}
         for component in components:
             component_sets[component] = set()
 
@@ -840,7 +843,7 @@ class PipelineOrchestrator:
 
         logger.info(f"Component key caching complete. Cached {len(component_sets)} component types in single pass.")
 
-    def clear_component_cache(self, components: Optional[List['VariableComponents']] = None) -> None:
+    def clear_component_cache(self, components: Optional[List['AllComponents']] = None) -> None:
         """
         Clear cached component keys to force recomputation.
 
@@ -848,7 +851,7 @@ class PipelineOrchestrator:
         to refresh the component key cache.
 
         Args:
-            components: Optional list of VariableComponents to clear from cache.
+            components: Optional list of AllComponents to clear from cache.
                        If None, clears entire cache.
         """
         if components is None:

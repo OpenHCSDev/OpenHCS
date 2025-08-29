@@ -334,25 +334,30 @@ class LazyDefaultPlaceholderService:
             temp_instance = dynamic_lazy_class()
             resolved_value = getattr(temp_instance, field_name)
         else:
-            # Use existing lazy class (thread-local resolution)
-            # DEBUG: Check what's in thread-local storage during placeholder resolution
+            # CONTEXT ISOLATION FIX: For top-level fields, resolve against global config context
+            # This ensures top-level fields inherit from global config, not pipeline config
             current_context = get_current_global_config(GlobalPipelineConfig)
-            print(f"🎨 PLACEHOLDER DEBUG: Thread-local context during resolution: {current_context}")
-            if current_context:
-                print(f"🎨 PLACEHOLDER DEBUG: Context materialization_defaults: {getattr(current_context, 'materialization_defaults', 'NOT_FOUND')}")
 
-            temp_instance = dataclass_type()
-            print(f"🎨 PLACEHOLDER DEBUG: Created temp_instance of {dataclass_type}")
+            # Check if this is a top-level PipelineConfig field that needs global inheritance
+            if (hasattr(dataclass_type, '_resolve_field_value') and
+                current_context and
+                hasattr(current_context, field_name)):
 
-            # For hierarchical lazy classes, use the proper resolution mechanism
-            if hasattr(temp_instance, '_resolve_field_value'):
-                # This is a hierarchical lazy class - use its resolution method
-                resolved_value = temp_instance._resolve_field_value(field_name)
-                print(f"🎨 PLACEHOLDER DEBUG: Hierarchical resolution for {field_name}: {resolved_value}")
+                # Temporarily clear the thread-local context to force resolution from global defaults
+                set_current_global_config(GlobalPipelineConfig, None)
+                try:
+                    temp_instance = dataclass_type()
+                    resolved_value = temp_instance._resolve_field_value(field_name)
+                finally:
+                    # Restore original context
+                    set_current_global_config(GlobalPipelineConfig, current_context)
             else:
-                # Regular lazy class - use getattr
-                resolved_value = getattr(temp_instance, field_name)
-                print(f"🎨 PLACEHOLDER DEBUG: Regular getattr for {field_name}: {resolved_value}")
+                # Regular resolution for non-top-level fields
+                temp_instance = dataclass_type()
+                if hasattr(temp_instance, '_resolve_field_value'):
+                    resolved_value = temp_instance._resolve_field_value(field_name)
+                else:
+                    resolved_value = getattr(temp_instance, field_name)
 
         if resolved_value is not None:
             # Handle nested dataclasses

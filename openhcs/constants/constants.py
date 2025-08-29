@@ -26,16 +26,18 @@ def get_openhcs_config():
 # Simple lazy initialization - just defer the config call
 @lru_cache(maxsize=1)
 def _create_enums():
-    """Create filtered enums when first needed."""
+    """Create enums when first needed."""
     config = get_openhcs_config()
     remaining = config.get_remaining_components()
 
-    # VariableComponents
+    # AllComponents: ALL possible dimensions (including multiprocessing axis)
+    all_components = Enum('AllComponents', {c.name: c.value for c in config.all_components})
+
+    # VariableComponents: Components available for variable selection (excludes multiprocessing axis)
     vc = Enum('VariableComponents', {c.name: c.value for c in remaining})
 
-    # GroupBy: VariableComponents + NONE option
-    # Use same values for interchangeability
-    gb_dict = {member.name: member.value for member in vc}
+    # GroupBy: Same as VariableComponents + NONE option (they're the same concept)
+    gb_dict = {c.name: c.value for c in remaining}
     gb_dict['NONE'] = None
     GroupBy = Enum('GroupBy', gb_dict)
 
@@ -46,13 +48,14 @@ def _create_enums():
     GroupBy.__str__ = lambda self: f"GroupBy.{self.name}"
     GroupBy.__repr__ = lambda self: f"GroupBy.{self.name}"
 
-    return vc, GroupBy
+    return all_components, vc, GroupBy
 
 
 def __getattr__(name):
     """Lazy enum creation."""
-    if name in ('VariableComponents', 'GroupBy'):
-        vc, gb = _create_enums()
+    if name in ('AllComponents', 'VariableComponents', 'GroupBy'):
+        all_components, vc, gb = _create_enums()
+        globals()['AllComponents'] = all_components
         globals()['VariableComponents'] = vc
         globals()['GroupBy'] = gb
         return globals()[name]
@@ -85,14 +88,14 @@ DEFAULT_RECURSIVE_PATTERN_SEARCH = False
 @lru_cache(maxsize=1)
 def get_default_variable_components():
     """Get default variable components from ComponentConfiguration."""
-    vc, _ = _create_enums()  # Get the enum directly
+    _, vc, _ = _create_enums()  # Get the enum directly
     return [getattr(vc, c.name) for c in get_openhcs_config().default_variable]
 
 
 @lru_cache(maxsize=1)
 def get_default_group_by():
     """Get default group_by from ComponentConfiguration."""
-    _, gb = _create_enums()  # Get the enum directly
+    _, _, gb = _create_enums()  # Get the enum directly
     config = get_openhcs_config()
     return getattr(gb, config.default_group_by.name) if config.default_group_by else None
 

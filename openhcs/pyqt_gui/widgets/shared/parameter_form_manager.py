@@ -184,7 +184,11 @@ class ParameterFormManager(QWidget):
             for field_obj in fields(editing_config):
                 parameters[field_obj.name] = object.__getattribute__(editing_config, field_obj.name)
                 parameter_types[field_obj.name] = field_obj.type
-            dataclass_type = type(editing_config)
+
+            # CRITICAL FIX: Use original dataclass type, not editing config type
+            # The editing config might be a different instance but we want to preserve
+            # the original lazy dataclass type for proper reset behavior
+            dataclass_type = type(dataclass_instance)
         else:
             # Regular dataclass - extract parameters normally
             parameters = {}
@@ -657,16 +661,27 @@ class ParameterFormManager(QWidget):
                 # Clear value when checkbox is unchecked
                 current_values[param_name] = None
 
+    def _handle_nested_parameter_change(self, parent_name: str, value: Any) -> None:
+        """Handle nested parameter changes by reconstructing the entire dataclass."""
+        if self._get_optional_checkbox_state(parent_name) is not False:
+            # Reconstruct the entire dataclass from current nested values
+            nested_manager = self.nested_managers.get(parent_name)
+            if nested_manager:
+                nested_values = nested_manager.get_current_values()
+                nested_type = self.parameter_types.get(parent_name)
+                if nested_type:
+                    if self.service._type_utils.is_optional_dataclass(nested_type):
+                        nested_type = self.service._type_utils.get_optional_inner_type(nested_type)
+                    reconstructed_instance = self._rebuild_nested_dataclass_instance(nested_values, nested_type, parent_name)
+                    self.parameter_changed.emit(parent_name, reconstructed_instance)
+
     def _process_nested_values_if_checkbox_enabled(self, param_name: str, manager: Any,
                                                  current_values: Dict[str, Any]) -> None:
         """Process nested values only if checkbox is enabled."""
         if self._get_optional_checkbox_state(param_name) is not False:
             self._process_nested_values(param_name, manager.get_current_values(), current_values)
 
-    def _handle_nested_parameter_change(self, parent_name: str, value: Any) -> None:
-        """Handle nested parameter changes respecting checkbox state."""
-        if self._get_optional_checkbox_state(parent_name) is not False:
-            self.parameter_changed.emit(parent_name, value)
+
 
     def _find_checkbox_in_container(self, container: QWidget) -> Optional['QCheckBox']:
         """Find the checkbox widget within an optional dataclass container."""

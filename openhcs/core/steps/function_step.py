@@ -778,7 +778,7 @@ class FunctionStep(AbstractStep):
                 well_filter=[well_id],         # well_filter
                 extensions=DEFAULT_IMAGE_EXTENSIONS,  # extensions
                 group_by=group_by,             # Pass GroupBy enum directly
-                variable_components=[vc.value for vc in variable_components] if variable_components else []  # variable_components
+                variable_components=[vc.value for vc in variable_components] if variable_components else []  # variable_components for placeholder logic
             )
 
 
