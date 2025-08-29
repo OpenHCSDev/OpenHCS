@@ -378,12 +378,13 @@ class PatternDiscoveryEngine:
             if not pattern_args:
                 raise ValueError(f"Clause 93 Violation: No components found in template metadata for pattern generation")
 
+            # Use metaprogramming approach - pass all components dynamically
+            extension = pattern_args.get('extension') or DEFAULT_IMAGE_EXTENSION
+            component_kwargs = {comp: pattern_args.get(comp) for comp in self.parser.get_component_names() if comp in pattern_args}
+
             pattern_str = self.parser.construct_filename(
-                well=pattern_args['well'],
-                site=pattern_args.get('site'),
-                channel=pattern_args.get('channel'),
-                z_index=pattern_args.get('z_index'),
-                extension=pattern_args.get('extension') or DEFAULT_IMAGE_EXTENSION
+                extension=extension,
+                **component_kwargs
             )
 
             # Validate that the pattern can be instantiated
