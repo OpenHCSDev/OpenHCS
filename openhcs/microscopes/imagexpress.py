@@ -195,13 +195,7 @@ class ImageXpressHandler(MicroscopeHandler):
                 components['z_index'] = z_index
 
                 # Use the parser to construct a new filename with the updated z_index
-                new_name = self.parser.construct_filename(
-                    well=components['well'],
-                    site=components['site'],
-                    channel=components['channel'],
-                    z_index=z_index,
-                    extension=components['extension']
-                )
+                new_name = self.parser.construct_filename(**components)
 
                 # Create the new path in the parent directory
                 new_path = directory / new_name if isinstance(directory, Path) else Path(os.path.join(str(directory), new_name))
@@ -275,13 +269,7 @@ class ImageXpressHandler(MicroscopeHandler):
             # Only rebuild filename if we added missing components
             if needs_rebuild:
                 # Construct new filename with complete metadata
-                new_name = self.parser.construct_filename(
-                    well=components['well'],
-                    site=components['site'],
-                    channel=components['channel'],
-                    z_index=components['z_index'],
-                    extension=components['extension']
-                )
+                new_name = self.parser.construct_filename(**components)
 
                 # Only rename if the filename actually changed
                 if new_name != img_file_name:
@@ -320,6 +308,8 @@ class ImageXpressFilenameParser(FilenameParser):
             filemanager: FileManager instance (not used, but required for interface compatibility)
             pattern_format: Optional pattern format (not used, but required for interface compatibility)
         """
+        super().__init__()  # Initialize the generic parser interface
+
         # These parameters are not used by this parser, but are required for interface compatibility
         self.filemanager = filemanager
         self.pattern_format = pattern_format
@@ -384,51 +374,53 @@ class ImageXpressFilenameParser(FilenameParser):
             logger.debug("Could not parse ImageXpress filename: %s", filename)
             return None
 
-    def extract_row_column(self, well: str) -> Tuple[str, str]:
+    def extract_component_coordinates(self, component_value: str) -> Tuple[str, str]:
         """
-        Extract row and column from ImageXpress well identifier.
+        Extract coordinates from component identifier (typically well).
 
         Args:
-            well (str): Well identifier (e.g., 'A01', 'C04')
+            component_value (str): Component identifier (e.g., 'A01', 'C04')
 
         Returns:
             Tuple[str, str]: (row, column) where row is like 'A', 'C' and column is like '01', '04'
 
         Raises:
-            ValueError: If well format is invalid
+            ValueError: If component format is invalid
         """
-        if not well or len(well) < 2:
-            raise ValueError(f"Invalid well format: {well}")
+        if not component_value or len(component_value) < 2:
+            raise ValueError(f"Invalid component format: {component_value}")
 
         # ImageXpress format: A01, B02, C04, etc.
-        row = well[0]
-        col = well[1:]
+        row = component_value[0]
+        col = component_value[1:]
 
         if not row.isalpha() or not col.isdigit():
-            raise ValueError(f"Invalid ImageXpress well format: {well}. Expected format like 'A01', 'C04'")
+            raise ValueError(f"Invalid ImageXpress component format: {component_value}. Expected format like 'A01', 'C04'")
 
         return row, col
 
-    def construct_filename(self, well: str, site: Optional[Union[int, str]] = None,
-                          channel: Optional[int] = None,
-                          z_index: Optional[Union[int, str]] = None,
-                          extension: str = '.tif',
-                          site_padding: int = 3, z_padding: int = 3) -> str:
+    def construct_filename(self, extension: str = '.tif', site_padding: int = 3, z_padding: int = 3, **component_values) -> str:
         """
         Construct an ImageXpress filename from components, only including parts if provided.
 
+        This method now uses **kwargs to accept any component values dynamically,
+        making it compatible with the generic parser interface.
+
         Args:
-            well (str): Well ID (e.g., 'A01')
-            site (int or str, optional): Site number or placeholder string (e.g., '{iii}')
-            channel (int, optional): Channel number
-            z_index (int or str, optional): Z-index or placeholder string (e.g., '{zzz}')
-            extension (str, optional): File extension
+            extension (str, optional): File extension (default: '.tif')
             site_padding (int, optional): Width to pad site numbers to (default: 3)
             z_padding (int, optional): Width to pad Z-index numbers to (default: 3)
+            **component_values: Component values as keyword arguments.
+                               Expected keys: well, site, channel, z_index
 
         Returns:
             str: Constructed filename
         """
+        # Extract components from kwargs
+        well = component_values.get('well')
+        site = component_values.get('site')
+        channel = component_values.get('channel')
+        z_index = component_values.get('z_index')
         if not well:
             raise ValueError("Well ID cannot be empty or None.")
 
@@ -651,7 +643,7 @@ class ImageXpressMetadataHandler(MetadataHandler):
 
     def get_channel_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
         """
-        Get channel key→name mapping from ImageXpress HTD file.
+        Get channel key->name mapping from ImageXpress HTD file.
 
         Args:
             plate_path: Path to the plate folder (str or Path)

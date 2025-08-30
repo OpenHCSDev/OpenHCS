@@ -13,10 +13,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSION
+from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSION, get_openhcs_config
 from openhcs.io.filemanager import FileManager
 # Core OpenHCS Interfaces
 from openhcs.microscopes.microscope_interfaces import FilenameParser
+
+# Note: Previously used GenericPatternEngine, but now we always use microscope-specific parsers
 
 logger = logging.getLogger(__name__)
 
@@ -203,62 +205,73 @@ class PatternDiscoveryEngine:
     def auto_detect_patterns(
         self,
         folder_path: Union[str, Path],
-        well_filter: List[str],
-        extensions: List[str],
-        group_by: Optional[str],
         variable_components: List[str],
-        backend: str
+        backend: str,
+        extensions: List[str] = None,
+        group_by=None,  # Accept GroupBy enum or None
+        recursive: bool = False,
+        **kwargs  # Dynamic filter parameters (e.g., well_filter, site_filter)
     ) -> Dict[str, Any]:
         """
         Automatically detect image patterns in a folder.
         """
-        files_by_well = self._find_and_filter_images(
-            folder_path, well_filter, extensions, True, backend
+        # Extract axis_filter from dynamic kwargs
+        from openhcs.constants import MULTIPROCESSING_AXIS
+        axis_name = MULTIPROCESSING_AXIS.value
+        axis_filter = kwargs.get(f"{axis_name}_filter")
+
+        files_by_axis = self._find_and_filter_images(
+            folder_path, axis_filter, extensions, True, backend
         )
 
-        if not files_by_well:
+        if not files_by_axis:
             return {}
 
         result = {}
-        for well, files in files_by_well.items():
-            patterns = self._generate_patterns_for_files(files, variable_components)
+        for axis_value, files in files_by_axis.items():
+            patterns = self._generate_patterns_for_files(files, variable_components, axis_value)
 
             # Validate patterns
             for pattern in patterns:
                 if not isinstance(pattern, str):
                     raise TypeError(f"Pattern generator returned invalid type: {type(pattern).__name__}")
 
-            result[well] = (
-                self.group_patterns_by_component(patterns, component=group_by)
-                if group_by else patterns
-            )
+            if group_by:
+                # Extract string value from GroupBy enum for pattern grouping
+                component_string = group_by.value if group_by.value else None
+                if component_string:
+                    result[axis_value] = self.group_patterns_by_component(patterns, component=component_string)
+                else:
+                    result[axis_value] = patterns
+            else:
+                result[axis_value] = patterns
 
         return result
 
     def _find_and_filter_images(
         self,
         folder_path: Union[str, Path],
-        well_filter: List[str],
+        axis_filter: List[str],
         extensions: List[str],
         recursive: bool,
         backend: str
     ) -> Dict[str, List[Any]]:
         """
-        Find all image files in a directory and filter by well.
+        Find all image files in a directory and filter by multiprocessing axis.
 
         Args:
             folder_path: Path to the folder to search (string or Path object)
-            well_filter: List of wells to include
+            axis_filter: List of axis values to include
             extensions: List of file extensions to include
             recursive: Whether to search recursively
             backend: Backend to use for file operations (required)
 
         Returns:
-            Dictionary mapping wells to lists of image paths
+            Dictionary mapping axis values to lists of image paths
 
         Raises:
             TypeError: If folder_path is not a string or Path object
-            ValueError: If well_filter is empty or folder_path does not exist
+            ValueError: If axis_filter is empty or folder_path does not exist
         """
         # Convert to Path and validate using FileManager abstraction
         folder_path = Path(folder_path)
@@ -266,14 +279,14 @@ class PatternDiscoveryEngine:
             raise FileNotFoundError(f"Folder not found: {folder_path}")
 
         # Validate inputs
-        if not well_filter:
-            raise ValueError("well_filter cannot be empty")
+        if not axis_filter:
+            raise ValueError("axis_filter cannot be empty")
 
         extensions = extensions or ['.tif', '.TIF', '.tiff', '.TIFF']
 
         image_paths = self.filemanager.list_image_files(folder_path, backend, extensions=extensions, recursive=recursive)
 
-        files_by_well = defaultdict(list)
+        files_by_axis = defaultdict(list)
         for img_path in image_paths:
             # FileManager should return strings, but handle Path objects too
             if isinstance(img_path, str):
@@ -289,18 +302,22 @@ class PatternDiscoveryEngine:
             if not metadata:
                 continue
 
-            well = metadata['well']
-            if well not in well_filter:
+            # Get multiprocessing axis dynamically from configuration
+            from openhcs.constants import MULTIPROCESSING_AXIS
+            axis_key = MULTIPROCESSING_AXIS.value
+            axis_value = metadata.get(axis_key)
+            if not axis_value or axis_value not in axis_filter:
                 continue
 
-            files_by_well[well].append(img_path)
+            files_by_axis[axis_value].append(img_path)
 
-        return files_by_well
+        return files_by_axis
 
     def _generate_patterns_for_files(
         self,
         files: List[Any],
-        variable_components: List[str]
+        variable_components: List[str],
+        axis_value: str
     ) -> List[str]:
         """
         Generate patterns for a list of files.
@@ -322,6 +339,8 @@ class PatternDiscoveryEngine:
 
         if not isinstance(variable_components, list):
             raise TypeError(f"Expected list of variable components, got {type(variable_components).__name__}")
+
+        # Use microscope-specific parser for pattern generation
 
 
         component_combinations = defaultdict(list)
@@ -354,6 +373,7 @@ class PatternDiscoveryEngine:
                 continue
 
             _, template_metadata = files_metadata[0]
+            # Generate pattern arguments for all discovered components
             pattern_args = {}
             for comp in self.parser.FILENAME_COMPONENTS:
                 if comp in template_metadata:
@@ -363,16 +383,17 @@ class PatternDiscoveryEngine:
                         pattern_args[comp] = template_metadata[comp]
 
             # 🔒 Clause 93 — Declarative Execution Enforcement
-            # Ensure all required components are present
-            if 'well' not in pattern_args or pattern_args['well'] is None:
-                raise ValueError("Clause 93 Violation: 'well' is a required component for pattern templates")
+            # Ensure pattern generation succeeded
+            if not pattern_args:
+                raise ValueError(f"Clause 93 Violation: No components found in template metadata for pattern generation")
+
+            # Use metaprogramming approach - pass all components dynamically
+            extension = pattern_args.get('extension') or DEFAULT_IMAGE_EXTENSION
+            component_kwargs = {comp: pattern_args.get(comp) for comp in self.parser.get_component_names() if comp in pattern_args}
 
             pattern_str = self.parser.construct_filename(
-                well=pattern_args['well'],
-                site=pattern_args.get('site'),
-                channel=pattern_args.get('channel'),
-                z_index=pattern_args.get('z_index'),
-                extension=pattern_args.get('extension') or DEFAULT_IMAGE_EXTENSION
+                extension=extension,
+                **component_kwargs
             )
 
             # Validate that the pattern can be instantiated

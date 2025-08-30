@@ -1484,7 +1484,9 @@ class PlateManagerWidget(ButtonListWidget):
                 pipeline_obj = Pipeline(steps=execution_pipeline)
 
                 # Run heavy operations in executor to avoid blocking UI
-                wells = await asyncio.get_event_loop().run_in_executor(None, lambda: orchestrator.get_component_keys(GroupBy.WELL))
+                # Get wells using multiprocessing axis (WELL in default config)
+                from openhcs.constants import MULTIPROCESSING_AXIS
+                wells = await asyncio.get_event_loop().run_in_executor(None, lambda: orchestrator.get_component_keys(MULTIPROCESSING_AXIS))
                 compiled_contexts = await asyncio.get_event_loop().run_in_executor(
                     None, orchestrator.compile_pipelines, pipeline_obj.steps, wells
                 )

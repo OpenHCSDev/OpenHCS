@@ -71,7 +71,7 @@ def setup_subprocess_logging(log_file_path: str):
 # Status and result files removed - log file is single source of truth
 
 def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contexts: Dict,
-                    global_config, logger, log_file_base: str = None):
+                    global_config, logger, log_file_base: str = None, effective_config=None):
     """
     Run a single plate using pre-compiled contexts from UI.
 
@@ -263,8 +263,8 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
         
         # Step 3: Get wells and prepare pipeline (like test_main.py)
         # NUCLEAR WRAP: Get wells
-        from openhcs.constants.constants import GroupBy
-        wells = force_error_detection("orchestrator_get_wells", lambda: orchestrator.get_component_keys(GroupBy.WELL))
+        from openhcs.constants import MULTIPROCESSING_AXIS
+        wells = force_error_detection("orchestrator_get_wells", lambda: orchestrator.get_component_keys(MULTIPROCESSING_AXIS))
         logger.info(f"🔥 SUBPROCESS: Found {len(wells)} wells: {wells}")
 
         # AGGRESSIVE VALIDATION: Check wells
@@ -286,9 +286,10 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
         # Step 5: Execution phase with multiprocessing (like test_main.py but with processes)
         logger.info("🔥 SUBPROCESS: Starting execution phase with multiprocessing...")
 
-        # Use global config num_workers setting
-        max_workers = global_config.num_workers
-        logger.info(f"🔥 SUBPROCESS: Using {max_workers} workers from global config for {len(wells)} wells")
+        # Use effective config passed from UI (includes pipeline config) instead of global config
+        config_to_use = effective_config if effective_config is not None else global_config
+        max_workers = config_to_use.num_workers
+        logger.info(f"🔥 SUBPROCESS: Using {max_workers} workers from {'effective' if effective_config else 'global'} config for {len(wells)} wells")
 
         # This is where hangs often occur - add extra monitoring
         logger.info("🔥 SUBPROCESS: About to call execute_compiled_plate...")
@@ -698,6 +699,7 @@ def main():
         plate_paths = data['plate_paths']
         pipeline_data = data['pipeline_data']  # Dict[plate_path, List[FunctionStep]]
         global_config = data['global_config']
+        effective_configs = data.get('effective_configs', {})  # Per-plate effective configs
 
         logger.info(f"🔥 SUBPROCESS: Loaded data for {len(plate_paths)} plates")
         logger.info(f"🔥 SUBPROCESS: Plates: {plate_paths}")
@@ -707,6 +709,7 @@ def main():
             plate_data = pipeline_data[plate_path]
             pipeline_definition = plate_data['pipeline_definition']
             compiled_contexts = plate_data['compiled_contexts']
+            effective_config = effective_configs.get(plate_path)  # Get effective config for this plate
             logger.info(f"🔥 SUBPROCESS: Processing plate {plate_path} with {len(pipeline_definition)} steps")
 
             run_single_plate(
@@ -715,7 +718,8 @@ def main():
                 compiled_contexts=compiled_contexts,
                 global_config=global_config,
                 logger=logger,
-                log_file_base=log_file_base
+                log_file_base=log_file_base,
+                effective_config=effective_config
             )
         
         logger.info("🔥 SUBPROCESS: All plates completed successfully")

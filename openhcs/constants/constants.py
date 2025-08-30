@@ -6,13 +6,9 @@ These constants are governed by various doctrinal clauses.
 """
 
 from enum import Enum
-from typing import Any, Callable, Dict, List, Set, TypeVar
+from functools import lru_cache
+from typing import Any, Callable, Dict, List, Optional, Set, Type, TypeVar
 
-class VariableComponents(Enum):
-    SITE = "site"
-    CHANNEL = "channel"
-    Z_INDEX = "z_index"
-    WELL = "well"
 
 class Microscope(Enum):
     AUTO = "auto"
@@ -20,12 +16,57 @@ class Microscope(Enum):
     IMAGEXPRESS = "ImageXpress"
     OPERAPHENIX = "OperaPhenix"
 
-class GroupBy(Enum):
-    CHANNEL = VariableComponents.CHANNEL.value # Will be "channel"
-    Z_INDEX = VariableComponents.Z_INDEX.value # Will be "z_index"
-    SITE = VariableComponents.SITE.value     # Will be "site"
-    WELL = VariableComponents.WELL.value     # Will be "well"
-    NONE = "" # Added for allow_blank in Select
+
+def get_openhcs_config():
+    """Get the OpenHCS configuration, initializing it if needed."""
+    from openhcs.core.components.framework import ComponentConfigurationFactory
+    return ComponentConfigurationFactory.create_openhcs_default_configuration()
+
+
+# Simple lazy initialization - just defer the config call
+@lru_cache(maxsize=1)
+def _create_enums():
+    """Create enums when first needed."""
+    config = get_openhcs_config()
+    remaining = config.get_remaining_components()
+
+    # AllComponents: ALL possible dimensions (including multiprocessing axis)
+    all_components = Enum('AllComponents', {c.name: c.value for c in config.all_components})
+
+    # VariableComponents: Components available for variable selection (excludes multiprocessing axis)
+    vc = Enum('VariableComponents', {c.name: c.value for c in remaining})
+
+    # GroupBy: Same as VariableComponents + NONE option (they're the same concept)
+    gb_dict = {c.name: c.value for c in remaining}
+    gb_dict['NONE'] = None
+    GroupBy = Enum('GroupBy', gb_dict)
+
+    # Add original interface methods
+    GroupBy.component = property(lambda self: self.value)
+    GroupBy.__eq__ = lambda self, other: self.value == getattr(other, 'value', other)
+    GroupBy.__hash__ = lambda self: hash("GroupBy.NONE") if self.value is None else hash(self.value)
+    GroupBy.__str__ = lambda self: f"GroupBy.{self.name}"
+    GroupBy.__repr__ = lambda self: f"GroupBy.{self.name}"
+
+    return all_components, vc, GroupBy
+
+
+def __getattr__(name):
+    """Lazy enum creation."""
+    if name in ('AllComponents', 'VariableComponents', 'GroupBy'):
+        all_components, vc, gb = _create_enums()
+        globals()['AllComponents'] = all_components
+        globals()['VariableComponents'] = vc
+        globals()['GroupBy'] = gb
+        return globals()[name]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+
+
+
+
+
+
 
 class OrchestratorState(Enum):
     """Simple orchestrator state tracking - no complex state machine."""
@@ -43,9 +84,30 @@ DEFAULT_IMAGE_EXTENSION = ".tif"
 DEFAULT_IMAGE_EXTENSIONS: Set[str] = {".tif", ".tiff", ".TIF", ".TIFF"}
 DEFAULT_SITE_PADDING = 3
 DEFAULT_RECURSIVE_PATTERN_SEARCH = False
-DEFAULT_VARIABLE_COMPONENTS: List[VariableComponents] = [VariableComponents.SITE]
-DEFAULT_GROUP_BY: GroupBy = GroupBy.CHANNEL
+# Lazy default resolution using lru_cache
+@lru_cache(maxsize=1)
+def get_default_variable_components():
+    """Get default variable components from ComponentConfiguration."""
+    _, vc, _ = _create_enums()  # Get the enum directly
+    return [getattr(vc, c.name) for c in get_openhcs_config().default_variable]
+
+
+@lru_cache(maxsize=1)
+def get_default_group_by():
+    """Get default group_by from ComponentConfiguration."""
+    _, _, gb = _create_enums()  # Get the enum directly
+    config = get_openhcs_config()
+    return getattr(gb, config.default_group_by.name) if config.default_group_by else None
+
+@lru_cache(maxsize=1)
+def get_multiprocessing_axis():
+    """Get multiprocessing axis from ComponentConfiguration."""
+    config = get_openhcs_config()
+    return config.multiprocessing_axis
+
 DEFAULT_MICROSCOPE: Microscope = Microscope.AUTO
+
+
 
 
 

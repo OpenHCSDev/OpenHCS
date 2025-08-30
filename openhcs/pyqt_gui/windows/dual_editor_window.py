@@ -163,8 +163,8 @@ class DualEditorWindow(QDialog):
             orchestrator=self.orchestrator
         )
 
-        # Connect parameter changes
-        self.step_editor.step_parameter_changed.connect(self.detect_changes)
+        # Connect parameter changes - use form manager signal for immediate response
+        self.step_editor.form_manager.parameter_changed.connect(self.on_form_parameter_changed)
 
         self.tab_widget.addTab(self.step_editor, "Step Settings")
 
@@ -547,15 +547,16 @@ class DualEditorWindow(QDialog):
         
         return info
     
-    def on_step_parameter_changed(self, param_name: str, value):
-        """Handle step parameter changes from form manager."""
-        try:
-            # Update the editing step
-            setattr(self.editing_step, param_name, value)
-            self.detect_changes()
-            logger.debug(f"Step parameter changed: {param_name} = {value}")
-        except Exception as e:
-            logger.error(f"Failed to update step parameter {param_name}: {e}")
+    def on_form_parameter_changed(self, param_name: str, value):
+        """Handle form parameter changes directly from form manager."""
+        setattr(self.editing_step, param_name, value)
+
+        if param_name in ('group_by', 'variable_components'):
+            self.func_editor.current_group_by = self.editing_step.group_by
+            self.func_editor.current_variable_components = self.editing_step.variable_components or []
+            self.func_editor._refresh_component_button()
+
+        self.detect_changes()
     
     def on_tab_changed(self, index: int):
         """Handle tab changes."""
@@ -566,15 +567,7 @@ class DualEditorWindow(QDialog):
     
     def detect_changes(self):
         """Detect if changes have been made."""
-        has_changes = False
-
-        # Check step parameters
-        for attr in ['name', 'variable_components', 'group_by', 'force_disk_output', 'input_dir', 'output_dir']:
-            original_value = getattr(self.original_step, attr, None)
-            current_value = getattr(self.editing_step, attr, None)
-            if original_value != current_value:
-                has_changes = True
-                break
+        has_changes = self.original_step != self.editing_step
 
         # Check function pattern
         if not has_changes:

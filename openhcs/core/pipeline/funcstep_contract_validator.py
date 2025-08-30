@@ -16,8 +16,10 @@ import inspect
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from openhcs.constants.constants import VALID_MEMORY_TYPES
+from openhcs.constants.constants import VALID_MEMORY_TYPES, get_openhcs_config
 from openhcs.core.steps.function_step import FunctionStep
+
+from openhcs.core.components.validation import GenericValidator
 
 logger = logging.getLogger(__name__)
 
@@ -192,11 +194,34 @@ class FuncStepContractValidator:
         # 2. Special contracts validation is handled by validate_pattern_structure() below
         # No additional restrictions needed - all valid patterns support special contracts
 
-        # 3. Validate dict pattern keys if orchestrator is available
+        # 3. Validate using generic validation system
+        config = get_openhcs_config()
+        validator = GenericValidator(config)
+
+        # Check for constraint violation: group_by ∈ variable_components
+        if step.group_by and step.group_by.value in [vc.value for vc in step.variable_components]:
+            # Auto-resolve constraint violation by nullifying group_by
+            logger.warning(
+                f"Step '{step_name}': Auto-resolved group_by conflict. "
+                f"Set group_by to None due to conflict with variable_components {[vc.value for vc in step.variable_components]}. "
+                f"Original group_by was {step.group_by.value}."
+            )
+            step.group_by = None
+
+        # Validate step configuration after auto-resolution
+        validation_result = validator.validate_step(
+            step.variable_components, step.group_by, func_pattern, step_name
+        )
+        if not validation_result.is_valid:
+            raise ValueError(validation_result.error_message)
+
+        # Validate dict pattern keys if orchestrator is available
         if orchestrator is not None and isinstance(func_pattern, dict) and step.group_by is not None:
-            FuncStepContractValidator._validate_dict_pattern_keys(
+            dict_validation_result = validator.validate_dict_pattern_keys(
                 func_pattern, step.group_by, step_name, orchestrator
             )
+            if not dict_validation_result.is_valid:
+                raise ValueError(dict_validation_result.error_message)
 
         # 4. Proceed with existing memory type validation using the original func_pattern
         input_type, output_type = FuncStepContractValidator.validate_function_pattern(

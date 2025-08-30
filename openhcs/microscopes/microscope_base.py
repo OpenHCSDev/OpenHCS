@@ -13,8 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union, Type
 
 # Import constants
 from openhcs.constants.constants import Backend
-# Import PatternDiscoveryEngine for MicroscopeHandler initialization
-from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
+# PatternDiscoveryEngine imported locally to avoid circular imports
 from openhcs.io.filemanager import FileManager
 # Import interfaces from the base interfaces module
 from openhcs.microscopes.microscope_interfaces import (FilenameParser,
@@ -348,15 +347,10 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
             )
 
             # Reconstruct the filename with proper padding
-            new_name = parser.construct_filename(
-                well=metadata['well'],
-                site=site,
-                channel=channel,
-                z_index=z_index,
-                extension=metadata['extension'],
-                site_padding=width,
-                z_padding=width
-            )
+            metadata['site'] = site
+            metadata['channel'] = channel
+            metadata['z_index'] = z_index
+            new_name = parser.construct_filename(**metadata)
 
             # Add to rename map if different
             if original_name != new_name:
@@ -427,18 +421,14 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         """Delegate to parser."""
         return self.parser.parse_filename(filename)
 
-    def construct_filename(self, well: str, site: Optional[Union[int, str]] = None,
-                          channel: Optional[int] = None,
-                          z_index: Optional[Union[int, str]] = None,
-                          extension: str = '.tif',
-                          site_padding: int = 3, z_padding: int = 3) -> str:
-        """Delegate to parser."""
-        return self.parser.construct_filename(
-            well, site, channel, z_index, extension, site_padding, z_padding
-        )
+    def construct_filename(self, extension: str = '.tif', **component_values) -> str:
+        """
+        Delegate to parser using pure generic interface.
+        """
+        return self.parser.construct_filename(extension=extension, **component_values)
 
     def auto_detect_patterns(self, folder_path: Union[str, Path], filemanager: FileManager, backend: str,
-                           well_filter=None, extensions=None, group_by='channel', variable_components=None):
+                           extensions=None, group_by=None, variable_components=None, **kwargs):
         """
         Delegate to pattern engine.
 
@@ -446,13 +436,13 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
             folder_path: Path to the folder (string or Path object)
             filemanager: FileManager instance for file operations
             backend: Backend to use for file operations (required)
-            well_filter: Optional list of wells to include
             extensions: Optional list of file extensions to include
-            group_by: Component to group patterns by (e.g., 'channel', 'z_index', 'well')
+            group_by: GroupBy enum to group patterns by (e.g., GroupBy.CHANNEL, GroupBy.Z_INDEX)
             variable_components: List of components to make variable (e.g., ['site', 'z_index'])
+            **kwargs: Dynamic filter parameters (e.g., well_filter, site_filter, channel_filter)
 
         Returns:
-            Dict[str, Any]: Dictionary mapping wells to patterns
+            Dict[str, Any]: Dictionary mapping axis values to patterns
         """
         # Ensure folder_path is a valid path
         if isinstance(folder_path, str):
@@ -464,17 +454,23 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         if not filemanager.exists(str(folder_path), backend):
             raise ValueError(f"Folder path does not exist: {folder_path}")
 
+        # Set default GroupBy if none provided
+        if group_by is None:
+            from openhcs.constants.constants import GroupBy
+            group_by = GroupBy.CHANNEL
+
         # Create pattern engine on demand with the provided filemanager
+        from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
         pattern_engine = PatternDiscoveryEngine(self.parser, filemanager)
 
         # Get patterns from the pattern engine
         patterns_by_well = pattern_engine.auto_detect_patterns(
             folder_path,
-            well_filter=well_filter,
             extensions=extensions,
             group_by=group_by,
             variable_components=variable_components,
-            backend=backend
+            backend=backend,
+            **kwargs  # Pass through dynamic filter parameters
         )
 
         # 🔒 Clause 74 — Runtime Behavior Variation
@@ -519,6 +515,7 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         # The pattern engine will handle template expansion to find matching files
 
         # Create pattern engine on demand with the provided filemanager
+        from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
         pattern_engine = PatternDiscoveryEngine(self.parser, filemanager)
 
         # Delegate to the pattern engine

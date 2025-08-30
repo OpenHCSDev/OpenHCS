@@ -11,6 +11,7 @@ from .filemanager import FileManager
 from .memory import MemoryStorageBackend
 from .metadata_writer import AtomicMetadataWriter, MetadataWriteError, MetadataUpdateRequest, get_metadata_path
 from .metadata_migration import detect_legacy_format, migrate_legacy_metadata, migrate_plate_metadata
+from .pipeline_migration import detect_legacy_pipeline, migrate_pipeline_file, load_pipeline_with_migration
 from .zarr import ZarrStorageBackend
 
 __all__ = [
@@ -32,5 +33,8 @@ __all__ = [
     'get_metadata_path',
     'detect_legacy_format',
     'migrate_legacy_metadata',
-    'migrate_plate_metadata'
+    'migrate_plate_metadata',
+    'detect_legacy_pipeline',
+    'migrate_pipeline_file',
+    'load_pipeline_with_migration'
 ]

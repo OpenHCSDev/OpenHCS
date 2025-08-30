@@ -221,6 +221,12 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
     setup_global_gpu_registry()
     config = _create_pipeline_config(test_config)
 
+    # CRITICAL: Establish global config context for lazy dataclass resolution
+    # This ensures LazyStepMaterializationConfig can inherit from path planning config
+    from openhcs.core.lazy_config import ensure_global_config_context
+    from openhcs.core.config import GlobalPipelineConfig
+    ensure_global_config_context(GlobalPipelineConfig, config)
+
     orchestrator = PipelineOrchestrator(test_config.plate_dir, global_config=config)
     orchestrator.initialize()
     return orchestrator
@@ -228,9 +234,9 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
 
 def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipeline) -> Dict:
     """Execute compilation and execution phases of the pipeline."""
-    from openhcs.constants.constants import GroupBy
+    from openhcs.constants import MULTIPROCESSING_AXIS
 
-    wells = orchestrator.get_component_keys(GroupBy.WELL)
+    wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
     if not wells:
         raise RuntimeError("No wells found for processing")
 

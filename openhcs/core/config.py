@@ -228,7 +228,7 @@ class StepMaterializationConfig(PathPlanningConfig):
     """
 
     # Override PathPlanningConfig defaults to prevent collisions
-    output_dir_suffix: str = ""  # Uses same output plate path as main pipeline
+    # output_dir_suffix inherited from PathPlanningConfig ("_outputs") - materialization uses same output plate as main pipeline
     sub_dir: str = "checkpoints"  # vs global "images"
 
 
@@ -285,6 +285,8 @@ class LazyDefaultPlaceholderService:
         return (hasattr(dataclass_type, '_resolve_field_value') and
                 hasattr(dataclass_type, 'to_base_config'))
 
+    NONE_VALUE_TEXT = "(none)"
+
     @staticmethod
     def get_lazy_resolved_placeholder(
         dataclass_type: type,
@@ -293,102 +295,58 @@ class LazyDefaultPlaceholderService:
         force_static_defaults: bool = False,
         placeholder_prefix: Optional[str] = None
     ) -> Optional[str]:
-        """
-        Get placeholder text for lazy-resolved field with flexible resolution.
-
-        Args:
-            dataclass_type: The lazy dataclass type (created by factory)
-            field_name: Name of the field to resolve
-            app_config: Optional app config for dynamic resolution
-            force_static_defaults: If True, always use static defaults regardless of thread-local context
-            placeholder_prefix: Custom prefix to use instead of the class default
-
-        Returns:
-            Placeholder text with configurable prefix for consistent UI experience.
-        """
-        # Use provided prefix or fall back to class default
-        if placeholder_prefix is None:
-            placeholder_prefix = LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
-
+        """Get placeholder text for lazy-resolved field with flexible resolution."""
         if not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type):
             return None
 
+        prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
+
+        # Resolve field value based on strategy
         if force_static_defaults:
-            # For global config editing: always use static defaults
-            if hasattr(dataclass_type, 'to_base_config'):
-                # This is a lazy dataclass - get the base class and create instance with static defaults
-                base_class = LazyDefaultPlaceholderService._get_base_class_from_lazy(dataclass_type)
-                static_instance = base_class()
-                resolved_value = getattr(static_instance, field_name, None)
-            else:
-                # Regular dataclass - create instance with static defaults
-                static_instance = dataclass_type()
-                resolved_value = getattr(static_instance, field_name, None)
+            base_class = (LazyDefaultPlaceholderService._get_base_class_from_lazy(dataclass_type)
+                         if hasattr(dataclass_type, 'to_base_config') else dataclass_type)
+            resolved_value = getattr(base_class(), field_name)
         elif app_config:
-            # For dynamic resolution, create lazy class with current app config
             from openhcs.core.lazy_config import LazyDataclassFactory
-            dynamic_lazy_class = LazyDataclassFactory.create_lazy_dataclass(
-                defaults_source=app_config,  # Use the app_config directly
-                lazy_class_name=f"Dynamic{dataclass_type.__name__}"
-            )
-            temp_instance = dynamic_lazy_class()
-            resolved_value = getattr(temp_instance, field_name)
+            dynamic_class = LazyDataclassFactory.create_lazy_dataclass(
+                defaults_source=app_config, lazy_class_name=f"Dynamic{dataclass_type.__name__}")
+            resolved_value = getattr(dynamic_class(), field_name)
         else:
-            # Use existing lazy class (thread-local resolution)
-            # DEBUG: Check what's in thread-local storage during placeholder resolution
+            # Context resolution with isolation fix for top-level fields
             current_context = get_current_global_config(GlobalPipelineConfig)
-            print(f"🎨 PLACEHOLDER DEBUG: Thread-local context during resolution: {current_context}")
-            if current_context:
-                print(f"🎨 PLACEHOLDER DEBUG: Context materialization_defaults: {getattr(current_context, 'materialization_defaults', 'NOT_FOUND')}")
-
-            temp_instance = dataclass_type()
-            print(f"🎨 PLACEHOLDER DEBUG: Created temp_instance of {dataclass_type}")
-
-            # For hierarchical lazy classes, use the proper resolution mechanism
-            if hasattr(temp_instance, '_resolve_field_value'):
-                # This is a hierarchical lazy class - use its resolution method
-                resolved_value = temp_instance._resolve_field_value(field_name)
-                print(f"🎨 PLACEHOLDER DEBUG: Hierarchical resolution for {field_name}: {resolved_value}")
+            if (hasattr(dataclass_type, '_resolve_field_value') and current_context and
+                hasattr(current_context, field_name)):
+                set_current_global_config(GlobalPipelineConfig, None)
+                try:
+                    resolved_value = dataclass_type()._resolve_field_value(field_name)
+                finally:
+                    set_current_global_config(GlobalPipelineConfig, current_context)
             else:
-                # Regular lazy class - use getattr
-                resolved_value = getattr(temp_instance, field_name)
-                print(f"🎨 PLACEHOLDER DEBUG: Regular getattr for {field_name}: {resolved_value}")
+                instance = dataclass_type()
+                resolved_value = (instance._resolve_field_value(field_name)
+                                if hasattr(instance, '_resolve_field_value') else getattr(instance, field_name))
 
-        if resolved_value is not None:
-            # Handle nested dataclasses
-            if hasattr(resolved_value, '__dataclass_fields__'):
-                # Check if this is a nested lazy dataclass that needs recursive resolution
-                if LazyDefaultPlaceholderService.has_lazy_resolution(type(resolved_value)):
-                    # This is a nested lazy dataclass - resolve the specific field recursively
-                    return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                        type(resolved_value), field_name, app_config, force_static_defaults, placeholder_prefix
-                    )
-                else:
-                    # Regular dataclass - show summary of all field values
-                    summary = LazyDefaultPlaceholderService._format_nested_dataclass_summary(resolved_value)
-                    return f"{placeholder_prefix}{summary}" if placeholder_prefix else summary
+        # Format output
+        if resolved_value is None:
+            value_text = LazyDefaultPlaceholderService.NONE_VALUE_TEXT
+        elif hasattr(resolved_value, '__dataclass_fields__'):
+            if LazyDefaultPlaceholderService.has_lazy_resolution(type(resolved_value)):
+                return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    type(resolved_value), field_name, app_config, force_static_defaults, prefix)
             else:
-                # Handle prefix formatting - avoid double colons
-                if placeholder_prefix:
-                    if placeholder_prefix.endswith(': '):
-                        return f"{placeholder_prefix}{resolved_value}"
-                    elif placeholder_prefix.endswith(':'):
-                        return f"{placeholder_prefix} {resolved_value}"
-                    else:
-                        return f"{placeholder_prefix}: {resolved_value}"
-                else:
-                    return str(resolved_value)
+                value_text = LazyDefaultPlaceholderService._format_nested_dataclass_summary(resolved_value)
         else:
-            # Handle prefix formatting for None values - avoid double colons
-            if placeholder_prefix:
-                if placeholder_prefix.endswith(': '):
-                    return f"{placeholder_prefix}(none)"
-                elif placeholder_prefix.endswith(':'):
-                    return f"{placeholder_prefix} (none)"
-                else:
-                    return f"{placeholder_prefix}: (none)"
-            else:
-                return "(none)"
+            value_text = str(resolved_value)
+
+        # Apply prefix formatting
+        if not prefix:
+            return value_text
+        elif prefix.endswith(': '):
+            return f"{prefix}{value_text}"
+        elif prefix.endswith(':'):
+            return f"{prefix} {value_text}"
+        else:
+            return f"{prefix}: {value_text}"
 
     @staticmethod
     def _get_base_class_from_lazy(lazy_class: Type) -> Type:

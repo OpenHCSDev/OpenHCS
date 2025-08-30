@@ -184,7 +184,11 @@ class ParameterFormManager(QWidget):
             for field_obj in fields(editing_config):
                 parameters[field_obj.name] = object.__getattribute__(editing_config, field_obj.name)
                 parameter_types[field_obj.name] = field_obj.type
-            dataclass_type = type(editing_config)
+
+            # CRITICAL FIX: Use original dataclass type, not editing config type
+            # The editing config might be a different instance but we want to preserve
+            # the original lazy dataclass type for proper reset behavior
+            dataclass_type = type(dataclass_instance)
         else:
             # Regular dataclass - extract parameters normally
             parameters = {}
@@ -571,10 +575,7 @@ class ParameterFormManager(QWidget):
 
     def reset_parameter(self, param_name: str, default_value: Any = None) -> None:
         """Reset parameter with streamlined logic."""
-        print(f"🔄 RESET DEBUG: reset_parameter called for {param_name}")
-
         if param_name not in self.parameters:
-            print(f"🔄 RESET DEBUG: {param_name} not in parameters, returning")
             return
 
         # Resolve reset value using dispatch
@@ -597,19 +598,14 @@ class ParameterFormManager(QWidget):
         """Get reset value using context dispatch."""
         if self.dataclass_type:
             is_static = not LazyDefaultPlaceholderService.has_lazy_resolution(self.dataclass_type)
-            print(f"🔄 RESET DEBUG: Getting reset value for {param_name}")
-            print(f"🔄 RESET DEBUG: Parameter type: {self.parameter_types.get(param_name)}")
-            print(f"🔄 RESET DEBUG: Dataclass type: {self.dataclass_type}")
-            print(f"🔄 RESET DEBUG: Is static (not lazy): {is_static}")
-
             reset_value = self.service.get_reset_value_for_parameter(
                 param_name, self.parameter_types.get(param_name), self.dataclass_type, is_static)
-
-            print(f"🔄 RESET DEBUG: Service returned reset value: {reset_value}")
             return reset_value
+        else:
+            # Function parameter reset: use param_defaults directly
+            return self.param_defaults.get(param_name)
 
-        return (getattr(self.parameter_info.get(param_name, object()), 'default_value', None)
-                if self.parameter_info and param_name in self.parameter_info else None)
+
 
     def get_current_values(self) -> Dict[str, Any]:
         """
@@ -665,16 +661,27 @@ class ParameterFormManager(QWidget):
                 # Clear value when checkbox is unchecked
                 current_values[param_name] = None
 
+    def _handle_nested_parameter_change(self, parent_name: str, value: Any) -> None:
+        """Handle nested parameter changes by reconstructing the entire dataclass."""
+        if self._get_optional_checkbox_state(parent_name) is not False:
+            # Reconstruct the entire dataclass from current nested values
+            nested_manager = self.nested_managers.get(parent_name)
+            if nested_manager:
+                nested_values = nested_manager.get_current_values()
+                nested_type = self.parameter_types.get(parent_name)
+                if nested_type:
+                    if self.service._type_utils.is_optional_dataclass(nested_type):
+                        nested_type = self.service._type_utils.get_optional_inner_type(nested_type)
+                    reconstructed_instance = self._rebuild_nested_dataclass_instance(nested_values, nested_type, parent_name)
+                    self.parameter_changed.emit(parent_name, reconstructed_instance)
+
     def _process_nested_values_if_checkbox_enabled(self, param_name: str, manager: Any,
                                                  current_values: Dict[str, Any]) -> None:
         """Process nested values only if checkbox is enabled."""
         if self._get_optional_checkbox_state(param_name) is not False:
             self._process_nested_values(param_name, manager.get_current_values(), current_values)
 
-    def _handle_nested_parameter_change(self, parent_name: str, value: Any) -> None:
-        """Handle nested parameter changes respecting checkbox state."""
-        if self._get_optional_checkbox_state(parent_name) is not False:
-            self.parameter_changed.emit(parent_name, value)
+
 
     def _find_checkbox_in_container(self, container: QWidget) -> Optional['QCheckBox']:
         """Find the checkbox widget within an optional dataclass container."""

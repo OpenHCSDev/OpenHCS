@@ -70,9 +70,9 @@ class ConfigWindow(QDialog):
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
-        # Determine placeholder prefix based on dataclass type
+        # Determine placeholder prefix based on actual instance type (not class type)
         from openhcs.core.config import LazyDefaultPlaceholderService
-        is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(config_class)
+        is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(current_config))
         placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
         # Always use ParameterFormManager with dataclass editing mode - unified approach

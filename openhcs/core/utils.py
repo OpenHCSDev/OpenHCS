@@ -423,7 +423,7 @@ class WellFilterProcessor:
 
         Args:
             well_filter: Filter specification (list, string pattern, or max count)
-            available_wells: Ordered list of wells from orchestrator.get_component_keys(GroupBy.WELL)
+            available_wells: Ordered list of wells from orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
 
         Returns:
             Set of well IDs that match the filter

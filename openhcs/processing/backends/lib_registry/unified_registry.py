@@ -410,8 +410,20 @@ class LibraryRegistryBase(ABC):
         if not self._cache_path.exists():
             return None
 
-        with open(self._cache_path, 'r') as f:
-            cache_data = json.load(f)
+        try:
+            with open(self._cache_path, 'r') as f:
+                cache_data = json.load(f)
+        except json.JSONDecodeError as e:
+            logger.warning(
+                f"Corrupt cache file found at {self._cache_path}: {e}. Deleting and rebuilding."
+            )
+            try:
+                self._cache_path.unlink()
+            except OSError as unlink_error:
+                logger.error(
+                    f"Failed to delete corrupt cache file {self._cache_path}: {unlink_error}"
+                )
+            return None
 
         if 'functions' not in cache_data:
             return None

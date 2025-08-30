@@ -347,7 +347,6 @@ class StepParameterEditorWidget(QScrollArea):
             logger.error(f"Failed to save step settings to {file_path}: {e}")
             if self.service_adapter:
                 self.service_adapter.show_error_dialog(f"Failed to save step settings: {e}")
-    
 
     
     def get_current_step(self) -> FunctionStep:

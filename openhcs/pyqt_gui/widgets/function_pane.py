@@ -418,24 +418,17 @@ class FunctionPaneWidget(QWidget):
         logger.debug(f"Parameter changed: {param_name} = {final_value}")
     
     def reset_all_parameters(self):
-        """Reset all parameters to default values (extracted from Textual version)."""
-        
+        """Reset all parameters to default values using enhanced PyQt6 form manager."""
+
+        # Use the PyQt6 form manager's reset functionality which properly handles widgets
+        self.enhanced_form_manager.reset_all_parameters()
+
+        # Update internal kwargs to match the reset values
         for param_name, default_value in self.param_defaults.items():
-            # Update internal kwargs
             self._internal_kwargs[param_name] = default_value
-            
-            # Update form manager
-            if self.form_manager:
-                self.form_manager.reset_parameter(param_name, default_value)
-            
-            # Update UI widget
-            if param_name in self.parameter_widgets:
-                widget = self.parameter_widgets[param_name]
-                self.update_widget_value(widget, default_value)
-            
             # Emit parameter changed signal
             self.parameter_changed.emit(self.index, param_name, default_value)
-        
+
         self.reset_parameters.emit(self.index)
         logger.debug(f"Reset all parameters for function {self.index}")
     

@@ -29,11 +29,11 @@ class PatternDetector(Protocol):
     def auto_detect_patterns(
         self,
         directory: Union[str, Path],
-        well_filter: List[str],
         variable_components: List[str],
         backend: str,
-        group_by: Optional[str] = None,
-        recursive: bool = False
+        group_by=None,  # Accept GroupBy enum or None
+        recursive: bool = False,
+        **kwargs  # Dynamic filter parameters (e.g., well_filter, site_filter)
     ) -> Dict[str, Any]:
         """Detect patterns in the given directory."""
         ...
@@ -83,11 +83,11 @@ class ManualRecursivePatternDetector(Protocol):
     def auto_detect_patterns(
         self,
         directory: Union[str, Path],
-        well_filter: List[str],
         variable_components: List[str],
         backend: str,
         group_by: Optional[str] = None,
-        recursive: bool = False
+        recursive: bool = False,
+        **kwargs  # Dynamic filter parameters (e.g., well_filter, site_filter)
     ) -> Dict[str, Any]:
         """Detect patterns in the given directory."""
         ...
@@ -278,13 +278,17 @@ def get_patterns_for_well(
         "Backend must be a BasicStorageBackend instance"
     # pylint: enable=protected-access
 
-    # Get patterns from detector
+    # Get patterns from detector using dynamic filter parameter
+    from openhcs.constants import MULTIPROCESSING_AXIS
+    axis_name = MULTIPROCESSING_AXIS.value
+    filter_kwargs = {f"{axis_name}_filter": [well]}
+
     patterns_by_well = detector.auto_detect_patterns(
         directory,
-        well_filter=[well],
         variable_components=variable_components,
         backend=backend,
-        recursive=recursive
+        recursive=recursive,
+        **filter_kwargs
     )
 
     all_patterns: List[str] = []

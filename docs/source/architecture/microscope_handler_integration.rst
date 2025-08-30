@@ -48,12 +48,15 @@ The core of microscope abstraction lies in two critical components that handle f
 Filename Parser Implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Each microscope format has unique filename conventions. Parsers extract semantic information from these patterns:
+Each microscope format has unique filename conventions. Parsers extract semantic information from these patterns using the :doc:`parser_metaprogramming_system` for dynamic interface generation:
 
 .. code-block:: python
 
    class ImageXpressFilenameParser(FilenameParser):
-       """Parser for ImageXpress filename format with placeholder support."""
+       """Parser for ImageXpress filename format with centralized component configuration."""
+
+       # FILENAME_COMPONENTS is automatically set to AllComponents + ['extension']
+       # by the FilenameParser.__init__() → GenericFilenameParser.__init__() chain
 
        # Actual regex pattern from codebase - supports placeholders and optional components
        _pattern = re.compile(r'(?:.*?_)?([A-Z]\d+)(?:_s(\d+|\{[^\}]*\}))?(?:_w(\d+|\{[^\}]*\}))?(?:_z(\d+|\{[^\}]*\}))?(\.\w+)?$')
@@ -78,8 +81,16 @@ Each microscope format has unique filename conventions. Parsers extract semantic
                }
            return None
 
+   # Component-specific methods are automatically generated at runtime:
+   # - self.validate_well(), self.validate_site(), etc.
+   # - self.extract_well(), self.extract_site(), etc.
+   # - All based on AllComponents configuration
+
    class OperaPhenixFilenameParser(FilenameParser):
-       """Parser for Opera Phenix format with complex pattern matching."""
+       """Parser for Opera Phenix format with centralized component configuration."""
+
+       # FILENAME_COMPONENTS is automatically set to AllComponents + ['extension']
+       # by the FilenameParser.__init__() → GenericFilenameParser.__init__() chain
 
        # Actual regex pattern - much more complex than documentation showed
        _pattern = re.compile(r"r(\d{1,2})c(\d{1,2})f(\d+|\{[^\}]*\})p(\d+|\{[^\}]*\})-ch(\d+|\{[^\}]*\})(?:sk\d+)?(?:fk\d+)?(?:fl\d+)?(\.\w+)$", re.I)
@@ -110,6 +121,11 @@ Each microscope format has unique filename conventions. Parsers extract semantic
                    'extension': ext if ext else '.tif'
                }
            return None
+
+   # Component-specific methods are automatically generated at runtime:
+   # - self.validate_well(), self.validate_site(), etc.
+   # - self.extract_well(), self.extract_site(), etc.
+   # - All based on AllComponents configuration
 
 Metadata Handler Implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -282,6 +298,86 @@ Handlers implement automatic pattern detection to identify image files and extra
            return file_paths
 
 This abstraction allows pipelines to discover images without knowing the underlying filename conventions or directory structures.
+
+Parser Metaprogramming System Integration
+-----------------------------------------
+
+The microscope handler system integrates with the :doc:`parser_metaprogramming_system` to provide dynamic interface generation for filename parsers.
+
+Dynamic Interface Generation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Each parser automatically generates component-specific interfaces using the DynamicParserMeta metaclass:
+
+.. code-block:: python
+
+   # Parser defines its component structure
+   class CustomFilenameParser(GenericFilenameParser):
+       FILENAME_COMPONENTS = ['well', 'site', 'channel', 'timepoint']
+
+       def parse_filename(self, filename: str) -> Optional[Dict[str, Any]]:
+           # Parser implementation...
+           pass
+
+   # Interface automatically generated with component-specific methods
+   CustomInterface = DynamicParserMeta.create_interface(
+       CustomFilenameParser,
+       interface_name="CustomInterface"
+   )
+
+   # Generated interface provides:
+   # - get_well_keys()
+   # - get_site_keys()
+   # - get_channel_keys()
+   # - get_timepoint_keys()
+   # - construct_filename(well=..., site=..., channel=..., timepoint=...)
+
+**Integration Benefits**:
+
+1. **Component-Agnostic Design**: Parsers work with any component configuration
+2. **Dynamic Method Generation**: Interface methods generated based on FILENAME_COMPONENTS
+3. **Type Safety**: Generated methods provide proper type hints and validation
+4. **Consistent API**: All parsers expose the same interface pattern regardless of components
+
+Generic Parser Base Class
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The GenericFilenameParser provides the foundation for all microscope-specific parsers:
+
+.. code-block:: python
+
+   class GenericFilenameParser(ABC):
+       """Base class for all filename parsers with centralized component configuration."""
+
+       def __init__(self, component_enum: Type[T]):
+           """Initialize with component enum - FILENAME_COMPONENTS set automatically."""
+           self.component_enum = component_enum
+           # FILENAME_COMPONENTS automatically set to all component values + extension
+           self.FILENAME_COMPONENTS = [c.value for c in component_enum] + ['extension']
+           self.PLACEHOLDER_PATTERN = '{iii}'
+           self._generate_dynamic_methods()
+
+       @abstractmethod
+       def parse_filename(self, filename: str) -> Optional[Dict[str, Any]]:
+           """Parse filename and return component dictionary."""
+           pass
+
+       def construct_filename(self, **kwargs) -> str:
+           """Construct filename from component values."""
+           # Generic implementation using component configuration
+           pass
+
+       def get_component_keys(self, component: str, filenames: List[str]) -> List[str]:
+           """Extract unique values for a specific component."""
+           # Generic implementation that works with any component
+           pass
+
+**Generic Design Benefits**:
+
+1. **Extensibility**: New parsers only need to implement parse_filename()
+2. **Consistency**: All parsers inherit common functionality
+3. **Component Independence**: Base class works with any component structure
+4. **Interface Compatibility**: Automatic compatibility with dynamic interface generation
 
 Integration with Pipeline System
 ---------------------------------
@@ -563,4 +659,13 @@ Design Benefits
 - Seamless integration with VFS and memory management systems
 
 This architecture enables OpenHCS to process data from any supported microscope platform through a single, consistent pipeline interface, while handling the complex format-specific details transparently.
+
+See Also
+--------
+
+- :doc:`parser_metaprogramming_system` - Dynamic interface generation for filename parsers
+- :doc:`component_configuration_framework` - Generic component configuration system
+- :doc:`component_validation_system` - Component validation and constraint checking
+- :doc:`../api/microscope_handlers` - Complete microscope handler API reference
+- :doc:`../development/adding-microscope-formats` - Guide for adding new microscope formats
 

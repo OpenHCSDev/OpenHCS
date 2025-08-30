@@ -21,6 +21,7 @@ from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
 from openhcs.constants.constants import GroupBy, VariableComponents
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.widgets.shared.widget_strategies import _get_enum_display_text
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ class FunctionListEditorWidget(QWidget):
         self.setup_connections()
         
         logger.debug(f"Function list editor initialized with {len(self.functions)} functions")
-    
+
     def _initialize_pattern_data(self, initial_functions):
         """Initialize pattern data from various input formats (mirrors Textual TUI logic)."""
         if initial_functions is None:
@@ -505,8 +506,8 @@ class FunctionListEditorWidget(QWidget):
         if self.current_group_by is None or self.current_group_by == GroupBy.NONE:
             return "Component: None"
 
-        # Use group_by.value.title() for dynamic component type display
-        component_type = self.current_group_by.value.title()
+        # Use the existing _get_enum_display_text function for consistent enum display handling
+        component_type = _get_enum_display_text(self.current_group_by).title()
 
         if self.is_dict_mode and self.selected_channel is not None:
             # Try to get metadata name for the selected component
@@ -518,7 +519,7 @@ class FunctionListEditorWidget(QWidget):
         """Get display name for component key, using metadata if available (mirrors Textual TUI)."""
         orchestrator = self._get_current_orchestrator()
         if orchestrator and self.current_group_by:
-            metadata_name = orchestrator.get_component_metadata(self.current_group_by, component_key)
+            metadata_name = orchestrator.metadata_cache.get_component_metadata(self.current_group_by, component_key)
             if metadata_name:
                 return metadata_name
         return component_key
@@ -554,7 +555,7 @@ class FunctionListEditorWidget(QWidget):
         result = GroupBySelectorDialog.select_components(
             available_components=available_components,
             selected_components=selected_components,
-            component_type=self.current_group_by.value,
+            group_by=self.current_group_by,
             orchestrator=orchestrator,
             parent=self
         )
@@ -685,6 +686,8 @@ class FunctionListEditorWidget(QWidget):
 
         # Also update navigation buttons when component button is refreshed
         self._update_navigation_buttons()
+
+
 
     def _update_navigation_buttons(self):
         """Update visibility of channel navigation buttons (mirrors Textual TUI)."""

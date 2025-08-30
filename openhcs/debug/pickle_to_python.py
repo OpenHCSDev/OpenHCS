@@ -85,7 +85,7 @@ def generate_complete_function_pattern_code(func_obj, indent=0, clean_mode=False
 
     # Collect imports from this pattern
     function_imports, enum_imports = collect_imports_from_data(func_obj)
-    import_lines = format_imports_as_strings(function_imports, enum_imports)
+    import_lines, name_mappings = format_imports_as_strings(function_imports, enum_imports)
 
     # Build complete code
     code_lines = ["# Edit this function pattern and save to apply changes", ""]
@@ -475,7 +475,7 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
     all_function_imports['openhcs.core.steps.function_step'].add('FunctionStep')
 
     # Format and add all collected imports
-    import_lines = format_imports_as_strings(all_function_imports, all_enum_imports)
+    import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
     if import_lines:
         code_lines.append("# Automatically collected imports")
         code_lines.extend(import_lines)

@@ -3,6 +3,7 @@
 import dataclasses
 import logging
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Type, Callable, Optional, Union
 
@@ -18,6 +19,25 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.ui.shared.widget_creation_registry import resolve_optional, is_enum, is_list_of_enums, get_enum_from_list
 
 logger = logging.getLogger(__name__)
+
+
+def _get_enum_display_text(enum_value: Enum) -> str:
+    """
+    Get display text for enum value, handling nested enums.
+
+    For simple enums like VariableComponents.SITE, returns the string value.
+    For nested enums like GroupBy.CHANNEL = VariableComponents.CHANNEL,
+    returns the nested enum's string value.
+    """
+    if isinstance(enum_value.value, Enum):
+        # Nested enum (e.g., GroupBy.CHANNEL = VariableComponents.CHANNEL)
+        return enum_value.value.value
+    elif isinstance(enum_value.value, str):
+        # Simple string enum
+        return enum_value.value
+    else:
+        # Fallback to string representation
+        return str(enum_value.value)
 
 
 @dataclasses.dataclass(frozen=True)

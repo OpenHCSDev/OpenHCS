@@ -827,8 +827,9 @@ class FunctionListEditorWidget(Container):
         if self.current_group_by is None or self.current_group_by == GroupBy.NONE:
             return "Component: None"
 
-        # Use group_by.value.title() for dynamic component type display
-        component_type = self.current_group_by.value.title()
+        # Use group_by.value.value.title() for dynamic component type display
+        # GroupBy.value is now a VariableComponents enum, so we need .value to get the string
+        component_type = self.current_group_by.value.value.title()
 
         if self.is_dict_mode and self.selected_channel is not None:
             # Try to get metadata name for the selected component
@@ -842,7 +843,7 @@ class FunctionListEditorWidget(Container):
         orchestrator = self._get_current_orchestrator()
         if orchestrator and self.current_group_by:
             try:
-                metadata_name = orchestrator.get_component_metadata(self.current_group_by, component_key)
+                metadata_name = orchestrator.metadata_cache.get_component_metadata(self.current_group_by, component_key)
                 if metadata_name:
                     return metadata_name
             except Exception as e:

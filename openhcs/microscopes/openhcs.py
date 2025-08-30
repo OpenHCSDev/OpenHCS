@@ -12,7 +12,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, Type
 
-from openhcs.constants.constants import Backend, GroupBy, DEFAULT_IMAGE_EXTENSIONS
+from openhcs.constants.constants import Backend, GroupBy, AllComponents, DEFAULT_IMAGE_EXTENSIONS
 from openhcs.io.exceptions import MetadataNotFoundError
 from openhcs.io.filemanager import FileManager
 from openhcs.io.metadata_writer import AtomicMetadataWriter, MetadataWriteError, get_metadata_path, METADATA_CONFIG
@@ -454,7 +454,7 @@ class OpenHCSMetadataGenerator:
             pixel_size=handler.metadata_handler._get_with_fallback('get_pixel_size', context.input_dir),
             image_files=relative_files,
             channels=cache.get(GroupBy.CHANNEL),
-            wells=cache.get(GroupBy.WELL),
+            wells=cache.get(AllComponents.WELL),  # Use AllComponents for multiprocessing axis
             sites=cache.get(GroupBy.SITE),
             z_indexes=cache.get(GroupBy.Z_INDEX),
             available_backends={write_backend: True},

@@ -16,6 +16,7 @@ The core systems every OpenHCS developer needs to understand.
 
    function_pattern_system
    configuration_system_architecture
+   component_configuration_framework
    storage_and_memory_system
    pipeline_compilation_system
    special_io_system
@@ -32,6 +33,10 @@ Deep technical dives for developers working on specific systems.
 .. toctree::
    :maxdepth: 1
 
+   component_validation_system
+   component_system_integration
+   multiprocessing_coordination_system
+   parser_metaprogramming_system
    compilation_system_detailed
    gpu_resource_management
    tui_system
@@ -55,6 +60,7 @@ Advanced topics for specific use cases.
 .. toctree::
    :maxdepth: 1
 
+   component_processor_metaprogramming
    pattern_detection_system
    concurrency_model
    service-layer-architecture

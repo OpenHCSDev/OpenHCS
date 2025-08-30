@@ -8,18 +8,25 @@ including filename parsing and metadata handling.
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
+from openhcs.constants.constants import VariableComponents, AllComponents
+from openhcs.core.components.parser_metaprogramming import GenericFilenameParser
 
 from openhcs.constants.constants import DEFAULT_PIXEL_SIZE
 
 
-class FilenameParser(ABC):
+class FilenameParser(GenericFilenameParser):
     """
     Abstract base class for parsing microscopy image filenames.
+
+    This class now uses the metaprogramming system to generate component-specific
+    methods dynamically based on the VariableComponents enum, eliminating hardcoded
+    component assumptions.
     """
 
-    # Constants
-    FILENAME_COMPONENTS = ['well', 'site', 'channel', 'z_index', 'extension']
-    PLACEHOLDER_PATTERN = '{iii}'
+    def __init__(self):
+        """Initialize the parser with AllComponents enum."""
+        from openhcs.constants.constants import AllComponents
+        super().__init__(AllComponents)
 
     @classmethod
     @abstractmethod
@@ -44,46 +51,46 @@ class FilenameParser(ABC):
             filename (str): Filename to parse
 
         Returns:
-            dict or None: Dictionary with extracted components or None if parsing fails
+            dict or None: Dictionary with extracted components or None if parsing fails.
+            The dictionary should contain keys matching VariableComponents enum values plus 'extension'.
         """
         pass
 
     @abstractmethod
-    def extract_row_column(self, well: str) -> Tuple[str, str]:
+    def extract_component_coordinates(self, component_value: str) -> Tuple[str, str]:
         """
-        Extract row and column from a well identifier.
+        Extract coordinates from component identifier (typically well).
 
         Args:
-            well (str): Well identifier (e.g., 'A01', 'R03C04', 'C04')
+            component_value (str): Component identifier (e.g., 'A01', 'R03C04', 'C04')
 
         Returns:
             Tuple[str, str]: (row, column) where row is like 'A', 'B' and column is like '01', '04'
 
         Raises:
-            ValueError: If well format is invalid for this parser
+            ValueError: If component format is invalid for this parser
         """
         pass
 
     @abstractmethod
-    def construct_filename(self, well: str, site: Optional[Union[int, str]] = None,
-                          channel: Optional[int] = None,
-                          z_index: Optional[Union[int, str]] = None,
-                          extension: str = '.tif',
-                          site_padding: int = 3, z_padding: int = 3) -> str:
+    def construct_filename(self, extension: str = '.tif', **component_values) -> str:
         """
-        Construct a filename from components.
+        Construct a filename from component values.
+
+        This method now uses **kwargs to accept any component values dynamically,
+        making it truly generic and adaptable to any component configuration.
 
         Args:
-            well (str): Well ID (e.g., 'A01')
-            site (int or str, optional): Site number or placeholder string (e.g., '{iii}')
-            channel (int, optional): Channel/wavelength number
-            z_index (int or str, optional): Z-index or placeholder string (e.g., '{zzz}')
-            extension (str, optional): File extension
-            site_padding (int, optional): Width to pad site numbers to (default: 3)
-            z_padding (int, optional): Width to pad Z-index numbers to (default: 3)
+            extension (str, optional): File extension (default: '.tif')
+            **component_values: Component values as keyword arguments.
+                               Keys should match VariableComponents enum values.
+                               Example: well='A01', site=1, channel=2, z_index=1
 
         Returns:
             str: Constructed filename
+
+        Example:
+            construct_filename(well='A01', site=1, channel=2, z_index=1, extension='.tif')
         """
         pass
 
@@ -102,6 +109,10 @@ class MetadataHandler(ABC):
         'pixel_size': DEFAULT_PIXEL_SIZE,  # Default pixel size in micrometers
         'grid_dimensions': None,  # No grid dimensions by default
     }
+
+    def __init__(self):
+        """Initialize metadata handler with VariableComponents enum."""
+        self.component_enum = VariableComponents
 
     def _get_with_fallback(self, method_name: str, *args, **kwargs):
         try:
@@ -221,9 +232,9 @@ class MetadataHandler(ABC):
 
     def parse_metadata(self, plate_path: Union[str, Path]) -> Dict[str, Dict[str, Optional[str]]]:
         """
-        Parse all metadata using enum→method mapping.
+        Parse all metadata using dynamic method resolution.
 
-        This method iterates through GroupBy components and calls the corresponding
+        This method iterates through VariableComponents and calls the corresponding
         abstract methods to collect all available metadata.
 
         Args:
@@ -233,19 +244,12 @@ class MetadataHandler(ABC):
             Dict mapping component names to their key→name mappings
             Example: {"channel": {"1": "HOECHST 33342", "2": "Calcein"}}
         """
-        # Import here to avoid circular imports
-        from openhcs.constants.constants import GroupBy
-
-        method_map = {
-            GroupBy.CHANNEL: self.get_channel_values,
-            GroupBy.WELL: self.get_well_values,
-            GroupBy.SITE: self.get_site_values,
-            GroupBy.Z_INDEX: self.get_z_index_values
-        }
-
         result = {}
-        for group_by, method in method_map.items():
+        for component in self.component_enum:
+            component_name = component.value
+            method_name = f"get_{component_name}_values"
+            method = getattr(self, method_name)  # Let AttributeError bubble up
             values = method(plate_path)
             if values:
-                result[group_by.value] = values
+                result[component_name] = values
         return result
