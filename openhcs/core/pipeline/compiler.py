@@ -107,14 +107,42 @@ class PipelineCompiler:
             context.step_plans = {} # Ensure step_plans dict exists
 
         # === THREAD-LOCAL CONTEXT SETUP ===
-        # Ensure thread-local context uses orchestrator's effective config (pipeline config takes precedence)
-        # This ensures compilation uses the same config as execution (including num_workers from pipeline config)
+        # CRITICAL: Use the same merged config pattern as orchestrator.apply_pipeline_config()
+        # to preserve None values needed for sibling inheritance (materialization_defaults → path_planning)
         from openhcs.core.config import get_current_global_config, set_current_global_config, GlobalPipelineConfig
+        from dataclasses import fields
 
-        # Always use orchestrator's effective config to ensure pipeline config takes precedence
-        effective_config = orchestrator.get_effective_config()
-        set_current_global_config(GlobalPipelineConfig, effective_config)
-        logger.debug(f"🔧 THREAD-LOCAL: Set context using orchestrator effective config (pipeline config takes precedence)")
+        # Get the orchestrator's pipeline config and shared global context
+        pipeline_config = orchestrator.pipeline_config
+        shared_context = get_current_global_config(GlobalPipelineConfig)
+
+        if pipeline_config is not None:
+            # Create merged config that preserves None values for sibling inheritance
+            # This replicates the logic from orchestrator.apply_pipeline_config()
+            merged_config_values = {}
+
+            for field in fields(GlobalPipelineConfig):
+                try:
+                    # Get raw value from pipeline config
+                    raw_value = object.__getattribute__(pipeline_config, field.name)
+                    if raw_value is not None:
+                        # Use the override value
+                        merged_config_values[field.name] = raw_value
+                    else:
+                        # Use shared global context for None values
+                        merged_config_values[field.name] = getattr(shared_context, field.name)
+                except AttributeError:
+                    # Field doesn't exist in pipeline config, use shared global context
+                    merged_config_values[field.name] = getattr(shared_context, field.name)
+
+            # Create merged config that preserves None values for sibling inheritance
+            merged_config = GlobalPipelineConfig(**merged_config_values)
+            set_current_global_config(GlobalPipelineConfig, merged_config)
+            logger.debug(f"🔧 THREAD-LOCAL: Set context using merged config that preserves None values for sibling inheritance")
+        else:
+            # No pipeline config, use shared context directly
+            set_current_global_config(GlobalPipelineConfig, shared_context)
+            logger.debug(f"🔧 THREAD-LOCAL: Set context using shared global context (no pipeline config)")
 
         # === BACKWARDS COMPATIBILITY PREPROCESSING ===
         # Ensure all steps have complete attribute sets based on AbstractStep constructor

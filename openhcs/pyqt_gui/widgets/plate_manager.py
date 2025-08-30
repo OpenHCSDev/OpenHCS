@@ -292,8 +292,9 @@ class PlateManagerWidget(QWidget):
         from openhcs.core.lazy_config import rebuild_lazy_config_with_new_global_reference
         from openhcs.core.config import GlobalPipelineConfig, set_current_global_config
 
-        # Update orchestrator's global config reference
-        orchestrator.global_config = new_global_config
+        # Update shared global context (orchestrator uses shared context now)
+        from openhcs.core.lazy_config import ensure_global_config_context
+        ensure_global_config_context(GlobalPipelineConfig, new_global_config)
 
         # Rebuild orchestrator-specific config if it exists
         if orchestrator.pipeline_config is not None:
@@ -403,6 +404,13 @@ class PlateManagerWidget(QWidget):
 
     async def action_init_plate(self):
         """Handle Initialize Plate button with unified validation."""
+        # CRITICAL: Set up global context in worker thread
+        # The service adapter runs this entire function in a worker thread,
+        # so we need to establish the global context here
+        from openhcs.core.lazy_config import ensure_global_config_context
+        from openhcs.core.config import GlobalPipelineConfig
+        ensure_global_config_context(GlobalPipelineConfig, self.global_config)
+
         selected_items = self.get_selected_plates()
 
         # Unified validation - let it fail if no plates
@@ -413,13 +421,22 @@ class PlateManagerWidget(QWidget):
         # Functional pattern: async map with enumerate
         async def init_single_plate(i, plate):
             plate_path = plate['path']
-            orchestrator = await asyncio.get_event_loop().run_in_executor(
+            # Create orchestrator in main thread (has access to global context)
+            orchestrator = PipelineOrchestrator(
+                plate_path=plate_path,
+                storage_registry=self.file_manager.registry
+            )
+            # Only run heavy initialization in worker thread
+            # Need to set up context in worker thread too since initialize() runs there
+            def initialize_with_context():
+                from openhcs.core.lazy_config import ensure_global_config_context
+                from openhcs.core.config import GlobalPipelineConfig
+                ensure_global_config_context(GlobalPipelineConfig, self.global_config)
+                return orchestrator.initialize()
+
+            await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: PipelineOrchestrator(
-                    plate_path=plate_path,
-                    global_config=self.global_config,
-                    storage_registry=self.file_manager.registry
-                ).initialize()
+                initialize_with_context
             )
 
             self.orchestrators[plate_path] = orchestrator
@@ -428,27 +445,6 @@ class PlateManagerWidget(QWidget):
             if not self.selected_plate_path:
                 self.selected_plate_path = plate_path
                 self.plate_selected.emit(plate_path)
-                # DEBUG: Check thread-local context before setup
-                from openhcs.core.config import get_current_global_config, GlobalPipelineConfig
-                before_context = get_current_global_config(GlobalPipelineConfig)
-                logger.debug(f"🔍 BEFORE context setup - thread-local config: {before_context}")
-
-                # Establish thread-local context first (replicates create_pipeline_config_for_editing pattern)
-                from openhcs.core.pipeline_config import ensure_pipeline_config_context
-                ensure_pipeline_config_context(orchestrator.global_config)
-
-                # DEBUG: Check thread-local context after setup
-                after_context = get_current_global_config(GlobalPipelineConfig)
-                logger.debug(f"🔍 AFTER context setup - thread-local config: {after_context}")
-
-                # Then apply pipeline config with proper context established
-                current_pipeline_cfg = orchestrator.pipeline_config or PipelineConfig()
-                orchestrator.apply_pipeline_config(current_pipeline_cfg)
-
-                # DEBUG: Check thread-local context after apply
-                final_context = get_current_global_config(GlobalPipelineConfig)
-                logger.debug(f"🔍 AFTER apply_pipeline_config - thread-local config: {final_context}")
-                logger.debug(f"Initialized orchestrator context with proper thread-local setup for selected plate: {plate_path}")
 
             self.progress_updated.emit(i + 1)
 
@@ -656,6 +652,13 @@ class PlateManagerWidget(QWidget):
 
     async def _compile_plates_worker(self, selected_items: List[Dict]) -> None:
         """Background worker for plate compilation."""
+        # CRITICAL: Set up global context in worker thread
+        # The service adapter runs this entire function in a worker thread,
+        # so we need to establish the global context here
+        from openhcs.core.lazy_config import ensure_global_config_context
+        from openhcs.core.config import GlobalPipelineConfig
+        ensure_global_config_context(GlobalPipelineConfig, self.global_config)
+
         # Use signals for thread-safe UI updates
         self.progress_started.emit(len(selected_items))
 
@@ -669,24 +672,39 @@ class PlateManagerWidget(QWidget):
                 definition_pipeline = []
 
             try:
-                # Get or create orchestrator for compilation (run in executor to avoid blocking)
-                def get_or_create_orchestrator():
-                    if plate_path in self.orchestrators:
-                        orchestrator = self.orchestrators[plate_path]
-                        if not orchestrator.is_initialized():
-                            orchestrator.initialize()
-                        return orchestrator
-                    else:
-                        return PipelineOrchestrator(
-                            plate_path=plate_path,
-                            global_config=self.global_config,
-                            storage_registry=self.file_manager.registry
-                        ).initialize()
+                # Get or create orchestrator for compilation
+                if plate_path in self.orchestrators:
+                    orchestrator = self.orchestrators[plate_path]
+                    if not orchestrator.is_initialized():
+                        # Only run heavy initialization in worker thread
+                        # Need to set up context in worker thread too since initialize() runs there
+                        def initialize_with_context():
+                            from openhcs.core.lazy_config import ensure_global_config_context
+                            from openhcs.core.config import GlobalPipelineConfig
+                            ensure_global_config_context(GlobalPipelineConfig, self.global_config)
+                            return orchestrator.initialize()
 
-                # Run in executor (works in Qt thread)
-                import asyncio
-                loop = asyncio.get_event_loop()
-                orchestrator = await loop.run_in_executor(None, get_or_create_orchestrator)
+                        import asyncio
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, initialize_with_context)
+                else:
+                    # Create orchestrator in main thread (has access to global context)
+                    orchestrator = PipelineOrchestrator(
+                        plate_path=plate_path,
+                        storage_registry=self.file_manager.registry
+                    )
+                    # Only run heavy initialization in worker thread
+                    # Need to set up context in worker thread too since initialize() runs there
+                    def initialize_with_context():
+                        from openhcs.core.lazy_config import ensure_global_config_context
+                        from openhcs.core.config import GlobalPipelineConfig
+                        ensure_global_config_context(GlobalPipelineConfig, self.global_config)
+                        return orchestrator.initialize()
+
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(None, initialize_with_context)
+                    self.orchestrators[plate_path] = orchestrator
                 self.orchestrators[plate_path] = orchestrator
 
                 # Make fresh copy for compilation
@@ -714,9 +732,15 @@ class PlateManagerWidget(QWidget):
                 # Get wells using multiprocessing axis (WELL in default config)
                 from openhcs.constants import MULTIPROCESSING_AXIS
                 wells = await loop.run_in_executor(None, lambda: orchestrator.get_component_keys(MULTIPROCESSING_AXIS))
-                compiled_contexts = await loop.run_in_executor(
-                    None, orchestrator.compile_pipelines, pipeline_obj.steps, wells
-                )
+
+                # Wrap compilation with context setup for worker thread
+                def compile_with_context():
+                    from openhcs.core.lazy_config import ensure_global_config_context
+                    from openhcs.core.config import GlobalPipelineConfig
+                    ensure_global_config_context(GlobalPipelineConfig, self.global_config)
+                    return orchestrator.compile_pipelines(pipeline_obj.steps, wells)
+
+                compiled_contexts = await loop.run_in_executor(None, compile_with_context)
 
                 # Store compiled data
                 self.plate_compiled_data[plate_path] = (execution_pipeline, compiled_contexts)
@@ -1083,7 +1107,9 @@ class PlateManagerWidget(QWidget):
                 orchestrator = self.orchestrators[self.selected_plate_path]
                 # Establish thread-local context first (replicates create_pipeline_config_for_editing pattern)
                 from openhcs.core.pipeline_config import ensure_pipeline_config_context
-                ensure_pipeline_config_context(orchestrator.global_config)
+                from openhcs.core.config import get_current_global_config
+                shared_context = get_current_global_config(GlobalPipelineConfig)
+                ensure_pipeline_config_context(shared_context)
                 # Then apply pipeline config with proper context established
                 current_pipeline_cfg = orchestrator.pipeline_config or PipelineConfig()
                 orchestrator.apply_pipeline_config(current_pipeline_cfg)

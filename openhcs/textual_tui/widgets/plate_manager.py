@@ -958,7 +958,8 @@ class PlateManagerWidget(ButtonListWidget):
                 self.app.current_status = f"Exporting to OME-ZARR: {export_path}"
 
                 # Create export-specific config with ZARR materialization
-                export_config = orchestrator.global_config
+                from openhcs.core.config import get_current_global_config, GlobalPipelineConfig
+                export_config = get_current_global_config(GlobalPipelineConfig)
                 export_vfs_config = VFSConfig(
                     intermediate_backend=export_config.vfs.intermediate_backend,
                     materialization_backend=MaterializationBackend.ZARR

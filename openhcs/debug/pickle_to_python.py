@@ -211,7 +211,7 @@ def convert_pickle_to_python(pickle_path, output_path=None, clean_mode=False):
             f.write('    from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry\n')
             f.write('    setup_global_gpu_registry(global_config=global_config)\n')
             f.write('    for plate_path in plate_paths:\n')
-            f.write('        orchestrator = PipelineOrchestrator(plate_path, global_config=global_config)\n')
+            f.write('        orchestrator = PipelineOrchestrator(plate_path)\n')
             f.write('        orchestrator.initialize()\n')
             f.write('        compiled_contexts = orchestrator.compile_pipelines(pipeline_data[plate_path])\n')
             f.write('        orchestrator.execute_compiled_plate(\n')

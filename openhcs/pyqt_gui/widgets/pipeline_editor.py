@@ -849,11 +849,13 @@ class PipelineEditorWidget(QWidget):
                         # Use the override value
                         merged_config_values[field.name] = raw_value
                     else:
-                        # Use global default for None values
-                        merged_config_values[field.name] = getattr(orchestrator.global_config, field.name)
+                        # Use shared global context for None values
+                        shared_context = get_current_global_config(GlobalPipelineConfig)
+                        merged_config_values[field.name] = getattr(shared_context, field.name)
                 except AttributeError:
-                    # Field doesn't exist in pipeline config, use global default
-                    merged_config_values[field.name] = getattr(orchestrator.global_config, field.name)
+                    # Field doesn't exist in pipeline config, use shared global context
+                    shared_context = get_current_global_config(GlobalPipelineConfig)
+                    merged_config_values[field.name] = getattr(shared_context, field.name)
 
             # Create merged config that preserves None values for sibling inheritance
             merged_config = GlobalPipelineConfig(**merged_config_values)

@@ -20,7 +20,7 @@ from typing import Any, Callable, Dict, List, Optional, Union, Set
 
 from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
 from openhcs.constants import Microscope
-from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, PipelineConfig, set_current_global_config, set_current_pipeline_config
+from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, PipelineConfig, set_current_global_config, get_current_global_config, set_current_pipeline_config
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.pipeline.compiler import PipelineCompiler
@@ -194,30 +194,43 @@ class PipelineOrchestrator:
         plate_path: Union[str, Path],
         workspace_path: Optional[Union[str, Path]] = None,
         *,
-        global_config: Optional[GlobalPipelineConfig] = None,
         pipeline_config: Optional[PipelineConfig] = None,
-        storage_registry: Optional[Any] = None, # Optional StorageRegistry instance
+        storage_registry: Optional[Any] = None,
     ):
         # Lock removed - was orphaned code never used
 
-        if global_config is None:
-            self.global_config = get_default_global_config()
-            logger.info("PipelineOrchestrator using default global configuration.")
-        else:
-            self.global_config = global_config
+        # Validate shared global context exists
+        from openhcs.core.config import get_current_global_config
+        if get_current_global_config(GlobalPipelineConfig) is None:
+            raise RuntimeError(
+                "No global configuration context found. "
+                "Ensure application startup has called ensure_global_config_context()."
+            )
 
         # Initialize per-orchestrator configuration
         # Always ensure orchestrator has a pipeline config - create default if none provided
         if pipeline_config is None:
-            self.pipeline_config = CorePipelineConfig()
-            logger.info("PipelineOrchestrator created default pipeline configuration.")
+            # Create PipelineConfig with all None values (like an empty form)
+            # This matches what the config save does when no edits are made
+            from openhcs.core.pipeline_config import PipelineConfig
+            from dataclasses import fields
+
+            # Create field values dict with all None values (like empty form)
+            field_values = {}
+            for field_obj in fields(GlobalPipelineConfig):
+                field_values[field_obj.name] = None
+
+            # Create PipelineConfig with None values for placeholder behavior
+            self.pipeline_config = PipelineConfig(**field_values)
+            logger.info("PipelineOrchestrator created default pipeline configuration with None values for placeholders.")
         else:
             self.pipeline_config = pipeline_config
 
 
 
         # Set current pipeline config for MaterializationPathConfig defaults
-        set_current_pipeline_config(self.global_config)
+        shared_context = get_current_global_config(GlobalPipelineConfig)
+        set_current_pipeline_config(shared_context)
 
         if plate_path is None:
             # This case should ideally be prevented by TUI logic if plate_path is mandatory
@@ -260,9 +273,10 @@ class PipelineOrchestrator:
             logger.info("PipelineOrchestrator created its own StorageRegistry instance (copy of global).")
 
         # Override zarr backend with orchestrator's config
-        zarr_backend_with_config = ZarrStorageBackend(self.global_config.zarr)
+        shared_context = get_current_global_config(GlobalPipelineConfig)
+        zarr_backend_with_config = ZarrStorageBackend(shared_context.zarr)
         self.registry[Backend.ZARR.value] = zarr_backend_with_config
-        logger.info(f"Orchestrator zarr backend configured with {self.global_config.zarr.compressor.value} compression")
+        logger.info(f"Orchestrator zarr backend configured with {shared_context.zarr.compressor.value} compression")
 
         # Orchestrator always creates its own FileManager, using the determined registry
         self.filemanager = FileManager(self.registry)
@@ -313,7 +327,8 @@ class PipelineOrchestrator:
         logger.info(f"Initializing microscope handler using input directory: {self.input_dir}...")
         try:
             # Use configured microscope type or auto-detect
-            microscope_type = self.global_config.microscope.value if self.global_config.microscope != Microscope.AUTO else 'auto'
+            shared_context = get_current_global_config(GlobalPipelineConfig)
+            microscope_type = shared_context.microscope.value if shared_context.microscope != Microscope.AUTO else 'auto'
             self.microscope_handler = create_microscope_handler(
                 plate_folder=str(self.plate_path),
                 filemanager=self.filemanager,
@@ -657,7 +672,8 @@ class PipelineOrchestrator:
 
             logger.info(f"🔥 ORCHESTRATOR: Plate execution completed, checking for analysis consolidation")
             # Run automatic analysis consolidation if enabled
-            if self.global_config.analysis_consolidation.enabled:
+            shared_context = get_current_global_config(GlobalPipelineConfig)
+            if shared_context.analysis_consolidation.enabled:
                 try:
                     # Get results directory from compiled contexts (Option 2: use existing paths)
                     results_dir = None
@@ -666,7 +682,7 @@ class PipelineOrchestrator:
                         for step_index, step_plan in context.step_plans.items():
                             if 'output_dir' in step_plan:
                                 # Found an output directory, check if it has a results subdirectory
-                                potential_results_dir = Path(step_plan['output_dir']) / self.global_config.materialization_results_path
+                                potential_results_dir = Path(step_plan['output_dir']) / shared_context.materialization_results_path
                                 if potential_results_dir.exists():
                                     results_dir = potential_results_dir
                                     logger.info(f"🔍 CONSOLIDATION: Found results directory from step {step_index}: {results_dir}")
@@ -686,8 +702,8 @@ class PipelineOrchestrator:
                             consolidate_analysis_results(
                                 results_directory=str(results_dir),
                                 axis_ids=axis_ids,
-                                consolidation_config=self.global_config.analysis_consolidation,
-                                plate_metadata_config=self.global_config.plate_metadata
+                                consolidation_config=shared_context.analysis_consolidation,
+                                plate_metadata_config=shared_context.plate_metadata
                             )
                             logger.info("✅ CONSOLIDATION: Completed successfully")
                         else:
@@ -876,6 +892,7 @@ class PipelineOrchestrator:
         # Create a merged config that combines global defaults with pipeline overrides
         # This provides the context for the existing sibling inheritance system
         merged_config_values = {}
+        shared_context = get_current_global_config(GlobalPipelineConfig)
 
         for field in fields(GlobalPipelineConfig):
             try:
@@ -885,11 +902,11 @@ class PipelineOrchestrator:
                     # Use the override value
                     merged_config_values[field.name] = raw_value
                 else:
-                    # Use global default for None values
-                    merged_config_values[field.name] = getattr(self.global_config, field.name)
+                    # Use shared global context for None values
+                    merged_config_values[field.name] = getattr(shared_context, field.name)
             except AttributeError:
-                # Field doesn't exist in pipeline config, use global default
-                merged_config_values[field.name] = getattr(self.global_config, field.name)
+                # Field doesn't exist in pipeline config, use shared global context
+                merged_config_values[field.name] = getattr(shared_context, field.name)
 
         # Create merged config for thread-local context
         # The existing sibling inheritance system will handle the rest automatically
@@ -909,13 +926,19 @@ class PipelineOrchestrator:
             # Thread-local context should already be set up by apply_pipeline_config()
             # Don't override it here as it may contain merged config for sibling inheritance
             return self.pipeline_config.to_base_config()
-        return self.global_config
+        # Use shared global context instead of per-orchestrator config
+        shared_context = get_current_global_config(GlobalPipelineConfig)
+        if shared_context is None:
+            raise RuntimeError("No global configuration context available")
+        return shared_context
 
     def clear_pipeline_config(self) -> None:
         """Clear per-orchestrator configuration."""
-        # Reset thread-local storage to global config
+        # Reset thread-local storage to shared global config
         if self.pipeline_config is not None:
-            set_current_global_config(GlobalPipelineConfig, self.global_config)
+            shared_context = get_current_global_config(GlobalPipelineConfig)
+            if shared_context is not None:
+                set_current_global_config(GlobalPipelineConfig, shared_context)
 
         self.pipeline_config = None
         logger.info(f"Cleared per-orchestrator config for plate: {self.plate_path}")
