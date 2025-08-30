@@ -31,12 +31,7 @@ from openhcs.formats.func_arg_prep import prepare_patterns_and_functions
 from openhcs.core.memory.stack_utils import stack_slices, unstack_slices
 # OpenHCS imports moved to local imports to avoid circular dependencies
 
-# Import new generic validation system
-try:
-    from openhcs.core.components.validation import GenericValidator
-except ImportError:
-    # Fallback for cases where the new system isn't available yet
-    GenericValidator = None
+from openhcs.core.components.validation import GenericValidator
 
 logger = logging.getLogger(__name__)
 
