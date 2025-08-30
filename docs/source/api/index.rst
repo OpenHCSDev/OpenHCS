@@ -23,11 +23,14 @@ Key Classes
 
     from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
     from openhcs.core.config import GlobalPipelineConfig
+    from openhcs.core.lazy_config import ensure_global_config_context
 
-    orchestrator = PipelineOrchestrator(
-        plate_path="/path/to/data",
-        global_config=GlobalPipelineConfig(num_workers=4)
-    )
+    # Set global context first (done at application startup)
+    config = GlobalPipelineConfig(num_workers=4)
+    ensure_global_config_context(GlobalPipelineConfig, config)
+
+    # Create orchestrator with simplified constructor
+    orchestrator = PipelineOrchestrator(plate_path="/path/to/data")
 
 **FunctionStep**
 

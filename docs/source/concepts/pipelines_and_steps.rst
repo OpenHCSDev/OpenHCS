@@ -176,10 +176,13 @@ When you run a pipeline, OpenHCS follows a systematic execution model:
        FunctionStep(func=assemble, name="assemble")
    ])
 
+   # Ensure global context is set first (done at application startup)
+   from openhcs.core.lazy_config import ensure_global_config_context
+   ensure_global_config_context(GlobalPipelineConfig, config)
+
    # Execute across entire dataset
    orchestrator = PipelineOrchestrator(
-       plate_path="/path/to/microscope/data",
-       global_config=config
+       plate_path="/path/to/microscope/data"
    )
    orchestrator.run_pipeline(pipeline)
 
