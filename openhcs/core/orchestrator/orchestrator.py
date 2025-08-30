@@ -38,12 +38,8 @@ from openhcs.microscopes.microscope_base import MicroscopeHandler
 
 from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
 
-# Import new generic component system
-try:
-    from openhcs.core.components.multiprocessing import MultiprocessingCoordinator
-except ImportError:
-    # Fallback for cases where the new system isn't available yet
-    MultiprocessingCoordinator = None
+# Import generic component system - required for orchestrator functionality
+from openhcs.core.components.multiprocessing import MultiprocessingCoordinator
 
 # Optional napari import for visualization
 try:
@@ -65,28 +61,28 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _execute_single_well_static(
+def _execute_single_axis_static(
     pipeline_definition: List[AbstractStep],
     frozen_context: 'ProcessingContext',
     visualizer: Optional['NapariVisualizerType']
 ) -> Dict[str, Any]:
     """
-    Static version of _execute_single_well for multiprocessing compatibility.
+    Static version of _execute_single_axis for multiprocessing compatibility.
 
-    This function is identical to PipelineOrchestrator._execute_single_well but doesn't
+    This function is identical to PipelineOrchestrator._execute_single_axis but doesn't
     require an orchestrator instance, making it safe for pickling in ProcessPoolExecutor.
     """
-    well_id = frozen_context.well_id
-    logger.info(f"🔥 SINGLE_WELL: Starting execution for well {well_id}")
+    axis_id = frozen_context.axis_id
+    logger.info(f"🔥 SINGLE_AXIS: Starting execution for axis {axis_id}")
 
     # NUCLEAR VALIDATION
     if not frozen_context.is_frozen():
-        error_msg = f"🔥 SINGLE_WELL ERROR: Context for well {well_id} is not frozen before execution"
+        error_msg = f"🔥 SINGLE_AXIS ERROR: Context for axis {axis_id} is not frozen before execution"
         logger.error(error_msg)
         raise RuntimeError(error_msg)
 
     if not pipeline_definition:
-        error_msg = f"🔥 SINGLE_WELL ERROR: Empty pipeline_definition for well {well_id}"
+        error_msg = f"🔥 SINGLE_AXIS ERROR: Empty pipeline_definition for axis {axis_id}"
         logger.error(error_msg)
         raise RuntimeError(error_msg)
 
@@ -94,15 +90,15 @@ def _execute_single_well_static(
     for step_index, step in enumerate(pipeline_definition):
         step_name = getattr(step, 'name', 'N/A') if hasattr(step, 'name') else 'N/A'
 
-        logger.info(f"🔥 SINGLE_WELL: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for well {well_id}")
+        logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
         if not hasattr(step, 'process'):
-            error_msg = f"🔥 SINGLE_WELL ERROR: Step {step_index+1} missing process method for well {well_id}"
+            error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} missing process method for axis {axis_id}"
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
         step.process(frozen_context, step_index)
-        logger.info(f"🔥 SINGLE_WELL: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for well {well_id}")
+        logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
 
         # Handle visualization if requested
         if visualizer:
@@ -111,18 +107,18 @@ def _execute_single_well_static(
                 output_dir = step_plan['output_dir']
                 write_backend = step_plan['write_backend']
                 if output_dir:
-                    logger.debug(f"Visualizing output for step {step_index} from path {output_dir} (backend: {write_backend}) for well {well_id}")
+                    logger.debug(f"Visualizing output for step {step_index} from path {output_dir} (backend: {write_backend}) for axis {axis_id}")
                     visualizer.visualize_path(
                         step_id=f"step_{step_index}",
                         path=str(output_dir),
                         backend=write_backend,
-                        well_id=well_id
+                        axis_id=axis_id
                     )
                 else:
-                    logger.warning(f"Step {step_index} in well {well_id} flagged for visualization but 'output_dir' is missing in its plan.")
+                    logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
 
-    logger.info(f"🔥 SINGLE_WELL: Pipeline execution completed successfully for well {well_id}")
-    return {"status": "success", "well_id": well_id}
+    logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
+    return {"status": "success", "axis_id": axis_id}
 
 
 def _configure_worker_logging(log_file_base: str):
@@ -187,7 +183,7 @@ class PipelineOrchestrator:
     Global configuration: Updates all orchestrators (existing behavior)
     Per-orchestrator configuration: Affects only this orchestrator instance
 
-    The orchestrator first compiles the pipeline for all specified wells,
+    The orchestrator first compiles the pipeline for all specified axis values,
     creating frozen, immutable ProcessingContexts using `compile_plate_for_processing()`.
     Then, it executes the (now stateless) pipeline definition against these contexts,
     potentially in parallel, using `execute_compiled_plate()`.
@@ -383,18 +379,18 @@ class PipelineOrchestrator:
     def is_initialized(self) -> bool:
         return self._initialized
 
-    def create_context(self, well_id: str) -> ProcessingContext:
-        """Creates a ProcessingContext for a given well."""
+    def create_context(self, axis_id: str) -> ProcessingContext:
+        """Creates a ProcessingContext for a given multiprocessing axis value."""
         if not self.is_initialized():
             raise RuntimeError("Orchestrator must be initialized before calling create_context().")
-        if not well_id:
-            raise ValueError("Well identifier must be provided.")
+        if not axis_id:
+            raise ValueError("Axis identifier must be provided.")
         if self.input_dir is None:
              raise RuntimeError("Orchestrator input_dir is not set; initialize orchestrator first.")
 
         context = ProcessingContext(
             global_config=self.get_effective_config(),
-            well_id=well_id,
+            axis_id=axis_id,
             filemanager=self.filemanager
         )
         # Orchestrator reference removed - was orphaned and unpickleable
@@ -412,74 +408,58 @@ class PipelineOrchestrator:
         well_filter: Optional[List[str]] = None,
         enable_visualizer_override: bool = False
     ) -> Dict[str, ProcessingContext]:
-        """
-        Compile-all phase: Prepares frozen ProcessingContexts for each well.
-
-        This method delegates to PipelineCompiler.compile_pipelines() to handle
-        the actual compilation logic while providing orchestrator context.
-
-        Args:
-            pipeline_definition: The list of AbstractStep objects defining the pipeline.
-            well_filter: Optional list of well IDs to process. If None, processes all found wells.
-            enable_visualizer_override: If True, all steps in all compiled contexts
-                                        will have their 'visualize' flag set to True.
-
-        Returns:
-            A dictionary mapping well IDs to their compiled and frozen ProcessingContexts.
-            The input `pipeline_definition` list (of step objects) is modified in-place
-            to become stateless.
-        """
+        """Compile pipelines for axis values (well_filter name preserved for UI compatibility)."""
         return PipelineCompiler.compile_pipelines(
             orchestrator=self,
             pipeline_definition=pipeline_definition,
-            well_filter=well_filter,
+            axis_filter=well_filter,  # Translate well_filter to axis_filter for generic backend
             enable_visualizer_override=enable_visualizer_override
         )
 
-    def _execute_single_well(
+    def _execute_single_axis(
         self,
         pipeline_definition: List[AbstractStep],
         frozen_context: ProcessingContext,
         visualizer: Optional[NapariVisualizerType]
     ) -> Dict[str, Any]:
         """Executes the pipeline for a single well using its frozen context."""
-        well_id = frozen_context.well_id
-        logger.info(f"🔥 SINGLE_WELL: Starting execution for well {well_id}")
+        axis_id = frozen_context.axis_id
+        logger.info(f"🔥 SINGLE_AXIS: Starting execution for axis {axis_id}")
 
         # NUCLEAR VALIDATION
         if not frozen_context.is_frozen():
-            error_msg = f"🔥 SINGLE_WELL ERROR: Context for well {well_id} is not frozen before execution"
+            error_msg = f"🔥 SINGLE_AXIS ERROR: Context for axis {axis_id} is not frozen before execution"
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
         if not pipeline_definition:
-            error_msg = f"🔥 SINGLE_WELL ERROR: Empty pipeline_definition for well {well_id}"
+            error_msg = f"🔥 SINGLE_AXIS ERROR: Empty pipeline_definition for axis {axis_id}"
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
         # Step IDs are consistent since pipeline_definition comes from UI (no remapping needed)
 
-        logger.info(f"🔥 SINGLE_WELL: Processing {len(pipeline_definition)} steps for well {well_id}")
+        logger.info(f"🔥 SINGLE_AXIS: Processing {len(pipeline_definition)} steps for axis {axis_id}")
 
         for step_index, step in enumerate(pipeline_definition):
             step_name = getattr(step, 'name', 'N/A') if hasattr(step, 'name') else 'N/A'
 
-            logger.info(f"🔥 SINGLE_WELL: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for well {well_id}")
+            logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
             if not hasattr(step, 'process'):
-                error_msg = f"🔥 SINGLE_WELL ERROR: Step {step_index+1} missing process method for well {well_id}"
+                error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} missing process method for axis {axis_id}"
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
 
             step.process(frozen_context, step_index)
-            logger.info(f"🔥 SINGLE_WELL: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for well {well_id}")
+            logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
 
     #        except Exception as step_error:
     #            import traceback
     #            full_traceback = traceback.format_exc()
-    #            error_msg = f"🔥 SINGLE_WELL ERROR: Step {step_index+1} ({step_id}) failed for well {well_id}: {step_error}"
+    #            error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} ({step_id}) failed for axis {axis_id}: {step_error}"
     #            logger.error(error_msg, exc_info=True)
-    #            logger.error(f"🔥 SINGLE_WELL TRACEBACK for well {well_id}, step {step_index+1} ({step_id}):\n{full_traceback}")
+    #            logger.error(f"🔥 SINGLE_AXIS TRACEBACK for axis {axis_id}, step {step_index+1} ({step_id}):\n{full_traceback}")
     #            raise RuntimeError(error_msg) from step_error
 
             if visualizer:
@@ -488,18 +468,18 @@ class PipelineOrchestrator:
                     output_dir = step_plan['output_dir']
                     write_backend = step_plan['write_backend']
                     if output_dir:
-                        logger.debug(f"Visualizing output for step {step_index} from path {output_dir} (backend: {write_backend}) for well {well_id}")
+                        logger.debug(f"Visualizing output for step {step_index} from path {output_dir} (backend: {write_backend}) for axis {axis_id}")
                         visualizer.visualize_path(
                             step_id=f"step_{step_index}",
                             path=str(output_dir),
                             backend=write_backend,
-                            well_id=well_id
+                            axis_id=axis_id
                         )
                     else:
-                        logger.warning(f"Step {step_index} in well {well_id} flagged for visualization but 'output_dir' is missing in its plan.")
+                        logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
         
-        logger.info(f"🔥 SINGLE_WELL: Pipeline execution completed successfully for well {well_id}")
-        return {"status": "success", "well_id": well_id}
+        logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
+        return {"status": "success", "axis_id": axis_id}
 
     def execute_compiled_plate(
         self,
@@ -514,7 +494,7 @@ class PipelineOrchestrator:
 
         Args:
             pipeline_definition: The stateless list of AbstractStep objects.
-            compiled_contexts: Dict of well_id to its compiled, frozen ProcessingContext.
+            compiled_contexts: Dict of axis_id to its compiled, frozen ProcessingContext.
                                Obtained from `compile_plate_for_processing`.
             max_workers: Maximum number of worker threads for parallel execution.
             visualizer: Optional instance of NapariStreamVisualizer for real-time visualization
@@ -539,7 +519,7 @@ class PipelineOrchestrator:
             actual_max_workers = 1
 
         self._state = OrchestratorState.EXECUTING
-        logger.info(f"Starting execution for {len(compiled_contexts)} wells with max_workers={actual_max_workers}.")
+        logger.info(f"Starting execution for {len(compiled_contexts)} axis values with max_workers={actual_max_workers}.")
 
         # 🔍 VRAM TRACKING: Log initial memory state
         try:
@@ -608,7 +588,9 @@ class PipelineOrchestrator:
                 logger.info("🔥 DEATH_MARKER: BEFORE_TASK_SUBMISSION_LOOP")
                 future_to_axis_id = {}
                 config = get_openhcs_config()
-                axis_name = config.multiprocessing_axis.value if config else 'well'
+                if not config:
+                    raise RuntimeError("Component configuration is required for orchestrator execution")
+                axis_name = config.multiprocessing_axis.value
                 for axis_id, context in contexts_snapshot.items():
                     try:
                         logger.info(f"🔥 DEATH_MARKER: SUBMITTING_TASK_FOR_{axis_name.upper()}_{axis_id}")
@@ -619,7 +601,7 @@ class PipelineOrchestrator:
 
                         # Use static function to avoid pickling the orchestrator instance
                         # Note: Use original pipeline_definition to preserve collision-resolved configs
-                        future = executor.submit(_execute_single_well_static, pipeline_definition, resolved_context, resolved_visualizer)
+                        future = executor.submit(_execute_single_axis_static, pipeline_definition, resolved_context, resolved_visualizer)
                         future_to_axis_id[future] = axis_id
                         logger.info(f"🔥 ORCHESTRATOR: Task submitted for {axis_name} {axis_id}")
                         logger.info(f"🔥 DEATH_MARKER: TASK_SUBMITTED_FOR_{axis_name.upper()}_{axis_id}")
@@ -679,7 +661,7 @@ class PipelineOrchestrator:
                 try:
                     # Get results directory from compiled contexts (Option 2: use existing paths)
                     results_dir = None
-                    for well_id, context in compiled_contexts.items():
+                    for axis_id, context in compiled_contexts.items():
                         # Look for any step that has an output_dir - this is where materialization happens
                         for step_index, step_plan in context.step_plans.items():
                             if 'output_dir' in step_plan:
@@ -698,12 +680,12 @@ class PipelineOrchestrator:
                         if csv_files:
                             logger.info(f"🔄 CONSOLIDATION: Found {len(csv_files)} CSV files, running consolidation")
                             # Get well IDs from compiled contexts
-                            well_ids = list(compiled_contexts.keys())
-                            logger.info(f"🔄 CONSOLIDATION: Using well IDs: {well_ids}")
+                            axis_ids = list(compiled_contexts.keys())
+                            logger.info(f"🔄 CONSOLIDATION: Using well IDs: {axis_ids}")
 
                             consolidate_analysis_results(
                                 results_directory=str(results_dir),
-                                well_ids=well_ids,
+                                axis_ids=axis_ids,
                                 consolidation_config=self.global_config.analysis_consolidation,
                                 plate_metadata_config=self.global_config.plate_metadata
                             )

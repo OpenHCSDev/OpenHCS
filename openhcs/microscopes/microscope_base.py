@@ -428,7 +428,7 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         return self.parser.construct_filename(extension=extension, **component_values)
 
     def auto_detect_patterns(self, folder_path: Union[str, Path], filemanager: FileManager, backend: str,
-                           well_filter=None, extensions=None, group_by=None, variable_components=None):
+                           extensions=None, group_by=None, variable_components=None, **kwargs):
         """
         Delegate to pattern engine.
 
@@ -436,13 +436,13 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
             folder_path: Path to the folder (string or Path object)
             filemanager: FileManager instance for file operations
             backend: Backend to use for file operations (required)
-            well_filter: Optional list of wells to include
             extensions: Optional list of file extensions to include
             group_by: GroupBy enum to group patterns by (e.g., GroupBy.CHANNEL, GroupBy.Z_INDEX)
             variable_components: List of components to make variable (e.g., ['site', 'z_index'])
+            **kwargs: Dynamic filter parameters (e.g., well_filter, site_filter, channel_filter)
 
         Returns:
-            Dict[str, Any]: Dictionary mapping wells to patterns
+            Dict[str, Any]: Dictionary mapping axis values to patterns
         """
         # Ensure folder_path is a valid path
         if isinstance(folder_path, str):
@@ -466,11 +466,11 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         # Get patterns from the pattern engine
         patterns_by_well = pattern_engine.auto_detect_patterns(
             folder_path,
-            well_filter=well_filter,
             extensions=extensions,
             group_by=group_by,
             variable_components=variable_components,
-            backend=backend
+            backend=backend,
+            **kwargs  # Pass through dynamic filter parameters
         )
 
         # 🔒 Clause 74 — Runtime Behavior Variation

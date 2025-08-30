@@ -86,7 +86,7 @@ class PipelineCompiler:
         orchestrator,
         metadata_writer: bool = False,
         plate_path: Optional[Path] = None
-        # base_input_dir and well_id parameters removed, will use from context
+        # base_input_dir and axis_id parameters removed, will use from context
     ) -> None:
         """
         Initializes step_plans by calling PipelinePathPlanner.prepare_pipeline_paths,
@@ -122,11 +122,11 @@ class PipelineCompiler:
         logger.debug("🔧 BACKWARDS COMPATIBILITY: Normalizing step attributes...")
         _normalize_step_attributes(steps_definition)
 
-        # === WELL FILTER RESOLUTION ===
-        # Resolve well filters for steps with materialization configs
+        # === AXIS FILTER RESOLUTION ===
+        # Resolve axis filters for steps with materialization configs
         # This must happen after normalization to ensure materialization_config exists
-        logger.debug("🎯 WELL FILTER RESOLUTION: Resolving step well filters...")
-        _resolve_step_well_filters(steps_definition, context, orchestrator)
+        logger.debug("🎯 AXIS FILTER RESOLUTION: Resolving step axis filters...")
+        _resolve_step_axis_filters(steps_definition, context, orchestrator)
 
         # Pre-initialize step_plans with basic entries for each step
         # Use step index as key instead of step_id for multiprocessing compatibility
@@ -135,7 +135,7 @@ class PipelineCompiler:
                 context.step_plans[step_index] = {
                     "step_name": step.name,
                     "step_type": step.__class__.__name__,
-                    "well_id": context.well_id,
+                    "axis_id": context.axis_id,
                 }
 
         # === INPUT CONVERSION DETECTION ===
@@ -165,7 +165,7 @@ class PipelineCompiler:
                     context.step_plans[0]["input_conversion_config"] = conversion_config
                     logger.debug(f"Input conversion to zarr enabled for first step: {first_step.name}")
 
-        # The well_id and base_input_dir are available from the context object.
+        # The axis_id and base_input_dir are available from the context object.
         PipelinePathPlanner.prepare_pipeline_paths(
             context,
             steps_definition
@@ -183,7 +183,7 @@ class PipelineCompiler:
                 context.step_plans[step_index] = {
                      "step_name": step.name,
                      "step_type": step.__class__.__name__,
-                     "well_id": context.well_id, # Use context.well_id
+                     "axis_id": context.axis_id, # Use context.axis_id
                      "error": "Missing from path planning phase by PipelinePathPlanner",
                      "create_openhcs_metadata": metadata_writer # Set metadata writer responsibility flag
                 }
@@ -194,7 +194,7 @@ class PipelineCompiler:
             # Ensure basic metadata (PathPlanner should set most of this)
             current_plan["step_name"] = step.name
             current_plan["step_type"] = step.__class__.__name__
-            current_plan["well_id"] = context.well_id # Use context.well_id; PathPlanner should also use context.well_id
+            current_plan["axis_id"] = context.axis_id # Use context.axis_id; PathPlanner should also use context.axis_id
             current_plan.setdefault("visualize", False) # Ensure visualize key exists
             current_plan["create_openhcs_metadata"] = metadata_writer # Set metadata writer responsibility flag
 
@@ -466,27 +466,27 @@ class PipelineCompiler:
     def compile_pipelines(
         orchestrator,
         pipeline_definition: List[AbstractStep],
-        well_filter: Optional[List[str]] = None,
+        axis_filter: Optional[List[str]] = None,
         enable_visualizer_override: bool = False
     ) -> Dict[str, ProcessingContext]:
         """
-        Compile-all phase: Prepares frozen ProcessingContexts for each well.
+        Compile-all phase: Prepares frozen ProcessingContexts for each axis value.
 
-        This method iterates through the specified wells, creates a ProcessingContext
+        This method iterates through the specified axis values, creates a ProcessingContext
         for each, and invokes the various phases of the PipelineCompiler to populate
-        the context's step_plans. After all compilation phases for a well are complete,
+        the context's step_plans. After all compilation phases for an axis value are complete,
         its context is frozen. Finally, attributes are stripped from the pipeline_definition,
         making the step objects stateless for the execution phase.
 
         Args:
             orchestrator: The PipelineOrchestrator instance to use for compilation
             pipeline_definition: The list of AbstractStep objects defining the pipeline.
-            well_filter: Optional list of well IDs to process. If None, processes all found wells.
+            axis_filter: Optional list of axis values to process. If None, processes all found axis values.
             enable_visualizer_override: If True, all steps in all compiled contexts
                                         will have their 'visualize' flag set to True.
 
         Returns:
-            A dictionary mapping well IDs to their compiled and frozen ProcessingContexts.
+            A dictionary mapping axis values to their compiled and frozen ProcessingContexts.
             The input `pipeline_definition` list (of step objects) is modified in-place
             to become stateless.
         """
@@ -501,27 +501,27 @@ class PipelineCompiler:
 
         try:
             compiled_contexts: Dict[str, ProcessingContext] = {}
-            # Get multiprocessing axis values (wells in default config)
+            # Get multiprocessing axis values dynamically from configuration
             from openhcs.constants import MULTIPROCESSING_AXIS
-            wells_to_process = orchestrator.get_component_keys(MULTIPROCESSING_AXIS, well_filter)
+            axis_values_to_process = orchestrator.get_component_keys(MULTIPROCESSING_AXIS, axis_filter)
 
-            if not wells_to_process:
-                logger.warning("No wells found to process based on filter.")
+            if not axis_values_to_process:
+                logger.warning("No axis values found to process based on filter.")
                 return {}
 
-            logger.info(f"Starting compilation for wells: {', '.join(wells_to_process)}")
+            logger.info(f"Starting compilation for axis values: {', '.join(axis_values_to_process)}")
 
-            # Determine responsible well for metadata creation (lexicographically first)
-            responsible_well = sorted(wells_to_process)[0] if wells_to_process else None
-            logger.debug(f"Designated responsible well for metadata creation: {responsible_well}")
+            # Determine responsible axis value for metadata creation (lexicographically first)
+            responsible_axis_value = sorted(axis_values_to_process)[0] if axis_values_to_process else None
+            logger.debug(f"Designated responsible axis value for metadata creation: {responsible_axis_value}")
 
-            for well_id in wells_to_process:
-                logger.debug(f"Compiling for well: {well_id}")
-                context = orchestrator.create_context(well_id)
+            for axis_id in axis_values_to_process:
+                logger.debug(f"Compiling for axis value: {axis_id}")
+                context = orchestrator.create_context(axis_id)
 
-                # Determine if this well is responsible for metadata creation
-                is_responsible = (well_id == responsible_well)
-                logger.debug(f"Well {well_id} metadata responsibility: {is_responsible}")
+                # Determine if this axis value is responsible for metadata creation
+                is_responsible = (axis_id == responsible_axis_value)
+                logger.debug(f"Axis {axis_id} metadata responsibility: {is_responsible}")
 
                 PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                 PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, orchestrator)
@@ -536,8 +536,8 @@ class PipelineCompiler:
                 PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
 
                 context.freeze()
-                compiled_contexts[well_id] = context
-                logger.debug(f"Compilation finished for well: {well_id}")
+                compiled_contexts[axis_id] = context
+                logger.debug(f"Compilation finished for axis value: {axis_id}")
 
             # Log path planning summary once per plate
             if compiled_contexts:
@@ -589,57 +589,57 @@ class PipelineCompiler:
 # _strip_step_attributes is also removed as StepAttributeStripper is called by Orchestrator.
 
 
-def _resolve_step_well_filters(steps_definition: List[AbstractStep], context, orchestrator):
+def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, orchestrator):
     """
-    Resolve well filters for steps with materialization configs.
+    Resolve axis filters for steps with materialization configs.
 
-    This function handles step-level well filtering by resolving patterns like
-    "row:A", ["A01", "B02"], or max counts against the available wells for the plate.
+    This function handles step-level axis filtering by resolving patterns like
+    "row:A", ["A01", "B02"], or max counts against the available axis values for the plate.
 
     Args:
         steps_definition: List of pipeline steps
-        context: Processing context for the current well
-        orchestrator: Orchestrator instance with access to available wells
+        context: Processing context for the current axis value
+        orchestrator: Orchestrator instance with access to available axis values
     """
     from openhcs.core.utils import WellFilterProcessor
 
-    # Get available wells from orchestrator using multiprocessing axis
+    # Get available axis values from orchestrator using multiprocessing axis
     from openhcs.constants import MULTIPROCESSING_AXIS
-    available_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-    if not available_wells:
-        logger.warning("No available wells found for well filter resolution")
+    available_axis_values = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+    if not available_axis_values:
+        logger.warning("No available axis values found for axis filter resolution")
         return
 
-    # Initialize step_well_filters in context if not present
-    if not hasattr(context, 'step_well_filters'):
-        context.step_well_filters = {}
+    # Initialize step_axis_filters in context if not present
+    if not hasattr(context, 'step_axis_filters'):
+        context.step_axis_filters = {}
 
-    # Process each step that has materialization config with well filter
+    # Process each step that has materialization config with axis filter
     for step_index, step in enumerate(steps_definition):
         if (step.materialization_config and
             step.materialization_config.well_filter is not None):
 
             try:
-                # Resolve the well filter pattern to concrete well IDs
-                resolved_wells = WellFilterProcessor.resolve_compilation_filter(
+                # Resolve the axis filter pattern to concrete axis values
+                resolved_axis_values = WellFilterProcessor.resolve_compilation_filter(
                     step.materialization_config.well_filter,
-                    available_wells
+                    available_axis_values
                 )
 
-                # Store resolved wells in context for path planner
+                # Store resolved axis values in context for path planner
                 # Use structure expected by path planner
-                context.step_well_filters[step_index] = {  # Use step_index instead of step.step_id
-                    'resolved_wells': sorted(resolved_wells),
+                context.step_axis_filters[step_index] = {  # Use step_index instead of step.step_id
+                    'resolved_axis_values': sorted(resolved_axis_values),
                     'filter_mode': step.materialization_config.well_filter_mode,
                     'original_filter': step.materialization_config.well_filter
                 }
 
-                logger.debug(f"Step '{step.name}' well filter '{step.materialization_config.well_filter}' "
-                           f"resolved to {len(resolved_wells)} wells: {sorted(resolved_wells)}")
+                logger.debug(f"Step '{step.name}' axis filter '{step.materialization_config.well_filter}' "
+                           f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
 
             except Exception as e:
-                logger.error(f"Failed to resolve well filter for step '{step.name}': {e}")
-                raise ValueError(f"Invalid well filter '{step.materialization_config.well_filter}' "
+                logger.error(f"Failed to resolve axis filter for step '{step.name}': {e}")
+                raise ValueError(f"Invalid axis filter '{step.materialization_config.well_filter}' "
                                f"for step '{step.name}': {e}")
 
-    logger.debug(f"Well filter resolution complete. {len(context.step_well_filters)} steps have well filters.")
+    logger.debug(f"Axis filter resolution complete. {len(context.step_axis_filters)} steps have axis filters.")

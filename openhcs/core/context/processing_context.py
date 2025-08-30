@@ -25,7 +25,7 @@ class ProcessingContext:
         outputs: Dictionary for step outputs (usage may change with VFS-centric model).
         intermediates: Dictionary for intermediate results (usage may change).
         current_step: Current executing step ID (usage may change).
-        well_id: Identifier of the well being processed.
+        axis_id: Identifier of the multiprocessing axis value being processed.
         filemanager: Instance of FileManager for VFS operations.
         global_config: GlobalPipelineConfig holding system-wide configurations.
         _is_frozen: Internal flag indicating if the context is immutable.
@@ -35,7 +35,7 @@ class ProcessingContext:
         self,
         global_config: GlobalPipelineConfig, # Made a required argument
         step_plans: Optional[Dict[str, Dict[str, Any]]] = None,
-        well_id: Optional[str] = None,
+        axis_id: Optional[str] = None,
         **kwargs
     ):
         """
@@ -44,7 +44,7 @@ class ProcessingContext:
         Args:
             global_config: The global pipeline configuration object.
             step_plans: Dictionary mapping step IDs to execution plans.
-            well_id: Identifier of the well being processed.
+            axis_id: Identifier of the multiprocessing axis value being processed.
             **kwargs: Additional context attributes (e.g., filemanager, microscope_handler).
         """
         # Initialize _is_frozen first to allow other attributes to be set by __setattr__
@@ -55,7 +55,7 @@ class ProcessingContext:
         self.outputs = {}  # Future use TBD, primary data flow via VFS
         self.intermediates = {} # Future use TBD, primary data flow via VFS
         self.current_step = None # Future use TBD
-        self.well_id = well_id
+        self.axis_id = axis_id
         self.global_config = global_config # Store the global config
         self.filemanager = None # Expected to be set by Orchestrator via kwargs or direct assignment
 
@@ -95,13 +95,13 @@ class ProcessingContext:
         Freezes the context, making its attributes immutable.
 
         This should be called after all compilation and plan injection is complete.
-        Essential attributes like step_plans, filemanager, and well_id must be set.
+        Essential attributes like step_plans, filemanager, and axis_id must be set.
 
         Raises:
             RuntimeError: If essential attributes are not set before freezing.
         """
-        if not self.well_id:
-            raise RuntimeError("Cannot freeze ProcessingContext: 'well_id' is not set.")
+        if not self.axis_id:
+            raise RuntimeError("Cannot freeze ProcessingContext: 'axis_id' is not set.")
         if not hasattr(self, 'filemanager') or self.filemanager is None:
             raise RuntimeError("Cannot freeze ProcessingContext: 'filemanager' is not set.")
         # step_plans can be empty if the pipeline is empty, but it must exist.

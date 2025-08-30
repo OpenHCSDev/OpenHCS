@@ -115,23 +115,23 @@ class PathPlanner:
         materialized_output_dir = None
         if step.materialization_config:
             # Check if this step has well filters and if current well should be materialized
-            step_well_filter = getattr(self.ctx, 'step_well_filters', {}).get(sid)
+            step_axis_filter = getattr(self.ctx, 'step_axis_filters', {}).get(sid)
 
-            if step_well_filter:
-                # Inline simple conditional logic for well filtering
+            if step_axis_filter:
+                # Inline simple conditional logic for axis filtering
                 from openhcs.core.config import WellFilterMode
-                well_in_filter = self.ctx.well_id in step_well_filter['resolved_wells']
+                axis_in_filter = self.ctx.axis_id in step_axis_filter['resolved_axis_values']
                 should_materialize = (
-                    well_in_filter if step_well_filter['filter_mode'] == WellFilterMode.INCLUDE
-                    else not well_in_filter
+                    axis_in_filter if step_axis_filter['filter_mode'] == WellFilterMode.INCLUDE
+                    else not axis_in_filter
                 )
 
                 if should_materialize:
                     materialized_output_dir = self._build_output_path(step.materialization_config)
                 else:
-                    logger.debug(f"Skipping materialization for step {step.name}, well {self.ctx.well_id} (filtered out)")
+                    logger.debug(f"Skipping materialization for step {step.name}, axis {self.ctx.axis_id} (filtered out)")
             else:
-                # No well filter - create materialization path as normal
+                # No axis filter - create materialization path as normal
                 materialized_output_dir = self._build_output_path(step.materialization_config)
 
         input_conversion_dir = self._get_optional_path("input_conversion_config", sid)
@@ -264,7 +264,7 @@ class PathPlanner:
         if io_type == 'output' and items:  # Special outputs
             results_path = self._get_results_path()
             for key in sorted(items):
-                filename = PipelinePathPlanner._build_well_filename(self.ctx.well_id, key)
+                filename = PipelinePathPlanner._build_axis_filename(self.ctx.axis_id, key)
                 path = results_path / filename
                 result[key] = {
                     'path': str(path),
@@ -404,9 +404,9 @@ class PipelinePathPlanner:
         return PathPlanner(context).plan(pipeline_definition)
 
     @staticmethod
-    def _build_well_filename(well_id: str, key: str, extension: str = "pkl") -> str:
-        """Build standardized well-based filename."""
-        return f"{well_id}_{key}.{extension}"
+    def _build_axis_filename(axis_id: str, key: str, extension: str = "pkl") -> str:
+        """Build standardized axis-based filename."""
+        return f"{axis_id}_{key}.{extension}"
 
 
 

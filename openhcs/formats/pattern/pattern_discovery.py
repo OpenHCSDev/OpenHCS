@@ -205,24 +205,30 @@ class PatternDiscoveryEngine:
     def auto_detect_patterns(
         self,
         folder_path: Union[str, Path],
-        well_filter: List[str],
-        extensions: List[str],
-        group_by,  # Accept GroupBy enum or None
         variable_components: List[str],
-        backend: str
+        backend: str,
+        extensions: List[str] = None,
+        group_by=None,  # Accept GroupBy enum or None
+        recursive: bool = False,
+        **kwargs  # Dynamic filter parameters (e.g., well_filter, site_filter)
     ) -> Dict[str, Any]:
         """
         Automatically detect image patterns in a folder.
         """
-        files_by_well = self._find_and_filter_images(
-            folder_path, well_filter, extensions, True, backend
+        # Extract axis_filter from dynamic kwargs
+        from openhcs.constants import MULTIPROCESSING_AXIS
+        axis_name = MULTIPROCESSING_AXIS.value
+        axis_filter = kwargs.get(f"{axis_name}_filter")
+
+        files_by_axis = self._find_and_filter_images(
+            folder_path, axis_filter, extensions, True, backend
         )
 
-        if not files_by_well:
+        if not files_by_axis:
             return {}
 
         result = {}
-        for axis_value, files in files_by_well.items():
+        for axis_value, files in files_by_axis.items():
             patterns = self._generate_patterns_for_files(files, variable_components, axis_value)
 
             # Validate patterns
@@ -245,27 +251,27 @@ class PatternDiscoveryEngine:
     def _find_and_filter_images(
         self,
         folder_path: Union[str, Path],
-        well_filter: List[str],
+        axis_filter: List[str],
         extensions: List[str],
         recursive: bool,
         backend: str
     ) -> Dict[str, List[Any]]:
         """
-        Find all image files in a directory and filter by well.
+        Find all image files in a directory and filter by multiprocessing axis.
 
         Args:
             folder_path: Path to the folder to search (string or Path object)
-            well_filter: List of wells to include
+            axis_filter: List of axis values to include
             extensions: List of file extensions to include
             recursive: Whether to search recursively
             backend: Backend to use for file operations (required)
 
         Returns:
-            Dictionary mapping wells to lists of image paths
+            Dictionary mapping axis values to lists of image paths
 
         Raises:
             TypeError: If folder_path is not a string or Path object
-            ValueError: If well_filter is empty or folder_path does not exist
+            ValueError: If axis_filter is empty or folder_path does not exist
         """
         # Convert to Path and validate using FileManager abstraction
         folder_path = Path(folder_path)
@@ -273,14 +279,14 @@ class PatternDiscoveryEngine:
             raise FileNotFoundError(f"Folder not found: {folder_path}")
 
         # Validate inputs
-        if not well_filter:
-            raise ValueError("well_filter cannot be empty")
+        if not axis_filter:
+            raise ValueError("axis_filter cannot be empty")
 
         extensions = extensions or ['.tif', '.TIF', '.tiff', '.TIFF']
 
         image_paths = self.filemanager.list_image_files(folder_path, backend, extensions=extensions, recursive=recursive)
 
-        files_by_well = defaultdict(list)
+        files_by_axis = defaultdict(list)
         for img_path in image_paths:
             # FileManager should return strings, but handle Path objects too
             if isinstance(img_path, str):
@@ -296,13 +302,16 @@ class PatternDiscoveryEngine:
             if not metadata:
                 continue
 
-            well = metadata['well']
-            if well not in well_filter:
+            # Get multiprocessing axis dynamically from configuration
+            from openhcs.constants import MULTIPROCESSING_AXIS
+            axis_key = MULTIPROCESSING_AXIS.value
+            axis_value = metadata.get(axis_key)
+            if not axis_value or axis_value not in axis_filter:
                 continue
 
-            files_by_well[well].append(img_path)
+            files_by_axis[axis_value].append(img_path)
 
-        return files_by_well
+        return files_by_axis
 
     def _generate_patterns_for_files(
         self,

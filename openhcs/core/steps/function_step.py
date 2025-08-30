@@ -51,13 +51,13 @@ def _generate_materialized_paths(memory_paths: List[str], step_output_dir: Path,
 
 
 def _save_materialized_data(filemanager, memory_data: List, materialized_paths: List[str],
-                           materialized_backend: str, step_plan: Dict, context, well_id: str) -> None:
+                           materialized_backend: str, step_plan: Dict, context, axis_id: str) -> None:
     """Save data to materialized location using appropriate backend."""
     if materialized_backend == Backend.ZARR.value:
         n_channels, n_z, n_fields = _calculate_zarr_dimensions(materialized_paths, context.microscope_handler)
-        row, col = context.microscope_handler.parser.extract_component_coordinates(well_id)
+        row, col = context.microscope_handler.parser.extract_component_coordinates(axis_id)
         filemanager.save_batch(memory_data, materialized_paths, materialized_backend,
-                             chunk_name=well_id, zarr_config=step_plan.get("zarr_config"),
+                             chunk_name=axis_id, zarr_config=step_plan.get("zarr_config"),
                              n_channels=n_channels, n_z=n_z, n_fields=n_fields,
                              row=row, col=col)
     else:
@@ -66,13 +66,13 @@ def _save_materialized_data(filemanager, memory_data: List, materialized_paths: 
 
 
 
-def get_all_image_paths(input_dir, backend, well_id, filemanager, microscope_handler):
+def get_all_image_paths(input_dir, backend, axis_id, filemanager, microscope_handler):
     """
     Get all image file paths for a specific well from a directory.
 
     Args:
         input_dir: Directory to search for images
-        well_id: Well identifier to filter files
+        axis_id: Well identifier to filter files
         backend: Backend to use for file listing
         filemanager: FileManager instance
         microscope_handler: Microscope handler with parser for filename parsing
@@ -84,47 +84,50 @@ def get_all_image_paths(input_dir, backend, well_id, filemanager, microscope_han
     all_image_files = filemanager.list_image_files(str(input_dir), backend)
 
     # Filter by well using parser (FIXED: was using naive string matching)
-    well_files = []
+    axis_files = []
     parser = microscope_handler.parser
 
     for f in all_image_files:
         filename = os.path.basename(str(f))
         metadata = parser.parse_filename(filename)
-        if metadata and metadata.get('well') == well_id:
-            well_files.append(str(f))
+        # Use dynamic multiprocessing axis instead of hardcoded 'well'
+        from openhcs.constants import MULTIPROCESSING_AXIS
+        axis_key = MULTIPROCESSING_AXIS.value
+        if metadata and metadata.get(axis_key) == axis_id:
+            axis_files.append(str(f))
 
     # Remove duplicates and sort
-    sorted_files = sorted(list(set(well_files)))
+    sorted_files = sorted(list(set(axis_files)))
 
     # Prepare full file paths
     full_file_paths = [str(input_dir / Path(f).name) for f in sorted_files]
 
-    logger.debug(f"Found {len(all_image_files)} total files, {len(full_file_paths)} for well {well_id}")
+    logger.debug(f"Found {len(all_image_files)} total files, {len(full_file_paths)} for axis {axis_id}")
 
     return full_file_paths
 
 
-def create_image_path_getter(well_id, filemanager, microscope_handler):
+def create_image_path_getter(axis_id, filemanager, microscope_handler):
     """
     Create a specialized image path getter function using runtime context.
 
     Args:
-        well_id: Well identifier
+        axis_id: Well identifier
         filemanager: FileManager instance
         microscope_handler: Microscope handler with parser for filename parsing
 
     Returns:
         Function that takes (input_dir, backend) and returns image paths for the well
     """
-    def get_paths_for_well(input_dir, backend):
+    def get_paths_for_axis(input_dir, backend):
         return get_all_image_paths(
             input_dir=input_dir,
-            well_id=well_id,
+            axis_id=axis_id,
             backend=backend,
             filemanager=filemanager,
             microscope_handler=microscope_handler
         )
-    return get_paths_for_well
+    return get_paths_for_axis
 
 # Environment variable to disable universal GPU defragmentation
 DISABLE_GPU_DEFRAG = os.getenv('OPENHCS_DISABLE_GPU_DEFRAG', 'false').lower() == 'true'
@@ -132,7 +135,7 @@ DISABLE_GPU_DEFRAG = os.getenv('OPENHCS_DISABLE_GPU_DEFRAG', 'false').lower() ==
 def _bulk_preload_step_images(
     step_input_dir: Path,
     step_output_dir: Path,
-    well_id: str,
+    axis_id: str,
     read_backend: str,
     patterns_by_well: Dict[str, Any],
     filemanager: 'FileManager',
@@ -150,18 +153,18 @@ def _bulk_preload_step_images(
     import time
     start_time = time.time()
 
-    logger.debug(f"🔄 BULK PRELOAD: Loading images from {read_backend} to memory for well {well_id}")
+    logger.debug(f"🔄 BULK PRELOAD: Loading images from {read_backend} to memory for well {axis_id}")
 
     # Get all files for this well from patterns
     all_files = []
     # Create specialized path getter for this well
-    get_paths_for_well = create_image_path_getter(well_id, filemanager, microscope_handler)
+    get_paths_for_axis = create_image_path_getter(axis_id, filemanager, microscope_handler)
 
     # Get all image paths for this well
-    full_file_paths = get_paths_for_well(step_input_dir, read_backend)
+    full_file_paths = get_paths_for_axis(step_input_dir, read_backend)
 
     if not full_file_paths:
-        raise RuntimeError(f"🔄 BULK PRELOAD: No files found for well {well_id} in {step_input_dir} with backend {read_backend}")
+        raise RuntimeError(f"🔄 BULK PRELOAD: No files found for well {axis_id} in {step_input_dir} with backend {read_backend}")
 
     # Load from source backend with conditional zarr_config
     if read_backend == Backend.ZARR.value:
@@ -191,7 +194,7 @@ def _bulk_preload_step_images(
 def _bulk_writeout_step_images(
     step_output_dir: Path,
     write_backend: str,
-    well_id: str,
+    axis_id: str,
     zarr_config: Optional[Dict[str, Any]],
     filemanager: 'FileManager',
     microscope_handler: Optional[Any] = None
@@ -207,14 +210,14 @@ def _bulk_writeout_step_images(
     import time
     start_time = time.time()
 
-    logger.debug(f"🔄 BULK WRITEOUT: Writing images from memory to {write_backend} for well {well_id}")
+    logger.debug(f"🔄 BULK WRITEOUT: Writing images from memory to {write_backend} for well {axis_id}")
 
     # Create specialized path getter and get memory paths for this well
-    get_paths_for_well = create_image_path_getter(well_id, filemanager, microscope_handler)
-    memory_file_paths = get_paths_for_well(step_output_dir, Backend.MEMORY.value)
+    get_paths_for_axis = create_image_path_getter(axis_id, filemanager, microscope_handler)
+    memory_file_paths = get_paths_for_axis(step_output_dir, Backend.MEMORY.value)
 
     if not memory_file_paths:
-        raise RuntimeError(f"🔄 BULK WRITEOUT: No image files found for well {well_id} in memory directory {step_output_dir}")
+        raise RuntimeError(f"🔄 BULK WRITEOUT: No image files found for well {axis_id} in memory directory {step_output_dir}")
 
     # Convert relative memory paths back to absolute paths for target backend
     # Memory backend stores relative paths, but target backend needs absolute paths
@@ -240,14 +243,14 @@ def _bulk_writeout_step_images(
         if microscope_handler is not None:
             n_channels, n_z, n_fields = _calculate_zarr_dimensions(file_paths, microscope_handler)
             # Parse well to get row and column for zarr structure
-            row, col = microscope_handler.parser.extract_component_coordinates(well_id)
+            row, col = microscope_handler.parser.extract_component_coordinates(axis_id)
             filemanager.save_batch(memory_data, file_paths, write_backend,
-                                 chunk_name=well_id, zarr_config=zarr_config,
+                                 chunk_name=axis_id, zarr_config=zarr_config,
                                  n_channels=n_channels, n_z=n_z, n_fields=n_fields,
                                  row=row, col=col)
         else:
             # Fallback without dimensions if microscope_handler not available
-            filemanager.save_batch(memory_data, file_paths, write_backend, chunk_name=well_id, zarr_config=zarr_config)
+            filemanager.save_batch(memory_data, file_paths, write_backend, chunk_name=axis_id, zarr_config=zarr_config)
     else:
         filemanager.save_batch(memory_data, file_paths, write_backend)
 
@@ -296,7 +299,7 @@ def _execute_function_core(
     context: 'ProcessingContext',
     special_inputs_plan: Dict[str, str],  # {'arg_name_for_func': 'special_path_value'}
     special_outputs_plan: TypingOrderedDict[str, str], # {'output_key': 'special_path_value'}, order matters
-    well_id: str, # Add well_id parameter
+    axis_id: str, # Add axis_id parameter
     input_memory_type: str,
     device_id: int
 ) -> Any: # Returns the main processed data stack
@@ -413,10 +416,10 @@ def _execute_function_core(
                     vfs_path = vfs_path_info['path']
                 else:
                     vfs_path = vfs_path_info  # Fallback if it's already a string
-               # # Add well_id prefix to filename for memory backend to avoid thread collisions
+               # # Add axis_id prefix to filename for memory backend to avoid thread collisions
                # from pathlib import Path
                # vfs_path_obj = Path(vfs_path)
-               # prefixed_filename = f"{well_id}_{vfs_path_obj.name}"
+               # prefixed_filename = f"{axis_id}_{vfs_path_obj.name}"
                # prefixed_vfs_path = str(vfs_path_obj.parent / prefixed_filename)
 
                 logger.info(f"🔍 SPECIAL_SAVE: Saving '{output_key}' to '{vfs_path}' (memory backend)")
@@ -440,7 +443,7 @@ def _execute_chain_core(
     context: 'ProcessingContext',
     step_special_inputs_plan: Dict[str, str],
     step_special_outputs_plan: TypingOrderedDict[str, str],
-    well_id: str,  # Add well_id parameter
+    axis_id: str,  # Add axis_id parameter
     device_id: int,
     input_memory_type: str,
     step_index: int,  # Add step_index for funcplan lookup
@@ -500,7 +503,7 @@ def _execute_chain_core(
             context=context,
             special_inputs_plan=step_special_inputs_plan,
             special_outputs_plan=outputs_plan_for_this_call,
-            well_id=well_id,
+            axis_id=axis_id,
             device_id=device_id,
             input_memory_type=input_memory_type,
         )
@@ -517,7 +520,7 @@ def _process_single_pattern_group(
     base_func_args: Dict[str, Any],
     step_input_dir: Path,
     step_output_dir: Path,
-    well_id: str,
+    axis_id: str,
     component_value: str,
     read_backend: str,
     write_backend: str,
@@ -533,7 +536,7 @@ def _process_single_pattern_group(
 ) -> None:
     start_time = time.time()
     pattern_repr = str(pattern_group_info)[:100]
-    logger.debug(f"🔥 PATTERN: Processing {pattern_repr} for well {well_id}")
+    logger.debug(f"🔥 PATTERN: Processing {pattern_repr} for well {axis_id}")
 
     try:
         if not context.microscope_handler:
@@ -599,14 +602,14 @@ def _process_single_pattern_group(
         if isinstance(executable_func_or_chain, list):
             processed_stack = _execute_chain_core(
                 main_data_stack, executable_func_or_chain, context,
-                special_inputs_map, special_outputs_map, well_id,
+                special_inputs_map, special_outputs_map, axis_id,
                 device_id, input_memory_type_from_plan, step_index, dict_key_for_funcplan
             )
         elif callable(executable_func_or_chain):
             # For single functions, we don't need chain execution, but we still need the right dict_key
             processed_stack = _execute_function_core(
                 executable_func_or_chain, main_data_stack, final_base_kwargs, context,
-                special_inputs_map, special_outputs_map, well_id, input_memory_type_from_plan, device_id
+                special_inputs_map, special_outputs_map, axis_id, input_memory_type_from_plan, device_id
             )
         else:
             raise TypeError(f"Invalid executable_func_or_chain: {type(executable_func_or_chain)}")
@@ -749,7 +752,7 @@ class FunctionStep(AbstractStep):
         step_name = step_plan['step_name']
 
         try:
-            well_id = step_plan['well_id']
+            axis_id = step_plan['axis_id']
             step_input_dir = Path(step_plan['input_dir'])
             step_output_dir = Path(step_plan['output_dir'])
             variable_components = step_plan['variable_components']
@@ -768,17 +771,22 @@ class FunctionStep(AbstractStep):
             filemanager = context.filemanager
 
             # Create path getter for this well
-            get_paths_for_well = create_image_path_getter(well_id, filemanager, microscope_handler)
+            get_paths_for_axis = create_image_path_getter(axis_id, filemanager, microscope_handler)
 
             # Get patterns first for bulk preload
+            # Use dynamic filter parameter based on current multiprocessing axis
+            from openhcs.constants import MULTIPROCESSING_AXIS
+            axis_name = MULTIPROCESSING_AXIS.value
+            filter_kwargs = {f"{axis_name}_filter": [axis_id]}
+
             patterns_by_well = microscope_handler.auto_detect_patterns(
                 str(step_input_dir),           # folder_path
                 filemanager,           # filemanager
                 read_backend,                  # backend
-                well_filter=[well_id],         # well_filter
                 extensions=DEFAULT_IMAGE_EXTENSIONS,  # extensions
                 group_by=group_by,             # Pass GroupBy enum directly
-                variable_components=[vc.value for vc in variable_components] if variable_components else []  # variable_components for placeholder logic
+                variable_components=[vc.value for vc in variable_components] if variable_components else [],  # variable_components for placeholder logic
+                **filter_kwargs               # Dynamic filter parameter
             )
 
 
@@ -800,7 +808,7 @@ class FunctionStep(AbstractStep):
 
             logger.debug(f"🔥 DEBUG: Step {step_index} read_backend: {read_backend}, write_backend: {write_backend}")
 
-            if not all([well_id, step_input_dir, step_output_dir]):
+            if not all([axis_id, step_input_dir, step_output_dir]):
                 raise ValueError(f"Plan missing essential keys for step {step_index}")
 
             same_dir = str(step_input_dir) == str(step_output_dir)
@@ -809,7 +817,7 @@ class FunctionStep(AbstractStep):
 
             # 🔄 MATERIALIZATION READ: Bulk preload if not reading from memory
             if read_backend != Backend.MEMORY.value:
-                _bulk_preload_step_images(step_input_dir, step_output_dir, well_id, read_backend,
+                _bulk_preload_step_images(step_input_dir, step_output_dir, axis_id, read_backend,
                                         patterns_by_well,filemanager, microscope_handler, step_plan["zarr_config"])
 
             # 🔄 INPUT CONVERSION: Convert loaded input data to zarr if configured
@@ -820,7 +828,7 @@ class FunctionStep(AbstractStep):
                 logger.info(f"Converting input data to zarr: {input_conversion_dir}")
 
                 # Get memory paths from input data (already loaded)
-                memory_paths = get_paths_for_well(step_input_dir, Backend.MEMORY.value)
+                memory_paths = get_paths_for_axis(step_input_dir, Backend.MEMORY.value)
                 memory_data = filemanager.load_batch(memory_paths, Backend.MEMORY.value)
 
                 # Generate conversion paths (input_dir → conversion_dir)
@@ -830,10 +838,10 @@ class FunctionStep(AbstractStep):
                 # Calculate zarr dimensions from conversion paths (which contain the filenames)
                 n_channels, n_z, n_fields = _calculate_zarr_dimensions(conversion_paths, context.microscope_handler)
                 # Parse well to get row and column for zarr structure
-                row, col = context.microscope_handler.parser.extract_component_coordinates(well_id)
+                row, col = context.microscope_handler.parser.extract_component_coordinates(axis_id)
 
                 # Save using existing materialized data infrastructure
-                _save_materialized_data(filemanager, memory_data, conversion_paths, input_conversion_backend, step_plan, context, well_id)
+                _save_materialized_data(filemanager, memory_data, conversion_paths, input_conversion_backend, step_plan, context, axis_id)
 
                 logger.info(f"🔬 Converted {len(conversion_paths)} input files to {input_conversion_dir}")
 
@@ -850,29 +858,29 @@ class FunctionStep(AbstractStep):
             except Exception:
                 pass
 
-            logger.info(f"🔥 STEP: Starting processing for '{step_name}' well {well_id} (group_by={group_by.name if group_by else None}, variable_components={[vc.name for vc in variable_components] if variable_components else []})")
+            logger.info(f"🔥 STEP: Starting processing for '{step_name}' well {axis_id} (group_by={group_by.name if group_by else None}, variable_components={[vc.name for vc in variable_components] if variable_components else []})")
 
-            if well_id not in patterns_by_well:
+            if axis_id not in patterns_by_well:
                 raise ValueError(
-                    f"No patterns detected for well '{well_id}' in step '{step_name}' (index: {step_index}). "
+                    f"No patterns detected for well '{axis_id}' in step '{step_name}' (index: {step_index}). "
                     f"This indicates either: (1) no image files found for this well, "
                     f"(2) image files don't match the expected naming pattern, or "
                     f"(3) pattern detection failed. Check input directory: {step_input_dir}"
                 )
 
-            if isinstance(patterns_by_well[well_id], dict):
+            if isinstance(patterns_by_well[axis_id], dict):
                 # Grouped patterns (when group_by is set)
-                for comp_val, pattern_list in patterns_by_well[well_id].items():
+                for comp_val, pattern_list in patterns_by_well[axis_id].items():
                     logger.debug(f"🔥 STEP: Component '{comp_val}' has {len(pattern_list)} patterns: {pattern_list}")
             else:
                 # Ungrouped patterns (when group_by is None)
-                logger.debug(f"🔥 STEP: Found {len(patterns_by_well[well_id])} ungrouped patterns: {patterns_by_well[well_id]}")
+                logger.debug(f"🔥 STEP: Found {len(patterns_by_well[axis_id])} ungrouped patterns: {patterns_by_well[axis_id]}")
 
             if func_from_plan is None:
                 raise ValueError(f"Step plan missing 'func' for step: {step_plan.get('step_name', 'Unknown')} (index: {step_index})")
 
             grouped_patterns, comp_to_funcs, comp_to_base_args = prepare_patterns_and_functions(
-                patterns_by_well[well_id], func_from_plan, component=group_by.value if group_by else None
+                patterns_by_well[axis_id], func_from_plan, component=group_by.value if group_by else None
             )
 
             logger.info(f"🔍 DICT_PATTERN: grouped_patterns keys: {list(grouped_patterns.keys())}")
@@ -889,25 +897,25 @@ class FunctionStep(AbstractStep):
                 for pattern_item in current_pattern_list:
                     _process_single_pattern_group(
                         context, pattern_item, exec_func_or_chain, base_kwargs,
-                        step_input_dir, step_output_dir, well_id, comp_val,
+                        step_input_dir, step_output_dir, axis_id, comp_val,
                         read_backend, write_backend, input_mem_type, output_mem_type,
                         device_id, same_dir,
                         special_inputs, special_outputs, # Pass the maps from step_plan
                         step_plan["zarr_config"],
                         variable_components, step_index  # Pass step_index for funcplan lookup
                     )
-            logger.info(f"🔥 STEP: Completed processing for '{step_name}' well {well_id}.")
+            logger.info(f"🔥 STEP: Completed processing for '{step_name}' well {axis_id}.")
 
             # 📄 MATERIALIZATION WRITE: Only if not writing to memory
             if write_backend != Backend.MEMORY.value:
-                memory_paths = get_paths_for_well(step_output_dir, Backend.MEMORY.value)
+                memory_paths = get_paths_for_axis(step_output_dir, Backend.MEMORY.value)
                 memory_data = filemanager.load_batch(memory_paths, Backend.MEMORY.value)
                 # Calculate zarr dimensions (ignored by non-zarr backends)
                 n_channels, n_z, n_fields = _calculate_zarr_dimensions(memory_paths, context.microscope_handler)
-                row, col = context.microscope_handler.parser.extract_component_coordinates(well_id)
+                row, col = context.microscope_handler.parser.extract_component_coordinates(axis_id)
                 filemanager.ensure_directory(step_output_dir, write_backend)
                 filemanager.save_batch(memory_data, memory_paths, write_backend,
-                                     chunk_name=well_id, zarr_config=step_plan["zarr_config"],
+                                     chunk_name=axis_id, zarr_config=step_plan["zarr_config"],
                                      n_channels=n_channels, n_z=n_z, n_fields=n_fields,
                                      row=row, col=col)
 
@@ -916,16 +924,16 @@ class FunctionStep(AbstractStep):
                 materialized_output_dir = step_plan["materialized_output_dir"]
                 materialized_backend = step_plan["materialized_backend"]
 
-                memory_paths = get_paths_for_well(step_output_dir, Backend.MEMORY.value)
+                memory_paths = get_paths_for_axis(step_output_dir, Backend.MEMORY.value)
                 memory_data = filemanager.load_batch(memory_paths, Backend.MEMORY.value)
                 materialized_paths = _generate_materialized_paths(memory_paths, step_output_dir, Path(materialized_output_dir))
 
                 filemanager.ensure_directory(materialized_output_dir, materialized_backend)
-                _save_materialized_data(filemanager, memory_data, materialized_paths, materialized_backend, step_plan, context, well_id)
+                _save_materialized_data(filemanager, memory_data, materialized_paths, materialized_backend, step_plan, context, axis_id)
 
                 logger.info(f"🔬 Materialized {len(materialized_paths)} files to {materialized_output_dir}")
 
-            logger.info(f"FunctionStep {step_index} ({step_name}) completed for well {well_id}.")
+            logger.info(f"FunctionStep {step_index} ({step_name}) completed for well {axis_id}.")
 
             # 📄 OPENHCS METADATA: Create metadata file automatically after step completion
             # Track which backend was actually used for writing files
