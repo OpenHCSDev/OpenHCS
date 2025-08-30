@@ -51,9 +51,9 @@ from openhcs.tests.generators.generate_synthetic_data import SyntheticMicroscopy
 @dataclass(frozen=True)
 class TimingConfig:
     """Timing configuration for GUI operations."""
-    ACTION_DELAY: float = 0.2
-    WINDOW_DELAY: float = 0.2
-    SAVE_DELAY: float = 0.2
+    ACTION_DELAY: float = 0.5
+    WINDOW_DELAY: float = 0.5
+    SAVE_DELAY: float = 0.5
 
     @classmethod
     def from_environment(cls) -> 'TimingConfig':
