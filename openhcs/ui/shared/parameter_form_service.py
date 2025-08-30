@@ -126,18 +126,19 @@ class ParameterFormService:
             has_optional_dataclasses=has_optional_dataclasses
         )
     
-    def convert_value_to_type(self, value: Any, param_type: Type, param_name: str) -> Any:
+    def convert_value_to_type(self, value: Any, param_type: Type, param_name: str, dataclass_type: Type = None) -> Any:
         """
         Convert a value to the appropriate type for a parameter.
-        
+
         This method provides centralized type conversion logic that can be
         used by any UI framework.
-        
+
         Args:
             value: The value to convert
             param_type: The target parameter type
             param_name: The parameter name (for debugging)
-            
+            dataclass_type: The dataclass type (for sibling inheritance checks)
+
         Returns:
             The converted value
         """
@@ -186,6 +187,12 @@ class ParameterFormService:
         # Handle string types - also convert empty strings to None for consistency
         if param_type == str and isinstance(value, str) and value == CONSTANTS.EMPTY_STRING:
             return None
+
+        # Handle sibling-inheritable fields - allow None even for non-Optional types
+        if value is None and dataclass_type is not None:
+            from openhcs.core.config import is_field_sibling_inheritable
+            if is_field_sibling_inheritable(dataclass_type, param_name):
+                return None
 
         return value
     

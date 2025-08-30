@@ -204,7 +204,7 @@ def run_pipeline():
     from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
     setup_global_gpu_registry(global_config=global_config)
     for plate_path in plate_paths:
-        orchestrator = PipelineOrchestrator(plate_path, global_config=global_config)
+        orchestrator = PipelineOrchestrator(plate_path)
         orchestrator.initialize()
         compiled_contexts = orchestrator.compile_pipelines(pipeline_data[plate_path])
         orchestrator.execute_compiled_plate(

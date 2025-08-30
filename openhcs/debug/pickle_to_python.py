@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 from enum import Enum
+import dataclasses
 from dataclasses import is_dataclass, fields
 
 from openhcs.core.config import GlobalPipelineConfig, PathPlanningConfig, VFSConfig, ZarrConfig
@@ -97,25 +98,46 @@ def generate_complete_function_pattern_code(func_obj, indent=0, clean_mode=False
 
     return "\n".join(code_lines)
 
-def _value_to_repr(value):
-    """Converts a value to its Python representation string."""
+def _value_to_repr(value, required_imports=None, name_mappings=None):
+    """Converts a value to its Python representation string and tracks required imports."""
     if isinstance(value, Enum):
-        return f"{value.__class__.__name__}.{value.name}"
+        enum_class_name = value.__class__.__name__
+        enum_module = value.__class__.__module__
+
+        # Collect import for the enum class
+        if required_imports is not None and enum_module and enum_class_name:
+            required_imports[enum_module].add(enum_class_name)
+
+        # Use name mapping if available to handle collisions
+        if name_mappings and (enum_class_name, enum_module) in name_mappings:
+            mapped_name = name_mappings[(enum_class_name, enum_module)]
+            return f"{mapped_name}.{value.name}"
+        else:
+            return f"{enum_class_name}.{value.name}"
     elif isinstance(value, str):
         # Use repr() for strings to properly escape newlines and special characters
         return repr(value)
     elif isinstance(value, Path):
-        return f'Path({repr(str(value))})'
+        # Track that we need Path import
+        if required_imports is not None:
+            required_imports['pathlib'].add('Path')
+
+        # Use name mapping if available
+        path_name = 'Path'
+        if name_mappings and ('Path', 'pathlib') in name_mappings:
+            path_name = name_mappings[('Path', 'pathlib')]
+
+        return f'{path_name}({repr(str(value))})'
     return repr(value)
 
-def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False):
+def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, required_imports=None, name_mappings=None):
     """
     Generates a clean, readable Python representation of a dataclass instance,
     omitting fields that are set to their default values if clean_mode is True.
     This function is recursive and handles nested dataclasses.
     """
     if not dataclasses.is_dataclass(instance):
-        return _value_to_repr(instance)
+        return _value_to_repr(instance, required_imports, name_mappings)
 
     lines = []
     indent_str = "    " * indent_level
@@ -133,11 +155,18 @@ def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False):
             continue
 
         if dataclasses.is_dataclass(current_value):
+            # Collect import for the nested dataclass
+            if required_imports is not None:
+                class_module = current_value.__class__.__module__
+                class_name = current_value.__class__.__name__
+                if class_module and class_name:
+                    required_imports[class_module].add(class_name)
+
             # Recursively generate representation for nested dataclasses
-            nested_repr = generate_clean_dataclass_repr(current_value, indent_level + 1, clean_mode)
+            nested_repr = generate_clean_dataclass_repr(current_value, indent_level + 1, clean_mode, required_imports, name_mappings)
             lines.append(f"{child_indent_str}{field_name}={current_value.__class__.__name__}(\n{nested_repr}\n{child_indent_str})")
         else:
-            value_repr = _value_to_repr(current_value)
+            value_repr = _value_to_repr(current_value, required_imports, name_mappings)
             lines.append(f"{child_indent_str}{field_name}={value_repr}")
 
     if not lines:
@@ -289,19 +318,39 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_m
         return _value_to_repr(func_obj)
 
 
-def _format_parameter_value(param_name, value):
+def _format_parameter_value(param_name, value, name_mappings=None):
     """Format parameter values with lazy dataclass preservation."""
     if isinstance(value, Enum):
-        return f"{value.__class__.__name__}.{value.name}"
+        enum_class_name = value.__class__.__name__
+        enum_module = value.__class__.__module__
+
+        # Use name mapping if available to handle collisions
+        if name_mappings and (enum_class_name, enum_module) in name_mappings:
+            mapped_name = name_mappings[(enum_class_name, enum_module)]
+            return f"{mapped_name}.{value.name}"
+        else:
+            return f"{enum_class_name}.{value.name}"
     elif isinstance(value, str):
         return f'"{value}"'
     elif isinstance(value, list) and value and isinstance(value[0], Enum):
-        return f"[{', '.join(f'{item.__class__.__name__}.{item.name}' for item in value)}]"
+        formatted_items = []
+        for item in value:
+            enum_class_name = item.__class__.__name__
+            enum_module = item.__class__.__module__
+
+            # Use name mapping if available to handle collisions
+            if name_mappings and (enum_class_name, enum_module) in name_mappings:
+                mapped_name = name_mappings[(enum_class_name, enum_module)]
+                formatted_items.append(f"{mapped_name}.{item.name}")
+            else:
+                formatted_items.append(f"{enum_class_name}.{item.name}")
+
+        return f"[{', '.join(formatted_items)}]"
     elif is_dataclass(value) and 'Lazy' in value.__class__.__name__:
         # Preserve lazy behavior by only including explicitly set fields
         class_name = value.__class__.__name__
         explicit_args = [
-            f"{f.name}={_format_parameter_value(f.name, object.__getattribute__(value, f.name))}"
+            f"{f.name}={_format_parameter_value(f.name, object.__getattribute__(value, f.name), name_mappings)}"
             for f in fields(value)
             if object.__getattribute__(value, f.name) is not None
         ]
@@ -347,6 +396,32 @@ def _collect_dataclass_classes_from_object(obj, visited=None):
     return dataclass_classes, enum_classes
 
 
+def _collect_enum_classes_from_step(step):
+    """Collect enum classes referenced in step parameters for import generation."""
+    from openhcs.core.steps.function_step import FunctionStep
+    import inspect
+    from enum import Enum
+
+    enum_classes = set()
+    sig = inspect.signature(FunctionStep.__init__)
+
+    for param_name, param in sig.parameters.items():
+        # Skip constructor-specific parameters and **kwargs
+        if param_name in ['self', 'func'] or param.kind == inspect.Parameter.VAR_KEYWORD:
+            continue
+
+        value = getattr(step, param_name, param.default)
+        if isinstance(value, Enum):
+            enum_classes.add(type(value))
+        elif isinstance(value, (list, tuple)):
+            # Check for lists/tuples of enums
+            for item in value:
+                if isinstance(item, Enum):
+                    enum_classes.add(type(item))
+
+    return enum_classes
+
+
 def _generate_step_parameters(step, default_step, clean_mode=False, name_mappings=None):
     """Generate FunctionStep constructor parameters using functional introspection."""
     from openhcs.core.steps.abstract import AbstractStep
@@ -356,7 +431,7 @@ def _generate_step_parameters(step, default_step, clean_mode=False, name_mapping
                  [(name, param) for name, param in inspect.signature(AbstractStep.__init__).parameters.items()
                   if name != 'self']
 
-    return [f"{name}={generate_readable_function_repr(getattr(step, name, param.default), 1, clean_mode, name_mappings) if name == 'func' else _format_parameter_value(name, getattr(step, name, param.default))}"
+    return [f"{name}={generate_readable_function_repr(getattr(step, name, param.default), 1, clean_mode, name_mappings) if name == 'func' else _format_parameter_value(name, getattr(step, name, param.default), name_mappings)}"
             for name, param in signatures
             if not clean_mode or getattr(step, name, param.default) != getattr(default_step, name, param.default)]
 
@@ -415,7 +490,7 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     return "\n".join(code_lines)
 
 
-def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_config, clean_mode=False):
+def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_config, clean_mode=False, pipeline_config=None):
     """Generate complete Python code for orchestrator config with imports."""
     # Build complete code (extract exact logic from lines 150-200)
     code_lines = ["# Edit this orchestrator configuration and save to apply changes", ""]
@@ -432,14 +507,6 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
             # Get imports from step parameters
             param_imports, param_enums = collect_imports_from_data(step)
 
-            # Get enum classes referenced in generated code
-            enum_classes = _collect_enum_classes_from_step(step)
-            for enum_class in enum_classes:
-                module = enum_class.__module__
-                name = enum_class.__name__
-                if module and name:
-                    all_enum_imports[module].add(name)
-
             # Merge all imports
             for module, names in func_imports.items():
                 all_function_imports[module].update(names)
@@ -450,36 +517,36 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
             for module, names in param_enums.items():
                 all_enum_imports[module].update(names)
 
-    # Collect from global config
-    config_imports, config_enums = collect_imports_from_data(global_config)
-    for module, names in config_imports.items():
+    # Don't collect imports from entire global config upfront - only collect what's actually used
+    # This prevents importing unused classes and keeps the generated code clean
+
+    # First pass: Collect imports needed for config representation (e.g., Path) BEFORE formatting imports
+    config_repr_imports = defaultdict(set)
+    temp_config_repr = generate_clean_dataclass_repr(global_config, indent_level=0, clean_mode=clean_mode, required_imports=config_repr_imports)
+
+    # Merge config representation imports with main imports
+    for module, names in config_repr_imports.items():
         all_function_imports[module].update(names)
-    for module, names in config_enums.items():
-        all_enum_imports[module].update(names)
 
-    # Collect dataclass and enum classes referenced in generated code (PathPlanningConfig, VFSConfig, Backend, etc.)
-    dataclass_classes, config_enum_classes = _collect_dataclass_classes_from_object(global_config)
-    for dataclass_class in dataclass_classes:
-        module = dataclass_class.__module__
-        name = dataclass_class.__name__
-        if module and name:
-            all_function_imports[module].add(name)
-
-    for enum_class in config_enum_classes:
-        module = enum_class.__module__
-        name = enum_class.__name__
-        if module and name:
-            all_enum_imports[module].add(name)
+    # Don't collect imports from entire pipeline config upfront - let representation generation handle it
+    # This ensures only actually used imports are collected
 
     # Add always-needed imports for generated code structure
     all_function_imports['openhcs.core.steps.function_step'].add('FunctionStep')
+    all_function_imports['openhcs.core.pipeline_config'].add('PipelineConfig')
+    all_function_imports['openhcs.core.orchestrator.orchestrator'].add('PipelineOrchestrator')
+    all_function_imports['openhcs.core.config'].add('GlobalPipelineConfig')  # Always needed for global_config constructor
 
-    # Format and add all collected imports
+    # First pass: Generate name mappings for collision resolution (don't add imports yet)
     import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
-    if import_lines:
-        code_lines.append("# Automatically collected imports")
-        code_lines.extend(import_lines)
-        code_lines.append("")
+
+    # Generate config representation and collect only the imports it actually needs
+    config_repr_imports = defaultdict(set)
+    config_repr = generate_clean_dataclass_repr(global_config, indent_level=0, clean_mode=clean_mode, required_imports=config_repr_imports, name_mappings=name_mappings)
+
+    # Add only the imports that are actually used in the config representation
+    for module, names in config_repr_imports.items():
+        all_function_imports[module].update(names)
 
     code_lines.extend([
         "# Plate paths",
@@ -488,24 +555,57 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
         "# Global configuration",
     ])
 
-    config_repr = generate_clean_dataclass_repr(global_config, indent_level=0, clean_mode=clean_mode)
     code_lines.append(f"global_config = GlobalPipelineConfig(\n{config_repr}\n)")
     code_lines.append("")
+
+    # Add PipelineConfig creation with actual values (if any)
+    if pipeline_config is not None:
+        # Collect imports needed for pipeline config representation
+        pipeline_config_imports = defaultdict(set)
+        pipeline_config_repr = generate_clean_dataclass_repr(
+            pipeline_config,
+            indent_level=0,
+            clean_mode=clean_mode,
+            required_imports=pipeline_config_imports,
+            name_mappings=name_mappings
+        )
+
+        # Add the collected imports to the main import collection
+        for module, names in pipeline_config_imports.items():
+            all_function_imports[module].update(names)
+
+        # Regenerate import lines with the new imports
+        import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
+
+        code_lines.extend([
+            "# Pipeline configuration (lazy GlobalPipelineConfig)",
+            f"pipeline_config = PipelineConfig(\n{pipeline_config_repr}\n)",
+            ""
+        ])
+    else:
+        # No pipeline config overrides
+        code_lines.extend([
+            "# Pipeline configuration (lazy GlobalPipelineConfig)",
+            "pipeline_config = PipelineConfig()",
+            ""
+        ])
 
     # Generate pipeline data (exact logic from lines 164-198)
     code_lines.extend(["# Pipeline steps", "pipeline_data = {}", ""])
 
     default_step = FunctionStep(func=lambda: None)
     for plate_path, steps in pipeline_data.items():
-        code_lines.append(f'# Steps for plate: {Path(plate_path).name}')
+        # Extract plate name without using Path in generated code
+        plate_name = str(plate_path).split('/')[-1] if '/' in str(plate_path) else str(plate_path)
+        code_lines.append(f'# Steps for plate: {plate_name}')
         code_lines.append("steps = []")
         code_lines.append("")
 
         for i, step in enumerate(steps):
             code_lines.append(f"# Step {i+1}: {step.name}")
 
-            # Generate all FunctionStep parameters automatically using introspection
-            step_args = _generate_step_parameters(step, default_step, clean_mode)
+            # Generate all FunctionStep parameters automatically using introspection with name mappings
+            step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
 
             args_str = ",\n    ".join(step_args)
             code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
@@ -515,7 +615,32 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
         code_lines.append(f'pipeline_data["{plate_path}"] = steps')
         code_lines.append("")
 
-    return "\n".join(code_lines)
+    # Add orchestrator creation example
+    code_lines.extend([
+        "# Example: Create orchestrators with PipelineConfig",
+        "# orchestrators = {}",
+        "# for plate_path in plate_paths:",
+        "#     orchestrator = PipelineOrchestrator(",
+        "#         plate_path=plate_path,",
+        "#         pipeline_config=pipeline_config",
+        "#     )",
+        "#     orchestrators[plate_path] = orchestrator",
+        ""
+    ])
+
+    # Final pass: Generate all imports and prepend to code
+    final_import_lines, final_name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
+    if final_import_lines:
+        # Prepend imports to the beginning of the code
+        final_code_lines = ["# Edit this orchestrator configuration and save to apply changes", ""]
+        final_code_lines.append("# Automatically collected imports")
+        final_code_lines.extend(final_import_lines)
+        final_code_lines.append("")
+        # Add the rest of the code (skip the first two lines which are the header)
+        final_code_lines.extend(code_lines[2:])
+        return "\n".join(final_code_lines)
+    else:
+        return "\n".join(code_lines)
 
 
 def main():

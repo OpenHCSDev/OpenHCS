@@ -20,14 +20,15 @@ from typing import Any, Callable, Dict, List, Optional, Union, Set
 
 from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
 from openhcs.constants import Microscope
-from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, PipelineConfig, set_current_global_config, get_current_global_config, set_current_pipeline_config
+from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, set_current_global_config, get_current_global_config, set_current_pipeline_config
+from openhcs.core.pipeline_config import PipelineConfig
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
 from openhcs.core.steps.abstract import AbstractStep, get_step_id
 from openhcs.core.components.validation import convert_enum_by_value
-from openhcs.core.pipeline_config import PipelineConfig as CorePipelineConfig
+# PipelineConfig now imported directly above
 from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
 from openhcs.io.exceptions import StorageWriteError
 from openhcs.io.filemanager import FileManager

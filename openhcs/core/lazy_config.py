@@ -9,6 +9,7 @@ Creates complete lazy dataclasses with bound methods - no mixin inheritance need
 """
 
 # Standard library imports
+import inspect
 import logging
 import re
 import threading
@@ -939,4 +940,38 @@ def rebuild_lazy_config_with_new_global_reference(
     # Nested dataclasses are updated to reference new global config
     lazy_class_type = type(existing_lazy_config)
     return lazy_class_type(**current_field_values)
+
+
+# Create lazy config classes directly here for code generation imports
+# This avoids circular import issues and makes them available where import detection expects them
+
+def _create_lazy_config_classes():
+    """Create lazy config classes dynamically for all config classes in openhcs.core.config.
+
+    This uses reflection to automatically discover config classes and create their lazy versions,
+    eliminating the need to hardcode class names and making the system self-maintaining.
+    """
+    import openhcs.core.config as config_module
+
+    # Dynamically discover all dataclass config classes in the config module
+    for name, obj in inspect.getmembers(config_module):
+        # Check if it's a dataclass that ends with 'Config' (our naming convention)
+        if (inspect.isclass(obj) and
+            is_dataclass(obj) and
+            name.endswith('Config') and
+            not name.startswith('Lazy') and  # Skip already lazy classes
+            not name.startswith('Global')):  # Skip global configs (they have different patterns)
+
+            # Create lazy version dynamically
+            lazy_class_name = f"Lazy{name}"
+            lazy_class = LazyDataclassFactory.create_lazy_dataclass(
+                defaults_source=obj(),  # Create default instance - fail loud if constructor fails
+                lazy_class_name=lazy_class_name
+            )
+
+            # Export to this module's globals for import
+            globals()[lazy_class_name] = lazy_class
+
+# Create the lazy classes
+_create_lazy_config_classes()
 

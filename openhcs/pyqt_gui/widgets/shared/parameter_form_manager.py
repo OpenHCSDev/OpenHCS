@@ -440,7 +440,7 @@ class ParameterFormManager(QWidget):
     def _emit_parameter_change(self, param_name: str, value: Any) -> None:
         """Handle parameter change from widget and update parameter data model."""
         # Convert value using service layer
-        converted_value = self.service.convert_value_to_type(value, self.parameter_types.get(param_name, type(value)), param_name)
+        converted_value = self.service.convert_value_to_type(value, self.parameter_types.get(param_name, type(value)), param_name, self.dataclass_type)
 
         # Update parameter in data model
         self.parameters[param_name] = converted_value
@@ -536,7 +536,7 @@ class ParameterFormManager(QWidget):
 
         if param_name in self.parameters:
             # Convert value using service layer
-            converted_value = self.service.convert_value_to_type(value, self.parameter_types.get(param_name, type(value)), param_name)
+            converted_value = self.service.convert_value_to_type(value, self.parameter_types.get(param_name, type(value)), param_name, self.dataclass_type)
 
             # Update parameter in data model
             self.parameters[param_name] = converted_value

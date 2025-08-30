@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any, Tuple
 
-from openhcs.core.config import PipelineConfig
+from openhcs.core.pipeline_config import PipelineConfig
 
 from PIL import Image
 from textual.app import ComposeResult
@@ -1173,7 +1173,7 @@ class PlateManagerWidget(ButtonListWidget):
         This maintains the existing global configuration workflow but uses lazy loading.
         """
         from openhcs.core.config import get_default_global_config
-        from openhcs.core.lazy_config import create_pipeline_config_for_editing, PipelineConfig
+        from openhcs.core.pipeline_config import create_pipeline_config_for_editing, PipelineConfig
 
         # Get current global config from app or use default
         current_global_config = self.app.global_config or get_default_global_config()
@@ -1578,7 +1578,7 @@ class PlateManagerWidget(ButtonListWidget):
                 plate_paths=plate_paths,
                 pipeline_data=pipeline_data,
                 global_config=self.app.global_config,
-                clean_mode=False
+                clean_mode=True  # Default to clean mode - only show non-default values
             )
 
             # Create callback to handle edited code

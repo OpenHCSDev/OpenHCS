@@ -23,7 +23,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QFont
 
-from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.pipeline_config import PipelineConfig
 from openhcs.io.filemanager import FileManager
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator, OrchestratorState
 from openhcs.core.pipeline import Pipeline
@@ -51,6 +52,10 @@ class PlateManagerWidget(QWidget):
     status_message = pyqtSignal(str)  # status message
     orchestrator_state_changed = pyqtSignal(str, str)  # plate_path, state
     orchestrator_config_changed = pyqtSignal(str, object)  # plate_path, effective_config
+
+    # Configuration change signals for tier 3 UI-code conversion
+    global_config_changed = pyqtSignal()  # global config updated
+    pipeline_data_changed = pyqtSignal()  # pipeline data updated
 
     # Log viewer integration signals
     subprocess_log_started = pyqtSignal(str)  # base_log_path
@@ -561,6 +566,25 @@ class PlateManagerWidget(QWidget):
             self,                   # parent
             orchestrator=orchestrator  # Pass orchestrator for context persistence
         )
+
+        # CRITICAL: Connect to orchestrator config changes for automatic refresh
+        # This ensures the config window stays in sync when tier 3 edits change the underlying config
+        if orchestrator and hasattr(config_window, 'refresh_config'):
+            def handle_orchestrator_config_change(plate_path: str, effective_config):
+                # Only refresh if this is for the same orchestrator
+                if plate_path == str(orchestrator.plate_path):
+                    # Get the updated pipeline config from the orchestrator
+                    updated_pipeline_config = orchestrator.pipeline_config
+                    if updated_pipeline_config:
+                        config_window.refresh_config(updated_pipeline_config)
+                        logger.debug(f"Auto-refreshed config window for orchestrator: {plate_path}")
+
+            # Connect the signal
+            self.orchestrator_config_changed.connect(handle_orchestrator_config_change)
+
+            # Store the connection so we can disconnect it when the window closes
+            config_window._orchestrator_signal_connection = handle_orchestrator_config_change
+
         # Show as non-modal window (like main window configuration)
         config_window.show()
         config_window.raise_()
@@ -974,9 +998,183 @@ class PlateManagerWidget(QWidget):
             self.service_adapter.show_info_dialog("No execution is currently running.")
     
     def action_code_plate(self):
-        """Handle Code Generation button (placeholder)."""
-        self.service_adapter.show_info_dialog("Code generation not yet implemented in PyQt6 version.")
-    
+        """Generate Python code for selected plates and their pipelines (Tier 3)."""
+        logger.debug("Code button pressed - generating Python code for plates")
+
+        selected_items = self.get_selected_plates()
+        if not selected_items:
+            self.service_adapter.show_error_dialog("No plates selected for code generation")
+            return
+
+        try:
+            # Collect plate paths, pipeline data, and pipeline config (same logic as Textual TUI)
+            plate_paths = []
+            pipeline_data = {}
+
+            # Get pipeline config from the first selected orchestrator (they should all have the same config)
+            representative_orchestrator = None
+            for plate_data in selected_items:
+                plate_path = plate_data['path']
+                if plate_path in self.orchestrators:
+                    representative_orchestrator = self.orchestrators[plate_path]
+                    break
+
+            for plate_data in selected_items:
+                plate_path = plate_data['path']
+                plate_paths.append(plate_path)
+
+                # Get pipeline definition for this plate
+                definition_pipeline = self._get_current_pipeline_definition(plate_path)
+                if not definition_pipeline:
+                    logger.warning(f"No pipeline defined for {plate_data['name']}, using empty pipeline")
+                    definition_pipeline = []
+
+                pipeline_data[plate_path] = definition_pipeline
+
+            # Get the actual pipeline config from the orchestrator
+            actual_pipeline_config = None
+            if representative_orchestrator and representative_orchestrator.pipeline_config:
+                actual_pipeline_config = representative_orchestrator.pipeline_config
+
+            # Generate complete orchestrator code using existing function
+            from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
+
+            python_code = generate_complete_orchestrator_code(
+                plate_paths=plate_paths,
+                pipeline_data=pipeline_data,
+                global_config=self.global_config,
+                pipeline_config=actual_pipeline_config,
+                clean_mode=True  # Default to clean mode - only show non-default values
+            )
+
+            # Create simple code editor service (same pattern as tiers 1 & 2)
+            from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
+            editor_service = SimpleCodeEditorService(self)
+
+            # Check if user wants external editor (check environment variable)
+            import os
+            use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
+
+            # Launch editor with callback
+            editor_service.edit_code(
+                initial_content=python_code,
+                title="Edit Orchestrator Configuration",
+                callback=self._handle_edited_orchestrator_code,
+                use_external=use_external
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to generate plate code: {e}")
+            self.service_adapter.show_error_dialog(f"Failed to generate code: {str(e)}")
+
+    def _handle_edited_orchestrator_code(self, edited_code: str):
+        """Handle edited orchestrator code and update UI state (same logic as Textual TUI)."""
+        logger.debug("Orchestrator code edited, processing changes...")
+        try:
+            # Execute the code (it has all necessary imports)
+            namespace = {}
+            exec(edited_code, namespace)
+
+            # Extract variables from executed code (same logic as Textual TUI)
+            if 'plate_paths' in namespace and 'pipeline_data' in namespace:
+                new_plate_paths = namespace['plate_paths']
+                new_pipeline_data = namespace['pipeline_data']
+
+                # Update global config if present
+                if 'global_config' in namespace:
+                    new_global_config = namespace['global_config']
+                    # Update the global config (trigger UI refresh)
+                    self.global_config = new_global_config
+
+                    # CRITICAL: Apply new global config to all orchestrators (was missing!)
+                    # This ensures orchestrators use the updated global config from tier 3 edits
+                    for orchestrator in self.orchestrators.values():
+                        self._update_orchestrator_global_config(orchestrator, new_global_config)
+
+                    # Update service adapter and thread-local storage
+                    self.service_adapter.set_global_config(new_global_config)
+                    from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
+                    set_current_global_config(GlobalPipelineConfig, new_global_config)
+
+                    self.global_config_changed.emit()
+
+                # Update pipeline config if present (CRITICAL: This was missing!)
+                if 'pipeline_config' in namespace:
+                    new_pipeline_config = namespace['pipeline_config']
+                    # Apply the new pipeline config to all affected orchestrators
+                    for plate_path in new_plate_paths:
+                        if plate_path in self.orchestrators:
+                            orchestrator = self.orchestrators[plate_path]
+                            orchestrator.apply_pipeline_config(new_pipeline_config)
+                            # Emit signal for UI components to refresh (including config windows)
+                            effective_config = orchestrator.get_effective_config()
+                            self.orchestrator_config_changed.emit(str(plate_path), effective_config)
+                            logger.debug(f"Applied tier 3 pipeline config to orchestrator: {plate_path}")
+
+                # Update pipeline data for ALL affected plates with proper state invalidation
+                if self.pipeline_editor and hasattr(self.pipeline_editor, 'plate_pipelines'):
+                    current_plate = getattr(self.pipeline_editor, 'current_plate', None)
+
+                    for plate_path, new_steps in new_pipeline_data.items():
+                        # Update pipeline data in the pipeline editor
+                        self.pipeline_editor.plate_pipelines[plate_path] = new_steps
+                        logger.debug(f"Updated pipeline for {plate_path} with {len(new_steps)} steps")
+
+                        # CRITICAL: Invalidate orchestrator state for ALL affected plates
+                        self._invalidate_orchestrator_compilation_state(plate_path)
+
+                        # If this is the currently displayed plate, trigger UI cascade
+                        if plate_path == current_plate:
+                            # Update the current pipeline steps to trigger cascade
+                            self.pipeline_editor.pipeline_steps = new_steps
+                            # Trigger UI refresh for the current plate
+                            self.pipeline_editor.update_step_list()
+                            # Emit pipeline changed signal to cascade to step editors
+                            self.pipeline_editor.pipeline_changed.emit(new_steps)
+                            logger.debug(f"Triggered UI cascade refresh for current plate: {plate_path}")
+                else:
+                    logger.warning("No pipeline editor available to update pipeline data")
+
+                # Trigger UI refresh
+                self.pipeline_data_changed.emit()
+                self.service_adapter.show_info_dialog("Orchestrator configuration updated successfully")
+
+            else:
+                self.service_adapter.show_error_dialog("No valid assignments found in edited code")
+
+        except SyntaxError as e:
+            self.service_adapter.show_error_dialog(f"Invalid Python syntax: {e}")
+        except Exception as e:
+            logger.error(f"Failed to parse edited orchestrator code: {e}")
+            self.service_adapter.show_error_dialog(f"Failed to parse orchestrator code: {str(e)}")
+
+    def _invalidate_orchestrator_compilation_state(self, plate_path: str):
+        """Invalidate compilation state for an orchestrator when its pipeline changes.
+
+        This ensures that tier 3 changes properly invalidate ALL affected orchestrators,
+        not just the currently visible one.
+
+        Args:
+            plate_path: Path of the plate whose orchestrator state should be invalidated
+        """
+        # Clear compiled data from simple state
+        if plate_path in self.plate_compiled_data:
+            del self.plate_compiled_data[plate_path]
+            logger.debug(f"Cleared compiled data for {plate_path}")
+
+        # Reset orchestrator state to READY (initialized) if it was compiled
+        orchestrator = self.orchestrators.get(plate_path)
+        if orchestrator:
+            from openhcs.constants.constants import OrchestratorState
+            if orchestrator.state == OrchestratorState.COMPILED:
+                orchestrator._state = OrchestratorState.READY
+                logger.debug(f"Reset orchestrator state to READY for {plate_path}")
+
+                # Emit state change signal for UI refresh
+                self.orchestrator_state_changed.emit(plate_path, "READY")
+
+        logger.debug(f"Invalidated compilation state for orchestrator: {plate_path}")
+
     def action_save_python_script(self):
         """Handle Save Python Script button (placeholder)."""
         self.service_adapter.show_info_dialog("Script saving not yet implemented in PyQt6 version.")
@@ -1246,23 +1444,14 @@ class PlateManagerWidget(QWidget):
             logger.warning("No pipeline editor reference - using empty pipeline")
             return []
 
-        # Get pipeline for specific plate or current plate
-        target_plate = plate_path or getattr(self.pipeline_editor, 'current_plate', None)
-        if not target_plate:
-            logger.warning("No plate specified - using empty pipeline")
-            return []
-
-        # Get pipeline from editor (should return List[FunctionStep] directly)
-        if hasattr(self.pipeline_editor, 'get_pipeline_for_plate'):
-            pipeline_steps = self.pipeline_editor.get_pipeline_for_plate(target_plate)
-        elif hasattr(self.pipeline_editor, 'pipeline_steps'):
-            # Fallback to current pipeline steps if get_pipeline_for_plate not available
-            pipeline_steps = getattr(self.pipeline_editor, 'pipeline_steps', [])
+        # Get pipeline for specific plate (same logic as Textual TUI)
+        if hasattr(self.pipeline_editor, 'plate_pipelines') and plate_path in self.pipeline_editor.plate_pipelines:
+            pipeline_steps = self.pipeline_editor.plate_pipelines[plate_path]
+            logger.debug(f"Found pipeline for plate {plate_path} with {len(pipeline_steps)} steps")
+            return pipeline_steps
         else:
-            logger.warning("Pipeline editor doesn't have expected methods - using empty pipeline")
+            logger.debug(f"No pipeline found for plate {plate_path}, using empty pipeline")
             return []
-
-        return pipeline_steps or []
 
     def set_pipeline_editor(self, pipeline_editor):
         """

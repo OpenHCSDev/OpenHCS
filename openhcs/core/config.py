@@ -227,9 +227,16 @@ class StepMaterializationConfig(PathPlanningConfig):
     - EXCLUDE: Materialize all wells except those matching the filter
     """
 
-    # Override PathPlanningConfig defaults to prevent collisions
-    # output_dir_suffix inherited from PathPlanningConfig ("_outputs") - materialization uses same output plate as main pipeline
-    sub_dir: str = "checkpoints"  # vs global "images"
+    # Override PathPlanningConfig defaults to enable sibling inheritance
+    output_dir_suffix: Optional[str] = None
+    """Override to None - inherits from sibling path_planning.output_dir_suffix when None."""
+
+    global_output_folder: Optional[Path] = None
+    """Override to None - inherits from sibling path_planning.global_output_folder when None."""
+
+    sub_dir: str = "checkpoints"  # vs global "images" - own field, no inheritance
+
+
 
 
 # Generic thread-local storage for any global config type
@@ -245,6 +252,81 @@ def get_current_global_config(config_type: Type) -> Optional[Any]:
     """Get current global config for any dataclass type."""
     context = _global_config_contexts.get(config_type)
     return getattr(context, 'value', None) if context else None
+
+
+def is_field_sibling_inheritable(dataclass_type: Type, field_name: str) -> bool:
+    """
+    Check if a field supports sibling inheritance based on dataclass inheritance.
+
+    A field is sibling-inheritable if:
+    1. The dataclass inherits from another dataclass
+    2. The parent dataclass has the same field name
+    3. This enables automatic sibling inheritance without metadata
+
+    Args:
+        dataclass_type: The dataclass type to check
+        field_name: The field name to check
+
+    Returns:
+        True if the field supports sibling inheritance
+    """
+    if not dataclasses.is_dataclass(dataclass_type):
+        return False
+
+    try:
+        # Check if this dataclass inherits from another dataclass
+        for base_class in dataclass_type.__bases__:
+            if dataclasses.is_dataclass(base_class):
+                # Check if the parent has the same field
+                parent_fields = {f.name for f in dataclasses.fields(base_class)}
+                if field_name in parent_fields:
+                    return True
+        return False
+    except (AttributeError, TypeError):
+        return False
+
+
+def resolve_dataclass_with_sibling_inheritance(instance: Any, sibling_source: Any) -> Any:
+    """
+    Generic utility to resolve any dataclass with automatic sibling inheritance.
+
+    For any dataclass that inherits from another dataclass, this function
+    automatically resolves None fields by inheriting from the sibling source.
+
+    Args:
+        instance: The dataclass instance to resolve
+        sibling_source: The sibling object to inherit from
+
+    Returns:
+        New dataclass instance with sibling inheritance resolved
+
+    Example:
+        # StepMaterializationConfig inherits from PathPlanningConfig
+        resolved = resolve_dataclass_with_sibling_inheritance(
+            materialization_config, path_planning_config
+        )
+    """
+    if not dataclasses.is_dataclass(instance):
+        return instance
+
+    if sibling_source is None:
+        return instance
+
+    # Get all fields and resolve them
+    resolved_values = {}
+    for field in dataclasses.fields(instance):
+        field_name = field.name
+        current_value = getattr(instance, field_name, None)
+
+        # Only inherit if field is None and field supports inheritance
+        if current_value is None and is_field_sibling_inheritable(type(instance), field_name):
+            resolved_value = getattr(sibling_source, field_name, None)
+            resolved_values[field_name] = resolved_value
+        else:
+            resolved_values[field_name] = current_value
+
+    # Create new instance with resolved values
+    return type(instance)(**resolved_values)
 
 
 # Type registry for lazy dataclass to base class mapping
@@ -544,6 +626,8 @@ class GlobalPipelineConfig:
     # logging_config: Optional[Dict[str, Any]] = None # For configuring logging levels, handlers
     # plugin_settings: Dict[str, Any] = field(default_factory=dict) # For plugin-specific settings
 
+
+
 # --- Default Configuration Provider ---
 
 # Pre-instantiate default sub-configs for clarity if they have many fields or complex defaults.
@@ -580,11 +664,16 @@ def get_default_global_config() -> GlobalPipelineConfig:
     )
 
 
+# Create and export lazy versions of config classes for code generation
+# Lazy config classes are automatically created by the dynamic system in lazy_config.py
+# No hardcoded lazy class creation needed - the system discovers and creates them automatically
+
 # Import pipeline-specific classes - circular import solved by moving import to end
 from openhcs.core.pipeline_config import (
     LazyStepMaterializationConfig,
-    PipelineConfig,
     set_current_pipeline_config,
     ensure_pipeline_config_context,
     create_pipeline_config_for_editing
 )
+# Note: PipelineConfig removed from re-export to avoid import collision
+# Import directly from openhcs.core.pipeline_config when needed

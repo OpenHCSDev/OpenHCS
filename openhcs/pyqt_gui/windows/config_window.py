@@ -250,6 +250,78 @@ class ConfigWindow(QDialog):
 
         logger.debug("Reset all parameters using enhanced ParameterFormManager service")
 
+    def refresh_config(self, new_config):
+        """Refresh the config window with new configuration data.
+
+        This is called when the underlying configuration changes (e.g., from tier 3 edits)
+        to keep the UI in sync with the actual data.
+
+        Args:
+            new_config: New configuration instance to display
+        """
+        try:
+            # Update the current config
+            self.current_config = new_config
+
+            # Determine placeholder prefix based on actual instance type (same logic as __init__)
+            from openhcs.core.config import LazyDefaultPlaceholderService
+            is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(new_config))
+            placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
+
+            # Create new form manager with the new config
+            new_form_manager = ParameterFormManager.from_dataclass_instance(
+                dataclass_instance=new_config,
+                field_id="config",
+                placeholder_prefix=placeholder_prefix,
+                color_scheme=self.color_scheme,
+                use_scroll_area=True
+            )
+
+            # Find and replace the form widget in the layout
+            # Layout structure: [0] header, [1] form/scroll_area, [2] buttons
+            layout = self.layout()
+            if layout.count() >= 2:
+                # Get the form container (might be scroll area or direct form)
+                form_container_item = layout.itemAt(1)
+                if form_container_item:
+                    old_container = form_container_item.widget()
+
+                    # Remove old container from layout
+                    layout.removeItem(form_container_item)
+
+                    # Properly delete old container and its contents
+                    if old_container:
+                        old_container.deleteLater()
+
+                    # Add new form container at the same position
+                    if self._should_use_scroll_area():
+                        # Create new scroll area with new form
+                        from PyQt6.QtWidgets import QScrollArea
+                        from PyQt6.QtCore import Qt
+                        scroll_area = QScrollArea()
+                        scroll_area.setWidgetResizable(True)
+                        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+                        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                        scroll_area.setWidget(new_form_manager)
+                        layout.insertWidget(1, scroll_area)
+                    else:
+                        # Add form directly
+                        layout.insertWidget(1, new_form_manager)
+
+                    # Update the form manager reference
+                    self.form_manager = new_form_manager
+
+                    logger.debug(f"Config window refreshed with new {type(new_config).__name__}")
+                else:
+                    logger.error("Could not find form container in layout")
+            else:
+                logger.error(f"Layout has insufficient items: {layout.count()}")
+
+        except Exception as e:
+            logger.error(f"Failed to refresh config window: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
     def save_config(self):
         """Save the configuration preserving lazy behavior for unset fields."""
         try:
@@ -275,4 +347,23 @@ class ConfigWindow(QDialog):
     def reject(self):
         """Handle dialog rejection (Cancel button)."""
         self.config_cancelled.emit()
+        self._cleanup_signal_connections()
         super().reject()
+
+    def accept(self):
+        """Handle dialog acceptance (Save button)."""
+        self._cleanup_signal_connections()
+        super().accept()
+
+    def closeEvent(self, event):
+        """Handle window close event."""
+        self._cleanup_signal_connections()
+        super().closeEvent(event)
+
+    def _cleanup_signal_connections(self):
+        """Clean up signal connections to prevent memory leaks."""
+        if hasattr(self, '_orchestrator_signal_connection'):
+            # The signal connection is handled by the plate manager
+            # We just need to mark that this window is closing
+            logger.debug("Config window closing, signal connections will be cleaned up")
+            delattr(self, '_orchestrator_signal_connection')
