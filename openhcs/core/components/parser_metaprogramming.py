@@ -327,12 +327,8 @@ class GenericFilenameParser(ABC):
             True if the value is valid for the component
         """
         validate_method_name = f"validate_{component_name}"
-        if hasattr(self, validate_method_name):
-            validate_method = getattr(self, validate_method_name)
-            return validate_method(value)
-        else:
-            # Fallback: allow any value for unknown components
-            return True
+        validate_method = getattr(self, validate_method_name)
+        return validate_method(value)
 
     def extract_component_by_name(self, filename: str, component_name: str) -> Optional[Any]:
         """
@@ -349,14 +345,8 @@ class GenericFilenameParser(ABC):
             AttributeError: If no extraction method exists for the component
         """
         extract_method_name = f"extract_{component_name}"
-        if hasattr(self, extract_method_name):
-            extract_method = getattr(self, extract_method_name)
-            return extract_method(filename)
-        else:
-            raise AttributeError(
-                f"No extraction method '{extract_method_name}' found. "
-                f"Component '{component_name}' may not be in the component enum."
-            )
+        extract_method = getattr(self, extract_method_name)
+        return extract_method(filename)
     
     def validate_component_dict(self, components: Dict[str, Any]) -> bool:
         """
