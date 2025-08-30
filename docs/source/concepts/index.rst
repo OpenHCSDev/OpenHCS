@@ -29,6 +29,7 @@ The fundamental concepts that define how OpenHCS works.
    pipelines_and_steps
    function_patterns
    data_dimensions
+   component_system_concepts
 
 Processing System
 =================
