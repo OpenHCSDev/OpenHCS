@@ -13,8 +13,10 @@ Doctrinal Clauses:
 """
 
 import logging
+import contextlib
 import concurrent.futures
 import multiprocessing
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Set
 
@@ -60,6 +62,25 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _create_merged_config(pipeline_config: PipelineConfig, global_config: GlobalPipelineConfig) -> GlobalPipelineConfig:
+    """
+    Pure function for creating merged config that preserves None values for sibling inheritance.
+
+    Follows OpenHCS stateless architecture principles - no side effects, explicit dependencies.
+    Extracted from apply_pipeline_config to eliminate code duplication.
+    """
+    merged_config_values = {}
+    for field in fields(GlobalPipelineConfig):
+        # Fail-loud: Let AttributeError bubble up naturally (no getattr fallbacks)
+        pipeline_value = getattr(pipeline_config, field.name)
+        if pipeline_value is not None:
+            merged_config_values[field.name] = pipeline_value
+        else:
+            merged_config_values[field.name] = getattr(global_config, field.name)
+
+    return GlobalPipelineConfig(**merged_config_values)
 
 
 def _execute_single_axis_static(
@@ -207,6 +228,10 @@ class PipelineOrchestrator:
                 "No global configuration context found. "
                 "Ensure application startup has called ensure_global_config_context()."
             )
+
+        # Initialize auto-sync control for pipeline config
+        self._pipeline_config = None
+        self._auto_sync_enabled = True
 
         # Initialize per-orchestrator configuration
         # Always ensure orchestrator has a pipeline config - create default if none provided
@@ -873,6 +898,23 @@ class PipelineOrchestrator:
 
     # Global config management removed - handled by UI layer
 
+    @property
+    def pipeline_config(self) -> Optional[PipelineConfig]:
+        """Get current pipeline configuration."""
+        return self._pipeline_config
+
+    @pipeline_config.setter
+    def pipeline_config(self, value: Optional[PipelineConfig]) -> None:
+        """Set pipeline configuration with auto-sync to thread-local context."""
+        self._pipeline_config = value
+        if self._auto_sync_enabled and value is not None:
+            self._sync_to_thread_local()
+
+    def _sync_to_thread_local(self) -> None:
+        """Internal method to sync current pipeline_config to thread-local context."""
+        if self._pipeline_config and hasattr(self, 'plate_path'):
+            self.apply_pipeline_config(self._pipeline_config)
+
     def apply_pipeline_config(self, pipeline_config: PipelineConfig) -> None:
         """
         Apply per-orchestrator configuration using thread-local storage.
@@ -883,35 +925,16 @@ class PipelineOrchestrator:
         if not isinstance(pipeline_config, PipelineConfig):
             raise TypeError(f"Expected PipelineConfig, got {type(pipeline_config)}")
 
-        self.pipeline_config = pipeline_config
+        # Temporarily disable auto-sync to prevent recursion
+        self._auto_sync_enabled = False
+        try:
+            self._pipeline_config = pipeline_config
+        finally:
+            self._auto_sync_enabled = True
 
-        # Set up thread-local context for sibling inheritance
-        # The existing lazy config system already handles sibling inheritance automatically
-        # We just need to provide the pipeline config instance as the context
-        from dataclasses import fields
-
-        # Create a merged config that combines global defaults with pipeline overrides
-        # This provides the context for the existing sibling inheritance system
-        merged_config_values = {}
+        # Set up thread-local context for sibling inheritance using pure function
         shared_context = get_current_global_config(GlobalPipelineConfig)
-
-        for field in fields(GlobalPipelineConfig):
-            try:
-                # Get raw value from pipeline config
-                raw_value = object.__getattribute__(pipeline_config, field.name)
-                if raw_value is not None:
-                    # Use the override value
-                    merged_config_values[field.name] = raw_value
-                else:
-                    # Use shared global context for None values
-                    merged_config_values[field.name] = getattr(shared_context, field.name)
-            except AttributeError:
-                # Field doesn't exist in pipeline config, use shared global context
-                merged_config_values[field.name] = getattr(shared_context, field.name)
-
-        # Create merged config for thread-local context
-        # The existing sibling inheritance system will handle the rest automatically
-        merged_config = GlobalPipelineConfig(**merged_config_values)
+        merged_config = _create_merged_config(pipeline_config, shared_context)
         set_current_global_config(GlobalPipelineConfig, merged_config)
 
         # CRITICAL FIX: Do NOT overwrite context with effective_config
@@ -921,17 +944,41 @@ class PipelineOrchestrator:
 
         logger.info(f"Applied orchestrator config for plate: {self.plate_path}")
 
-    def get_effective_config(self) -> GlobalPipelineConfig:
-        """Get effective configuration for this orchestrator."""
-        if self.pipeline_config:
-            # Thread-local context should already be set up by apply_pipeline_config()
-            # Don't override it here as it may contain merged config for sibling inheritance
+    def get_effective_config(self, *, for_serialization: bool = False) -> GlobalPipelineConfig:
+        """
+        Get effective configuration for this orchestrator.
+
+        Args:
+            for_serialization: If True, resolves all values for pickling/storage.
+                              If False, preserves None values for sibling inheritance.
+        """
+        if not self.pipeline_config:
+            shared_context = get_current_global_config(GlobalPipelineConfig)
+            if shared_context is None:
+                raise RuntimeError("No global configuration context available")
+            return shared_context
+
+        if for_serialization:
             return self.pipeline_config.to_base_config()
-        # Use shared global context instead of per-orchestrator config
-        shared_context = get_current_global_config(GlobalPipelineConfig)
-        if shared_context is None:
-            raise RuntimeError("No global configuration context available")
-        return shared_context
+        else:
+            # Reuse existing merged config logic from apply_pipeline_config
+            shared_context = get_current_global_config(GlobalPipelineConfig)
+            if not shared_context:
+                raise RuntimeError("No global configuration context available for merging")
+
+            return _create_merged_config(self.pipeline_config, shared_context)
+
+    @contextlib.contextmanager
+    def config_context(self, *, for_serialization: bool = False):
+        """Context manager for operations requiring orchestrator config context."""
+        original_config = get_current_global_config(GlobalPipelineConfig)
+        try:
+            if self.pipeline_config:
+                effective_config = self.get_effective_config(for_serialization=for_serialization)
+                set_current_global_config(GlobalPipelineConfig, effective_config)
+            yield self
+        finally:
+            set_current_global_config(GlobalPipelineConfig, original_config)
 
     def clear_pipeline_config(self) -> None:
         """Clear per-orchestrator configuration."""

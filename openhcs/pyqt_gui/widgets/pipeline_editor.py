@@ -353,15 +353,9 @@ class PipelineEditorWidget(QWidget):
         # Create and show editor dialog within the correct config context
         orchestrator = self._get_current_orchestrator()
 
-        # CRITICAL FIX: Apply the merged config to thread-local storage so that
-        # placeholder resolution in the step editor has access to sibling inheritance
-        if orchestrator:
-            current_pipeline_cfg = orchestrator.pipeline_config or PipelineConfig()
-            orchestrator.apply_pipeline_config(current_pipeline_cfg)
-        else:
+        # Auto-sync handles context setup automatically when pipeline_config is accessed
+        if not orchestrator:
             logger.info("No orchestrator found for step editor context, This should not happen.")
-
-        with self._scoped_orchestrator_context():
             editor = DualEditorWindow(
                 step_data=new_step,
                 is_new=True,
@@ -369,6 +363,15 @@ class PipelineEditorWidget(QWidget):
                 orchestrator=orchestrator,
                 parent=self
             )
+        else:
+            with orchestrator.config_context(for_serialization=False):
+                editor = DualEditorWindow(
+                    step_data=new_step,
+                    is_new=True,
+                    on_save_callback=handle_save,
+                    orchestrator=orchestrator,
+                    parent=self
+                )
             # Set original step for change detection within the scoped context
             editor.set_original_step_for_change_detection()
         editor.show()
@@ -420,7 +423,18 @@ class PipelineEditorWidget(QWidget):
 
         # Create and show editor dialog within the correct config context
         orchestrator = self._get_current_orchestrator()
-        with self._scoped_orchestrator_context():
+        if orchestrator:
+            with orchestrator.config_context(for_serialization=False):
+                editor = DualEditorWindow(
+                    step_data=step_to_edit,
+                    is_new=False,
+                    on_save_callback=handle_save,
+                    orchestrator=orchestrator,
+                    parent=self
+                )
+                # Set original step for change detection within the scoped context
+                editor.set_original_step_for_change_detection()
+        else:
             editor = DualEditorWindow(
                 step_data=step_to_edit,
                 is_new=False,
@@ -428,7 +442,6 @@ class PipelineEditorWidget(QWidget):
                 orchestrator=orchestrator,
                 parent=self
             )
-            # Set original step for change detection within the scoped context
             editor.set_original_step_for_change_detection()
         editor.show()
         editor.raise_()
@@ -629,10 +642,14 @@ class PipelineEditorWidget(QWidget):
 
             # Refresh any open step forms within the orchestrator's scoped context
             # This ensures step forms resolve against the updated effective config
-            with self._scoped_orchestrator_context():
-                # Trigger refresh of any open configuration windows or step forms
-                # The scoped context ensures they resolve against the updated orchestrator config
-                logger.debug(f"Step forms will now resolve against updated orchestrator config for: {plate_path}")
+            orchestrator = self._get_current_orchestrator()
+            if orchestrator:
+                with orchestrator.config_context(for_serialization=False):
+                    # Trigger refresh of any open configuration windows or step forms
+                    # The scoped context ensures they resolve against the updated orchestrator config
+                    logger.debug(f"Step forms will now resolve against updated orchestrator config for: {plate_path}")
+            else:
+                logger.debug(f"No orchestrator found for config refresh: {plate_path}")
     
     # ========== UI Helper Methods ==========
     
@@ -827,46 +844,6 @@ class PipelineEditorWidget(QWidget):
             return None
         return plate_manager_widget.orchestrators.get(self.current_plate)
 
-    @contextlib.contextmanager
-    def _scoped_orchestrator_context(self):
-        """A context manager to temporarily set the thread-local config for the current orchestrator."""
-        original_config = get_current_global_config(GlobalPipelineConfig)
-        orchestrator = self._get_current_orchestrator()
-        if orchestrator:
-            # CRITICAL FIX: Create the same merged config that apply_pipeline_config() creates
-            # to preserve None values for sibling inheritance, instead of using get_effective_config()
-            # which resolves all values and breaks the inheritance chain
-            from dataclasses import fields
-
-            pipeline_config = orchestrator.pipeline_config or PipelineConfig()
-            merged_config_values = {}
-
-            for field in fields(GlobalPipelineConfig):
-                try:
-                    # Get raw value from pipeline config
-                    raw_value = object.__getattribute__(pipeline_config, field.name)
-                    if raw_value is not None:
-                        # Use the override value
-                        merged_config_values[field.name] = raw_value
-                    else:
-                        # Use shared global context for None values
-                        shared_context = get_current_global_config(GlobalPipelineConfig)
-                        merged_config_values[field.name] = getattr(shared_context, field.name)
-                except AttributeError:
-                    # Field doesn't exist in pipeline config, use shared global context
-                    shared_context = get_current_global_config(GlobalPipelineConfig)
-                    merged_config_values[field.name] = getattr(shared_context, field.name)
-
-            # Create merged config that preserves None values for sibling inheritance
-            merged_config = GlobalPipelineConfig(**merged_config_values)
-            set_current_global_config(GlobalPipelineConfig, merged_config)
-            logger.debug(f"Set merged config context for orchestrator: {orchestrator.plate_path}")
-
-        try:
-            yield
-        finally:
-            set_current_global_config(GlobalPipelineConfig, original_config)
-            logger.debug("Restored original config context.")
 
     def _find_main_window(self):
         """Find the main window by traversing parent hierarchy."""

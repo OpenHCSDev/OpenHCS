@@ -21,7 +21,7 @@ from PyQt6.QtGui import QFont
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.config import GlobalPipelineConfig, require_config_context
 
 
 
@@ -42,7 +42,8 @@ class ConfigWindow(QDialog):
     # Signals
     config_saved = pyqtSignal(object)  # saved config
     config_cancelled = pyqtSignal()
-    
+
+    @require_config_context
     def __init__(self, config_class: Type, current_config: Any,
                  on_save_callback: Optional[Callable] = None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,

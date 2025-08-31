@@ -527,12 +527,9 @@ class PlateManagerWidget(QWidget):
                 effective_config = orchestrator.get_effective_config()
                 self.orchestrator_config_changed.emit(str(orchestrator.plate_path), effective_config)
 
-            # CRITICAL FIX: Restore orchestrator context after config save
-            # This ensures step editors continue to work with orchestrator-specific context
+            # Auto-sync handles context restoration automatically when pipeline_config is accessed
             if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
-                current_orchestrator = self.orchestrators[self.selected_plate_path]
-                current_orchestrator.apply_pipeline_config(current_orchestrator.pipeline_config or PipelineConfig())
-                logger.debug(f"Restored orchestrator context after config save: {self.selected_plate_path}")
+                logger.debug(f"Orchestrator context automatically maintained after config save: {self.selected_plate_path}")
 
             count = len(selected_orchestrators)
             # Success message dialog removed for test automation compatibility
@@ -1305,15 +1302,12 @@ class PlateManagerWidget(QWidget):
             # Update thread-local context using orchestrator's merged pipeline context
             if self.selected_plate_path in self.orchestrators:
                 orchestrator = self.orchestrators[self.selected_plate_path]
-                # Establish thread-local context first (replicates create_pipeline_config_for_editing pattern)
+                # Auto-sync handles thread-local context setup automatically when pipeline_config is accessed
                 from openhcs.core.pipeline_config import ensure_pipeline_config_context
                 from openhcs.core.config import get_current_global_config
                 shared_context = get_current_global_config(GlobalPipelineConfig)
                 ensure_pipeline_config_context(shared_context)
-                # Then apply pipeline config with proper context established
-                current_pipeline_cfg = orchestrator.pipeline_config or PipelineConfig()
-                orchestrator.apply_pipeline_config(current_pipeline_cfg)
-                logger.debug(f"Applied orchestrator context with proper thread-local setup for selected plate: {self.selected_plate_path}")
+                logger.debug(f"Orchestrator context automatically maintained for selected plate: {self.selected_plate_path}")
 
                 # Refresh placeholders in any open parameter forms to reflect new context
                 self._refresh_all_parameter_form_placeholders()

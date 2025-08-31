@@ -31,6 +31,7 @@ Lazy configuration, resolution, and field path detection.
    configuration_system_architecture
    lazy_class_system
    configuration_resolution
+   orchestrator_configuration_management
    field_path_detection
    component_configuration_framework
 

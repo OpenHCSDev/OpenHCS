@@ -21,18 +21,13 @@ def collect_imports_from_data(data_obj):
     function_imports = defaultdict(set)
     enum_imports = defaultdict(set)
 
-    # Import mappings for dynamically generated classes
-    LAZY_MAPPINGS = {
-        'LazyStepMaterializationConfig': 'openhcs.core.pipeline_config',
-        'PipelineConfig': 'openhcs.core.pipeline_config',
-    }
-
     def register_imports(obj):
         if isinstance(obj, Enum):
             enum_imports[obj.__class__.__module__].add(obj.__class__.__name__)
         elif is_dataclass(obj):
+            # Use the actual module where the class is defined (works for both regular and dynamically created classes)
+            module = obj.__class__.__module__
             name = obj.__class__.__name__
-            module = LAZY_MAPPINGS.get(name, obj.__class__.__module__)
             function_imports[module].add(name)
             [register_imports(getattr(obj, f.name)) for f in fields(obj) if getattr(obj, f.name) is not None]
         elif callable(obj):

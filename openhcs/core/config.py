@@ -254,6 +254,22 @@ def get_current_global_config(config_type: Type) -> Optional[Any]:
     return getattr(context, 'value', None) if context else None
 
 
+def require_config_context(func):
+    """Decorator to ensure config context is available for UI operations."""
+    import functools
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        current_context = get_current_global_config(GlobalPipelineConfig)
+        if current_context is None:
+            raise RuntimeError(
+                f"{func.__name__} requires active configuration context. "
+                f"Use orchestrator.config_context() or ensure global config is set."
+            )
+        return func(*args, **kwargs)
+    return wrapper
+
+
 def is_field_sibling_inheritable(dataclass_type: Type, field_name: str) -> bool:
     """
     Check if a field supports sibling inheritance based on dataclass inheritance.

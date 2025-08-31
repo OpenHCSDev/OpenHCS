@@ -111,10 +111,12 @@ Shows orchestrator values with global fallback.
 .. code-block:: python
 
     # Pipeline editor setup
-    orchestrator_config = orchestrator.get_effective_config()
+    orchestrator_config = orchestrator.get_effective_config(for_serialization=False)
     set_current_global_config(GlobalPipelineConfig, orchestrator_config)
 
     # Lazy resolution from orchestrator config, None values use global defaults
+
+See :doc:`orchestrator_configuration_management` for detailed orchestrator configuration patterns.
 
 **3. Step Config Editing (Scoped)**
 
