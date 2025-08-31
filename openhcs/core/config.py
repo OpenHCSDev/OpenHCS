@@ -670,7 +670,6 @@ def get_default_global_config() -> GlobalPipelineConfig:
 
 # Import pipeline-specific classes - circular import solved by moving import to end
 from openhcs.core.pipeline_config import (
-    LazyStepMaterializationConfig,
     set_current_pipeline_config,
     ensure_pipeline_config_context,
     create_pipeline_config_for_editing

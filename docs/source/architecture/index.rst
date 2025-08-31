@@ -16,10 +16,14 @@ The core systems every OpenHCS developer needs to understand.
 
    function_pattern_system
    configuration_system_architecture
+   lazy_class_system
+   configuration_resolution
+   field_path_detection
    component_configuration_framework
    storage_and_memory_system
    pipeline_compilation_system
    special_io_system
+   dict_pattern_case_study
    function_registry_system
    microscope_handler_integration
    system_integration
@@ -38,6 +42,7 @@ Deep technical dives for developers working on specific systems.
    multiprocessing_coordination_system
    parser_metaprogramming_system
    compilation_system_detailed
+   memory_type_system
    gpu_resource_management
    tui_system
 

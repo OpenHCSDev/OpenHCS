@@ -1145,8 +1145,10 @@ class PlateManagerWidget(QWidget):
         except SyntaxError as e:
             self.service_adapter.show_error_dialog(f"Invalid Python syntax: {e}")
         except Exception as e:
-            logger.error(f"Failed to parse edited orchestrator code: {e}")
-            self.service_adapter.show_error_dialog(f"Failed to parse orchestrator code: {str(e)}")
+            import traceback
+            full_traceback = traceback.format_exc()
+            logger.error(f"Failed to parse edited orchestrator code: {e}\nFull traceback:\n{full_traceback}")
+            self.service_adapter.show_error_dialog(f"Failed to parse orchestrator code: {str(e)}\n\nFull traceback:\n{full_traceback}")
 
     def _invalidate_orchestrator_compilation_state(self, plate_path: str):
         """Invalidate compilation state for an orchestrator when its pipeline changes.

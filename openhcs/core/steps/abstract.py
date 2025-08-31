@@ -32,7 +32,7 @@ from openhcs.constants.input_source import InputSource
 from openhcs.core.config import PathPlanningConfig
 
 # Import LazyStepMaterializationConfig for type hints
-from openhcs.core.pipeline_config import LazyStepMaterializationConfig
+from openhcs.core.lazy_config import LazyStepMaterializationConfig
 
 # ProcessingContext is used in type hints
 if TYPE_CHECKING:

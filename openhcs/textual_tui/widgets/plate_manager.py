@@ -1627,8 +1627,10 @@ class PlateManagerWidget(ButtonListWidget):
                 except SyntaxError as e:
                     self.app.show_error("Syntax Error", f"Invalid Python syntax: {e}")
                 except Exception as e:
-                    logger.error(f"Failed to parse edited orchestrator code: {e}")
-                    self.app.show_error("Edit Error", f"Failed to parse orchestrator code: {str(e)}")
+                    import traceback
+                    full_traceback = traceback.format_exc()
+                    logger.error(f"Failed to parse edited orchestrator code: {e}\nFull traceback:\n{full_traceback}")
+                    self.app.show_error("Edit Error", f"Failed to parse orchestrator code: {str(e)}\n\nFull traceback:\n{full_traceback}")
 
             # Launch terminal editor
             launcher = TerminalLauncher(self.app)

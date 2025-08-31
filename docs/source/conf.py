@@ -73,6 +73,7 @@ extensions = [
     'sphinx.ext.intersphinx',
     'sphinx.ext.autosummary',
     'sphinx.ext.mathjax',
+    'sphinx.ext.doctest',
     'sphinx_rtd_theme',
 ]
 

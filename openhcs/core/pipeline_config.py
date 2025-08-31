@@ -14,7 +14,7 @@ from openhcs.core.config import (
 )
 from openhcs.core.lazy_config import (
     LazyDataclassFactory, create_config_for_editing,
-    ensure_global_config_context, CONSTANTS
+    ensure_global_config_context
 )
 
 
@@ -107,26 +107,7 @@ def create_editing_config_from_existing_lazy_config(
 
 
 
-# Create LazyStepMaterializationConfig with field-level auto-hierarchy using automatic field path detection
-from openhcs.core.field_path_detection import FieldPathDetector
-
-# Use automatic field path detection instead of hardcoded string
-_materialization_field_path = FieldPathDetector.find_field_path_for_type(
-    GlobalPipelineConfig, StepMaterializationConfig
-)
-
-# Verify field path was detected correctly (fail-loud if not found)
-if _materialization_field_path is None:
-    raise RuntimeError(
-        f"Could not automatically detect field path for {StepMaterializationConfig.__name__} "
-        f"in {GlobalPipelineConfig.__name__}. This indicates a structural change in the configuration."
-    )
-
-LazyStepMaterializationConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
-    base_class=StepMaterializationConfig,
-    global_config_type=GlobalPipelineConfig,
-    field_path=_materialization_field_path,
-    lazy_class_name="LazyStepMaterializationConfig")
+# LazyStepMaterializationConfig is now created automatically by the dynamic system in lazy_config.py
 
 # Generate pipeline-specific lazy configuration classes using auto-hierarchy resolution
 PipelineConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
@@ -165,9 +146,9 @@ def _add_to_base_config_method(lazy_class: Type, base_class: Type) -> None:
 
 # Add to_base_config method for orchestrator integration
 _add_to_base_config_method(PipelineConfig, GlobalPipelineConfig)
-_add_to_base_config_method(LazyStepMaterializationConfig, StepMaterializationConfig)
 
 # Register type mappings for the placeholder service
 register_lazy_type_mapping(PipelineConfig, GlobalPipelineConfig)
-register_lazy_type_mapping(LazyStepMaterializationConfig, StepMaterializationConfig)
+
+# LazyStepMaterializationConfig registration is handled automatically by the dynamic system
 
