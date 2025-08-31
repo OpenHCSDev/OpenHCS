@@ -20,7 +20,7 @@ from openhcs.core.config import (
     GlobalPipelineConfig, MaterializationBackend,
     PathPlanningConfig, VFSConfig, ZarrConfig
 )
-from openhcs.core.pipeline_config import LazyStepMaterializationConfig
+from openhcs.core.lazy_config import LazyStepMaterializationConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.pipeline import Pipeline
