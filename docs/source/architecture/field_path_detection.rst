@@ -35,18 +35,10 @@ The core functionality finds field paths by analyzing type annotations:
 
 **Real-World Usage:**
 
-.. code-block:: python
-
-    # Automatic discovery replaces hardcoded mappings
-    field_path = FieldPathDetector.find_field_path_for_type(
-        GlobalPipelineConfig, StepMaterializationConfig
-    )
-    # Returns: "materialization_defaults"
-    
-    field_path = FieldPathDetector.find_field_path_for_type(
-        GlobalPipelineConfig, VFSConfig
-    )
-    # Returns: "vfs"
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 592-593
+   :caption: Automatic field path discovery example from openhcs/core/lazy_config.py
 
 Optional Type Unwrapping
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -60,16 +52,10 @@ The system handles complex type annotations including Optional types:
 
 **Type Annotation Examples:**
 
-.. code-block:: python
-
-    # All these annotations are handled automatically:
-    
-    @dataclass
-    class PipelineConfig:
-        vfs: VFSConfig                                    # Direct type
-        materialization_defaults: StepMaterializationConfig  # Direct type
-        optional_config: Optional[CustomConfig] = None   # Optional type
-        union_config: Union[ConfigA, None] = None        # Union type
+.. literalinclude:: ../../../openhcs/core/config.py
+   :language: python
+   :lines: 575-605
+   :caption: Type annotation examples from openhcs/core/config.py (GlobalPipelineConfig fields)
 
 Comprehensive Path Discovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -83,13 +69,10 @@ For complex scenarios, the system can find all instances of a type:
 
 **Nested Path Discovery:**
 
-.. code-block:: python
-
-    # Find all instances of StepMaterializationConfig
-    paths = FieldPathDetector.find_all_field_paths_for_type(
-        GlobalPipelineConfig, StepMaterializationConfig
-    )
-    # Returns: ['materialization_defaults', 'nested.step_config', ...]
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 403
+   :caption: Real-world usage examples from openhcs/core/lazy_config.py
 
 Dataclass Field Analysis
 -------------------------
@@ -108,11 +91,10 @@ The system can automatically discover inheritance relationships:
 
 **Inheritance Analysis Example:**
 
-.. code-block:: python
-
-    # Discover inheritance relationships automatically
-    parents = FieldPathDetector.find_inheritance_relationships(StepMaterializationConfig)
-    # Returns: [PathPlanningConfig] (if StepMaterializationConfig inherits from PathPlanningConfig)
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 404
+   :caption: Inheritance analysis example from openhcs/core/lazy_config.py
 
 Type Introspection Algorithms
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

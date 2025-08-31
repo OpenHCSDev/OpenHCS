@@ -11,14 +11,10 @@ Overview
 
 Lazy dataclasses need to resolve values from different sources based on execution context without explicit parameter passing. OpenHCS uses thread-local storage to provide isolated configuration contexts per thread.
 
-.. code-block:: python
-
-   # Set thread-local context
-   set_current_global_config(GlobalPipelineConfig, pipeline_config)
-
-   # Lazy configs automatically resolve from thread-local context
-   step_config = LazyStepMaterializationConfig()
-   step_config.num_workers  # Resolves from thread-local pipeline_config
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 467-469
+   :caption: Basic usage example from openhcs/core/lazy_config.py
 
 This enables context-aware resolution where the same lazy config shows different values based on the current thread's configuration context.
 
@@ -40,14 +36,10 @@ Works with any configuration type via type-keyed storage.
 Usage Pattern
 ~~~~~~~~~~~~~
 
-.. code-block:: python
-
-    # Set thread-local context
-    set_current_global_config(GlobalPipelineConfig, global_config)
-    
-    # Lazy dataclasses automatically resolve from thread-local context
-    pipeline_config = PipelineConfig()  # Resolves from thread-local
-    value = pipeline_config.some_field  # Thread-local resolution
+.. literalinclude:: ../../../openhcs/core/pipeline_config.py
+   :language: python
+   :lines: 113-118
+   :caption: Usage pattern from openhcs/core/pipeline_config.py
 
 Configuration Resolution Hierarchy
 -----------------------------------
@@ -64,16 +56,10 @@ Configuration resolution follows a clear hierarchy:
 Context-Driven Behavior
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
-
-    # Global config editing: Use actual default values
-    is_global_config_editing = not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
-    
-    # Lazy config editing: Use None to show placeholder text
-    if is_global_config_editing:
-        return actual_default_value
-    else:
-        return None  # Shows "Pipeline default: value" placeholder
+.. literalinclude:: ../../../openhcs/core/config.py
+   :language: python
+   :lines: 385-410
+   :caption: Context resolution patterns from openhcs/core/config.py
 
 Field Path Resolution
 ---------------------
@@ -96,14 +82,10 @@ Eliminates algorithmic field name conversion bugs:
 Automatic Field Path Detection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
-
-    # Replaces hardcoded field paths
-    field_path = FieldPathDetector.find_field_path_for_type(
-        parent_type=GlobalPipelineConfig,
-        child_type=StepMaterializationConfig
-    )
-    # Returns: "materialization_defaults"
+.. literalinclude:: ../../../openhcs/core/field_path_detection.py
+   :language: python
+   :lines: 15-35
+   :caption: Automatic field path discovery from openhcs/core/field_path_detection.py
 
 UI Context Scoping Patterns
 ---------------------------
@@ -117,12 +99,10 @@ Context Types
 
 Shows actual default values.
 
-.. code-block:: python
-
-    # Global config editor setup
-    set_current_global_config(GlobalPipelineConfig, global_defaults)
-
-    # Shows actual default values, no lazy resolution
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 523-535
+   :caption: Global config editor setup from openhcs/core/lazy_config.py
 
 **2. Pipeline Config Editing**
 
@@ -150,14 +130,10 @@ Context Manager Pattern
 
 Ensures proper context isolation and cleanup.
 
-.. code-block:: python
-
-    # Step editor usage
-    with self._scoped_orchestrator_context():
-        step_form = ParameterFormManager(...)
-        # LazyStepMaterializationConfig resolves from orchestrator context
-
-    # Context automatically restored
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 571-582
+   :caption: Step editor usage from openhcs/core/lazy_config.py
 
 Context managers provide isolation, cleanup, and safe nesting.
 
@@ -221,18 +197,10 @@ With thread-local, context is ambient:
 
 Lazy dataclasses require thread-local for resolution:
 
-.. code-block:: python
-
-    class LazyStepMaterializationConfig:
-        def _resolve_field_value(self, field_name: str) -> Any:
-            # This is why thread-local is required:
-            # Lazy resolution happens without explicit parameters
-            global_config = get_current_global_config(GlobalPipelineConfig)
-            if global_config and self._field_path:
-                nested_value = self._navigate_field_path(global_config, self._field_path)
-                if nested_value and hasattr(nested_value, field_name):
-                    return getattr(nested_value, field_name)
-            return self._get_static_default(field_name)
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 159-162
+   :caption: Lazy resolution implementation from openhcs/core/lazy_config.py
 
 Advanced Thread Safety Patterns
 -------------------------------
@@ -267,138 +235,54 @@ The system provides strong isolation guarantees across different execution conte
 
 **Thread Safety Implementation:**
 
-.. code-block:: python
-
-    # Each thread gets its own threading.local() instance
-    _global_config_contexts: Dict[Type, threading.local] = {}
-
-    def set_current_global_config(config_type: Type, config_instance: Any) -> None:
-        """Thread-safe configuration setting."""
-        if config_type not in _global_config_contexts:
-            # Create new threading.local() for this config type
-            _global_config_contexts[config_type] = threading.local()
-
-        # Each thread gets its own 'value' attribute
-        _global_config_contexts[config_type].value = config_instance
+.. literalinclude:: ../../../openhcs/core/config.py
+   :language: python
+   :lines: 242-254
+   :caption: Thread safety implementation from openhcs/core/config.py
 
 Context Provider Mechanisms
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Advanced context resolution using custom context providers for specialized scenarios:
 
-.. code-block:: python
-
-    def create_context_aware_lazy_class(parent_instance):
-        """Create lazy class with custom context resolution."""
-
-        def context_provider():
-            # Custom resolution: use specific parent instance
-            return parent_instance
-
-        return LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
-            base_class=StepMaterializationConfig,
-            global_config_type=GlobalPipelineConfig,
-            field_path="materialization_defaults",
-            context_provider=context_provider  # Override thread-local
-        )
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 320-344
+   :caption: Advanced context resolution using custom context providers from openhcs/core/lazy_config.py
 
 **Context Provider Pattern:**
 
-.. code-block:: python
-
-    # Standard thread-local resolution
-    def standard_context_provider():
-        return get_current_global_config(GlobalPipelineConfig)
-
-    # Custom parent-based resolution
-    def parent_context_provider(parent_instance):
-        def provider():
-            return parent_instance if parent_instance else standard_context_provider()
-        return provider
-
-    # Nested context propagation
-    def nested_context_provider(parent_instance_provider):
-        def provider():
-            if parent_instance_provider:
-                parent = parent_instance_provider()
-                if parent:
-                    return parent
-            return get_current_global_config(GlobalPipelineConfig)
-        return provider
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 349-354
+   :caption: Context provider pattern from openhcs/core/lazy_config.py
 
 Context Cleanup and Lifecycle Management
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Proper context lifecycle management prevents memory leaks and ensures clean state transitions:
 
-.. code-block:: python
-
-    class LazyConfigContext:
-        """Context manager for safe lazy config context handling."""
-
-        def __init__(self, config_instance, config_type=GlobalPipelineConfig):
-            self.config_instance = config_instance
-            self.config_type = config_type
-            self.previous_config = None
-
-        def __enter__(self):
-            # Save current context
-            self.previous_config = get_current_global_config(self.config_type)
-            # Set new context
-            set_current_global_config(self.config_type, self.config_instance)
-            return self
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            # Restore previous context
-            if self.previous_config is not None:
-                set_current_global_config(self.config_type, self.previous_config)
-            else:
-                # Clear context if no previous context existed
-                _global_config_contexts.get(self.config_type, None)
+.. literalinclude:: ../../../openhcs/pyqt_gui/widgets/pipeline_editor.py
+   :language: python
+   :lines: 830-869
+   :caption: LazyConfigContext class from openhcs/pyqt_gui/widgets/pipeline_editor.py
 
 **Usage Pattern:**
 
-.. code-block:: python
-
-    # Safe context switching
-    with LazyConfigContext(pipeline_config):
-        # All lazy resolution happens in pipeline_config context
-        step_config = LazyStepMaterializationConfig()
-        value = step_config.output_dir_suffix
-    # Context automatically restored
+.. literalinclude:: ../../../openhcs/pyqt_gui/widgets/pipeline_editor.py
+   :language: python
+   :lines: 364-374
+   :caption: Safe context switching from openhcs/pyqt_gui/widgets/pipeline_editor.py
 
 Integration with Lazy Dataclass Resolution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Thread-local contexts integrate seamlessly with the lazy dataclass resolution system:
 
-.. code-block:: python
-
-    def field_level_provider_with_context_support():
-        """Provider that uses context-aware resolution."""
-
-        # Check for custom context provider first
-        if context_provider:
-            current_config = context_provider()
-        else:
-            # Fall back to thread-local context
-            current_config = get_current_global_config(global_config_type)
-
-        # Use current_config for resolution hierarchy
-        class FieldLevelInheritanceConfig:
-            def _resolve_field_through_hierarchy(self, field_name, hierarchy_paths):
-                for context_type, path in hierarchy_paths:
-                    if context_type == 'current':
-                        config = current_config  # Context-aware resolution
-                    else:
-                        config = get_actual_global_config()  # Real global config
-
-                    instance = FieldPathNavigator.navigate_to_instance(config, path)
-                    if instance:
-                        value = _get_raw_field_value(instance, field_name)
-                        if value is not None:
-                            return value
-                return None
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 349-389
+   :caption: Field level provider from openhcs/core/lazy_config.py
 
 Debugging Context Resolution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

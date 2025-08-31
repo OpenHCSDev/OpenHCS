@@ -166,37 +166,17 @@ OpenHCS implements a hierarchical resolution system where configuration values f
 2. **Orchestrator Level**: Pipeline-specific configuration
 3. **Global Level**: Application-wide defaults (lowest priority)
 
-.. code-block:: python
-
-    # Example: output_dir_suffix resolution chain
-    # 1. Step level (None) → 2. Pipeline level ("_custom") → 3. Global level ("_openhcs")
-
-    step_config = LazyStepMaterializationConfig()  # All None values
-    step_config.output_dir_suffix  # Resolves to "_custom" from pipeline level
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 120-129
+   :caption: Declarative configuration for recursive lazy resolution.
 
 **Real-World Resolution Example:**
 
-.. code-block:: python
-
-    # Global configuration (application defaults)
-    global_config = GlobalPipelineConfig(
-        path_planning=PathPlanningConfig(output_dir_suffix="_openhcs"),
-        materialization_defaults=StepMaterializationConfig(output_dir_suffix="_openhcs")
-    )
-
-    # Pipeline configuration (user overrides)
-    pipeline_config = PipelineConfig(
-        path_planning=LazyPathPlanningConfig(output_dir_suffix="_pipeline_custom"),
-        materialization_defaults=LazyStepMaterializationConfig()  # None values
-    )
-
-    # Step configuration (inherits from pipeline)
-    step_config = LazyStepMaterializationConfig()
-
-    # Resolution chain:
-    # step_config.output_dir_suffix (None)
-    # → pipeline.materialization_defaults.output_dir_suffix (None)
-    # → pipeline.path_planning.output_dir_suffix ("_pipeline_custom") ✅
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 301-315
+   :caption: Entry point for creating lazy dataclasses with custom resolution logic.
 
 Sibling Inheritance Mechanisms
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -205,17 +185,10 @@ One of the most sophisticated features is **sibling inheritance** - where fields
 
 **Sibling Inheritance Pattern:**
 
-.. code-block:: python
-
-    # StepMaterializationConfig inherits shared fields from PathPlanningConfig
-    # when those fields are None in the materialization config
-
-    class StepMaterializationConfig:
-        output_dir_suffix: Optional[str] = None  # Can inherit from PathPlanningConfig
-        sub_dir: Optional[str] = None            # Own field, no inheritance
-
-    class PathPlanningConfig:
-        output_dir_suffix: Optional[str] = "_openhcs"  # Shared field
+.. literalinclude:: ../../../openhcs/core/field_path_detection.py
+   :language: python
+   :lines: 116-142
+   :caption: Find all parent dataclasses that a target type inherits from.
 
 **How Sibling Inheritance Works:**
 
@@ -223,31 +196,17 @@ One of the most sophisticated features is **sibling inheritance** - where fields
 2. **Hierarchy Building**: Resolution paths include both direct paths and sibling paths
 3. **Context-Aware Resolution**: Uses current context (pipeline config) and global context separately
 
-.. code-block:: python
-
-    # Hierarchy paths for StepMaterializationConfig.output_dir_suffix:
-    hierarchy_paths = [
-        ('current', 'materialization_defaults'),  # Direct path
-        ('current', 'path_planning'),             # Sibling inheritance ✅
-        ('global', 'materialization_defaults'),   # Global direct
-        ('global', 'path_planning')               # Global sibling
-    ]
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 426-436
+   :caption: Logic for building hierarchy paths used in field-level resolution.
 
 **Sibling Inheritance Example:**
 
-.. code-block:: python
-
-    # User sets path_planning.output_dir_suffix = "_custom"
-    # materialization_defaults.output_dir_suffix = None (inherits from sibling)
-
-    pipeline_config = PipelineConfig(
-        path_planning=LazyPathPlanningConfig(output_dir_suffix="_custom"),
-        materialization_defaults=LazyStepMaterializationConfig()  # None values
-    )
-
-    # Sibling inheritance in action:
-    value = pipeline_config.materialization_defaults.output_dir_suffix
-    # Result: "_custom" (inherited from sibling path_planning)
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 319-326
+   :caption: Method signature for creating lazy dataclasses with auto-discovered hierarchy.
 
 Context-Aware Resolution Patterns
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -256,34 +215,17 @@ The system uses **context providers** to enable sophisticated resolution scenari
 
 **Context Provider Pattern:**
 
-.. code-block:: python
-
-    def create_context_aware_lazy_class(base_class, parent_instance):
-        """Create lazy class that resolves from specific parent instance."""
-
-        def context_provider():
-            return parent_instance  # Use specific instance, not global context
-
-        return LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
-            base_class=base_class,
-            global_config_type=GlobalPipelineConfig,
-            field_path="materialization_defaults",
-            context_provider=context_provider  # Custom context
-        )
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 319-326
+   :caption: Method signature for creating lazy dataclasses with auto-discovered hierarchy.
 
 **Context Propagation in Nested Resolution:**
 
-.. code-block:: python
-
-    # Parent instance provides context for nested lazy classes
-    def nested_context_provider():
-        if parent_instance_provider:
-            parent_instance = parent_instance_provider()
-            if parent_instance:
-                return parent_instance  # Use parent's context
-
-        # Fall back to global config
-        return get_current_global_config(global_config_type)
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 319-326
+   :caption: Method signature for creating lazy dataclasses with auto-discovered hierarchy.
 
 This enables scenarios where nested configurations resolve from their immediate parent rather than the global thread-local context, crucial for step editor functionality.
 
@@ -297,62 +239,20 @@ Structure Preservation System
 
 The system uses a three-method preservation approach to handle the complex interaction between user edits and lazy resolution:
 
-.. code-block:: python
-
-    def _preserve_lazy_structure_if_needed(self, field_name: str, value: Any) -> Any:
-        """Core preservation logic - maintains user intent vs lazy resolution."""
-
-        # Mark as user-set to prevent lazy resolution override
-        object.__setattr__(self, f'_{field_name}_user_set', True)
-        object.__setattr__(self, f'_{field_name}', value)
-
-        # Handle nested dataclass preservation
-        if dataclasses.is_dataclass(value):
-            return self._rebuild_nested_dataclass_instance(value, field_name)
-
-        return value
-
-    def _convert_to_lazy_dataclass(self, value: Any, field_type: Type) -> Any:
-        """Safe conversion to lazy dataclass when needed."""
-        if LazyDefaultPlaceholderService.has_lazy_resolution(field_type):
-            # Already a lazy dataclass - preserve as-is
-            return value
-        else:
-            # Convert to lazy version for proper inheritance
-            return self._create_lazy_version(value, field_type)
-
-    def _rebuild_nested_dataclass_instance(self, nested_values: Dict[str, Any],
-                                         nested_type: Type, param_name: str) -> Any:
-        """Recursive reconstruction of nested dataclass instances."""
-        nested_type_is_lazy = LazyDefaultPlaceholderService.has_lazy_resolution(nested_type)
-
-        if nested_type_is_lazy:
-            # Lazy dataclass: preserve None values for lazy resolution
-            # This maintains "lazy mixed" pattern - some concrete, some None
-            return nested_type(**nested_values)
-        else:
-            # Non-lazy dataclass: filter out None values
-            filtered_values = {k: v for k, v in nested_values.items() if v is not None}
-            return nested_type(**filtered_values) if filtered_values else nested_type()
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 156-188
+   :caption: Declarative method bindings that enable lazy field resolution on access.
 
 Mixed State Management
 ~~~~~~~~~~~~~~~~~~~~~~
 
 A key innovation is **mixed state management** - the ability for a single dataclass instance to have some fields with concrete user values and other fields with None values that resolve lazily.
 
-.. code-block:: python
-
-    # Example: Mixed state in StepMaterializationConfig
-    step_config = LazyStepMaterializationConfig(
-        output_dir_suffix="_user_custom",  # Concrete user value
-        sub_dir=None,                      # Lazy resolution from hierarchy
-        force_disk_output=True             # Concrete user value
-    )
-
-    # Field access behavior:
-    step_config.output_dir_suffix  # Returns "_user_custom" (user-set)
-    step_config.sub_dir           # Resolves from pipeline → global hierarchy
-    step_config.force_disk_output # Returns True (user-set)
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 156-188
+   :caption: Declarative method bindings that enable lazy field resolution on access.
 
 **Why Mixed State Matters:**
 
@@ -365,31 +265,10 @@ Recursive Reconstruction
 
 When nested dataclasses are modified, the system recursively rebuilds the entire structure while preserving user edits at every level:
 
-.. code-block:: python
-
-    def rebuild_lazy_config_with_new_global_reference(
-        current_config: Any,
-        new_global_config: Any,
-        global_config_type: Type
-    ) -> Any:
-        """Rebuild entire config hierarchy with new global reference."""
-
-        current_field_values = {}
-
-        for field_obj in fields(type(current_config)):
-            raw_value = _get_raw_field_value(current_config, field_obj.name)
-
-            if raw_value is not None and hasattr(raw_value, '__dataclass_fields__'):
-                # Nested dataclass - recursively rebuild
-                rebuilt_nested_value = rebuild_lazy_config_with_new_global_reference(
-                    raw_value, new_global_config, global_config_type
-                )
-                current_field_values[field_obj.name] = rebuilt_nested_value
-            else:
-                # Regular field - preserve as-is
-                current_field_values[field_obj.name] = raw_value
-
-        return type(current_config)(**current_field_values)
+.. literalinclude:: ../../../openhcs/core/lazy_config.py
+   :language: python
+   :lines: 538-582
+   :caption: Rebuild lazy config to reference new global config while preserving field states.
 
 This ensures that when global configuration changes, all existing lazy instances are updated while preserving their user-set values.
 
