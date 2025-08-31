@@ -308,7 +308,7 @@ class PipelineCompiler:
                     "all_wells": all_wells,
                     "needs_initialization": True
                 }
-                logger.debug(f"Step '{step.name}' will use zarr backend for well {context.well_id}")
+                logger.debug(f"Step '{step.name}' will use zarr backend for axis {context.axis_id}")
             else:
                 step_plan["zarr_config"] = None
 
