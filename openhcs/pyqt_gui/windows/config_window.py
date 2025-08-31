@@ -245,8 +245,7 @@ class ConfigWindow(QDialog):
         self.form_manager.reset_all_parameters()
 
         # Refresh placeholder text to ensure UI shows correct defaults
-        if hasattr(self.form_manager, 'refresh_placeholder_text'):
-            self.form_manager.refresh_placeholder_text()
+        self.form_manager.refresh_placeholder_text()
 
         logger.debug("Reset all parameters using enhanced ParameterFormManager service")
 
@@ -362,8 +361,6 @@ class ConfigWindow(QDialog):
 
     def _cleanup_signal_connections(self):
         """Clean up signal connections to prevent memory leaks."""
-        if hasattr(self, '_orchestrator_signal_connection'):
-            # The signal connection is handled by the plate manager
-            # We just need to mark that this window is closing
-            logger.debug("Config window closing, signal connections will be cleaned up")
-            delattr(self, '_orchestrator_signal_connection')
+        # The signal connection is handled by the plate manager
+        # We just need to mark that this window is closing
+        logger.debug("Config window closing, signal connections will be cleaned up")

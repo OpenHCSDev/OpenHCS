@@ -30,7 +30,7 @@ Works with any configuration type via type-keyed storage.
 
 .. literalinclude:: ../../../openhcs/core/config.py
    :language: python
-   :lines: 25-40
+   :lines: 242-249
    :caption: Thread-local storage implementation from openhcs/core/config.py
 
 Usage Pattern

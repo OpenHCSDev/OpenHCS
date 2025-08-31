@@ -148,23 +148,44 @@ def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, re
 
     for field in dataclasses.fields(instance):
         field_name = field.name
-        current_value = getattr(instance, field_name)
-        default_value = getattr(default_instance, field_name)
+
+        # CRITICAL FIX: For lazy dataclasses, use raw stored value to avoid triggering resolution
+        # This ensures tier 3 code generation only shows explicitly set pipeline config fields
+        if hasattr(instance, '_resolve_field_value'):
+            # This is a lazy dataclass - get raw stored value without triggering lazy resolution
+            current_value = object.__getattribute__(instance, field_name)
+            default_value = object.__getattribute__(default_instance, field_name)
+        else:
+            # Regular dataclass - use normal getattr
+            current_value = getattr(instance, field_name)
+            default_value = getattr(default_instance, field_name)
 
         if clean_mode and current_value == default_value:
             continue
 
         if dataclasses.is_dataclass(current_value):
-            # Collect import for the nested dataclass
-            if required_imports is not None:
-                class_module = current_value.__class__.__module__
-                class_name = current_value.__class__.__name__
-                if class_module and class_name:
-                    required_imports[class_module].add(class_name)
-
             # Recursively generate representation for nested dataclasses
             nested_repr = generate_clean_dataclass_repr(current_value, indent_level + 1, clean_mode, required_imports, name_mappings)
-            lines.append(f"{child_indent_str}{field_name}={current_value.__class__.__name__}(\n{nested_repr}\n{child_indent_str})")
+
+            # Only include nested dataclass if it has non-default content
+            if nested_repr.strip():  # Has actual content
+                # Collect import for the nested dataclass
+                if required_imports is not None:
+                    class_module = current_value.__class__.__module__
+                    class_name = current_value.__class__.__name__
+                    if class_module and class_name:
+                        required_imports[class_module].add(class_name)
+
+                lines.append(f"{child_indent_str}{field_name}={current_value.__class__.__name__}(\n{nested_repr}\n{child_indent_str})")
+            elif not clean_mode:
+                # In non-clean mode, still include empty nested dataclasses
+                if required_imports is not None:
+                    class_module = current_value.__class__.__module__
+                    class_name = current_value.__class__.__name__
+                    if class_module and class_name:
+                        required_imports[class_module].add(class_name)
+
+                lines.append(f"{child_indent_str}{field_name}={current_value.__class__.__name__}()")
         else:
             value_repr = _value_to_repr(current_value, required_imports, name_mappings)
             lines.append(f"{child_indent_str}{field_name}={value_repr}")
