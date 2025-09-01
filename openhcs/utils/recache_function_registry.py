@@ -31,49 +31,7 @@ from datetime import datetime
 # Toggle between legacy and unified registry systems
 USE_UNIFIED_REGISTRIES = True  # Set to False to use legacy registries
 
-def _switch_to_unified_registries():
-    """Temporarily switch func_registry to use unified registries."""
-    import openhcs.processing.func_registry as func_registry
-
-    # Monkey patch the _register_external_libraries function to use unified registries
-    def _register_external_libraries_unified():
-        """Register external libraries using unified registries."""
-        logger = logging.getLogger(__name__)
-        logger.info("Phase 2: Registering external library functions using unified registries...")
-
-        try:
-            from openhcs.processing.backends.analysis.pyclesperanto_registry_clean import PyclesperantoRegistry
-            registry = PyclesperantoRegistry()
-            registry.register_functions_direct()
-            logger.info("Successfully registered pyclesperanto functions")
-        except ImportError as e:
-            logger.warning(f"Could not register pyclesperanto functions: {e}")
-        except Exception as e:
-            logger.error(f"Error registering pyclesperanto functions: {e}")
-
-        try:
-            from openhcs.processing.backends.analysis.scikit_image_registry_clean import SkimageRegistry
-            registry = SkimageRegistry()
-            registry.register_functions_direct()
-            logger.info("Successfully registered scikit-image functions")
-        except ImportError as e:
-            logger.warning(f"Could not register scikit-image functions: {e}")
-        except Exception as e:
-            logger.error(f"Error registering scikit-image functions: {e}")
-
-        try:
-            from openhcs.processing.backends.lib_registry.cupy_registry import CupyRegistry
-            registry = CupyRegistry()
-            registry.register_functions_direct()
-            logger.info("Successfully registered CuPy ndimage functions")
-        except ImportError as e:
-            logger.warning(f"Could not register CuPy functions: {e}")
-        except Exception as e:
-            logger.error(f"Error registering CuPy functions: {e}")
-
-    # Replace the function
-    func_registry._register_external_libraries = _register_external_libraries_unified
-    print("  ✅ Switched to unified registry system")
+# Legacy function switching no longer needed - unified registries are now the default
 
 def recache_function_registry():
     """Force a complete recache of the OpenHCS function registry."""

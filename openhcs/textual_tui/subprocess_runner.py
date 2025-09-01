@@ -32,14 +32,8 @@ def _initialize_subprocess_registry():
 
     with func_registry_module._registry_lock:
         if not func_registry_module._registry_initialized:
-            # Initialize empty registry structure
-            func_registry_module.FUNC_REGISTRY.clear()
-            for memory_type in func_registry_module.VALID_MEMORY_TYPES:
-                func_registry_module.FUNC_REGISTRY[memory_type] = []
-            func_registry_module._registry_initialized = True
-
-            # Register external libraries using cached metadata (fast)
-            func_registry_module._register_external_libraries()
+            # Use the new auto-initialization system
+            func_registry_module._auto_initialize_registry()
 
 _initialize_subprocess_registry()
 
