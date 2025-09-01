@@ -441,9 +441,17 @@ class FunctionSelectorDialog(QDialog):
     
     def filter_functions(self, search_term: str):
         """Filter functions using mathematical simplification (RST principle)."""
-        if not search_term.strip():
-            # Show all functions using factored update
-            self._update_filtered_view(self.all_functions_metadata.copy())
+        search_term = search_term.strip()
+
+        if not search_term or len(search_term) < 2:
+            # Performance optimization: skip expensive table rebuild for short searches
+            # Table is already populated with all functions on initialization
+            if len(search_term) == 0:
+                # Only update if completely empty (to reset from previous filter)
+                if self.filtered_functions != self.all_functions_metadata:
+                    self._update_filtered_view(self.all_functions_metadata.copy())
+            # For 1-character searches, do nothing - keep current state
+            return
         else:
             # Mathematical simplification: functional approach to searchable text creation
             search_lower = search_term.lower()

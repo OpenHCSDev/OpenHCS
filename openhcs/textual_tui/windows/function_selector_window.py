@@ -321,8 +321,10 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
         table = self.query_one("#function_table", DataTable)
         count_label = self.query_one("#function_count", Static)
 
-        if not search_term.strip():
-            # Show all functions
+        search_term = search_term.strip()
+
+        if not search_term or len(search_term) < 2:
+            # Show all functions if empty or less than 2 characters (performance optimization)
             self.filtered_functions = self.all_functions_metadata.copy()
         else:
             # Filter functions across multiple fields
