@@ -19,6 +19,7 @@ Fundamental systems that define OpenHCS architecture.
    pipeline_compilation_system
    special_io_system
    analysis_consolidation_system
+   experimental_analysis_system
    dict_pattern_case_study
 
 Configuration Systems

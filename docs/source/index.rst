@@ -106,6 +106,12 @@ Documentation Structure
 
 .. toctree::
    :maxdepth: 2
+   :caption: Reference
+
+   reference/index
+
+.. toctree::
+   :maxdepth: 2
    :caption: Appendices
 
    appendices/index

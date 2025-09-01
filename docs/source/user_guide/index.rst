@@ -25,6 +25,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
    dtype_conversion
    cpu_only_mode
    analysis_consolidation
+   experimental_layouts
 
 **Available Guides**:
 
@@ -32,10 +33,15 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
 - :doc:`dtype_conversion` - Automatic data type conversion for GPU libraries
 - :doc:`cpu_only_mode` - CPU-only mode for CI testing and deployment
 - :doc:`analysis_consolidation` - Automatic analysis result consolidation
+- :doc:`experimental_layouts` - Excel-based experimental design and well-to-condition mapping
 
 **Environment Configuration**:
 
 - :doc:`cpu_only_mode` - Configure OpenHCS for CPU-only environments
+
+**Experimental Design**:
+
+- :doc:`experimental_layouts` - Define complex experimental layouts with biological replicates
 
 **Data Management**:
 
