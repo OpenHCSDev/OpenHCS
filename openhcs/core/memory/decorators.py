@@ -19,6 +19,17 @@ from openhcs.constants.constants import VALID_MEMORY_TYPES
 from openhcs.core.utils import optional_import
 from openhcs.core.memory.oom_recovery import _execute_with_oom_recovery
 
+# ProcessingContract imported lazily to avoid circular imports
+ProcessingContract = None
+
+def _get_processing_contract():
+    """Lazy import of ProcessingContract to avoid circular imports."""
+    global ProcessingContract
+    if ProcessingContract is None:
+        from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract as PC
+        ProcessingContract = PC
+    return ProcessingContract
+
 logger = logging.getLogger(__name__)
 
 F = TypeVar('F', bound=Callable[..., Any])
@@ -272,7 +283,7 @@ def get_thread_gpu_context() -> ThreadGPUContext:
     return _thread_gpu_contexts.gpu_context
 
 
-def memory_types(*, input_type: str, output_type: str) -> Callable[[F], F]:
+def memory_types(*, input_type: str, output_type: str, contract: Optional['ProcessingContract'] = None) -> Callable[[F], F]:
     """
     Decorator that explicitly declares the memory types for a function's input and output.
 
@@ -282,6 +293,7 @@ def memory_types(*, input_type: str, output_type: str) -> Callable[[F], F]:
     Args:
         input_type: The memory type for the function's input (e.g., "numpy", "cupy")
         output_type: The memory type for the function's output (e.g., "numpy", "cupy")
+        contract: Optional processing contract declaration (defaults to PURE_3D)
 
     Returns:
         A decorator function that sets the memory type attributes
@@ -348,6 +360,14 @@ def memory_types(*, input_type: str, output_type: str) -> Callable[[F], F]:
         func.input_memory_type = input_type
         func.output_memory_type = output_type
 
+        # Set processing contract attribute if provided, otherwise default to PURE_3D
+        if contract is not None:
+            func.__processing_contract__ = contract
+        else:
+            PC = _get_processing_contract()
+            if PC is not None:
+                func.__processing_contract__ = PC.PURE_3D
+
         # Return the function unchanged (no wrapper)
         return func
 
@@ -358,7 +378,8 @@ def numpy(
     func: Optional[F] = None,
     *,
     input_type: str = "numpy",
-    output_type: str = "numpy"
+    output_type: str = "numpy",
+    contract: Optional['ProcessingContract'] = None
 ) -> Any:
     """
     Decorator that declares a function as operating on numpy arrays.
@@ -369,6 +390,7 @@ def numpy(
         func: The function to decorate (optional)
         input_type: The memory type for the function's input (default: "numpy")
         output_type: The memory type for the function's output (default: "numpy")
+        contract: Optional processing contract declaration (defaults to PURE_3D)
 
     Returns:
         The decorated function with memory type attributes set
@@ -377,8 +399,8 @@ def numpy(
         ValueError: If input_type or output_type is not a supported memory type
     """
     def decorator_with_dtype_preservation(func: F) -> F:
-        # Set memory type attributes
-        memory_decorator = memory_types(input_type=input_type, output_type=output_type)
+        # Set memory type attributes and contract
+        memory_decorator = memory_types(input_type=input_type, output_type=output_type, contract=contract)
         func = memory_decorator(func)
 
         # Apply dtype preservation wrapper
@@ -393,7 +415,7 @@ def numpy(
     return decorator_with_dtype_preservation(func)
 
 
-def cupy(func: Optional[F] = None, *, input_type: str = "cupy", output_type: str = "cupy", oom_recovery: bool = True) -> Any:
+def cupy(func: Optional[F] = None, *, input_type: str = "cupy", output_type: str = "cupy", oom_recovery: bool = True, contract: Optional['ProcessingContract'] = None) -> Any:
     """
     Decorator that declares a function as operating on cupy arrays.
 
@@ -406,6 +428,7 @@ def cupy(func: Optional[F] = None, *, input_type: str = "cupy", output_type: str
         input_type: The memory type for the function's input (default: "cupy")
         output_type: The memory type for the function's output (default: "cupy")
         oom_recovery: Enable automatic OOM recovery (default: True)
+        contract: Optional processing contract declaration (defaults to PURE_3D)
 
     Returns:
         The decorated function with memory type attributes and stream management
@@ -414,8 +437,8 @@ def cupy(func: Optional[F] = None, *, input_type: str = "cupy", output_type: str
         ValueError: If input_type or output_type is not a supported memory type
     """
     def decorator(func: F) -> F:
-        # Set memory type attributes
-        memory_decorator = memory_types(input_type=input_type, output_type=output_type)
+        # Set memory type attributes and contract
+        memory_decorator = memory_types(input_type=input_type, output_type=output_type, contract=contract)
         func = memory_decorator(func)
 
         # Apply dtype preservation wrapper
@@ -466,7 +489,8 @@ def torch(
     *,
     input_type: str = "torch",
     output_type: str = "torch",
-    oom_recovery: bool = True
+    oom_recovery: bool = True,
+    contract: Optional['ProcessingContract'] = None
 ) -> Any:
     """
     Decorator that declares a function as operating on torch tensors.
@@ -480,6 +504,7 @@ def torch(
         input_type: The memory type for the function's input (default: "torch")
         output_type: The memory type for the function's output (default: "torch")
         oom_recovery: Enable automatic OOM recovery (default: True)
+        contract: Optional processing contract declaration (defaults to PURE_3D)
 
     Returns:
         The decorated function with memory type attributes and stream management
@@ -488,8 +513,8 @@ def torch(
         ValueError: If input_type or output_type is not a supported memory type
     """
     def decorator(func: F) -> F:
-        # Set memory type attributes
-        memory_decorator = memory_types(input_type=input_type, output_type=output_type)
+        # Set memory type attributes and contract
+        memory_decorator = memory_types(input_type=input_type, output_type=output_type, contract=contract)
         func = memory_decorator(func)
 
         # Apply dtype preservation wrapper
@@ -540,7 +565,8 @@ def tensorflow(
     *,
     input_type: str = "tensorflow",
     output_type: str = "tensorflow",
-    oom_recovery: bool = True
+    oom_recovery: bool = True,
+    contract: Optional['ProcessingContract'] = None
 ) -> Any:
     """
     Decorator that declares a function as operating on tensorflow tensors.
@@ -554,6 +580,7 @@ def tensorflow(
         input_type: The memory type for the function's input (default: "tensorflow")
         output_type: The memory type for the function's output (default: "tensorflow")
         oom_recovery: Enable automatic OOM recovery (default: True)
+        contract: Optional processing contract declaration (defaults to PURE_3D)
 
     Returns:
         The decorated function with memory type attributes and device management
@@ -562,8 +589,8 @@ def tensorflow(
         ValueError: If input_type or output_type is not a supported memory type
     """
     def decorator(func: F) -> F:
-        # Set memory type attributes
-        memory_decorator = memory_types(input_type=input_type, output_type=output_type)
+        # Set memory type attributes and contract
+        memory_decorator = memory_types(input_type=input_type, output_type=output_type, contract=contract)
         func = memory_decorator(func)
 
         # Apply dtype preservation wrapper
@@ -607,7 +634,8 @@ def jax(
     *,
     input_type: str = "jax",
     output_type: str = "jax",
-    oom_recovery: bool = True
+    oom_recovery: bool = True,
+    contract: Optional['ProcessingContract'] = None
 ) -> Any:
     """
     Decorator that declares a function as operating on JAX arrays.
@@ -621,6 +649,7 @@ def jax(
         input_type: The memory type for the function's input (default: "jax")
         output_type: The memory type for the function's output (default: "jax")
         oom_recovery: Enable automatic OOM recovery (default: True)
+        contract: Optional processing contract declaration (defaults to PURE_3D)
 
     Returns:
         The decorated function with memory type attributes and device management
@@ -629,8 +658,8 @@ def jax(
         ValueError: If input_type or output_type is not a supported memory type
     """
     def decorator(func: F) -> F:
-        # Set memory type attributes
-        memory_decorator = memory_types(input_type=input_type, output_type=output_type)
+        # Set memory type attributes and contract
+        memory_decorator = memory_types(input_type=input_type, output_type=output_type, contract=contract)
         func = memory_decorator(func)
 
         # Apply dtype preservation wrapper
@@ -681,7 +710,8 @@ def pyclesperanto(
     *,
     input_type: str = "pyclesperanto",
     output_type: str = "pyclesperanto",
-    oom_recovery: bool = True
+    oom_recovery: bool = True,
+    contract: Optional['ProcessingContract'] = None
 ) -> Any:
     """
     Decorator that declares a function as operating on pyclesperanto GPU arrays.
@@ -693,6 +723,7 @@ def pyclesperanto(
         input_type: The memory type for the function's input (default: "pyclesperanto")
         output_type: The memory type for the function's output (default: "pyclesperanto")
         oom_recovery: Enable automatic OOM recovery (default: True)
+        contract: Optional processing contract declaration (defaults to PURE_3D)
 
     Returns:
         The decorated function with memory type attributes and OOM recovery
@@ -701,8 +732,8 @@ def pyclesperanto(
         ValueError: If input_type or output_type is not a supported memory type
     """
     def decorator(func: F) -> F:
-        # Set memory type attributes
-        memory_decorator = memory_types(input_type=input_type, output_type=output_type)
+        # Set memory type attributes and contract
+        memory_decorator = memory_types(input_type=input_type, output_type=output_type, contract=contract)
         func = memory_decorator(func)
 
         # Apply dtype preservation wrapper

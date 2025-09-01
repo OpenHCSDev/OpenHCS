@@ -1,13 +1,15 @@
 """Function selector window for selecting functions from the registry."""
 
-from typing import Callable, Optional, List, Tuple
+from typing import Callable, Optional, List, Tuple, Dict, Any
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
-from textual.widgets import Input, Tree, Button, Static
+from textual.widgets import Input, DataTable, Button, Static, Tree
+from textual.widgets.data_table import RowKey
 from textual.widgets.tree import TreeNode
 
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
 from openhcs.textual_tui.services.function_registry_service import FunctionRegistryService
+from openhcs.processing.backends.lib_registry.unified_registry import FunctionMetadata
 
 
 class FunctionSelectorWindow(BaseOpenHCSWindow):
@@ -15,83 +17,225 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
 
     DEFAULT_CSS = """
     FunctionSelectorWindow {
-        width: 75; height: 25;
-        min-width: 75; min-height: 25;
+        width: 90; height: 30;
+        min-width: 90; min-height: 30;
+    }
+
+    .left-pane {
+        width: 40%;
+        border-right: solid $primary;
+    }
+
+    .right-pane {
+        width: 60%;
+    }
+
+    .pane-title {
+        text-align: center;
+        text-style: bold;
+        background: $primary;
+        color: $text;
+        height: 1;
     }
     """
 
     def __init__(self, current_function: Optional[Callable] = None, on_result_callback: Optional[Callable] = None, **kwargs):
         """Initialize function selector window.
-        
+
         Args:
             current_function: Currently selected function (for highlighting)
             on_result_callback: Callback function to handle the result
         """
         self.current_function = current_function
         self.selected_function = None
-        self.functions_by_backend = {}
-        self.all_functions = []
+        self.all_functions_metadata: Dict[str, FunctionMetadata] = {}
+        self.filtered_functions: Dict[str, FunctionMetadata] = {}
         self.on_result_callback = on_result_callback
-        
-        # Load function data
+
+        # Load function data with enhanced metadata
         self._load_function_data()
-        
+
         super().__init__(
             window_id="function_selector",
-            title="Select Function",
+            title="Select Function - Dual Pane View",
             mode="temporary",
             **kwargs
         )
 
     def _load_function_data(self) -> None:
-        """Load function data from registry."""
+        """Load function data with enhanced metadata from registry."""
         registry_service = FunctionRegistryService()
-        self.functions_by_backend = registry_service.get_functions_by_backend()
-        
-        # Flatten for search
-        self.all_functions = []
-        for backend, functions in self.functions_by_backend.items():
-            for func, display_name in functions:
-                self.all_functions.append((func, display_name, backend))
+
+        # Get unified metadata for all functions
+        self.all_functions_metadata = registry_service.get_all_functions_with_metadata()
+        self.filtered_functions = self.all_functions_metadata.copy()
 
     def compose(self) -> ComposeResult:
-        """Compose the function selector content."""
+        """Compose the dual-pane function selector content."""
         with Vertical():
             # Search input
             yield Input(
-                placeholder="Search functions...",
+                placeholder="Search functions by name, module, contract, or tags...",
                 id="search_input"
             )
-            
-            # Function tree
-            yield self._build_function_tree()
-            
+
+            # Function count display
+            yield Static(f"Functions: {len(self.all_functions_metadata)}", id="function_count")
+
+            # Dual-pane layout
+            with Horizontal():
+                # Left pane: Hierarchical tree view
+                with Vertical(classes="left-pane"):
+                    yield Static("Module Structure", classes="pane-title")
+                    yield self._build_module_tree()
+
+                # Right pane: Enhanced table view
+                with Vertical(classes="right-pane"):
+                    yield Static("Function Details", classes="pane-title")
+                    yield self._build_function_table()
+
             # Buttons - use unified dialog-buttons class for centered alignment
             with Horizontal(classes="dialog-buttons"):
                 yield Button("Select", id="select_btn", variant="primary", compact=True, disabled=True)
                 yield Button("Cancel", id="cancel_btn", compact=True)
 
-    def _build_function_tree(self) -> Tree:
-        """Build tree widget with functions grouped by backend."""
-        tree = Tree("Functions", id="function_tree")
+    def _build_function_table(self) -> DataTable:
+        """Build table widget with enhanced function metadata."""
+        table = DataTable(id="function_table", cursor_type="row")
 
-        # Expand the root node to show all categories
+        # Add columns with sorting support
+        table.add_column("Name", key="name")
+        table.add_column("Module", key="module")
+        table.add_column("Backend", key="backend")
+        table.add_column("Contract", key="contract")
+        table.add_column("Tags", key="tags")
+        table.add_column("Description", key="description")
+
+        # Populate table with function data
+        self._populate_table(table, self.filtered_functions)
+
+        return table
+
+    def _build_module_tree(self) -> Tree:
+        """Build hierarchical tree widget showing module structure by library."""
+        tree = Tree("All Libraries", id="module_tree")
         tree.root.expand()
 
-        # Add backend nodes
-        for backend, functions in self.functions_by_backend.items():
-            backend_node = tree.root.add(f"{backend} ({len(functions)} functions)")
-            backend_node.data = {"type": "backend", "name": backend}
+        # Group functions by library and module
+        library_modules = self._organize_by_library_and_module()
 
-            # Expand all backend nodes by default
-            backend_node.expand()
+        # Build tree structure
+        for library_name, modules in library_modules.items():
+            library_node = tree.root.add(f"{library_name} ({sum(len(funcs) for funcs in modules.values())} functions)")
+            library_node.data = {"type": "library", "name": library_name}
+            library_node.expand()
 
-            # Add function nodes
-            for func, display_name in functions:
-                func_node = backend_node.add(display_name)
-                func_node.data = {"type": "function", "func": func, "name": display_name}
+            for module_path, functions in modules.items():
+                module_node = library_node.add(f"{module_path} ({len(functions)} functions)")
+                module_node.data = {"type": "module", "library": library_name, "module": module_path, "functions": functions}
 
         return tree
+
+    def _organize_by_library_and_module(self) -> Dict[str, Dict[str, List[str]]]:
+        """Organize functions by library and module structure."""
+        library_modules = {}
+
+        for func_name, metadata in self.all_functions_metadata.items():
+            # Determine library from tags or module
+            library = self._determine_library(metadata)
+
+            # Extract meaningful module path
+            module_path = self._extract_module_path(metadata)
+
+            # Initialize library if not exists
+            if library not in library_modules:
+                library_modules[library] = {}
+
+            # Initialize module if not exists
+            if module_path not in library_modules[library]:
+                library_modules[library][module_path] = []
+
+            # Add function to module
+            library_modules[library][module_path].append(func_name)
+
+        return library_modules
+
+    def _determine_library(self, metadata: FunctionMetadata) -> str:
+        """Determine library name from metadata."""
+        if 'openhcs' in metadata.tags:
+            return 'OpenHCS'
+        elif 'gpu' in metadata.tags and 'cupy' in metadata.module.lower():
+            return 'CuPy'
+        elif 'pyclesperanto' in metadata.module or 'cle' in metadata.module:
+            return 'pyclesperanto'
+        elif 'skimage' in metadata.module:
+            return 'scikit-image'
+        else:
+            return 'Unknown'
+
+    def _extract_module_path(self, metadata: FunctionMetadata) -> str:
+        """Extract meaningful module path for display."""
+        module = metadata.module
+
+        # For OpenHCS functions, show the backend structure
+        if 'openhcs' in metadata.tags:
+            parts = module.split('.')
+            # Find the backends part and show from there
+            try:
+                backends_idx = parts.index('backends')
+                return '.'.join(parts[backends_idx+1:])  # Skip 'backends'
+            except ValueError:
+                return module.split('.')[-1]  # Just the last part
+
+        # For external libraries, show the meaningful part
+        elif 'skimage' in module:
+            parts = module.split('.')
+            try:
+                skimage_idx = parts.index('skimage')
+                return '.'.join(parts[skimage_idx+1:]) or 'core'
+            except ValueError:
+                return module.split('.')[-1]
+
+        elif 'pyclesperanto' in module or 'cle' in module:
+            return 'pyclesperanto_prototype'
+
+        elif 'cupy' in module.lower():
+            parts = module.split('.')
+            try:
+                cupy_idx = next(i for i, part in enumerate(parts) if 'cupy' in part.lower())
+                return '.'.join(parts[cupy_idx+1:]) or 'core'
+            except (StopIteration, IndexError):
+                return module.split('.')[-1]
+
+        return module.split('.')[-1]
+
+    def _populate_table(self, table: DataTable, functions_metadata: Dict[str, FunctionMetadata]) -> None:
+        """Populate table with function metadata."""
+        table.clear()
+
+        for func_name, metadata in functions_metadata.items():
+            # Extract backend from function attributes or use module info
+            backend = getattr(metadata.func, 'input_memory_type', 'unknown')
+
+            # Format tags as comma-separated string
+            tags_str = ", ".join(metadata.tags) if metadata.tags else ""
+
+            # Truncate description for table display
+            description = metadata.doc[:50] + "..." if len(metadata.doc) > 50 else metadata.doc
+
+            # Add row with function metadata
+            row_key = table.add_row(
+                metadata.name,
+                metadata.module.split('.')[-1] if metadata.module else "unknown",  # Show only last part of module
+                backend,
+                metadata.contract.name if metadata.contract else "unknown",
+                tags_str,
+                description,
+                key=func_name
+            )
+
+            # Store function reference for selection
+            table.get_row(row_key).metadata = {"func": metadata.func, "metadata": metadata}
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Handle search input changes."""
@@ -99,15 +243,65 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
             self._filter_functions(event.value)
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
-        """Handle tree node selection."""
-        if event.node.data and event.node.data.get("type") == "function":
-            self.selected_function = event.node.data["func"]
-            # Enable select button
-            select_btn = self.query_one("#select_btn", Button)
-            select_btn.disabled = False
+        """Handle tree node selection to filter table."""
+        if event.node.data:
+            node_type = event.node.data.get("type")
+
+            if node_type == "module":
+                # Filter table to show only functions from this module
+                module_functions = event.node.data.get("functions", [])
+                self.filtered_functions = {
+                    name: metadata for name, metadata in self.all_functions_metadata.items()
+                    if name in module_functions
+                }
+
+                # Update table and count
+                table = self.query_one("#function_table", DataTable)
+                self._populate_table(table, self.filtered_functions)
+
+                count_label = self.query_one("#function_count", Static)
+                count_label.update(f"Functions: {len(self.filtered_functions)}/{len(self.all_functions_metadata)} (filtered by module)")
+
+            elif node_type == "library":
+                # Filter table to show only functions from this library
+                library_name = event.node.data.get("name")
+                self.filtered_functions = {
+                    name: metadata for name, metadata in self.all_functions_metadata.items()
+                    if self._determine_library(metadata) == library_name
+                }
+
+                # Update table and count
+                table = self.query_one("#function_table", DataTable)
+                self._populate_table(table, self.filtered_functions)
+
+                count_label = self.query_one("#function_count", Static)
+                count_label.update(f"Functions: {len(self.filtered_functions)}/{len(self.all_functions_metadata)} (filtered by library)")
+
+        # Clear function selection when tree selection changes
+        self.selected_function = None
+        select_btn = self.query_one("#select_btn", Button)
+        select_btn.disabled = True
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle table row selection."""
+        table = self.query_one("#function_table", DataTable)
+
+        if event.row_key:
+            # Get function from filtered metadata
+            func_name = str(event.row_key.value)
+            if func_name in self.filtered_functions:
+                metadata = self.filtered_functions[func_name]
+                self.selected_function = metadata.func
+
+                # Enable select button
+                select_btn = self.query_one("#select_btn", Button)
+                select_btn.disabled = False
+            else:
+                self.selected_function = None
+                select_btn = self.query_one("#select_btn", Button)
+                select_btn.disabled = True
         else:
             self.selected_function = None
-            # Disable select button
             select_btn = self.query_one("#select_btn", Button)
             select_btn.disabled = True
 
@@ -123,43 +317,38 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
             self.close_window()
 
     def _filter_functions(self, search_term: str) -> None:
-        """Filter functions based on search term."""
-        tree = self.query_one("#function_tree", Tree)
-        
+        """Filter functions based on search term across multiple fields."""
+        table = self.query_one("#function_table", DataTable)
+        count_label = self.query_one("#function_count", Static)
+
         if not search_term.strip():
             # Show all functions
-            tree.clear()
-            tree.root.label = "Functions"
-            self._populate_tree(tree, self.functions_by_backend)
+            self.filtered_functions = self.all_functions_metadata.copy()
         else:
-            # Filter functions
+            # Filter functions across multiple fields
             search_lower = search_term.lower()
-            filtered_functions = {}
-            
-            for backend, functions in self.functions_by_backend.items():
-                matching_functions = [
-                    (func, display_name) for func, display_name in functions
-                    if search_lower in display_name.lower()
-                ]
-                if matching_functions:
-                    filtered_functions[backend] = matching_functions
-            
-            tree.clear()
-            tree.root.label = f"Functions (filtered: {search_term})"
-            self._populate_tree(tree, filtered_functions)
+            self.filtered_functions = {}
 
-    def _populate_tree(self, tree: Tree, functions_by_backend: dict) -> None:
-        """Populate tree with function data."""
-        # Expand the root node to show all categories
-        tree.root.expand()
+            for func_name, metadata in self.all_functions_metadata.items():
+                # Search in name, module, contract, tags, and description
+                searchable_text = " ".join([
+                    metadata.name.lower(),
+                    metadata.module.lower(),
+                    metadata.contract.name.lower() if metadata.contract else "",
+                    " ".join(metadata.tags).lower(),
+                    metadata.doc.lower()
+                ])
 
-        for backend, functions in functions_by_backend.items():
-            backend_node = tree.root.add(f"{backend} ({len(functions)} functions)")
-            backend_node.data = {"type": "backend", "name": backend}
+                if search_lower in searchable_text:
+                    self.filtered_functions[func_name] = metadata
 
-            # Expand all backend nodes by default
-            backend_node.expand()
+        # Update table and count
+        self._populate_table(table, self.filtered_functions)
+        count_label.update(f"Functions: {len(self.filtered_functions)}/{len(self.all_functions_metadata)}")
 
-            for func, display_name in functions:
-                func_node = backend_node.add(display_name)
-                func_node.data = {"type": "function", "func": func, "name": display_name}
+        # Clear selection when filtering
+        self.selected_function = None
+        select_btn = self.query_one("#select_btn", Button)
+        select_btn.disabled = True
+
+

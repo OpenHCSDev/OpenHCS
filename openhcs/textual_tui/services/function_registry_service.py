@@ -12,16 +12,25 @@ import logging
 # The FUNC_REGISTRY is auto-initialized on import (following storage_registry pattern)
 from openhcs.processing.func_registry import FUNC_REGISTRY, get_function_info, get_functions_by_memory_type
 
+# Import unified registry system for enhanced metadata
+from openhcs.processing.backends.lib_registry.unified_registry import OpenHCSRegistry, FunctionMetadata
+
 logger = logging.getLogger(__name__)
 
 
 class FunctionRegistryService:
     """
     Stateless service for function registry integration and metadata extraction.
-    
+
     Extends existing FUNC_REGISTRY functionality with enhanced metadata
     and UI-specific formatting.
     """
+
+    # Class-level cache for expensive metadata discovery
+    _unified_metadata_cache: Optional[Dict[str, FunctionMetadata]] = None
+
+    # Class-level cache for expensive metadata discovery
+    _unified_metadata_cache: Optional[Dict[str, FunctionMetadata]] = None
     
     @staticmethod
     def get_functions_by_backend() -> Dict[str, List[Tuple[Callable, str]]]:
@@ -62,6 +71,80 @@ class FunctionRegistryService:
                     functions_by_backend['unknown'].append((func, func.__name__))
         
         return functions_by_backend
+
+    @staticmethod
+    def get_all_functions_with_metadata() -> Dict[str, FunctionMetadata]:
+        """
+        Get unified metadata for all functions (OpenHCS and external libraries).
+
+        This method provides access to both OpenHCS functions (through OpenHCSRegistry)
+        and external library functions (through existing registries) in a unified
+        FunctionMetadata format suitable for enhanced UI display.
+
+        Uses caching to avoid expensive re-discovery on subsequent calls.
+
+        Returns:
+            Dict mapping function names to FunctionMetadata objects
+        """
+        # Return cached results if available
+        if FunctionRegistryService._unified_metadata_cache is not None:
+            logger.debug(f"Using cached unified metadata ({len(FunctionRegistryService._unified_metadata_cache)} functions)")
+            return FunctionRegistryService._unified_metadata_cache
+
+        logger.info("Performing expensive function discovery - caching results for future use")
+        all_functions = {}
+
+        # Get OpenHCS functions through unified registry
+        try:
+            openhcs_registry = OpenHCSRegistry()
+            openhcs_functions = openhcs_registry.discover_functions()
+            logger.info(f"Retrieved {len(openhcs_functions)} OpenHCS functions with unified metadata")
+            all_functions.update(openhcs_functions)
+        except Exception as e:
+            logger.error(f"Failed to get OpenHCS functions with unified metadata: {e}")
+
+        # Get external library functions through their unified registries
+        external_registries = [
+            ("pyclesperanto", "openhcs.processing.backends.lib_registry.pyclesperanto_registry", "PyclesperantoRegistry"),
+            ("scikit-image", "openhcs.processing.backends.lib_registry.scikit_image_registry", "SkimageRegistry"),
+            ("cupy", "openhcs.processing.backends.lib_registry.cupy_registry", "CupyRegistry"),
+        ]
+
+        for lib_name, module_path, class_name in external_registries:
+            try:
+                # Import registry class dynamically
+                module = __import__(module_path, fromlist=[class_name])
+                registry_class = getattr(module, class_name)
+                registry = registry_class()
+
+                # Check if library is available
+                if not registry.is_library_available():
+                    logger.warning(f"Library {lib_name} not available, skipping")
+                    continue
+
+                # Get functions with metadata
+                external_functions = registry.discover_functions()
+                logger.info(f"Retrieved {len(external_functions)} {lib_name} functions with unified metadata")
+                all_functions.update(external_functions)
+
+            except ImportError as e:
+                logger.warning(f"Could not import {lib_name} registry: {e}")
+            except Exception as e:
+                logger.error(f"Failed to get {lib_name} functions with unified metadata: {e}")
+
+        logger.info(f"Total functions with unified metadata: {len(all_functions)}")
+
+        # Cache the results for future calls
+        FunctionRegistryService._unified_metadata_cache = all_functions
+        logger.info("Cached unified metadata for future use")
+
+        return all_functions
+
+    @classmethod
+    def clear_metadata_cache(cls) -> None:
+        """Clear the cached metadata to force re-discovery."""
+        cls._unified_metadata_cache = None
+        logger.info("Unified metadata cache cleared")
     
     @staticmethod
     def get_enhanced_function_metadata(func: Callable) -> Dict[str, Any]:
@@ -80,7 +163,7 @@ class FunctionRegistryService:
             # Start with existing function info
             base_info = get_function_info(func)
             
-            # Enhance with additional metadata
+            # Enhance with additional metadata including contract information
             enhanced_info = {
                 'name': base_info.get('name', func.__name__),
                 'backend': base_info.get('backend', 'unknown'),
@@ -88,6 +171,8 @@ class FunctionRegistryService:
                 'output_memory_type': base_info.get('output_memory_type', 'unknown'),
                 'special_inputs': base_info.get('special_inputs', []),
                 'special_outputs': base_info.get('special_outputs', []),
+                # Extract contract information if available
+                'contract': getattr(func, '__processing_contract__', None),
             }
             
             # Add validation status
