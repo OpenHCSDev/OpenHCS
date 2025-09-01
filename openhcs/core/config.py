@@ -160,6 +160,37 @@ class PlateMetadataConfig:
 
 
 @dataclass(frozen=True)
+class ExperimentalAnalysisConfig:
+    """Configuration for experimental analysis system."""
+    enabled: bool = True
+    """Whether experimental analysis is enabled."""
+
+    config_file_name: str = "config.xlsx"
+    """Name of the experimental configuration Excel file."""
+
+    design_sheet_name: str = "drug_curve_map"
+    """Name of the sheet containing experimental design."""
+
+    plate_groups_sheet_name: str = "plate_groups"
+    """Name of the sheet containing plate group mappings."""
+
+    normalization_method: str = "fold_change"
+    """Normalization method: fold_change, z_score, percent_control."""
+
+    export_raw_results: bool = True
+    """Whether to export raw (non-normalized) results."""
+
+    export_heatmaps: bool = True
+    """Whether to generate heatmap visualizations."""
+
+    auto_detect_format: bool = True
+    """Whether to automatically detect microscope format."""
+
+    default_format: Optional[str] = None
+    """Default format to use if auto-detection fails."""
+
+
+@dataclass(frozen=True)
 class PathPlanningConfig:
     """
     Configuration for pipeline path planning and directory structure.
@@ -626,6 +657,9 @@ class GlobalPipelineConfig:
     plate_metadata: PlateMetadataConfig = field(default_factory=PlateMetadataConfig)
     """Configuration for plate metadata in consolidated outputs."""
 
+    experimental_analysis: ExperimentalAnalysisConfig = field(default_factory=ExperimentalAnalysisConfig)
+    """Configuration for experimental analysis system."""
+
     function_registry: FunctionRegistryConfig = field(default_factory=FunctionRegistryConfig)
     """Configuration for function registry behavior."""
 
@@ -656,6 +690,7 @@ _DEFAULT_VFS_CONFIG = VFSConfig(
 _DEFAULT_ZARR_CONFIG = ZarrConfig()
 _DEFAULT_ANALYSIS_CONSOLIDATION_CONFIG = AnalysisConsolidationConfig()
 _DEFAULT_PLATE_METADATA_CONFIG = PlateMetadataConfig()
+_DEFAULT_EXPERIMENTAL_ANALYSIS_CONFIG = ExperimentalAnalysisConfig()
 _DEFAULT_FUNCTION_REGISTRY_CONFIG = FunctionRegistryConfig()
 _DEFAULT_MATERIALIZATION_DEFAULTS = StepMaterializationConfig()
 _DEFAULT_TUI_CONFIG = TUIConfig()

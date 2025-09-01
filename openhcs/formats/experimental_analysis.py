@@ -642,12 +642,28 @@ def run_experimental_analysis(
     """
     Run complete experimental analysis pipeline for CX5/MetaXpress data.
 
+    DEPRECATED: This function is maintained for backward compatibility.
+    New code should use the unified analysis engine:
+
+    from openhcs.processing.backends.experimental_analysis import ExperimentalAnalysisEngine
+    from openhcs.core.config import ExperimentalAnalysisConfig
+
+    config = ExperimentalAnalysisConfig()
+    engine = ExperimentalAnalysisEngine(config)
+    engine.run_analysis(results_path, config_file, compiled_results_path, heatmap_path)
+
     Args:
         results_path: Path to results Excel file (CX5 or MetaXpress format)
         config_file: Path to experimental configuration Excel file
         compiled_results_path: Output path for compiled results
         heatmap_path: Output path for heatmap visualization
     """
+    import warnings
+    warnings.warn(
+        "run_experimental_analysis is deprecated. Use ExperimentalAnalysisEngine instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     # Parse experimental configuration
     scope, plate_layout, conditions, ctrl_positions = read_plate_layout(config_file)
     plate_groups = load_plate_groups(config_file)
