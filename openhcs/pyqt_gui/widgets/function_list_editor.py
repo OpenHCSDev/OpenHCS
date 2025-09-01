@@ -360,7 +360,7 @@ class FunctionListEditorWidget(QWidget):
         # Use complete function pattern code generation from pickle_to_python
         from openhcs.debug.pickle_to_python import generate_complete_function_pattern_code
 
-        return generate_complete_function_pattern_code(self.pattern_data, clean_mode=False)
+        return generate_complete_function_pattern_code(self.pattern_data, clean_mode=True)
 
     def _handle_edited_pattern(self, edited_code: str) -> None:
         """Handle the edited pattern code from code editor."""
