@@ -13,12 +13,12 @@ from functools import wraps
 from typing import Tuple, Callable, List, Any, Dict
 from openhcs.constants import MemoryType
 from openhcs.core.utils import optional_import
-from .unified_registry import LibraryRegistryBase, ProcessingContract, FunctionMetadata
+from .unified_registry import LibraryRegistryBase, RuntimeTestingRegistryBase, ProcessingContract, FunctionMetadata
 
 cle = optional_import("pyclesperanto")
 
 
-class PyclesperantoRegistry(LibraryRegistryBase):
+class PyclesperantoRegistry(RuntimeTestingRegistryBase):
     """Clean pyclesperanto registry with internal library-specific logic."""
 
     # Library-specific exclusions extending common ones
@@ -52,6 +52,10 @@ class PyclesperantoRegistry(LibraryRegistryBase):
 
     def get_library_object(self):
         return cle
+
+    def get_module_patterns(self) -> List[str]:
+        """Get module patterns for pyclesperanto (includes 'cle' alternative)."""
+        return ['pyclesperanto', 'cle']
 
     # ===== HOOK IMPLEMENTATIONS =====
     def _create_array(self, shape: Tuple[int, ...], dtype):

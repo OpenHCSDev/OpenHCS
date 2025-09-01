@@ -14,14 +14,14 @@ from typing import Tuple, Callable, List, Any, Dict
 
 from openhcs.constants import MemoryType
 from openhcs.core.utils import optional_import
-from .unified_registry import LibraryRegistryBase, ProcessingContract, FunctionMetadata
+from .unified_registry import LibraryRegistryBase, RuntimeTestingRegistryBase, ProcessingContract, FunctionMetadata
 
 cp = optional_import("cupy")
 cucim = optional_import("cucim")
 cucim_skimage = optional_import("cucim.skimage")
 
 
-class CupyRegistry(LibraryRegistryBase):
+class CupyRegistry(RuntimeTestingRegistryBase):
     """Clean CuPy registry with internal GPU handling logic."""
 
     # Library-specific exclusions (uses common ones)
@@ -50,6 +50,14 @@ class CupyRegistry(LibraryRegistryBase):
 
     def get_library_object(self):
         return cucim_skimage
+
+    def get_module_patterns(self) -> List[str]:
+        """Get module patterns for CuPy (includes cucim patterns)."""
+        return ['cupy', 'cucim']
+
+    def get_display_name(self) -> str:
+        """Get proper display name for CuPy."""
+        return 'CuPy'
 
     # ===== HOOK IMPLEMENTATIONS =====
     def _create_array(self, shape: Tuple[int, ...], dtype):

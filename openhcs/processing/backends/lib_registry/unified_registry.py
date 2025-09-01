@@ -42,6 +42,19 @@ from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
 logger = logging.getLogger(__name__)
 
 
+# Enums for OpenHCS principle compliance (replace magic strings)
+class ModuleFilterComponents(Enum):
+    """Components to filter out when generating tags from module paths."""
+    BACKENDS = "backends"
+    PROCESSING = "processing"
+    OPENHCS = "openhcs"
+
+    @classmethod
+    def should_skip(cls, component: str) -> bool:
+        """Check if component should be skipped in tag generation."""
+        return any(component == item.value for item in cls)
+
+
 class ProcessingContract(Enum):
     """
     Unified contract classification with direct method execution.
@@ -69,23 +82,17 @@ class FunctionMetadata:
     doc: str = ""
     tags: List[str] = field(default_factory=list)
     original_name: str = ""  # Original function name for cache reconstruction
+    registry: Optional['LibraryRegistryBase'] = None  # Reference to the registry that registered this function
 
 
 
 
 class LibraryRegistryBase(ABC):
     """
-    Clean abstraction with essential contracts only.
+    Minimal ABC for all library registries.
 
-    Enforces only essential behavior contracts, not library-specific details.
-    Each registry implements the contract its own way while returning unified
-    ProcessingContract and FunctionMetadata types.
-
-    Essential contracts:
-    - Test function behavior to determine: 3D→3D, 2D→2D only, 3D→2D, etc.
-    - Create adapters based on contract classification
-    - Filter functions using consolidated logic
-    - Provide library identification and discovery
+    Provides only essential contracts that all registries must implement,
+    regardless of whether they use runtime testing or explicit contracts.
     """
 
     # Common exclusions across all libraries
@@ -103,7 +110,7 @@ class LibraryRegistryBase(ABC):
     def __init__(self, library_name: str):
         """
         Initialize registry for a specific library.
-        
+
         Args:
             library_name: Name of the library (e.g., "pyclesperanto", "skimage")
         """
@@ -126,6 +133,16 @@ class LibraryRegistryBase(ABC):
     def get_memory_type(self) -> str:
         """Get the memory type string value for this library."""
         return self.MEMORY_TYPE
+
+    def get_module_patterns(self) -> List[str]:
+        """Get module patterns that identify this library (can be overridden by implementations)."""
+        # Default: just the library name
+        return [self.library_name.lower()]
+
+    def get_display_name(self) -> str:
+        """Get display name for this library (can be overridden by implementations)."""
+        # Default: capitalize library name
+        return self.library_name.title()
 
     # ===== FUNCTION DISCOVERY =====
     def get_modules_to_scan(self) -> List[Tuple[str, Any]]:
@@ -153,6 +170,15 @@ class LibraryRegistryBase(ABC):
     def get_library_object(self):
         """Get the main library object to scan for modules. Library-specific implementation."""
         pass
+
+
+class RuntimeTestingRegistryBase(LibraryRegistryBase):
+    """
+    Extended ABC for libraries that require runtime testing.
+
+    Adds runtime testing methods for libraries that don't have explicit
+    processing contracts and need behavioral classification through testing.
+    """
 
     def create_test_arrays(self) -> Tuple[Any, Any]:
         """
@@ -294,9 +320,9 @@ class LibraryRegistryBase(ABC):
         """Check if first parameter meets library-specific criteria. Library-specific implementation."""
         pass
 
-    # ===== SHARED IMPLEMENTATION LOGIC =====
+    # ===== RUNTIME TESTING IMPLEMENTATION =====
     def discover_functions(self) -> Dict[str, FunctionMetadata]:
-        """Discover and classify all library functions with detailed logging."""
+        """Discover and classify all library functions with runtime testing."""
         functions = {}
         modules = self.get_modules_to_scan()
         logger.info(f"🔍 Starting function discovery for {self.library_name}")
@@ -345,7 +371,8 @@ class LibraryRegistryBase(ABC):
                     module=func.__module__ or "",
                     doc=first_line_doc,
                     tags=self._generate_tags(name),
-                    original_name=name
+                    original_name=name,
+                    registry=self
                 )
 
                 functions[func_name] = metadata
@@ -357,6 +384,8 @@ class LibraryRegistryBase(ABC):
 
         logger.info(f"✅ Discovery complete: {total_accepted}/{total_tested} functions accepted")
         return functions
+
+
 
     def _get_full_function_path(self, module, func_name: str, module_name: str) -> str:
         """Generate full module path for logging."""
@@ -458,35 +487,14 @@ class LibraryRegistryBase(ABC):
                 module=cached_data.get('module', ''),
                 doc=cached_data.get('doc', ''),
                 tags=cached_data.get('tags', []),
-                original_name=cached_data.get('original_name', func_name)
+                original_name=cached_data.get('original_name', func_name),
+                registry=self
             )
             functions[func_name] = metadata
 
         return functions
 
-    def register_functions_direct(self):
-        """Register functions directly with OpenHCS function registry using shared logic."""
-        from openhcs.processing.func_registry import _apply_unified_decoration, _register_function
-        from openhcs.constants import MemoryType
 
-        functions = self._load_or_discover_functions()
-        registered_count = 0
-
-        for func_name, metadata in functions.items():
-            adapted = self.create_library_adapter(metadata.func, metadata.contract)
-            memory_type_enum = MemoryType(self.get_memory_type())
-            wrapper_func = _apply_unified_decoration(
-                original_func=adapted,
-                func_name=metadata.name,
-                memory_type=memory_type_enum,
-                create_wrapper=True
-            )
-
-            _register_function(wrapper_func, self.get_memory_type())
-            registered_count += 1
-
-        logger.info(f"Registered {registered_count} {self.library_name} functions")
-        return registered_count
 
     # ===== SHARED ADAPTER LOGIC =====
     def _execute_slice_by_slice(self, func, image, *args, **kwargs):
@@ -528,8 +536,8 @@ class LibraryRegistryBase(ABC):
         return name
 
     def _generate_tags(self, func_name: str) -> List[str]:
-        """Generate tags. Override in subclasses for custom tags."""
-        return func_name.lower().replace("_", " ").split()
+        """Generate tags using library name."""
+        return [self.library_name]
 
     def _promote_2d_to_3d(self, result):
         """Promote 2D results to 3D using library-specific expansion method."""
@@ -574,202 +582,4 @@ class LibraryRegistryBase(ABC):
         return getattr(module, func_name)
 
 
-class OpenHCSRegistry(LibraryRegistryBase):
-    """
-    Registry for OpenHCS native functions with explicit contract support.
-
-    This registry processes OpenHCS functions that have been decorated with
-    explicit contract declarations, allowing them to skip runtime testing
-    while producing the same FunctionMetadata format as external libraries.
-    """
-
-    # Required abstract class attributes
-    MODULES_TO_SCAN = []  # Will be set dynamically
-    MEMORY_TYPE = "openhcs"  # Placeholder, actual memory types come from function attributes
-    FLOAT_DTYPE = np.float32
-
-    def __init__(self):
-        super().__init__("openhcs")
-        # Set modules to scan to OpenHCS processing modules
-        self.MODULES_TO_SCAN = self._get_openhcs_modules()
-
-    def _get_openhcs_modules(self) -> List[str]:
-        """Get list of OpenHCS processing modules to scan."""
-        # Import here to avoid circular imports
-        import openhcs.processing
-        import os
-        import pkgutil
-
-        modules = []
-        processing_path = os.path.dirname(openhcs.processing.__file__)
-        processing_package = "openhcs.processing"
-
-        # Scan all modules in openhcs.processing recursively
-        for importer, modname, ispkg in pkgutil.walk_packages([processing_path], processing_package + "."):
-            # Skip lib_registry modules to avoid circular imports
-            if "lib_registry" not in modname:
-                modules.append(modname)
-
-        return modules
-
-    # ===== ESSENTIAL ABC METHODS =====
-    def get_library_version(self) -> str:
-        """Get OpenHCS version."""
-        try:
-            import openhcs
-            return getattr(openhcs, '__version__', 'unknown')
-        except:
-            return 'unknown'
-
-    def is_library_available(self) -> bool:
-        """OpenHCS is always available."""
-        return True
-
-    def get_library_object(self):
-        """Return OpenHCS processing module."""
-        import openhcs.processing
-        return openhcs.processing
-
-    def get_memory_type(self) -> str:
-        """Return placeholder memory type."""
-        return self.MEMORY_TYPE
-
-    def get_modules_to_scan(self) -> List[Tuple[str, Any]]:
-        """Get modules to scan for OpenHCS functions."""
-        modules = []
-        for module_name in self.MODULES_TO_SCAN:
-            try:
-                module = importlib.import_module(module_name)
-                modules.append((module_name, module))
-            except ImportError as e:
-                logger.warning(f"Could not import OpenHCS module {module_name}: {e}")
-        return modules
-
-    def create_test_arrays(self) -> Tuple[Any, Any]:
-        """Create test arrays for contract testing (not used for explicit contracts)."""
-        return np.random.rand(3, 10, 10).astype(np.float32), np.random.rand(10, 10).astype(np.float32)
-
-    def _check_first_parameter(self, first_param, func_name: str) -> bool:
-        """Check if first parameter is suitable for image processing."""
-        # Accept any parameter for OpenHCS functions
-        return True
-
-    def _generate_function_name(self, original_name: str, module_name: str) -> str:
-        """Generate function name for OpenHCS functions."""
-        # Use original name for OpenHCS functions
-        return original_name
-
-    def _generate_tags(self, module_name: str) -> List[str]:
-        """Generate tags for OpenHCS functions based on module structure using generic principles."""
-        tags = ["openhcs"]
-
-        # Extract meaningful components from module path using generic parsing
-        # Follow OpenHCS principle: extract structure from existing data, don't hardcode
-        module_parts = module_name.split('.')
-
-        # Add tags based on actual module structure
-        for part in module_parts:
-            if part in ['backends', 'processing', 'openhcs']:
-                continue  # Skip common/root parts
-
-            # Add meaningful module components as tags
-            if part:
-                tags.append(part)
-
-        return tags
-
-    # ===== REQUIRED ABSTRACT METHODS =====
-    def _create_array(self, data: Any) -> Any:
-        """Create array from data (not used for explicit contracts)."""
-        return np.array(data)
-
-    def _preprocess_input(self, array: Any) -> Any:
-        """Preprocess input array (not used for explicit contracts)."""
-        return array
-
-    def _postprocess_output(self, array: Any) -> Any:
-        """Postprocess output array (not used for explicit contracts)."""
-        return array
-
-    def _expand_2d_to_3d(self, array_2d: Any) -> Any:
-        """Expand 2D array to 3D (not used for explicit contracts)."""
-        return np.expand_dims(array_2d, axis=0)
-
-    def _stack_2d_results(self, results: List[Any]) -> Any:
-        """Stack 2D results into 3D (not used for explicit contracts)."""
-        return np.stack(results, axis=0)
-
-    def _arrays_close(self, arr1: Any, arr2: Any, rtol: float = 1e-5, atol: float = 1e-8) -> bool:
-        """Check if arrays are close (not used for explicit contracts)."""
-        return np.allclose(arr1, arr2, rtol=rtol, atol=atol)
-
-    # ===== OPENHCS-SPECIFIC METHODS =====
-    def discover_functions(self) -> Dict[str, FunctionMetadata]:
-        """Discover OpenHCS functions with explicit contract support."""
-        functions = {}
-        modules = self.get_modules_to_scan()
-        logger.info(f"🔍 Starting OpenHCS function discovery")
-        logger.info(f"📦 Scanning {len(modules)} OpenHCS modules")
-
-        total_tested = 0
-        total_accepted = 0
-
-        for module_name, module in modules:
-            module_tested = 0
-            module_accepted = 0
-
-            for name in dir(module):
-                if name.startswith("_"):
-                    continue
-
-                func = getattr(module, name)
-
-                # Only process functions with memory type attributes (decorated functions)
-                if not (hasattr(func, "input_memory_type") and hasattr(func, "output_memory_type")):
-                    continue
-
-                if not self.should_include_function(func, name):
-                    continue
-
-                module_tested += 1
-                total_tested += 1
-
-                # Extract declared contract from function attribute
-                declared_contract = getattr(func, '__processing_contract__', None)
-
-                # Use enhanced classify_function_behavior with declared contract
-                contract, is_valid = self.classify_function_behavior(func, declared_contract)
-
-                if declared_contract:
-                    logger.info(f"    ✅ {module_name}.{name}: Using explicit contract {contract.name}")
-                else:
-                    logger.info(f"    🧪 {module_name}.{name}: Runtime testing → {contract.name if contract else 'invalid'}")
-
-                if not is_valid:
-                    logger.info(f"       ❌ Rejected: Invalid classification")
-                    continue
-
-                # Create FunctionMetadata (same format as external libraries)
-                doc_lines = (func.__doc__ or "").splitlines()
-                first_line_doc = doc_lines[0] if doc_lines else ""
-                func_name = self._generate_function_name(name, module_name)
-
-                metadata = FunctionMetadata(
-                    name=func_name,
-                    func=func,
-                    contract=contract,
-                    module=func.__module__ or "",
-                    doc=first_line_doc,
-                    tags=self._generate_tags(module_name),
-                    original_name=name
-                )
-
-                functions[func_name] = metadata
-                module_accepted += 1
-                total_accepted += 1
-
-            if module_tested > 0:
-                logger.info(f"  📊 Module {module_name}: {module_accepted}/{module_tested} functions accepted")
-
-        logger.info(f"✅ OpenHCS discovery complete: {total_accepted}/{total_tested} functions accepted")
-        return functions
+# OpenHCSRegistry moved to openhcs_registry.py for consistency with other registries

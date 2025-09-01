@@ -14,12 +14,12 @@ from typing import Tuple, Callable, List, Any, Dict
 
 from openhcs.constants import MemoryType
 from openhcs.core.utils import optional_import
-from .unified_registry import LibraryRegistryBase, ProcessingContract, FunctionMetadata
+from .unified_registry import LibraryRegistryBase, RuntimeTestingRegistryBase, ProcessingContract, FunctionMetadata
 
 skimage = optional_import("skimage")
 
 
-class SkimageRegistry(LibraryRegistryBase):
+class SkimageRegistry(RuntimeTestingRegistryBase):
     """Clean scikit-image registry with internal array compliance logic."""
 
     # Library-specific exclusions (uses common ones)
@@ -47,6 +47,14 @@ class SkimageRegistry(LibraryRegistryBase):
 
     def get_library_object(self):
         return skimage
+
+    def get_module_patterns(self) -> List[str]:
+        """Get module patterns for scikit-image."""
+        return ['skimage']
+
+    def get_display_name(self) -> str:
+        """Get proper display name for scikit-image."""
+        return 'scikit-image'
 
     # ===== HOOK IMPLEMENTATIONS =====
     def _create_array(self, shape: Tuple[int, ...], dtype):

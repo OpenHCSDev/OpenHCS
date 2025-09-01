@@ -94,8 +94,8 @@ def _auto_initialize_registry() -> None:
         # Phase 1: Scan processing directory and register native OpenHCS functions
         _scan_and_register_functions()
 
-        # Phase 2: Register external library functions
-        _register_external_libraries()
+        # Phase 2: External library functions now handled by RegistryService
+        # No longer needed - external libraries accessed via RegistryService.get_all_functions_with_metadata()
 
         total_functions = sum(len(funcs) for funcs in FUNC_REGISTRY.values())
         logger.info(
@@ -146,8 +146,8 @@ def initialize_registry() -> None:
         # Phase 1: Scan processing directory and register native OpenHCS functions
         _scan_and_register_functions()
 
-        # Phase 2: Register external library functions
-        _register_external_libraries()
+        # Phase 2: External library functions now handled by RegistryService
+        # No longer needed - external libraries accessed via RegistryService.get_all_functions_with_metadata()
         
         logger.info(
             "Function registry initialized with %d functions across %d backends",
@@ -291,44 +291,6 @@ def _apply_unified_decoration(original_func, func_name, memory_type, create_wrap
     return wrapper_func
 
 
-def _register_external_libraries() -> None:
-    """
-    Phase 2: Register external library functions using clean unified registries.
-
-    This is separate from core scanning to avoid circular dependencies.
-    External library registration should use direct registration, not trigger re-initialization.
-    """
-    logger.info("Phase 2: Registering external library functions using unified registries...")
-
-    try:
-        from openhcs.processing.backends.lib_registry.pyclesperanto_registry import PyclesperantoRegistry
-        registry = PyclesperantoRegistry()
-        registry.register_functions_direct()
-        logger.info("Successfully registered pyclesperanto functions")
-    except ImportError as e:
-        logger.warning(f"Could not register pyclesperanto functions: {e}")
-    except Exception as e:
-        logger.error(f"Error registering pyclesperanto functions: {e}")
-
-    try:
-        from openhcs.processing.backends.lib_registry.scikit_image_registry import SkimageRegistry
-        registry = SkimageRegistry()
-        registry.register_functions_direct()
-        logger.info("Successfully registered scikit-image functions")
-    except ImportError as e:
-        logger.warning(f"Could not register scikit-image functions: {e}")
-    except Exception as e:
-        logger.error(f"Error registering scikit-image functions: {e}")
-
-    try:
-        from openhcs.processing.backends.lib_registry.cupy_registry import CupyRegistry
-        registry = CupyRegistry()
-        registry.register_functions_direct()
-        logger.info("Successfully registered CuPy ndimage functions")
-    except ImportError as e:
-        logger.warning(f"Could not register CuPy functions: {e}")
-    except Exception as e:
-        logger.error(f"Error registering CuPy functions: {e}")
 
 
 def register_function(func: Callable, backend: str = None, **kwargs) -> None:
@@ -408,35 +370,53 @@ def _register_function(func: Callable, memory_type: str) -> None:
 
 def get_functions_by_memory_type(memory_type: str) -> List[Callable]:
     """
-    Get all functions registered for a specific memory type.
-    
-    Thread-safe: Uses a lock to ensure consistent access to the global registry.
-    
+    Get all functions for a specific memory type using the new RegistryService.
+
     Args:
         memory_type: The memory type (e.g., "numpy", "cupy", "torch")
-        
+
     Returns:
-        A list of functions registered for the specified memory type
-        
+        A list of functions for the specified memory type
+
     Raises:
-        RuntimeError: If the registry is not initialized
         ValueError: If the memory type is not valid
     """
+    # Check if memory type is valid
+    if memory_type not in VALID_MEMORY_TYPES:
+        raise ValueError(
+            f"Invalid memory type: {memory_type}. "
+            f"Valid types are: {', '.join(sorted(VALID_MEMORY_TYPES))}"
+        )
+
+    # Get functions from new RegistryService
+    from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+    all_functions = RegistryService.get_all_functions_with_metadata()
+
+    # Filter functions by memory type using proper architecture
+    functions = []
+    for func_name, metadata in all_functions.items():
+        # Handle two distinct patterns:
+
+        # 1. Runtime Testing Libraries: Use registry's MEMORY_TYPE attribute
+        if hasattr(metadata, 'registry') and hasattr(metadata.registry, 'MEMORY_TYPE'):
+            if metadata.registry.MEMORY_TYPE == memory_type:
+                functions.append(metadata.func)
+
+        # 2. OpenHCS Native Functions: Check function's own memory type attributes
+        elif metadata.tags and 'openhcs' in metadata.tags:
+            # Check if function has memory type information
+            func = metadata.func
+            if hasattr(func, 'input_memory_type') and func.input_memory_type == memory_type:
+                functions.append(func)
+            elif hasattr(func, 'backend') and func.backend == memory_type:
+                functions.append(func)
+
+    # Also include legacy FUNC_REGISTRY functions for backward compatibility
     with _registry_lock:
-        # Check if registry is initialized (should be auto-initialized on import)
-        if not _registry_initialized:
-            logger.warning("Function registry not initialized, auto-initializing now")
-            _auto_initialize_registry()
-        
-        # Check if memory type is valid
-        if memory_type not in VALID_MEMORY_TYPES:
-            raise ValueError(
-                f"Invalid memory type: {memory_type}. "
-                f"Valid types are: {', '.join(sorted(VALID_MEMORY_TYPES))}"
-            )
-        
-        # Return a copy of the list to prevent external modification
-        return list(FUNC_REGISTRY[memory_type])
+        if _registry_initialized and memory_type in FUNC_REGISTRY:
+            functions.extend(FUNC_REGISTRY[memory_type])
+
+    return functions
 
 
 def get_function_info(func: Callable) -> Dict[str, Any]:

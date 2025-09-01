@@ -6,7 +6,9 @@ FunctionRegistryService and business logic.
 """
 
 import logging
-from typing import Callable, Optional, Dict, List, Tuple
+from dataclasses import dataclass
+from enum import Enum
+from typing import Callable, Optional, Dict, List, Tuple, Any
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QTableWidget,
@@ -16,11 +18,73 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
-# REUSE the actual working Textual TUI services
-from openhcs.textual_tui.services.function_registry_service import FunctionRegistryService
+# Use the registry service from correct location
+from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.processing.backends.lib_registry.unified_registry import FunctionMetadata
 
 logger = logging.getLogger(__name__)
+
+
+# Direct registry-based library detection (robust, no pattern matching)
+class LibraryDetector:
+    """Direct library detection using registry ownership data."""
+
+    # Class-level cache for efficient lookup (OpenHCS caching pattern)
+    _registry_functions: Optional[Dict[str, str]] = None
+    _registry_display_names: Optional[Dict[str, str]] = None
+
+    @classmethod
+    def get_function_library(cls, func_name: str, module_path: str) -> str:
+        """Get library for a function using direct registry ownership (robust approach)."""
+        if cls._registry_functions is None:
+            cls._build_registry_ownership_cache()
+
+        # Direct lookup by function name (most reliable)
+        if func_name in cls._registry_functions:
+            return cls._registry_functions[func_name]
+
+        # Fallback: check by registry library name in module path
+        for registry_name, display_name in cls._registry_display_names.items():
+            if registry_name.lower() in module_path.lower():
+                return display_name
+
+        return 'Unknown'
+
+    @classmethod
+    def _build_registry_ownership_cache(cls):
+        """Build cache of function ownership using FunctionRegistryService."""
+        cls._registry_functions = {}
+        cls._registry_display_names = {}
+
+        # Use existing RegistryService (already has discovery and caching)
+        unified_functions = RegistryService.get_all_functions_with_metadata()
+
+        # Build ownership cache from unified metadata
+        for func_name, metadata in unified_functions.items():
+            # Extract library name from tags or module
+            library_name = cls._extract_library_name(metadata)
+            cls._registry_functions[func_name] = library_name
+
+    @classmethod
+    def _extract_library_name(cls, metadata) -> str:
+        """Extract library name from function metadata."""
+        # Use tags first (most reliable)
+        if metadata.tags:
+            primary_tag = metadata.tags[0]
+            return primary_tag.title()
+
+        # Fallback to module path analysis
+        module_path = metadata.module.lower()
+        if 'openhcs' in module_path:
+            return 'OpenHCS'
+        elif 'cupy' in module_path:
+            return 'CuPy'
+        elif 'pyclesperanto' in module_path or 'cle' in module_path:
+            return 'Pyclesperanto'
+        elif 'skimage' in module_path:
+            return 'scikit-image'
+
+        return 'Unknown'
 
 
 class FunctionSelectorDialog(QDialog):
@@ -33,6 +97,16 @@ class FunctionSelectorDialog(QDialog):
 
     # Class-level cache for expensive metadata discovery
     _metadata_cache: Optional[Dict[str, FunctionMetadata]] = None
+
+    # UI Constants (RST principle: eliminate magic numbers)
+    DEFAULT_WIDTH = 1200
+    DEFAULT_HEIGHT = 700
+    MIN_WIDTH = 800
+    MIN_HEIGHT = 500
+    MODULE_COLUMN_WIDTH = 250
+    DESCRIPTION_COLUMN_WIDTH = 200
+    TREE_PROPORTION = 400
+    TABLE_PROPORTION = 600
 
     # Signals
     function_selected = pyqtSignal(object)  # Selected function
@@ -63,7 +137,7 @@ class FunctionSelectorDialog(QDialog):
         logger.debug(f"Function selector initialized with {len(self.all_functions_metadata)} functions")
 
     def _load_function_data(self) -> None:
-        """Load function data efficiently using existing FUNC_REGISTRY."""
+        """Load ALL functions from registries (not just FUNC_REGISTRY subset)."""
         # Check if we have cached metadata
         if FunctionSelectorDialog._metadata_cache is not None:
             logger.debug("Using cached function metadata")
@@ -71,52 +145,50 @@ class FunctionSelectorDialog(QDialog):
             self.filtered_functions = self.all_functions_metadata.copy()
             return
 
-        # Use the fast existing FUNC_REGISTRY instead of expensive discovery
-        logger.info("Loading functions from existing registry (fast path)")
+        # Load ALL functions from registries directly
+        logger.info("Loading ALL functions from registries")
 
-        # Import FUNC_REGISTRY directly for maximum speed
-        from openhcs.processing.func_registry import FUNC_REGISTRY
+        # Use existing RegistryService (already has caching and discovery)
+        unified_functions = RegistryService.get_all_functions_with_metadata()
 
-        # Get functions by backend (this is instant - uses existing cached data)
-        functions_by_backend = {}
-        for memory_type, functions in FUNC_REGISTRY.items():
-            backend_name = memory_type.replace('_', ' ').title()
-            functions_by_backend[backend_name] = [(func, func.__name__) for func in functions]
-
-        # Convert to metadata format quickly
         self.all_functions_metadata = {}
 
-        for backend, functions in functions_by_backend.items():
-            for func, display_name in functions:
-                # Create basic metadata without expensive discovery
-                metadata = self._create_basic_metadata(func, display_name, backend)
-                self.all_functions_metadata[display_name] = metadata
+        # Convert FunctionMetadata to dict format for UI compatibility
+        for func_name, metadata in unified_functions.items():
+            self.all_functions_metadata[func_name] = {
+                'name': metadata.name,
+                'func': metadata.func,
+                'module': metadata.module,
+                'contract': metadata.contract,
+                'tags': metadata.tags,
+                'doc': metadata.doc
+            }
 
         # Cache the results for future use
         FunctionSelectorDialog._metadata_cache = self.all_functions_metadata
-        logger.info(f"Loaded {len(self.all_functions_metadata)} functions efficiently")
+        logger.info(f"Loaded {len(self.all_functions_metadata)} functions from all registries")
+
+
 
         self.filtered_functions = self.all_functions_metadata.copy()
 
-    def _create_basic_metadata(self, func: Callable, display_name: str, backend: str):
-        """Create basic metadata without expensive discovery."""
-        # Create a simple metadata object for fast loading
-        # We'll use a dict instead of FunctionMetadata to avoid import issues
-        return {
-            'name': display_name,
-            'func': func,
-            'module': getattr(func, '__module__', 'unknown'),
-            'contract': getattr(func, '__processing_contract__', None),
-            'tags': [backend.lower()],
-            'doc': (getattr(func, '__doc__', '') or '').strip()
-        }
-
     def populate_module_tree(self):
-        """Populate the module tree with hierarchical function organization."""
+        """Populate the module tree with hierarchical function organization (inlined per RST principle)."""
         self.module_tree.clear()
 
-        # Organize functions by library and module
-        library_modules = self._organize_by_library_and_module()
+        # Inline organization logic (single-use method elimination)
+        library_modules = {}
+        for func_name, metadata in self.all_functions_metadata.items():
+            library = self._determine_library(metadata)
+            module_path = self._extract_module_path(metadata)
+
+            # Initialize nested structure
+            if library not in library_modules:
+                library_modules[library] = {}
+            if module_path not in library_modules[library]:
+                library_modules[library][module_path] = []
+
+            library_modules[library][module_path].append(func_name)
 
         # Build tree structure
         for library_name, modules in library_modules.items():
@@ -135,94 +207,86 @@ class FunctionSelectorDialog(QDialog):
                     "functions": functions
                 })
 
-    def _organize_by_library_and_module(self):
-        """Organize functions by library and module structure."""
-        library_modules = {}
+    def _update_filtered_view(self, filtered_functions: Dict[str, Any], filter_description: str = ""):
+        """Mathematical simplification: factor out common filter update pattern (RST principle)."""
+        self.filtered_functions = filtered_functions
+        self.populate_function_table(self.filtered_functions)
 
-        for func_name, metadata in self.all_functions_metadata.items():
-            # Determine library from tags or module
-            library = self._determine_library(metadata)
+        # Create unified count display
+        total_count = len(self.all_functions_metadata)
+        filtered_count = len(self.filtered_functions)
+        count_text = f"Functions: {filtered_count}/{total_count}"
+        if filter_description:
+            count_text += f" ({filter_description})"
 
-            # Extract meaningful module path
-            module_path = self._extract_module_path(metadata)
+        self.function_count_label.setText(count_text)
 
-            # Initialize library if not exists
-            if library not in library_modules:
-                library_modules[library] = {}
+        # Clear selection when filtering
+        self._set_selection_state(None, False)
 
-            # Initialize module if not exists
-            if module_path not in library_modules[library]:
-                library_modules[library][module_path] = []
+    def _set_selection_state(self, function: Optional[Callable], enabled: bool):
+        """Mathematical simplification: factor out common button state logic (RST principle)."""
+        self.selected_function = function
+        self.select_btn.setEnabled(enabled)
 
-            # Add function to module
-            library_modules[library][module_path].append(func_name)
+    def _extract_function_from_item(self, item) -> Optional[Callable]:
+        """Mathematical simplification: factor out common data extraction pattern (RST principle)."""
+        if not item:
+            return None
+        data = item.data(Qt.ItemDataRole.UserRole)
+        return data.get("func") if data else None
 
-        return library_modules
+    def _create_pane_widget(self, title: str, main_widget) -> QWidget:
+        """Mathematical simplification: factor out common pane setup pattern (RST principle)."""
+        pane_widget = QWidget()
+        layout = QVBoxLayout(pane_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-    def _determine_library(self, metadata):
-        """Determine library name from metadata."""
+        # Create title with consistent styling
+        title_label = QLabel(title)
+        title_label.setStyleSheet("font-weight: bold; background-color: #e0e0e0; padding: 5px;")
+        layout.addWidget(title_label)
+
+        # Add main widget
+        layout.addWidget(main_widget)
+
+        return pane_widget
+
+    def _determine_library(self, metadata) -> str:
+        """Direct library determination using registry ownership (robust approach)."""
+        func_name = metadata.get('name', '')
         module = metadata.get('module', '')
-        tags = metadata.get('tags', [])
 
-        if 'openhcs' in module:
-            return 'OpenHCS'
-        elif 'skimage' in module:
-            return 'scikit-image'
-        elif 'pyclesperanto' in module or 'cle' in module:
-            return 'pyclesperanto'
-        elif 'cupy' in module.lower() or 'gpu' in tags:
-            return 'CuPy'
-        else:
-            return 'Unknown'
+        # Use direct registry ownership lookup (eliminates pattern matching fragility)
+        return LibraryDetector.get_function_library(func_name, module)
 
-    def _extract_module_path(self, metadata):
-        """Extract meaningful module path for display."""
+    def _extract_module_path(self, metadata) -> str:
+        """Extract module path from metadata (simple, direct approach)."""
         module = metadata.get('module', '')
+        if not module:
+            return 'unknown'
 
-        # For OpenHCS functions, show the backend structure
-        if 'openhcs' in module:
-            parts = module.split('.')
-            # Find the backends part and show from there
-            try:
-                backends_idx = parts.index('backends')
-                return '.'.join(parts[backends_idx+1:])  # Skip 'backends'
-            except ValueError:
-                return module.split('.')[-1]  # Just the last part
+        # Use the module path directly - it's already there
+        parts = module.split('.')
+        if len(parts) >= 2:
+            return f"{parts[-2]}.{parts[-1]}"
+        return parts[-1] if parts else 'unknown'
 
-        # For external libraries, show the meaningful part
-        elif 'skimage' in module:
-            parts = module.split('.')
-            try:
-                skimage_idx = parts.index('skimage')
-                return '.'.join(parts[skimage_idx+1:]) or 'core'
-            except ValueError:
-                return module.split('.')[-1]
 
-        elif 'pyclesperanto' in module or 'cle' in module:
-            return 'pyclesperanto_prototype'
-
-        elif 'cupy' in module.lower():
-            parts = module.split('.')
-            try:
-                cupy_idx = next(i for i, part in enumerate(parts) if 'cupy' in part.lower())
-                return '.'.join(parts[cupy_idx+1:]) or 'core'
-            except (StopIteration, IndexError):
-                return module.split('.')[-1]
-
-        return module.split('.')[-1]
 
     @classmethod
     def clear_metadata_cache(cls) -> None:
         """Clear the cached metadata to force re-discovery."""
         cls._metadata_cache = None
+        RegistryService.clear_metadata_cache()
         logger.info("Function metadata cache cleared")
     
     def setup_ui(self):
         """Setup the dual-pane user interface with tree and table."""
         self.setWindowTitle("Select Function - Dual Pane View")
         self.setModal(True)
-        self.resize(1200, 700)  # Larger size for dual panes
-        self.setMinimumSize(800, 500)  # Ensure minimum usable size
+        self.resize(self.DEFAULT_WIDTH, self.DEFAULT_HEIGHT)
+        self.setMinimumSize(self.MIN_WIDTH, self.MIN_HEIGHT)
 
         layout = QVBoxLayout(self)
 
@@ -248,30 +312,14 @@ class FunctionSelectorDialog(QDialog):
         splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         splitter.setHandleWidth(5)  # Make splitter handle more visible
 
-        # Left pane: Module tree
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-
-        tree_title = QLabel("Module Structure")
-        tree_title.setStyleSheet("font-weight: bold; background-color: #e0e0e0; padding: 5px;")
-        left_layout.addWidget(tree_title)
-
+        # Create tree widget with configuration
         self.module_tree = QTreeWidget()
         self.module_tree.setHeaderLabel("Libraries and Modules")
         self.module_tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        left_layout.addWidget(self.module_tree)
 
+        # Create panes using factored pattern (RST principle)
+        left_widget = self._create_pane_widget("Module Structure", self.module_tree)
         splitter.addWidget(left_widget)
-
-        # Right pane: Function table
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-
-        table_title = QLabel("Function Details")
-        table_title.setStyleSheet("font-weight: bold; background-color: #e0e0e0; padding: 5px;")
-        right_layout.addWidget(table_title)
 
         # Function table with enhanced columns
         self.function_table = QTableWidget()
@@ -286,24 +334,30 @@ class FunctionSelectorDialog(QDialog):
         self.function_table.setSortingEnabled(True)
         self.function_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # Configure column widths for better readability
+        # Configure column widths using mathematical simplification (RST principle)
         header = self.function_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Name
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)       # Module (allow manual resize)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Backend
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Contract
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Tags
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)           # Description
+        resize_modes = [
+            QHeaderView.ResizeMode.ResizeToContents,  # Name
+            QHeaderView.ResizeMode.Interactive,       # Module
+            QHeaderView.ResizeMode.ResizeToContents,  # Backend
+            QHeaderView.ResizeMode.ResizeToContents,  # Contract
+            QHeaderView.ResizeMode.ResizeToContents,  # Tags
+            QHeaderView.ResizeMode.Stretch            # Description
+        ]
+        for col, mode in enumerate(resize_modes):
+            header.setSectionResizeMode(col, mode)
 
-        # Set minimum column widths for better display
-        self.function_table.setColumnWidth(1, 250)  # Module column - wider for full paths
-        self.function_table.setColumnWidth(5, 200)  # Description column - minimum width
+        # Set specific column widths using constants (RST principle)
+        column_widths = {1: self.MODULE_COLUMN_WIDTH, 5: self.DESCRIPTION_COLUMN_WIDTH}
+        for col, width in column_widths.items():
+            self.function_table.setColumnWidth(col, width)
 
-        right_layout.addWidget(self.function_table)
+        # Create right pane using factored pattern (RST principle)
+        right_widget = self._create_pane_widget("Function Details", self.function_table)
         splitter.addWidget(right_widget)
 
-        # Set splitter proportions (40% tree, 60% table)
-        splitter.setSizes([400, 600])
+        # Set splitter proportions using constants
+        splitter.setSizes([self.TREE_PROPORTION, self.TABLE_PROPORTION])
 
         # Add splitter to layout with stretch factor to fill available space
         layout.addWidget(splitter, 1)  # Stretch factor of 1 to expand
@@ -358,74 +412,68 @@ class FunctionSelectorDialog(QDialog):
             doc = metadata.get('doc', '')
             description = doc[:150] + "..." if len(doc) > 150 else doc
 
-            # Create table items
-            name_item = QTableWidgetItem(metadata.get('name', func_name))
-            # Show full module path, not just the last part
-            full_module = metadata.get('module', 'unknown')
-            module_item = QTableWidgetItem(full_module)
-            backend_item = QTableWidgetItem(backend.title())
-
-            # Handle contract display
+            # Mathematical simplification: consolidate table item creation (RST principle)
             contract = metadata.get('contract')
             contract_name = contract.name if hasattr(contract, 'name') else str(contract) if contract else "unknown"
-            contract_item = QTableWidgetItem(contract_name)
 
-            tags_item = QTableWidgetItem(tags_str)
-            description_item = QTableWidgetItem(description)
+            # Create all table items using factored pattern
+            items_data = [
+                metadata.get('name', func_name),
+                metadata.get('module', 'unknown'),
+                backend.title(),
+                contract_name,
+                tags_str,
+                description
+            ]
 
-            # Store function reference in name item
-            name_item.setData(Qt.ItemDataRole.UserRole, {"func": metadata.get('func'), "metadata": metadata})
+            items = [QTableWidgetItem(data) for data in items_data]
+            items[0].setData(Qt.ItemDataRole.UserRole, {"func": metadata.get('func'), "metadata": metadata})
 
-            # Set items in table
-            self.function_table.setItem(row, 0, name_item)
-            self.function_table.setItem(row, 1, module_item)
-            self.function_table.setItem(row, 2, backend_item)
-            self.function_table.setItem(row, 3, contract_item)
-            self.function_table.setItem(row, 4, tags_item)
-            self.function_table.setItem(row, 5, description_item)
+            # Set all items in table using enumeration
+            for col, item in enumerate(items):
+                self.function_table.setItem(row, col, item)
 
             # Highlight current function if it matches
-            if self.current_function and metadata.func == self.current_function:
+            if self.current_function and metadata.get('func') == self.current_function:
                 self.function_table.selectRow(row)
 
         self.function_table.setSortingEnabled(True)  # Re-enable sorting
     
     def filter_functions(self, search_term: str):
-        """Filter functions based on search term across multiple fields."""
+        """Filter functions using mathematical simplification (RST principle)."""
         if not search_term.strip():
-            # Show all functions
-            self.filtered_functions = self.all_functions_metadata.copy()
+            # Show all functions using factored update
+            self._update_filtered_view(self.all_functions_metadata.copy())
         else:
-            # Filter functions across multiple fields
+            # Mathematical simplification: functional approach to searchable text creation
             search_lower = search_term.lower()
-            self.filtered_functions = {}
 
-            for func_name, metadata in self.all_functions_metadata.items():
-                # Search in name, module, contract, tags, and description
+            def create_searchable_text(metadata):
+                """Create searchable text using functional approach."""
                 contract = metadata.get('contract')
                 contract_name = contract.name if hasattr(contract, 'name') else str(contract) if contract else ""
 
-                searchable_text = " ".join([
-                    metadata.get('name', '').lower(),
-                    metadata.get('module', '').lower(),
-                    contract_name.lower(),
-                    " ".join(metadata.get('tags', [])).lower(),
-                    metadata.get('doc', '').lower()
-                ])
+                # Functional approach: map fields to searchable strings
+                searchable_fields = [
+                    metadata.get('name', ''),
+                    metadata.get('module', ''),
+                    contract_name,
+                    " ".join(metadata.get('tags', [])),
+                    metadata.get('doc', '')
+                ]
+                return " ".join(field.lower() for field in searchable_fields)
 
-                if search_lower in searchable_text:
-                    self.filtered_functions[func_name] = metadata
+            # Filter using comprehension and factored text creation
+            filtered = {
+                name: metadata for name, metadata in self.all_functions_metadata.items()
+                if search_lower in create_searchable_text(metadata)
+            }
 
-        # Update table and count
-        self.populate_function_table(self.filtered_functions)
-        self.function_count_label.setText(f"Functions: {len(self.filtered_functions)}/{len(self.all_functions_metadata)}")
-
-        # Clear selection when filtering
-        self.selected_function = None
-        self.select_btn.setEnabled(False)
+            # Use factored update method
+            self._update_filtered_view(filtered, f"search: '{search_term}'")
 
     def on_tree_selection_changed(self):
-        """Handle tree selection changes to filter table."""
+        """Handle tree selection using mathematical simplification (RST principle)."""
         selected_items = self.module_tree.selectedItems()
         if not selected_items:
             return
@@ -436,37 +484,22 @@ class FunctionSelectorDialog(QDialog):
         if data:
             node_type = data.get("type")
 
+            # Mathematical simplification: factor out filtering logic
             if node_type == "module":
-                # Filter table to show only functions from this module
                 module_functions = data.get("functions", [])
-                self.filtered_functions = {
+                filtered = {
                     name: metadata for name, metadata in self.all_functions_metadata.items()
                     if name in module_functions
                 }
-
-                # Update table and count
-                self.populate_function_table(self.filtered_functions)
-                self.function_count_label.setText(
-                    f"Functions: {len(self.filtered_functions)}/{len(self.all_functions_metadata)} (filtered by module)"
-                )
+                self._update_filtered_view(filtered, "filtered by module")
 
             elif node_type == "library":
-                # Filter table to show only functions from this library
                 library_name = data.get("name")
-                self.filtered_functions = {
+                filtered = {
                     name: metadata for name, metadata in self.all_functions_metadata.items()
                     if self._determine_library(metadata) == library_name
                 }
-
-                # Update table and count
-                self.populate_function_table(self.filtered_functions)
-                self.function_count_label.setText(
-                    f"Functions: {len(self.filtered_functions)}/{len(self.all_functions_metadata)} (filtered by library)"
-                )
-
-        # Clear function selection when tree selection changes
-        self.selected_function = None
-        self.select_btn.setEnabled(False)
+                self._update_filtered_view(filtered, "filtered by library")
     
     def on_table_selection_changed(self):
         """Handle table selection changes."""
@@ -476,32 +509,22 @@ class FunctionSelectorDialog(QDialog):
             row = selected_items[0].row()
             name_item = self.function_table.item(row, 0)
 
-            if name_item:
-                data = name_item.data(Qt.ItemDataRole.UserRole)
-                if data and data.get("func"):
-                    self.selected_function = data["func"]
-                    self.select_btn.setEnabled(True)
-                else:
-                    self.selected_function = None
-                    self.select_btn.setEnabled(False)
-            else:
-                self.selected_function = None
-                self.select_btn.setEnabled(False)
+            # Use factored extraction and state setting
+            func = self._extract_function_from_item(name_item)
+            self._set_selection_state(func, func is not None)
         else:
-            self.selected_function = None
-            self.select_btn.setEnabled(False)
+            self._set_selection_state(None, False)
 
     def on_table_double_click(self, item):
-        """Handle table double-click."""
+        """Handle table double-click using factored extraction (RST principle)."""
         if item:
             row = item.row()
             name_item = self.function_table.item(row, 0)
+            func = self._extract_function_from_item(name_item)
 
-            if name_item:
-                data = name_item.data(Qt.ItemDataRole.UserRole)
-                if data and data.get("func"):
-                    self.selected_function = data["func"]
-                    self.accept_selection()
+            if func:
+                self.selected_function = func
+                self.accept_selection()
     
     def accept_selection(self):
         """Accept the selected function."""

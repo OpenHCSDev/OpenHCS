@@ -400,8 +400,8 @@ class PipelineEditorWidget(ButtonListWidget):
         func = step_dict.get("func")
         if func is None:
             # Fallback to default function if missing
-            from openhcs.textual_tui.services.function_registry_service import FunctionRegistryService
-            registry = FunctionRegistryService()
+            from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+            registry = RegistryService()
             func = registry.find_default_function()
             logger.warning(f"Step '{step_dict.get('name', 'Unknown')}' missing function, using default")
 

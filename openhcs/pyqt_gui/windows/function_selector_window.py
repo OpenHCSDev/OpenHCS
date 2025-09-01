@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
-from openhcs.textual_tui.services.function_registry_service import FunctionRegistryService
+from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 
@@ -50,7 +50,7 @@ class FunctionSelectorWindow(QDialog):
 
         # Business logic state (extracted from Textual version)
         self.on_result_callback = on_result_callback
-        self.function_registry = FunctionRegistryService()
+        self.function_registry = RegistryService()
 
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or PyQt6ColorScheme()

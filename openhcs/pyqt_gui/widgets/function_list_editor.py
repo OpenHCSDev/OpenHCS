@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
-from openhcs.textual_tui.services.function_registry_service import FunctionRegistryService
+from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
 from openhcs.constants.constants import GroupBy, VariableComponents
@@ -45,7 +45,7 @@ class FunctionListEditorWidget(QWidget):
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         
         # Initialize services (reuse existing business logic)
-        self.registry_service = FunctionRegistryService()
+        self.registry_service = RegistryService()
         self.data_manager = PatternDataManager()
         self.service_adapter = service_adapter
 

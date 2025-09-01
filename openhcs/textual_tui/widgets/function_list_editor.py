@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.reactive import reactive
 from textual.message import Message # Added Message
 
-from openhcs.textual_tui.services.function_registry_service import FunctionRegistryService
+from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
 from openhcs.textual_tui.widgets.function_pane import FunctionPaneWidget
 from openhcs.constants.constants import GroupBy, VariableComponents
@@ -43,7 +43,7 @@ class FunctionListEditorWidget(Container):
         super().__init__()
 
         # Initialize services (reuse existing business logic)
-        self.registry_service = FunctionRegistryService()
+        self.registry_service = RegistryService()
         self.data_manager = PatternDataManager() # Not heavily used yet, but available
 
         # Step identifier for cache isolation (optional, defaults to widget instance id)

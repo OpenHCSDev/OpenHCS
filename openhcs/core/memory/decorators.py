@@ -19,16 +19,7 @@ from openhcs.constants.constants import VALID_MEMORY_TYPES
 from openhcs.core.utils import optional_import
 from openhcs.core.memory.oom_recovery import _execute_with_oom_recovery
 
-# ProcessingContract imported lazily to avoid circular imports
-ProcessingContract = None
-
-def _get_processing_contract():
-    """Lazy import of ProcessingContract to avoid circular imports."""
-    global ProcessingContract
-    if ProcessingContract is None:
-        from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract as PC
-        ProcessingContract = PC
-    return ProcessingContract
+# Direct import for default contract (inlined single-use method per RST principle)
 
 logger = logging.getLogger(__name__)
 
@@ -360,13 +351,12 @@ def memory_types(*, input_type: str, output_type: str, contract: Optional['Proce
         func.input_memory_type = input_type
         func.output_memory_type = output_type
 
-        # Set processing contract attribute if provided, otherwise default to PURE_3D
-        if contract is not None:
-            func.__processing_contract__ = contract
+        # Set processing contract with fail-loud behavior (inlined per RST principle)
+        if contract is None:
+            from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
+            func.__processing_contract__ = ProcessingContract.PURE_3D
         else:
-            PC = _get_processing_contract()
-            if PC is not None:
-                func.__processing_contract__ = PC.PURE_3D
+            func.__processing_contract__ = contract
 
         # Return the function unchanged (no wrapper)
         return func

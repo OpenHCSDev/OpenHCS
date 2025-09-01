@@ -16,7 +16,7 @@ from itertools import zip_longest
 
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
-from openhcs.textual_tui.services.function_registry_service import FunctionRegistryService
+from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
 # Updated import to get the message class as well
 from openhcs.textual_tui.widgets.step_parameter_editor import (
@@ -220,7 +220,7 @@ class DualEditorWindow(BaseOpenHCSWindow):
 
         # Initialize services (reuse existing business logic)
         self.pattern_manager = PatternDataManager()
-        self.registry_service = FunctionRegistryService()
+        self.registry_service = RegistryService()
 
         # Create working copy of step data
         if self.step_data:

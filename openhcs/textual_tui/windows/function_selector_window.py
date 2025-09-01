@@ -8,7 +8,7 @@ from textual.widgets.data_table import RowKey
 from textual.widgets.tree import TreeNode
 
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
-from openhcs.textual_tui.services.function_registry_service import FunctionRegistryService
+from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.processing.backends.lib_registry.unified_registry import FunctionMetadata
 
 
@@ -64,7 +64,7 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
 
     def _load_function_data(self) -> None:
         """Load function data with enhanced metadata from registry."""
-        registry_service = FunctionRegistryService()
+        registry_service = RegistryService()
 
         # Get unified metadata for all functions
         self.all_functions_metadata = registry_service.get_all_functions_with_metadata()
