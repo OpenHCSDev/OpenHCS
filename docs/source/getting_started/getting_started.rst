@@ -12,6 +12,37 @@ Requirements:
 - Python 3.8+
 - For GPU acceleration: CUDA-compatible GPU with appropriate drivers
 
+Installation Options
+~~~~~~~~~~~~~~~~~~~
+
+**Standard Installation** (with GPU support):
+
+.. code-block:: bash
+
+    pip install openhcs
+    # Includes GPU libraries: pyclesperanto, cupy, etc.
+
+**CPU-Only Installation** (for CI/testing environments):
+
+.. code-block:: bash
+
+    # Install with minimal dependencies
+    pip install openhcs --no-deps
+    pip install numpy scipy scikit-image pandas
+
+    # Enable CPU-only mode
+    export OPENHCS_CPU_ONLY=1
+
+**Development Installation**:
+
+.. code-block:: bash
+
+    git clone https://github.com/your-org/openhcs.git
+    cd openhcs
+    pip install -e .
+
+See :doc:`../user_guide/cpu_only_mode` for detailed CPU-only configuration.
+
 Basic Example
 ------------
 

@@ -48,6 +48,55 @@ Configuration Structure
 
 OpenHCS uses immutable dataclasses that compose together to form the configuration hierarchy.
 
+Core Configuration Classes
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**GlobalPipelineConfig**: Top-level configuration containing all subsystem configurations
+
+.. code-block:: python
+
+   @dataclass(frozen=True)
+   class GlobalPipelineConfig:
+       # Core execution settings
+       num_workers: int = 4
+       gpu_enabled: bool = True
+
+       # Storage and memory
+       zarr: ZarrConfig = field(default_factory=ZarrConfig)
+
+       # Analysis and data management
+       analysis_consolidation: AnalysisConsolidationConfig = field(default_factory=AnalysisConsolidationConfig)
+       plate_metadata: PlateMetadataConfig = field(default_factory=PlateMetadataConfig)
+
+       # Function registry behavior
+       function_registry: FunctionRegistryConfig = field(default_factory=FunctionRegistryConfig)
+
+**AnalysisConsolidationConfig**: Controls automatic analysis result consolidation
+
+.. code-block:: python
+
+   @dataclass(frozen=True)
+   class AnalysisConsolidationConfig:
+       enabled: bool = True
+       metaxpress_style: bool = True
+       well_pattern: str = r"([A-Z]\d{2})"
+       file_extensions: tuple[str, ...] = (".csv",)
+       exclude_patterns: tuple[str, ...] = (r".*consolidated.*", r".*summary.*")
+       output_filename: str = "metaxpress_style_summary.csv"
+
+**PlateMetadataConfig**: MetaXpress-compatible plate metadata
+
+.. code-block:: python
+
+   @dataclass(frozen=True)
+   class PlateMetadataConfig:
+       barcode: Optional[str] = None
+       plate_name: Optional[str] = None
+       plate_id: Optional[str] = None
+       description: Optional[str] = None
+       acquisition_user: str = "OpenHCS"
+       z_step: str = "1"
+
 .. code-block:: python
 
    @dataclass(frozen=True)

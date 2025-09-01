@@ -23,11 +23,23 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
    production_examples
    code_ui_editing
    dtype_conversion
+   cpu_only_mode
+   analysis_consolidation
 
 **Available Guides**:
 
 - :doc:`code_ui_editing` - Bidirectional editing between TUI and Python code
 - :doc:`dtype_conversion` - Automatic data type conversion for GPU libraries
+- :doc:`cpu_only_mode` - CPU-only mode for CI testing and deployment
+- :doc:`analysis_consolidation` - Automatic analysis result consolidation
+
+**Environment Configuration**:
+
+- :doc:`cpu_only_mode` - Configure OpenHCS for CPU-only environments
+
+**Data Management**:
+
+- :doc:`analysis_consolidation` - Consolidate multi-well analysis results
 
 **What's Coming**:
 
