@@ -717,7 +717,7 @@ class PipelineEditorWidget(ButtonListWidget):
             # Generate complete pipeline steps code with imports
             python_code = generate_complete_pipeline_steps_code(
                 pipeline_steps=list(self.pipeline_steps),
-                clean_mode=False
+                clean_mode=True
             )
 
             # Create callback to handle edited code
