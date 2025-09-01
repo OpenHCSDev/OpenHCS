@@ -8,8 +8,9 @@ while producing the same FunctionMetadata format as external libraries.
 
 import logging
 import numpy as np
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Callable
 import importlib
+from functools import wraps
 
 from openhcs.processing.backends.lib_registry.unified_registry import LibraryRegistryBase, FunctionMetadata, ProcessingContract
 
@@ -127,9 +128,12 @@ class OpenHCSRegistry(LibraryRegistryBase):
                 if hasattr(func, '__processing_contract__'):
                     contract = getattr(func, '__processing_contract__')
 
+                    # Apply contract wrapper (adds slice_by_slice for FLEXIBLE)
+                    wrapped_func = self.apply_contract_wrapper(func, contract)
+
                     metadata = FunctionMetadata(
                         name=name,
-                        func=func,
+                        func=wrapped_func,
                         contract=contract,
                         registry=self,
                         module=func.__module__ or "",

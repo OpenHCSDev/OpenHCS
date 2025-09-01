@@ -140,6 +140,57 @@ class LibraryRegistryBase(ABC):
         """Discover and return function metadata. Must be implemented by subclasses."""
         pass
 
+    # ===== CONTRACT HANDLING =====
+    def apply_contract_wrapper(self, func: Callable, contract: ProcessingContract) -> Callable:
+        """Apply contract-specific wrapper for all contract types."""
+        from functools import wraps
+        import inspect
+
+        if contract == ProcessingContract.FLEXIBLE:
+            # First, create the modified signature
+            original_sig = inspect.signature(func)
+            new_params = list(original_sig.parameters.values())
+
+            # Add slice_by_slice parameter if not already present
+            param_names = [p.name for p in new_params]
+            if 'slice_by_slice' not in param_names:
+                slice_param = inspect.Parameter(
+                    'slice_by_slice',
+                    inspect.Parameter.KEYWORD_ONLY,
+                    default=False,
+                    annotation=bool
+                )
+
+                # Insert before any VAR_KEYWORD (**kwargs) parameter
+                insert_index = len(new_params)
+                for i, param in enumerate(new_params):
+                    if param.kind == inspect.Parameter.VAR_KEYWORD:
+                        insert_index = i
+                        break
+
+                new_params.insert(insert_index, slice_param)
+
+            # Create the wrapper function
+            @wraps(func)
+            def flexible_wrapper(image, *args, slice_by_slice: bool = False, **kwargs):
+                func.slice_by_slice = slice_by_slice
+                return contract.execute(self, func, image, *args, **kwargs)
+
+            # Apply the modified signature AFTER @wraps
+            if 'slice_by_slice' not in param_names:
+                new_sig = original_sig.replace(parameters=new_params)
+                flexible_wrapper.__signature__ = new_sig
+
+            flexible_wrapper.slice_by_slice = False
+            return flexible_wrapper
+        else:
+            # For other contracts, wrap with contract execution
+            @wraps(func)
+            def contract_wrapper(image, *args, **kwargs):
+                return contract.execute(self, func, image, *args, **kwargs)
+
+            return contract_wrapper
+
 
 
     def _get_function_by_name(self, module_path: str, func_name: str):
@@ -237,9 +288,18 @@ class LibraryRegistryBase(ABC):
             func = self._get_function_by_name(cached_data['module'], original_name)
             contract = ProcessingContract[cached_data['contract']]
 
+            # Apply the same wrappers as during discovery
+            if hasattr(self, 'create_library_adapter'):
+                # External library - apply library adapter + contract wrapper
+                adapted_func = self.create_library_adapter(func, contract)
+                final_func = self.apply_contract_wrapper(adapted_func, contract)
+            else:
+                # OpenHCS - apply contract wrapper only
+                final_func = self.apply_contract_wrapper(func, contract)
+
             metadata = FunctionMetadata(
                 name=func_name,
-                func=func,
+                func=final_func,
                 contract=contract,
                 registry=self,
                 module=cached_data.get('module', ''),
@@ -404,34 +464,15 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         pass
 
     def create_library_adapter(self, original_func: Callable, contract: ProcessingContract) -> Callable:
-        """Create adapter based on contract classification."""
+        """Create adapter with library-specific processing only."""
         func_name = getattr(original_func, '__name__', 'unknown')
 
-        def _core_adapter_logic(image, *args, **kwargs):
-            """Core adapter logic shared by all contracts."""
-            # Library-specific preprocessing
+        def adapter(image, *args, **kwargs):
             processed_image = self._preprocess_input(image, func_name)
-
-            # Contract-based execution
             result = contract.execute(self, original_func, processed_image, *args, **kwargs)
-
-            # Library-specific postprocessing
             return self._postprocess_output(result, image, func_name)
 
-        # Only add slice_by_slice parameter for FLEXIBLE contract functions
-        if contract == ProcessingContract.FLEXIBLE:
-            @wraps(original_func)
-            def unified_adapter(image, *args, slice_by_slice: bool = False, **kwargs):
-                # Set slice_by_slice attribute on the function for contract execution to check
-                original_func.slice_by_slice = slice_by_slice
-                return _core_adapter_logic(image, *args, **kwargs)
-
-            # Add slice_by_slice attribute to the wrapper for UI introspection
-            unified_adapter.slice_by_slice = False
-            return unified_adapter
-        else:
-            # For non-flexible contracts, use standard adapter without slice_by_slice
-            return wraps(original_func)(_core_adapter_logic)
+        return wraps(original_func)(adapter)
 
     @abstractmethod
     def _preprocess_input(self, image, func_name: str):
@@ -523,9 +564,15 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
                 first_line_doc = doc_lines[0] if doc_lines else ""
                 func_name = self._generate_function_name(name, module_name)
 
+                # Apply library adapter (preprocessing/postprocessing)
+                adapted_func = self.create_library_adapter(func, contract)
+
+                # Apply contract wrapper (slice_by_slice for FLEXIBLE)
+                final_func = self.apply_contract_wrapper(adapted_func, contract)
+
                 metadata = FunctionMetadata(
                     name=func_name,
-                    func=func,
+                    func=final_func,
                     contract=contract,
                     registry=self,
                     module=func.__module__ or "",
