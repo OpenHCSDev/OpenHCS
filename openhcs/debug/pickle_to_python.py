@@ -12,6 +12,7 @@ from collections import defaultdict
 from enum import Enum
 import dataclasses
 from dataclasses import is_dataclass, fields
+from typing import Callable
 
 from openhcs.core.config import GlobalPipelineConfig, PathPlanningConfig, VFSConfig, ZarrConfig
 from openhcs.core.steps.function_step import FunctionStep
@@ -20,7 +21,7 @@ def collect_imports_from_data(data_obj):
     """Extract function, enum, and dataclass imports by traversing data structure."""
     function_imports = defaultdict(set)
     enum_imports = defaultdict(set)
-    registry_functions = set()  # Track functions that need registry lookup
+    decorated_functions = set()  # Track external functions that need openhcs.decorated import
 
     def register_imports(obj):
         if isinstance(obj, Enum):
@@ -32,9 +33,11 @@ def collect_imports_from_data(data_obj):
             function_imports[module].add(name)
             [register_imports(getattr(obj, f.name)) for f in fields(obj) if getattr(obj, f.name) is not None]
         elif callable(obj):
-            # Check if this is an external registered function that needs registry lookup
+            # Check if this is an external registered function
             if _is_external_registered_function(obj):
-                registry_functions.add(obj.__name__)
+                # Use virtual module import instead of direct import
+                function_imports['openhcs.decorated'].add(obj.__name__)
+                decorated_functions.add(obj.__name__)
             else:
                 function_imports[obj.__module__].add(obj.__name__)
         elif isinstance(obj, (list, tuple)):
@@ -45,7 +48,7 @@ def collect_imports_from_data(data_obj):
             [register_imports(value) for value in obj.__dict__.values()]
 
     register_imports(data_obj)
-    return function_imports, enum_imports, registry_functions
+    return function_imports, enum_imports, decorated_functions
 
 
 def _is_external_registered_function(func):
@@ -54,6 +57,31 @@ def _is_external_registered_function(func):
     return (hasattr(func, 'slice_by_slice') and
             not hasattr(func, '__processing_contract__') and
             not func.__module__.startswith('openhcs.'))
+
+
+def _create_openhcs_decorated_module():
+    """Create a virtual module that exposes decorated external functions with clean import paths."""
+    import sys
+    import types
+    from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+
+    # Create the virtual module
+    module_name = 'openhcs.decorated'
+    if module_name not in sys.modules:
+        decorated_module = types.ModuleType(module_name)
+        decorated_module.__doc__ = "Virtual module providing access to OpenHCS-decorated external functions"
+        sys.modules[module_name] = decorated_module
+
+        # Get all registered functions
+        all_functions = RegistryService.get_all_functions_with_metadata()
+
+        # Add external functions to the module
+        for func_name, metadata in all_functions.items():
+            if _is_external_registered_function(metadata.func):
+                # Add the decorated function to the module
+                setattr(decorated_module, func_name, metadata.func)
+
+    return sys.modules[module_name]
 
 def format_imports_as_strings(function_imports, enum_imports):
     """Convert import dictionaries to list of import strings with collision resolution."""
@@ -473,12 +501,12 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     # Collect imports from ALL data in pipeline steps (functions AND parameters)
     all_function_imports = defaultdict(set)
     all_enum_imports = defaultdict(set)
-    all_registry_functions = set()
+    all_decorated_functions = set()
 
     for step in pipeline_steps:
         # Collect all imports from step (functions, enums, dataclasses)
-        func_imports, enum_imports, func_registry = collect_imports_from_data(step.func)
-        param_imports, param_enums, param_registry = collect_imports_from_data(step)
+        func_imports, enum_imports, func_decorated = collect_imports_from_data(step.func)
+        param_imports, param_enums, param_decorated = collect_imports_from_data(step)
 
         # Merge imports
         for module, names in func_imports.items():
@@ -489,29 +517,21 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
             all_function_imports[module].update(names)
         for module, names in param_enums.items():
             all_enum_imports[module].update(names)
-        all_registry_functions.update(func_registry)
-        all_registry_functions.update(param_registry)
+        all_decorated_functions.update(func_decorated)
+        all_decorated_functions.update(param_decorated)
 
     # Add FunctionStep import (always needed for generated code)
     all_function_imports['openhcs.core.steps.function_step'].add('FunctionStep')
 
-    # Add RegistryService import if we have external functions
-    if all_registry_functions:
-        all_function_imports['openhcs.processing.backends.lib_registry.registry_service'].add('RegistryService')
+    # Create virtual module if we have decorated functions
+    if all_decorated_functions:
+        _create_openhcs_decorated_module()
 
     # Format and add all collected imports
     import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
     if import_lines:
         code_lines.append("# Automatically collected imports")
         code_lines.extend(import_lines)
-        code_lines.append("")
-
-    # Add registry function lookups if needed
-    if all_registry_functions:
-        code_lines.append("# External function lookups from registry")
-        code_lines.append("_registry_functions = RegistryService.get_all_functions_with_metadata()")
-        for func_name in sorted(all_registry_functions):
-            code_lines.append(f"{func_name} = _registry_functions['{func_name}'].func")
         code_lines.append("")
 
     # Generate pipeline steps (extract exact logic from lines 164-198)
@@ -542,15 +562,15 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
     # Collect imports from ALL data in orchestrator (functions, parameters, config)
     all_function_imports = defaultdict(set)
     all_enum_imports = defaultdict(set)
-    all_registry_functions = set()
+    all_decorated_functions = set()
 
     # Collect from pipeline steps
     for plate_path, steps in pipeline_data.items():
         for step in steps:
             # Get imports from function patterns
-            func_imports, enum_imports, func_registry = collect_imports_from_data(step.func)
+            func_imports, enum_imports, func_decorated = collect_imports_from_data(step.func)
             # Get imports from step parameters
-            param_imports, param_enums, param_registry = collect_imports_from_data(step)
+            param_imports, param_enums, param_decorated = collect_imports_from_data(step)
 
             # Merge all imports
             for module, names in func_imports.items():
@@ -561,8 +581,8 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
                 all_function_imports[module].update(names)
             for module, names in param_enums.items():
                 all_enum_imports[module].update(names)
-            all_registry_functions.update(func_registry)
-            all_registry_functions.update(param_registry)
+            all_decorated_functions.update(func_decorated)
+            all_decorated_functions.update(param_decorated)
 
     # Don't collect imports from entire global config upfront - only collect what's actually used
     # This prevents importing unused classes and keeps the generated code clean
@@ -584,9 +604,9 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
     all_function_imports['openhcs.core.orchestrator.orchestrator'].add('PipelineOrchestrator')
     all_function_imports['openhcs.core.config'].add('GlobalPipelineConfig')  # Always needed for global_config constructor
 
-    # Add RegistryService import if we have external functions
-    if all_registry_functions:
-        all_function_imports['openhcs.processing.backends.lib_registry.registry_service'].add('RegistryService')
+    # Create virtual module if we have decorated functions
+    if all_decorated_functions:
+        _create_openhcs_decorated_module()
 
     # First pass: Generate name mappings for collision resolution (don't add imports yet)
     import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
@@ -688,13 +708,7 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
         final_code_lines.extend(final_import_lines)
         final_code_lines.append("")
 
-        # Add registry function lookups if needed
-        if all_registry_functions:
-            final_code_lines.append("# External function lookups from registry")
-            final_code_lines.append("_registry_functions = RegistryService.get_all_functions_with_metadata()")
-            for func_name in sorted(all_registry_functions):
-                final_code_lines.append(f"{func_name} = _registry_functions['{func_name}'].func")
-            final_code_lines.append("")
+
 
         # Add the rest of the code (skip the first two lines which are the header)
         final_code_lines.extend(code_lines[2:])
