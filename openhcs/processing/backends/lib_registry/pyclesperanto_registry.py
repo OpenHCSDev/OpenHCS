@@ -101,7 +101,4 @@ class PyclesperantoRegistry(RuntimeTestingRegistryBase):
         """Compare arrays using CLE."""
         return np.allclose(arr1.get(), arr2.get(), rtol=1e-5, atol=1e-8)
 
-    def _expand_2d_to_3d(self, array_2d):
-        """Expand 2D array to 3D using CLE concatenation."""
-        temp = cle.concatenate_along_z(array_2d, array_2d)
-        return temp[0:1, :, :]
+

@@ -36,22 +36,37 @@ class OpenHCSRegistry(LibraryRegistryBase):
         self.MODULES_TO_SCAN = self._get_openhcs_modules()
 
     def _get_openhcs_modules(self) -> List[str]:
-        """Get list of OpenHCS processing modules to scan."""
-        # Import here to avoid circular imports
-        import openhcs.processing
-        import os
+        """Get list of OpenHCS processing modules to scan using automatic discovery."""
         import pkgutil
+        import os
 
         modules = []
-        processing_path = os.path.dirname(openhcs.processing.__file__)
-        processing_package = "openhcs.processing"
 
-        # Scan all modules in openhcs.processing recursively (eliminate magic string per RST)
-        EXCLUDED_MODULE_PATTERN = "lib_registry"  # Extract magic string to constant
-        for importer, modname, ispkg in pkgutil.walk_packages([processing_path], processing_package + "."):
+        # Get the backends directory path
+        backends_path = os.path.dirname(__file__)  # lib_registry directory
+        backends_path = os.path.dirname(backends_path)  # backends directory
+
+        # Walk through all modules in openhcs.processing.backends recursively
+        for importer, module_name, ispkg in pkgutil.walk_packages(
+            [backends_path],
+            "openhcs.processing.backends."
+        ):
             # Skip lib_registry modules to avoid circular imports
-            if EXCLUDED_MODULE_PATTERN not in modname:
-                modules.append(modname)
+            if "lib_registry" in module_name:
+                continue
+
+            # Skip __pycache__ and other non-module files
+            if "__pycache__" in module_name:
+                continue
+
+            try:
+                # Try to import the module to ensure it's valid
+                importlib.import_module(module_name)
+                modules.append(module_name)
+            except ImportError as e:
+                # Module has import issues, skip it but log for debugging
+                logger.debug(f"Skipping module {module_name}: {e}")
+                continue
 
         return modules
 
@@ -116,6 +131,7 @@ class OpenHCSRegistry(LibraryRegistryBase):
                         name=name,
                         func=func,
                         contract=contract,
+                        registry=self,
                         module=func.__module__ or "",
                         doc=(func.__doc__ or "").splitlines()[0] if func.__doc__ else "",
                         tags=["openhcs"],
@@ -125,6 +141,8 @@ class OpenHCSRegistry(LibraryRegistryBase):
                     functions[name] = metadata
 
         return functions
+
+
 
     def _generate_function_name(self, original_name: str, module_name: str) -> str:
         """Generate unique function name for OpenHCS functions."""

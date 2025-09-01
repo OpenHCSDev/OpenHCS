@@ -78,11 +78,11 @@ class FunctionMetadata:
     name: str
     func: Callable
     contract: ProcessingContract
+    registry: 'LibraryRegistryBase'  # Reference to the registry that registered this function - REQUIRED
     module: str = ""
     doc: str = ""
     tags: List[str] = field(default_factory=list)
     original_name: str = ""  # Original function name for cache reconstruction
-    registry: Optional['LibraryRegistryBase'] = None  # Reference to the registry that registered this function
 
 
 
@@ -116,7 +116,11 @@ class LibraryRegistryBase(ABC):
         """
         self.library_name = library_name
         self._cache_path = get_cache_file_path(f"{library_name}_function_metadata.json")
-        
+
+
+
+
+
     # ===== ESSENTIAL ABC METHODS =====
 
     # ===== LIBRARY IDENTIFICATION =====
@@ -129,6 +133,148 @@ class LibraryRegistryBase(ABC):
     def is_library_available(self) -> bool:
         """Check if the library is available for import."""
         pass
+
+    # ===== FUNCTION DISCOVERY =====
+    @abstractmethod
+    def discover_functions(self) -> Dict[str, FunctionMetadata]:
+        """Discover and return function metadata. Must be implemented by subclasses."""
+        pass
+
+
+
+    def _get_function_by_name(self, module_path: str, func_name: str):
+        """Get function object by module path and name."""
+        module = importlib.import_module(module_path)
+        return getattr(module, func_name)
+
+    # ===== PROCESSING CONTRACT EXECUTION METHODS =====
+    def _execute_slice_by_slice(self, func, image, *args, **kwargs):
+        """Shared slice-by-slice execution logic."""
+        if image.ndim == 3:
+            from openhcs.core.memory.stack_utils import unstack_slices, stack_slices, _detect_memory_type
+            mem = _detect_memory_type(image)
+            slices = unstack_slices(image, mem, 0)
+            results = [func(sl, *args, **kwargs) for sl in slices]
+            return stack_slices(results, mem, 0)
+        return func(image, *args, **kwargs)
+
+    def _execute_pure_3d(self, func, image, *args, **kwargs):
+        """Execute 3D→3D function directly (no change)."""
+        return func(image, *args, **kwargs)
+
+    def _execute_pure_2d(self, func, image, *args, **kwargs):
+        """Execute 2D→2D function with unstack/restack wrapper."""
+        from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
+        # Get memory type from the decorated function
+        memory_type = func.output_memory_type
+        slices = unstack_slices(image, memory_type, 0)
+        results = [func(sl, *args, **kwargs) for sl in slices]
+        return stack_slices(results, memory_type, 0)
+
+    def _execute_flexible(self, func, image, *args, **kwargs):
+        """Execute function that handles both 3D→3D and 2D→2D with toggle."""
+        # Check if slice_by_slice attribute is set on the function
+        slice_by_slice = getattr(func, 'slice_by_slice', False)
+        if slice_by_slice:
+            # Reuse the 2D-only execution logic (unstack -> process -> restack)
+            return self._execute_pure_2d(func, image, *args, **kwargs)
+        else:
+            # Use 3D-only execution logic (no modification)
+            return self._execute_pure_3d(func, image, *args, **kwargs)
+
+    def _execute_volumetric_to_slice(self, func, image, *args, **kwargs):
+        """Execute 3D→2D function returning slice 3D array."""
+        from openhcs.core.memory.stack_utils import stack_slices
+        # Get memory type from the decorated function
+        memory_type = func.output_memory_type
+        result_2d = func(image, *args, **kwargs)
+        return stack_slices([result_2d], memory_type, 0)
+
+    # ===== CACHING METHODS =====
+    def _load_or_discover_functions(self) -> Dict[str, FunctionMetadata]:
+        """Load functions from cache or discover them if cache is invalid."""
+        cached_functions = self._load_from_cache()
+        if cached_functions is not None:
+            logger.info(f"✅ Loaded {len(cached_functions)} {self.library_name} functions from cache")
+            return cached_functions
+
+        logger.info(f"🔍 Cache miss for {self.library_name} - performing full discovery")
+        functions = self.discover_functions()
+        self._save_to_cache(functions)
+        return functions
+
+    def _load_from_cache(self) -> Optional[Dict[str, FunctionMetadata]]:
+        """Load function metadata from cache with validation."""
+        if not self._cache_path.exists():
+            return None
+
+        try:
+            with open(self._cache_path, 'r') as f:
+                cache_data = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning(f"Corrupt cache file {self._cache_path}, rebuilding")
+            self._cache_path.unlink(missing_ok=True)
+            return None
+
+        if 'functions' not in cache_data:
+            return None
+
+        cached_version = cache_data.get('library_version', 'unknown')
+        current_version = self.get_library_version()
+        if cached_version != current_version:
+            logger.info(f"{self.library_name} version changed ({cached_version} → {current_version}) - cache invalid")
+            return None
+
+        cache_timestamp = cache_data.get('timestamp', 0)
+        cache_age_days = (time.time() - cache_timestamp) / (24 * 3600)
+        if cache_age_days > 7:
+            logger.info(f"Cache is {cache_age_days:.1f} days old - rebuilding")
+            return None
+
+        functions = {}
+        for func_name, cached_data in cache_data['functions'].items():
+            original_name = cached_data.get('original_name', func_name)
+            func = self._get_function_by_name(cached_data['module'], original_name)
+            contract = ProcessingContract[cached_data['contract']]
+
+            metadata = FunctionMetadata(
+                name=func_name,
+                func=func,
+                contract=contract,
+                registry=self,
+                module=cached_data.get('module', ''),
+                doc=cached_data.get('doc', ''),
+                tags=cached_data.get('tags', []),
+                original_name=cached_data.get('original_name', func_name)
+            )
+            functions[func_name] = metadata
+
+        return functions
+
+    def _save_to_cache(self, functions: Dict[str, FunctionMetadata]) -> None:
+        """Save function metadata to cache."""
+        cache_data = {
+            'cache_version': '1.0',
+            'library_version': self.get_library_version(),
+            'timestamp': time.time(),
+            'functions': {
+                func_name: {
+                    'name': metadata.name,
+                    'original_name': metadata.original_name,
+                    'module': metadata.module,
+                    'contract': metadata.contract.name,
+                    'doc': metadata.doc,
+                    'tags': metadata.tags
+                }
+                for func_name, metadata in functions.items()
+            }
+        }
+
+        self._cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._cache_path, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+
+        logger.info(f"💾 Saved {len(functions)} {self.library_name} functions to cache")
 
     def get_memory_type(self) -> str:
         """Get the memory type string value for this library."""
@@ -261,8 +407,8 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         """Create adapter based on contract classification."""
         func_name = getattr(original_func, '__name__', 'unknown')
 
-        @wraps(original_func)
-        def unified_adapter(image, *args, slice_by_slice: bool = False, **kwargs):
+        def _core_adapter_logic(image, *args, **kwargs):
+            """Core adapter logic shared by all contracts."""
             # Library-specific preprocessing
             processed_image = self._preprocess_input(image, func_name)
 
@@ -272,7 +418,20 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
             # Library-specific postprocessing
             return self._postprocess_output(result, image, func_name)
 
-        return unified_adapter
+        # Only add slice_by_slice parameter for FLEXIBLE contract functions
+        if contract == ProcessingContract.FLEXIBLE:
+            @wraps(original_func)
+            def unified_adapter(image, *args, slice_by_slice: bool = False, **kwargs):
+                # Set slice_by_slice attribute on the function for contract execution to check
+                original_func.slice_by_slice = slice_by_slice
+                return _core_adapter_logic(image, *args, **kwargs)
+
+            # Add slice_by_slice attribute to the wrapper for UI introspection
+            unified_adapter.slice_by_slice = False
+            return unified_adapter
+        else:
+            # For non-flexible contracts, use standard adapter without slice_by_slice
+            return wraps(original_func)(_core_adapter_logic)
 
     @abstractmethod
     def _preprocess_input(self, image, func_name: str):
@@ -368,11 +527,11 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
                     name=func_name,
                     func=func,
                     contract=contract,
+                    registry=self,
                     module=func.__module__ or "",
                     doc=first_line_doc,
                     tags=self._generate_tags(name),
-                    original_name=name,
-                    registry=self
+                    original_name=name
                 )
 
                 functions[func_name] = metadata
@@ -426,109 +585,15 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
 
         return "unknown"
 
-    # ===== CACHING METHODS =====
-    def _load_or_discover_functions(self) -> Dict[str, FunctionMetadata]:
-        """Load functions from cache or discover them if cache is invalid."""
-        cached_functions = self._load_from_cache()
-        if cached_functions is not None:
-            logger.info(f"✅ Loaded {len(cached_functions)} {self.library_name} functions from cache")
-            return cached_functions
-
-        logger.info(f"🔍 Cache miss for {self.library_name} - performing full discovery")
-        functions = self.discover_functions()
-        self._save_to_cache(functions)
-        return functions
-
-    def _load_from_cache(self) -> Optional[Dict[str, FunctionMetadata]]:
-        """Load function metadata from cache with validation."""
-        if not self._cache_path.exists():
-            return None
-
-        try:
-            with open(self._cache_path, 'r') as f:
-                cache_data = json.load(f)
-        except json.JSONDecodeError as e:
-            logger.warning(
-                f"Corrupt cache file found at {self._cache_path}: {e}. Deleting and rebuilding."
-            )
-            try:
-                self._cache_path.unlink()
-            except OSError as unlink_error:
-                logger.error(
-                    f"Failed to delete corrupt cache file {self._cache_path}: {unlink_error}"
-                )
-            return None
-
-        if 'functions' not in cache_data:
-            return None
-
-        cached_version = cache_data.get('library_version', 'unknown')
-        current_version = self.get_library_version()
-        if cached_version != current_version:
-            logger.info(f"{self.library_name} version changed ({cached_version} → {current_version}) - cache invalid")
-            return None
-
-        cache_timestamp = cache_data.get('timestamp', 0)
-        cache_age_days = (time.time() - cache_timestamp) / (24 * 3600)
-        if cache_age_days > 7:
-            logger.info(f"Cache is {cache_age_days:.1f} days old - rebuilding")
-            return None
-
-        functions = {}
-        for func_name, cached_data in cache_data['functions'].items():
-            original_name = cached_data.get('original_name', func_name)
-            func = self._get_function_by_name(cached_data['module'], original_name)
-            contract = ProcessingContract[cached_data['contract']]
-
-            metadata = FunctionMetadata(
-                name=func_name,
-                func=func,
-                contract=contract,
-                module=cached_data.get('module', ''),
-                doc=cached_data.get('doc', ''),
-                tags=cached_data.get('tags', []),
-                original_name=cached_data.get('original_name', func_name),
-                registry=self
-            )
-            functions[func_name] = metadata
-
-        return functions
 
 
 
-    # ===== SHARED ADAPTER LOGIC =====
-    def _execute_slice_by_slice(self, func, image, *args, **kwargs):
-        """Shared slice-by-slice execution logic."""
-        if image.ndim == 3:
-            from openhcs.core.memory.stack_utils import unstack_slices, stack_slices, _detect_memory_type
-            mem = _detect_memory_type(image)
-            slices = unstack_slices(image, mem, 0)
-            results = [func(sl, *args, **kwargs) for sl in slices]
-            return stack_slices(results, mem, 0)
-        return func(image, *args, **kwargs)
 
-    # ===== PROCESSING CONTRACT EXECUTION METHODS =====
-    def _execute_pure_3d(self, func, image, *args, **kwargs):
-        """Execute 3D→3D function directly (no change)."""
-        return func(image, *args, **kwargs)
 
-    def _execute_pure_2d(self, func, image, *args, **kwargs):
-        """Execute 2D→2D function with unstack/restack wrapper."""
-        slices = unstack_slices(image, self.MEMORY_TYPE, 0)
-        results = [func(sl, *args, **kwargs) for sl in slices]
-        return stack_slices(results, self.MEMORY_TYPE, 0)
 
-    def _execute_flexible(self, func, image, *args, slice_by_slice: bool = False, **kwargs):
-        """Execute function that handles both 3D→3D and 2D→2D with toggle."""
-        if slice_by_slice:
-            return self._execute_pure_2d(func, image, *args, **kwargs)
-        else:
-            return self._execute_pure_3d(func, image, *args, **kwargs)
 
-    def _execute_volumetric_to_slice(self, func, image, *args, **kwargs):
-        """Execute 3D→2D function returning slice 3D array."""
-        result_2d = func(image, *args, **kwargs)
-        return stack_slices([result_2d], self.MEMORY_TYPE, 0)
+
+
 
     # ===== CUSTOMIZATION HOOKS =====
     def _generate_function_name(self, name: str, module_name: str) -> str:
@@ -539,47 +604,11 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         """Generate tags using library name."""
         return [self.library_name]
 
-    def _promote_2d_to_3d(self, result):
-        """Promote 2D results to 3D using library-specific expansion method."""
-        if result.ndim == 2:
-            return self._expand_2d_to_3d(result)
-        elif isinstance(result, tuple) and result[0].ndim == 2:
-            expanded_first = self._expand_2d_to_3d(result[0])
-            return (expanded_first, *result[1:])
-        return result
 
-    @abstractmethod
-    def _expand_2d_to_3d(self, array_2d):
-        """Expand 2D array to 3D. Library-specific implementation required."""
-        pass
 
-    def _save_to_cache(self, functions: Dict[str, FunctionMetadata]) -> None:
-        """Save function metadata to cache."""
-        cache_data = {
-            'cache_version': '1.0',
-            'library_version': self.get_library_version(),
-            'timestamp': time.time(),
-            'functions': {
-                func_name: {
-                    'name': metadata.name,
-                    'original_name': metadata.original_name,
-                    'module': metadata.module,
-                    'contract': metadata.contract.name,
-                    'doc': metadata.doc,
-                    'tags': metadata.tags
-                }
-                for func_name, metadata in functions.items()
-            }
-        }
 
-        self._cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self._cache_path, 'w') as f:
-            json.dump(cache_data, f, indent=2)
 
-    def _get_function_by_name(self, module_path: str, func_name: str) -> Optional[Callable]:
-        """Reconstruct function object from module path and function name."""
-        module = importlib.import_module(module_path)
-        return getattr(module, func_name)
+
 
 
 # OpenHCSRegistry moved to openhcs_registry.py for consistency with other registries

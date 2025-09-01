@@ -79,29 +79,34 @@ def _auto_initialize_registry() -> None:
         return
 
     try:
-        # Clear and initialize the registry with valid memory types
+        # Clear and initialize the registry
         FUNC_REGISTRY.clear()
 
-        # Use CPU-only memory types if CPU_ONLY_MODE is enabled
-        memory_types_to_use = CPU_ONLY_MEMORY_TYPES if CPU_ONLY_MODE else VALID_MEMORY_TYPES
+        # Phase 1: Register all functions from RegistryService (includes OpenHCS and external libraries)
+        from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+        all_functions = RegistryService.get_all_functions_with_metadata()
 
-        for memory_type in memory_types_to_use:
-            FUNC_REGISTRY[memory_type] = []
+        # Initialize registry structure based on discovered registries
+        for func_name, metadata in all_functions.items():
+            registry_name = metadata.registry.library_name
+            if registry_name not in FUNC_REGISTRY:
+                FUNC_REGISTRY[registry_name] = []
 
+        # Register all functions
+        for func_name, metadata in all_functions.items():
+            registry_name = metadata.registry.library_name
+            FUNC_REGISTRY[registry_name].append(metadata.func)
+
+        # Phase 2: Apply CPU-only filtering if enabled
         if CPU_ONLY_MODE:
-            logger.info("CPU-only mode enabled - only registering numpy functions")
-
-        # Phase 1: Scan processing directory and register native OpenHCS functions
-        _scan_and_register_functions()
-
-        # Phase 2: External library functions now handled by RegistryService
-        # No longer needed - external libraries accessed via RegistryService.get_all_functions_with_metadata()
+            logger.info("CPU-only mode enabled - filtering to numpy functions only")
+            _apply_cpu_only_filtering()
 
         total_functions = sum(len(funcs) for funcs in FUNC_REGISTRY.values())
         logger.info(
-            "Function registry auto-initialized with %d functions across %d backends",
+            "Function registry auto-initialized with %d functions across %d registries",
             total_functions,
-            len(VALID_MEMORY_TYPES)
+            len(FUNC_REGISTRY)
         )
 
         # Mark registry as initialized
@@ -109,12 +114,7 @@ def _auto_initialize_registry() -> None:
 
     except Exception as e:
         logger.error(f"Failed to auto-initialize function registry: {e}")
-        # Initialize empty registry as fallback
-        FUNC_REGISTRY.clear()
-        memory_types_to_use = CPU_ONLY_MEMORY_TYPES if CPU_ONLY_MODE else VALID_MEMORY_TYPES
-        for memory_type in memory_types_to_use:
-            FUNC_REGISTRY[memory_type] = []
-        _registry_initialized = True
+        raise
 
 
 def initialize_registry() -> None:
@@ -137,22 +137,33 @@ def initialize_registry() -> None:
             logger.info("Function registry already initialized, skipping manual initialization")
             return
         
-        # Clear and initialize the registry with valid memory types
+        # Clear and initialize the registry
         FUNC_REGISTRY.clear()
-        memory_types_to_use = CPU_ONLY_MEMORY_TYPES if CPU_ONLY_MODE else VALID_MEMORY_TYPES
-        for memory_type in memory_types_to_use:
-            FUNC_REGISTRY[memory_type] = []
         
-        # Phase 1: Scan processing directory and register native OpenHCS functions
-        _scan_and_register_functions()
+        # Phase 1: Register all functions from RegistryService (includes OpenHCS and external libraries)
+        from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+        all_functions = RegistryService.get_all_functions_with_metadata()
 
-        # Phase 2: External library functions now handled by RegistryService
-        # No longer needed - external libraries accessed via RegistryService.get_all_functions_with_metadata()
+        # Initialize registry structure based on discovered registries
+        for func_name, metadata in all_functions.items():
+            registry_name = metadata.registry.library_name
+            if registry_name not in FUNC_REGISTRY:
+                FUNC_REGISTRY[registry_name] = []
+
+        # Register all functions
+        for func_name, metadata in all_functions.items():
+            registry_name = metadata.registry.library_name
+            FUNC_REGISTRY[registry_name].append(metadata.func)
+
+        # Phase 2: Apply CPU-only filtering if enabled
+        if CPU_ONLY_MODE:
+            logger.info("CPU-only mode enabled - filtering to numpy functions only")
+            _apply_cpu_only_filtering()
         
         logger.info(
-            "Function registry initialized with %d functions across %d backends",
+            "Function registry initialized with %d functions across %d registries",
             sum(len(funcs) for funcs in FUNC_REGISTRY.values()),
-            len(VALID_MEMORY_TYPES)
+            len(FUNC_REGISTRY)
         )
         
         # Mark registry as initialized
@@ -218,9 +229,9 @@ def _scan_and_register_functions() -> None:
                     input_type = getattr(obj, "input_memory_type")
                     output_type = getattr(obj, "output_memory_type")
 
-                    # Register if input and output types match and are valid
-                    if input_type == output_type and input_type in VALID_MEMORY_TYPES:
-                        _register_function(obj, input_type)
+                    # Register if input and output types are valid (OpenHCS functions can have mixed types)
+                    if input_type in VALID_MEMORY_TYPES and output_type in VALID_MEMORY_TYPES:
+                        _register_function(obj, "openhcs")
                         function_count += 1
 
             logger.debug(f"Module {module_name}: found {function_count} registerable functions")
@@ -329,38 +340,54 @@ def register_function(func: Callable, backend: str = None, **kwargs) -> None:
         if output_type not in VALID_MEMORY_TYPES:
             raise ValueError(f"Invalid output memory type: {output_type}")
 
-        # Use input_memory_type as backend if not specified
-        memory_type = backend or input_type
-        if memory_type not in VALID_MEMORY_TYPES:
-            raise ValueError(f"Invalid backend memory type: {memory_type}")
+        # Use backend if specified, otherwise register as openhcs
+        registry_name = backend or "openhcs"
+        if registry_name not in FUNC_REGISTRY:
+            raise ValueError(f"Invalid registry name: {registry_name}")
 
         # Register the function
-        _register_function(func, memory_type)
+        _register_function(func, registry_name)
 
 
-def _register_function(func: Callable, memory_type: str) -> None:
+def _apply_cpu_only_filtering() -> None:
+    """Filter registry to only include numpy-compatible functions when CPU_ONLY_MODE is enabled."""
+    for registry_name, functions in list(FUNC_REGISTRY.items()):
+        filtered_functions = []
+        for func in functions:
+            # Only keep functions with numpy memory types
+            if hasattr(func, 'output_memory_type') and func.output_memory_type == "numpy":
+                filtered_functions.append(func)
+
+        # Update registry with filtered functions, remove empty registries
+        if filtered_functions:
+            FUNC_REGISTRY[registry_name] = filtered_functions
+        else:
+            del FUNC_REGISTRY[registry_name]
+
+
+def _register_function(func: Callable, registry_name: str) -> None:
     """
-    Register a function for a specific memory type.
+    Register a function for a specific registry.
 
     This is an internal function used during automatic scanning and manual registration.
 
     Args:
         func: The function to register
-        memory_type: The memory type (e.g., "numpy", "cupy", "torch")
+        registry_name: The registry name (e.g., "openhcs", "skimage", "pyclesperanto")
     """
     # Skip if function is already registered
-    if func in FUNC_REGISTRY[memory_type]:
+    if func in FUNC_REGISTRY[registry_name]:
         logger.debug(
-            "Function '%s' already registered for memory type '%s'",
-            func.__name__, memory_type
+            "Function '%s' already registered for registry '%s'",
+            func.__name__, registry_name
         )
         return
 
     # Add function to registry
-    FUNC_REGISTRY[memory_type].append(func)
+    FUNC_REGISTRY[registry_name].append(func)
 
-    # Add memory_type attribute for easier inspection
-    setattr(func, "backend", memory_type)
+    # Add registry_name attribute for easier inspection
+    setattr(func, "registry", registry_name)
 
     logger.debug(
         "Registered function '%s' for memory type '%s'",

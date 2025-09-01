@@ -34,7 +34,8 @@ from PyQt6.QtCore import QTimer, QObject, pyqtSignal
 from PyQt6.QtTest import QTest
 
 from openhcs.core.config import GlobalPipelineConfig, set_current_pipeline_config
-from openhcs.core.pipeline_config import PipelineConfig, create_pipeline_config_for_editing, LazyStepMaterializationConfig
+from openhcs.core.pipeline_config import PipelineConfig, create_pipeline_config_for_editing
+from openhcs.core.lazy_config import LazyStepMaterializationConfig
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.constants import Microscope
 from openhcs.pyqt_gui.main import OpenHCSMainWindow

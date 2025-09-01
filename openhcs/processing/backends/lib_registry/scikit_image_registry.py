@@ -84,6 +84,4 @@ class SkimageRegistry(RuntimeTestingRegistryBase):
         """Compare arrays using NumPy."""
         return np.allclose(arr1, arr2, rtol=1e-5, atol=1e-8)
 
-    def _expand_2d_to_3d(self, array_2d):
-        """Expand 2D array to 3D using NumPy expansion."""
-        return np.expand_dims(array_2d, 0)
+

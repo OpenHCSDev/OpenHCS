@@ -21,8 +21,8 @@ from typing import Any
 import numpy as np
 from scipy import linalg
 
-# Import decorator directly from core.memory to avoid circular imports
-from openhcs.core.memory import numpy as numpy_func
+# Import decorator directly from core.memory.decorators to avoid circular imports
+from openhcs.core.memory.decorators import numpy as numpy_func
 
 logger = logging.getLogger(__name__)
 

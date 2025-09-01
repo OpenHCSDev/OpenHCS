@@ -47,8 +47,8 @@ class RegistryService:
                     logger.warning(f"Library {registry_instance.library_name} not available, skipping")
                     continue
                 
-                # Get functions from this registry
-                functions = registry_instance.discover_functions()
+                # Get functions from this registry (with caching)
+                functions = registry_instance._load_or_discover_functions()
                 logger.info(f"Retrieved {len(functions)} {registry_instance.library_name} functions")
                 all_functions.update(functions)
                 
