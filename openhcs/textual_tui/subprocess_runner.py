@@ -242,10 +242,16 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
 
         log_thread_count("before orchestrator creation")
 
+        # NUCLEAR WRAP: Set up global config context (required before orchestrator creation)
+        def setup_global_context():
+            from openhcs.core.lazy_config import ensure_global_config_context
+            from openhcs.core.config import GlobalPipelineConfig
+            ensure_global_config_context(GlobalPipelineConfig, global_config)
+        force_error_detection("setup_global_context", setup_global_context)
+
         # NUCLEAR WRAP: Orchestrator creation
         orchestrator = force_error_detection("PipelineOrchestrator_creation", PipelineOrchestrator,
             plate_path=plate_path,
-            global_config=global_config,
             storage_registry=storage_registry  # Use default registry
         )
         log_thread_count("after orchestrator creation")
