@@ -146,7 +146,7 @@ def generate_complete_function_pattern_code(func_obj, indent=0, clean_mode=False
     pattern_repr = generate_readable_function_repr(func_obj, indent, clean_mode)
 
     # Collect imports from this pattern
-    function_imports, enum_imports = collect_imports_from_data(func_obj)
+    function_imports, enum_imports, decorated_functions = collect_imports_from_data(func_obj)
     import_lines, name_mappings = format_imports_as_strings(function_imports, enum_imports)
 
     # Build complete code
