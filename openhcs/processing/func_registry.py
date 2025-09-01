@@ -67,6 +67,60 @@ _registry_initializing = False
 # Import hook decoration functions removed - using existing registries
 
 
+def _create_virtual_modules() -> None:
+    """Create virtual modules that mirror external library structure under openhcs namespace."""
+    import sys
+    import types
+    from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+
+    # Get all registered functions
+    all_functions = RegistryService.get_all_functions_with_metadata()
+
+    # Group functions by their full module path
+    functions_by_module = {}
+    for func_name, metadata in all_functions.items():
+        # Only create virtual modules for external library functions with slice_by_slice
+        if (hasattr(metadata.func, 'slice_by_slice') and
+            not hasattr(metadata.func, '__processing_contract__') and
+            not metadata.func.__module__.startswith('openhcs.')):
+
+            original_module = metadata.func.__module__
+            virtual_module = f'openhcs.{original_module}'
+            if virtual_module not in functions_by_module:
+                functions_by_module[virtual_module] = {}
+            functions_by_module[virtual_module][metadata.func.__name__] = metadata.func
+
+    # Create virtual modules for each module path
+    created_modules = []
+    all_virtual_modules = set()
+
+    # First, collect all module paths including intermediate ones
+    for virtual_module in functions_by_module.keys():
+        parts = virtual_module.split('.')
+        for i in range(2, len(parts) + 1):  # Start from 'openhcs.xxx'
+            intermediate_module = '.'.join(parts[:i])
+            all_virtual_modules.add(intermediate_module)
+
+    # Create intermediate modules first (in order)
+    for virtual_module in sorted(all_virtual_modules):
+        if virtual_module not in sys.modules:
+            module = types.ModuleType(virtual_module)
+            module.__doc__ = f"Virtual module mirroring {virtual_module.replace('openhcs.', '')} with OpenHCS decorations"
+            sys.modules[virtual_module] = module
+            created_modules.append(virtual_module)
+
+    # Then add functions to the leaf modules
+    for virtual_module, functions in functions_by_module.items():
+        if virtual_module in sys.modules:
+            module = sys.modules[virtual_module]
+            # Add all functions from this module
+            for func_name, func in functions.items():
+                setattr(module, func_name, func)
+
+    if created_modules:
+        logger.info(f"Created {len(created_modules)} virtual modules: {', '.join(created_modules)}")
+
+
 def _auto_initialize_registry() -> None:
     """
     Auto-initialize the function registry on module import.
@@ -111,6 +165,9 @@ def _auto_initialize_registry() -> None:
 
         # Mark registry as initialized
         _registry_initialized = True
+
+        # Create virtual modules for external library functions
+        _create_virtual_modules()
 
     except Exception as e:
         logger.error(f"Failed to auto-initialize function registry: {e}")
@@ -168,6 +225,9 @@ def initialize_registry() -> None:
         
         # Mark registry as initialized
         _registry_initialized = True
+
+        # Create virtual modules for external library functions
+        _create_virtual_modules()
 
 
 def load_prebuilt_registry(registry_data: Dict) -> None:

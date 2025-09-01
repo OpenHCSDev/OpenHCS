@@ -697,14 +697,6 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
 
 
 
-
-
-
-
-
-
-
-
     # ===== CUSTOMIZATION HOOKS =====
     def _generate_function_name(self, name: str, module_name: str) -> str:
         """Generate function name. Override in subclasses for custom naming."""
@@ -713,12 +705,3 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
     def _generate_tags(self, func_name: str) -> List[str]:
         """Generate tags using library name."""
         return [self.library_name]
-
-
-
-
-
-
-
-
-# OpenHCSRegistry moved to openhcs_registry.py for consistency with other registries

@@ -554,28 +554,8 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     # Add FunctionStep import (always needed for generated code)
     all_function_imports['openhcs.core.steps.function_step'].add('FunctionStep')
 
-    # Create virtual modules if we have decorated functions
-    if all_decorated_functions:
-        _create_openhcs_library_modules()
-
-    # Add virtual module creation code if needed
-    if all_decorated_functions:
-        code_lines.append("# Create virtual modules for decorated external functions")
-        code_lines.append("import sys, types")
-        code_lines.append("from openhcs.processing.backends.lib_registry.registry_service import RegistryService")
-        code_lines.append("_all_functions = RegistryService.get_all_functions_with_metadata()")
-        code_lines.append("_functions_by_module = {}")
-        code_lines.append("for func_name, metadata in _all_functions.items():")
-        code_lines.append("    if (hasattr(metadata.func, 'slice_by_slice') and not hasattr(metadata.func, '__processing_contract__') and not metadata.func.__module__.startswith('openhcs.')):")
-        code_lines.append("        virtual_module = f'openhcs.{metadata.func.__module__}'")
-        code_lines.append("        if virtual_module not in _functions_by_module: _functions_by_module[virtual_module] = {}")
-        code_lines.append("        _functions_by_module[virtual_module][metadata.func.__name__] = metadata.func")
-        code_lines.append("for virtual_module, functions in _functions_by_module.items():")
-        code_lines.append("    if virtual_module not in sys.modules:")
-        code_lines.append("        module = types.ModuleType(virtual_module)")
-        code_lines.append("        sys.modules[virtual_module] = module")
-        code_lines.append("        for func_name, func in functions.items(): setattr(module, func_name, func)")
-        code_lines.append("")
+    # Virtual modules are now automatically created during OpenHCS import
+    # No need to generate runtime virtual module creation code
 
     # Format and add all collected imports
     import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
@@ -654,9 +634,8 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
     all_function_imports['openhcs.core.orchestrator.orchestrator'].add('PipelineOrchestrator')
     all_function_imports['openhcs.core.config'].add('GlobalPipelineConfig')  # Always needed for global_config constructor
 
-    # Create virtual modules if we have decorated functions
-    if all_decorated_functions:
-        _create_openhcs_library_modules()
+    # Virtual modules are now automatically created during OpenHCS import
+    # No need for runtime virtual module creation
 
     # First pass: Generate name mappings for collision resolution (don't add imports yet)
     import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
