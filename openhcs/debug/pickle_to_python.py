@@ -21,22 +21,23 @@ def collect_imports_from_data(data_obj):
     """Extract function, enum, and dataclass imports by traversing data structure."""
     function_imports = defaultdict(set)
     enum_imports = defaultdict(set)
-    decorated_functions = set()  # Track external functions that need openhcs.decorated import
+    decorated_functions = set()
 
     def register_imports(obj):
         if isinstance(obj, Enum):
             enum_imports[obj.__class__.__module__].add(obj.__class__.__name__)
         elif is_dataclass(obj):
-            # Use the actual module where the class is defined (works for both regular and dynamically created classes)
             module = obj.__class__.__module__
             name = obj.__class__.__name__
             function_imports[module].add(name)
             [register_imports(getattr(obj, f.name)) for f in fields(obj) if getattr(obj, f.name) is not None]
         elif callable(obj):
-            # Check if this is an external registered function
             if _is_external_registered_function(obj):
-                # Use virtual module import instead of direct import
-                function_imports['openhcs.decorated'].add(obj.__name__)
+                # Use the actual module path but under openhcs namespace
+                original_module = obj.__module__
+                # Convert original module to openhcs namespace: cucim.skimage.filters -> openhcs.cucim.skimage.filters
+                virtual_module = f'openhcs.{original_module}'
+                function_imports[virtual_module].add(obj.__name__)
                 decorated_functions.add(obj.__name__)
             else:
                 function_imports[obj.__module__].add(obj.__name__)
@@ -59,29 +60,53 @@ def _is_external_registered_function(func):
             not func.__module__.startswith('openhcs.'))
 
 
-def _create_openhcs_decorated_module():
-    """Create a virtual module that exposes decorated external functions with clean import paths."""
+def _get_function_library_name(func):
+    """Get the library name for an external registered function."""
+    from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+
+    # Find the function in the registry to get its library name
+    all_functions = RegistryService.get_all_functions_with_metadata()
+    for func_name, metadata in all_functions.items():
+        if metadata.func is func:
+            return metadata.registry.library_name
+
+    return None
+
+
+def _create_openhcs_library_modules():
+    """Create virtual modules that mirror external library structure under openhcs namespace."""
     import sys
     import types
     from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 
-    # Create the virtual module
-    module_name = 'openhcs.decorated'
-    if module_name not in sys.modules:
-        decorated_module = types.ModuleType(module_name)
-        decorated_module.__doc__ = "Virtual module providing access to OpenHCS-decorated external functions"
-        sys.modules[module_name] = decorated_module
+    # Get all registered functions
+    all_functions = RegistryService.get_all_functions_with_metadata()
 
-        # Get all registered functions
-        all_functions = RegistryService.get_all_functions_with_metadata()
+    # Group functions by their full module path
+    functions_by_module = {}
+    for func_name, metadata in all_functions.items():
+        if _is_external_registered_function(metadata.func):
+            original_module = metadata.func.__module__
+            virtual_module = f'openhcs.{original_module}'
+            if virtual_module not in functions_by_module:
+                functions_by_module[virtual_module] = {}
+            functions_by_module[virtual_module][metadata.func.__name__] = metadata.func
 
-        # Add external functions to the module
-        for func_name, metadata in all_functions.items():
-            if _is_external_registered_function(metadata.func):
-                # Add the decorated function to the module
-                setattr(decorated_module, func_name, metadata.func)
+    # Create virtual modules for each module path
+    created_modules = []
+    for virtual_module, functions in functions_by_module.items():
+        if virtual_module not in sys.modules:
+            module = types.ModuleType(virtual_module)
+            module.__doc__ = f"Virtual module mirroring {virtual_module.replace('openhcs.', '')} with OpenHCS decorations"
+            sys.modules[virtual_module] = module
 
-    return sys.modules[module_name]
+            # Add all functions from this module
+            for func_name, func in functions.items():
+                setattr(module, func_name, func)
+
+            created_modules.append(virtual_module)
+
+    return created_modules
 
 def format_imports_as_strings(function_imports, enum_imports):
     """Convert import dictionaries to list of import strings with collision resolution."""
@@ -523,9 +548,28 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     # Add FunctionStep import (always needed for generated code)
     all_function_imports['openhcs.core.steps.function_step'].add('FunctionStep')
 
-    # Create virtual module if we have decorated functions
+    # Create virtual modules if we have decorated functions
     if all_decorated_functions:
-        _create_openhcs_decorated_module()
+        _create_openhcs_library_modules()
+
+    # Add virtual module creation code if needed
+    if all_decorated_functions:
+        code_lines.append("# Create virtual modules for decorated external functions")
+        code_lines.append("import sys, types")
+        code_lines.append("from openhcs.processing.backends.lib_registry.registry_service import RegistryService")
+        code_lines.append("_all_functions = RegistryService.get_all_functions_with_metadata()")
+        code_lines.append("_functions_by_module = {}")
+        code_lines.append("for func_name, metadata in _all_functions.items():")
+        code_lines.append("    if (hasattr(metadata.func, 'slice_by_slice') and not hasattr(metadata.func, '__processing_contract__') and not metadata.func.__module__.startswith('openhcs.')):")
+        code_lines.append("        virtual_module = f'openhcs.{metadata.func.__module__}'")
+        code_lines.append("        if virtual_module not in _functions_by_module: _functions_by_module[virtual_module] = {}")
+        code_lines.append("        _functions_by_module[virtual_module][metadata.func.__name__] = metadata.func")
+        code_lines.append("for virtual_module, functions in _functions_by_module.items():")
+        code_lines.append("    if virtual_module not in sys.modules:")
+        code_lines.append("        module = types.ModuleType(virtual_module)")
+        code_lines.append("        sys.modules[virtual_module] = module")
+        code_lines.append("        for func_name, func in functions.items(): setattr(module, func_name, func)")
+        code_lines.append("")
 
     # Format and add all collected imports
     import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
@@ -604,9 +648,9 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
     all_function_imports['openhcs.core.orchestrator.orchestrator'].add('PipelineOrchestrator')
     all_function_imports['openhcs.core.config'].add('GlobalPipelineConfig')  # Always needed for global_config constructor
 
-    # Create virtual module if we have decorated functions
+    # Create virtual modules if we have decorated functions
     if all_decorated_functions:
-        _create_openhcs_decorated_module()
+        _create_openhcs_library_modules()
 
     # First pass: Generate name mappings for collision resolution (don't add imports yet)
     import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
