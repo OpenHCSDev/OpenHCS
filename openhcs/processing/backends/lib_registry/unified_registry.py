@@ -505,66 +505,37 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         return wrapped_adapter
 
     def _enhance_annotations_from_docstring(self, wrapped_func: Callable, original_func: Callable):
-        """Extract type hints from docstring and add to function annotations."""
+        """Extract type hints from docstring using mathematical simplification approach."""
         try:
             from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
             import numpy as np
 
-            # Type mapping lookup table (mathematical simplification approach)
-            TYPE_PATTERNS = {
-                'ndarray': np.ndarray, 'array': np.ndarray, 'array_like': np.ndarray,
-                'int': int, 'integer': int, 'float': float, 'scalar': float,
-                'bool': bool, 'boolean': bool, 'str': str, 'string': str,
-                'tuple': tuple, 'list': list, 'dict': dict, 'sequence': list
-            }
+            # Unified type extraction with compatibility validation (mathematical simplification)
+            TYPE_PATTERNS = {'ndarray': np.ndarray, 'array': np.ndarray, 'array_like': np.ndarray,
+                           'int': int, 'integer': int, 'float': float, 'scalar': float,
+                           'bool': bool, 'boolean': bool, 'str': str, 'string': str,
+                           'tuple': tuple, 'list': list, 'dict': dict, 'sequence': list}
+
+            COMPATIBLE_DEFAULTS = {float: (int, float, range), int: (int, float),
+                                 list: (list, tuple, range), tuple: (list, tuple, range)}
 
             param_info = SignatureAnalyzer.analyze(original_func, skip_first_param=False)
 
-            # Unified processing: extract type from description for all parameters
+            # Inline type extraction and validation (single-use function inlining rule)
             for param_name, info in param_info.items():
                 if param_name not in wrapped_func.__annotations__ and info.description:
-                    python_type = self._extract_type_from_description(info.description, TYPE_PATTERNS)
-                    # Validate extracted type against default value to avoid mismatches
-                    if python_type and self._is_type_compatible_with_default(python_type, info.default_value):
+                    # Inline type extraction with priority patterns
+                    desc = info.description.lower().replace(', optional', '').replace(' optional', '').split(' or ')[0].strip()
+                    python_type = (str if desc.startswith('{') and '}' in desc
+                                 else list if any(p in desc for p in ['sequence', 'iterable', 'array of', 'list of'])
+                                 else next((t for pattern, t in TYPE_PATTERNS.items() if pattern in desc), None))
+
+                    # Inline compatibility check (single-use function inlining rule)
+                    if python_type and (info.default_value is None or
+                                      type(info.default_value) in COMPATIBLE_DEFAULTS.get(python_type, (python_type,))):
                         wrapped_func.__annotations__[param_name] = python_type
-
         except Exception:
-            pass  # Fail silently - don't break function wrapping
-
-    def _extract_type_from_description(self, description: str, type_patterns: dict):
-        """Extract Python type from docstring description using pattern matching."""
-        if not description:
-            return None
-
-        # Normalize description (remove common suffixes)
-        desc = description.lower().replace(', optional', '').replace(' optional', '').strip()
-
-        # Handle union types - take first type
-        desc = desc.split(' or ')[0].strip()
-
-        # Pattern matching using lookup table with priority order
-        return (str if desc.startswith('{') and '}' in desc  # Enum-like patterns
-                else list if any(pattern in desc for pattern in ['sequence', 'iterable', 'array of', 'list of'])  # Collection patterns
-                else next((python_type for pattern, python_type in type_patterns.items()
-                          if pattern in desc), None))  # Direct pattern match
-
-    def _is_type_compatible_with_default(self, extracted_type, default_value):
-        """Check if extracted type is compatible with the actual default value."""
-        if default_value is None:
-            return True  # None is compatible with any type
-
-        # Check if default value type is compatible with extracted type
-        default_type = type(default_value)
-
-        # Compatible type mappings
-        compatible_types = {
-            float: (int, float, range),  # float annotation can accept int, float, or range defaults
-            int: (int, float),           # int annotation can accept int or float defaults
-            list: (list, tuple, range),  # list annotation can accept list, tuple, or range defaults
-            tuple: (list, tuple, range), # tuple annotation can accept list, tuple, or range defaults
-        }
-
-        return default_type in compatible_types.get(extracted_type, (extracted_type,))
+            pass
 
     @abstractmethod
     def _preprocess_input(self, image, func_name: str):
