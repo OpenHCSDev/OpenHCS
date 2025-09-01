@@ -147,28 +147,35 @@ class LibraryRegistryBase(ABC):
         import inspect
 
         if contract == ProcessingContract.FLEXIBLE:
-            # First, create the modified signature
+            # Check if function already has slice_by_slice parameter
             original_sig = inspect.signature(func)
+            param_names = [p.name for p in original_sig.parameters.values()]
+
+            if 'slice_by_slice' in param_names:
+                # Function already has slice_by_slice, just ensure type hint is correct
+                if hasattr(func, '__annotations__'):
+                    func.__annotations__['slice_by_slice'] = bool
+                else:
+                    func.__annotations__ = {'slice_by_slice': bool}
+                return func
+
+            # Add slice_by_slice parameter
             new_params = list(original_sig.parameters.values())
+            slice_param = inspect.Parameter(
+                'slice_by_slice',
+                inspect.Parameter.KEYWORD_ONLY,
+                default=False,
+                annotation=bool  # Explicit bool type hint for UI
+            )
 
-            # Add slice_by_slice parameter if not already present
-            param_names = [p.name for p in new_params]
-            if 'slice_by_slice' not in param_names:
-                slice_param = inspect.Parameter(
-                    'slice_by_slice',
-                    inspect.Parameter.KEYWORD_ONLY,
-                    default=False,
-                    annotation=bool
-                )
+            # Insert before any VAR_KEYWORD (**kwargs) parameter
+            insert_index = len(new_params)
+            for i, param in enumerate(new_params):
+                if param.kind == inspect.Parameter.VAR_KEYWORD:
+                    insert_index = i
+                    break
 
-                # Insert before any VAR_KEYWORD (**kwargs) parameter
-                insert_index = len(new_params)
-                for i, param in enumerate(new_params):
-                    if param.kind == inspect.Parameter.VAR_KEYWORD:
-                        insert_index = i
-                        break
-
-                new_params.insert(insert_index, slice_param)
+            new_params.insert(insert_index, slice_param)
 
             # Create the wrapper function
             @wraps(func)
@@ -177,9 +184,15 @@ class LibraryRegistryBase(ABC):
                 return contract.execute(self, func, image, *args, **kwargs)
 
             # Apply the modified signature AFTER @wraps
-            if 'slice_by_slice' not in param_names:
-                new_sig = original_sig.replace(parameters=new_params)
-                flexible_wrapper.__signature__ = new_sig
+            new_sig = original_sig.replace(parameters=new_params)
+            flexible_wrapper.__signature__ = new_sig
+
+            # Preserve original annotations and add slice_by_slice
+            if hasattr(func, '__annotations__'):
+                flexible_wrapper.__annotations__ = func.__annotations__.copy()
+            else:
+                flexible_wrapper.__annotations__ = {}
+            flexible_wrapper.__annotations__['slice_by_slice'] = bool
 
             flexible_wrapper.slice_by_slice = False
             return flexible_wrapper
@@ -465,14 +478,93 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
 
     def create_library_adapter(self, original_func: Callable, contract: ProcessingContract) -> Callable:
         """Create adapter with library-specific processing only."""
+        import inspect
         func_name = getattr(original_func, '__name__', 'unknown')
+
+        # Get original signature to preserve it
+        original_sig = inspect.signature(original_func)
 
         def adapter(image, *args, **kwargs):
             processed_image = self._preprocess_input(image, func_name)
             result = contract.execute(self, original_func, processed_image, *args, **kwargs)
             return self._postprocess_output(result, image, func_name)
 
-        return wraps(original_func)(adapter)
+        # Apply wraps and preserve signature
+        wrapped_adapter = wraps(original_func)(adapter)
+        wrapped_adapter.__signature__ = original_sig
+
+        # Preserve and enhance annotations
+        if hasattr(original_func, '__annotations__'):
+            wrapped_adapter.__annotations__ = original_func.__annotations__.copy()
+        else:
+            wrapped_adapter.__annotations__ = {}
+
+        # Extract type hints from docstring if annotations are missing
+        self._enhance_annotations_from_docstring(wrapped_adapter, original_func)
+
+        return wrapped_adapter
+
+    def _enhance_annotations_from_docstring(self, wrapped_func: Callable, original_func: Callable):
+        """Extract type hints from docstring and add to function annotations."""
+        try:
+            from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
+            import numpy as np
+
+            # Type mapping lookup table (mathematical simplification approach)
+            TYPE_PATTERNS = {
+                'ndarray': np.ndarray, 'array': np.ndarray, 'array_like': np.ndarray,
+                'int': int, 'integer': int, 'float': float, 'scalar': float,
+                'bool': bool, 'boolean': bool, 'str': str, 'string': str,
+                'tuple': tuple, 'list': list, 'dict': dict, 'sequence': list
+            }
+
+            param_info = SignatureAnalyzer.analyze(original_func, skip_first_param=False)
+
+            # Unified processing: extract type from description for all parameters
+            for param_name, info in param_info.items():
+                if param_name not in wrapped_func.__annotations__ and info.description:
+                    python_type = self._extract_type_from_description(info.description, TYPE_PATTERNS)
+                    # Validate extracted type against default value to avoid mismatches
+                    if python_type and self._is_type_compatible_with_default(python_type, info.default_value):
+                        wrapped_func.__annotations__[param_name] = python_type
+
+        except Exception:
+            pass  # Fail silently - don't break function wrapping
+
+    def _extract_type_from_description(self, description: str, type_patterns: dict):
+        """Extract Python type from docstring description using pattern matching."""
+        if not description:
+            return None
+
+        # Normalize description (remove common suffixes)
+        desc = description.lower().replace(', optional', '').replace(' optional', '').strip()
+
+        # Handle union types - take first type
+        desc = desc.split(' or ')[0].strip()
+
+        # Pattern matching using lookup table with priority order
+        return (str if desc.startswith('{') and '}' in desc  # Enum-like patterns
+                else list if any(pattern in desc for pattern in ['sequence', 'iterable', 'array of', 'list of'])  # Collection patterns
+                else next((python_type for pattern, python_type in type_patterns.items()
+                          if pattern in desc), None))  # Direct pattern match
+
+    def _is_type_compatible_with_default(self, extracted_type, default_value):
+        """Check if extracted type is compatible with the actual default value."""
+        if default_value is None:
+            return True  # None is compatible with any type
+
+        # Check if default value type is compatible with extracted type
+        default_type = type(default_value)
+
+        # Compatible type mappings
+        compatible_types = {
+            float: (int, float, range),  # float annotation can accept int, float, or range defaults
+            int: (int, float),           # int annotation can accept int or float defaults
+            list: (list, tuple, range),  # list annotation can accept list, tuple, or range defaults
+            tuple: (list, tuple, range), # tuple annotation can accept list, tuple, or range defaults
+        }
+
+        return default_type in compatible_types.get(extracted_type, (extracted_type,))
 
     @abstractmethod
     def _preprocess_input(self, image, func_name: str):
