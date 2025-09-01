@@ -351,8 +351,14 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_m
     next_indent_str = "    " * (indent + 1)
     name_mappings = name_mappings or {}
 
-    # Get qualified function name for collisions
-    get_name = lambda f: name_mappings.get((f.__name__, f.__module__), f.__name__) if callable(f) else str(f)
+    # Get qualified function name for collisions (handle both original and virtual modules)
+    def get_name(f):
+        if not callable(f):
+            return str(f)
+        # Try virtual module first (for external functions), then original module
+        virtual_module = f'openhcs.{f.__module__}'
+        return (name_mappings.get((f.__name__, virtual_module), None) or
+                name_mappings.get((f.__name__, f.__module__), f.__name__))
 
     if callable(func_obj):
         return get_name(func_obj)
