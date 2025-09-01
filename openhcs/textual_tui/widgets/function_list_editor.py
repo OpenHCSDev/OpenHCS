@@ -78,16 +78,22 @@ class FunctionListEditorWidget(Container):
         # Update pattern data when functions change (structural changes only)
         self._update_pattern_data()
 
-    def _initialize_pattern_data(self, initial_functions: Union[List, Dict, callable, None]) -> None:
+    def _initialize_pattern_data(self, initial_functions: Union[List, Dict, callable, tuple, None]) -> None:
         """Initialize pattern data and determine mode."""
         if initial_functions is None:
             self.pattern_data = []
             self.is_dict_mode = False
             self.functions = []
         elif callable(initial_functions):
+            # Single callable: treat as [(callable, {})]
             self.pattern_data = [(initial_functions, {})]
             self.is_dict_mode = False
             self.functions = [(initial_functions, {})]
+        elif isinstance(initial_functions, tuple) and len(initial_functions) == 2 and callable(initial_functions[0]) and isinstance(initial_functions[1], dict):
+            # Single tuple (callable, kwargs): treat as [(callable, kwargs)]
+            self.pattern_data = [initial_functions]
+            self.is_dict_mode = False
+            self.functions = [initial_functions]
         elif isinstance(initial_functions, list):
             self.pattern_data = initial_functions
             self.is_dict_mode = False
@@ -582,9 +588,16 @@ class FunctionListEditorWidget(Container):
                 new_functions = []
                 new_selected_channel = None
             elif callable(pattern):
+                # Single callable: treat as [(callable, {})]
                 new_pattern_data = [(pattern, {})]
                 new_is_dict_mode = False
                 new_functions = [(pattern, {})]
+                new_selected_channel = None
+            elif isinstance(pattern, tuple) and len(pattern) == 2 and callable(pattern[0]) and isinstance(pattern[1], dict):
+                # Single tuple (callable, kwargs): treat as [(callable, kwargs)]
+                new_pattern_data = [pattern]
+                new_is_dict_mode = False
+                new_functions = [pattern]
                 new_selected_channel = None
             elif isinstance(pattern, list):
                 new_pattern_data = pattern
@@ -739,8 +752,16 @@ class FunctionListEditorWidget(Container):
                 if isinstance(new_pattern, list):
                     self.pattern_data = new_pattern
                     self.functions = self._normalize_function_list(new_pattern)
+                elif callable(new_pattern):
+                    # Single callable: treat as [(callable, {})]
+                    self.pattern_data = [(new_pattern, {})]
+                    self.functions = [(new_pattern, {})]
+                elif isinstance(new_pattern, tuple) and len(new_pattern) == 2 and callable(new_pattern[0]) and isinstance(new_pattern[1], dict):
+                    # Single tuple (callable, kwargs): treat as [(callable, kwargs)]
+                    self.pattern_data = [new_pattern]
+                    self.functions = [new_pattern]
                 else:
-                    raise ValueError("Expected list pattern for list mode")
+                    raise ValueError(f"Expected list, callable, or (callable, dict) tuple pattern for list mode, got {type(new_pattern)}")
 
             # Refresh the UI and notify of changes
             self.refresh()
