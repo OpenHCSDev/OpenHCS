@@ -584,13 +584,18 @@ def create_microscope_handler(microscope_type: str = 'auto',
         microscope_type = _auto_detect_microscope_type(plate_folder, filemanager, allowed_types=allowed_auto_types)
         logger.info("Auto-detected microscope type: %s", microscope_type)
 
-    # Get the appropriate handler class from the constant mapping
+    # Ensure all handlers are discovered before lookup
+    from openhcs.microscopes.handler_registry_service import discover_all_handlers, get_all_handler_types
+    discover_all_handlers()
+
+    # Get the appropriate handler class from the registry
     # No dynamic imports or fallbacks (Clause 77: Rot Intolerance)
     handler_class = MICROSCOPE_HANDLERS.get(microscope_type.lower())
     if not handler_class:
+        available_types = get_all_handler_types()
         raise ValueError(
             f"Unsupported microscope type: {microscope_type}. "
-            f"Supported types: {list(MICROSCOPE_HANDLERS.keys())}"
+            f"Available types: {available_types}"
         )
 
     # Create and configure the handler
@@ -682,6 +687,10 @@ def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
         ValueError: If microscope type cannot be determined
     """
     try:
+        # Ensure all handlers are discovered before auto-detection
+        from openhcs.microscopes.handler_registry_service import discover_all_handlers
+        discover_all_handlers()
+
         # Build detection order: openhcsdata first, then filtered/ordered list
         detection_order = ['openhcsdata']  # Always first, always included (correct registration name)
 
