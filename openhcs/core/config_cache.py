@@ -60,22 +60,38 @@ class QtExecutionStrategy(CacheExecutionStrategy):
         return _sync_save_config(config, cache_file)
 
 
+def _migrate_dataclass(cached_obj, target_type):
+    """Recursively migrate dataclass with schema evolution."""
+    if not (hasattr(cached_obj, '__dataclass_fields__') and hasattr(target_type, '__dataclass_fields__')):
+        return cached_obj
+
+    from dataclasses import fields
+    preserved_values = {}
+    for f in fields(target_type):
+        if hasattr(cached_obj, f.name):
+            old_value = getattr(cached_obj, f.name)
+            preserved_values[f.name] = (_migrate_dataclass(old_value, f.type)
+                                      if hasattr(f.type, '__dataclass_fields__')
+                                      else old_value)
+    return target_type(**preserved_values)
+
+
 def _sync_load_config(cache_file: Path) -> Optional[GlobalPipelineConfig]:
     """Synchronous config loading implementation."""
     try:
         if not cache_file.exists():
             return None
-            
+
         with open(cache_file, 'rb') as f:
-            config = pickle.load(f)
-            
-        if isinstance(config, GlobalPipelineConfig):
+            cached_config = pickle.load(f)
+
+        if hasattr(cached_config, '__dataclass_fields__'):
             logger.debug(f"Loaded cached config from: {cache_file}")
-            return config
+            return _migrate_dataclass(cached_config, GlobalPipelineConfig)
         else:
-            logger.warning(f"Invalid config type in cache: {type(config)}")
+            logger.warning(f"Invalid config type in cache: {type(cached_config)}")
             return None
-            
+
     except pickle.PickleError as e:
         logger.warning(f"Failed to unpickle cached config: {e}")
         return None
