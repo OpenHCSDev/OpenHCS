@@ -18,8 +18,7 @@ from openhcs.microscopes.handler_registry_service import (
     is_handler_available
 )
 
-# Trigger automatic discovery of all handlers
-discover_all_handlers()
+# Discovery is now lazy - handlers are discovered when first needed
 
 # Import handlers and components for backward compatibility
 # These imports are now optional since discovery handles registration
