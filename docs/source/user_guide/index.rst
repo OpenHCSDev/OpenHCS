@@ -26,9 +26,11 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
    cpu_only_mode
    analysis_consolidation
    experimental_layouts
+   real_time_visualization
 
 **Available Guides**:
 
+- :doc:`real_time_visualization` - Real-time visualization with napari streaming
 - :doc:`code_ui_editing` - Bidirectional editing between TUI and Python code
 - :doc:`dtype_conversion` - Automatic data type conversion for GPU libraries
 - :doc:`cpu_only_mode` - CPU-only mode for CI testing and deployment

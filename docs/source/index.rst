@@ -46,6 +46,9 @@ Core Capabilities
 **Storage Flexibility**
   Virtual file system with memory, disk, and compressed Zarr backends
 
+**Real-Time Visualization**
+  Automatic napari streaming with materialization-aware filtering for monitoring pipeline progress
+
 **Analysis Functions**
   Specialized tools for cell counting, neurite tracing, and morphological analysis
 

@@ -47,6 +47,7 @@ File management, memory types, and backend systems.
 
    storage_and_memory_system
    memory_type_system
+   napari_streaming_system
 
 System Integration
 ==================

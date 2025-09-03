@@ -36,7 +36,7 @@ This documentation represents our **V1 architectural understanding** of OpenHCS 
 - **[Special I/O System](special-io-system.md)** - Cross-step communication and data linking
 - **[Microscope Handler Integration](microscope-handler-integration.md)** - Format-specific processing and directory flattening
 - **[GPU Resource Management](gpu-resource-management.md)** - Device allocation and parallel execution
-- **[Napari Streaming System](napari-streaming-system.md)** - Real-time visualization with materialization-aware filtering
+- **[Napari Streaming System](../source/architecture/napari_streaming_system.rst)** - Real-time visualization with materialization-aware filtering
 
 ## **🧠 Architectural Understanding Assessment**
 
