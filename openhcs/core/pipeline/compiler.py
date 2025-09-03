@@ -210,6 +210,10 @@ class PipelineCompiler:
             # Add step-specific attributes (non-I/O, non-path related)
             current_plan["variable_components"] = step.variable_components
             current_plan["group_by"] = step.group_by
+            current_plan["stream_to_napari"] = getattr(step, 'stream_to_napari', False)
+
+            # Set visualize flag for orchestrator if napari streaming is enabled
+            current_plan["visualize"] = getattr(step, 'stream_to_napari', False)
 
             # Store materialization_config if present
             if step.materialization_config is not None:
@@ -536,6 +540,12 @@ class PipelineCompiler:
                 # Resolve all lazy dataclasses before freezing to ensure multiprocessing compatibility
                 PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
 
+                # Set visualizer creation flag if any step has napari streaming enabled
+                has_napari_streaming = any(getattr(step, 'stream_to_napari', False) for step in pipeline_definition)
+                if has_napari_streaming:
+                    context.create_visualizer = True
+                    logger.debug(f"🔬 COMPILER: Set visualizer creation flag for axis {axis_id}")
+
                 context.freeze()
                 compiled_contexts[axis_id] = context
                 logger.debug(f"Compilation finished for axis value: {axis_id}")
@@ -565,6 +575,8 @@ class PipelineCompiler:
             # Update the pipeline_definition list in-place to maintain references
             pipeline_definition.clear()
             pipeline_definition.extend(resolved_pipeline_definition)
+
+
 
             # After processing all wells, strip attributes and finalize
             logger.info("Stripping attributes from pipeline definition steps.")

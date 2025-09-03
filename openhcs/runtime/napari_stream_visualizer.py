@@ -12,12 +12,16 @@ Doctrinal Clauses:
 """
 
 import logging
+import multiprocessing
 import queue
 import threading
+import time
+import zmq
 from typing import Any, Dict, Optional
 
 from openhcs.io.filemanager import FileManager
 from openhcs.utils.import_utils import optional_import
+from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
 
 # Optional napari import - this module should only be imported if napari is available
 napari = optional_import("napari")
@@ -31,138 +35,304 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Sentinel object to signal the viewer thread to shut down
-SHUTDOWN_SENTINEL = object()
+# Global process management for napari viewer
+_global_viewer_process: Optional[multiprocessing.Process] = None
+_global_viewer_port: Optional[int] = None
+_global_process_lock = threading.Lock()
+
+def _napari_viewer_process(port: int, viewer_title: str):
+    """
+    Napari viewer process entry point. Runs in a separate process.
+    Listens for ZeroMQ messages with image data to display.
+    """
+    try:
+        import zmq
+        import napari
+        import numpy as np
+        import pickle
+
+        # Set up ZeroMQ subscriber
+        context = zmq.Context()
+        socket = context.socket(zmq.SUB)
+        socket.bind(f"tcp://*:{port}")
+        socket.setsockopt(zmq.SUBSCRIBE, b"")  # Subscribe to all messages
+
+        # Create napari viewer in this process (main thread)
+        viewer = napari.Viewer(title=viewer_title, show=True)
+        layers = {}
+
+        print(f"🔬 NAPARI PROCESS: Viewer started on port {port}")
+
+        # Use proper Qt event loop integration
+        import sys
+        from qtpy import QtWidgets, QtCore
+
+        # Get the Qt application
+        app = QtWidgets.QApplication.instance()
+        if app is None:
+            app = QtWidgets.QApplication(sys.argv)
+
+        # Set up a QTimer for message processing
+        timer = QtCore.QTimer()
+
+        def process_messages():
+            try:
+                # Process multiple messages per timer tick for better throughput
+                for _ in range(10):  # Process up to 10 messages per tick
+                    try:
+                        message = socket.recv(zmq.NOBLOCK)
+
+                        # Try to parse as JSON first (from NapariStreamingBackend)
+                        try:
+                            import json
+                            data = json.loads(message.decode('utf-8'))
+
+                            # Handle streaming backend format
+                            path = data.get('path', 'unknown')
+                            shape = data.get('shape')
+                            dtype = data.get('dtype')
+                            shm_name = data.get('shm_name')
+                            direct_data = data.get('data')
+
+                            if shm_name:
+                                # Load from shared memory
+                                try:
+                                    import multiprocessing as mp
+                                    shm = mp.shared_memory.SharedMemory(name=shm_name)
+                                    image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                                    shm.close()  # Close our reference
+                                except Exception as e:
+                                    print(f"🔬 NAPARI PROCESS: Failed to load shared memory {shm_name}: {e}")
+                                    continue
+                            elif direct_data:
+                                # Load from direct data (fallback)
+                                image_data = np.array(direct_data, dtype=dtype).reshape(shape)
+                            else:
+                                print(f"🔬 NAPARI PROCESS: No image data in message")
+                                continue
+
+                            # Extract step info from path
+                            layer_name = str(path).replace('/', '_').replace('\\', '_')
+
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            # Try to parse as pickle (from direct visualizer calls)
+                            data = pickle.loads(message)
+
+                            step_id = data.get('step_id', 'unknown')
+                            image_data = data.get('image_data')
+                            axis_id = data.get('axis_id', 'unknown')
+                            layer_name = f"{step_id}_{axis_id}"
+
+                            if image_data is None:
+                                continue
+
+                        # Update or create layer
+                        if layer_name in layers:
+                            layers[layer_name].data = image_data
+                        else:
+                            layers[layer_name] = viewer.add_image(
+                                image_data,
+                                name=layer_name,
+                                colormap='viridis'
+                            )
+                        print(f"🔬 NAPARI PROCESS: Updated layer {layer_name}")
+
+                    except zmq.Again:
+                        # No more messages available
+                        break
+
+            except Exception as e:
+                print(f"🔬 NAPARI PROCESS: Error processing message: {e}")
+
+        # Connect timer to message processing
+        timer.timeout.connect(process_messages)
+        timer.start(50)  # Process messages every 50ms
+
+        print("🔬 NAPARI PROCESS: Starting Qt event loop")
+
+        # Run the Qt event loop - this keeps napari responsive
+        app.exec_()
+
+    except Exception as e:
+        print(f"🔬 NAPARI PROCESS: Fatal error: {e}")
+    finally:
+        print("🔬 NAPARI PROCESS: Shutting down")
+        if 'socket' in locals():
+            socket.close()
+        if 'context' in locals():
+            context.term()
 
 class NapariStreamVisualizer:
     """
     Manages a Napari viewer instance for real-time visualization of tensors
-    streamed from the OpenHCS pipeline. Runs in a separate thread.
+    streamed from the OpenHCS pipeline. Runs napari in a separate process
+    for Qt compatibility and true persistence across pipeline runs.
     """
 
-    def __init__(self, filemanager: FileManager, viewer_title: str = "OpenHCS Real-Time Visualization"):
-        self.filemanager = filemanager # Added
+    def __init__(self, filemanager: FileManager, viewer_title: str = "OpenHCS Real-Time Visualization", persistent: bool = True):
+        self.filemanager = filemanager
         self.viewer_title = viewer_title
-        self.viewer: Optional[napari.Viewer] = None
-        self.layers: Dict[str, napari.layers.Image] = {} # Consider if layer type should be more generic
-        self.data_queue = queue.Queue()
-        self.viewer_thread: Optional[threading.Thread] = None
+        self.persistent = persistent  # If True, viewer process stays alive after pipeline completion
+        self.port: Optional[int] = None
+        self.process: Optional[multiprocessing.Process] = None
+        self.zmq_context: Optional[zmq.Context] = None
+        self.zmq_socket: Optional[zmq.Socket] = None
         self.is_running = False
         self._lock = threading.Lock()
 
         # Clause 368: Visualization must be observer-only.
         # This class will only read data and display it.
 
-    def _initialize_viewer_in_thread(self):
-        """
-        Initializes and runs the Napari viewer event loop.
-        This method is intended to be run in a separate thread.
-        """
-        try:
-            logger.info("Napari viewer thread started.")
-            # napari.gui_qt() ensures the Qt event loop is running if not already.
-            # It's crucial for running napari in a non-blocking way from a script.
-            with napari.gui_qt():
-                self.viewer = napari.Viewer(title=self.viewer_title, show=True)
+    def _find_free_port(self) -> int:
+        """Find a free port for ZeroMQ communication."""
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('', 0))
+            return s.getsockname()[1]
+
+    def start_viewer(self):
+        """Starts the Napari viewer in a separate process."""
+        global _global_viewer_process, _global_viewer_port
+
+        with self._lock:
+            # Check if we can reuse existing global viewer process
+            with _global_process_lock:
+                if (_global_viewer_process is not None and
+                    _global_viewer_process.is_alive() and
+                    _global_viewer_port is not None):
+                    logger.info(f"🔬 VISUALIZER: Reusing existing napari viewer process on port {_global_viewer_port}")
+                    self.port = _global_viewer_port
+                    self.process = _global_viewer_process
+                    self._setup_zmq_client()
+                    self.is_running = True
+                    return
+
+            if self.is_running:
+                logger.warning("Napari viewer is already running.")
+                return
+
+            # Use constant port for napari streaming
+            self.port = DEFAULT_NAPARI_STREAM_PORT
+            logger.info(f"🔬 VISUALIZER: Starting napari viewer process on port {self.port}")
+
+            self.process = multiprocessing.Process(
+                target=_napari_viewer_process,
+                args=(self.port, self.viewer_title),
+                daemon=False  # Don't make it daemon so it can outlive parent
+            )
+            self.process.start()
+
+            # Update global references
+            with _global_process_lock:
+                _global_viewer_process = self.process
+                _global_viewer_port = self.port
+
+            # Set up ZeroMQ client
+            self._setup_zmq_client()
+
+            # Wait a moment for process to start
+            time.sleep(1.0)
+
+            if self.process.is_alive():
                 self.is_running = True
-                logger.info("Napari viewer initialized and shown.")
+                logger.info(f"🔬 VISUALIZER: Napari viewer process started successfully (PID: {self.process.pid})")
+            else:
+                logger.error("🔬 VISUALIZER: Failed to start napari viewer process")
 
-                while self.is_running:
-                    try:
-                        # Wait for data with a timeout to allow checking self.is_running
-                        item = self.data_queue.get(timeout=0.1)
-                        if item is SHUTDOWN_SENTINEL:
-                            logger.info("Shutdown sentinel received. Exiting viewer loop.")
-                            break
+    def _setup_zmq_client(self):
+        """Set up ZeroMQ client to send data to viewer process."""
+        if self.port is None:
+            raise RuntimeError("Port not set - call start_viewer() first")
 
-                        # New logic for path-based items:
-                        if isinstance(item, dict) and item.get('type') == 'data_path':
-                            step_id = item['step_id']
-                            path = item['path']
-                            backend = item['backend']
-                            well_id = item.get('well_id') # Can be None
+        self.zmq_context = zmq.Context()
+        self.zmq_socket = self.zmq_context.socket(zmq.PUB)
+        self.zmq_socket.connect(f"tcp://localhost:{self.port}")
 
-                            logger.debug(f"Processing path '{path}' for step '{step_id}' from queue.")
-                            try:
-                                # Load data using FileManager
-                                loaded_data = self.filemanager.load(path, backend)
-                                if loaded_data is not None:
-                                    # Prepare data for display (includes GPU->CPU, slicing)
-                                    display_data = self._prepare_data_for_display(loaded_data, step_id)
+        # Give ZeroMQ time to connect
+        time.sleep(0.1)
 
-                                    if display_data is not None:
-                                        layer_name = f"{well_id}_{step_id}" if well_id else step_id
-                                        # Metadata might come from step_plan or be fixed for now
-                                        metadata = {'colormap': 'gray'}
-                                        self._update_layer_in_thread(layer_name, display_data, metadata)
-                                    # else: (logging already in _prepare_data_for_display)
-                                else:
-                                    logger.warning(f"FileManager returned None for path '{path}', backend '{backend}' (step '{step_id}').")
-                            except Exception as e_load:
-                                logger.error(f"Error loading or preparing data for step '{step_id}', path '{path}': {e_load}", exc_info=True)
-                        else:
-                            logger.warning(f"Unknown item type in data queue: {type(item)}. Item: {item}")
-
-                        self.data_queue.task_done()
-                    except queue.Empty:
-                        continue # Timeout, check self.is_running again
-                    except Exception as e:
-                        logger.error(f"Error processing item in viewer thread: {e}", exc_info=True)
-                        # Clause 65: Fail loudly (within the visualizer context) but don't crash pipeline.
-            logger.info("Napari viewer event loop exited.")
-        except Exception as e:
-            logger.error(f"Fatal error in Napari viewer thread: {e}", exc_info=True)
-        finally:
-            self.is_running = False # Ensure flag is cleared
-            if self.viewer:
-                self.viewer.close()
-            logger.info("Napari viewer thread finished.")
-
-
-    def _update_layer_in_thread(self, layer_name: str, data: np.ndarray, metadata: Optional[Dict] = None):
-        """
-        Updates or creates a layer in the Napari viewer. Must be called from the viewer thread.
-        """
-        if not self.viewer:
-            logger.warning("Viewer not initialized, cannot update layer.")
+    def send_image_data(self, step_id: str, image_data: np.ndarray, axis_id: str = "unknown"):
+        """Send image data to the napari viewer process via ZeroMQ."""
+        if not self.is_running or self.zmq_socket is None:
+            logger.warning(f"🔬 VISUALIZER: Cannot send data - viewer not running")
             return
 
         try:
-            if layer_name in self.layers:
-                self.layers[layer_name].data = data
-                logger.debug(f"Updated layer: {layer_name} with shape {data.shape}")
-            else:
-                self.layers[layer_name] = self.viewer.add_image(data, name=layer_name)
-                logger.info(f"Added new layer: {layer_name} with shape {data.shape}")
-
-            if metadata and 'colormap' in metadata and self.layers[layer_name]:
-                self.layers[layer_name].colormap = metadata['colormap']
-            if metadata and 'contrast_limits' in metadata and self.layers[layer_name]:
-                self.layers[layer_name].contrast_limits = metadata['contrast_limits']
-
+            import pickle
+            message_data = {
+                'step_id': step_id,
+                'image_data': image_data,
+                'axis_id': axis_id
+            }
+            message = pickle.dumps(message_data)
+            self.zmq_socket.send(message, zmq.NOBLOCK)
+            logger.debug(f"🔬 VISUALIZER: Sent image data for {step_id}_{axis_id}")
         except Exception as e:
-            logger.error(f"Error updating Napari layer '{layer_name}': {e}", exc_info=True)
+            logger.error(f"🔬 VISUALIZER: Failed to send image data: {e}")
 
-    def start_viewer(self):
-        """Starts the Napari viewer in a separate thread."""
+    def stop_viewer(self):
+        """Stop the napari viewer process (only if not persistent)."""
         with self._lock:
-            if self.is_running or self.viewer_thread is not None:
-                logger.warning("Napari viewer is already running or starting.")
-                return
+            if not self.persistent:
+                logger.info("🔬 VISUALIZER: Stopping non-persistent napari viewer")
+                self._cleanup_zmq()
+                if self.process and self.process.is_alive():
+                    self.process.terminate()
+                    self.process.join(timeout=5)
+                    if self.process.is_alive():
+                        logger.warning("🔬 VISUALIZER: Force killing napari viewer process")
+                        self.process.kill()
+                self.is_running = False
+            else:
+                logger.info("🔬 VISUALIZER: Keeping persistent napari viewer alive")
+                # Just cleanup our ZMQ connection, leave process running
+                self._cleanup_zmq()
+                self.is_running = False
 
-            self.viewer_thread = threading.Thread(target=self._initialize_viewer_in_thread, daemon=True)
-            self.viewer_thread.start()
-            logger.info("NapariStreamVisualizer viewer thread initiated.")
+    def _cleanup_zmq(self):
+        """Clean up ZeroMQ resources."""
+        if self.zmq_socket:
+            self.zmq_socket.close()
+            self.zmq_socket = None
+        if self.zmq_context:
+            self.zmq_context.term()
+            self.zmq_context = None
+
+    def visualize_path(self, step_id: str, path: str, backend: str, axis_id: Optional[str] = None):
+        """
+        Load data from a path and send it to the napari viewer process.
+        This method is called by the orchestrator for visualization.
+        """
+        if not self.is_running:
+            logger.warning(f"🔬 VISUALIZER: Cannot visualize - viewer not running")
+            return
+
+        try:
+            # Load data using FileManager
+            loaded_data = self.filemanager.load(path, backend)
+            if loaded_data is not None:
+                # Prepare data for display (includes GPU->CPU conversion, slicing)
+                display_data = self._prepare_data_for_display(loaded_data, step_id)
+
+                if display_data is not None:
+                    self.send_image_data(step_id, display_data, axis_id or "unknown")
+                    logger.debug(f"🔬 VISUALIZER: Visualized data from {path}")
+                else:
+                    logger.warning(f"🔬 VISUALIZER: Could not prepare data for display from {path}")
+            else:
+                logger.warning(f"🔬 VISUALIZER: FileManager returned None for path '{path}', backend '{backend}'")
+        except Exception as e:
+            logger.error(f"🔬 VISUALIZER: Error visualizing path '{path}': {e}", exc_info=True)
 
     def _prepare_data_for_display(self, data: Any, step_id_for_log: str) -> Optional[np.ndarray]:
         """Converts loaded data to a displayable NumPy array (e.g., 2D slice)."""
         cpu_tensor: Optional[np.ndarray] = None
         try:
             # GPU to CPU conversion logic
-            if hasattr(data, 'is_cuda') and data.is_cuda: # PyTorch
+            if hasattr(data, 'is_cuda') and data.is_cuda:  # PyTorch
                 cpu_tensor = data.cpu().numpy()
-            elif hasattr(data, 'device') and 'cuda' in str(data.device).lower(): # Check for device attribute
-                if hasattr(data, 'get'): # CuPy
+            elif hasattr(data, 'device') and 'cuda' in str(data.device).lower():  # Check for device attribute
+                if hasattr(data, 'get'):  # CuPy
                     cpu_tensor = data.get()
                 elif hasattr(data, 'numpy'): # JAX on GPU might have .numpy() after host transfer
                     cpu_tensor = np.asarray(data) # JAX arrays might need explicit conversion
@@ -212,48 +382,3 @@ class NapariStreamVisualizer:
             logger.error(f"Error preparing data from step '{step_id_for_log}' for display: {e}", exc_info=True)
             return None
 
-    def visualize_path(self, step_id: str, path: str, backend: str, well_id: Optional[str] = None):
-        """
-        Receives a VFS path, backend, and associated info, and queues it for display.
-        """
-        if not self.is_running and self.viewer_thread is None:
-            logger.info(f"Visualizer not running for step '{step_id}'. Starting Napari viewer.")
-            self.start_viewer()
-
-        if not self.viewer_thread: # Check if thread actually started
-            logger.warning(f"Visualizer thread not available. Cannot visualize path for step '{step_id}'.")
-            return
-
-        try:
-            item_to_queue = {
-                'type': 'data_path', # To distinguish from other potential queue items
-                'step_id': step_id,
-                'path': path,
-                'backend': backend,
-                'well_id': well_id
-            }
-            self.data_queue.put(item_to_queue)
-            logger.debug(f"Queued path '{path}' for step '{step_id}' (well: {well_id}).")
-        except Exception as e:
-            logger.error(f"Error queueing path for visualization: {e}", exc_info=True)
-
-    def stop_viewer(self):
-        """Signals the viewer thread to shut down and waits for it to join."""
-        logger.info("Attempting to stop Napari viewer...")
-        with self._lock:
-            if not self.is_running and self.viewer_thread is None:
-                logger.info("Napari viewer was not running.")
-                return
-            if self.is_running:
-                self.is_running = False
-                self.data_queue.put(SHUTDOWN_SENTINEL)
-
-        if self.viewer_thread and self.viewer_thread.is_alive():
-            logger.info("Waiting for Napari viewer thread to join...")
-            self.viewer_thread.join(timeout=5.0)
-            if self.viewer_thread.is_alive():
-                logger.warning("Napari viewer thread did not join in time.")
-            else:
-                logger.info("Napari viewer thread joined successfully.")
-        self.viewer_thread = None
-        logger.info("NapariStreamVisualizer stopped.")

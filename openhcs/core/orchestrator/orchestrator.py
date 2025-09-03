@@ -559,6 +559,21 @@ class PipelineOrchestrator:
         if actual_max_workers <= 0: # Ensure positive number of workers
             actual_max_workers = 1
 
+        # 🔬 AUTOMATIC VISUALIZER CREATION: Create visualizer if compiler detected napari streaming
+        if visualizer is None:
+            # Check if any compiled context has the create_visualizer flag
+            needs_visualizer = any(getattr(context, 'create_visualizer', False) for context in compiled_contexts.values())
+            if needs_visualizer:
+                try:
+                    if NapariStreamVisualizer is not None:
+                        visualizer = NapariStreamVisualizer(self.filemanager, viewer_title="OpenHCS Pipeline Visualization")
+                        visualizer.start_viewer()  # Actually start the napari window
+                        logger.info("🔬 ORCHESTRATOR: Auto-created and started napari visualizer for real-time streaming")
+                    else:
+                        logger.warning("🔬 ORCHESTRATOR: Napari streaming requested but napari not available. Install with: pip install 'openhcs[viz]'")
+                except Exception as e:
+                    logger.warning(f"🔬 ORCHESTRATOR: Failed to create napari visualizer: {e}")
+
         self._state = OrchestratorState.EXECUTING
         logger.info(f"Starting execution for {len(compiled_contexts)} axis values with max_workers={actual_max_workers}.")
 
@@ -638,11 +653,11 @@ class PipelineOrchestrator:
                         logger.info(f"🔥 ORCHESTRATOR: Submitting task for {axis_name} {axis_id}")
                         # Resolve all arguments before passing to ProcessPoolExecutor
                         resolved_context = resolve_lazy_configurations_for_serialization(context)
-                        resolved_visualizer = resolve_lazy_configurations_for_serialization(visualizer)
 
                         # Use static function to avoid pickling the orchestrator instance
                         # Note: Use original pipeline_definition to preserve collision-resolved configs
-                        future = executor.submit(_execute_single_axis_static, pipeline_definition, resolved_context, resolved_visualizer)
+                        # Don't pass visualizer to worker processes - they communicate via ZeroMQ
+                        future = executor.submit(_execute_single_axis_static, pipeline_definition, resolved_context, None)
                         future_to_axis_id[future] = axis_id
                         logger.info(f"🔥 ORCHESTRATOR: Task submitted for {axis_name} {axis_id}")
                         logger.info(f"🔥 DEATH_MARKER: TASK_SUBMITTED_FOR_{axis_name.upper()}_{axis_id}")
@@ -744,6 +759,14 @@ class PipelineOrchestrator:
                 self._state = OrchestratorState.COMPLETED
             else:
                 self._state = OrchestratorState.EXEC_FAILED
+
+            # 🔬 VISUALIZER CLEANUP: Stop napari visualizer if it was auto-created
+            if visualizer is not None:
+                try:
+                    visualizer.stop_viewer()
+                    logger.info("🔬 ORCHESTRATOR: Stopped napari visualizer")
+                except Exception as e:
+                    logger.warning(f"🔬 ORCHESTRATOR: Failed to stop napari visualizer: {e}")
 
             logger.info(f"🔥 ORCHESTRATOR: Plate execution finished. Results: {execution_results}")
 

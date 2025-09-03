@@ -928,6 +928,38 @@ class FunctionStep(AbstractStep):
 
                 logger.info(f"🔬 Materialized {len(materialized_paths)} files to {materialized_output_dir}")
 
+            # 📄 NAPARI STREAMING: Stream to napari if configured
+            # Only stream files that would be materialized, not all files
+            if step_plan.get('stream_to_napari', False):
+                napari_paths = []
+                napari_data = []
+
+                # Determine which files to stream based on materialization logic
+                # 1. If step writes to materialization backend (disk/zarr), stream those files
+                if write_backend != Backend.MEMORY.value:
+                    napari_paths = get_paths_for_axis(step_output_dir, Backend.MEMORY.value)
+                    napari_data = filemanager.load_batch(napari_paths, Backend.MEMORY.value)
+                    logger.debug(f"🔍 NAPARI: Streaming main output files (write_backend={write_backend})")
+
+                # 2. If step has per-step materialization, stream those files too
+                if "materialized_output_dir" in step_plan:
+                    materialized_output_dir = step_plan["materialized_output_dir"]
+                    memory_paths = get_paths_for_axis(step_output_dir, Backend.MEMORY.value)
+                    memory_data = filemanager.load_batch(memory_paths, Backend.MEMORY.value)
+                    materialized_paths = _generate_materialized_paths(memory_paths, step_output_dir, Path(materialized_output_dir))
+
+                    # Add materialized files to napari streaming
+                    napari_paths.extend(materialized_paths)
+                    napari_data.extend(memory_data)
+                    logger.debug(f"🔍 NAPARI: Streaming per-step materialized files from {materialized_output_dir}")
+
+                # Stream to napari if we have files to stream
+                if napari_paths and napari_data:
+                    filemanager.save_batch(napari_data, napari_paths, Backend.NAPARI_STREAM.value)
+                    logger.info(f"🔍 NAPARI: Streamed {len(napari_paths)} materialized images to napari for step {step_name}")
+                else:
+                    logger.debug(f"🔍 NAPARI: No materialized files to stream for step {step_name} (all files kept in memory only)")
+
             logger.info(f"FunctionStep {step_index} ({step_name}) completed for well {axis_id}.")
 
             # 📄 OPENHCS METADATA: Create metadata file automatically after step completion
