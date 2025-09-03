@@ -14,6 +14,7 @@ Systematic approaches for OpenHCS development workflows.
    systematic_refactoring_framework
    architectural_refactoring_patterns
    refactoring_principles
+   respecting_codebase_architecture
    literal_includes_audit_methodology
    compositional_commit_message_generation
 
