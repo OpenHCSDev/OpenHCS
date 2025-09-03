@@ -6,6 +6,10 @@ This package contains the storage backend implementations for openhcs.
 
 from .atomic import file_lock, atomic_write_json, atomic_update_json, FileLockError, FileLockTimeoutError
 from .base import DataSink, StorageBackend, storage_registry, reset_memory_backend
+from .backend_registry import (
+    StorageBackendMeta, get_backend_instance, discover_all_backends,
+    cleanup_backend_connections, cleanup_all_backends, STORAGE_BACKENDS
+)
 from .disk import DiskStorageBackend
 from .filemanager import FileManager
 from .memory import MemoryStorageBackend
@@ -22,6 +26,11 @@ __all__ = [
     'StreamingBackend',
     'storage_registry',
     'reset_memory_backend',
+    'StorageBackendMeta',
+    'get_backend_instance',
+    'discover_all_backends',
+    'cleanup_all_backends',
+    'STORAGE_BACKENDS',
     'DiskStorageBackend',
     'MemoryStorageBackend',
     'NapariStreamingBackend',

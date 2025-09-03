@@ -40,6 +40,29 @@ _global_viewer_process: Optional[multiprocessing.Process] = None
 _global_viewer_port: Optional[int] = None
 _global_process_lock = threading.Lock()
 
+
+def _cleanup_global_viewer() -> None:
+    """
+    Clean up global napari viewer process for test mode.
+
+    This forcibly terminates the napari viewer process to allow pytest to exit.
+    Should only be called in test mode.
+    """
+    global _global_viewer_process
+
+    with _global_process_lock:
+        if _global_viewer_process and _global_viewer_process.is_alive():
+            logger.info("🔬 VISUALIZER: Terminating napari viewer for test cleanup")
+            _global_viewer_process.terminate()
+            _global_viewer_process.join(timeout=3)
+
+            if _global_viewer_process.is_alive():
+                logger.warning("🔬 VISUALIZER: Force killing napari viewer process")
+                _global_viewer_process.kill()
+                _global_viewer_process.join(timeout=1)
+
+            _global_viewer_process = None
+
 def _napari_viewer_process(port: int, viewer_title: str):
     """
     Napari viewer process entry point. Runs in a separate process.

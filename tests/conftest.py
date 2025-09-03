@@ -142,3 +142,22 @@ def pytest_generate_tests(metafunc):
             selected_choices = _get_config_option(metafunc.config, config['option'], config['choices'])
             values = [config['value_mapper'](choice) for choice in selected_choices]
             metafunc.parametrize(fixture_name, values, ids=selected_choices, scope="module")
+
+
+@pytest.fixture(autouse=True)
+def cleanup_backend_connections():
+    """
+    Automatically clean up backend connections after each test.
+
+    This preserves the napari window for future tests while cleaning up
+    ZeroMQ connections and shared memory to prevent test hanging.
+    """
+    yield  # Run the test
+
+    # Clean up connections after test completes
+    try:
+        from openhcs.io import cleanup_backend_connections
+        cleanup_backend_connections()
+    except Exception as e:
+        # Don't fail tests due to cleanup issues
+        print(f"Warning: Failed to cleanup backend connections: {e}")

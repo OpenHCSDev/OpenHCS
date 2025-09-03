@@ -71,6 +71,8 @@ class StorageBackend(DataSink):
 
     Extends DataSink with retrieval capabilities and file system operations
     for backends that provide persistent storage with file-like semantics.
+
+    Concrete implementations should use StorageBackendMeta for automatic registration.
     """
 
     # Inherits save() and save_batch() from DataSink
@@ -362,11 +364,10 @@ class StorageBackend(DataSink):
 
 def _create_storage_registry() -> Dict[str, DataSink]:
     """
-    Create a new storage registry.
+    Create a new storage registry using metaclass-based discovery.
 
     This function creates a dictionary mapping backend names to their respective
-    storage backend instances. It is the canonical factory for creating backend
-    registries in the system.
+    storage backend instances using automatic discovery and registration.
 
     Now returns Dict[str, DataSink] to support both StorageBackend and StreamingBackend.
 
@@ -374,21 +375,13 @@ def _create_storage_registry() -> Dict[str, DataSink]:
         A dictionary mapping backend names to DataSink instances (polymorphic)
 
     Note:
-        This is an internal factory function. Use the global storage_registry
-        instance instead of calling this directly.
+        This function now uses the metaclass-based registry system for automatic
+        backend discovery, eliminating hardcoded imports.
     """
-    # Import here to avoid circular imports
-    from openhcs.io.disk import DiskStorageBackend
-    from openhcs.io.memory import MemoryStorageBackend
-    from openhcs.io.zarr import ZarrStorageBackend
-    from openhcs.io.napari_stream import NapariStreamingBackend
+    # Import the metaclass-based registry system
+    from openhcs.io.backend_registry import create_storage_registry
 
-    return {
-        Backend.DISK.value: DiskStorageBackend(),
-        Backend.MEMORY.value: MemoryStorageBackend(),
-        Backend.ZARR.value: ZarrStorageBackend(),
-        Backend.NAPARI_STREAM.value: NapariStreamingBackend()
-    }
+    return create_storage_registry()
 
 
 # Global singleton storage registry - created once at module import time

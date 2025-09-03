@@ -15,12 +15,18 @@ from os import PathLike
 import numpy as np
 
 from openhcs.io.streaming import StreamingBackend
+from openhcs.io.backend_registry import StorageBackendMeta
+from openhcs.constants.constants import Backend
 from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
 
 logger = logging.getLogger(__name__)
 
 
-class NapariStreamingBackend(StreamingBackend):
+class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
+    """Napari streaming backend with automatic metaclass registration."""
+
+    # Backend type from enum for registration
+    _backend_type = Backend.NAPARI_STREAM.value
     """
     Napari streaming backend for real-time visualization.
 
@@ -32,6 +38,7 @@ class NapariStreamingBackend(StreamingBackend):
     def __init__(self):
         """Initialize the napari streaming backend."""
         self._publisher = None
+        self._context = None
         self._shared_memory_blocks = {}
 
     def _get_publisher(self):
@@ -39,8 +46,8 @@ class NapariStreamingBackend(StreamingBackend):
         if self._publisher is None:
             try:
                 import zmq
-                context = zmq.Context()
-                self._publisher = context.socket(zmq.PUB)
+                self._context = zmq.Context()
+                self._publisher = self._context.socket(zmq.PUB)
 
                 # Connect to napari viewer process on constant port
                 self._publisher.connect(f"tcp://localhost:{DEFAULT_NAPARI_STREAM_PORT}")
@@ -132,8 +139,25 @@ class NapariStreamingBackend(StreamingBackend):
     # REMOVED: All file system methods (load, load_batch, exists, list_files, delete, etc.)
     # These are no longer inherited - clean interface!
     
+    def cleanup_connections(self) -> None:
+        """Clean up ZeroMQ connections without affecting shared memory or napari window."""
+        # Close publisher and context
+        if self._publisher is not None:
+            self._publisher.close()
+            self._publisher = None
+
+        if self._context is not None:
+            self._context.term()
+            self._context = None
+
+        logger.debug("Napari streaming connections cleaned up")
+
     def cleanup(self) -> None:
-        """Clean up shared memory blocks and close publisher."""
+        """Clean up shared memory blocks and close publisher.
+
+        Note: This does NOT close the napari window - it should remain open
+        for future test executions and user interaction.
+        """
         # Clean up shared memory blocks
         for shm_name, shm in self._shared_memory_blocks.items():
             try:
@@ -141,15 +165,13 @@ class NapariStreamingBackend(StreamingBackend):
                 shm.unlink()
             except Exception as e:
                 logger.warning(f"Failed to cleanup shared memory {shm_name}: {e}")
-        
+
         self._shared_memory_blocks.clear()
-        
-        # Close publisher
-        if self._publisher is not None:
-            self._publisher.close()
-            self._publisher = None
-            
-        logger.debug("Napari streaming backend cleaned up")
+
+        # Clean up connections
+        self.cleanup_connections()
+
+        logger.debug("Napari streaming backend cleaned up (napari window remains open)")
     
     def __del__(self):
         """Cleanup on deletion."""
