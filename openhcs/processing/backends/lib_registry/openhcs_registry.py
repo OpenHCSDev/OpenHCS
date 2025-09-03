@@ -28,7 +28,7 @@ class OpenHCSRegistry(LibraryRegistryBase):
 
     # Required abstract class attributes
     MODULES_TO_SCAN = []  # Will be set dynamically
-    MEMORY_TYPE = "openhcs"  # Placeholder, actual memory types come from function attributes
+    MEMORY_TYPE = None  # OpenHCS functions have their own memory type attributes
     FLOAT_DTYPE = np.float32
 
     def __init__(self):

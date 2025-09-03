@@ -503,8 +503,10 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         self._enhance_annotations_from_docstring(wrapped_adapter, original_func)
 
         # Set memory type attributes for contract execution compatibility
-        wrapped_adapter.input_memory_type = self.MEMORY_TYPE
-        wrapped_adapter.output_memory_type = self.MEMORY_TYPE
+        # Only set if registry has a specific memory type (external libraries)
+        if self.MEMORY_TYPE is not None:
+            wrapped_adapter.input_memory_type = self.MEMORY_TYPE
+            wrapped_adapter.output_memory_type = self.MEMORY_TYPE
         wrapped_adapter.stream_to_napari = False
 
         return wrapped_adapter
