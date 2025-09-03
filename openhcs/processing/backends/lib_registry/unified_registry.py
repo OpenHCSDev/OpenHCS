@@ -502,6 +502,11 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         # Extract type hints from docstring if annotations are missing
         self._enhance_annotations_from_docstring(wrapped_adapter, original_func)
 
+        # Set memory type attributes for contract execution compatibility
+        wrapped_adapter.input_memory_type = self.MEMORY_TYPE
+        wrapped_adapter.output_memory_type = self.MEMORY_TYPE
+        wrapped_adapter.stream_to_napari = False
+
         return wrapped_adapter
 
     def _enhance_annotations_from_docstring(self, wrapped_func: Callable, original_func: Callable):
