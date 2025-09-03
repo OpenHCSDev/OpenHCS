@@ -29,12 +29,14 @@ This documentation represents our **V1 architectural understanding** of OpenHCS 
 ### **🔄 Data Processing Systems**
 - **[Memory Type System](memory-type-system.md)** - Cross-library array conversion and GPU coordination
 - **[VFS System](vfs-system.md)** - Virtual file system and backend abstraction
+- **[Memory Backend System](memory-backend-system.md)** - Storage and streaming backend implementations
 - **[Pattern Detection System](pattern-detection-system.md)** - Microscope format handling and file pattern discovery
 
 ### **🔗 Integration Systems**
 - **[Special I/O System](special-io-system.md)** - Cross-step communication and data linking
 - **[Microscope Handler Integration](microscope-handler-integration.md)** - Format-specific processing and directory flattening
 - **[GPU Resource Management](gpu-resource-management.md)** - Device allocation and parallel execution
+- **[Napari Streaming System](napari-streaming-system.md)** - Real-time visualization with materialization-aware filtering
 
 ## **🧠 Architectural Understanding Assessment**
 

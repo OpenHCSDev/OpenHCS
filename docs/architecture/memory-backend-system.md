@@ -15,11 +15,12 @@ OpenHCS provides a Virtual File System (VFS) with multiple storage backends desi
 from openhcs.io.base import storage_registry
 from openhcs.io.filemanager import FileManager
 
-# Backend registry with three implementations:
+# Backend registry with storage and streaming implementations:
 storage_registry = {
     "memory": MemoryStorageBackend(),    # In-memory object store
     "disk": DiskStorageBackend(),        # File system storage
-    "zarr": ZarrStorageBackend()         # OME-ZARR compressed storage
+    "zarr": ZarrStorageBackend(),        # OME-ZARR compressed storage
+    "napari_stream": NapariStreamingBackend()  # Real-time visualization streaming
 }
 
 filemanager = FileManager(storage_registry)
@@ -37,6 +38,9 @@ filemanager.save(data, "results/final_output.tif", "disk")
 
 # Large datasets - use zarr backend with compression
 filemanager.save(data, "results/large_dataset", "zarr")
+
+# Real-time visualization - use streaming backend
+filemanager.save(data, "visualization/current_step", "napari_stream")
 ```
 
 ## Unified API Across Backends
@@ -45,9 +49,10 @@ filemanager.save(data, "results/large_dataset", "zarr")
 
 ```python
 # Same code works with any backend - location transparency:
-filemanager.save(data, "processed/image.tif", "memory")    # RAM storage
-filemanager.save(data, "processed/image.tif", "disk")      # File system
-filemanager.save(data, "processed/image.tif", "zarr")      # OME-ZARR
+filemanager.save(data, "processed/image.tif", "memory")       # RAM storage
+filemanager.save(data, "processed/image.tif", "disk")         # File system
+filemanager.save(data, "processed/image.tif", "zarr")         # OME-ZARR
+filemanager.save(data, "processed/image.tif", "napari_stream") # Real-time visualization
 
 # Load from any backend with automatic type conversion:
 data = filemanager.load("processed/image.tif", "memory")   # Returns numpy array
@@ -147,8 +152,9 @@ class StorageRegistry:
 # Default registry setup:
 registry = StorageRegistry()
 registry.register_backend("memory", MemoryStorageBackend)
-registry.register_backend("disk", DiskStorageBackend)  
+registry.register_backend("disk", DiskStorageBackend)
 registry.register_backend("zarr", ZarrStorageBackend)
+registry.register_backend("napari_stream", NapariStreamingBackend)
 ```
 
 ### Memory Backend Implementation
@@ -202,6 +208,45 @@ class DiskStorageBackend(StorageBackend):
             with open(path, 'wb') as f:
                 dill.dump(data, f)
 ```
+
+### Streaming Backend Implementation
+
+Real-time visualization requires streaming data to external processes without persistent storage. The streaming backend architecture separates data flow from storage concerns.
+
+```python
+class NapariStreamingBackend(StreamingBackend):
+    """Real-time visualization streaming using ZeroMQ."""
+
+    def __init__(self):
+        self._publisher = None
+        self._shared_memory_blocks = {}
+
+    def save(self, data, path, **kwargs):
+        """Stream data to napari viewer process via ZeroMQ."""
+        publisher = self._get_publisher()
+
+        # Use shared memory for large arrays, direct data for small ones
+        if isinstance(data, np.ndarray) and data.nbytes > 1024:
+            shm_name = self._create_shared_memory(data)
+            message = {
+                'path': str(path),
+                'shape': data.shape,
+                'dtype': str(data.dtype),
+                'shm_name': shm_name
+            }
+        else:
+            message = {
+                'path': str(path),
+                'shape': data.shape if hasattr(data, 'shape') else None,
+                'dtype': str(data.dtype) if hasattr(data, 'dtype') else None,
+                'data': data.tolist() if hasattr(data, 'tolist') else data
+            }
+
+        # Send JSON message to napari viewer process
+        publisher.send_string(json.dumps(message))
+```
+
+This enables automatic napari visualization when pipeline steps set `stream_to_napari=True`, with the streaming backend connecting to a persistent napari viewer process on port 5555.
 
 ## Real-World Performance
 
