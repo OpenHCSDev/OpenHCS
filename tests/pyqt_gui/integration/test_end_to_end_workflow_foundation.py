@@ -781,7 +781,13 @@ def _reset_field(context: WorkflowContext) -> WorkflowContext:
         raise AssertionError(f"Reset button for field '{field_name}' not found")
 
     print(f"  Resetting {field_name} to lazy state")
+
+    # Properly click the reset button with Qt event processing
+    from PyQt6.QtWidgets import QApplication
     reset_button.click()
+    QApplication.processEvents()  # Process the click event
+
+    print(f"  ✅ Reset button clicked and events processed for {field_name}")
     _wait_for_gui(TIMING.ACTION_DELAY)
 
     return context
@@ -1091,6 +1097,35 @@ class AssertionFactory:
         def assert_full_lazy_state(context: WorkflowContext) -> None:
             """Assert that all fields show lazy state after reset."""
             results = context.validation_results
+
+            # Check for reset placeholder bug specifically
+            if scenario.name == "reset_placeholder_bug_direct_field":
+                # Validate that num_workers placeholder shows correct pipeline default, not old concrete value
+                form_managers = context.config_window.findChildren(ParameterFormManager)
+                for form_manager in form_managers:
+                    if hasattr(form_manager, 'widgets') and 'num_workers' in form_manager.widgets:
+                        widget = form_manager.widgets['num_workers']
+                        texts = ValidationEngine.extract_widget_texts(widget)
+                        all_text = " ".join(texts.values()).lower()
+
+                        print(f"🔍 RESET PLACEHOLDER BUG CHECK: num_workers text = '{all_text}'")
+
+                        # Critical bug check: should NOT show the old concrete value "2"
+                        if "2" in all_text and "pipeline default:" in all_text:
+                            raise AssertionError(
+                                f"RESET PLACEHOLDER BUG DETECTED: num_workers placeholder shows old concrete value '2' "
+                                f"instead of pipeline default. Text: '{all_text}'"
+                            )
+
+                        # Should show pipeline default: 1
+                        if "pipeline default:" in all_text and "1" not in all_text:
+                            raise AssertionError(
+                                f"RESET PLACEHOLDER BUG: num_workers should show 'pipeline default: 1'. "
+                                f"Text: '{all_text}'"
+                            )
+
+                        print(f"✅ RESET PLACEHOLDER CORRECT: num_workers shows proper pipeline default")
+                        break
 
             lazy_state_fields = [
                 key for key, value in results.items()
