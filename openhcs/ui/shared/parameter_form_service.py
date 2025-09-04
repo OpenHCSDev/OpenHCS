@@ -10,7 +10,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Dict, Any, Type, Optional, List, Tuple
 
-from openhcs.core.config import LazyDefaultPlaceholderService
+from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 from openhcs.ui.shared.ui_utils import debug_param, format_field_id, format_param_name, format_reset_button_id

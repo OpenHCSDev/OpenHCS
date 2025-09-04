@@ -41,7 +41,7 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         self._context = None
         self._shared_memory_blocks = {}
 
-    def _get_publisher(self):
+    def _get_publisher(self, napari_port: int):
         """Lazy initialization of ZeroMQ publisher."""
         if self._publisher is None:
             try:
@@ -49,9 +49,8 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 self._context = zmq.Context()
                 self._publisher = self._context.socket(zmq.PUB)
 
-                # Connect to napari viewer process on constant port
-                self._publisher.connect(f"tcp://localhost:{DEFAULT_NAPARI_STREAM_PORT}")
-                logger.info(f"Napari streaming publisher connected to viewer on port {DEFAULT_NAPARI_STREAM_PORT}")
+                self._publisher.connect(f"tcp://localhost:{napari_port}")
+                logger.info(f"Napari streaming publisher connected to viewer on port {napari_port}")
 
                 # Small delay to ensure socket is ready
                 time.sleep(0.1)
@@ -61,6 +60,8 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 raise RuntimeError("ZeroMQ required for napari streaming")
 
         return self._publisher
+
+
     
     def save(self, data: Any, file_path: Union[str, Path], **kwargs) -> None:
         """
@@ -72,7 +73,9 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             **kwargs: Additional metadata
         """
         try:
-            publisher = self._get_publisher()
+            napari_port = kwargs.get('napari_port')
+            logger.info(f"🔍 NAPARI BACKEND: save() called with napari_port={napari_port}, data_type={type(data)}")
+            publisher = self._get_publisher(napari_port)
             
             # Convert data to numpy if needed
             if hasattr(data, 'cpu'):  # PyTorch tensor

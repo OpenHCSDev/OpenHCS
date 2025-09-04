@@ -29,7 +29,7 @@ from collections import OrderedDict # For special_outputs and special_inputs ord
 
 from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES, READ_BACKEND, WRITE_BACKEND, Backend
 from openhcs.core.context.processing_context import ProcessingContext
-from openhcs.core.config import MaterializationBackend, PathPlanningConfig
+from openhcs.core.config import MaterializationBackend, PathPlanningConfig, WellFilterMode
 from openhcs.core.pipeline.funcstep_contract_validator import \
     FuncStepContractValidator
 from openhcs.core.pipeline.materialization_flag_planner import \
@@ -109,13 +109,17 @@ class PipelineCompiler:
         # === THREAD-LOCAL CONTEXT SETUP ===
         # CRITICAL: Use the same merged config pattern as orchestrator.apply_pipeline_config()
         # to preserve None values needed for sibling inheritance (materialization_defaults → path_planning)
-        from openhcs.core.config import get_current_global_config, set_current_global_config, GlobalPipelineConfig
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
         from dataclasses import fields
 
         # Use unified config access pattern with inheritance preservation
         effective_config = orchestrator.get_effective_config(for_serialization=False)
         set_current_global_config(GlobalPipelineConfig, effective_config)
         logger.debug(f"🔧 THREAD-LOCAL: Set context using unified config pattern that preserves None values for sibling inheritance")
+
+        # Add visualizer config to context for orchestrator access
+        context.visualizer_config = effective_config.visualizer
 
         # === BACKWARDS COMPATIBILITY PREPROCESSING ===
         # Ensure all steps have complete attribute sets based on AbstractStep constructor
@@ -210,14 +214,36 @@ class PipelineCompiler:
             # Add step-specific attributes (non-I/O, non-path related)
             current_plan["variable_components"] = step.variable_components
             current_plan["group_by"] = step.group_by
-            current_plan["stream_to_napari"] = getattr(step, 'stream_to_napari', False)
+            # Resolve lazy configs for this step BEFORE checking inheritance
+            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+            resolved_step = resolve_lazy_configurations_for_serialization([step])[0]
 
-            # Set visualize flag for orchestrator if napari streaming is enabled
-            current_plan["visualize"] = getattr(step, 'stream_to_napari', False)
+            # Store all WellFilterConfig instances except materialization (already handled above)
+            from openhcs.core.config import WellFilterConfig, StreamingConfig
+            has_streaming = False
+            required_visualizers = getattr(context, 'required_visualizers', [])
 
-            # Store materialization_config if present
-            if step.materialization_config is not None:
-                current_plan["materialization_config"] = step.materialization_config
+            for attr_name in dir(resolved_step):
+                if not attr_name.startswith('_'):
+                    config = getattr(resolved_step, attr_name, None)
+                    if config is not None and isinstance(config, WellFilterConfig):
+                            current_plan[attr_name] = config
+                            # Check if this is a streaming config for visualize flag
+                            if isinstance(config, StreamingConfig):
+                                has_streaming = True
+                                # Collect visualizer info
+                                visualizer_info = {
+                                    'backend': config.backend.name,
+                                    'config': config
+                                }
+                                if visualizer_info not in required_visualizers:
+                                    required_visualizers.append(visualizer_info)
+
+            # Set visualize flag for orchestrator if any streaming is enabled
+            current_plan["visualize"] = has_streaming
+            context.required_visualizers = required_visualizers
+
+
 
             # Add FunctionStep specific attributes
             if isinstance(step, FunctionStep):
@@ -451,7 +477,8 @@ class PipelineCompiler:
             orchestrator: PipelineOrchestrator to get current effective config from
         """
         from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-        from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.core.context.global_config import set_current_global_config
 
         # Use orchestrator's current effective config as authoritative source
         # This ensures compilation resolves the same values as UI placeholders
@@ -540,11 +567,9 @@ class PipelineCompiler:
                 # Resolve all lazy dataclasses before freezing to ensure multiprocessing compatibility
                 PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
 
-                # Set visualizer creation flag if any step has napari streaming enabled
-                has_napari_streaming = any(getattr(step, 'stream_to_napari', False) for step in pipeline_definition)
-                if has_napari_streaming:
-                    context.create_visualizer = True
-                    logger.debug(f"🔬 COMPILER: Set visualizer creation flag for axis {axis_id}")
+
+
+
 
                 context.freeze()
                 compiled_contexts[axis_id] = context
@@ -566,17 +591,6 @@ class PipelineCompiler:
 
                 for step_name, mat_path in materialization_steps:
                     logger.info(f"   Materialization {step_name}: {mat_path}")
-
-            # Resolve lazy dataclasses in pipeline definition steps before stripping
-            logger.info("Resolving lazy dataclasses in pipeline definition steps.")
-            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-            resolved_pipeline_definition = resolve_lazy_configurations_for_serialization(pipeline_definition)
-
-            # Update the pipeline_definition list in-place to maintain references
-            pipeline_definition.clear()
-            pipeline_definition.extend(resolved_pipeline_definition)
-
-
 
             # After processing all wells, strip attributes and finalize
             logger.info("Stripping attributes from pipeline definition steps.")
@@ -656,3 +670,12 @@ def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, or
                                f"for step '{step.name}': {e}")
 
     logger.debug(f"Axis filter resolution complete. {len(context.step_axis_filters)} steps have axis filters.")
+
+
+def _should_process_for_well(axis_id, well_filter_config):
+    """Unified well filtering logic for all WellFilterConfig systems."""
+    if well_filter_config.well_filter is None:
+        return True
+
+    well_in_filter = axis_id in well_filter_config.well_filter
+    return well_in_filter if well_filter_config.well_filter_mode == WellFilterMode.INCLUDE else not well_in_filter

@@ -21,7 +21,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
 from PyQt6.QtGui import QFont, QDrag
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-from openhcs.core.config import GlobalPipelineConfig, set_current_global_config, get_current_global_config
+from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
 from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.pyqt_gui.widgets.mixins import (

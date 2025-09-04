@@ -169,24 +169,36 @@ class MagicGuiWidgetFactory:
                             magicgui_value = 0.0
                         elif resolved_type == bool:
                             magicgui_value = False
+                        elif hasattr(resolved_type, '__origin__') and resolved_type.__origin__ is list:
+                            magicgui_value = []  # Empty list for List[T] types
+                        elif hasattr(resolved_type, '__origin__') and resolved_type.__origin__ is tuple:
+                            magicgui_value = ()  # Empty tuple for tuple[T, ...] types
                         # For other types, let magicgui handle None (might still cause issues but less common)
 
                     widget = create_widget(annotation=resolved_type, value=magicgui_value)
 
-                    # If original value was None, clear the widget to show placeholder behavior
-                    if extracted_value is None and hasattr(widget, 'native'):
-                        native_widget = widget.native
-                        if hasattr(native_widget, 'setText'):
-                            native_widget.setText("")  # Clear text for None values
-                        elif hasattr(native_widget, 'setChecked') and resolved_type == bool:
-                            native_widget.setChecked(False)  # Uncheck for None bool values
+                    # Check if magicgui returned a basic QWidget (which indicates failure)
+                    if hasattr(widget, 'native') and type(widget.native).__name__ == 'QWidget':
+                        logger.warning(f"magicgui returned basic QWidget for {param_name} ({resolved_type}), using fallback")
+                        widget = create_string_fallback_widget(current_value=extracted_value)
+                    elif type(widget).__name__ == 'QWidget':
+                        logger.warning(f"magicgui returned basic QWidget for {param_name} ({resolved_type}), using fallback")
+                        widget = create_string_fallback_widget(current_value=extracted_value)
+                    else:
+                        # If original value was None, clear the widget to show placeholder behavior
+                        if extracted_value is None and hasattr(widget, 'native'):
+                            native_widget = widget.native
+                            if hasattr(native_widget, 'setText'):
+                                native_widget.setText("")  # Clear text for None values
+                            elif hasattr(native_widget, 'setChecked') and resolved_type == bool:
+                                native_widget.setChecked(False)  # Uncheck for None bool values
 
-                    # Extract native PyQt6 widget from magicgui wrapper if needed
-                    if hasattr(widget, 'native'):
-                        native_widget = widget.native
-                        native_widget._magicgui_widget = widget  # Store reference for signal connections
-                        widget = native_widget
-                except (ValueError, TypeError) as e:
+                        # Extract native PyQt6 widget from magicgui wrapper if needed
+                        if hasattr(widget, 'native'):
+                            native_widget = widget.native
+                            native_widget._magicgui_widget = widget  # Store reference for signal connections
+                            widget = native_widget
+                except Exception as e:
                     # Fallback to string widget for any type magicgui cannot handle
                     logger.warning(f"Widget creation failed for {param_name} ({resolved_type}): {e}", exc_info=True)
                     widget = create_string_fallback_widget(current_value=extracted_value)

@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QIcon
 
-from openhcs.core.config import GlobalPipelineConfig, get_default_global_config
+from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.io.base import storage_registry
 from openhcs.io.filemanager import FileManager
@@ -50,7 +50,7 @@ class OpenHCSPyQtApp(QApplication):
         self.setOrganizationDomain("openhcs.org")
         
         # Global configuration
-        self.global_config = global_config or get_default_global_config()
+        self.global_config = global_config or GlobalPipelineConfig()
         
         # Shared components
         self.storage_registry = storage_registry

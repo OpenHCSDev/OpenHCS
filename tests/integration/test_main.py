@@ -20,7 +20,7 @@ from openhcs.core.config import (
     GlobalPipelineConfig, MaterializationBackend,
     PathPlanningConfig, VFSConfig, ZarrConfig
 )
-from openhcs.core.lazy_config import LazyStepMaterializationConfig
+from openhcs.core.lazy_config import LazyStepMaterializationConfig, LazyNapariStreamingConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.pipeline import Pipeline
@@ -114,7 +114,8 @@ def create_test_pipeline() -> Pipeline:
             Step(
                 name="Image Enhancement Processing",
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
-                materialization_config=LazyStepMaterializationConfig()
+                materialization_config=LazyStepMaterializationConfig(),
+                napari_streaming_config=LazyNapariStreamingConfig()  # Enable napari streaming for this step
             ),
             Step(name="Position Computation", func=position_func),
             Step(

@@ -22,8 +22,10 @@ from typing import Any, Callable, Dict, List, Optional, Union, Set
 
 from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
 from openhcs.constants import Microscope
-from openhcs.core.config import GlobalPipelineConfig, get_default_global_config, set_current_global_config, get_current_global_config, set_current_pipeline_config
-from openhcs.core.pipeline_config import PipelineConfig
+from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+
+
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.pipeline.compiler import PipelineCompiler
@@ -64,7 +66,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def _create_merged_config(pipeline_config: PipelineConfig, global_config: GlobalPipelineConfig) -> GlobalPipelineConfig:
+def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: GlobalPipelineConfig) -> GlobalPipelineConfig:
     """
     Pure function for creating merged config that preserves None values for sibling inheritance.
 
@@ -110,7 +112,7 @@ def _execute_single_axis_static(
 
     # Execute each step in the pipeline
     for step_index, step in enumerate(pipeline_definition):
-        step_name = getattr(step, 'name', 'N/A') if hasattr(step, 'name') else 'N/A'
+        step_name = frozen_context.step_plans[step_index]["step_name"]
 
         logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
@@ -216,13 +218,13 @@ class PipelineOrchestrator:
         plate_path: Union[str, Path],
         workspace_path: Optional[Union[str, Path]] = None,
         *,
-        pipeline_config: Optional[PipelineConfig] = None,
+        pipeline_config: Optional['PipelineConfig'] = None,
         storage_registry: Optional[Any] = None,
     ):
         # Lock removed - was orphaned code never used
 
         # Validate shared global context exists
-        from openhcs.core.config import get_current_global_config
+        from openhcs.core.context.global_config import get_current_global_config
         if get_current_global_config(GlobalPipelineConfig) is None:
             raise RuntimeError(
                 "No global configuration context found. "
@@ -238,7 +240,7 @@ class PipelineOrchestrator:
         if pipeline_config is None:
             # Create PipelineConfig with all None values (like an empty form)
             # This matches what the config save does when no edits are made
-            from openhcs.core.pipeline_config import PipelineConfig
+            from openhcs.core.config import PipelineConfig
             from dataclasses import fields
 
             # Create field values dict with all None values (like empty form)
@@ -247,6 +249,7 @@ class PipelineOrchestrator:
                 field_values[field_obj.name] = None
 
             # Create PipelineConfig with None values for placeholder behavior
+            from openhcs.core.config import PipelineConfig
             self.pipeline_config = PipelineConfig(**field_values)
             logger.info("PipelineOrchestrator created default pipeline configuration with None values for placeholders.")
         else:
@@ -254,9 +257,9 @@ class PipelineOrchestrator:
 
 
 
-        # Set current pipeline config for MaterializationPathConfig defaults
+        # Set current global config for MaterializationPathConfig defaults
         shared_context = get_current_global_config(GlobalPipelineConfig)
-        set_current_pipeline_config(shared_context)
+        set_current_global_config(GlobalPipelineConfig, shared_context)
 
         if plate_path is None:
             # This case should ideally be prevented by TUI logic if plate_path is mandatory
@@ -300,9 +303,9 @@ class PipelineOrchestrator:
 
         # Override zarr backend with orchestrator's config
         shared_context = get_current_global_config(GlobalPipelineConfig)
-        zarr_backend_with_config = ZarrStorageBackend(shared_context.zarr)
+        zarr_backend_with_config = ZarrStorageBackend(shared_context.zarr_config)
         self.registry[Backend.ZARR.value] = zarr_backend_with_config
-        logger.info(f"Orchestrator zarr backend configured with {shared_context.zarr.compressor.value} compression")
+        logger.info(f"Orchestrator zarr backend configured with {shared_context.zarr_config.compressor.value} compression")
 
         # Orchestrator always creates its own FileManager, using the determined registry
         self.filemanager = FileManager(self.registry)
@@ -483,7 +486,7 @@ class PipelineOrchestrator:
         logger.info(f"🔥 SINGLE_AXIS: Processing {len(pipeline_definition)} steps for axis {axis_id}")
 
         for step_index, step in enumerate(pipeline_definition):
-            step_name = getattr(step, 'name', 'N/A') if hasattr(step, 'name') else 'N/A'
+            step_name = frozen_context.step_plans[step_index]["step_name"]
 
             logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
@@ -559,20 +562,14 @@ class PipelineOrchestrator:
         if actual_max_workers <= 0: # Ensure positive number of workers
             actual_max_workers = 1
 
-        # 🔬 AUTOMATIC VISUALIZER CREATION: Create visualizer if compiler detected napari streaming
+        # 🔬 AUTOMATIC VISUALIZER CREATION: Create visualizers if compiler detected streaming
         if visualizer is None:
-            # Check if any compiled context has the create_visualizer flag
-            needs_visualizer = any(getattr(context, 'create_visualizer', False) for context in compiled_contexts.values())
-            if needs_visualizer:
-                try:
-                    if NapariStreamVisualizer is not None:
-                        visualizer = NapariStreamVisualizer(self.filemanager, viewer_title="OpenHCS Pipeline Visualization")
-                        visualizer.start_viewer()  # Actually start the napari window
-                        logger.info("🔬 ORCHESTRATOR: Auto-created and started napari visualizer for real-time streaming")
-                    else:
-                        logger.warning("🔬 ORCHESTRATOR: Napari streaming requested but napari not available. Install with: pip install 'openhcs[viz]'")
-                except Exception as e:
-                    logger.warning(f"🔬 ORCHESTRATOR: Failed to create napari visualizer: {e}")
+            context = next(iter(compiled_contexts.values()))
+            for visualizer_info in context.required_visualizers:
+                config = visualizer_info['config']
+                visualizer = config.create_visualizer(self.filemanager, context.visualizer_config)
+                visualizer.start_viewer()
+                break
 
         self._state = OrchestratorState.EXECUTING
         logger.info(f"Starting execution for {len(compiled_contexts)} axis values with max_workers={actual_max_workers}.")
@@ -922,12 +919,12 @@ class PipelineOrchestrator:
     # Global config management removed - handled by UI layer
 
     @property
-    def pipeline_config(self) -> Optional[PipelineConfig]:
+    def pipeline_config(self) -> Optional['PipelineConfig']:
         """Get current pipeline configuration."""
         return self._pipeline_config
 
     @pipeline_config.setter
-    def pipeline_config(self, value: Optional[PipelineConfig]) -> None:
+    def pipeline_config(self, value: Optional['PipelineConfig']) -> None:
         """Set pipeline configuration with auto-sync to thread-local context."""
         self._pipeline_config = value
         if self._auto_sync_enabled and value is not None:
@@ -938,13 +935,15 @@ class PipelineOrchestrator:
         if self._pipeline_config and hasattr(self, 'plate_path'):
             self.apply_pipeline_config(self._pipeline_config)
 
-    def apply_pipeline_config(self, pipeline_config: PipelineConfig) -> None:
+    def apply_pipeline_config(self, pipeline_config: 'PipelineConfig') -> None:
         """
         Apply per-orchestrator configuration using thread-local storage.
 
         This method sets the orchestrator's effective config in thread-local storage
         for step-level lazy configurations to resolve against.
         """
+        # Import PipelineConfig at runtime for isinstance check
+        from openhcs.core.config import PipelineConfig
         if not isinstance(pipeline_config, PipelineConfig):
             raise TypeError(f"Expected PipelineConfig, got {type(pipeline_config)}")
 

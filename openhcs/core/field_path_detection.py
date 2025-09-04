@@ -7,9 +7,13 @@ for type introspection logic across the UI system.
 """
 
 import dataclasses
+import os
 import typing
 from typing import Type, Optional, Union, get_origin, get_args
 from dataclasses import fields
+
+# Configuration flag for switching between inheritance and composition detection
+USE_COMPOSITION_DETECTION = os.getenv('OPENHCS_USE_COMPOSITION_DETECTION', 'false').lower() == 'true'
 
 
 class FieldPathDetector:
@@ -140,3 +144,100 @@ class FieldPathDetector:
                 inheritance_chain.extend(FieldPathDetector.find_inheritance_relationships(base))
 
         return inheritance_chain
+
+    @staticmethod
+    def find_all_relationships(target_type: Type) -> list:
+        """
+        Find ALL relationships - both inheritance AND composition.
+
+        This detects relationships regardless of implementation approach,
+        providing complete relationship discovery for lazy resolution.
+
+        Args:
+            target_type: The dataclass type to analyze
+
+        Returns:
+            List of all related types (inherited + composed, deduplicated)
+        """
+        all_relationships = []
+
+        # Find inheritance relationships
+        inheritance_relationships = FieldPathDetector.find_inheritance_relationships(target_type)
+        all_relationships.extend(inheritance_relationships)
+
+        # Find composition relationships
+        from openhcs.core.composition_detection import find_composition_relationships
+        composition_relationships = find_composition_relationships(target_type)
+        all_relationships.extend(composition_relationships)
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduplicated = []
+        for rel_type in all_relationships:
+            if rel_type not in seen:
+                seen.add(rel_type)
+                deduplicated.append(rel_type)
+
+        return deduplicated
+
+    @staticmethod
+    def find_all_field_paths_unified(root_type: Type, target_type: Type) -> list:
+        """
+        Find ALL field paths - both inheritance AND composition paths.
+
+        Args:
+            root_type: The root dataclass to search within
+            target_type: The target type to find paths for
+
+        Returns:
+            List of all field paths where target_type appears (inheritance + composition)
+        """
+        all_paths = []
+
+        # Find inheritance-based paths
+        inheritance_paths = FieldPathDetector.find_all_field_paths_for_type(root_type, target_type)
+        all_paths.extend(inheritance_paths)
+
+        # Find composition-based paths
+        from openhcs.core.composition_detection import find_all_composition_paths_for_type
+        composition_paths = find_all_composition_paths_for_type(root_type, target_type)
+        all_paths.extend(composition_paths)
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduplicated = []
+        for path in all_paths:
+            if path not in seen:
+                seen.add(path)
+                deduplicated.append(path)
+
+        return deduplicated
+
+    @staticmethod
+    def resolve_field_unified(instance, field_name: str):
+        """
+        Unified field resolution that works with both inheritance and composition.
+
+        This provides the most comprehensive field resolution by trying both
+        inheritance-based attribute access and composition-based traversal.
+
+        Args:
+            instance: The dataclass instance to resolve from
+            field_name: The field name to resolve
+
+        Returns:
+            The resolved field value, or None if not found
+        """
+        # First try direct attribute access (works for inheritance)
+        if hasattr(instance, field_name):
+            value = getattr(instance, field_name)
+            if value is not None:
+                return value
+
+        # Then try composition-based resolution
+        from openhcs.core.composition_detection import resolve_field_through_composition
+        composition_result = resolve_field_through_composition(instance, field_name)
+        if composition_result is not None:
+            return composition_result
+
+        return None

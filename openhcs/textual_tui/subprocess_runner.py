@@ -423,7 +423,7 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
                 pipeline_definition=pipeline_definition,
                 compiled_contexts=compiled_contexts,
                 max_workers=max_workers,  # Use global config num_workers setting
-                visualizer=None,    # No visualization in subprocess
+                visualizer=None,    # Let orchestrator auto-create visualizers based on compiled contexts
                 log_file_base=log_file_base  # Pass log base for worker process logging
             )
             death_marker("AFTER_FORCE_ERROR_DETECTION", f"results_type={type(results)}")

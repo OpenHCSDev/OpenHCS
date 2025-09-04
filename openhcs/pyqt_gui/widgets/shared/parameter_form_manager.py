@@ -8,8 +8,33 @@ by leveraging the comprehensive shared infrastructure we've built.
 import dataclasses
 import logging
 from typing import Any, Dict, Type, Optional
+from dataclasses import replace
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton, QLineEdit, QCheckBox, QComboBox
 from PyQt6.QtCore import Qt, pyqtSignal
+
+# Imports for masking logic (moved from inline)
+from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
+from openhcs.core.config import GlobalPipelineConfig
+
+# Mathematical simplification: Shared dispatch tables to eliminate duplication
+WIDGET_UPDATE_DISPATCH = [
+    (QComboBox, 'update_combo_box'),
+    ('get_selected_values', 'update_checkbox_group'),
+    ('setChecked', lambda w, v: w.setChecked(bool(v))),
+    ('setValue', lambda w, v: w.setValue(v or 0)),
+    ('set_value', lambda w, v: w.set_value(v)),
+    ('setText', lambda w, v: v is not None and w.setText(str(v))),
+    ('clear', lambda w, v: v is None and w.clear())
+]
+
+WIDGET_GET_DISPATCH = [
+    (QComboBox, lambda w: w.itemData(w.currentIndex()) if w.currentIndex() >= 0 else None),
+    ('get_selected_values', lambda w: w.get_selected_values()),
+    ('get_value', lambda w: w.get_value()),
+    ('isChecked', lambda w: w.isChecked()),
+    ('value', lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
+    ('text', lambda w: w.text())
+]
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +52,8 @@ from .clickable_help_components import GroupBoxWithHelp, LabelWithHelp
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 
 # Import OpenHCS core components
-from openhcs.core.config import LazyDefaultPlaceholderService, GlobalPipelineConfig
+from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
 
@@ -105,8 +131,9 @@ class ParameterFormManager(QWidget):
         config.parameter_info = parameter_info
         config.dataclass_type = dataclass_type
         config.placeholder_prefix = placeholder_prefix
-        config.is_global_config_editing = not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
-        # global_config_type is no longer needed - dataclass_type determines all behavior
+        # Mathematical simplification: Cache lazy resolution check to avoid repeated calls
+        config.is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
+        config.is_global_config_editing = not config.is_lazy_dataclass
 
         # Initialize core attributes directly (avoid abstract class instantiation)
         self.parameters = parameters.copy()
@@ -138,7 +165,7 @@ class ParameterFormManager(QWidget):
         # Get widget creator from registry
         self.create_widget = create_pyqt6_registry()
 
-        
+
         # Set up UI
         self.setup_ui()
 
@@ -146,7 +173,8 @@ class ParameterFormManager(QWidget):
     def from_dataclass_instance(cls, dataclass_instance: Any, field_id: str,
                               placeholder_prefix: str = "Default",
                               parent=None, use_scroll_area: bool = True,
-                              function_target=None, color_scheme=None):
+                              function_target=None, color_scheme=None,
+                              force_show_all_fields: bool = False):
         """
         Create ParameterFormManager for editing entire dataclass instance.
 
@@ -170,32 +198,16 @@ class ParameterFormManager(QWidget):
         if not is_dataclass(dataclass_instance):
             raise ValueError(f"{type(dataclass_instance)} is not a dataclass")
 
-        # Handle lazy dataclasses properly using the editing config pattern
-        if hasattr(dataclass_instance, '_resolve_field_value'):
-            # Lazy dataclass - use create_editing_config_from_existing_lazy_config
-            from openhcs.core.pipeline_config import create_editing_config_from_existing_lazy_config
-            editing_config = create_editing_config_from_existing_lazy_config(
-                dataclass_instance, None  # Use existing thread-local context
-            )
+        # Mathematical simplification: Unified parameter extraction for both lazy and regular dataclasses
+        is_lazy = hasattr(dataclass_instance, '_resolve_field_value')
+        parameters = {}
+        parameter_types = {}
 
-            # Extract parameters from editing config
-            parameters = {}
-            parameter_types = {}
-            for field_obj in fields(editing_config):
-                parameters[field_obj.name] = object.__getattribute__(editing_config, field_obj.name)
-                parameter_types[field_obj.name] = field_obj.type
-
-            # CRITICAL FIX: Use original dataclass type, not editing config type
-            # The editing config might be a different instance but we want to preserve
-            # the original lazy dataclass type for proper reset behavior
-            dataclass_type = type(dataclass_instance)
-        else:
-            # Regular dataclass - extract parameters normally
-            parameters = {}
-            parameter_types = {}
-            for field_obj in fields(dataclass_instance):
-                parameters[field_obj.name] = getattr(dataclass_instance, field_obj.name)
-                parameter_types[field_obj.name] = field_obj.type
+        # Algebraic simplification: Single loop with conditional attribute access
+        for field_obj in fields(dataclass_instance):
+            parameters[field_obj.name] = (object.__getattribute__(dataclass_instance, field_obj.name) if is_lazy
+                                        else getattr(dataclass_instance, field_obj.name))
+            parameter_types[field_obj.name] = field_obj.type
 
             dataclass_type = type(dataclass_instance)
 
@@ -217,14 +229,14 @@ class ParameterFormManager(QWidget):
         form_manager._current_config_instance = dataclass_instance
 
         return form_manager
-    
+
     def setup_ui(self):
         """Set up the UI layout."""
         layout = QVBoxLayout(self)
-        
+
         # Build form content
         form_widget = self.build_form()
-        
+
         # Add scroll area if requested
         if self.config.use_scroll_area:
             scroll_area = QScrollArea()
@@ -235,22 +247,22 @@ class ParameterFormManager(QWidget):
             layout.addWidget(scroll_area)
         else:
             layout.addWidget(form_widget)
-    
+
     def build_form(self) -> QWidget:
         """
         Build the complete form UI.
-        
+
         Dramatically simplified by delegating analysis to service layer
         and using centralized widget creation patterns.
         """
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
-        
+
         # Use unified widget creation for all parameter types
         for param_info in self.form_structure.parameters:
             widget = self._create_parameter_widget_unified(param_info)
             content_layout.addWidget(widget)
-        
+
         return content_widget
 
     def _create_parameter_widget_unified(self, param_info) -> QWidget:
@@ -258,22 +270,21 @@ class ParameterFormManager(QWidget):
         return self._create_parameter_section(param_info)
 
     def _create_parameter_section(self, param_info) -> QWidget:
-        """Unified scaffolding - consolidates all common patterns, injects differences through return values."""
-        display_info = self.service.get_parameter_display_info(
-            param_info.name, param_info.type, param_info.description)
+        """Mathematical simplification: Unified parameter section creation with dispatch table."""
+        display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
         field_ids = self.service.generate_field_ids(self.config.field_id, param_info.name)
 
-        if param_info.is_optional and param_info.is_nested:
-            container, widgets = self._build_optional_content(param_info, display_info, field_ids)
-        elif param_info.is_nested:
-            container, widgets = self._build_nested_content(param_info, display_info, field_ids)
-        else:
-            container, widgets = self._build_regular_content(param_info, display_info, field_ids)
+        # Algebraic simplification: Single expression for content type dispatch
+        container, widgets = (
+            self._build_optional_content(param_info, display_info, field_ids) if param_info.is_optional and param_info.is_nested
+            else self._build_nested_content(param_info, display_info, field_ids) if param_info.is_nested
+            else self._build_regular_content(param_info, display_info, field_ids)
+        )
 
+        # Unified widget registration
         self.widgets[param_info.name] = widgets['main']
         if 'reset_button' in widgets:
             self.reset_buttons[param_info.name] = widgets['reset_button']
-
         if 'widget' in widgets:
             PyQt6WidgetEnhancer.connect_change_signal(widgets['widget'], param_info.name, self._emit_parameter_change)
 
@@ -311,23 +322,53 @@ class ParameterFormManager(QWidget):
             color_scheme=self.config.color_scheme or PyQt6ColorScheme()
         )
         current_value = self.parameters.get(param_info.name)
-        if LazyDefaultPlaceholderService.has_lazy_resolution(param_info.type):
+
+        # Mathematical simplification: Unified nested type resolution
+        nested_type = self._get_actual_nested_type_from_signature(param_info.type) or param_info.type
+
+        # Algebraic simplification: Single conditional for lazy resolution
+        if LazyDefaultPlaceholderService.has_lazy_resolution(nested_type):
+            # Mathematical simplification: Inline instance creation without helper method
+            if current_value and not isinstance(current_value, nested_type):
+                # Convert base to lazy instance via direct field mapping
+                from dataclasses import fields
+                try:
+                    lazy_instance = nested_type(**{f.name: getattr(current_value, f.name) for f in fields(current_value)})
+                except Exception:
+                    lazy_instance = nested_type()
+            else:
+                lazy_instance = current_value or nested_type()
+
             nested_manager = ParameterFormManager.from_dataclass_instance(
-                dataclass_instance=current_value or param_info.type(),
-                field_id=f"nested_{param_info.name}", placeholder_prefix=self.placeholder_prefix,
-                parent=group_box, use_scroll_area=False, color_scheme=self.config.color_scheme
+                dataclass_instance=lazy_instance,
+                field_id=f"nested_{param_info.name}",
+                placeholder_prefix=self.placeholder_prefix,
+                parent=group_box, use_scroll_area=False,
+                color_scheme=self.config.color_scheme
             )
+
+            # Unified manager setup
             self.nested_managers[param_info.name] = nested_manager
-            # Connect nested parameter changes to trigger parent parameter updates
-            # This ensures LazyStepMaterializationConfig changes are properly saved
             nested_manager.parameter_changed.connect(
                 lambda name, value, parent_name=param_info.name: self._handle_nested_parameter_change(parent_name, value)
             )
             group_box.content_layout.addWidget(nested_manager)
         else:
+            # Non-lazy fallback
             nested_form = self._create_nested_form_inline(param_info.name, param_info.type, current_value)
             group_box.content_layout.addWidget(nested_form)
+
         return group_box, {'main': group_box}
+
+    def _get_actual_nested_type_from_signature(self, field_type: Type) -> Type:
+        """Mathematical simplification: Extract nested type from Optional or return direct type."""
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+        from dataclasses import is_dataclass
+
+        # Algebraic simplification: Single expression for type extraction
+        return (ParameterTypeUtils.get_optional_inner_type(field_type)
+                if ParameterTypeUtils.is_optional_dataclass(field_type)
+                else field_type if is_dataclass(field_type) else None)
 
     def _build_optional_content(self, param_info, display_info, field_ids):
         container = QWidget()
@@ -402,36 +443,40 @@ class ParameterFormManager(QWidget):
 
 
 
-    def _apply_placeholder_with_lazy_context(self, widget: QWidget, param_name: str, current_value: Any) -> None:
+    def _apply_placeholder_with_lazy_context(self, widget: QWidget, param_name: str, current_value: Any, masked_fields: Optional[set] = None) -> None:
         """Apply placeholder using current form state, not saved thread-local state."""
         # Only apply placeholder if value is None
         if current_value is not None:
             return
 
-        # Get placeholder text from the lazy resolution service
+        # Mathematical simplification: Use cached lazy resolution check
+        if not self.config.is_lazy_dataclass:
+            return
+
+        # Use the EXACT SAME working code path as initial open
         placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-            self.dataclass_type,
-            param_name,
-            placeholder_prefix=self.placeholder_prefix
+            self.dataclass_type, param_name, placeholder_prefix=self.placeholder_prefix
         )
 
         if placeholder_text is None:
             return
 
-        # Apply the placeholder text to the widget
+        # Apply placeholder using the SAME working logic as initial open
         if hasattr(widget, 'setPlaceholderText'):
             widget.setPlaceholderText(placeholder_text)
 
         # Block signals to prevent placeholder application from triggering parameter updates
         widget.blockSignals(True)
         try:
-            # Apply placeholder using PyQt6 widget strategies
+            # Use the EXACT SAME PyQt6WidgetEnhancer logic that works on initial open
             PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
         finally:
             # Always restore signal connections
             widget.blockSignals(False)
 
-
+    def _format_placeholder_text(self, raw_placeholder: Optional[str]) -> Optional[str]:
+        """Mathematical simplification: Use existing enum formatting utilities."""
+        return raw_placeholder  # Existing LazyDefaultPlaceholderService already handles enum formatting correctly
 
 
 
@@ -447,24 +492,26 @@ class ParameterFormManager(QWidget):
 
         # Emit signal only once
         self.parameter_changed.emit(param_name, converted_value)
-    
-    def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None) -> None:
-        """Update widget value using functional dispatch."""
-        dispatch_table = [
-            (QComboBox, self._update_combo_box),
-            ('get_selected_values', self._update_checkbox_group),
-            ('setChecked', lambda w, v: w.setChecked(bool(v))),
-            ('setValue', lambda w, v: w.setValue(v or 0)),
-            ('set_value', lambda w, v: w.set_value(v)),
-            ('setText', lambda w, v: w.setText(str(v or ""))),
-            ('clear', lambda w, v: v is None and w.clear())
-        ]
 
-        self._execute_with_signal_blocking(widget, lambda: next(
-            (updater(widget, value) for matcher, updater in dispatch_table
-             if (isinstance(widget, matcher) if isinstance(matcher, type) else hasattr(widget, matcher))), None
-        ))
-        self._apply_context_behavior(widget, value, param_name)
+    def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None, skip_context_behavior: bool = False) -> None:
+        """Mathematical simplification: Unified widget update using shared dispatch."""
+        self._execute_with_signal_blocking(widget, lambda: self._dispatch_widget_update(widget, value))
+
+        # Only apply context behavior if not explicitly skipped (e.g., during reset operations)
+        if not skip_context_behavior:
+            self._apply_context_behavior(widget, value, param_name)
+
+    def _dispatch_widget_update(self, widget: QWidget, value: Any) -> None:
+        """Algebraic simplification: Single dispatch logic for all widget updates."""
+        for matcher, updater in WIDGET_UPDATE_DISPATCH:
+            if isinstance(widget, matcher) if isinstance(matcher, type) else hasattr(widget, matcher):
+                if isinstance(updater, str):
+                    getattr(self, f'_{updater}')(widget, value)
+                else:
+                    updater(widget, value)
+                return
+
+
 
     def _update_combo_box(self, widget: QComboBox, value: Any) -> None:
         """Update combo box with value matching."""
@@ -484,34 +531,23 @@ class ParameterFormManager(QWidget):
         operation()
         widget.blockSignals(False)
 
-    def _apply_context_behavior(self, widget: QWidget, value: Any, param_name: str) -> None:
+    def _apply_context_behavior(self, widget: QWidget, value: Any, param_name: str, masked_fields: Optional[set] = None) -> None:
         """Apply lazy placeholder context behavior - pure function of inputs."""
         if not param_name or not self.dataclass_type:
             return
 
-        if value is None and LazyDefaultPlaceholderService.has_lazy_resolution(self.dataclass_type):
-            self._apply_placeholder_with_lazy_context(widget, param_name, value)
+        if value is None and self.config.is_lazy_dataclass:
+            self._apply_placeholder_with_lazy_context(widget, param_name, value, masked_fields)
         elif value is not None:
             PyQt6WidgetEnhancer._clear_placeholder_state(widget)
 
 
-
     def get_widget_value(self, widget: QWidget) -> Any:
-        """Get widget value using functional dispatch."""
-        dispatch_table = [
-            (QComboBox, lambda w: w.itemData(w.currentIndex()) if w.currentIndex() >= 0 else None),
-            ('get_selected_values', lambda w: w.get_selected_values()),
-            ('get_value', lambda w: w.get_value()),
-            ('isChecked', lambda w: w.isChecked()),
-            ('value', lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
-            ('text', lambda w: w.text())
-        ]
-
-        return next(
-            (extractor(widget) for matcher, extractor in dispatch_table
-             if (isinstance(widget, matcher) if isinstance(matcher, type) else hasattr(widget, matcher))),
-            None
-        )
+        """Mathematical simplification: Unified widget value extraction using shared dispatch."""
+        for matcher, extractor in WIDGET_GET_DISPATCH:
+            if isinstance(widget, matcher) if isinstance(matcher, type) else hasattr(widget, matcher):
+                return extractor(widget)
+        return None
 
     # Framework-specific methods for backward compatibility
 
@@ -528,11 +564,8 @@ class ParameterFormManager(QWidget):
 
 
 
-    # Core parameter management methods (using shared service layer)
-
     def update_parameter(self, param_name: str, value: Any) -> None:
         """Update parameter value using shared service layer."""
-
 
         if param_name in self.parameters:
             # Convert value using service layer
@@ -547,7 +580,6 @@ class ParameterFormManager(QWidget):
 
             # Emit signal for PyQt6 compatibility
             self.parameter_changed.emit(param_name, converted_value)
-
 
     def _is_function_parameter(self, param_name: str) -> bool:
         """
@@ -588,8 +620,6 @@ class ParameterFormManager(QWidget):
         if param_name in self.widgets:
             widget = self.widgets[param_name]
             self.update_widget_value(widget, reset_value, param_name)
-            # Apply context behavior to handle placeholder text for None values
-            self._apply_context_behavior(widget, reset_value, param_name)
 
         self.nested_managers.get(param_name) and hasattr(self.nested_managers[param_name], 'reset_all_parameters') and self.nested_managers[param_name].reset_all_parameters()
         self.parameter_changed.emit(param_name, reset_value)
@@ -597,15 +627,12 @@ class ParameterFormManager(QWidget):
     def _get_reset_value(self, param_name: str) -> Any:
         """Get reset value using context dispatch."""
         if self.dataclass_type:
-            is_static = not LazyDefaultPlaceholderService.has_lazy_resolution(self.dataclass_type)
             reset_value = self.service.get_reset_value_for_parameter(
-                param_name, self.parameter_types.get(param_name), self.dataclass_type, is_static)
+                param_name, self.parameter_types.get(param_name), self.dataclass_type, not self.config.is_lazy_dataclass)
             return reset_value
         else:
             # Function parameter reset: use param_defaults directly
             return self.param_defaults.get(param_name)
-
-
 
     def get_current_values(self) -> Dict[str, Any]:
         """
@@ -696,9 +723,6 @@ class ParameterFormManager(QWidget):
             return child  # Return the first checkbox found
 
         return None
-
-
-
 
 
     def refresh_placeholder_text(self) -> None:

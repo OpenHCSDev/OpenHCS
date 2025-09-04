@@ -6,6 +6,9 @@ import dataclasses
 import re
 from typing import Any, Dict, Callable, get_type_hints, NamedTuple, Union, Optional, Type
 from dataclasses import dataclass
+import openhcs.core.lazy_config as lazy_module
+import openhcs.core.config as config_module
+
 
 @dataclass(frozen=True)
 class AnalysisConstants:
@@ -324,7 +327,14 @@ class SignatureAnalyzer:
                             If None, auto-detects based on context.
         """
         sig = inspect.signature(callable_obj)
-        type_hints = get_type_hints(callable_obj)
+        # Build comprehensive namespace for forward reference resolution
+        globalns = {
+            **getattr(callable_obj, '__globals__', {}),
+            **vars(lazy_module),
+            **vars(config_module)
+        }
+
+        type_hints = get_type_hints(callable_obj, globalns=globalns)
 
         # Extract docstring information (with fallback for robustness)
         try:

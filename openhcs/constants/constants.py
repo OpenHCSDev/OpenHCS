@@ -117,6 +117,7 @@ class Backend(Enum):
     MEMORY = "memory"
     ZARR = "zarr"
     NAPARI_STREAM = "napari_stream"
+    FIJI_STREAM = "fiji_stream"
 
 class FileFormat(Enum):
     TIFF = list(DEFAULT_IMAGE_EXTENSIONS)

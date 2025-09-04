@@ -16,11 +16,12 @@ from typing import Optional
 
 # Add OpenHCS to path if needed
 try:
-    from openhcs.core.config import get_default_global_config
+    from openhcs.core.config import GlobalPipelineConfig
 except ImportError:
     # Add parent directory to path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from openhcs.core.config import get_default_global_config
+    from openhcs.core.config import GlobalPipelineConfig
+    
 
 from openhcs.pyqt_gui.app import OpenHCSPyQtApp
 
@@ -160,7 +161,7 @@ def load_configuration(config_path: Optional[Path] = None):
             # This would need to be implemented based on config format
             logging.info(f"Loading custom configuration from: {config_path}")
             # For now, use default config
-            config = get_default_global_config()
+            config = GlobalPipelineConfig()
         else:
             # Load cached configuration (matches TUI pattern)
             from openhcs.pyqt_gui.services.config_cache_adapter import load_cached_global_config_sync
@@ -171,7 +172,7 @@ def load_configuration(config_path: Optional[Path] = None):
     except Exception as e:
         logging.error(f"Failed to load configuration: {e}")
         logging.info("Falling back to default configuration")
-        return get_default_global_config()
+        return GlobalPipelineConfig()
 
 
 def check_dependencies():

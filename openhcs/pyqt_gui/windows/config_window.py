@@ -21,7 +21,9 @@ from PyQt6.QtGui import QFont
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.core.config import GlobalPipelineConfig, require_config_context
+from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.context.global_config import require_config_context
+from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 
 
 
@@ -72,7 +74,6 @@ class ConfigWindow(QDialog):
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
         # Determine placeholder prefix based on actual instance type (not class type)
-        from openhcs.core.config import LazyDefaultPlaceholderService
         is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(current_config))
         placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
@@ -264,7 +265,6 @@ class ConfigWindow(QDialog):
             self.current_config = new_config
 
             # Determine placeholder prefix based on actual instance type (same logic as __init__)
-            from openhcs.core.config import LazyDefaultPlaceholderService
             is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(new_config))
             placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 

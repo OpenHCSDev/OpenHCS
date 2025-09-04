@@ -42,10 +42,56 @@ The defensive pattern ignores this architectural guarantee, suggesting the devel
 
 **Impact of Disrespect**: The defensive pattern adds cognitive load, suggests system unreliability, and masks real bugs. If a step somehow lacks a ``name`` attribute, that indicates a serious architectural violation that should fail immediately with Python's natural ``AttributeError``.
 
+Smart Implementation Through Information Reuse
+----------------------------------------------
+
+Smart implementation respects codebase architecture by reusing information that is already made available rather than redundantly calling methods or accessing data multiple times. This principle demonstrates architectural understanding and prevents unnecessary computational overhead.
+
+**Example of Architectural Disrespect**:
+
+.. code-block:: python
+
+   # DISRESPECTFUL CODE - redundant method calls
+   def compile_pipelines(orchestrator, pipeline_definition):
+       for axis_id in axis_values:
+           context = orchestrator.create_context(axis_id)
+
+           # First call to get config
+           effective_config = orchestrator.get_effective_config(for_serialization=False)
+           initialize_step_plans_for_context(context, pipeline_definition, orchestrator)
+
+           # Later in the same method - redundant call!
+           effective_config = orchestrator.get_effective_config(for_serialization=False)
+           context.visualizer_config = effective_config.visualizer
+
+**Respectful Implementation**:
+
+.. code-block:: python
+
+   # RESPECTFUL CODE - reuse information from where it's already available
+   def initialize_step_plans_for_context(context, steps_definition, orchestrator):
+       # Config already retrieved here
+       effective_config = orchestrator.get_effective_config(for_serialization=False)
+       set_current_global_config(GlobalPipelineConfig, effective_config)
+
+       # Add visualizer config while we have it
+       context.visualizer_config = effective_config.visualizer
+
+**Key Principle**: When information is already available in a method's scope, use it there rather than calling the same method again elsewhere. This shows understanding of the data flow and prevents redundant operations.
+
 AI Agent Tendency Toward Disrespect
 ------------------------------------
 
 AI agents, including language models, exhibit a strong tendency to disrespect existing codebases by introducing defensive programming patterns that ignore architectural guarantees. This stems from training on codebases with varying quality levels and a bias toward "safe" patterns that work in poorly-designed systems.
+
+**Additional AI Disrespect Pattern**:
+
+.. code-block:: python
+
+   # AI agents frequently introduce redundant method calls
+   config1 = get_config()  # Called in method A
+   # ... later in same execution path
+   config2 = get_config()  # Called again in method B - disrespectful!
 
 **Common AI Disrespect Patterns**:
 
@@ -154,6 +200,7 @@ Guidelines for Architectural Respect
 2. **Abstract Methods**: Never check for abstract method existence—the ABC system guarantees implementation
 3. **Constructor Contracts**: If ``__init__`` sets an attribute, it always exists
 4. **Type-Based Access**: Use ``isinstance()`` checks instead of ``hasattr()`` for type-specific attributes
+5. **Information Reuse**: If data is already available in scope, use it rather than calling methods again
 
 **Elimination Process**:
 

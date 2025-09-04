@@ -16,6 +16,7 @@ from .memory import MemoryStorageBackend
 from .metadata_writer import AtomicMetadataWriter, MetadataWriteError, MetadataUpdateRequest, get_metadata_path
 from .metadata_migration import detect_legacy_format, migrate_legacy_metadata, migrate_plate_metadata
 from .napari_stream import NapariStreamingBackend
+from .fiji_stream import FijiStreamingBackend
 from .pipeline_migration import detect_legacy_pipeline, migrate_pipeline_file, load_pipeline_with_migration
 from .streaming import StreamingBackend
 from .zarr import ZarrStorageBackend
@@ -34,6 +35,7 @@ __all__ = [
     'DiskStorageBackend',
     'MemoryStorageBackend',
     'NapariStreamingBackend',
+    'FijiStreamingBackend',
     'ZarrStorageBackend',
     'FileManager',
     'file_lock',

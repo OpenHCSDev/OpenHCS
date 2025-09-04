@@ -5,19 +5,31 @@ import inspect
 import logging
 import re
 import threading
+import sys
 from contextlib import contextmanager
-from dataclasses import dataclass, fields, is_dataclass, make_dataclass, MISSING
+from dataclasses import dataclass, fields, is_dataclass, make_dataclass, MISSING, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
 # OpenHCS imports
-from openhcs.core.config import (
-    get_base_type_for_lazy,
+from openhcs.core.context.global_config import (
     get_current_global_config,
     set_current_global_config,
-    register_lazy_type_mapping,
-    GlobalPipelineConfig
 )
 from openhcs.core.field_path_detection import FieldPathDetector
+
+
+# Type registry for lazy dataclass to base class mapping
+_lazy_type_registry: Dict[Type, Type] = {}
+
+
+def register_lazy_type_mapping(lazy_type: Type, base_type: Type) -> None:
+    """Register mapping between lazy dataclass type and its base type."""
+    _lazy_type_registry[lazy_type] = base_type
+
+
+def get_base_type_for_lazy(lazy_type: Type) -> Optional[Type]:
+    """Get the base type for a lazy dataclass type."""
+    return _lazy_type_registry.get(lazy_type)
 
 # Optional imports (handled gracefully)
 try:
@@ -65,15 +77,7 @@ def _create_static_field_extractor(obj):
     """Create lambda for extracting field values from static object."""
     return lambda field_name: _get_raw_field_value(obj, field_name)
 
-# Unified resolution config creator - eliminates conditional duplication
-def _create_resolution_config(instance_provider, base_class, use_recursive_resolution, fallback_chain=None):
-    """Create resolution config with unified fallback logic."""
-    static_fallback = _create_static_field_extractor(base_class())
-    safe_fallback = _create_field_value_extractor(instance_provider)
-
-    final_fallback_chain = (fallback_chain or [static_fallback]) if use_recursive_resolution else [safe_fallback, static_fallback]
-
-    return ResolutionConfig(instance_provider=instance_provider, fallback_chain=final_fallback_chain)
+# Removed single-use _create_resolution_config method - inlined at call site
 
 
 class FieldPathNavigator:
@@ -166,10 +170,29 @@ class LazyMethodBindings:
     def create_getattribute() -> Callable[[Any, str], Any]:
         """Create lazy __getattribute__ method."""
         def __getattribute__(self: Any, name: str) -> Any:
-            value = object.__getattribute__(self, name)
-            if value is None and name in {f.name for f in fields(self.__class__)}:
-                return self._resolve_field_value(name)
-            return value
+            # First try to get the attribute normally
+            try:
+                value = object.__getattribute__(self, name)
+                if value is None and name in {f.name for f in fields(self.__class__)}:
+                    # CRITICAL FIX: Use object.__getattribute__ to get _resolve_field_value method
+                    # to avoid potential recursion if _resolve_field_value accesses other attributes
+                    resolve_method = object.__getattribute__(self, '_resolve_field_value')
+                    return resolve_method(name)
+                return value
+            except AttributeError:
+                # If attribute doesn't exist on lazy class, try to get it from base class
+                # This handles methods like get_streaming_kwargs
+                try:
+                    # CRITICAL FIX: Use object.__getattribute__ to avoid recursion
+                    base_class = object.__getattribute__(self, '_base_class')
+                    if hasattr(base_class, name):
+                        # Create a temporary instance of the base class with current values
+                        base_instance = self.to_base_config()
+                        return getattr(base_instance, name)
+                except AttributeError:
+                    # _base_class doesn't exist, continue to raise original AttributeError
+                    pass
+                raise
         return __getattribute__
 
     @staticmethod
@@ -237,7 +260,17 @@ class LazyDataclassFactory:
             else:
                 final_field_type = field_type
 
-            lazy_field_definitions.append((field.name, final_field_type, None))
+            # CRITICAL FIX: Create default factory for Optional dataclass fields
+            # This eliminates the need for field introspection and ensures UI always has instances to render
+            default_value = None
+            if (is_already_optional or not has_default) and is_dataclass(field.type):
+                # For Optional dataclass fields, create default factory that creates lazy instances
+                # This ensures the UI always has nested lazy instances to render recursively
+                from dataclasses import field as dataclass_field
+                # CRITICAL: field_type is already the lazy type, so use it directly
+                default_value = dataclass_field(default_factory=field_type)
+
+            lazy_field_definitions.append((field.name, final_field_type, default_value))
 
             # Debug logging with provided template (reduced to DEBUG level to reduce log pollution)
             logger.debug(debug_template.format(
@@ -271,15 +304,19 @@ class LazyDataclassFactory:
         if not is_dataclass(base_class):
             raise ValueError(f"{base_class} must be a dataclass")
 
-        # Create resolution configuration using unified helper
-        resolution_config = _create_resolution_config(instance_provider, base_class, use_recursive_resolution, fallback_chain)
+        # Inlined resolution config creation (was single-use method)
+        static_fallback = _create_static_field_extractor(base_class())
+        safe_fallback = _create_field_value_extractor(instance_provider)
+        final_fallback_chain = (fallback_chain or [static_fallback]) if use_recursive_resolution else [safe_fallback, static_fallback]
+        resolution_config = ResolutionConfig(instance_provider=instance_provider, fallback_chain=final_fallback_chain)
 
-        # Create lazy dataclass with introspected fields
+        # Create lazy dataclass with introspected fields, inheriting from base class
         lazy_class = make_dataclass(
             lazy_class_name,
             LazyDataclassFactory._introspect_dataclass_fields(
                 base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
             ),
+            bases=(base_class,),
             frozen=True
         )
 
@@ -399,16 +436,22 @@ def _create_field_level_hierarchy_provider(base_class: Type, global_config_type:
     and creates a provider that resolves each field through multiple config sources.
     Handles PyQt app context detection and inheritance-aware validation.
     """
-    # Auto-discover hierarchy paths
-    all_field_paths = FieldPathDetector.find_all_field_paths_for_type(global_config_type, base_class)
-    parent_types = FieldPathDetector.find_inheritance_relationships(base_class)
-    sibling_paths = [path for parent_type in parent_types for path in FieldPathDetector.find_all_field_paths_for_type(global_config_type, parent_type)]
+    # Auto-discover unified hierarchy paths (inheritance + composition)
+    all_field_paths = FieldPathDetector.find_all_field_paths_unified(global_config_type, base_class)
+    parent_types = FieldPathDetector.find_all_relationships(base_class)
+    sibling_paths = [path for parent_type in parent_types for path in FieldPathDetector.find_all_field_paths_unified(global_config_type, parent_type)]
 
-    # Determine field classifications
+    # Determine field classifications - FIXED: Use ALL parent types, not just the first one
     if parent_types:
-        parent_fields = frozenset(f.name for f in fields(parent_types[0]))
+        # Collect fields from ALL parent types (inheritance + composition)
+        parent_fields = frozenset()
+        for parent_type in parent_types:
+            parent_fields |= frozenset(f.name for f in fields(parent_type))
         child_fields = frozenset(f.name for f in fields(base_class))
-        inherited_fields, own_fields = parent_fields & child_fields, child_fields - parent_fields
+        # CRITICAL FIX: For composition, we want ALL parent fields to be resolvable, not just intersection
+        inherited_fields, own_fields = parent_fields, child_fields
+
+        # Debug removed - parent field collection working correctly
     else:
         inherited_fields, own_fields = frozenset(), frozenset(f.name for f in fields(base_class))
 
@@ -435,28 +478,51 @@ def _create_field_level_hierarchy_provider(base_class: Type, global_config_type:
         else:
             hierarchy_paths.extend(('current', path) for path in all_field_paths if path != current_field_path)
 
+        # CRITICAL FIX: Include ALL GlobalPipelineConfig fields for top-level field resolution
+        global_config_fields = {f.name for f in fields(global_config_type)} if global_config_type else set()
+        all_resolvable_fields = inherited_fields | own_fields | global_config_fields
+
+        # Debug removed - field categorization working correctly
+
         # Create config instance with resolved fields
         config_instance = type('FieldLevelInheritanceConfig', (), {})()
-        for field_name in inherited_fields | own_fields:
+
+        # Debug removed - field processing working correctly
+
+        for field_name in all_resolvable_fields:
             is_inherited = field_name in inherited_fields
 
-            # Create sources for value resolution
+            # CRITICAL: Thread-local context must have highest priority for placeholder resolution
             sources = []
-            if not hierarchy_paths:
+
+            # ALWAYS include direct access to global config for top-level fields
+            is_global_config_field = global_config_type and field_name in {f.name for f in fields(global_config_type)}
+
+            # Debug removed - conditions working correctly
+
+            if is_global_config_field:
                 if current_config:
                     sources.append(_create_static_field_extractor(current_config))
-                if actual_global_config:
+                if actual_global_config and actual_global_config != current_config:
                     sources.append(_create_static_field_extractor(actual_global_config))
-            else:
+
+            # Add hierarchy-based sources for inherited/composed fields
+            if hierarchy_paths and not is_global_config_field:
                 for context_type, path in hierarchy_paths:
                     config = current_config if context_type == 'current' else actual_global_config
                     if config and (instance := FieldPathNavigator.navigate_to_instance(config, path)):
-                        # Complex lambda with inheritance-aware validation: inherited fields reject empty strings
-                        sources.append(lambda fn, inst=instance, inh=is_inherited: (
-                            value if (value := _get_raw_field_value(inst, fn)) is not None and (not inh or value != "") else None
-                        ))
+                        # Debug removed - instance finding working correctly
+                        # SIMPLIFIED: Use the same static field extractor that works in debug
+                        sources.append(_create_static_field_extractor(instance))
+            elif not hierarchy_paths and not is_global_config_field:
+                # Fallback for non-global fields when no hierarchy paths
+                if current_config:
+                    sources.append(_create_static_field_extractor(current_config))
+                if actual_global_config and actual_global_config != current_config:
+                    sources.append(_create_static_field_extractor(actual_global_config))
 
-            setattr(config_instance, field_name, _resolve_value_from_sources(field_name, *sources))
+            resolved_value = _resolve_value_from_sources(field_name, *sources)
+            setattr(config_instance, field_name, resolved_value)
 
         return config_instance
 
@@ -582,23 +648,266 @@ def rebuild_lazy_config_with_new_global_reference(
     return type(existing_lazy_config)(**current_field_values)
 
 
-def _create_lazy_config_classes():
-    """Create lazy config classes dynamically for all config classes."""
-    import openhcs.core.config as config_module
+# Declarative Global Config Field Injection System
+# Moved inline imports to top-level
 
-    for name, obj in inspect.getmembers(config_module):
-        if (inspect.isclass(obj) and is_dataclass(obj) and name.endswith('Config') and
-            not name.startswith(('Lazy', 'Global')) and
-            (field_path := FieldPathDetector.find_field_path_for_type(GlobalPipelineConfig, obj)) is not None):
-            try:
-                obj()  # Test instantiation
-                lazy_class_name = f"Lazy{name}"
-                globals()[lazy_class_name] = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
-                    base_class=obj, global_config_type=GlobalPipelineConfig, field_path=field_path, lazy_class_name=lazy_class_name
-                )
-            except Exception:
-                continue
+# Naming configuration
+GLOBAL_CONFIG_PREFIX = "Global"
+LAZY_CONFIG_PREFIX = "Lazy"
 
-# Create the lazy classes
-_create_lazy_config_classes()
+# Registry to accumulate all decorations before injection
+_pending_injections = {}
+
+
+
+def create_global_default_decorator(target_config_class: Type):
+    """
+    Create a decorator factory for a specific global config class.
+
+    The decorator accumulates all decorations, then injects all fields at once
+    when the module finishes loading. Also creates lazy versions of all decorated configs.
+    """
+    target_class_name = target_config_class.__name__
+    if target_class_name not in _pending_injections:
+        _pending_injections[target_class_name] = {
+            'target_class': target_config_class,
+            'configs_to_inject': []
+        }
+
+    def global_default_decorator(cls=None, *, optional: bool = False):
+        """
+        Decorator that can be used with or without parameters.
+
+        Args:
+            cls: The class being decorated (when used without parentheses)
+            optional: Whether to wrap the field type with Optional (default: False)
+        """
+        def decorator(actual_cls):
+            # Generate field and class names
+            field_name = _camel_to_snake(actual_cls.__name__)
+            lazy_class_name = f"{LAZY_CONFIG_PREFIX}{actual_cls.__name__}"
+
+            # Add to pending injections for field injection
+            _pending_injections[target_class_name]['configs_to_inject'].append({
+                'config_class': actual_cls,
+                'field_name': field_name,
+                'lazy_class_name': lazy_class_name,
+                'optional': optional  # Store the optional flag
+            })
+
+            # Immediately create lazy version of this config (not dependent on injection)
+            lazy_class = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+                base_class=actual_cls,
+                global_config_type=target_config_class,
+                field_path=field_name,
+                lazy_class_name=lazy_class_name
+            )
+
+            # Export lazy class to config module immediately
+            config_module = sys.modules[actual_cls.__module__]
+            setattr(config_module, lazy_class_name, lazy_class)
+
+            return actual_cls
+
+        # Handle both @decorator and @decorator() usage
+        if cls is None:
+            # Called with parentheses: @decorator(optional=True)
+            return decorator
+        else:
+            # Called without parentheses: @decorator
+            return decorator(cls)
+
+    return global_default_decorator
+
+
+
+def _inject_all_pending_fields():
+    """Inject all accumulated fields at once."""
+    for target_name, injection_data in _pending_injections.items():
+        target_class = injection_data['target_class']
+        configs = injection_data['configs_to_inject']
+
+        if configs:  # Only inject if there are configs to inject
+            _inject_multiple_fields_into_dataclass(target_class, configs)
+
+def _camel_to_snake(name: str) -> str:
+    """Convert CamelCase to snake_case for field names."""
+    s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+    return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+
+def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dict]) -> None:
+    """Mathematical simplification: Batch field injection with direct dataclass recreation."""
+    # Imports moved to top-level
+
+    # Direct field reconstruction - guaranteed by dataclass contract
+    existing_fields = [
+        (f.name, f.type, field(default_factory=f.default_factory) if f.default_factory != MISSING
+         else f.default if f.default != MISSING else f.type)
+        for f in fields(target_class)
+    ]
+
+    # Mathematical simplification: Single expression for all field construction with optional support
+    def create_field_definition(config):
+        """Create field definition with optional support."""
+        from typing import Union
+
+        field_type = config['config_class']
+        is_optional = config.get('optional', False)
+
+        if is_optional:
+            # Wrap with Optional and use None as default
+            field_type = Union[field_type, type(None)]
+            default_value = None
+        else:
+            # Use default factory for required fields - use lazy class, not base class
+            # field_type is already the lazy type, so use it for the default factory
+            default_value = field(default_factory=field_type)
+
+        return (config['field_name'], field_type, default_value)
+
+    all_fields = existing_fields + [create_field_definition(config) for config in configs]
+
+    # Direct dataclass recreation - fail-loud
+    new_class = make_dataclass(
+        target_class.__name__,
+        all_fields,
+        bases=target_class.__bases__,
+        frozen=target_class.__dataclass_params__.frozen
+    )
+
+    # Direct module replacement
+    module = sys.modules[target_class.__module__]
+    setattr(module, target_class.__name__, new_class)
+    globals()[target_class.__name__] = new_class
+
+    # Create lazy classes and recreate PipelineConfig inline
+    for config in configs:
+        lazy_class = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+            base_class=config['config_class'],
+            global_config_type=new_class,
+            field_path=config['field_name'],
+            lazy_class_name=config['lazy_class_name']
+        )
+        setattr(sys.modules[config['config_class'].__module__], config['lazy_class_name'], lazy_class)
+
+        # Also make lazy class available globally for type hint resolution
+        globals()[config['lazy_class_name']] = lazy_class
+
+    # Create lazy version of the updated global config itself with proper naming
+    # Global configs must start with GLOBAL_CONFIG_PREFIX - fail-loud if not
+    if not target_class.__name__.startswith(GLOBAL_CONFIG_PREFIX):
+        raise ValueError(f"Target class '{target_class.__name__}' must start with '{GLOBAL_CONFIG_PREFIX}' prefix")
+
+    # Remove global prefix (GlobalPipelineConfig → PipelineConfig)
+    lazy_global_class_name = target_class.__name__[len(GLOBAL_CONFIG_PREFIX):]
+
+    lazy_global_class = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+        base_class=new_class,
+        global_config_type=new_class,
+        field_path=None,
+        lazy_class_name=lazy_global_class_name
+    )
+
+    # Export lazy global config to the module
+    setattr(sys.modules[target_class.__module__], lazy_global_class_name, lazy_global_class)
+
+    # Also make lazy global config available globally for type hint resolution
+    globals()[lazy_global_class_name] = lazy_global_class
+
+
+
+
+
+def auto_create_decorator(global_config_class):
+    """
+    Decorator that automatically creates:
+    1. A field injection decorator for other configs to use
+    2. A lazy version of the global config itself
+
+    Global config classes must start with "Global" prefix.
+    """
+    # Validate naming convention
+    if not global_config_class.__name__.startswith(GLOBAL_CONFIG_PREFIX):
+        raise ValueError(f"Global config class '{global_config_class.__name__}' must start with '{GLOBAL_CONFIG_PREFIX}' prefix")
+
+    decorator_name = _camel_to_snake(global_config_class.__name__)
+    decorator = create_global_default_decorator(global_config_class)
+
+    # Export decorator to module globals
+    module = sys.modules[global_config_class.__module__]
+    setattr(module, decorator_name, decorator)
+
+    # Lazy global config will be created after field injection
+
+    return global_config_class
+
+
+# Old discovery system removed - decorators handle lazy class creation automatically
+
+
+def is_field_sibling_inheritable(dataclass_type: Type, field_name: str) -> bool:
+    """
+    Check if a field supports sibling inheritance based on dataclass inheritance.
+
+    A field is sibling-inheritable if:
+    1. The dataclass inherits from another dataclass
+    2. The parent dataclass has the same field name
+    3. This enables automatic sibling inheritance without metadata
+
+    Args:
+        dataclass_type: The dataclass type to check
+        field_name: The field name to check
+
+    Returns:
+        True if the field supports sibling inheritance
+    """
+    if not is_dataclass(dataclass_type):
+        return False
+
+    try:
+        # Check if this dataclass has relationships (inheritance OR composition) with field
+        related_types = FieldPathDetector.find_all_relationships(dataclass_type)
+        return any(field_name in {f.name for f in fields(related_type)} for related_type in related_types if is_dataclass(related_type))
+    except (AttributeError, TypeError):
+        return False
+
+
+def resolve_dataclass_with_sibling_inheritance(instance: Any, sibling_source: Any) -> Any:
+    """
+    Generic utility to resolve any dataclass with automatic sibling inheritance.
+
+    For any dataclass that inherits from another dataclass, this function
+    automatically resolves None fields by inheriting from the sibling source.
+
+    Args:
+        instance: The dataclass instance to resolve
+        sibling_source: The sibling object to inherit from
+
+    Returns:
+        New dataclass instance with sibling inheritance resolved
+
+    Example:
+        # StepMaterializationConfig inherits from PathPlanningConfig
+        resolved = resolve_dataclass_with_sibling_inheritance(
+            materialization_config, path_planning_config
+        )
+    """
+    if not is_dataclass(instance):
+        return instance
+
+    if sibling_source is None:
+        return instance
+
+    # Resolve all fields using concise comprehension (mathematical simplification)
+    resolved_values = {
+        field.name: (
+            getattr(sibling_source, field.name, None)
+            if (current_value := getattr(instance, field.name, None)) is None
+            and is_field_sibling_inheritable(type(instance), field.name)
+            else current_value
+        )
+        for field in fields(instance)
+    }
+
+    return type(instance)(**resolved_values)
 

@@ -61,12 +61,12 @@ class StepParameterEditorWidget(QWidget):
             # ParameterFormManager will automatically route lazy dataclass parameters to LazyDataclassEditor
             current_value = getattr(self.step, name, info.default_value)
 
-            # Generic handling for any optional lazy dataclass parameter that exists in PipelineConfig
+            # CRITICAL FIX: For lazy dataclass parameters, leave current_value as None
+            # This allows the UI to show placeholders and use lazy resolution properly
             if current_value is None and self._is_optional_lazy_dataclass_in_pipeline(info.param_type, name):
-                # Create step-level config for proper inheritance hierarchy
-                step_level_config = self._create_step_level_config(name, info.param_type)
-                current_value = step_level_config
-                param_defaults[name] = step_level_config
+                # Don't create concrete instances - leave as None for placeholder resolution
+                # The UI will handle lazy resolution and show appropriate placeholders
+                param_defaults[name] = None
                 # Mark this as a step-level config for special handling
                 if not hasattr(self, '_step_level_configs'):
                     self._step_level_configs = {}
@@ -105,7 +105,7 @@ class StepParameterEditorWidget(QWidget):
 
         No manual mappings needed - uses type-based discovery.
         """
-        from openhcs.core.pipeline_config import PipelineConfig
+        from openhcs.core.config import PipelineConfig
         from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
         import dataclasses
 
@@ -136,7 +136,7 @@ class StepParameterEditorWidget(QWidget):
 
         This is type-based discovery - no manual mappings needed.
         """
-        from openhcs.core.pipeline_config import PipelineConfig
+        from openhcs.core.config import PipelineConfig
         import dataclasses
 
         for field in dataclasses.fields(PipelineConfig):
@@ -152,7 +152,8 @@ class StepParameterEditorWidget(QWidget):
         Uses type-based discovery to find the corresponding pipeline field as defaults source.
         """
         from openhcs.core.lazy_config import LazyDataclassFactory
-        from openhcs.core.config import GlobalPipelineConfig, get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.core.context.global_config import get_current_global_config
         from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
         # Get the inner dataclass type
@@ -165,7 +166,7 @@ class StepParameterEditorWidget(QWidget):
             return inner_type()
 
         # Use field-level auto-hierarchy for all step-level configs
-        from openhcs.core.config import get_base_type_for_lazy
+        from openhcs.core.lazy_config import get_base_type_for_lazy
         base_class = get_base_type_for_lazy(inner_type) or inner_type
 
         StepLevelConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(

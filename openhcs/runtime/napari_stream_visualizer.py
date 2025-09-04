@@ -192,10 +192,12 @@ class NapariStreamVisualizer:
     for Qt compatibility and true persistence across pipeline runs.
     """
 
-    def __init__(self, filemanager: FileManager, viewer_title: str = "OpenHCS Real-Time Visualization", persistent: bool = True):
+    def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Real-Time Visualization", persistent: bool = True, napari_port: int = DEFAULT_NAPARI_STREAM_PORT):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
         self.persistent = persistent  # If True, viewer process stays alive after pipeline completion
+        self.visualizer_config = visualizer_config
+        self.napari_port = napari_port  # Port for napari streaming
         self.port: Optional[int] = None
         self.process: Optional[multiprocessing.Process] = None
         self.zmq_context: Optional[zmq.Context] = None
@@ -234,8 +236,8 @@ class NapariStreamVisualizer:
                 logger.warning("Napari viewer is already running.")
                 return
 
-            # Use constant port for napari streaming
-            self.port = DEFAULT_NAPARI_STREAM_PORT
+            # Use configured port for napari streaming
+            self.port = self.napari_port
             logger.info(f"🔬 VISUALIZER: Starting napari viewer process on port {self.port}")
 
             self.process = multiprocessing.Process(

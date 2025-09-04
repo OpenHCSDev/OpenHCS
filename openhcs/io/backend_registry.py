@@ -143,7 +143,7 @@ def cleanup_backend_connections() -> None:
             except Exception as e:
                 logger.warning(f"Failed to cleanup backend '{backend_type}': {e}")
 
-    # In test mode, also stop napari viewer processes to allow pytest to exit
+    # In test mode, also stop viewer processes to allow pytest to exit
     if is_test_mode:
         try:
             from openhcs.runtime.napari_stream_visualizer import _cleanup_global_viewer
@@ -153,6 +153,15 @@ def cleanup_backend_connections() -> None:
             pass  # napari not available
         except Exception as e:
             logger.warning(f"Failed to cleanup napari viewer: {e}")
+
+        try:
+            from openhcs.runtime.fiji_stream_visualizer import _cleanup_global_fiji_viewer
+            _cleanup_global_fiji_viewer()
+            logger.debug("Cleaned up Fiji viewer for test mode")
+        except ImportError:
+            pass  # fiji visualizer not available
+        except Exception as e:
+            logger.warning(f"Failed to cleanup Fiji viewer: {e}")
 
     logger.info(f"Backend connections cleaned up ({'test mode' if is_test_mode else 'napari window preserved'})")
 
@@ -185,7 +194,7 @@ def discover_all_backends() -> None:
     """
     # Import backend modules directly to trigger metaclass registration
     try:
-        from openhcs.io import disk, memory, zarr, napari_stream
+        from openhcs.io import disk, memory, zarr, napari_stream, fiji_stream
         logger.debug(f"Discovered {len(STORAGE_BACKENDS)} storage backends: {list(STORAGE_BACKENDS.keys())}")
     except ImportError as e:
         logger.warning(f"Could not import some backend modules: {e}")

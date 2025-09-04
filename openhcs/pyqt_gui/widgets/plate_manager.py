@@ -24,7 +24,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QFont
 
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.pipeline_config import PipelineConfig
+from openhcs.core.config import PipelineConfig
 from openhcs.io.filemanager import FileManager
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator, OrchestratorState
 from openhcs.core.pipeline import Pipeline
@@ -295,7 +295,8 @@ class PlateManagerWidget(QWidget):
     def _update_orchestrator_global_config(self, orchestrator, new_global_config):
         """Update orchestrator's global config reference and rebuild pipeline config if needed."""
         from openhcs.core.lazy_config import rebuild_lazy_config_with_new_global_reference
-        from openhcs.core.config import GlobalPipelineConfig, set_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.core.context.global_config import set_current_global_config
 
         # Update shared global context (orchestrator uses shared context now)
         from openhcs.core.lazy_config import ensure_global_config_context
@@ -497,21 +498,18 @@ class PlateManagerWidget(QWidget):
 
         # Create config for editing based on whether orchestrator has existing config
         if representative_orchestrator.pipeline_config is not None:
-            # Existing config - use the editing function that preserves user values
-            from openhcs.core.pipeline_config import create_editing_config_from_existing_lazy_config
-            current_plate_config = create_editing_config_from_existing_lazy_config(
-                representative_orchestrator.pipeline_config,
-                None  # Use thread-local context set up above
-            )
+            # Existing config - just use the lazy config directly (it already has editing capabilities)
+            current_plate_config = representative_orchestrator.pipeline_config
         else:
             # Create new config with placeholders using current global config
-            from openhcs.core.pipeline_config import create_pipeline_config_for_editing
-            current_plate_config = create_pipeline_config_for_editing(self.global_config)
+            from openhcs.core.lazy_config import create_dataclass_for_editing
+            current_plate_config = create_dataclass_for_editing(PipelineConfig, self.global_config)
 
         def handle_config_save(new_config: PipelineConfig) -> None:
             """Apply per-orchestrator configuration without global side effects."""
             # DEBUG: Check what's in the new_config and thread-local context
-            from openhcs.core.config import get_current_global_config, GlobalPipelineConfig
+            from openhcs.core.config import GlobalPipelineConfig
+            from openhcs.core.context.global_config import get_current_global_config
             from dataclasses import fields
             context_before_save = get_current_global_config(GlobalPipelineConfig)
             logger.debug(f"🔍 CONFIG SAVE - thread-local context before apply: {context_before_save}")
@@ -593,17 +591,18 @@ class PlateManagerWidget(QWidget):
 
         Uses concrete GlobalPipelineConfig for direct editing with static placeholder defaults.
         """
-        from openhcs.core.config import get_default_global_config, GlobalPipelineConfig
+        from openhcs.core.config import GlobalPipelineConfig
 
         # Get current global config from service adapter or use default
-        current_global_config = self.service_adapter.get_global_config() or get_default_global_config()
+        current_global_config = self.service_adapter.get_global_config() or GlobalPipelineConfig()
 
         def handle_global_config_save(new_config: GlobalPipelineConfig) -> None:
             """Apply global configuration to all orchestrators and save to cache."""
             self.service_adapter.set_global_config(new_config)  # Update app-level config
 
             # Update thread-local storage for MaterializationPathConfig defaults
-            from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
+            from openhcs.core.config import GlobalPipelineConfig
+            from openhcs.core.context.global_config import set_current_global_config
             set_current_global_config(GlobalPipelineConfig, new_config)
 
             # Save to cache for persistence between sessions
@@ -617,7 +616,8 @@ class PlateManagerWidget(QWidget):
             if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
                 current_orchestrator = self.orchestrators[self.selected_plate_path]
                 effective_config = current_orchestrator.get_effective_config()
-                from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
+                from openhcs.core.config import GlobalPipelineConfig
+                from openhcs.core.context.global_config import set_current_global_config
                 set_current_global_config(GlobalPipelineConfig, effective_config)
                 logger.debug(f"Updated thread-local storage for currently selected orchestrator: {self.selected_plate_path}")
 
@@ -1090,7 +1090,8 @@ class PlateManagerWidget(QWidget):
 
                     # Update service adapter and thread-local storage
                     self.service_adapter.set_global_config(new_global_config)
-                    from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
+                    from openhcs.core.config import GlobalPipelineConfig
+                    from openhcs.core.context.global_config import set_current_global_config
                     set_current_global_config(GlobalPipelineConfig, new_global_config)
 
                     self.global_config_changed.emit()
@@ -1303,10 +1304,10 @@ class PlateManagerWidget(QWidget):
             if self.selected_plate_path in self.orchestrators:
                 orchestrator = self.orchestrators[self.selected_plate_path]
                 # Auto-sync handles thread-local context setup automatically when pipeline_config is accessed
-                from openhcs.core.pipeline_config import ensure_pipeline_config_context
-                from openhcs.core.config import get_current_global_config
+                from openhcs.core.lazy_config import ensure_global_config_context
+                from openhcs.core.context.global_config import get_current_global_config
                 shared_context = get_current_global_config(GlobalPipelineConfig)
-                ensure_pipeline_config_context(shared_context)
+                ensure_global_config_context(GlobalPipelineConfig, shared_context)
                 logger.debug(f"Orchestrator context automatically maintained for selected plate: {self.selected_plate_path}")
 
                 # Refresh placeholders in any open parameter forms to reflect new context
@@ -1370,7 +1371,8 @@ class PlateManagerWidget(QWidget):
         if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
             current_orchestrator = self.orchestrators[self.selected_plate_path]
             effective_config = current_orchestrator.get_effective_config()
-            from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
+            from openhcs.core.config import GlobalPipelineConfig
+            from openhcs.core.context.global_config import set_current_global_config
             set_current_global_config(GlobalPipelineConfig, effective_config)
             logger.debug(f"Updated thread-local storage for currently selected orchestrator: {self.selected_plate_path}")
 
@@ -1378,7 +1380,8 @@ class PlateManagerWidget(QWidget):
         if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
             current_orchestrator = self.orchestrators[self.selected_plate_path]
             effective_config = current_orchestrator.get_effective_config()
-            from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
+            from openhcs.core.config import GlobalPipelineConfig
+            from openhcs.core.context.global_config import set_current_global_config
             set_current_global_config(GlobalPipelineConfig, effective_config)
             logger.debug(f"Updated thread-local storage for currently selected orchestrator: {self.selected_plate_path}")
 

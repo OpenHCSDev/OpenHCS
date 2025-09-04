@@ -32,7 +32,7 @@ from openhcs.constants.input_source import InputSource
 from openhcs.core.config import PathPlanningConfig
 
 # Import LazyStepMaterializationConfig for type hints
-from openhcs.core.lazy_config import LazyStepMaterializationConfig
+from openhcs.core.config import LazyStepMaterializationConfig
 
 # ProcessingContext is used in type hints
 if TYPE_CHECKING:
@@ -128,12 +128,13 @@ class AbstractStep(abc.ABC):
     def __init__(
         self,
         *,  # Force keyword-only arguments
-        name: Optional[str] = None,
+        name: str = None,
         variable_components: List[VariableComponents] = get_default_variable_components(),
         group_by: Optional[GroupBy] = get_default_group_by(),
         input_source: InputSource = InputSource.PREVIOUS_STEP,
         materialization_config: Optional['LazyStepMaterializationConfig'] = None,
-        stream_to_napari: bool = False
+        napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
+        fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None
     ) -> None:
         """
         Initialize a step. These attributes are primarily used during the
@@ -152,14 +153,18 @@ class AbstractStep(abc.ABC):
                                    When provided, enables saving materialized copy of step output
                                    to custom location in addition to normal memory backend processing.
                                    Use LazyStepMaterializationConfig() for safe defaults that prevent path collisions.
-            stream_to_napari: Whether to stream step output to napari viewer for real-time visualization.
+            napari_streaming_config: Optional LazyNapariStreamingConfig for napari streaming.
+                                   When provided, enables real-time streaming to napari viewer.
+            fiji_streaming_config: Optional LazyFijiStreamingConfig for Fiji streaming.
+                                 When provided, enables real-time streaming to Fiji viewer.
         """
         self.name = name or self.__class__.__name__
         self.variable_components = variable_components
         self.group_by = group_by
         self.input_source = input_source
         self.materialization_config = materialization_config
-        self.stream_to_napari = stream_to_napari
+        self.napari_streaming_config = napari_streaming_config
+        self.fiji_streaming_config = fiji_streaming_config
 
         # Internal compiler hints - set by path planner during compilation
         self.__input_dir__ = None

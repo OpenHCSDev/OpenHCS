@@ -630,7 +630,7 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
 
     # Add always-needed imports for generated code structure
     all_function_imports['openhcs.core.steps.function_step'].add('FunctionStep')
-    all_function_imports['openhcs.core.pipeline_config'].add('PipelineConfig')
+    all_function_imports['openhcs.core.config'].add('PipelineConfig')
     all_function_imports['openhcs.core.orchestrator.orchestrator'].add('PipelineOrchestrator')
     all_function_imports['openhcs.core.config'].add('GlobalPipelineConfig')  # Always needed for global_config constructor
 

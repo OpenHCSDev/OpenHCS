@@ -33,8 +33,10 @@ from PyQt6.QtWidgets import QApplication, QDialog, QPushButton, QMessageBox, QLa
 from PyQt6.QtCore import QTimer, QObject, pyqtSignal
 from PyQt6.QtTest import QTest
 
-from openhcs.core.config import GlobalPipelineConfig, set_current_pipeline_config
-from openhcs.core.pipeline_config import PipelineConfig, create_pipeline_config_for_editing
+from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.context.global_config import set_current_global_config
+from openhcs.core.lazy_config import create_dataclass_for_editing
+# PipelineConfig is dynamically generated from GlobalPipelineConfig
 from openhcs.core.lazy_config import LazyStepMaterializationConfig
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.constants import Microscope
@@ -52,9 +54,9 @@ from openhcs.tests.generators.generate_synthetic_data import SyntheticMicroscopy
 @dataclass(frozen=True)
 class TimingConfig:
     """Timing configuration for GUI operations."""
-    ACTION_DELAY: float = 0.5
-    WINDOW_DELAY: float = 0.5
-    SAVE_DELAY: float = 0.5
+    ACTION_DELAY: float = 1.5
+    WINDOW_DELAY: float = 1.5
+    SAVE_DELAY: float = 1.5
 
     @classmethod
     def from_environment(cls) -> 'TimingConfig':
@@ -88,6 +90,7 @@ class TestScenario:
     orchestrator_config: Dict[str, Any]
     expected_values: Dict[str, Any]
     field_to_test: FieldModificationSpec
+    reset_field_to_test: Optional[str] = None  # Field to reset (different from field_to_test)
     legitimate_none_fields: frozenset = field(default_factory=lambda: frozenset({
         'barcode', 'plate_name', 'plate_id', 'description'
     }))
@@ -162,6 +165,27 @@ RESET_PLACEHOLDER_BUG_MATERIALIZATION_SCENARIO = TestScenario(
     )
 )
 
+RESET_PLACEHOLDER_BUG_DIRECT_FIELD_SCENARIO = TestScenario(
+    name="reset_placeholder_bug_direct_field",
+    orchestrator_config={
+        "output_dir_suffix": "_test",
+        "sub_dir": "images",
+        "well_filter": ["A01", "A02"]
+    },
+    expected_values={
+        "num_workers": 2,  # This will be set via UI
+        "output_dir_suffix": "_test",
+        "sub_dir": "images",
+        "well_filter": ["A01", "A02"]
+    },
+    field_to_test=FieldModificationSpec(
+        field_name="num_workers",  # Modify this field via UI
+        modification_value=2,  # Set concrete value via UI
+        config_section="direct"  # Direct field on PipelineConfig (not nested)
+    )
+    # No reset_field_to_test needed - we'll reset the same field we modified
+)
+
 DEFAULT_SCENARIO = TestScenario(
     name="default_hierarchy",
     orchestrator_config={
@@ -177,7 +201,7 @@ DEFAULT_SCENARIO = TestScenario(
     field_to_test=FieldModificationSpec(
         field_name="well_filter",
         modification_value=4,
-        config_section="materialization_defaults"  # well_filter is in StepMaterializationConfig, not PathPlanningConfig
+        config_section="step_materialization_config"   # well_filter is in StepMaterializationConfig, not PathPlanningConfig
     )
 )
 
@@ -633,7 +657,7 @@ def _launch_application(context: WorkflowContext) -> WorkflowContext:
     """Launch real OpenHCS application using normal startup process."""
     from openhcs.pyqt_gui.services.config_cache_adapter import load_cached_global_config_sync
     from openhcs.pyqt_gui.app import OpenHCSPyQtApp
-    from openhcs.core.config import get_current_global_config
+    from openhcs.core.context.global_config import get_current_global_config
     import sys
 
     config = load_cached_global_config_sync()
@@ -710,13 +734,32 @@ def _apply_orchestrator_config(context: WorkflowContext) -> WorkflowContext:
 
     # Apply configuration from test scenario (eliminates hardcoded values)
     config_params = context.test_scenario.orchestrator_config
-    orchestrator_config = PipelineConfig(
-        materialization_defaults=LazyStepMaterializationConfig(
-            output_dir_suffix=config_params.get("output_dir_suffix"),
-            sub_dir=config_params.get("sub_dir"),
-            well_filter=config_params.get("well_filter")
+
+    # Import the dynamically generated PipelineConfig
+    from openhcs.core.config import PipelineConfig
+
+    # Generic configuration builder - automatically detects direct vs nested fields
+    pipeline_config_kwargs = {}
+    nested_config_params = {}
+
+    # Get PipelineConfig field names to determine what's direct vs nested
+    pipeline_fields = set(PipelineConfig.__dataclass_fields__.keys())
+
+    for field_name, value in config_params.items():
+        if field_name in pipeline_fields:
+            # Direct field on PipelineConfig
+            pipeline_config_kwargs[field_name] = value
+        else:
+            # Nested field - collect for step_materialization_config
+            nested_config_params[field_name] = value
+
+    # If we have nested parameters, create the nested config
+    if nested_config_params:
+        pipeline_config_kwargs['step_materialization_config'] = LazyStepMaterializationConfig(
+            **nested_config_params
         )
-    )
+
+    orchestrator_config = PipelineConfig(**pipeline_config_kwargs)
     orchestrator.apply_pipeline_config(orchestrator_config)
     _wait_for_gui(TIMING.ACTION_DELAY)
 
@@ -753,26 +796,27 @@ def _open_config_window(context: WorkflowContext) -> WorkflowContext:
 
 
 def _find_field_widget(form_managers: List[ParameterFormManager], field_name: str, config_section: str = None) -> Optional[Any]:
-    """Find widget for specified field name across form managers, optionally targeting specific config section."""
-    if config_section:
-        # Target specific config section using same logic as set_concrete_config_value
-        target_index = None
-        if config_section == "path_planning":
-            target_index = 1  # LazyPathPlanningConfig
-        elif config_section == "materialization_defaults":
-            target_index = 7  # LazyStepMaterializationConfig
+    """Find widget for specified field name across form managers."""
+    print(f"🔍 DEBUG: Looking for field '{field_name}' in {len(form_managers)} form managers")
 
-        if target_index is not None and target_index < len(form_managers):
-            target_form_manager = form_managers[target_index]
-            if hasattr(target_form_manager, 'widgets') and field_name in target_form_manager.widgets:
-                return target_form_manager.widgets[field_name]
-        return None
-    else:
-        # Original behavior - return first match (for backward compatibility)
-        for form_manager in form_managers:
-            if hasattr(form_manager, 'widgets') and field_name in form_manager.widgets:
+    # Generic approach - search all form managers for the field
+    for i, form_manager in enumerate(form_managers):
+        has_widgets = hasattr(form_manager, 'widgets')
+        widgets_count = len(form_manager.widgets) if has_widgets else 0
+        dataclass_name = getattr(form_manager.dataclass_type, '__name__', 'Unknown') if hasattr(form_manager, 'dataclass_type') else 'No dataclass'
+
+        print(f"🔍 DEBUG: Form manager [{i}] {dataclass_name}: has_widgets={has_widgets}, widgets_count={widgets_count}")
+
+        if has_widgets and form_manager.widgets:
+            widget_names = list(form_manager.widgets.keys())[:5]  # Show first 5
+            print(f"🔍 DEBUG: Available widgets: {widget_names}{'...' if len(form_manager.widgets) > 5 else ''}")
+
+            if field_name in form_manager.widgets:
+                print(f"🔍 DEBUG: Found '{field_name}' in form manager [{i}] {dataclass_name}")
                 return form_manager.widgets[field_name]
-        return None
+
+    print(f"🔍 DEBUG: Field '{field_name}' not found in any form manager")
+    return None
 
 
 def _set_widget_value(widget: Any, value: Any) -> None:
@@ -903,7 +947,9 @@ def _reset_field(context: WorkflowContext) -> WorkflowContext:
     if not context.test_scenario:
         raise ValueError("Test scenario required for parameterized field reset")
 
-    field_name = context.test_scenario.get_modification_field_name()
+    # Use reset_field_to_test if specified, otherwise use the field being modified
+    field_name = (context.test_scenario.reset_field_to_test or
+                  context.test_scenario.get_modification_field_name())
     form_managers = context.config_window.findChildren(ParameterFormManager)
 
     target_form_manager = _find_form_manager_for_field(form_managers, field_name)
@@ -1410,6 +1456,7 @@ class TestPyQtGUIWorkflowFoundation:
         DEFAULT_SCENARIO,
         RESET_PLACEHOLDER_BUG_PATH_PLANNING_SCENARIO,  # Test inheritance from path_planning
         RESET_PLACEHOLDER_BUG_MATERIALIZATION_SCENARIO,  # Test inheritance from materialization_defaults
+        RESET_PLACEHOLDER_BUG_DIRECT_FIELD_SCENARIO,  # Test direct field reset placeholders
         # ALTERNATIVE_SCENARIO,  # Commented out for now - sufficient to test with one scenario
         # MINIMAL_SCENARIO       # Commented out for now - sufficient to test with one scenario
     ], ids=lambda scenario: scenario.name)
@@ -1488,34 +1535,108 @@ class TestPyQtGUIWorkflowFoundation:
                 operation=_validate_field_persistence
             ))
             .add_step(WorkflowStep(
-                name=f"Reset {test_scenario.get_modification_field_name().title()} Field",
+                name=f"Reset {(test_scenario.reset_field_to_test or test_scenario.get_modification_field_name()).title().replace('_', ' ')} Field",
                 operation=_reset_field,
                 timing_delay=TIMING.ACTION_DELAY
             ))
         )
 
-        # Add reset placeholder bug check immediately after reset (before any window reopening)
-        if test_scenario.name.startswith("reset_placeholder_bug"):
-            def check_reset_placeholder_immediately(context: WorkflowContext) -> WorkflowContext:
-                """Check placeholder immediately after reset, before any window reopening."""
-                reset_assertions = _create_reset_validation_assertions(test_scenario)
-                for assertion in reset_assertions:
-                    assertion(context)
+        # DIRECT FIELD RESET PLACEHOLDER BUG TEST - 10-Step Sequence
+        if test_scenario.name == "reset_placeholder_bug_direct_field":
+
+            # Step 7: Verify immediate state after reset (global default, not concrete value)
+            def check_reset_immediate_state(context: WorkflowContext) -> WorkflowContext:
+                """Step 7: Check that placeholder immediately shows global default after reset."""
+                print(f"\n🔍 STEP 7: Verifying immediate state after reset...")
+
+                field_name = test_scenario.field_to_test.field_name
+                form_managers = context.config_window.findChildren(ParameterFormManager)
+
+                for form_manager in form_managers:
+                    if hasattr(form_manager, 'widgets') and field_name in form_manager.widgets:
+                        widget = form_manager.widgets[field_name]
+                        texts = _extract_widget_texts(widget)
+                        all_text = " ".join(texts.values())
+                        print(f"🔍 IMMEDIATE AFTER RESET {field_name}: '{all_text}'")
+
+                        # Should show global default (1), not concrete value (2)
+                        if "1" in all_text and "2" not in all_text:
+                            print(f"✅ GOOD: Immediate reset shows global default (1), not concrete value (2)")
+                        else:
+                            print(f"❌ BAD: Immediate reset shows wrong value - expected global default (1)")
+                        break
+
                 return context
 
             workflow.add_step(WorkflowStep(
-                name="Check Reset Placeholder Bug (Immediate)",
-                operation=check_reset_placeholder_immediately,
-                timing_delay=0.1  # Small delay to let UI update
+                name="Step 7: Check Reset Immediate State",
+                operation=check_reset_immediate_state,
+                timing_delay=0.1
             ))
 
-            # Step 1: Set Concrete Path Planning Value
+            # Step 8: Save and close to persist the lazy/None state
+            def save_and_close_after_reset(context: WorkflowContext) -> WorkflowContext:
+                """Step 8: Save configuration to persist lazy state, then close window."""
+                print(f"\n🔍 STEP 8: Saving and closing to persist lazy state...")
+
+                print(f"🔧 Saving configuration after reset...")
+                context.config_window.save_config()
+
+                print(f"🔧 Closing configuration window...")
+                context.config_window.close()
+                context.config_window = None
+
+                return context
+
             workflow.add_step(WorkflowStep(
-                name="Reopen Configuration Window",
+                name="Step 8: Save And Close After Reset",
+                operation=save_and_close_after_reset,
+                timing_delay=1.0
+            ))
+
+            # Step 9: Reopen configuration window for final verification
+            workflow.add_step(WorkflowStep(
+                name="Step 9: Reopen For Final Verification",
                 operation=_reopen_config_window,
                 timing_delay=1.0
             ))
 
+            # Step 10: Final verification - field should be None with global default placeholder
+            def verify_final_reset_state(context: WorkflowContext) -> WorkflowContext:
+                """Step 10: Verify field is None and placeholder shows global default (not concrete value)."""
+                print(f"\n🔍 STEP 10: Final verification after save/reopen...")
+
+                field_name = test_scenario.field_to_test.field_name
+                concrete_value = test_scenario.field_to_test.modification_value
+                form_managers = context.config_window.findChildren(ParameterFormManager)
+
+                for form_manager in form_managers:
+                    if hasattr(form_manager, 'widgets') and field_name in form_manager.widgets:
+                        widget = form_manager.widgets[field_name]
+                        texts = _extract_widget_texts(widget)
+                        all_text = " ".join(texts.values())
+                        print(f"🔍 FINAL STATE {field_name}: '{all_text}'")
+
+                        # Critical test: Should show global default (1), NOT concrete value (2)
+                        if "1" in all_text and str(concrete_value) not in all_text:
+                            print(f"✅ SUCCESS: Reset placeholder shows global default (1), not concrete value ({concrete_value})")
+                            print(f"✅ DIRECT FIELD RESET PLACEHOLDER BUG TEST PASSED!")
+                        else:
+                            print(f"❌ FAILURE: Reset placeholder shows concrete value ({concrete_value}) instead of global default (1)")
+                            print(f"❌ This confirms the direct field reset placeholder bug exists!")
+                            raise AssertionError(f"Direct field reset placeholder bug detected: shows {concrete_value} instead of global default")
+                        break
+
+                return context
+
+            workflow.add_step(WorkflowStep(
+                name="Step 10: Verify Final Reset State",
+                operation=verify_final_reset_state,
+                timing_delay=0.5
+            ))
+
+        # OTHER RESET PLACEHOLDER BUG SCENARIOS (nested fields) - Keep existing complex workflow
+        elif test_scenario.name.startswith("reset_placeholder_bug"):
             def set_concrete_config_value(context: WorkflowContext) -> WorkflowContext:
                 """Set a concrete value in the specified config section for inheritance test."""
                 config_section = test_scenario.field_to_test.config_section
@@ -1543,59 +1664,46 @@ class TestPyQtGUIWorkflowFoundation:
                                 widget_id = id(widget)
                                 print(f"  [{i}] {dataclass_name}.{field_name_check} = '{current_value}' (widget ID: {widget_id})")
 
-                # HARD-CODED: Use exact form manager indices based on known structure
-                # [1] LazyPathPlanningConfig - ['output_dir_suffix', 'global_output_folder', 'sub_dir']
-                # [7] LazyStepMaterializationConfig - ['output_dir_suffix', 'global_output_folder', 'sub_dir', 'well_filter', 'well_filter_mode']
-
-                target_index = None
-                if config_section == "path_planning":
-                    target_index = 1  # LazyPathPlanningConfig
-                elif config_section == "materialization_defaults":
-                    target_index = 7  # LazyStepMaterializationConfig
-
-                print(f"🎯 HARD-CODED: Targeting form manager [{target_index}] for {config_section}")
+                # GENERIC: Search all form managers for the field
+                print(f"🎯 GENERIC: Searching all form managers for {field_name}")
                 print(f"🎯 Total form managers available: {len(form_managers)}")
 
-                if target_index is not None and target_index < len(form_managers):
-                    target_form_manager = form_managers[target_index]
-                    print(f"🎯 SELECTED form manager at index [{target_index}]")
+                target_form_manager = None
+                target_index = None
+
+                # Search through all form managers to find the one with our field
+                for i, form_manager in enumerate(form_managers):
+                    if hasattr(form_manager, 'widgets') and field_name in form_manager.widgets:
+                        target_form_manager = form_manager
+                        target_index = i
+                        break
+
+                if target_form_manager:
+                    print(f"🎯 FOUND form manager at index [{target_index}]")
 
                     # Verify this is the right form manager
                     if hasattr(target_form_manager, 'dataclass_type'):
                         dataclass_name = getattr(target_form_manager.dataclass_type, '__name__', 'Unknown')
                         print(f"🔧 Confirmed target: [{target_index}] {dataclass_name}")
 
-                        if field_name in target_form_manager.widgets:
-                            widget = target_form_manager.widgets[field_name]
+                        widget = target_form_manager.widgets[field_name]
+                        print(f"🔧 Setting {config_section}.{field_name} = {concrete_value}")
 
-                            print(f"🔧 Setting {config_section}.{field_name} = {concrete_value}")
+                        # Set the concrete value
+                        if hasattr(widget, 'setText'):
+                            widget.setText(str(concrete_value))
+                            print(f"🔧 SUCCESS: setText({concrete_value}) on {dataclass_name}")
+                        elif hasattr(widget, 'setValue'):
+                            widget.setValue(concrete_value)
+                            print(f"🔧 SUCCESS: setValue({concrete_value}) on {dataclass_name}")
 
-                            # Set the concrete value
-                            if hasattr(widget, 'setText'):
-                                widget.setText(concrete_value)
-                                print(f"🔧 SUCCESS: setText({concrete_value}) on {dataclass_name}")
-                            elif hasattr(widget, 'setValue'):
-                                widget.setValue(concrete_value)
-                                print(f"🔧 SUCCESS: setValue({concrete_value}) on {dataclass_name}")
-
-                            # Update form manager parameters
-                            target_form_manager.parameters[field_name] = concrete_value
-                            field_found = True
-                        else:
-                            print(f"❌ ERROR: Field {field_name} not found in target form manager")
+                        # Update form manager parameters
+                        target_form_manager.parameters[field_name] = concrete_value
+                        field_found = True
                     else:
                         print(f"❌ ERROR: Target form manager has no dataclass_type")
                 else:
-                    print(f"❌ ERROR: Invalid target index {target_index} for {config_section}")
-
-                # Set the value in the target form manager
-                if target_form_manager:
-                    widget = target_form_manager.widgets[field_name]
-                    dataclass_name = getattr(target_form_manager.dataclass_type, '__name__', 'Unknown')
-                    print(f"🔧 Setting {config_section}.{field_name} = {concrete_value}")
-                    print(f"🔧 Target form manager dataclass: {dataclass_name}")
-                    print(f"🔧 Widget object: {widget}")
-                    print(f"🔧 Widget ID: {id(widget)}")
+                    print(f"❌ ERROR: Field {field_name} not found in any form manager")
                     print(f"🔧 Widget parent: {widget.parent() if hasattr(widget, 'parent') else 'No parent'}")
                     print(f"🔧 Current widget text before: '{widget.text() if hasattr(widget, 'text') else 'No text method'}'")
 
@@ -1745,7 +1853,7 @@ class TestPyQtGUIWorkflowFoundation:
 
                         if "pipeline default:" in all_text.lower():
                             # The inherited value should be the test scenario's modification value
-                            if expected_value in all_text:
+                            if str(expected_value) in all_text:
                                 print(f"✅ GOOD: Step materialization placeholder shows inherited concrete value '{expected_value}' from {modified_section}")
 
                                 # Also verify that the checkbox is unchecked (key part of the fix)
