@@ -616,6 +616,14 @@ class ParameterFormManager(QWidget):
         # Apply reset with functional operations
         self.parameters[param_name] = reset_value
 
+        # CRITICAL FIX: Update thread-local context when resetting to None
+        # This ensures placeholder generation uses correct context for top-level fields
+        if reset_value is None and self.config.is_lazy_dataclass:
+            current_context = get_current_global_config(GlobalPipelineConfig)
+            if current_context and hasattr(current_context, param_name):
+                updated_context = replace(current_context, **{param_name: None})
+                set_current_global_config(GlobalPipelineConfig, updated_context)
+
         # Update widget value and apply context behavior (including placeholder logic)
         if param_name in self.widgets:
             widget = self.widgets[param_name]
