@@ -1,76 +1,69 @@
-Literal Includes Audit Methodology
-====================================
+Python Object Reference Documentation Methodology
+=================================================
 
-**Perpetual documentation accuracy through systematic code-documentation synchronization.**
+**Perpetual documentation accuracy through Python object references and implementation-priming prose.**
 
-*Status: CANONICAL*  
+*Status: CANONICAL*
 *Applies to: All OpenHCS documentation with code examples*
 
 Overview
 --------
 
-Traditional documentation suffers from the "documentation drift" problem - code examples become outdated as implementation evolves. OpenHCS eliminates this through systematic replacement of code examples with literal includes from the actual codebase.
+Traditional documentation suffers from the "documentation drift" problem - code examples become outdated as implementation evolves. OpenHCS eliminates this through systematic use of Python object references (`:py:meth:`, `:py:func:`, `:py:class:`) combined with clear, concise prose that primes readers with implementation context.
 
-This methodology ensures documentation remains perpetually accurate by making the codebase itself the single source of truth for all code examples.
+This methodology ensures documentation remains perpetually accurate by making Sphinx automatically validate object references, while providing readers with the mental framework to understand code before they see it.
 
 Core Principles
 ---------------
 
-Codebase as Single Source of Truth
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Python Object References as Single Source of Truth
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Principle**: Documentation never contains manually written code examples that duplicate implementation.
+**Principle**: Documentation uses Python object references that Sphinx automatically validates against the actual codebase.
 
 **Implementation**:
 
 .. code-block:: rst
 
-   .. literalinclude:: ../../../openhcs/core/lazy_config.py
-      :language: python
-      :lines: 320-326
-      :caption: Method signature from actual implementation
+   The core entry point :py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy`
+   works by creating a temporary lazy dataclass instance, then asking that instance to resolve the specific field value.
 
-**Rationale**: When implementation changes, documentation automatically reflects the change. No manual synchronization required.
+**Rationale**: When implementation changes, Sphinx build fails if referenced objects don't exist. No manual synchronization required, with automatic validation.
+
+Implementation-Priming Prose
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Principle**: Prose explains how methods work conceptually before readers encounter the actual code, building intuition for easy code comprehension.
+
+**Implementation Pattern**:
+
+.. code-block:: rst
+
+   :py:meth:`~openhcs.core.lazy_placeholder._resolve_field_with_composition_awareness` works like a smart field finder.
+   Given a dataclass instance and a field name, it first checks if the field exists directly on the instance
+   (using `dataclasses.fields()`). If found, it gets the value using `getattr()`. If not found, it loops through
+   all fields looking for nested dataclasses, then recursively searches inside each one.
+
+**Rationale**: Readers understand the implementation strategy before seeing code, making the actual implementation immediately comprehensible.
 
 Architectural Accuracy Over Syntactic Accuracy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Principle**: Documentation should reflect architectural patterns and design decisions, even when method names change during refactoring.
+**Principle**: Documentation should reflect architectural patterns and design decisions, with Python object references automatically tracking method evolution.
 
-**Example**: Documentation describing ``_preserve_lazy_structure_if_needed`` functionality points to ``rebuild_lazy_config_with_new_global_reference`` implementation - same logic, evolved API.
+**Example**: Documentation describing lazy structure preservation functionality uses `:py:func:`~openhcs.core.lazy_config.rebuild_lazy_config_with_new_global_reference`` - if method is renamed, Sphinx build fails until reference is updated.
 
 **Implementation Strategy**:
 
-- Map conceptual functionality to actual implementation
-- Update line numbers when refactoring occurs
-- Preserve architectural explanations even when method names evolve
+- Use Python object references that track refactoring automatically
+- Sphinx validates object existence during build
+- Preserve architectural explanations with validated references
+- Build failures force documentation updates during refactoring
 
-Logical Method Decomposition for Documentation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Logical Method Decomposition with Implementation Context
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Principle**: Large methods that serve multiple conceptual purposes should be documented as separate logical sections, even when architecturally unified.
-
-**Example**:
-
-.. code-block:: python
-
-   # Single architectural method (lines 394-463)
-   def _create_field_level_hierarchy_provider(...):
-       # Section 1: Auto-discovery (lines 402-405)
-       all_field_paths = FieldPathDetector.find_all_field_paths_for_type(...)
-       parent_types = FieldPathDetector.find_inheritance_relationships(...)
-       
-       # Section 2: Context detection (lines 410-420)
-       current_config = context_provider() if context_provider else _get_current_config(...)
-       
-       # Section 3: Hierarchy building (lines 425-437)
-       hierarchy_paths = []
-       if current_field_path:
-           hierarchy_paths.append(('current', current_field_path))
-       
-       # Section 4: Field resolution (lines 440-461)
-       for field_name in inherited_fields | own_fields:
-           # Complex resolution logic...
+**Principle**: Large methods that serve multiple conceptual purposes should be documented with clear prose explaining each logical phase, using Python object references for validation.
 
 **Documentation Approach**:
 
@@ -79,45 +72,45 @@ Logical Method Decomposition for Documentation
    Auto-Discovery Phase
    ~~~~~~~~~~~~~~~~~~~~
 
-   .. literalinclude:: ../../../openhcs/core/lazy_config.py
-      :language: python
-      :lines: 402-405
-      :caption: Automatic hierarchy path discovery
+   :py:class:`~openhcs.core.field_path_detection.FieldPathDetector` examines the global config structure
+   to automatically discover where each config type should live in the hierarchy. It builds a map of
+   which field paths correspond to which config types, eliminating hardcoded assumptions about config structure.
 
    Context Detection Phase
    ~~~~~~~~~~~~~~~~~~~~~~~
 
-   .. literalinclude:: ../../../openhcs/core/lazy_config.py
-      :language: python
-      :lines: 410-420
-      :caption: PyQt app context detection logic
+   :py:func:`~openhcs.core.lazy_config._get_current_config` checks if we're running in a PyQt application
+   context where thread-local storage should be available. If context is missing in a GUI environment,
+   it logs an architecture warning since this indicates a context management bug.
 
    Hierarchy Building Phase
    ~~~~~~~~~~~~~~~~~~~~~~~~
 
-   .. literalinclude:: ../../../openhcs/core/lazy_config.py
-      :language: python
-      :lines: 425-437
-      :caption: Dynamic hierarchy path construction
+   The system constructs a resolution hierarchy by combining the current field path with discovered parent
+   relationships. :py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory._create_field_level_hierarchy_provider`
+   builds a chain where each level can inherit from the next, creating the step → pipeline → global resolution flow.
+
+**Rationale**: Prose explains the conceptual purpose of each phase, while Python object references ensure the described functionality actually exists and can be validated by Sphinx.
 
 Audit Methodology
 ------------------
 
-Phase 1: Systematic Code Example Identification
+Phase 1: Python Object Reference Identification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Objective**: Catalog all code examples in documentation that reference implementation.
+**Objective**: Catalog all code references in documentation and convert to validated Python object references.
 
 **Process**:
 
-1. **Scan for code blocks**: Find all ``.. code-block:: python`` directives
-2. **Classify examples**:
+1. **Scan for code references**: Find all manual code examples, method names, and class references
+2. **Classify references**:
 
-   - **Implementation references**: Examples showing actual method signatures, class definitions
-   - **Usage examples**: Examples showing how to call actual functions
+   - **Implementation references**: Method signatures, class definitions → `:py:meth:`, `:py:class:`
+   - **Function references**: Standalone functions → `:py:func:`
+   - **Attribute references**: Class attributes, constants → `:py:attr:`
    - **Conceptual examples**: Pseudo-code illustrating patterns (keep as-is)
 
-3. **Create mapping document**: File path, line range, description, implementation location
+3. **Create mapping document**: Current reference, target Python object, validation status
 
 **Tools**:
 
@@ -126,85 +119,112 @@ Phase 1: Systematic Code Example Identification
    # Find all code blocks in documentation
    find docs/ -name "*.rst" -exec grep -l "code-block:: python" {} \;
 
-   # Extract method references
-   grep -r "def [a-zA-Z_]" docs/source/architecture/ | grep -v "literalinclude"
+   # Find manual method references that should be Python objects
+   grep -r "def [a-zA-Z_]" docs/source/architecture/ | grep -v ":py:"
 
-Phase 2: Implementation Verification
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   # Find class references that should be Python objects
+   grep -r "class [A-Z]" docs/source/architecture/ | grep -v ":py:"
 
-**Objective**: Verify each code example references actual, existing implementation.
+Phase 2: Python Object Validation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Objective**: Verify each Python object reference points to actual, existing implementation.
 
 **Process**:
 
-1. **Method existence check**: Confirm referenced methods exist in current codebase
-2. **Functionality mapping**: For renamed methods, verify functionality equivalence
-3. **Line number verification**: Confirm line ranges contain expected code
-4. **Phantom method detection**: Identify examples referencing non-existent methods
+1. **Object existence check**: Sphinx automatically validates Python object references during build
+2. **Import verification**: Confirm referenced modules can be imported
+3. **Signature validation**: Verify method signatures match expectations
+4. **Phantom reference detection**: Sphinx build fails for non-existent objects
 
-**Verification Script Pattern**:
+**Validation Benefits**:
 
-.. code-block:: python
+- **Automatic validation**: Sphinx validates all `:py:` references during build
+- **Import checking**: References fail if modules can't be imported
+- **Refactoring safety**: Build fails when referenced objects are renamed/moved
+- **No manual verification**: Sphinx handles all validation automatically
 
-   def verify_method_exists(file_path: str, method_name: str) -> bool:
-       """Verify method exists in specified file."""
-       with open(file_path) as f:
-           content = f.read()
-       return f"def {method_name}" in content
+**Build Integration**:
 
-   def verify_line_range_content(file_path: str, start: int, end: int, expected_pattern: str) -> bool:
-       """Verify line range contains expected functionality."""
-       with open(file_path) as f:
-           lines = f.readlines()
-       content = ''.join(lines[start-1:end])
-       return expected_pattern in content
+.. code-block:: bash
 
-Phase 3: Systematic Replacement
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   # Sphinx automatically validates Python object references
+   sphinx-build -b html docs/source docs/build -W --keep-going
 
-**Objective**: Replace verified code examples with literal includes.
+   # -W treats warnings as errors (including invalid references)
+   # --keep-going shows all invalid references at once
+
+Phase 3: Systematic Replacement with Implementation Context
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Objective**: Replace code examples with Python object references and implementation-priming prose.
 
 **Process**:
 
 1. **High priority first**: Core implementation methods, class definitions
-2. **Batch replacement**: Group related examples for efficient processing
-3. **Build verification**: Test documentation build after each batch
-4. **Cross-reference updates**: Update internal documentation links
+2. **Add implementation context**: Write clear prose explaining how each method works
+3. **Batch replacement**: Group related examples for efficient processing
+4. **Build verification**: Test documentation build after each batch
 
 **Replacement Template**:
 
 .. code-block:: rst
 
-   .. literalinclude:: ../../../{file_path}
-      :language: python
-      :lines: {start_line}-{end_line}
-      :caption: {descriptive_caption_with_source_reference}
+   {Clear prose explaining what the method does and how it works conceptually}
 
-Phase 4: Perpetual Maintenance
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   :py:meth:`~module.path.ClassName.method_name` {additional context about the implementation approach}.
 
-**Objective**: Maintain accuracy as codebase evolves.
+   {Brief explanation of why this approach was chosen or what problem it solves}
+
+**Example Implementation**:
+
+.. code-block:: rst
+
+   The service uses :py:func:`~openhcs.core.lazy_placeholder._resolve_field_with_composition_awareness`
+   to find field values. This function first checks if the field exists directly on the dataclass
+   (like `num_workers` on `PipelineConfig`). If not found, it recursively searches through nested
+   dataclasses (like looking for `output_dir_suffix` inside `materialization_defaults`).
+
+Phase 4: Perpetual Maintenance with Automatic Validation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Objective**: Maintain accuracy as codebase evolves with automatic validation.
 
 **Process**:
 
-1. **Build integration**: Documentation build fails if literal includes reference non-existent lines
-2. **Refactoring protocol**: When moving/renaming methods, update corresponding literal includes
-3. **Review integration**: Code reviews must verify literal include accuracy for changed files
-4. **Automated verification**: CI checks that verify literal includes point to expected functionality
+1. **Build integration**: Documentation build fails if Python object references are invalid
+2. **Refactoring protocol**: Sphinx automatically detects renamed/moved methods and fails build
+3. **Review integration**: Code reviews catch documentation build failures from invalid references
+4. **Automated verification**: CI enforces that all Python object references are valid
+
+**Automatic Maintenance Benefits**:
+
+- **Zero manual tracking**: Sphinx handles all reference validation
+- **Immediate feedback**: Build fails instantly when references become invalid
+- **Refactoring safety**: Impossible to forget updating documentation during refactoring
+- **Cross-reference accuracy**: All internal links automatically validated
 
 OpenHCS-Specific Implementation Guidelines
 ------------------------------------------
 
-Fail-Loud Documentation
-~~~~~~~~~~~~~~~~~~~~~~~
+Fail-Loud Documentation with Implementation Context
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Principle**: Documentation build should fail immediately when literal includes become invalid.
+**Principle**: Documentation build should fail immediately when Python object references become invalid, while providing clear implementation context.
 
-**Implementation**: Use Sphinx's strict mode and verify all literal includes during CI.
+**Implementation**: Use Sphinx's strict mode with Python object references and implementation-priming prose.
+
+.. code-block:: rst
+
+   # Fail-loud with implementation context
+   :py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory._create_lazy_dataclass_unified`
+   works like a dataclass compiler. It takes a regular dataclass definition and generates a new
+   class with the same fields and interface, but replaces the field access behavior.
 
 Mathematical Simplification Applied to Documentation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Principle**: Eliminate duplicate explanations by referencing single implementation source.
+**Principle**: Eliminate duplicate explanations by referencing single implementation source with consistent prose patterns.
 
 **Before**:
 
@@ -212,7 +232,7 @@ Mathematical Simplification Applied to Documentation
 
    # Multiple explanations of the same concept
    Configuration Resolution (in config.rst)
-   Lazy Field Resolution (in lazy_config.rst)  
+   Lazy Field Resolution (in lazy_config.rst)
    Thread-Local Context (in context.rst)
 
 **After**:
@@ -220,27 +240,37 @@ Mathematical Simplification Applied to Documentation
 .. code-block:: rst
 
    # Single implementation with multiple documentation perspectives
-   .. literalinclude:: ../../../openhcs/core/lazy_config.py
-      :lines: 126-129
-      :caption: Core resolution logic (referenced from multiple docs)
+   :py:func:`~openhcs.core.lazy_config._resolve_value_from_sources` implements the core
+   resolution logic by trying each source in the fallback chain until one returns a non-None value.
+   (Referenced consistently across config.rst, lazy_config.rst, and context.rst)
 
-Architectural Coherence Over Implementation Details
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Architectural Coherence with Implementation Context
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Principle**: Document architectural patterns and design decisions, not implementation minutiae.
+**Principle**: Document architectural patterns and design decisions with clear prose that explains implementation approach.
 
 **Focus Areas**:
 
-- **Why** code is structured a certain way
-- **How** patterns solve architectural problems  
-- **When** to use specific approaches
-- **What** trade-offs were made
+- **Why** code is structured a certain way (architectural rationale)
+- **How** methods work conceptually (implementation approach)
+- **When** to use specific approaches (usage context)
+- **What** trade-offs were made (design decisions)
+
+**Implementation Context Pattern**:
+
+.. code-block:: rst
+
+   # Explain HOW the method works before referencing it
+   :py:meth:`~openhcs.core.lazy_placeholder._resolve_field_with_composition_awareness`
+   works like a smart field finder. Given a dataclass instance and a field name, it first
+   checks if the field exists directly on the instance. If not found, it loops through all
+   fields looking for nested dataclasses, then recursively searches inside each one.
 
 **Avoid**:
 
-- Line-by-line code walkthroughs
-- Implementation details that change frequently
-- Language-specific syntax explanations
+- Python object references without implementation context
+- Architectural explanations without concrete method references
+- Implementation details without architectural rationale
 
 Breadth-First Documentation Structure
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -263,33 +293,33 @@ Phantom Method Resolution
 
 **Problem**: Documentation references methods that were renamed or refactored during development.
 
-**Solution**: Map phantom method functionality to actual implementation.
+**Solution**: Update Python object references to point to actual implementation with clear implementation context.
 
 **Process**:
 
-1. **Identify phantom methods**: Methods referenced in documentation but not found in codebase
+1. **Sphinx validation**: Build fails automatically for non-existent method references
 2. **Functionality analysis**: Determine what the phantom method was supposed to do
 3. **Implementation mapping**: Find actual code that performs the same functionality
-4. **Line range verification**: Confirm the line numbers point to equivalent logic
+4. **Reference update**: Update Python object reference to actual method
 
 **Example**:
 
 .. code-block:: rst
 
-   # Documentation references phantom method
-   def _preserve_lazy_structure_if_needed(self, field_name: str, value: Any) -> Any:
+   # Old documentation with phantom method reference
+   :py:meth:`~openhcs.core.lazy_config._preserve_lazy_structure_if_needed`
 
-   # Maps to actual implementation
-   .. literalinclude:: ../../../openhcs/core/lazy_config.py
-      :lines: 544-582
-      :caption: Field state preservation (rebuild_lazy_config_with_new_global_reference)
+   # Updated with actual implementation and context
+   :py:func:`~openhcs.core.lazy_config.rebuild_lazy_config_with_new_global_reference`
+   preserves lazy structure by creating a new lazy config instance that maintains the same
+   field resolution behavior but uses an updated global reference for context resolution.
 
-Logical Method Decomposition
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Logical Method Decomposition with Implementation Context
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Problem**: Large architectural methods serve multiple conceptual purposes but cannot be split for architectural reasons.
 
-**Solution**: Document logical sections as separate conceptual units.
+**Solution**: Document logical phases with clear prose explaining each phase, using Python object references for validation.
 
 **Technique**:
 
@@ -298,25 +328,23 @@ Logical Method Decomposition
    Complex Provider Function
    ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   This function performs four distinct logical operations:
+   :py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory._create_field_level_hierarchy_provider`
+   performs four distinct logical operations:
 
    **Phase 1: Auto-Discovery**
 
-   .. literalinclude:: ../../../openhcs/core/lazy_config.py
-      :lines: 402-405
-      :caption: Automatic hierarchy path discovery
+   :py:class:`~openhcs.core.field_path_detection.FieldPathDetector` examines the global config
+   structure to automatically discover where each config type should live in the hierarchy.
 
    **Phase 2: Context Detection**
 
-   .. literalinclude:: ../../../openhcs/core/lazy_config.py
-      :lines: 410-420
-      :caption: PyQt application context detection
+   :py:func:`~openhcs.core.lazy_config._get_current_config` checks if we're running in a PyQt
+   application context where thread-local storage should be available.
 
    **Phase 3: Hierarchy Construction**
 
-   .. literalinclude:: ../../../openhcs/core/lazy_config.py
-      :lines: 425-437
-      :caption: Dynamic hierarchy path building
+   The system constructs a resolution hierarchy by combining the current field path with
+   discovered parent relationships using :py:func:`~openhcs.core.lazy_config._create_hierarchy_chain`.
 
    **Phase 4: Field Resolution**
 
@@ -466,6 +494,48 @@ Qualitative Indicators
 - Documentation pressure improves code quality
 - Architectural patterns become more consistent
 - Complex methods are naturally decomposed for documentability
+
+Success Metrics
+---------------
+
+Quantitative Measures
+~~~~~~~~~~~~~~~~~~~~~
+
+- **Python object reference coverage**: Percentage of code references using `:py:` directives vs manual examples
+- **Build failure rate**: Frequency of documentation builds failing due to invalid object references
+- **Implementation context coverage**: Percentage of Python object references with explanatory prose
+
+Qualitative Measures
+~~~~~~~~~~~~~~~~~~~~
+
+- **Documentation accuracy**: Alignment between documented references and actual implementation
+- **Developer comprehension**: Ease of understanding code after reading implementation context
+- **Onboarding effectiveness**: New developer ability to navigate codebase using documentation
+
+Target State
+~~~~~~~~~~~~
+
+- **100% Python object reference coverage** for all implementation references
+- **Zero tolerance** for manual code examples that duplicate implementation
+- **Automatic validation** integrated into CI/CD pipeline with Sphinx strict mode
+- **Implementation-priming prose** for all Python object references
+- **Fail-fast feedback** when implementation changes break documentation
+
+Example Quality Standard
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Excellent Documentation Pattern**:
+
+.. code-block:: rst
+
+   The service uses :py:func:`~openhcs.core.lazy_placeholder._resolve_field_with_composition_awareness`
+   to find field values. This function first checks if the field exists directly on the dataclass
+   (like `num_workers` on `PipelineConfig`). If not found, it recursively searches through nested
+   dataclasses (like looking for `output_dir_suffix` inside `materialization_defaults`). This unified
+   approach handles both inheritance patterns (field exists on current class) and composition patterns
+   (field exists in nested class).
+
+**Benefits**: Validated reference + clear implementation context + architectural rationale + concrete examples.
 
 Benefits
 --------
