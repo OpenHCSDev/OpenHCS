@@ -874,6 +874,14 @@ class ParameterFormManager(QWidget):
         if field_name not in target_fields or field_name not in source_fields:
             return False
 
+        # CRITICAL FIX: Explicit blocking for PathPlanningConfig -> StepMaterializationConfig.well_filter
+        # StepWellFilterConfig is more specialized and should always win
+        if (target_base_class.__name__ == 'StepMaterializationConfig' and
+            source_base_class.__name__ == 'PathPlanningConfig' and
+            field_name == 'well_filter'):
+            print(f"🔍 DEBUG: EXPLICIT BLOCK: PathPlanningConfig.well_filter cannot affect StepMaterializationConfig.well_filter (StepWellFilterConfig is more specialized)")
+            return False
+
         # CRITICAL FIX: Use inheritance declaration order, not MRO
         # For fields, rightmost parent in declaration should win, not MRO order
         # StepMaterializationConfig(PathPlanningConfig, StepWellFilterConfig)
@@ -975,41 +983,29 @@ class ParameterFormManager(QWidget):
             # No parent defines this field, inheritance is allowed
             return True
 
-        # CRITICAL FIX: For multiple inheritance, ONLY allow inheritance from the rightmost parent
-        # This prevents PathPlanningConfig changes from affecting StepMaterializationConfig.well_filter
-        # when StepWellFilterConfig (rightmost parent) also defines well_filter
+        # CRITICAL FIX: For multiple inheritance, ONLY allow inheritance from the most specialized parent
+        # StepWellFilterConfig is more specialized than WellFilterConfig/PathPlanningConfig
+        # So StepWellFilterConfig.well_filter should ALWAYS win over PathPlanningConfig.well_filter
 
-        # First, determine which dataclass type triggered this inheritance check
-        # by checking which manager in the sibling hierarchy was modified
         changed_dataclass_name = getattr(self, '_last_changed_dataclass_name', None)
 
-        if changed_dataclass_name:
+        if changed_dataclass_name and rightmost_field_definer:
             print(f"🔍 DEBUG: Inheritance triggered by change in {changed_dataclass_name}")
-            print(f"🔍 DEBUG: Rightmost parent for field '{field_name}': {rightmost_field_definer.__name__}")
+            print(f"🔍 DEBUG: Most specialized parent for field '{field_name}': {rightmost_field_definer.__name__}")
 
-            # Only allow inheritance if the change came from the rightmost parent
+            # ABSOLUTE RULE: Only allow inheritance from the most specialized parent
+            # PathPlanningConfig.well_filter should NEVER affect StepMaterializationConfig.well_filter
+            # because StepWellFilterConfig is more specialized
             if rightmost_field_definer.__name__ in changed_dataclass_name:
-                print(f"🔍 DEBUG: Field '{field_name}' inheritance ALLOWED - change from rightmost parent {rightmost_field_definer.__name__}")
+                print(f"🔍 DEBUG: Field '{field_name}' inheritance ALLOWED - change from most specialized parent")
                 return True
             else:
-                print(f"🔍 DEBUG: Field '{field_name}' inheritance BLOCKED - change from non-rightmost parent {changed_dataclass_name}, rightmost is {rightmost_field_definer.__name__}")
+                print(f"🔍 DEBUG: Field '{field_name}' inheritance BLOCKED - change from less specialized parent")
                 return False
 
-        # Fallback: check if the updated placeholder value matches the rightmost parent's value
-        rightmost_config_name = self._get_config_name_for_class(rightmost_field_definer)
-        if rightmost_config_name:
-            rightmost_config = getattr(updated_context, rightmost_config_name, None)
-            if rightmost_config and hasattr(rightmost_config, field_name):
-                rightmost_value = getattr(rightmost_config, field_name)
-                if rightmost_value is not None and str(rightmost_value) in updated_placeholder:
-                    print(f"🔍 DEBUG: Field '{field_name}' inheritance allowed - placeholder matches rightmost parent value")
-                    return True
-                else:
-                    print(f"🔍 DEBUG: Field '{field_name}' inheritance blocked - placeholder doesn't match rightmost parent")
-                    return False
-
-        # Default to blocking inheritance for multiple inheritance conflicts
-        print(f"🔍 DEBUG: Field '{field_name}' inheritance blocked - cannot determine source, defaulting to block for safety")
+        # If we can't determine the source, block inheritance to be safe
+        # Multiple inheritance should be explicit and deterministic
+        print(f"🔍 DEBUG: Field '{field_name}' inheritance BLOCKED - cannot determine source, blocking for safety")
         return False
 
     def _get_config_name_for_class(self, dataclass_type: type) -> str:
