@@ -849,69 +849,42 @@ class ParameterFormManager(QWidget):
 
         # Check if target base class inherits from source base class
         if not issubclass(target_base_class, source_base_class):
+            print(f"🔍 DEBUG: {target_base_class.__name__} does not inherit from {source_base_class.__name__} - no inheritance relationship")
             return False
 
-        # CRITICAL FIX: Check for multiple inheritance override
-        # Find the most specific class that defines this field in the target's inheritance hierarchy
-        most_specific_source = self._find_most_specific_field_source(target_base_class, field_name)
-
-        # Only allow inheritance from the most specific source
-        if most_specific_source and most_specific_source != source_base_class:
-            print(f"🔍 DEBUG: {source_base_class.__name__} is overridden by {most_specific_source.__name__} for field '{field_name}' - blocking inheritance")
-            return False
-
-        # Get the field from target dataclass
+        # Check if both classes have the field
         target_fields = {f.name: f for f in fields(target_dataclass_type)}
-        if field_name not in target_fields:
-            return False
-
-        # Check if source_dataclass_type actually overrides this field (not just inherits it)
         source_fields = {f.name: f for f in fields(source_dataclass_type)}
-        if field_name not in source_fields:
+
+        if field_name not in target_fields or field_name not in source_fields:
             return False
 
-        # Find the common base class that originally defined this field
-        common_base = self._find_field_origin_class(target_dataclass_type, field_name)
-        if not common_base:
-            return False
-
-        # Check if source_dataclass_type overrides the field from the common base
-        source_field = source_fields[field_name]
-        base_fields = {f.name: f for f in fields(common_base)}
-        base_field = base_fields.get(field_name)
-
-        if base_field and source_field.default != base_field.default:
-            print(f"🔍 DEBUG: {source_dataclass_type.__name__} overrides '{field_name}' (base: {base_field.default} -> override: {source_field.default})")
-            return True
-
-        return False
+        # SIMPLIFIED: If target inherits from source and both have the field, allow inheritance
+        # The complex override detection was causing more problems than it solved
+        print(f"🔍 DEBUG: {target_dataclass_type.__name__} can inherit '{field_name}' from {source_dataclass_type.__name__}")
+        return True
 
     def _find_most_specific_field_source(self, target_dataclass_type: type, field_name: str) -> type:
         """
         Find the most specific class in the inheritance hierarchy that defines a field.
 
+        CRITICAL FIX: Only considers classes that are actually in the inheritance chain.
         For multiple inheritance like StepMaterializationConfig(PathPlanningConfig, StepWellFilterConfig),
         if both parents define the same field, the rightmost (most specific) parent wins.
+        But separate inheritance chains (like StreamingConfig) don't override each other.
         """
         from dataclasses import fields, is_dataclass
 
         if not is_dataclass(target_dataclass_type):
             return None
 
-        # Check direct parents first (most specific)
-        for base_class in reversed(target_dataclass_type.__bases__):
-            if is_dataclass(base_class):
-                base_fields = {f.name: f for f in fields(base_class)}
-                if field_name in base_fields:
-                    print(f"🔍 DEBUG: Found field '{field_name}' in direct parent {base_class.__name__}")
-                    return base_class
-
-        # If not found in direct parents, walk up the MRO
-        for cls in target_dataclass_type.__mro__[1:]:  # Skip self
-            if is_dataclass(cls):
+        # Use Python's MRO to find the most specific class that defines this field
+        # MRO already handles multiple inheritance correctly
+        for cls in target_dataclass_type.__mro__:
+            if is_dataclass(cls) and cls != target_dataclass_type:
                 cls_fields = {f.name: f for f in fields(cls)}
                 if field_name in cls_fields:
-                    print(f"🔍 DEBUG: Found field '{field_name}' in MRO class {cls.__name__}")
+                    print(f"🔍 DEBUG: Found field '{field_name}' in MRO class {cls.__name__} (most specific)")
                     return cls
 
         return None
