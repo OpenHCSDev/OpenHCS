@@ -811,6 +811,8 @@ class ParameterFormManager(QWidget):
 
                 if has_affected_fields:
                     print(f"🔍 DEBUG: Manager '{manager_name}' has inheritance from {changed_dataclass_type.__name__} - refreshing")
+                    # Track which dataclass triggered this inheritance update for rightmost parent logic
+                    manager._last_changed_dataclass_name = changed_dataclass_type.__name__
                     manager.refresh_placeholder_text_with_context(updated_context)
                 else:
                     # REDUCED DEBUG: Only show streaming configs to reduce output
@@ -952,39 +954,63 @@ class ParameterFormManager(QWidget):
         # Get base class (handle lazy classes)
         target_base_class = self.dataclass_type.__bases__[0] if self.dataclass_type.__bases__ else self.dataclass_type
 
-        # Find rightmost parent that defines this field
+        # Find rightmost parent that defines this field using full MRO traversal
         rightmost_field_definer = None
-        for base_class in reversed(target_base_class.__bases__):
-            if is_dataclass(base_class):
-                base_fields = {f.name: f for f in fields(base_class)}
-                if field_name in base_fields:
-                    rightmost_field_definer = base_class
-                    break
+        print(f"🔍 DEBUG: Finding rightmost parent for field '{field_name}' in {target_base_class.__name__}")
+        print(f"🔍 DEBUG: Full MRO: {[cls.__name__ for cls in target_base_class.__mro__]}")
+
+        # Use MRO to find the rightmost (most specific) parent class that defines this field
+        # MRO goes from most specific to least specific, so we want the FIRST match
+        for mro_class in target_base_class.__mro__[1:]:  # Skip self (index 0)
+            if is_dataclass(mro_class):
+                mro_fields = {f.name: f for f in fields(mro_class)}
+                if field_name in mro_fields:
+                    print(f"🔍 DEBUG: Field '{field_name}' found in MRO class {mro_class.__name__} (most specific)")
+                    rightmost_field_definer = mro_class
+                    break  # First match in MRO is the most specific (rightmost)
+
+        print(f"🔍 DEBUG: Rightmost field definer for '{field_name}': {rightmost_field_definer.__name__ if rightmost_field_definer else None}")
 
         if not rightmost_field_definer:
             # No parent defines this field, inheritance is allowed
             return True
 
-        # Check if the inheritance source in the updated context matches the rightmost parent
-        # We do this by checking which config in the updated context could have caused this change
-        rightmost_config_name = self._get_config_name_for_class(rightmost_field_definer)
+        # CRITICAL FIX: For multiple inheritance, ONLY allow inheritance from the rightmost parent
+        # This prevents PathPlanningConfig changes from affecting StepMaterializationConfig.well_filter
+        # when StepWellFilterConfig (rightmost parent) also defines well_filter
 
+        # First, determine which dataclass type triggered this inheritance check
+        # by checking which manager in the sibling hierarchy was modified
+        changed_dataclass_name = getattr(self, '_last_changed_dataclass_name', None)
+
+        if changed_dataclass_name:
+            print(f"🔍 DEBUG: Inheritance triggered by change in {changed_dataclass_name}")
+            print(f"🔍 DEBUG: Rightmost parent for field '{field_name}': {rightmost_field_definer.__name__}")
+
+            # Only allow inheritance if the change came from the rightmost parent
+            if rightmost_field_definer.__name__ in changed_dataclass_name:
+                print(f"🔍 DEBUG: Field '{field_name}' inheritance ALLOWED - change from rightmost parent {rightmost_field_definer.__name__}")
+                return True
+            else:
+                print(f"🔍 DEBUG: Field '{field_name}' inheritance BLOCKED - change from non-rightmost parent {changed_dataclass_name}, rightmost is {rightmost_field_definer.__name__}")
+                return False
+
+        # Fallback: check if the updated placeholder value matches the rightmost parent's value
+        rightmost_config_name = self._get_config_name_for_class(rightmost_field_definer)
         if rightmost_config_name:
-            # Get the rightmost parent's value from the updated context
             rightmost_config = getattr(updated_context, rightmost_config_name, None)
             if rightmost_config and hasattr(rightmost_config, field_name):
                 rightmost_value = getattr(rightmost_config, field_name)
-
-                # If the updated placeholder contains the rightmost parent's value, inheritance is allowed
                 if rightmost_value is not None and str(rightmost_value) in updated_placeholder:
-                    print(f"🔍 DEBUG: Field '{field_name}' inheritance allowed - comes from rightmost parent {rightmost_field_definer.__name__}")
+                    print(f"🔍 DEBUG: Field '{field_name}' inheritance allowed - placeholder matches rightmost parent value")
                     return True
                 else:
-                    print(f"🔍 DEBUG: Field '{field_name}' inheritance blocked - does not come from rightmost parent {rightmost_field_definer.__name__}")
+                    print(f"🔍 DEBUG: Field '{field_name}' inheritance blocked - placeholder doesn't match rightmost parent")
                     return False
 
-        # Default to allowing inheritance if we can't determine the source
-        return True
+        # Default to blocking inheritance for multiple inheritance conflicts
+        print(f"🔍 DEBUG: Field '{field_name}' inheritance blocked - cannot determine source, defaulting to block for safety")
+        return False
 
     def _get_config_name_for_class(self, dataclass_type: type) -> str:
         """Get the config field name for a dataclass type."""
