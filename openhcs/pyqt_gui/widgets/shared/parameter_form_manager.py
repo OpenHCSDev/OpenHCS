@@ -458,31 +458,64 @@ class ParameterFormManager(QWidget):
         if not self.config.is_lazy_dataclass:
             return
 
-        # Use the EXACT SAME working code path as initial open
+        # CRITICAL FIX: Build context from current form values instead of using thread-local context
+        current_form_context = self._build_context_from_current_form_values()
+
+        # Get placeholder resolved against current form state
         placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-            self.dataclass_type, param_name, placeholder_prefix=self.placeholder_prefix
+            self.dataclass_type, param_name,
+            app_config=current_form_context,  # Use current form context
+            placeholder_prefix=self.placeholder_prefix
         )
 
         if placeholder_text is None:
             return
 
-        # Apply placeholder using the SAME working logic as initial open
+        # Apply placeholder using the working logic
         if hasattr(widget, 'setPlaceholderText'):
             widget.setPlaceholderText(placeholder_text)
 
         # Block signals to prevent placeholder application from triggering parameter updates
         widget.blockSignals(True)
         try:
-            # Use the EXACT SAME PyQt6WidgetEnhancer logic that works on initial open
+            # Use PyQt6WidgetEnhancer logic for visual styling
             PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
         finally:
             # Always restore signal connections
             widget.blockSignals(False)
 
-    def _format_placeholder_text(self, raw_placeholder: Optional[str]) -> Optional[str]:
-        """Mathematical simplification: Use existing enum formatting utilities."""
-        return raw_placeholder  # Existing LazyDefaultPlaceholderService already handles enum formatting correctly
+#    def _format_placeholder_text(self, raw_placeholder: Optional[str]) -> Optional[str]:
+#        """Mathematical simplification: Use existing enum formatting utilities."""
+#        return raw_placeholder  # Existing LazyDefaultPlaceholderService already handles enum formatting correctly
+    def _build_context_from_current_form_values(self, masked_fields: Optional[set] = None) -> Any:
+        """Build context from current form values for placeholder resolution."""
+        from openhcs.core.context.global_config import get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+        from dataclasses import replace
 
+        # Get current thread-local context as base
+        current_context = get_current_global_config(GlobalPipelineConfig)
+        if not current_context:
+            return None
+
+        # Build updated context with current form values (only non-user-set, non-masked fields)
+        current_values = self.get_current_values()
+        context_updates = {}
+        masked_fields = masked_fields or set()
+
+        for field_name, field_value in current_values.items():
+            if hasattr(current_context, field_name):
+                # CRITICAL FIX: Exclude masked fields (e.g., field being reset)
+                if field_name in masked_fields:
+                    continue
+
+                # Only include non-user-set fields in context updates
+                is_user_set = hasattr(self, '_user_set_fields') and field_name in self._user_set_fields
+                if not is_user_set:
+                    context_updates[field_name] = field_value
+
+        # Return updated context if we have updates, otherwise original context
+        return replace(current_context, **context_updates) if context_updates else current_context
 
 
 
@@ -504,13 +537,13 @@ class ParameterFormManager(QWidget):
 
 
 
-    def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None, skip_context_behavior: bool = False) -> None:
+    def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None, skip_context_behavior: bool = False, masked_fields: Optional[set] = None) -> None:
         """Mathematical simplification: Unified widget update using shared dispatch."""
         self._execute_with_signal_blocking(widget, lambda: self._dispatch_widget_update(widget, value))
 
         # Only apply context behavior if not explicitly skipped (e.g., during reset operations)
         if not skip_context_behavior:
-            self._apply_context_behavior(widget, value, param_name)
+            self._apply_context_behavior(widget, value, param_name, masked_fields)
 
     def _dispatch_widget_update(self, widget: QWidget, value: Any) -> None:
         """Algebraic simplification: Single dispatch logic for all widget updates."""
@@ -548,7 +581,16 @@ class ParameterFormManager(QWidget):
             return
 
         if value is None and self.config.is_lazy_dataclass:
-            self._apply_placeholder_with_lazy_context(widget, param_name, value, masked_fields)
+            # CRITICAL FIX: Apply placeholder using current form state with masking support
+            current_form_context = self._build_context_from_current_form_values(masked_fields)
+            placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                self.dataclass_type, param_name,
+                app_config=current_form_context,
+                placeholder_prefix=self.placeholder_prefix
+            )
+            if placeholder_text and hasattr(widget, 'setPlaceholderText'):
+                widget.setPlaceholderText(placeholder_text)
+                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
         elif value is not None:
             PyQt6WidgetEnhancer._clear_placeholder_state(widget)
 
@@ -636,10 +678,11 @@ class ParameterFormManager(QWidget):
         if hasattr(self, '_user_set_fields'):
             self._user_set_fields.discard(param_name)
 
-        # 2. Update widget value
+        # 2. Update widget value with masking to prevent resolving against old value
         if param_name in self.widgets:
             widget = self.widgets[param_name]
-            self.update_widget_value(widget, reset_value, param_name)
+            # CRITICAL FIX: Mask the field being reset so placeholder doesn't resolve against its old value
+            self.update_widget_value(widget, reset_value, param_name, masked_fields={param_name})
 
         self.nested_managers.get(param_name) and hasattr(self.nested_managers[param_name], 'reset_all_parameters') and self.nested_managers[param_name].reset_all_parameters()
         self.parameter_changed.emit(param_name, reset_value)
@@ -875,7 +918,33 @@ class ParameterFormManager(QWidget):
             if target_base_default is not None and target_base_default != source_base_default:
                 return False
 
+        # CRITICAL FIX: Multiple inheritance precedence check
+        # Only allow inheritance from the highest precedence parent for this field
+        highest_precedence_parent = self._find_highest_precedence_field_definer(target_base, field_name)
+        if highest_precedence_parent and highest_precedence_parent != source_base:
+            # Source is not the highest precedence parent - block inheritance
+            return False
+
         return True
+
+    def _find_highest_precedence_field_definer(self, target_base_class: type, field_name: str) -> type:
+        """Find the highest precedence parent class that defines a field using Python's MRO."""
+        from dataclasses import fields, is_dataclass
+        import dataclasses
+
+        # Use Python's MRO to find the first parent that defines this field with a concrete value
+        for mro_class in target_base_class.__mro__[1:]:  # Skip self (index 0)
+            if is_dataclass(mro_class):
+                mro_fields = {f.name: f for f in fields(mro_class)}
+                if field_name in mro_fields:
+                    field_obj = mro_fields[field_name]
+                    field_default = field_obj.default if field_obj.default is not dataclasses.MISSING else None
+
+                    # Return the first parent with a concrete (non-None) value = highest precedence
+                    if field_default is not None:
+                        return mro_class
+
+        return None
 
 
 
