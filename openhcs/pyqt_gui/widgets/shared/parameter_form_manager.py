@@ -851,6 +851,15 @@ class ParameterFormManager(QWidget):
         if not issubclass(target_base_class, source_base_class):
             return False
 
+        # CRITICAL FIX: Check for multiple inheritance override
+        # Find the most specific class that defines this field in the target's inheritance hierarchy
+        most_specific_source = self._find_most_specific_field_source(target_base_class, field_name)
+
+        # Only allow inheritance from the most specific source
+        if most_specific_source and most_specific_source != source_base_class:
+            print(f"🔍 DEBUG: {source_base_class.__name__} is overridden by {most_specific_source.__name__} for field '{field_name}' - blocking inheritance")
+            return False
+
         # Get the field from target dataclass
         target_fields = {f.name: f for f in fields(target_dataclass_type)}
         if field_name not in target_fields:
@@ -876,6 +885,36 @@ class ParameterFormManager(QWidget):
             return True
 
         return False
+
+    def _find_most_specific_field_source(self, target_dataclass_type: type, field_name: str) -> type:
+        """
+        Find the most specific class in the inheritance hierarchy that defines a field.
+
+        For multiple inheritance like StepMaterializationConfig(PathPlanningConfig, StepWellFilterConfig),
+        if both parents define the same field, the rightmost (most specific) parent wins.
+        """
+        from dataclasses import fields, is_dataclass
+
+        if not is_dataclass(target_dataclass_type):
+            return None
+
+        # Check direct parents first (most specific)
+        for base_class in reversed(target_dataclass_type.__bases__):
+            if is_dataclass(base_class):
+                base_fields = {f.name: f for f in fields(base_class)}
+                if field_name in base_fields:
+                    print(f"🔍 DEBUG: Found field '{field_name}' in direct parent {base_class.__name__}")
+                    return base_class
+
+        # If not found in direct parents, walk up the MRO
+        for cls in target_dataclass_type.__mro__[1:]:  # Skip self
+            if is_dataclass(cls):
+                cls_fields = {f.name: f for f in fields(cls)}
+                if field_name in cls_fields:
+                    print(f"🔍 DEBUG: Found field '{field_name}' in MRO class {cls.__name__}")
+                    return cls
+
+        return None
 
     def _find_field_origin_class(self, dataclass_type: type, field_name: str) -> type:
         """Find the class that originally defined a field by walking up the MRO."""
@@ -919,6 +958,8 @@ class ParameterFormManager(QWidget):
 
         This method should be called when the GlobalPipelineConfig changes to ensure
         that lazy dataclass forms show updated placeholder text.
+
+        CRITICAL FIX: Now includes inheritance-aware placeholder updates for all fields.
         """
         # Only refresh for lazy dataclasses (PipelineConfig forms)
         if not self.dataclass_type:
@@ -932,42 +973,18 @@ class ParameterFormManager(QWidget):
         print(f"🔍 DEBUG: refresh_placeholder_text for {self.dataclass_type.__name__}")
         print(f"🔍 DEBUG: Current parameters: {self.parameters}")
 
-        # Refresh placeholder text for all widgets with None values
-        for param_name, widget in self.widgets.items():
-            current_value = self.parameters.get(param_name)
-            print(f"🔍 DEBUG: Field '{param_name}' has value: {current_value} (None: {current_value is None})")
-            if current_value is None:
-                print(f"🔍 DEBUG: Updating placeholder for '{param_name}'")
+        # Get current context for inheritance-aware placeholder updates
+        from openhcs.core.context.global_config import get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
 
-                # Generate placeholder text to see what it resolves to
-                from openhcs.core.context.global_config import get_current_global_config
-                from openhcs.core.config import GlobalPipelineConfig
+        current_context = get_current_global_config(GlobalPipelineConfig)
+        print(f"🔍 DEBUG: Current thread-local context for placeholder resolution: {current_context}")
+        if hasattr(current_context, 'step_well_filter_config'):
+            print(f"🔍 DEBUG: step_well_filter_config in context: {current_context.step_well_filter_config}")
 
-                current_context = get_current_global_config(GlobalPipelineConfig)
-                print(f"🔍 DEBUG: Current thread-local context for placeholder resolution: {current_context}")
-                if hasattr(current_context, 'step_well_filter_config'):
-                    print(f"🔍 DEBUG: step_well_filter_config in context: {current_context.step_well_filter_config}")
-
-                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    self.dataclass_type, param_name, placeholder_prefix=self.placeholder_prefix
-                )
-                print(f"🔍 DEBUG: Generated placeholder text for '{param_name}': '{placeholder_text}'")
-
-                # CRITICAL FIX: Use the already-generated placeholder text instead of regenerating it
-                # The placeholder_text was generated with the correct thread-local context above
-                if placeholder_text and hasattr(widget, 'setPlaceholderText'):
-                    widget.setPlaceholderText(placeholder_text)
-
-                # Block signals to prevent placeholder application from triggering parameter updates
-                widget.blockSignals(True)
-                try:
-                    # Use the EXACT SAME PyQt6WidgetEnhancer logic that works on initial open
-                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
-                finally:
-                    # Always restore signal connections
-                    widget.blockSignals(False)
-            else:
-                print(f"🔍 DEBUG: Skipping placeholder update for '{param_name}' (not None)")
+        # CRITICAL FIX: Use inheritance-aware placeholder refresh for ALL fields
+        # This ensures inheritance works on window open and reset, not just on field changes
+        self.refresh_placeholder_text_with_context(current_context)
 
         # Recursively refresh nested managers
         self._apply_to_nested_managers(lambda name, manager: manager.refresh_placeholder_text())
