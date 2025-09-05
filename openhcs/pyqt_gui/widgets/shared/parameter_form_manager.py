@@ -488,7 +488,7 @@ class ParameterFormManager(QWidget):
 #        """Mathematical simplification: Use existing enum formatting utilities."""
 #        return raw_placeholder  # Existing LazyDefaultPlaceholderService already handles enum formatting correctly
     def _build_context_from_current_form_values(self, masked_fields: Optional[set] = None) -> Any:
-        """Build context from current form values for placeholder resolution."""
+        """Build context using Python's natural resolution order."""
         from openhcs.core.context.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         from dataclasses import replace
@@ -498,23 +498,18 @@ class ParameterFormManager(QWidget):
         if not current_context:
             return None
 
-        # Build updated context with current form values (only non-user-set, non-masked fields)
+        # SIMPLIFICATION: Let Python's MRO handle the resolution
+        # Just exclude masked fields and let inheritance work naturally
         current_values = self.get_current_values()
-        context_updates = {}
         masked_fields = masked_fields or set()
 
-        for field_name, field_value in current_values.items():
-            if hasattr(current_context, field_name):
-                # CRITICAL FIX: Exclude masked fields (e.g., field being reset)
-                if field_name in masked_fields:
-                    continue
+        # Only mask fields that are being reset - everything else resolves naturally
+        context_updates = {
+            field_name: None for field_name in masked_fields
+            if hasattr(current_context, field_name)
+        }
 
-                # Only include non-user-set fields in context updates
-                is_user_set = hasattr(self, '_user_set_fields') and field_name in self._user_set_fields
-                if not is_user_set:
-                    context_updates[field_name] = field_value
-
-        # Return updated context if we have updates, otherwise original context
+        # Return updated context with masked fields set to None
         return replace(current_context, **context_updates) if context_updates else current_context
 
 
@@ -869,8 +864,9 @@ class ParameterFormManager(QWidget):
         return False
 
     def _should_allow_inheritance(self, target_dataclass_type: type, field_name: str, source_dataclass_type: type) -> bool:
-        """Mathematical simplification: Simple inheritance check without complex MRO logic."""
+        """RADICAL SIMPLIFICATION: Use Python's MRO directly like super() would."""
         from dataclasses import fields, is_dataclass
+        import dataclasses
 
         if not (is_dataclass(target_dataclass_type) and is_dataclass(source_dataclass_type)):
             return False
@@ -879,72 +875,37 @@ class ParameterFormManager(QWidget):
         target_base = target_dataclass_type.__bases__[0] if target_dataclass_type.__bases__ else target_dataclass_type
         source_base = source_dataclass_type.__bases__[0] if source_dataclass_type.__bases__ else source_dataclass_type
 
-        # Simple rule: target must inherit from source
-        if not issubclass(target_base, source_base):
-            return False
-
-        # Check if both lazy classes have the field
-        target_fields = {f.name: f for f in fields(target_dataclass_type)}
-        source_fields = {f.name: f for f in fields(source_dataclass_type)}
-
-        if field_name not in target_fields or field_name not in source_fields:
-            return False
-
-        # CRITICAL FIX: Check both lazy class AND base class defaults
-        # Priority: lazy class concrete values > base class overrides
-        import dataclasses
-
-        # First check lazy class defaults (might have concrete user values)
-        target_field = target_fields[field_name]
-        source_field = source_fields[field_name]
-        target_lazy_default = target_field.default if target_field.default is not dataclasses.MISSING else None
-        source_lazy_default = source_field.default if source_field.default is not dataclasses.MISSING else None
-
-        # If lazy class has concrete override, block inheritance
-        if target_lazy_default is not None and target_lazy_default != source_lazy_default:
-            return False
-
-        # If lazy classes both have None, check base class overrides
+        # CRITICAL: Check if target has concrete override - if so, block ALL inheritance
         target_base_fields = {f.name: f for f in fields(target_base)}
-        source_base_fields = {f.name: f for f in fields(source_base)}
+        if field_name in target_base_fields:
+            target_field = target_base_fields[field_name]
+            target_default = target_field.default if target_field.default is not dataclasses.MISSING else None
 
-        if field_name in target_base_fields and field_name in source_base_fields:
-            target_base_field = target_base_fields[field_name]
-            source_base_field = source_base_fields[field_name]
-            target_base_default = target_base_field.default if target_base_field.default is not dataclasses.MISSING else None
-            source_base_default = source_base_field.default if source_base_field.default is not dataclasses.MISSING else None
-
-            # If base class has concrete override, block inheritance
-            if target_base_default is not None and target_base_default != source_base_default:
+            # If target has concrete override, never inherit from anyone
+            if target_default is not None:
                 return False
 
-        # CRITICAL FIX: Multiple inheritance precedence check
-        # Only allow inheritance from the highest precedence parent for this field
-        highest_precedence_parent = self._find_highest_precedence_field_definer(target_base, field_name)
-        if highest_precedence_parent and highest_precedence_parent != source_base:
-            # Source is not the highest precedence parent - block inheritance
-            return False
+        # CORE PRINCIPLE: Only allow inheritance if source is the next class in MRO
+        # This mirrors exactly how Python's super() and MRO work
+        return self._is_next_in_mro_with_field(target_base, source_base, field_name)
 
-        return True
+    def _is_next_in_mro_with_field(self, target_class: type, source_class: type, field_name: str) -> bool:
+        """Check if source_class is the next class in target's MRO that defines the field.
 
-    def _find_highest_precedence_field_definer(self, target_base_class: type, field_name: str) -> type:
-        """Find the highest precedence parent class that defines a field using Python's MRO."""
+        This leverages Python's MRO directly - inheritance should only happen from the
+        next class in the resolution order that actually defines the field.
+        """
         from dataclasses import fields, is_dataclass
-        import dataclasses
 
-        # Use Python's MRO to find the first parent that defines this field with a concrete value
-        for mro_class in target_base_class.__mro__[1:]:  # Skip self (index 0)
+        # Walk through target's MRO to find the next class that defines this field
+        for mro_class in target_class.__mro__[1:]:  # Skip self
             if is_dataclass(mro_class):
                 mro_fields = {f.name: f for f in fields(mro_class)}
                 if field_name in mro_fields:
-                    field_obj = mro_fields[field_name]
-                    field_default = field_obj.default if field_obj.default is not dataclasses.MISSING else None
+                    # Found the next class in MRO that defines this field
+                    return mro_class == source_class
 
-                    # Return the first parent with a concrete (non-None) value = highest precedence
-                    if field_default is not None:
-                        return mro_class
-
-        return None
+        return False
 
 
 
