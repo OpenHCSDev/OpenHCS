@@ -755,6 +755,31 @@ def _modify_field(context: WorkflowContext) -> WorkflowContext:
     return context
 
 
+def _set_step_well_filter_for_isolation_test(context: WorkflowContext) -> WorkflowContext:
+    """Set step_well_filter_config.well_filter = 5 for isolation test using existing field modification logic."""
+    if not context.test_scenario or context.test_scenario.name != "inheritance_hierarchy_path_planning_isolation":
+        return context  # Skip for other tests
+
+    from dataclasses import replace
+
+    # Create temporary field spec for step_well_filter_config.well_filter = 5
+    temp_field_spec = FieldModificationSpec(
+        field_name="well_filter",
+        modification_value=5,
+        config_section="step_well_filter_config"
+    )
+
+    # Temporarily replace field spec and reuse existing _modify_field logic
+    temp_scenario = replace(context.test_scenario, field_to_test=temp_field_spec)
+    temp_context = context.with_updates(test_scenario=temp_scenario)
+
+    print(f"🔧 ISOLATION TEST SETUP: Setting step_well_filter_config.well_filter = 5")
+    result_context = _modify_field(temp_context)
+
+    # Restore original field spec
+    return result_context.with_updates(test_scenario=context.test_scenario)
+
+
 def _close_config_window(context: WorkflowContext) -> WorkflowContext:
     """Close configuration window with cleanup."""
     try:
@@ -1190,39 +1215,80 @@ class AssertionFactory:
                     raise AssertionError("Could not find fiji_streaming_config.well_filter widget for streaming test")
 
             elif scenario.name == "inheritance_hierarchy_path_planning_isolation":
-                # Test: path_planning_config.well_filter = 99 should NOT affect step_materialization_config placeholder
+                # Test: path_planning_config.well_filter = 99 should NOT affect step_materialization_config or streaming configs
                 form_managers = context.config_window.findChildren(ParameterFormManager)
                 step_materialization_placeholder = None
+                napari_placeholder = None
+                fiji_placeholder = None
 
                 for form_manager in form_managers:
                     if (hasattr(form_manager, 'widgets') and
                         hasattr(form_manager, 'dataclass_type') and
                         form_manager.dataclass_type and
-                        'StepMaterialization' in form_manager.dataclass_type.__name__ and
                         'well_filter' in form_manager.widgets):
 
                         widget = form_manager.widgets['well_filter']
                         texts = ValidationEngine.extract_widget_texts(widget)
                         all_text = " ".join(texts.values())
-                        step_materialization_placeholder = all_text
-                        print(f"🔍 ISOLATION TEST: step_materialization_config.well_filter placeholder = '{all_text}'")
-                        break
 
+                        if 'StepMaterialization' in form_manager.dataclass_type.__name__:
+                            step_materialization_placeholder = all_text
+                            print(f"🔍 ISOLATION TEST: step_materialization_config.well_filter placeholder = '{all_text}'")
+                        elif 'NapariStreaming' in form_manager.dataclass_type.__name__:
+                            napari_placeholder = all_text
+                            print(f"🔍 ISOLATION TEST: napari_streaming_config.well_filter placeholder = '{all_text}'")
+                        elif 'FijiStreaming' in form_manager.dataclass_type.__name__:
+                            fiji_placeholder = all_text
+                            print(f"🔍 ISOLATION TEST: fiji_streaming_config.well_filter placeholder = '{all_text}'")
+
+                # Check step_materialization_config isolation
                 if step_materialization_placeholder:
-                    # Should still show inheritance from step_well_filter_config (value=1), NOT path_planning (value=99)
+                    # Should still show inheritance from step_well_filter_config (value=5), NOT path_planning (value=99)
                     if "pipeline default: 99" in step_materialization_placeholder.lower():
                         raise AssertionError(
                             f"INHERITANCE ISOLATION BUG: step_materialization_config.well_filter incorrectly inherits "
                             f"from path_planning_config (99), shows: '{step_materialization_placeholder}'"
                         )
-                    if "pipeline default: 1" not in step_materialization_placeholder.lower():
+                    if "pipeline default: 5" not in step_materialization_placeholder.lower():
                         raise AssertionError(
                             f"INHERITANCE ISOLATION BUG: step_materialization_config.well_filter should still inherit "
-                            f"from step_well_filter_config (1), but shows: '{step_materialization_placeholder}'"
+                            f"from step_well_filter_config (5), but shows: '{step_materialization_placeholder}'"
                         )
                     print(f"✅ INHERITANCE ISOLATION CORRECT: step_materialization still inherits from step_well_filter")
                 else:
                     raise AssertionError("Could not find step_materialization_config.well_filter widget for isolation test")
+
+                # Check napari_streaming_config isolation
+                if napari_placeholder:
+                    if "pipeline default: 99" in napari_placeholder.lower():
+                        raise AssertionError(
+                            f"STREAMING ISOLATION BUG: napari_streaming_config.well_filter incorrectly inherits "
+                            f"from path_planning_config (99), shows: '{napari_placeholder}'"
+                        )
+                    if "pipeline default: 5" not in napari_placeholder.lower():
+                        raise AssertionError(
+                            f"STREAMING ISOLATION BUG: napari_streaming_config.well_filter should inherit "
+                            f"from step_well_filter_config (5), but shows: '{napari_placeholder}'"
+                        )
+                    print(f"✅ STREAMING ISOLATION CORRECT: napari does not inherit from path_planning")
+                else:
+                    raise AssertionError("Could not find napari_streaming_config.well_filter widget for isolation test")
+
+                # Check fiji_streaming_config isolation
+                if fiji_placeholder:
+                    if "pipeline default: 99" in fiji_placeholder.lower():
+                        raise AssertionError(
+                            f"STREAMING ISOLATION BUG: fiji_streaming_config.well_filter incorrectly inherits "
+                            f"from path_planning_config (99), shows: '{fiji_placeholder}'"
+                        )
+                    if "pipeline default: 5" not in fiji_placeholder.lower():
+                        raise AssertionError(
+                            f"STREAMING ISOLATION BUG: fiji_streaming_config.well_filter should inherit "
+                            f"from step_well_filter_config (5), but shows: '{fiji_placeholder}'"
+                        )
+                    print(f"✅ STREAMING ISOLATION CORRECT: fiji does not inherit from path_planning")
+                else:
+                    raise AssertionError("Could not find fiji_streaming_config.well_filter widget for isolation test")
 
         assertions = [assert_no_placeholder_bugs, assert_inheritance_working]
 
@@ -1461,6 +1527,7 @@ class TestPyQtGUIWorkflowFoundation:
             ("Apply Parameterized Orchestrator Configuration", _apply_orchestrator_config, TIMING.ACTION_DELAY),
             ("Open Configuration Window", _open_config_window, TIMING.WINDOW_DELAY),
             ("Validate Initial Placeholder Behavior", _validate_placeholder_behavior, None),
+            ("Set Step Well Filter for Isolation Test", _set_step_well_filter_for_isolation_test, TIMING.SAVE_DELAY),
             ("Modify Field", _modify_field, TIMING.SAVE_DELAY),
             ("Reopen Configuration Window", _reopen_config_window, TIMING.WINDOW_DELAY),
             ("Validate Field Persistence", _validate_field_persistence, None),
