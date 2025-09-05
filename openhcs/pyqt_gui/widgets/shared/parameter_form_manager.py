@@ -891,13 +891,22 @@ class ParameterFormManager(QWidget):
                     rightmost_field_definer = base_class
                     break  # First match in reverse order = rightmost definer
 
-        # If the source is not the rightmost definer, block inheritance
+        # If the source is not the rightmost definer, check if rightmost inherits from source
         if rightmost_field_definer and rightmost_field_definer != source_base_class:
-            if is_streaming:
-                print(f"🔍 DEBUG: *** STREAMING *** Field '{field_name}' in {target_base_class.__name__} is overridden by {rightmost_field_definer.__name__} (rightmost parent) - blocking inheritance from {source_base_class.__name__}")
+            # CRITICAL FIX: Check if rightmost parent inherits the field from the source
+            # E.g., StreamingConfig inherits well_filter from StepWellFilterConfig
+            if issubclass(rightmost_field_definer, source_base_class):
+                if is_streaming:
+                    print(f"🔍 DEBUG: *** STREAMING *** Field '{field_name}' in {target_base_class.__name__} - rightmost parent {rightmost_field_definer.__name__} inherits from {source_base_class.__name__} - allowing inheritance")
+                else:
+                    print(f"🔍 DEBUG: Field '{field_name}' in {target_base_class.__name__} - rightmost parent {rightmost_field_definer.__name__} inherits from {source_base_class.__name__} - allowing inheritance")
+                # Allow inheritance since rightmost parent gets the field from this source
             else:
-                print(f"🔍 DEBUG: Field '{field_name}' in {target_base_class.__name__} is overridden by {rightmost_field_definer.__name__} (rightmost parent) - blocking inheritance from {source_base_class.__name__}")
-            return False
+                if is_streaming:
+                    print(f"🔍 DEBUG: *** STREAMING *** Field '{field_name}' in {target_base_class.__name__} is overridden by {rightmost_field_definer.__name__} (rightmost parent) - blocking inheritance from {source_base_class.__name__}")
+                else:
+                    print(f"🔍 DEBUG: Field '{field_name}' in {target_base_class.__name__} is overridden by {rightmost_field_definer.__name__} (rightmost parent) - blocking inheritance from {source_base_class.__name__}")
+                return False
 
         # If we get here, source is the rightmost definer for this field
         if is_streaming:

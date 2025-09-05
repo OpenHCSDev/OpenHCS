@@ -1146,6 +1146,49 @@ class AssertionFactory:
                 else:
                     raise AssertionError("Could not find step_materialization_config.well_filter widget for inheritance test")
 
+                # CRITICAL: Also verify streaming configs inherit from step_well_filter_config
+                napari_placeholder = None
+                fiji_placeholder = None
+
+                for form_manager in form_managers:
+                    if (hasattr(form_manager, 'widgets') and
+                        hasattr(form_manager, 'dataclass_type') and
+                        form_manager.dataclass_type and
+                        'well_filter' in form_manager.widgets):
+
+                        if 'NapariStreaming' in form_manager.dataclass_type.__name__:
+                            widget = form_manager.widgets['well_filter']
+                            texts = ValidationEngine.extract_widget_texts(widget)
+                            napari_placeholder = " ".join(texts.values())
+                            print(f"🔍 STREAMING TEST: napari_streaming_config.well_filter placeholder = '{napari_placeholder}'")
+
+                        elif 'FijiStreaming' in form_manager.dataclass_type.__name__:
+                            widget = form_manager.widgets['well_filter']
+                            texts = ValidationEngine.extract_widget_texts(widget)
+                            fiji_placeholder = " ".join(texts.values())
+                            print(f"🔍 STREAMING TEST: fiji_streaming_config.well_filter placeholder = '{fiji_placeholder}'")
+
+                # Verify streaming configs inherit from step_well_filter_config (value=42)
+                if napari_placeholder:
+                    if "pipeline default: 42" not in napari_placeholder.lower():
+                        raise AssertionError(
+                            f"STREAMING INHERITANCE BUG: napari_streaming_config.well_filter should inherit "
+                            f"from step_well_filter_config (42), but shows: '{napari_placeholder}'"
+                        )
+                    print(f"✅ STREAMING INHERITANCE CORRECT: napari inherits from step_well_filter")
+                else:
+                    raise AssertionError("Could not find napari_streaming_config.well_filter widget for streaming test")
+
+                if fiji_placeholder:
+                    if "pipeline default: 42" not in fiji_placeholder.lower():
+                        raise AssertionError(
+                            f"STREAMING INHERITANCE BUG: fiji_streaming_config.well_filter should inherit "
+                            f"from step_well_filter_config (42), but shows: '{fiji_placeholder}'"
+                        )
+                    print(f"✅ STREAMING INHERITANCE CORRECT: fiji inherits from step_well_filter")
+                else:
+                    raise AssertionError("Could not find fiji_streaming_config.well_filter widget for streaming test")
+
             elif scenario.name == "inheritance_hierarchy_path_planning_isolation":
                 # Test: path_planning_config.well_filter = 99 should NOT affect step_materialization_config placeholder
                 form_managers = context.config_window.findChildren(ParameterFormManager)
