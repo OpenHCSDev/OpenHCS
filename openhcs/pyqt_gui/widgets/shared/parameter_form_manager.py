@@ -503,32 +503,39 @@ class ParameterFormManager(QWidget):
 
 
     def _build_context_from_current_form_values(self) -> Any:
-        """Build context respecting MRO precedence for placeholder resolution."""
+        """Build context preserving complete inheritance hierarchy for MRO-based placeholder resolution."""
         from openhcs.core.context.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         from dataclasses import replace
 
-        # Get current thread-local context as base
+        # Get current thread-local context as base - this contains ALL dataclass instances
         current_context = get_current_global_config(GlobalPipelineConfig)
         if not current_context:
             return None
 
-        # CRITICAL FIX: Only update context with values from THIS form's dataclass
-        # Don't include values from other forms that would break MRO precedence
-        context_updates = {}
+        # CRITICAL FIX: Return the complete context with ALL dataclass instances
+        # This preserves the full inheritance hierarchy needed for MRO-based resolution
+        # The placeholder resolution system needs to see the complete hierarchy:
+        # - well_filter_config: LazyWellFilterConfig(well_filter='2')
+        # - step_well_filter_config: LazyStepWellFilterConfig(well_filter='5')
+        # - step_materialization_config: LazyStepMaterializationConfig(well_filter=None)
+        #
+        # When resolving StepMaterializationConfig.well_filter, the MRO walk will:
+        # 1. Check StepMaterializationConfig (well_filter=None) -> continue
+        # 2. Check StepWellFilterConfig (well_filter='5') -> FOUND! Use this value
+        # 3. Skip WellFilterConfig (well_filter='2') -> lower precedence
 
-        # Get the field name that corresponds to this form's dataclass in the global config
+        # Update only THIS form's dataclass instance while preserving all others
+        context_updates = {}
         form_field_name = self.field_id
         if hasattr(current_context, form_field_name):
-            # Only update the specific dataclass field for this form
-            # This preserves MRO precedence by not flattening the inheritance hierarchy
             current_dataclass_instance = getattr(current_context, form_field_name)
             if current_dataclass_instance:
                 # Update with current parameter values for this specific dataclass
                 updated_instance = replace(current_dataclass_instance, **self.parameters)
                 context_updates[form_field_name] = updated_instance
 
-        # Return updated context preserving inheritance hierarchy
+        # Return updated context preserving COMPLETE inheritance hierarchy
         return replace(current_context, **context_updates) if context_updates else current_context
 
     def _refresh_all_placeholders_with_current_context(self) -> None:
@@ -921,16 +928,24 @@ class ParameterFormManager(QWidget):
         target_base = target_dataclass_type.__bases__[0] if target_dataclass_type.__bases__ else target_dataclass_type
         source_base = source_dataclass_type.__bases__[0] if source_dataclass_type.__bases__ else source_dataclass_type
 
-        # CRITICAL: Check if target itself defines this field with a concrete value
-        if field_name in target_base.__annotations__:
-            target_fields = {f.name: f for f in fields(target_base)}
-            if field_name in target_fields:
-                target_field = target_fields[field_name]
-                target_default = target_field.default if target_field.default is not dataclasses.MISSING else None
+        # CRITICAL FIX: For lazy dataclasses, check the actual instance value, not static defaults
+        # This is because inherit_as_none configs have static defaults but None instance values
+        if hasattr(self, 'parameters') and field_name in self.parameters:
+            current_instance_value = self.parameters[field_name]
+            # If the current instance has a concrete value (not None), it doesn't inherit
+            if current_instance_value is not None:
+                return False
+        else:
+            # Fallback to static field check for non-lazy dataclasses
+            if field_name in target_base.__annotations__:
+                target_fields = {f.name: f for f in fields(target_base)}
+                if field_name in target_fields:
+                    target_field = target_fields[field_name]
+                    target_default = target_field.default if target_field.default is not dataclasses.MISSING else None
 
-                # If target has its own concrete value, it doesn't inherit
-                if target_default is not None:
-                    return False
+                    # If target has its own concrete value, it doesn't inherit
+                    if target_default is not None:
+                        return False
 
         # Use MRO to find next appropriate parent for inheritance
         return self._is_next_in_mro_with_field(target_base, source_base, field_name)

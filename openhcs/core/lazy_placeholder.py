@@ -202,6 +202,122 @@ def _handle_optional_nested_config(instance, nested_field_name: str, target_fiel
     return None
 
 
+def _apply_subclass_precedence(concrete_values, field_name: str):
+    """
+    Apply generic subclass precedence to resolve field collisions.
+
+    When multiple classes define the same field, subclasses take precedence
+    over their parent classes. This handles cases like:
+    - StepWellFilterConfig.well_filter takes precedence over WellFilterConfig.well_filter
+    - Any subclass takes precedence over its parent for colliding fields
+
+    Args:
+        concrete_values: List of (value, source_class, field_path, config_instance)
+        field_name: Name of the field being resolved
+
+    Returns:
+        Filtered list with parent class values removed when subclass has concrete value
+    """
+    if len(concrete_values) <= 1:
+        return concrete_values
+
+    print(f"🔍 DEBUG: Applying subclass precedence for {len(concrete_values)} concrete values")
+
+    # Group by class hierarchy - remove parent values when subclass has concrete value
+    classes_with_values = [source_class for _, source_class, _, _ in concrete_values]
+    filtered_values = []
+
+    for value, source_class, field_path, config_instance in concrete_values:
+        # Check if this class has any subclasses in the list with concrete values
+        has_subclass_with_value = any(
+            other_class != source_class and issubclass(other_class, source_class)
+            for other_class in classes_with_values
+        )
+
+        if not has_subclass_with_value:
+            # No subclass has a concrete value, so include this one
+            filtered_values.append((value, source_class, field_path, config_instance))
+            print(f"🔍 DEBUG: Including {source_class.__name__}.{field_name} = '{value}' (no subclass override)")
+        else:
+            print(f"🔍 DEBUG: Excluding {source_class.__name__}.{field_name} = '{value}' (subclass takes precedence)")
+
+    return filtered_values
+
+
+def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, field_name: str):
+    """
+    Resolve field using LAZY-FIRST resolution order.
+
+    For lazy dataclasses, the resolution order is:
+    1. Check lazy dataclass instances for concrete values (highest MRO precedence first)
+    2. Follow the lazy resolution chain through the context
+    3. Only fall back to static defaults if no concrete values found
+    """
+    from openhcs.core.field_path_detection import FieldPathDetector
+    from openhcs.core.lazy_config import get_base_type_for_lazy, FieldPathNavigator
+
+    if not global_config:
+        return None
+
+    # Get the base class if this is a lazy type
+    base_class = get_base_type_for_lazy(target_dataclass_type)
+    if not base_class:
+        base_class = target_dataclass_type
+
+    print(f"🔍 DEBUG: LAZY-FIRST resolution for {base_class.__name__}.{field_name}")
+
+    # STEP 1: Check lazy dataclass instances for concrete values (MRO order)
+    # CRITICAL FIX: Skip the target class itself for inherit_as_none configs
+    # Target class should inherit from parents, not use its own static defaults
+    mro_types = [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
+    print(f"🔍 DEBUG: MRO classes with field '{field_name}' (excluding target): {[cls.__name__ for cls in mro_types]}")
+
+    # CRITICAL FIX: Collect ALL concrete values first, then apply subclass precedence
+    concrete_values = []  # List of (value, source_class, field_path, config_instance)
+
+    for mro_class in mro_types:
+        field_paths = FieldPathDetector.find_all_field_paths_unified(type(global_config), mro_class)
+        print(f"🔍 DEBUG: Checking lazy instances for {mro_class.__name__}: {field_paths}")
+
+        for field_path in field_paths:
+            config_instance = FieldPathNavigator.navigate_to_instance(global_config, field_path)
+            if config_instance and hasattr(config_instance, field_name):
+                value = getattr(config_instance, field_name)
+                print(f"🔍 DEBUG: Lazy instance {field_path}.{field_name} = '{value}'")
+                if value is not None:
+                    concrete_values.append((value, mro_class, field_path, config_instance))
+
+    # GENERIC SUBCLASS PRECEDENCE: Filter out parent class values when subclass has concrete value
+    if len(concrete_values) > 1:
+        print(f"🔍 DEBUG: Multiple concrete values found, applying subclass precedence")
+        filtered_values = _apply_subclass_precedence(concrete_values, field_name)
+        if filtered_values:
+            value, source_class, field_path, _ = filtered_values[0]
+            print(f"✅ DEBUG: SUBCLASS PRECEDENCE - using '{value}' from {source_class.__name__} (highest precedence)")
+            return value
+    elif len(concrete_values) == 1:
+        value, source_class, field_path, _ = concrete_values[0]
+        print(f"✅ DEBUG: LAZY-FIRST - using concrete value '{value}' from {source_class.__name__}")
+        return value
+
+    # STEP 2: If no concrete values found, create lazy instance and let it resolve
+    print(f"🔍 DEBUG: No concrete values found, falling back to lazy resolution")
+    try:
+        temp_instance = target_dataclass_type()
+        if hasattr(temp_instance, '_resolve_field_value'):
+            resolved_value = temp_instance._resolve_field_value(field_name)
+            print(f"🔍 DEBUG: Lazy resolution returned: '{resolved_value}'")
+            return resolved_value
+        else:
+            # Final fallback to getattr
+            resolved_value = getattr(temp_instance, field_name)
+            print(f"🔍 DEBUG: getattr fallback returned: '{resolved_value}'")
+            return resolved_value
+    except Exception as e:
+        print(f"🔍 DEBUG: Lazy resolution failed: {e}")
+        return None
+
+
 def _search_in_global_config_inheritance(instance, field_name: str):
     """Search for field_name in global config using actual inheritance relationships."""
     print(f"🔍 DEBUG: _search_in_global_config_inheritance called for {type(instance).__name__}.{field_name}")
@@ -218,11 +334,12 @@ def _search_in_global_config_inheritance(instance, field_name: str):
 
     print(f"🔍 DEBUG: Searching inheritance for {base_class.__name__}.{field_name}")
 
-    # Use existing FieldPathDetector to find inheritance relationships
-    parent_types = FieldPathDetector.find_inheritance_relationships(base_class)
-    print(f"🔍 DEBUG: Found parent types: {[p.__name__ for p in parent_types]}")
+    # CRITICAL FIX: Use MRO order instead of arbitrary inheritance relationships
+    # This ensures we respect Python's Method Resolution Order for precedence
+    mro_types = [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__')]
+    print(f"🔍 DEBUG: MRO-ordered parent types: {[p.__name__ for p in mro_types]}")
 
-    for parent_type in parent_types:
+    for parent_type in mro_types:
         print(f"🔍 DEBUG: Checking parent type: {parent_type.__name__}")
         # Check if this parent has the field we're looking for
         if hasattr(parent_type, '__dataclass_fields__'):
@@ -304,12 +421,18 @@ class LazyDefaultPlaceholderService:
             current_context = get_current_global_config(GlobalPipelineConfig)
             set_current_global_config(GlobalPipelineConfig, app_config)
             try:
-                # CRITICAL FIX: Directly extract the value from the temporarily set context
-                # This bypasses all lazy resolution and uses the exact context values
+                # CRITICAL FIX: Use MRO-aware resolution instead of composition-only search
+                # This ensures we respect inheritance precedence when searching the context
                 current_app_config = get_current_global_config(GlobalPipelineConfig)
-                resolved_value = _resolve_field_with_composition_awareness(current_app_config, field_name)
 
-                # If not found in context, fall back to lazy resolution
+                # First try MRO-aware resolution for inheritance-based fields
+                resolved_value = _resolve_field_with_mro_awareness(current_app_config, dataclass_type, field_name)
+
+                # If not found via MRO, fall back to composition search
+                if resolved_value is None:
+                    resolved_value = _resolve_field_with_composition_awareness(current_app_config, field_name)
+
+                # If still not found in context, fall back to lazy resolution
                 if resolved_value is None and hasattr(dataclass_type, '_resolve_field_value'):
                     temp_instance = dataclass_type()
                     resolved_value = _resolve_field_with_composition_awareness(temp_instance, field_name)
