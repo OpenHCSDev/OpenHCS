@@ -877,9 +877,33 @@ class ParameterFormManager(QWidget):
         if field_name not in target_fields or field_name not in source_fields:
             return False
 
-        # SIMPLIFIED: If target inherits from source and both have the field, allow inheritance
-        # The complex override detection was causing more problems than it solved
-        print(f"🔍 DEBUG: {target_dataclass_type.__name__} can inherit '{field_name}' from {source_dataclass_type.__name__}")
+        # CRITICAL FIX: Use inheritance declaration order, not MRO
+        # For fields, rightmost parent in declaration should win, not MRO order
+        # StepMaterializationConfig(PathPlanningConfig, StepWellFilterConfig)
+        # -> StepWellFilterConfig should win for well_filter, not PathPlanningConfig
+
+        rightmost_field_definer = None
+        # Check direct parents in reverse order (rightmost = most specific for fields)
+        for base_class in reversed(target_base_class.__bases__):
+            if is_dataclass(base_class):
+                base_fields = {f.name: f for f in fields(base_class)}
+                if field_name in base_fields:
+                    rightmost_field_definer = base_class
+                    break  # First match in reverse order = rightmost definer
+
+        # If the source is not the rightmost definer, block inheritance
+        if rightmost_field_definer and rightmost_field_definer != source_base_class:
+            if is_streaming:
+                print(f"🔍 DEBUG: *** STREAMING *** Field '{field_name}' in {target_base_class.__name__} is overridden by {rightmost_field_definer.__name__} (rightmost parent) - blocking inheritance from {source_base_class.__name__}")
+            else:
+                print(f"🔍 DEBUG: Field '{field_name}' in {target_base_class.__name__} is overridden by {rightmost_field_definer.__name__} (rightmost parent) - blocking inheritance from {source_base_class.__name__}")
+            return False
+
+        # If we get here, source is the rightmost definer for this field
+        if is_streaming:
+            print(f"🔍 DEBUG: *** STREAMING *** {target_dataclass_type.__name__} can inherit '{field_name}' from {source_dataclass_type.__name__} (rightmost parent)")
+        else:
+            print(f"🔍 DEBUG: {target_dataclass_type.__name__} can inherit '{field_name}' from {source_dataclass_type.__name__} (rightmost parent)")
         return True
 
     def _find_most_specific_field_source(self, target_dataclass_type: type, field_name: str) -> type:
@@ -904,6 +928,98 @@ class ParameterFormManager(QWidget):
                 if field_name in cls_fields:
                     print(f"🔍 DEBUG: Found field '{field_name}' in MRO class {cls.__name__} (most specific)")
                     return cls
+
+        return None
+
+    def _is_field_inheritance_allowed_by_rightmost_parent(self, field_name: str, updated_context, original_placeholder: str, updated_placeholder: str) -> bool:
+        """
+        Check if field inheritance is allowed by rightmost parent override logic.
+
+        This prevents fields from inheriting from non-rightmost parents when a rightmost parent
+        defines the same field (e.g., StepMaterializationConfig.well_filter should only inherit
+        from StepWellFilterConfig, not PathPlanningConfig).
+        """
+        from dataclasses import fields, is_dataclass
+
+        if not self.dataclass_type or not is_dataclass(self.dataclass_type):
+            return True
+
+        # Get base class (handle lazy classes)
+        target_base_class = self.dataclass_type.__bases__[0] if self.dataclass_type.__bases__ else self.dataclass_type
+
+        # Find rightmost parent that defines this field
+        rightmost_field_definer = None
+        for base_class in reversed(target_base_class.__bases__):
+            if is_dataclass(base_class):
+                base_fields = {f.name: f for f in fields(base_class)}
+                if field_name in base_fields:
+                    rightmost_field_definer = base_class
+                    break
+
+        if not rightmost_field_definer:
+            # No parent defines this field, inheritance is allowed
+            return True
+
+        # Check if the inheritance source in the updated context matches the rightmost parent
+        # We do this by checking which config in the updated context could have caused this change
+        rightmost_config_name = self._get_config_name_for_class(rightmost_field_definer)
+
+        if rightmost_config_name:
+            # Get the rightmost parent's value from the updated context
+            rightmost_config = getattr(updated_context, rightmost_config_name, None)
+            if rightmost_config and hasattr(rightmost_config, field_name):
+                rightmost_value = getattr(rightmost_config, field_name)
+
+                # If the updated placeholder contains the rightmost parent's value, inheritance is allowed
+                if rightmost_value is not None and str(rightmost_value) in updated_placeholder:
+                    print(f"🔍 DEBUG: Field '{field_name}' inheritance allowed - comes from rightmost parent {rightmost_field_definer.__name__}")
+                    return True
+                else:
+                    print(f"🔍 DEBUG: Field '{field_name}' inheritance blocked - does not come from rightmost parent {rightmost_field_definer.__name__}")
+                    return False
+
+        # Default to allowing inheritance if we can't determine the source
+        return True
+
+    def _get_config_name_for_class(self, dataclass_type: type) -> str:
+        """Get the config field name for a dataclass type."""
+        class_name = dataclass_type.__name__
+
+        # Convert class names to config field names
+        name_mapping = {
+            'PathPlanningConfig': 'path_planning_config',
+            'StepWellFilterConfig': 'step_well_filter_config',
+            'StepMaterializationConfig': 'step_materialization_config',
+            'WellFilterConfig': 'well_filter_config',
+            'ZarrConfig': 'zarr_config',
+            'VFSConfig': 'vfs_config',
+            # Add more mappings as needed
+        }
+
+        return name_mapping.get(class_name)
+
+    def _find_most_specific_field_source_for_target(self, target_dataclass_type: type, field_name: str) -> type:
+        """
+        Find the most specific class that defines a field for a target class.
+
+        For multiple inheritance like StepMaterializationConfig(PathPlanningConfig, StepWellFilterConfig),
+        if both parents define the same field, the rightmost (most specific) parent wins.
+
+        This is different from _find_most_specific_field_source because it looks at the target's
+        direct inheritance hierarchy, not a general MRO search.
+        """
+        from dataclasses import fields, is_dataclass
+
+        if not is_dataclass(target_dataclass_type):
+            return None
+
+        # Check direct parents in reverse order (rightmost = most specific)
+        for base_class in reversed(target_dataclass_type.__bases__):
+            if is_dataclass(base_class):
+                base_fields = {f.name: f for f in fields(base_class)}
+                if field_name in base_fields:
+                    print(f"🔍 DEBUG: Most specific source for '{field_name}' in {target_dataclass_type.__name__} is {base_class.__name__}")
+                    return base_class
 
         return None
 
@@ -1025,6 +1141,27 @@ class ParameterFormManager(QWidget):
             # Only update if the placeholder actually changed (indicating inheritance relationship)
             if (updated_placeholder and original_placeholder and
                 updated_placeholder != original_placeholder):
+
+                # CRITICAL FIX: Check if this field inheritance is allowed by rightmost parent logic
+                # We need to verify that the inheritance source is the rightmost parent for this field
+                inheritance_allowed = self._is_field_inheritance_allowed_by_rightmost_parent(
+                    param_name, updated_context, original_placeholder, updated_placeholder
+                )
+
+                if not inheritance_allowed:
+                    print(f"🔍 DEBUG: Field '{param_name}' inheritance blocked by rightmost parent override")
+                    print(f"🔍 DEBUG: Original placeholder: '{original_placeholder}'")
+                    print(f"🔍 DEBUG: Blocked placeholder: '{updated_placeholder}'")
+                    print(f"🔍 DEBUG: Current widget placeholder: '{widget.placeholderText() if hasattr(widget, 'placeholderText') else 'N/A'}'")
+
+                    # CRITICAL FIX: Ensure the widget shows the correct original placeholder
+                    if original_placeholder and hasattr(widget, 'setPlaceholderText'):
+                        widget.setPlaceholderText(original_placeholder)
+                        PyQt6WidgetEnhancer.apply_placeholder_text(widget, original_placeholder)
+                        print(f"🔍 DEBUG: Restored original placeholder: '{original_placeholder}'")
+
+                    continue
+
                 print(f"🔍 DEBUG: Inheritance detected for '{param_name}': '{original_placeholder}' -> '{updated_placeholder}'")
 
                 # CRITICAL FIX: Only update placeholder text, NEVER modify field values
