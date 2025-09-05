@@ -279,7 +279,6 @@ class PathPlanningConfig(WellFilterConfig):
     sub_dir: str = "images"
     """
     Subdirectory within plate folder for storing processed data.
-    Automatically adds .zarr suffix when using zarr backend.
     Examples: "images", "processed", "data/images"
     """
 
@@ -293,7 +292,7 @@ class StepWellFilterConfig(WellFilterConfig):
 
 @global_pipeline_config
 @dataclass(frozen=True)
-class StepMaterializationConfig(PathPlanningConfig, StepWellFilterConfig):
+class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     """
     Configuration for per-step materialization - configurable in UI.
 
@@ -341,6 +340,8 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
 
     Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
     """
+    # Override to None to enable lazy resolution from StepWellFilterConfig
+    well_filter: Optional[List[str]] = None
 
     @property
     @abstractmethod
@@ -371,7 +372,6 @@ class NapariStreamingConfig(StreamingConfig):
     """Configuration for napari streaming."""
     napari_port: int = 5555
     """Port for napari streaming communication."""
-    well_filter: Optional[List[str]] = None
 
     @property
     def backend(self) -> Backend:
@@ -401,8 +401,6 @@ class FijiStreamingConfig(StreamingConfig):
     """Configuration for fiji streaming."""
     fiji_executable_path: Optional[Path] = None
     """Path to Fiji/ImageJ executable. If None, will auto-detect."""
-
-    well_filter: Optional[List[str]] = None
 
     @property
     def backend(self) -> Backend:
