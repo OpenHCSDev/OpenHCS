@@ -827,15 +827,14 @@ class ParameterFormManager(QWidget):
         """
         # Check each field to see if it should inherit from the changed dataclass
         for param_name, current_value in manager.parameters.items():
-            # CRITICAL FIX: Check inheritance for both None and non-None fields
-            # If the manager's dataclass directly inherits from the changed dataclass,
-            # inheritance should apply regardless of current value
-            if self._field_inherits_from_dataclass(manager.dataclass_type, param_name, changed_dataclass_type):
-                if current_value is None:
-                    print(f"🔍 DEBUG: Field '{param_name}' inherits from {changed_dataclass_type.__name__} via Python inheritance (None value)")
-                else:
-                    print(f"🔍 DEBUG: Field '{param_name}' inherits from {changed_dataclass_type.__name__} via Python inheritance (overriding non-None value)")
+            # CRITICAL FIX: Only allow inheritance for None values
+            # Concrete values should not inherit from parent classes
+            if current_value is None and self._field_inherits_from_dataclass(manager.dataclass_type, param_name, changed_dataclass_type):
+                print(f"🔍 DEBUG: Field '{param_name}' inherits from {changed_dataclass_type.__name__} via Python inheritance (None value)")
                 return True
+            elif current_value is not None and self._field_inherits_from_dataclass(manager.dataclass_type, param_name, changed_dataclass_type):
+                print(f"🔍 DEBUG: Field '{param_name}' has concrete value '{current_value}' - blocking inheritance from {changed_dataclass_type.__name__}")
+                # Don't return True - concrete values block inheritance
 
         return False
 
