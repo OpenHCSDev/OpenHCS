@@ -173,6 +173,9 @@ class ParameterFormManager(QWidget):
         # Set up UI
         self.setup_ui()
 
+        # CRITICAL FIX: Refresh placeholders after form is built to show inheritance
+        self._refresh_all_placeholders_with_current_context()
+
     @classmethod
     def from_dataclass_instance(cls, dataclass_instance: Any, field_id: str,
                               placeholder_prefix: str = "Default",
@@ -310,7 +313,7 @@ class ParameterFormManager(QWidget):
             f"{self.field_id}_{param_info.name}",
             self.parameter_info.get(param_info.name)
         )
-        # SIMPLIFIED: Apply placeholder using thread-local context directly
+        # SIMPLIFIED: Use thread-local context during initial widget creation to avoid recursion
         if current_value is None and self.config.is_lazy_dataclass:
             placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                 self.dataclass_type, param_info.name,
@@ -498,6 +501,55 @@ class ParameterFormManager(QWidget):
 
 
 
+
+    def _build_context_from_current_form_values(self) -> Any:
+        """Build context respecting MRO precedence for placeholder resolution."""
+        from openhcs.core.context.global_config import get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+        from dataclasses import replace
+
+        # Get current thread-local context as base
+        current_context = get_current_global_config(GlobalPipelineConfig)
+        if not current_context:
+            return None
+
+        # CRITICAL FIX: Only update context with values from THIS form's dataclass
+        # Don't include values from other forms that would break MRO precedence
+        context_updates = {}
+
+        # Get the field name that corresponds to this form's dataclass in the global config
+        form_field_name = self.field_id
+        if hasattr(current_context, form_field_name):
+            # Only update the specific dataclass field for this form
+            # This preserves MRO precedence by not flattening the inheritance hierarchy
+            current_dataclass_instance = getattr(current_context, form_field_name)
+            if current_dataclass_instance:
+                # Update with current parameter values for this specific dataclass
+                updated_instance = replace(current_dataclass_instance, **self.parameters)
+                context_updates[form_field_name] = updated_instance
+
+        # Return updated context preserving inheritance hierarchy
+        return replace(current_context, **context_updates) if context_updates else current_context
+
+    def _refresh_all_placeholders_with_current_context(self) -> None:
+        """Refresh all placeholders using current form values to show inheritance."""
+        if not self.config.is_lazy_dataclass:
+            return
+
+        # Build context from current form values
+        current_form_context = self._build_context_from_current_form_values()
+
+        # Refresh placeholders for all None-valued fields
+        for param_name, widget in self.widgets.items():
+            current_value = self.parameters.get(param_name)
+            if current_value is None:
+                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type, param_name,
+                    app_config=current_form_context,
+                    placeholder_prefix=self.placeholder_prefix
+                )
+                if placeholder_text:
+                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
     def _emit_parameter_change(self, param_name: str, value: Any) -> None:
         """Handle parameter change from widget and update parameter data model."""

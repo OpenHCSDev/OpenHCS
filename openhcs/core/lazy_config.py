@@ -674,13 +674,14 @@ def create_global_default_decorator(target_config_class: Type):
             'configs_to_inject': []
         }
 
-    def global_default_decorator(cls=None, *, optional: bool = False):
+    def global_default_decorator(cls=None, *, optional: bool = False, inherit_as_none: bool = True):
         """
         Decorator that can be used with or without parameters.
 
         Args:
             cls: The class being decorated (when used without parentheses)
             optional: Whether to wrap the field type with Optional (default: False)
+            inherit_as_none: Whether to set all inherited fields to None by default (default: True)
         """
         def decorator(actual_cls):
             # Generate field and class names
@@ -692,7 +693,8 @@ def create_global_default_decorator(target_config_class: Type):
                 'config_class': actual_cls,
                 'field_name': field_name,
                 'lazy_class_name': lazy_class_name,
-                'optional': optional  # Store the optional flag
+                'optional': optional,  # Store the optional flag
+                'inherit_as_none': inherit_as_none  # Store the inherit_as_none flag
             })
 
             # Immediately create lazy version of this config (not dependent on injection)
@@ -746,18 +748,48 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
         for f in fields(target_class)
     ]
 
-    # Mathematical simplification: Single expression for all field construction with optional support
+    # Mathematical simplification: Single expression for all field construction with optional and inherit_as_none support
     def create_field_definition(config):
-        """Create field definition with optional support."""
+        """Create field definition with optional and inherit_as_none support."""
         from typing import Union
+        from dataclasses import fields as get_fields
 
         field_type = config['config_class']
         is_optional = config.get('optional', False)
+        inherit_as_none = config.get('inherit_as_none', False)
 
         if is_optional:
             # Wrap with Optional and use None as default
             field_type = Union[field_type, type(None)]
             default_value = None
+        elif inherit_as_none:
+            # SYNTACTIC SUGAR: Automatically set all inherited fields to None
+            # This allows explicit overrides while enabling inheritance for None fields
+
+            # Get all inherited fields from parent classes with correct types
+            # CRITICAL FIX: Only add fields that aren't already defined in the target class
+            existing_field_names = {f.name for f in get_fields(field_type)}
+            inherited_field_definitions = []
+
+            for base in field_type.__bases__:
+                if hasattr(base, '__dataclass_fields__'):
+                    for parent_field in get_fields(base):
+                        # Only add inherited fields that aren't already defined in target class
+                        if parent_field.name not in existing_field_names:
+                            inherited_field_definitions.append((parent_field.name, parent_field.type, None))
+
+            # Create modified dataclass with inherited fields set to None
+            if inherited_field_definitions:
+                # Create new dataclass with inherited fields defaulting to None but preserving types
+                modified_class = make_dataclass(
+                    f"{field_type.__name__}WithInheritAsNone",
+                    inherited_field_definitions,
+                    bases=(field_type,),
+                    frozen=getattr(field_type, '__dataclass_params__', type('', (), {'frozen': True})).frozen
+                )
+                field_type = modified_class
+
+            default_value = field(default_factory=field_type)
         else:
             # Use default factory for required fields - use lazy class, not base class
             # field_type is already the lazy type, so use it for the default factory
