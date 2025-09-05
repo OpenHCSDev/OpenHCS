@@ -637,6 +637,37 @@ class WidgetFinder:
         return None
 
     @staticmethod
+    def find_field_widget_in_config_section(form_managers: List[ParameterFormManager],
+                                           field_name: str, config_section: str) -> Optional[Any]:
+        """Find widget for specified field name in a specific config section."""
+        print(f"🔍 DEBUG: Looking for field '{field_name}' in config section '{config_section}' across {len(form_managers)} form managers")
+
+        # Convert config_section to expected dataclass name patterns
+        expected_dataclass_patterns = [
+            config_section,  # exact match
+            f"Lazy{config_section}",  # LazyStepWellFilterConfig
+            f"Lazy{config_section.replace('_config', '').title().replace('_', '')}Config",  # LazyStepWellFilterConfig
+            config_section.replace('_config', '').title().replace('_', '') + 'Config',  # StepWellFilterConfig
+        ]
+
+        print(f"🔍 DEBUG: Expected dataclass patterns: {expected_dataclass_patterns}")
+
+        for i, form_manager in enumerate(form_managers):
+            if hasattr(form_manager, 'widgets') and form_manager.widgets and field_name in form_manager.widgets:
+                dataclass_name = getattr(form_manager.dataclass_type, '__name__', 'Unknown') if hasattr(form_manager, 'dataclass_type') else 'No dataclass'
+                print(f"🔍 DEBUG: Checking form manager [{i}] {dataclass_name}")
+
+                # Check if this form manager matches the expected config section
+                if any(pattern.lower() in dataclass_name.lower() for pattern in expected_dataclass_patterns):
+                    print(f"🔍 DEBUG: Found '{field_name}' in correct config section '{config_section}' - form manager [{i}] {dataclass_name}")
+                    return form_manager.widgets[field_name]
+                else:
+                    print(f"🔍 DEBUG: Skipping form manager [{i}] {dataclass_name} (doesn't match config section '{config_section}')")
+
+        print(f"🔍 DEBUG: Field '{field_name}' not found in config section '{config_section}'")
+        return None
+
+    @staticmethod
     def find_button_by_text(parent_widget, button_texts: List[str]) -> Optional[QPushButton]:
         """Find button by text using lookup table approach."""
         button_texts_lower = [text.lower() for text in button_texts]
@@ -700,7 +731,8 @@ def _modify_field(context: WorkflowContext) -> WorkflowContext:
     config_section = context.test_scenario.field_to_test.config_section
 
     form_managers = context.config_window.findChildren(ParameterFormManager)
-    field_widget = WidgetFinder.find_field_widget(form_managers, field_name)
+    # CRITICAL FIX: Use config-section-specific field finder to target the correct form manager
+    field_widget = WidgetFinder.find_field_widget_in_config_section(form_managers, field_name, config_section)
 
     print(f"🔧 MODIFY FIELD: Targeting {config_section}.{field_name} = {field_value}")
 

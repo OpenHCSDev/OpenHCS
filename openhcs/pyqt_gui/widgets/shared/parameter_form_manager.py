@@ -203,13 +203,14 @@ class ParameterFormManager(QWidget):
         parameters = {}
         parameter_types = {}
 
+        # CRITICAL FIX: Get dataclass type BEFORE the loop, not inside it
+        dataclass_type = type(dataclass_instance)
+
         # Algebraic simplification: Single loop with conditional attribute access
         for field_obj in fields(dataclass_instance):
             parameters[field_obj.name] = (object.__getattribute__(dataclass_instance, field_obj.name) if is_lazy
                                         else getattr(dataclass_instance, field_obj.name))
             parameter_types[field_obj.name] = field_obj.type
-
-            dataclass_type = type(dataclass_instance)
 
         # Create ParameterFormManager with extracted data
         form_manager = cls(
@@ -498,23 +499,23 @@ class ParameterFormManager(QWidget):
         self.parameter_changed.emit(param_name, converted_value)
 
     def _update_dependent_placeholders(self, changed_param: str) -> None:
-        """Update placeholders for fields that might inherit from changed parameter."""
+        """DISABLED: This method should not update placeholders within the same dataclass.
+
+        Placeholder updates should only happen when sibling dataclasses change, not when
+        fields within the same dataclass change. The inheritance hierarchy is between
+        different dataclasses, not between fields within the same dataclass.
+
+        For example:
+        - step_well_filter_config.well_filter changes -> should update step_materialization_config.well_filter
+        - But step_materialization_config.well_filter changes -> should NOT update other fields in step_materialization_config
+        """
         if not self.config.is_lazy_dataclass:
             return
 
-        # Update placeholders for None fields using current thread-local context
-        for param_name, widget in self.widgets.items():
-            if (param_name != changed_param and
-                self.parameters.get(param_name) is None):
-
-                # Use existing placeholder resolution with current thread-local context
-                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    self.dataclass_type, param_name,
-                    placeholder_prefix=self.placeholder_prefix
-                )
-
-                if placeholder_text and hasattr(widget, 'setPlaceholderText'):
-                    widget.setPlaceholderText(placeholder_text)
+        # CRITICAL FIX: Disable intra-dataclass placeholder updates
+        # Only sibling dataclass updates should trigger placeholder changes
+        print(f"🔍 DEBUG: _update_dependent_placeholders called for '{changed_param}' - DISABLED (intra-dataclass updates not allowed)")
+        return
 
     def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None, skip_context_behavior: bool = False) -> None:
         """Mathematical simplification: Unified widget update using shared dispatch."""
@@ -741,11 +742,13 @@ class ParameterFormManager(QWidget):
 
                     # Update sibling placeholders with updated context directly
                     print(f"🔍 DEBUG: Calling _update_sibling_placeholders_with_updated_context")
-                    self._update_sibling_placeholders_with_updated_context(parent_name, reconstructed_instance)
+                    # CRITICAL FIX: Pass the nested manager's dataclass type, not the parent's type
+                    nested_dataclass_type = nested_manager.dataclass_type if nested_manager else nested_type
+                    self._update_sibling_placeholders_with_updated_context(parent_name, reconstructed_instance, nested_dataclass_type)
 
                     self.parameter_changed.emit(parent_name, reconstructed_instance)
 
-    def _update_sibling_placeholders_with_updated_context(self, changed_field_name: str, new_value: Any) -> None:
+    def _update_sibling_placeholders_with_updated_context(self, changed_field_name: str, new_value: Any, changed_dataclass_type: type = None) -> None:
         """Update sibling manager placeholders with the updated context directly."""
         from openhcs.core.context.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
@@ -764,13 +767,115 @@ class ParameterFormManager(QWidget):
             updated_context = replace(current_context, **{changed_field_name: new_value})
             print(f"🔍 DEBUG: Created updated context with {changed_field_name} = {new_value}")
 
-            # Refresh all sibling managers with the updated context
-            print(f"🔍 DEBUG: Refreshing {len(self.nested_managers)} sibling managers with updated context")
+            # PYTHON INHERITANCE APPROACH: Check inheritance relationships using Python's type system
+            print(f"🔍 DEBUG: Checking {len(self.nested_managers)} sibling managers for inheritance relationships")
+
+            # CRITICAL FIX: Use the passed dataclass type (from nested manager) instead of parent's type
+            if changed_dataclass_type is None:
+                # Fallback to self.dataclass_type for backward compatibility
+                changed_dataclass_type = self.dataclass_type
+
+            if not changed_dataclass_type:
+                print(f"🔍 DEBUG: Could not determine changed dataclass type")
+                return
+
+            print(f"🔍 DEBUG: Changed dataclass type: {changed_dataclass_type.__name__} (from nested manager)")
+
             for manager_name, manager in self.nested_managers.items():
-                print(f"🔍 DEBUG: Refreshing manager '{manager_name}' (type: {getattr(manager, 'dataclass_type', 'unknown')})")
-                manager.refresh_placeholder_text_with_context(updated_context)
+                manager_dataclass_type = getattr(manager, 'dataclass_type', None)
+                if manager_dataclass_type is None:
+                    print(f"🔍 DEBUG: Skipping manager '{manager_name}' (no dataclass_type)")
+                    continue
+
+                print(f"🔍 DEBUG: Checking manager '{manager_name}' ({manager_dataclass_type.__name__})")
+
+                # Check if this manager has any None fields that inherit from the changed dataclass
+                has_affected_fields = self._manager_has_inheritance_from_dataclass(manager, changed_dataclass_type)
+
+                if has_affected_fields:
+                    print(f"🔍 DEBUG: Manager '{manager_name}' has inheritance from {changed_dataclass_type.__name__} - refreshing")
+                    manager.refresh_placeholder_text_with_context(updated_context)
+                else:
+                    print(f"🔍 DEBUG: Manager '{manager_name}' has no inheritance from {changed_dataclass_type.__name__} - skipping")
         else:
             print(f"🔍 DEBUG: No current context found - cannot update sibling inheritance")
+
+    def _manager_has_inheritance_from_dataclass(self, manager, changed_dataclass_type: type) -> bool:
+        """
+        Check if any None-valued fields in the manager inherit from the changed dataclass
+        using Python's inheritance system and field override detection.
+        """
+        # Check each field to see if it should inherit from the changed dataclass
+        for param_name, current_value in manager.parameters.items():
+            # CRITICAL FIX: Check inheritance for both None and non-None fields
+            # If the manager's dataclass directly inherits from the changed dataclass,
+            # inheritance should apply regardless of current value
+            if self._field_inherits_from_dataclass(manager.dataclass_type, param_name, changed_dataclass_type):
+                if current_value is None:
+                    print(f"🔍 DEBUG: Field '{param_name}' inherits from {changed_dataclass_type.__name__} via Python inheritance (None value)")
+                else:
+                    print(f"🔍 DEBUG: Field '{param_name}' inherits from {changed_dataclass_type.__name__} via Python inheritance (overriding non-None value)")
+                return True
+
+        return False
+
+    def _field_inherits_from_dataclass(self, target_dataclass_type: type, field_name: str, source_dataclass_type: type) -> bool:
+        """
+        Check if a field in target_dataclass_type should inherit from source_dataclass_type
+        using Python's inheritance system and field override detection.
+        """
+        from dataclasses import fields, is_dataclass
+
+        if not (is_dataclass(target_dataclass_type) and is_dataclass(source_dataclass_type)):
+            return False
+
+        # CRITICAL FIX: Check inheritance relationship between base classes, not lazy classes
+        # Lazy classes don't preserve multiple inheritance from their base classes
+        target_base_class = target_dataclass_type.__bases__[0] if target_dataclass_type.__bases__ else target_dataclass_type
+        source_base_class = source_dataclass_type.__bases__[0] if source_dataclass_type.__bases__ else source_dataclass_type
+
+        # Check if target base class inherits from source base class
+        if not issubclass(target_base_class, source_base_class):
+            return False
+
+        # Get the field from target dataclass
+        target_fields = {f.name: f for f in fields(target_dataclass_type)}
+        if field_name not in target_fields:
+            return False
+
+        # Check if source_dataclass_type actually overrides this field (not just inherits it)
+        source_fields = {f.name: f for f in fields(source_dataclass_type)}
+        if field_name not in source_fields:
+            return False
+
+        # Find the common base class that originally defined this field
+        common_base = self._find_field_origin_class(target_dataclass_type, field_name)
+        if not common_base:
+            return False
+
+        # Check if source_dataclass_type overrides the field from the common base
+        source_field = source_fields[field_name]
+        base_fields = {f.name: f for f in fields(common_base)}
+        base_field = base_fields.get(field_name)
+
+        if base_field and source_field.default != base_field.default:
+            print(f"🔍 DEBUG: {source_dataclass_type.__name__} overrides '{field_name}' (base: {base_field.default} -> override: {source_field.default})")
+            return True
+
+        return False
+
+    def _find_field_origin_class(self, dataclass_type: type, field_name: str) -> type:
+        """Find the class that originally defined a field by walking up the MRO."""
+        from dataclasses import fields, is_dataclass
+
+        # Walk up the MRO to find where this field was first defined
+        for cls in reversed(dataclass_type.__mro__):
+            if is_dataclass(cls):
+                cls_fields = {f.name: f for f in fields(cls)}
+                if field_name in cls_fields:
+                    return cls
+
+        return None
 
     def _process_nested_values_if_checkbox_enabled(self, param_name: str, manager: Any,
                                                  current_values: Dict[str, Any]) -> None:
@@ -872,39 +977,64 @@ class ParameterFormManager(QWidget):
         print(f"🔍 DEBUG: refresh_placeholder_text_with_context for {self.dataclass_type.__name__}")
         print(f"🔍 DEBUG: Using updated context: {updated_context}")
 
-        # Refresh placeholder text for all widgets with None values using the provided context
+        # CRITICAL FIX: Check inheritance for ALL fields, not just None fields
+        # When there's a direct inheritance relationship, placeholders should update even for non-None fields
         for param_name, widget in self.widgets.items():
             current_value = self.parameters.get(param_name)
             print(f"🔍 DEBUG: Field '{param_name}' has value: {current_value} (None: {current_value is None})")
-            if current_value is None:
-                print(f"🔍 DEBUG: Updating placeholder for '{param_name}' with custom context")
 
-                # Use the provided context for placeholder resolution
-                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    self.dataclass_type, param_name,
-                    app_config=updated_context,
-                    placeholder_prefix=self.placeholder_prefix
-                )
-                print(f"🔍 DEBUG: Generated placeholder text for '{param_name}': '{placeholder_text}'")
+            print(f"🔍 DEBUG: Checking inheritance for '{param_name}' with custom context")
 
-                # Apply the placeholder text directly instead of calling _apply_placeholder_with_lazy_context
-                if placeholder_text and hasattr(widget, 'setPlaceholderText'):
-                    widget.setPlaceholderText(placeholder_text)
+            # CRITICAL: Check if this field's placeholder would actually change with the updated context
+            # This ensures we only update fields that actually inherit from the changed dataclass
 
-                # Block signals to prevent placeholder application from triggering parameter updates
+            # Get placeholder with original context (before the change)
+            original_placeholder = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                self.dataclass_type, param_name,
+                placeholder_prefix=self.placeholder_prefix
+            )
+
+            # Get placeholder with updated context (after the change)
+            updated_placeholder = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                self.dataclass_type, param_name,
+                app_config=updated_context,
+                placeholder_prefix=self.placeholder_prefix
+            )
+
+            # Only update if the placeholder actually changed (indicating inheritance relationship)
+            if (updated_placeholder and original_placeholder and
+                updated_placeholder != original_placeholder):
+                print(f"🔍 DEBUG: Inheritance detected for '{param_name}': '{original_placeholder}' -> '{updated_placeholder}'")
+
+                # CRITICAL FIX: Only update placeholder text, NEVER modify field values
+                # Field values are sacred and reserved for explicit user input only
+
+                # Update the widget placeholder to show the inherited value
                 widget.blockSignals(True)
                 try:
+                    # Apply the updated placeholder text
+                    if hasattr(widget, 'setPlaceholderText'):
+                        widget.setPlaceholderText(updated_placeholder)
+
                     # Use the EXACT SAME PyQt6WidgetEnhancer logic that works on initial open
-                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, updated_placeholder)
+
+                    # DEBUG: Check what text is actually in the widget after placeholder update
+                    widget_type = type(widget).__name__
+                    placeholder_text = getattr(widget, 'placeholderText', lambda: "N/A")()
+                    tooltip_text = getattr(widget, 'toolTip', lambda: "N/A")()
+                    current_text = getattr(widget, 'text', lambda: "N/A")()
+                    current_value = getattr(widget, 'value', lambda: "N/A")()
+                    print(f"🔍 DEBUG: Widget {widget_type} after placeholder update (values preserved):")
+                    print(f"  - placeholderText(): '{placeholder_text}'")
+                    print(f"  - toolTip(): '{tooltip_text}'")
+                    print(f"  - text(): '{current_text}'")
+                    print(f"  - value(): '{current_value}'")
                 finally:
                     # Always restore signal connections
                     widget.blockSignals(False)
-                print(f"🔍 DEBUG: Generated placeholder text for '{param_name}': '{placeholder_text}'")
-
-                if placeholder_text and hasattr(widget, 'setPlaceholderText'):
-                    widget.setPlaceholderText(placeholder_text)
             else:
-                print(f"🔍 DEBUG: Skipping placeholder update for '{param_name}' (not None)")
+                print(f"🔍 DEBUG: No inheritance relationship for '{param_name}' (placeholder unchanged)")
 
     def _rebuild_nested_dataclass_instance(self, nested_values: Dict[str, Any],
                                          nested_type: Type, param_name: str) -> Any:
