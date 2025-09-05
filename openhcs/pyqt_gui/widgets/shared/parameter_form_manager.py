@@ -766,7 +766,7 @@ class ParameterFormManager(QWidget):
 
         # Get current thread-local context and create updated version
         current_context = get_current_global_config(GlobalPipelineConfig)
-        print(f"🔍 DEBUG: Original context before update:")
+
         print(f"🔍 DEBUG: step_well_filter_config type: {type(getattr(current_context, 'step_well_filter_config', None))}")
         print(f"🔍 DEBUG: step_materialization_config type: {type(getattr(current_context, 'step_materialization_config', None))}")
 
@@ -853,13 +853,8 @@ class ParameterFormManager(QWidget):
         target_base_class = target_dataclass_type.__bases__[0] if target_dataclass_type.__bases__ else target_dataclass_type
         source_base_class = source_dataclass_type.__bases__[0] if source_dataclass_type.__bases__ else source_dataclass_type
 
-        # CRITICAL DEBUG: Focus on streaming configs
+        # Debug inheritance relationships for complex hierarchies
         is_streaming = 'Streaming' in target_dataclass_type.__name__
-        if is_streaming:
-            print(f"🔍 DEBUG: *** STREAMING INHERITANCE CHECK ***")
-            print(f"🔍 DEBUG: Target: {target_dataclass_type.__name__} -> Base: {target_base_class.__name__}")
-            print(f"🔍 DEBUG: Source: {source_dataclass_type.__name__} -> Base: {source_base_class.__name__}")
-            print(f"🔍 DEBUG: Target MRO: {[cls.__name__ for cls in target_base_class.__mro__]}")
 
         # Check if target base class inherits from source base class
         if not issubclass(target_base_class, source_base_class):
@@ -893,19 +888,20 @@ class ParameterFormManager(QWidget):
 
         # If the source is not the rightmost definer, check if rightmost inherits from source
         if rightmost_field_definer and rightmost_field_definer != source_base_class:
-            # CRITICAL FIX: Check if rightmost parent inherits the field from the source
-            # E.g., StreamingConfig inherits well_filter from StepWellFilterConfig
-            if issubclass(rightmost_field_definer, source_base_class):
-                if is_streaming:
-                    print(f"🔍 DEBUG: *** STREAMING *** Field '{field_name}' in {target_base_class.__name__} - rightmost parent {rightmost_field_definer.__name__} inherits from {source_base_class.__name__} - allowing inheritance")
-                else:
-                    print(f"🔍 DEBUG: Field '{field_name}' in {target_base_class.__name__} - rightmost parent {rightmost_field_definer.__name__} inherits from {source_base_class.__name__} - allowing inheritance")
+            # CRITICAL FIX: Check if there's a more specific intermediate source
+            # E.g., StreamingConfig should inherit from StepWellFilterConfig, not WellFilterConfig directly
+            more_specific_source = self._find_most_specific_intermediate_source(
+                rightmost_field_definer, source_base_class, field_name
+            )
+
+            if more_specific_source and more_specific_source != source_base_class:
+                print(f"🔍 DEBUG: Field '{field_name}' in {target_base_class.__name__} has more specific source {more_specific_source.__name__} - blocking inheritance from {source_base_class.__name__}")
+                return False
+            elif issubclass(rightmost_field_definer, source_base_class):
+                print(f"🔍 DEBUG: Field '{field_name}' in {target_base_class.__name__} - rightmost parent {rightmost_field_definer.__name__} inherits from {source_base_class.__name__} - allowing inheritance")
                 # Allow inheritance since rightmost parent gets the field from this source
             else:
-                if is_streaming:
-                    print(f"🔍 DEBUG: *** STREAMING *** Field '{field_name}' in {target_base_class.__name__} is overridden by {rightmost_field_definer.__name__} (rightmost parent) - blocking inheritance from {source_base_class.__name__}")
-                else:
-                    print(f"🔍 DEBUG: Field '{field_name}' in {target_base_class.__name__} is overridden by {rightmost_field_definer.__name__} (rightmost parent) - blocking inheritance from {source_base_class.__name__}")
+                print(f"🔍 DEBUG: Field '{field_name}' in {target_base_class.__name__} is overridden by {rightmost_field_definer.__name__} (rightmost parent) - blocking inheritance from {source_base_class.__name__}")
                 return False
 
         # If we get here, source is the rightmost definer for this field
@@ -1006,6 +1002,49 @@ class ParameterFormManager(QWidget):
         }
 
         return name_mapping.get(class_name)
+
+
+
+    def _find_most_specific_intermediate_source(self, rightmost_definer: type, ultimate_source: type, field_name: str) -> type:
+        """
+        Find the most specific intermediate source between rightmost definer and ultimate source.
+
+        For example, if StreamingConfig inherits from StepWellFilterConfig, and StepWellFilterConfig
+        inherits from WellFilterConfig, then when checking inheritance from WellFilterConfig,
+        we should find StepWellFilterConfig as the more specific intermediate source.
+
+        Args:
+            rightmost_definer: The rightmost parent that defines the field (e.g., StreamingConfig)
+            ultimate_source: The ultimate source being checked (e.g., WellFilterConfig)
+            field_name: The field name being checked
+
+        Returns:
+            The most specific intermediate source, or None if no intermediate source exists
+        """
+        from dataclasses import fields, is_dataclass
+
+        if not issubclass(rightmost_definer, ultimate_source):
+            return None
+
+        # Walk up the MRO from rightmost_definer to ultimate_source
+        # Find the most specific class that defines the field and is between them
+        most_specific_intermediate = None
+
+        for cls in rightmost_definer.__mro__[1:]:  # Skip rightmost_definer itself
+            if cls == ultimate_source:
+                # Reached ultimate source, stop searching
+                break
+
+            if is_dataclass(cls):
+                cls_fields = {f.name: f for f in fields(cls)}
+                if field_name in cls_fields:
+                    # This class defines the field and is between rightmost_definer and ultimate_source
+                    if most_specific_intermediate is None or issubclass(cls, most_specific_intermediate):
+                        most_specific_intermediate = cls
+
+        return most_specific_intermediate
+
+
 
     def _find_most_specific_field_source_for_target(self, target_dataclass_type: type, field_name: str) -> type:
         """
