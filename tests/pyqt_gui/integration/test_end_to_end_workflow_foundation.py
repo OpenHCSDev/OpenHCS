@@ -127,6 +127,18 @@ def create_test_scenarios() -> Dict[str, TestScenario]:
             "name": "minimal_config",
             "orchestrator_config": {"output_dir_suffix": "", "sub_dir": "data", "well_filter": 1},
             "field_to_test": ("sub_dir", "test_data", "path_planning")
+        },
+        {
+            "name": "inheritance_hierarchy_step_well_filter",
+            "orchestrator_config": {"output_dir_suffix": "_test", "sub_dir": "images", "well_filter": 1, "num_workers": 1},
+            "field_to_test": ("well_filter", 42, "step_well_filter_config"),
+            "additional_expected": {"step_well_filter_inheritance_test": True}
+        },
+        {
+            "name": "inheritance_hierarchy_path_planning_isolation",
+            "orchestrator_config": {"output_dir_suffix": "_test", "sub_dir": "images", "well_filter": 1, "num_workers": 1},
+            "field_to_test": ("well_filter", 99, "path_planning"),
+            "additional_expected": {"path_planning_isolation_test": True}
         }
     ]
 
@@ -1070,7 +1082,80 @@ class AssertionFactory:
                     f"inheritance may not be working. Expected patterns: {expected_patterns}"
                 )
 
-        return [assert_no_placeholder_bugs, assert_inheritance_working]
+        def assert_inheritance_hierarchy(context: WorkflowContext) -> None:
+            """Assert that inheritance hierarchy is respected for specific test scenarios."""
+            if scenario.name == "inheritance_hierarchy_step_well_filter":
+                # Test: step_well_filter_config.well_filter = 42 should update step_materialization_config placeholder
+                form_managers = context.config_window.findChildren(ParameterFormManager)
+                step_materialization_placeholder = None
+
+                for form_manager in form_managers:
+                    if (hasattr(form_manager, 'widgets') and
+                        hasattr(form_manager, 'dataclass_type') and
+                        form_manager.dataclass_type and
+                        'StepMaterialization' in form_manager.dataclass_type.__name__ and
+                        'well_filter' in form_manager.widgets):
+
+                        widget = form_manager.widgets['well_filter']
+                        texts = ValidationEngine.extract_widget_texts(widget)
+                        all_text = " ".join(texts.values())
+                        step_materialization_placeholder = all_text
+                        print(f"🔍 INHERITANCE TEST: step_materialization_config.well_filter placeholder = '{all_text}'")
+                        break
+
+                if step_materialization_placeholder:
+                    # Should show inheritance from step_well_filter_config (value=42)
+                    if "pipeline default: 42" not in step_materialization_placeholder.lower():
+                        raise AssertionError(
+                            f"INHERITANCE HIERARCHY BUG: step_materialization_config.well_filter should inherit "
+                            f"from step_well_filter_config (42), but shows: '{step_materialization_placeholder}'"
+                        )
+                    print(f"✅ INHERITANCE HIERARCHY CORRECT: step_materialization inherits from step_well_filter")
+                else:
+                    raise AssertionError("Could not find step_materialization_config.well_filter widget for inheritance test")
+
+            elif scenario.name == "inheritance_hierarchy_path_planning_isolation":
+                # Test: path_planning_config.well_filter = 99 should NOT affect step_materialization_config placeholder
+                form_managers = context.config_window.findChildren(ParameterFormManager)
+                step_materialization_placeholder = None
+
+                for form_manager in form_managers:
+                    if (hasattr(form_manager, 'widgets') and
+                        hasattr(form_manager, 'dataclass_type') and
+                        form_manager.dataclass_type and
+                        'StepMaterialization' in form_manager.dataclass_type.__name__ and
+                        'well_filter' in form_manager.widgets):
+
+                        widget = form_manager.widgets['well_filter']
+                        texts = ValidationEngine.extract_widget_texts(widget)
+                        all_text = " ".join(texts.values())
+                        step_materialization_placeholder = all_text
+                        print(f"🔍 ISOLATION TEST: step_materialization_config.well_filter placeholder = '{all_text}'")
+                        break
+
+                if step_materialization_placeholder:
+                    # Should still show inheritance from step_well_filter_config (value=1), NOT path_planning (value=99)
+                    if "pipeline default: 99" in step_materialization_placeholder.lower():
+                        raise AssertionError(
+                            f"INHERITANCE ISOLATION BUG: step_materialization_config.well_filter incorrectly inherits "
+                            f"from path_planning_config (99), shows: '{step_materialization_placeholder}'"
+                        )
+                    if "pipeline default: 1" not in step_materialization_placeholder.lower():
+                        raise AssertionError(
+                            f"INHERITANCE ISOLATION BUG: step_materialization_config.well_filter should still inherit "
+                            f"from step_well_filter_config (1), but shows: '{step_materialization_placeholder}'"
+                        )
+                    print(f"✅ INHERITANCE ISOLATION CORRECT: step_materialization still inherits from step_well_filter")
+                else:
+                    raise AssertionError("Could not find step_materialization_config.well_filter widget for isolation test")
+
+        assertions = [assert_no_placeholder_bugs, assert_inheritance_working]
+
+        # Add inheritance hierarchy assertion for specific scenarios
+        if scenario.name in ["inheritance_hierarchy_step_well_filter", "inheritance_hierarchy_path_planning_isolation"]:
+            assertions.append(assert_inheritance_hierarchy)
+
+        return assertions
 
     @staticmethod
     def create_persistence_assertions(scenario: TestScenario) -> List[Callable[[WorkflowContext], None]]:
