@@ -789,6 +789,10 @@ class ParameterFormManager(QWidget):
 
             print(f"🔍 DEBUG: Changed dataclass type: {changed_dataclass_type.__name__} (from nested manager)")
 
+            # CRITICAL DEBUG: List all managers to see if streaming configs are present
+            all_manager_names = list(self.nested_managers.keys())
+            print(f"🔍 DEBUG: All managers: {all_manager_names}")
+
             for manager_name, manager in self.nested_managers.items():
                 # CRITICAL FIX: Skip the manager that was just modified to preserve its concrete input
                 if exclude_manager and manager_name == exclude_manager:
@@ -809,7 +813,10 @@ class ParameterFormManager(QWidget):
                     print(f"🔍 DEBUG: Manager '{manager_name}' has inheritance from {changed_dataclass_type.__name__} - refreshing")
                     manager.refresh_placeholder_text_with_context(updated_context)
                 else:
-                    print(f"🔍 DEBUG: Manager '{manager_name}' has no inheritance from {changed_dataclass_type.__name__} - skipping")
+                    # REDUCED DEBUG: Only show streaming configs to reduce output
+                    if 'streaming' in manager_name:
+                        print(f"🔍 DEBUG: *** STREAMING *** Manager '{manager_name}' has no inheritance from {changed_dataclass_type.__name__} - skipping")
+                    # Skip debug for other managers to prevent BrokenPipeError
         else:
             print(f"🔍 DEBUG: No current context found - cannot update sibling inheritance")
 
@@ -847,10 +854,22 @@ class ParameterFormManager(QWidget):
         target_base_class = target_dataclass_type.__bases__[0] if target_dataclass_type.__bases__ else target_dataclass_type
         source_base_class = source_dataclass_type.__bases__[0] if source_dataclass_type.__bases__ else source_dataclass_type
 
+        # CRITICAL DEBUG: Focus on streaming configs
+        is_streaming = 'Streaming' in target_dataclass_type.__name__
+        if is_streaming:
+            print(f"🔍 DEBUG: *** STREAMING INHERITANCE CHECK ***")
+            print(f"🔍 DEBUG: Target: {target_dataclass_type.__name__} -> Base: {target_base_class.__name__}")
+            print(f"🔍 DEBUG: Source: {source_dataclass_type.__name__} -> Base: {source_base_class.__name__}")
+            print(f"🔍 DEBUG: Target MRO: {[cls.__name__ for cls in target_base_class.__mro__]}")
+
         # Check if target base class inherits from source base class
         if not issubclass(target_base_class, source_base_class):
-            print(f"🔍 DEBUG: {target_base_class.__name__} does not inherit from {source_base_class.__name__} - no inheritance relationship")
+            if is_streaming:
+                print(f"🔍 DEBUG: *** STREAMING *** {target_base_class.__name__} does not inherit from {source_base_class.__name__} - no inheritance relationship")
             return False
+
+        if is_streaming:
+            print(f"🔍 DEBUG: *** STREAMING *** ✅ {target_base_class.__name__} DOES inherit from {source_base_class.__name__} - inheritance relationship confirmed")
 
         # Check if both classes have the field
         target_fields = {f.name: f for f in fields(target_dataclass_type)}
