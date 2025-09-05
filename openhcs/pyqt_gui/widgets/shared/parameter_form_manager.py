@@ -310,8 +310,15 @@ class ParameterFormManager(QWidget):
             f"{self.field_id}_{param_info.name}",
             self.parameter_info.get(param_info.name)
         )
-        if current_value is None and self.dataclass_type:
-            self._apply_placeholder_with_lazy_context(widget, param_info.name, current_value)
+        # SIMPLIFIED: Apply placeholder using thread-local context directly
+        if current_value is None and self.config.is_lazy_dataclass:
+            placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                self.dataclass_type, param_info.name,
+                placeholder_prefix=self.placeholder_prefix
+            )
+            if placeholder_text:
+                # Apply placeholder to all widget types using PyQt6WidgetEnhancer
+                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
         widget.setObjectName(field_ids['widget_id'])
         layout.addWidget(widget, 1)
         reset_button = QPushButton(CONSTANTS.RESET_BUTTON_TEXT)
@@ -487,30 +494,7 @@ class ParameterFormManager(QWidget):
 #    def _format_placeholder_text(self, raw_placeholder: Optional[str]) -> Optional[str]:
 #        """Mathematical simplification: Use existing enum formatting utilities."""
 #        return raw_placeholder  # Existing LazyDefaultPlaceholderService already handles enum formatting correctly
-    def _build_context_from_current_form_values(self, masked_fields: Optional[set] = None) -> Any:
-        """Build context using Python's natural resolution order."""
-        from openhcs.core.context.global_config import get_current_global_config
-        from openhcs.core.config import GlobalPipelineConfig
-        from dataclasses import replace
 
-        # Get current thread-local context as base
-        current_context = get_current_global_config(GlobalPipelineConfig)
-        if not current_context:
-            return None
-
-        # SIMPLIFICATION: Let Python's MRO handle the resolution
-        # Just exclude masked fields and let inheritance work naturally
-        current_values = self.get_current_values()
-        masked_fields = masked_fields or set()
-
-        # Only mask fields that are being reset - everything else resolves naturally
-        context_updates = {
-            field_name: None for field_name in masked_fields
-            if hasattr(current_context, field_name)
-        }
-
-        # Return updated context with masked fields set to None
-        return replace(current_context, **context_updates) if context_updates else current_context
 
 
 
@@ -532,13 +516,13 @@ class ParameterFormManager(QWidget):
 
 
 
-    def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None, skip_context_behavior: bool = False, masked_fields: Optional[set] = None) -> None:
+    def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None, skip_context_behavior: bool = False) -> None:
         """Mathematical simplification: Unified widget update using shared dispatch."""
         self._execute_with_signal_blocking(widget, lambda: self._dispatch_widget_update(widget, value))
 
         # Only apply context behavior if not explicitly skipped (e.g., during reset operations)
         if not skip_context_behavior:
-            self._apply_context_behavior(widget, value, param_name, masked_fields)
+            self._apply_context_behavior(widget, value, param_name)
 
     def _dispatch_widget_update(self, widget: QWidget, value: Any) -> None:
         """Algebraic simplification: Single dispatch logic for all widget updates."""
@@ -570,21 +554,19 @@ class ParameterFormManager(QWidget):
         operation()
         widget.blockSignals(False)
 
-    def _apply_context_behavior(self, widget: QWidget, value: Any, param_name: str, masked_fields: Optional[set] = None) -> None:
+    def _apply_context_behavior(self, widget: QWidget, value: Any, param_name: str) -> None:
         """Apply lazy placeholder context behavior - pure function of inputs."""
         if not param_name or not self.dataclass_type:
             return
 
         if value is None and self.config.is_lazy_dataclass:
-            # CRITICAL FIX: Apply placeholder using current form state with masking support
-            current_form_context = self._build_context_from_current_form_values(masked_fields)
+            # SIMPLIFIED: Use thread-local context directly (updated during reset)
             placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                 self.dataclass_type, param_name,
-                app_config=current_form_context,
                 placeholder_prefix=self.placeholder_prefix
             )
-            if placeholder_text and hasattr(widget, 'setPlaceholderText'):
-                widget.setPlaceholderText(placeholder_text)
+            if placeholder_text:
+                # Apply placeholder to all widget types using PyQt6WidgetEnhancer
                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
         elif value is not None:
             PyQt6WidgetEnhancer._clear_placeholder_state(widget)
@@ -673,11 +655,23 @@ class ParameterFormManager(QWidget):
         if hasattr(self, '_user_set_fields'):
             self._user_set_fields.discard(param_name)
 
-        # 2. Update widget value with masking to prevent resolving against old value
+        # 2. CRITICAL FIX: Update thread-local context to exclude reset field
+        # This prevents placeholder resolution from using stale values
+        if reset_value is None and self.config.is_lazy_dataclass:
+            from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
+            from openhcs.core.config import GlobalPipelineConfig
+            from dataclasses import replace
+
+            current_context = get_current_global_config(GlobalPipelineConfig)
+            if current_context and hasattr(current_context, param_name):
+                # Create updated context with reset field set to None
+                updated_context = replace(current_context, **{param_name: None})
+                set_current_global_config(GlobalPipelineConfig, updated_context)
+
+        # 3. Update widget value
         if param_name in self.widgets:
             widget = self.widgets[param_name]
-            # CRITICAL FIX: Mask the field being reset so placeholder doesn't resolve against its old value
-            self.update_widget_value(widget, reset_value, param_name, masked_fields={param_name})
+            self.update_widget_value(widget, reset_value, param_name)
 
         self.nested_managers.get(param_name) and hasattr(self.nested_managers[param_name], 'reset_all_parameters') and self.nested_managers[param_name].reset_all_parameters()
         self.parameter_changed.emit(param_name, reset_value)
