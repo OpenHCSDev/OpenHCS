@@ -840,24 +840,40 @@ class ParameterFormManager(QWidget):
         if not issubclass(target_base, source_base):
             return False
 
-        # Check if both have the field
+        # Check if both lazy classes have the field
         target_fields = {f.name: f for f in fields(target_dataclass_type)}
         source_fields = {f.name: f for f in fields(source_dataclass_type)}
 
         if field_name not in target_fields or field_name not in source_fields:
             return False
 
-        # Simple override check: if target has different default, it's an override - block inheritance
+        # CRITICAL FIX: Check both lazy class AND base class defaults
+        # Priority: lazy class concrete values > base class overrides
         import dataclasses
+
+        # First check lazy class defaults (might have concrete user values)
         target_field = target_fields[field_name]
         source_field = source_fields[field_name]
+        target_lazy_default = target_field.default if target_field.default is not dataclasses.MISSING else None
+        source_lazy_default = source_field.default if source_field.default is not dataclasses.MISSING else None
 
-        target_default = target_field.default if target_field.default is not dataclasses.MISSING else None
-        source_default = source_field.default if source_field.default is not dataclasses.MISSING else None
-
-        # If target overrides with concrete value, block inheritance
-        if target_default is not None and target_default != source_default:
+        # If lazy class has concrete override, block inheritance
+        if target_lazy_default is not None and target_lazy_default != source_lazy_default:
             return False
+
+        # If lazy classes both have None, check base class overrides
+        target_base_fields = {f.name: f for f in fields(target_base)}
+        source_base_fields = {f.name: f for f in fields(source_base)}
+
+        if field_name in target_base_fields and field_name in source_base_fields:
+            target_base_field = target_base_fields[field_name]
+            source_base_field = source_base_fields[field_name]
+            target_base_default = target_base_field.default if target_base_field.default is not dataclasses.MISSING else None
+            source_base_default = source_base_field.default if source_base_field.default is not dataclasses.MISSING else None
+
+            # If base class has concrete override, block inheritance
+            if target_base_default is not None and target_base_default != source_base_default:
+                return False
 
         return True
 
