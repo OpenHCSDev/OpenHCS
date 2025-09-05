@@ -744,12 +744,20 @@ class ParameterFormManager(QWidget):
                     print(f"🔍 DEBUG: Calling _update_sibling_placeholders_with_updated_context")
                     # CRITICAL FIX: Pass the nested manager's dataclass type, not the parent's type
                     nested_dataclass_type = nested_manager.dataclass_type if nested_manager else nested_type
-                    self._update_sibling_placeholders_with_updated_context(parent_name, reconstructed_instance, nested_dataclass_type)
+                    # CRITICAL FIX: Exclude the manager that was just modified to preserve its concrete input
+                    self._update_sibling_placeholders_with_updated_context(parent_name, reconstructed_instance, nested_dataclass_type, exclude_manager=parent_name)
 
                     self.parameter_changed.emit(parent_name, reconstructed_instance)
 
-    def _update_sibling_placeholders_with_updated_context(self, changed_field_name: str, new_value: Any, changed_dataclass_type: type = None) -> None:
-        """Update sibling manager placeholders with the updated context directly."""
+    def _update_sibling_placeholders_with_updated_context(self, changed_field_name: str, new_value: Any, changed_dataclass_type: type = None, exclude_manager: str = None) -> None:
+        """Update sibling manager placeholders with the updated context directly.
+
+        Args:
+            changed_field_name: Name of the field that was changed
+            new_value: New value of the field
+            changed_dataclass_type: Type of the dataclass that was changed
+            exclude_manager: Name of the manager to exclude from updates (the one that was just modified)
+        """
         from openhcs.core.context.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         from dataclasses import replace
@@ -782,6 +790,11 @@ class ParameterFormManager(QWidget):
             print(f"🔍 DEBUG: Changed dataclass type: {changed_dataclass_type.__name__} (from nested manager)")
 
             for manager_name, manager in self.nested_managers.items():
+                # CRITICAL FIX: Skip the manager that was just modified to preserve its concrete input
+                if exclude_manager and manager_name == exclude_manager:
+                    print(f"🔍 DEBUG: Skipping manager '{manager_name}' (was just modified - preserving concrete input)")
+                    continue
+
                 manager_dataclass_type = getattr(manager, 'dataclass_type', None)
                 if manager_dataclass_type is None:
                     print(f"🔍 DEBUG: Skipping manager '{manager_name}' (no dataclass_type)")
