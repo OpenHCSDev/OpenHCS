@@ -874,27 +874,23 @@ class ParameterFormManager(QWidget):
         if field_name not in target_fields or field_name not in source_fields:
             return False
 
-        # CRITICAL FIX: Explicit blocking for PathPlanningConfig -> StepMaterializationConfig.well_filter
-        # StepWellFilterConfig is more specialized and should always win
-        if (target_base_class.__name__ == 'StepMaterializationConfig' and
-            source_base_class.__name__ == 'PathPlanningConfig' and
-            field_name == 'well_filter'):
-            print(f"🔍 DEBUG: EXPLICIT BLOCK: PathPlanningConfig.well_filter cannot affect StepMaterializationConfig.well_filter (StepWellFilterConfig is more specialized)")
-            return False
-
-        # CRITICAL FIX: Use inheritance declaration order, not MRO
-        # For fields, rightmost parent in declaration should win, not MRO order
-        # StepMaterializationConfig(PathPlanningConfig, StepWellFilterConfig)
-        # -> StepWellFilterConfig should win for well_filter, not PathPlanningConfig
-
+        # CRITICAL FIX: Generic multiple inheritance resolution
+        # Check if there's a more specialized parent that also defines this field
+        # If so, block inheritance from less specialized sources
         rightmost_field_definer = None
-        # Check direct parents in reverse order (rightmost = most specific for fields)
         for base_class in reversed(target_base_class.__bases__):
             if is_dataclass(base_class):
                 base_fields = {f.name: f for f in fields(base_class)}
                 if field_name in base_fields:
                     rightmost_field_definer = base_class
-                    break  # First match in reverse order = rightmost definer
+                    break  # First match in reverse order = rightmost (most specialized)
+
+        # If source is not the rightmost definer, block inheritance
+        if rightmost_field_definer and rightmost_field_definer != source_base_class:
+            print(f"🔍 DEBUG: GENERIC BLOCK: {source_base_class.__name__}.{field_name} cannot affect {target_base_class.__name__}.{field_name} ({rightmost_field_definer.__name__} is more specialized)")
+            return False
+
+
 
         # If the source is not the rightmost definer, check if rightmost inherits from source
         if rightmost_field_definer and rightmost_field_definer != source_base_class:
