@@ -149,6 +149,10 @@ class ParameterFormManager(QWidget):
         self.reset_buttons = {}  # Track reset buttons for API compatibility
         self.nested_managers = {}
 
+        # CRITICAL FIX: Track which fields have been explicitly set by users
+        # This prevents placeholder updates from destroying user values
+        self._user_set_fields: set = set()
+
         # Store public API attributes for backward compatibility
         self.field_id = field_id
         self.parameter_info = parameter_info or {}
@@ -491,31 +495,14 @@ class ParameterFormManager(QWidget):
         # Update parameter in data model
         self.parameters[param_name] = converted_value
 
-        # NEW: Update dependent placeholders (surgical addition)
-        if converted_value is not None:  # Only when setting concrete values
-            self._update_dependent_placeholders(param_name)
+        # CRITICAL FIX: Track that user explicitly set this field
+        # This prevents placeholder updates from destroying user values
+        self._user_set_fields.add(param_name)
 
-        # Emit signal only once
+        # Emit signal only once - this triggers sibling placeholder updates
         self.parameter_changed.emit(param_name, converted_value)
 
-    def _update_dependent_placeholders(self, changed_param: str) -> None:
-        """DISABLED: This method should not update placeholders within the same dataclass.
 
-        Placeholder updates should only happen when sibling dataclasses change, not when
-        fields within the same dataclass change. The inheritance hierarchy is between
-        different dataclasses, not between fields within the same dataclass.
-
-        For example:
-        - step_well_filter_config.well_filter changes -> should update step_materialization_config.well_filter
-        - But step_materialization_config.well_filter changes -> should NOT update other fields in step_materialization_config
-        """
-        if not self.config.is_lazy_dataclass:
-            return
-
-        # CRITICAL FIX: Disable intra-dataclass placeholder updates
-        # Only sibling dataclass updates should trigger placeholder changes
-        print(f"🔍 DEBUG: _update_dependent_placeholders called for '{changed_param}' - DISABLED (intra-dataclass updates not allowed)")
-        return
 
     def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None, skip_context_behavior: bool = False) -> None:
         """Mathematical simplification: Unified widget update using shared dispatch."""
@@ -598,6 +585,10 @@ class ParameterFormManager(QWidget):
             # Update parameter in data model
             self.parameters[param_name] = converted_value
 
+            # CRITICAL FIX: Track that user explicitly set this field
+            # This prevents placeholder updates from destroying user values
+            self._user_set_fields.add(param_name)
+
             # Update corresponding widget if it exists
             if param_name in self.widgets:
                 self.update_widget_value(self.widgets[param_name], converted_value)
@@ -640,15 +631,12 @@ class ParameterFormManager(QWidget):
         # Apply reset with functional operations
         self.parameters[param_name] = reset_value
 
-        # CRITICAL FIX: Update thread-local context when resetting to None
-        # This ensures placeholder generation uses correct context for top-level fields
-        if reset_value is None and self.config.is_lazy_dataclass:
-            current_context = get_current_global_config(GlobalPipelineConfig)
-            if current_context and hasattr(current_context, param_name):
-                updated_context = replace(current_context, **{param_name: None})
-                set_current_global_config(GlobalPipelineConfig, updated_context)
+        # Mathematical simplification: Simple reset logic
+        # 1. Remove from user-set tracking
+        if hasattr(self, '_user_set_fields'):
+            self._user_set_fields.discard(param_name)
 
-        # Update widget value and apply context behavior (including placeholder logic)
+        # 2. Update widget value
         if param_name in self.widgets:
             widget = self.widgets[param_name]
             self.update_widget_value(widget, reset_value, param_name)
@@ -665,6 +653,8 @@ class ParameterFormManager(QWidget):
         else:
             # Function parameter reset: use param_defaults directly
             return self.param_defaults.get(param_name)
+
+
 
     def get_current_values(self) -> Dict[str, Any]:
         """
@@ -823,142 +813,55 @@ class ParameterFormManager(QWidget):
             print(f"🔍 DEBUG: No current context found - cannot update sibling inheritance")
 
     def _manager_has_inheritance_from_dataclass(self, manager, changed_dataclass_type: type) -> bool:
-        """
-        Check if any None-valued fields in the manager inherit from the changed dataclass
-        using Python's inheritance system and field override detection.
-        """
+        """Check if manager has fields that should inherit from changed dataclass."""
         # Check each field to see if it should inherit from the changed dataclass
         for param_name, current_value in manager.parameters.items():
-            # CRITICAL FIX: Only allow inheritance for None values
-            # Concrete values should not inherit from parent classes
-            if current_value is None and self._field_inherits_from_dataclass(manager.dataclass_type, param_name, changed_dataclass_type):
-                print(f"🔍 DEBUG: Field '{param_name}' inherits from {changed_dataclass_type.__name__} via Python inheritance (None value)")
-                return True
-            elif current_value is not None and self._field_inherits_from_dataclass(manager.dataclass_type, param_name, changed_dataclass_type):
-                print(f"🔍 DEBUG: Field '{param_name}' has concrete value '{current_value}' - blocking inheritance from {changed_dataclass_type.__name__}")
-                # Don't return True - concrete values block inheritance
+            # Simple rule: Only None values that are NOT user-set can inherit
+            is_user_set = hasattr(manager, '_user_set_fields') and param_name in manager._user_set_fields
 
+            if current_value is None and not is_user_set:
+                # Use the simplified field inheritance check
+                if self._should_allow_inheritance(manager.dataclass_type, param_name, changed_dataclass_type):
+                    return True
         return False
 
-    def _field_inherits_from_dataclass(self, target_dataclass_type: type, field_name: str, source_dataclass_type: type) -> bool:
-        """
-        Check if a field in target_dataclass_type should inherit from source_dataclass_type
-        using Python's inheritance system and field override detection.
-        """
-        print(f"🔍 DEBUG: ⚡ INHERITANCE CHECK CALLED: {source_dataclass_type.__name__} -> {target_dataclass_type.__name__} for field '{field_name}'")
+    def _should_allow_inheritance(self, target_dataclass_type: type, field_name: str, source_dataclass_type: type) -> bool:
+        """Mathematical simplification: Simple inheritance check without complex MRO logic."""
         from dataclasses import fields, is_dataclass
-        import dataclasses
 
         if not (is_dataclass(target_dataclass_type) and is_dataclass(source_dataclass_type)):
             return False
 
-        # CRITICAL FIX: Check inheritance relationship between base classes, not lazy classes
-        # Lazy classes don't preserve multiple inheritance from their base classes
-        target_base_class = target_dataclass_type.__bases__[0] if target_dataclass_type.__bases__ else target_dataclass_type
-        source_base_class = source_dataclass_type.__bases__[0] if source_dataclass_type.__bases__ else source_dataclass_type
+        # Get base classes (unwrap lazy classes)
+        target_base = target_dataclass_type.__bases__[0] if target_dataclass_type.__bases__ else target_dataclass_type
+        source_base = source_dataclass_type.__bases__[0] if source_dataclass_type.__bases__ else source_dataclass_type
 
-        # DEBUG: Show exactly what we're checking
-        print(f"🔍 DEBUG: INHERITANCE CHECK - Target: {target_dataclass_type.__name__} -> {target_base_class.__name__}")
-        print(f"🔍 DEBUG: INHERITANCE CHECK - Source: {source_dataclass_type.__name__} -> {source_base_class.__name__}")
-        print(f"🔍 DEBUG: INHERITANCE CHECK - Field: {field_name}")
-
-        # Debug inheritance relationships for complex hierarchies
-        is_streaming = 'Streaming' in target_dataclass_type.__name__
-
-        # Check if target base class inherits from source base class
-        if not issubclass(target_base_class, source_base_class):
-            if is_streaming:
-                print(f"🔍 DEBUG: *** STREAMING *** {target_base_class.__name__} does not inherit from {source_base_class.__name__} - no inheritance relationship")
+        # Simple rule: target must inherit from source
+        if not issubclass(target_base, source_base):
             return False
 
-        if is_streaming:
-            print(f"🔍 DEBUG: *** STREAMING *** ✅ {target_base_class.__name__} DOES inherit from {source_base_class.__name__} - inheritance relationship confirmed")
-
-        # Check if both classes have the field
+        # Check if both have the field
         target_fields = {f.name: f for f in fields(target_dataclass_type)}
         source_fields = {f.name: f for f in fields(source_dataclass_type)}
 
         if field_name not in target_fields or field_name not in source_fields:
             return False
 
-        # SIMPLIFIED: Use Python's natural MRO for precedence
-        # Find the first parent in MRO that defines this field with a NON-None default (highest precedence)
-        highest_precedence_definer = None
-        print(f"🔍 DEBUG: Target MRO: {[cls.__name__ for cls in target_base_class.__mro__[1:]]}")  # Skip self
-        for mro_class in target_base_class.__mro__[1:]:  # Skip self (index 0)
-            if is_dataclass(mro_class):
-                mro_fields = {f.name: f for f in fields(mro_class)}
-                print(f"🔍 DEBUG: Checking MRO class {mro_class.__name__} for field '{field_name}': {field_name in mro_fields}")
-                if field_name in mro_fields:
-                    # CRITICAL FIX: Check if this class defines the field with a concrete (non-None) value
-                    field_obj = mro_fields[field_name]
-                    field_default = field_obj.default if field_obj.default is not dataclasses.MISSING else field_obj.default_factory() if field_obj.default_factory is not dataclasses.MISSING else None
-                    print(f"🔍 DEBUG: {mro_class.__name__}.{field_name} default value: {field_default}")
+        # Simple override check: if target has different default, it's an override - block inheritance
+        import dataclasses
+        target_field = target_fields[field_name]
+        source_field = source_fields[field_name]
 
-                    if field_default is not None:
-                        highest_precedence_definer = mro_class
-                        print(f"🔍 DEBUG: Found highest precedence field definer with concrete value: {mro_class.__name__}")
-                        break  # First match with concrete value = highest precedence
-                    else:
-                        print(f"🔍 DEBUG: Skipping {mro_class.__name__} - defines field with None (not a real override)")
+        target_default = target_field.default if target_field.default is not dataclasses.MISSING else None
+        source_default = source_field.default if source_field.default is not dataclasses.MISSING else None
 
-        print(f"🔍 DEBUG: Final highest precedence definer: {highest_precedence_definer.__name__ if highest_precedence_definer else None}")
-
-        # CRITICAL FIX: Only allow inheritance from the highest precedence parent
-        # If source is not the highest precedence parent for this field, it loses the conflict
-        if highest_precedence_definer and highest_precedence_definer != source_base_class:
-            print(f"🔍 DEBUG: ❌ BLOCKING INHERITANCE - Field '{field_name}' CONFLICT - {source_base_class.__name__} loses to higher precedence parent {highest_precedence_definer.__name__}")
-            print(f"🔍 DEBUG: ❌ INHERITANCE BLOCKED: {source_base_class.__name__} -> {target_base_class.__name__} for field '{field_name}'")
+        # If target overrides with concrete value, block inheritance
+        if target_default is not None and target_default != source_default:
             return False
 
-        # SIMPLIFIED LOGIC: Use Python's natural MRO precedence
-
-        # Case 1: Source is the highest precedence definer - always allow
-        if highest_precedence_definer and highest_precedence_definer == source_base_class:
-            print(f"🔍 DEBUG: Field '{field_name}' inheritance ALLOWED - {source_base_class.__name__} has highest precedence")
-            return True
-
-        # Case 2: Source is not highest precedence, but highest precedence inherits from source (transitive inheritance) - allow
-        if highest_precedence_definer and highest_precedence_definer != source_base_class:
-            if issubclass(highest_precedence_definer, source_base_class):
-                print(f"🔍 DEBUG: Field '{field_name}' inheritance ALLOWED - highest precedence parent {highest_precedence_definer.__name__} inherits from {source_base_class.__name__}")
-                return True
-            else:
-                # Case 3: Field conflict - only highest precedence parent can trigger updates
-                print(f"🔍 DEBUG: Field '{field_name}' inheritance BLOCKED - {source_base_class.__name__} conflicts with higher precedence parent {highest_precedence_definer.__name__}")
-                return False
-
-        # If we get here, source is the rightmost definer for this field
-        if is_streaming:
-            print(f"🔍 DEBUG: *** STREAMING *** {target_dataclass_type.__name__} can inherit '{field_name}' from {source_dataclass_type.__name__} (rightmost parent)")
-        else:
-            print(f"🔍 DEBUG: {target_dataclass_type.__name__} can inherit '{field_name}' from {source_dataclass_type.__name__} (rightmost parent)")
         return True
 
-    def _find_most_specific_field_source(self, target_dataclass_type: type, field_name: str) -> type:
-        """
-        Find the most specific class in the inheritance hierarchy that defines a field.
 
-        CRITICAL FIX: Only considers classes that are actually in the inheritance chain.
-        For multiple inheritance like StepMaterializationConfig(PathPlanningConfig, StepWellFilterConfig),
-        if both parents define the same field, the rightmost (most specific) parent wins.
-        But separate inheritance chains (like StreamingConfig) don't override each other.
-        """
-        from dataclasses import fields, is_dataclass
-
-        if not is_dataclass(target_dataclass_type):
-            return None
-
-        # Use Python's MRO to find the most specific class that defines this field
-        # MRO already handles multiple inheritance correctly
-        for cls in target_dataclass_type.__mro__:
-            if is_dataclass(cls) and cls != target_dataclass_type:
-                cls_fields = {f.name: f for f in fields(cls)}
-                if field_name in cls_fields:
-                    print(f"🔍 DEBUG: Found field '{field_name}' in MRO class {cls.__name__} (most specific)")
-                    return cls
-
-        return None
 
 
 
@@ -1012,43 +915,7 @@ class ParameterFormManager(QWidget):
 
 
 
-    def _find_most_specific_field_source_for_target(self, target_dataclass_type: type, field_name: str) -> type:
-        """
-        Find the most specific class that defines a field for a target class.
 
-        For multiple inheritance like StepMaterializationConfig(PathPlanningConfig, StepWellFilterConfig),
-        if both parents define the same field, the rightmost (most specific) parent wins.
-
-        This is different from _find_most_specific_field_source because it looks at the target's
-        direct inheritance hierarchy, not a general MRO search.
-        """
-        from dataclasses import fields, is_dataclass
-
-        if not is_dataclass(target_dataclass_type):
-            return None
-
-        # Check direct parents in reverse order (rightmost = most specific)
-        for base_class in reversed(target_dataclass_type.__bases__):
-            if is_dataclass(base_class):
-                base_fields = {f.name: f for f in fields(base_class)}
-                if field_name in base_fields:
-                    print(f"🔍 DEBUG: Most specific source for '{field_name}' in {target_dataclass_type.__name__} is {base_class.__name__}")
-                    return base_class
-
-        return None
-
-    def _find_field_origin_class(self, dataclass_type: type, field_name: str) -> type:
-        """Find the class that originally defined a field by walking up the MRO."""
-        from dataclasses import fields, is_dataclass
-
-        # Walk up the MRO to find where this field was first defined
-        for cls in reversed(dataclass_type.__mro__):
-            if is_dataclass(cls):
-                cls_fields = {f.name: f for f in fields(cls)}
-                if field_name in cls_fields:
-                    return cls
-
-        return None
 
     def _process_nested_values_if_checkbox_enabled(self, param_name: str, manager: Any,
                                                  current_values: Dict[str, Any]) -> None:
@@ -1132,52 +999,27 @@ class ParameterFormManager(QWidget):
         print(f"🔍 DEBUG: refresh_placeholder_text_with_context for {self.dataclass_type.__name__}")
         print(f"🔍 DEBUG: Using updated context: {updated_context}")
 
-        # CRITICAL FIX: Check inheritance for ALL fields, not just None fields
-        # When there's a direct inheritance relationship, placeholders should update even for non-None fields
+        # Mathematical simplification: Simple rule - only update placeholders for None values that aren't user-set
         for param_name, widget in self.widgets.items():
             current_value = self.parameters.get(param_name)
-            print(f"🔍 DEBUG: Field '{param_name}' has value: {current_value} (None: {current_value is None})")
+            is_user_set = hasattr(self, '_user_set_fields') and param_name in self._user_set_fields
 
-            print(f"🔍 DEBUG: Checking inheritance for '{param_name}' with custom context")
+            # CRITICAL FIX: Only refresh placeholders if field value is None AND not user-set
+            if current_value is not None or is_user_set:
+                continue
 
-            # CRITICAL: Check if this field's placeholder would actually change with the updated context
-            # This ensures we only update fields that actually inherit from the changed dataclass
+            # Simple inheritance check: only update if inheritance is allowed
+            if changed_dataclass_type and not self._should_allow_inheritance(self.dataclass_type, param_name, changed_dataclass_type):
+                continue
 
-            # Get placeholder with original context (before the change)
-            original_placeholder = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                self.dataclass_type, param_name,
-                placeholder_prefix=self.placeholder_prefix
-            )
-
-            # Get placeholder with updated context (after the change)
+            # Get updated placeholder and apply it
             updated_placeholder = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                 self.dataclass_type, param_name,
                 app_config=updated_context,
                 placeholder_prefix=self.placeholder_prefix
             )
 
-            # Only update if the placeholder actually changed (indicating inheritance relationship)
-            if (updated_placeholder and original_placeholder and
-                updated_placeholder != original_placeholder):
-
-                # CRITICAL FIX: Check if this inheritance is actually allowed
-                if changed_dataclass_type:
-                    inheritance_allowed = self._field_inherits_from_dataclass(
-                        self.dataclass_type, param_name, changed_dataclass_type
-                    )
-
-                    if not inheritance_allowed:
-                        print(f"🔍 DEBUG: ❌ PLACEHOLDER UPDATE BLOCKED - Inheritance not allowed for '{param_name}' from {changed_dataclass_type.__name__}")
-                        continue
-                else:
-                    print(f"🔍 DEBUG: ⚠️  No changed dataclass type provided - allowing inheritance for '{param_name}'")
-
-                if not inheritance_allowed:
-                    print(f"🔍 DEBUG: ❌ PLACEHOLDER UPDATE BLOCKED - Inheritance not allowed for '{param_name}' from {changed_dataclass_type.__name__}")
-                    continue
-
-                print(f"🔍 DEBUG: ✅ Inheritance allowed for '{param_name}': '{original_placeholder}' -> '{updated_placeholder}'")
-
+            if updated_placeholder:
                 # CRITICAL FIX: Only update placeholder text, NEVER modify field values
                 # Field values are sacred and reserved for explicit user input only
 
@@ -1188,22 +1030,9 @@ class ParameterFormManager(QWidget):
                     if hasattr(widget, 'setPlaceholderText'):
                         widget.setPlaceholderText(updated_placeholder)
 
-                    # Use the EXACT SAME PyQt6WidgetEnhancer logic that works on initial open
+                    # Apply placeholder using PyQt6WidgetEnhancer for visual styling
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, updated_placeholder)
-
-                    # DEBUG: Check what text is actually in the widget after placeholder update
-                    widget_type = type(widget).__name__
-                    placeholder_text = getattr(widget, 'placeholderText', lambda: "N/A")()
-                    tooltip_text = getattr(widget, 'toolTip', lambda: "N/A")()
-                    current_text = getattr(widget, 'text', lambda: "N/A")()
-                    current_value = getattr(widget, 'value', lambda: "N/A")()
-                    print(f"🔍 DEBUG: Widget {widget_type} after placeholder update (values preserved):")
-                    print(f"  - placeholderText(): '{placeholder_text}'")
-                    print(f"  - toolTip(): '{tooltip_text}'")
-                    print(f"  - text(): '{current_text}'")
-                    print(f"  - value(): '{current_value}'")
                 finally:
-                    # Always restore signal connections
                     widget.blockSignals(False)
             else:
                 print(f"🔍 DEBUG: No inheritance relationship for '{param_name}' (placeholder unchanged)")
