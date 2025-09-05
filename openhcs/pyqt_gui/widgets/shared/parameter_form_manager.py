@@ -875,35 +875,57 @@ class ParameterFormManager(QWidget):
         target_base = target_dataclass_type.__bases__[0] if target_dataclass_type.__bases__ else target_dataclass_type
         source_base = source_dataclass_type.__bases__[0] if source_dataclass_type.__bases__ else source_dataclass_type
 
-        # CRITICAL: Check if target has concrete override - if so, block ALL inheritance
-        target_base_fields = {f.name: f for f in fields(target_base)}
-        if field_name in target_base_fields:
-            target_field = target_base_fields[field_name]
-            target_default = target_field.default if target_field.default is not dataclasses.MISSING else None
+        # CRITICAL: Check if target itself defines this field with a concrete value
+        if field_name in target_base.__annotations__:
+            target_fields = {f.name: f for f in fields(target_base)}
+            if field_name in target_fields:
+                target_field = target_fields[field_name]
+                target_default = target_field.default if target_field.default is not dataclasses.MISSING else None
 
-            # If target has concrete override, never inherit from anyone
-            if target_default is not None:
-                return False
+                # If target has its own concrete value, it doesn't inherit
+                if target_default is not None:
+                    return False
 
-        # CORE PRINCIPLE: Only allow inheritance if source is the next class in MRO
-        # This mirrors exactly how Python's super() and MRO work
+        # Use MRO to find next appropriate parent for inheritance
         return self._is_next_in_mro_with_field(target_base, source_base, field_name)
 
     def _is_next_in_mro_with_field(self, target_class: type, source_class: type, field_name: str) -> bool:
-        """Check if source_class is the next class in target's MRO that defines the field.
+        """Check if source_class is the next class in target's MRO that should provide the field value.
 
-        This leverages Python's MRO directly - inheritance should only happen from the
-        next class in the resolution order that actually defines the field.
+        FIELD-SPECIFIC LOGIC:
+        - Skip None values only if there's a concrete value later in MRO
+        - If no concrete value exists, inherit the None value from the first class that defines it
         """
         from dataclasses import fields, is_dataclass
+        import dataclasses
 
-        # Walk through target's MRO to find the next class that defines this field
+        # First pass: Check if there's ANY concrete value in the MRO
+        has_concrete_value = False
+        for mro_class in target_class.__mro__[1:]:
+            if is_dataclass(mro_class):
+                mro_fields = {f.name: f for f in fields(mro_class)}
+                if field_name in mro_fields:
+                    field_obj = mro_fields[field_name]
+                    field_default = field_obj.default if field_obj.default is not dataclasses.MISSING else None
+                    if field_default is not None:
+                        has_concrete_value = True
+                        break
+
+        # Second pass: Find the appropriate class to inherit from
         for mro_class in target_class.__mro__[1:]:  # Skip self
             if is_dataclass(mro_class):
                 mro_fields = {f.name: f for f in fields(mro_class)}
                 if field_name in mro_fields:
-                    # Found the next class in MRO that defines this field
-                    return mro_class == source_class
+                    field_obj = mro_fields[field_name]
+                    field_default = field_obj.default if field_obj.default is not dataclasses.MISSING else None
+
+                    if has_concrete_value:
+                        # Skip None values when concrete value exists later
+                        if field_default is not None:
+                            return mro_class == source_class
+                    else:
+                        # No concrete value exists - inherit from first class that defines it
+                        return mro_class == source_class
 
         return False
 
