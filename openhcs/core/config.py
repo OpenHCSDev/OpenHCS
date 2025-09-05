@@ -371,6 +371,7 @@ class NapariStreamingConfig(StreamingConfig):
     """Configuration for napari streaming."""
     napari_port: int = 5555
     """Port for napari streaming communication."""
+    well_filter: Optional[List[str]] = None
 
     @property
     def backend(self) -> Backend:
@@ -400,6 +401,8 @@ class FijiStreamingConfig(StreamingConfig):
     """Configuration for fiji streaming."""
     fiji_executable_path: Optional[Path] = None
     """Path to Fiji/ImageJ executable. If None, will auto-detect."""
+
+    well_filter: Optional[List[str]] = None
 
     @property
     def backend(self) -> Backend:

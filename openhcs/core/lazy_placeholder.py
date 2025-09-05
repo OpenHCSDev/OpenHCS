@@ -10,7 +10,8 @@ import dataclasses
 # Import functions from their new locations after refactoring
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
-from openhcs.core.lazy_config import get_base_type_for_lazy
+from openhcs.core.lazy_config import get_base_type_for_lazy, FieldPathNavigator
+from openhcs.core.field_path_detection import FieldPathDetector
 
 
 def _resolve_field_with_composition_awareness(instance, field_name: str):
@@ -202,52 +203,48 @@ def _handle_optional_nested_config(instance, nested_field_name: str, target_fiel
 
 
 def _search_in_global_config_inheritance(instance, field_name: str):
-    """Search for field_name in global config using inheritance patterns."""
-    from openhcs.core.context.global_config import get_current_global_config
-    from openhcs.core.config import GlobalPipelineConfig
-    from dataclasses import fields, is_dataclass
+    """Search for field_name in global config using actual inheritance relationships."""
+    print(f"🔍 DEBUG: _search_in_global_config_inheritance called for {type(instance).__name__}.{field_name}")
+    global_config = get_current_global_config(GlobalPipelineConfig)
+    if not global_config:
+        print(f"🔍 DEBUG: No global config found for inheritance search")
+        return None
 
-    try:
-        # Step configs inherit from GlobalPipelineConfig, not their own base type
-        global_config = get_current_global_config(GlobalPipelineConfig)
-        if global_config:
-            # Check for inheritance patterns like:
-            # field_name -> field_name_config.field_name
-            # well_filter -> well_filter_config.well_filter
-            # well_filter_mode -> well_filter_config.well_filter_mode
+    # Get the base class of the lazy instance
+    base_class = get_base_type_for_lazy(type(instance))
+    if not base_class:
+        print(f"🔍 DEBUG: No base class found for {type(instance)}")
+        return None
 
-            # Try the base field name pattern first
-            base_field_name = field_name
-            if field_name.endswith('_mode'):
-                # For fields like well_filter_mode, try well_filter_config
-                base_field_name = field_name.replace('_mode', '')
+    print(f"🔍 DEBUG: Searching inheritance for {base_class.__name__}.{field_name}")
 
-            potential_config_field = f"{base_field_name}_config"
+    # Use existing FieldPathDetector to find inheritance relationships
+    parent_types = FieldPathDetector.find_inheritance_relationships(base_class)
+    print(f"🔍 DEBUG: Found parent types: {[p.__name__ for p in parent_types]}")
 
-            if hasattr(global_config, potential_config_field):
-                config_value = getattr(global_config, potential_config_field)
-                if config_value is not None and is_dataclass(config_value):
-                    if hasattr(config_value, field_name):
-                        return getattr(config_value, field_name)
+    for parent_type in parent_types:
+        print(f"🔍 DEBUG: Checking parent type: {parent_type.__name__}")
+        # Check if this parent has the field we're looking for
+        if hasattr(parent_type, '__dataclass_fields__'):
+            if field_name in parent_type.__dataclass_fields__:
+                print(f"🔍 DEBUG: Found field '{field_name}' in {parent_type.__name__}")
+                # Find the field path for this parent type in global config
+                field_paths = FieldPathDetector.find_all_field_paths_unified(GlobalPipelineConfig, parent_type)
+                print(f"🔍 DEBUG: Field paths for {parent_type.__name__}: {field_paths}")
+                for field_path in field_paths:
+                    print(f"🔍 DEBUG: Trying field path: {field_path}")
+                    # Navigate to the config instance and get the field value
+                    config_instance = FieldPathNavigator.navigate_to_instance(global_config, field_path)
+                    print(f"🔍 DEBUG: Config instance at {field_path}: {config_instance}")
+                    if config_instance and hasattr(config_instance, field_name):
+                        value = getattr(config_instance, field_name)
+                        print(f"🔍 DEBUG: Found value '{value}' at {field_path}.{field_name}")
+                        if value is not None:
+                            return value
+            else:
+                print(f"🔍 DEBUG: Field '{field_name}' not found in {parent_type.__name__}")
 
-                # CRITICAL FIX: If config_value is None, fall back to default values
-                elif config_value is None:
-                    # Get the config class type from the field definition
-                    for field in fields(type(global_config)):
-                        if field.name == potential_config_field:
-                            config_class = field.type
-                            if is_dataclass(config_class):
-                                # Create default instance and check for the field
-                                default_config = config_class()
-                                if hasattr(default_config, field_name):
-                                    default_value = getattr(default_config, field_name)
-                                    # Only return non-None default values
-                                    if default_value is not None:
-                                        return default_value
-                            break
-    except (AttributeError, TypeError):
-        pass
-
+    print(f"🔍 DEBUG: No inheritance value found for {field_name}")
     return None
 
 
@@ -307,7 +304,18 @@ class LazyDefaultPlaceholderService:
             current_context = get_current_global_config(GlobalPipelineConfig)
             set_current_global_config(GlobalPipelineConfig, app_config)
             try:
-                resolved_value = dataclass_type()._resolve_field_value(field_name) if hasattr(dataclass_type, '_resolve_field_value') else getattr(dataclass_type(), field_name)
+                # CRITICAL FIX: Directly extract the value from the temporarily set context
+                # This bypasses all lazy resolution and uses the exact context values
+                current_app_config = get_current_global_config(GlobalPipelineConfig)
+                resolved_value = _resolve_field_with_composition_awareness(current_app_config, field_name)
+
+                # If not found in context, fall back to lazy resolution
+                if resolved_value is None and hasattr(dataclass_type, '_resolve_field_value'):
+                    temp_instance = dataclass_type()
+                    resolved_value = _resolve_field_with_composition_awareness(temp_instance, field_name)
+                elif resolved_value is None:
+                    # Final fallback: create instance and use getattr
+                    resolved_value = getattr(dataclass_type(), field_name)
             finally:
                 set_current_global_config(GlobalPipelineConfig, current_context)
         else:

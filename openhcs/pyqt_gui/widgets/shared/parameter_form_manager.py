@@ -490,8 +490,31 @@ class ParameterFormManager(QWidget):
         # Update parameter in data model
         self.parameters[param_name] = converted_value
 
+        # NEW: Update dependent placeholders (surgical addition)
+        if converted_value is not None:  # Only when setting concrete values
+            self._update_dependent_placeholders(param_name)
+
         # Emit signal only once
         self.parameter_changed.emit(param_name, converted_value)
+
+    def _update_dependent_placeholders(self, changed_param: str) -> None:
+        """Update placeholders for fields that might inherit from changed parameter."""
+        if not self.config.is_lazy_dataclass:
+            return
+
+        # Update placeholders for None fields using current thread-local context
+        for param_name, widget in self.widgets.items():
+            if (param_name != changed_param and
+                self.parameters.get(param_name) is None):
+
+                # Use existing placeholder resolution with current thread-local context
+                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type, param_name,
+                    placeholder_prefix=self.placeholder_prefix
+                )
+
+                if placeholder_text and hasattr(widget, 'setPlaceholderText'):
+                    widget.setPlaceholderText(placeholder_text)
 
     def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None, skip_context_behavior: bool = False) -> None:
         """Mathematical simplification: Unified widget update using shared dispatch."""
@@ -698,17 +721,56 @@ class ParameterFormManager(QWidget):
 
     def _handle_nested_parameter_change(self, parent_name: str, value: Any) -> None:
         """Handle nested parameter changes by reconstructing the entire dataclass."""
+        print(f"🔍 DEBUG: _handle_nested_parameter_change called for '{parent_name}' with value: {value}")
+
         if self._get_optional_checkbox_state(parent_name) is not False:
             # Reconstruct the entire dataclass from current nested values
             nested_manager = self.nested_managers.get(parent_name)
+            print(f"🔍 DEBUG: Found nested manager for '{parent_name}': {nested_manager is not None}")
+
             if nested_manager:
                 nested_values = nested_manager.get_current_values()
+                print(f"🔍 DEBUG: Nested values: {nested_values}")
+
                 nested_type = self.parameter_types.get(parent_name)
                 if nested_type:
                     if self.service._type_utils.is_optional_dataclass(nested_type):
                         nested_type = self.service._type_utils.get_optional_inner_type(nested_type)
                     reconstructed_instance = self._rebuild_nested_dataclass_instance(nested_values, nested_type, parent_name)
+                    print(f"🔍 DEBUG: Reconstructed instance: {reconstructed_instance}")
+
+                    # Update sibling placeholders with updated context directly
+                    print(f"🔍 DEBUG: Calling _update_sibling_placeholders_with_updated_context")
+                    self._update_sibling_placeholders_with_updated_context(parent_name, reconstructed_instance)
+
                     self.parameter_changed.emit(parent_name, reconstructed_instance)
+
+    def _update_sibling_placeholders_with_updated_context(self, changed_field_name: str, new_value: Any) -> None:
+        """Update sibling manager placeholders with the updated context directly."""
+        from openhcs.core.context.global_config import get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+        from dataclasses import replace
+
+        print(f"🔍 DEBUG: Updating sibling placeholders for field '{changed_field_name}' with value: {new_value}")
+
+        # Get current thread-local context and create updated version
+        current_context = get_current_global_config(GlobalPipelineConfig)
+        print(f"🔍 DEBUG: Original context before update:")
+        print(f"🔍 DEBUG: step_well_filter_config type: {type(getattr(current_context, 'step_well_filter_config', None))}")
+        print(f"🔍 DEBUG: step_materialization_config type: {type(getattr(current_context, 'step_materialization_config', None))}")
+
+        if current_context:
+            # Create updated context with the new value
+            updated_context = replace(current_context, **{changed_field_name: new_value})
+            print(f"🔍 DEBUG: Created updated context with {changed_field_name} = {new_value}")
+
+            # Refresh all sibling managers with the updated context
+            print(f"🔍 DEBUG: Refreshing {len(self.nested_managers)} sibling managers with updated context")
+            for manager_name, manager in self.nested_managers.items():
+                print(f"🔍 DEBUG: Refreshing manager '{manager_name}' (type: {getattr(manager, 'dataclass_type', 'unknown')})")
+                manager.refresh_placeholder_text_with_context(updated_context)
+        else:
+            print(f"🔍 DEBUG: No current context found - cannot update sibling inheritance")
 
     def _process_nested_values_if_checkbox_enabled(self, param_name: str, manager: Any,
                                                  current_values: Dict[str, Any]) -> None:
@@ -749,16 +811,100 @@ class ParameterFormManager(QWidget):
         if not is_lazy_dataclass:
             return
 
+        print(f"🔍 DEBUG: refresh_placeholder_text for {self.dataclass_type.__name__}")
+        print(f"🔍 DEBUG: Current parameters: {self.parameters}")
+
         # Refresh placeholder text for all widgets with None values
         for param_name, widget in self.widgets.items():
             current_value = self.parameters.get(param_name)
+            print(f"🔍 DEBUG: Field '{param_name}' has value: {current_value} (None: {current_value is None})")
             if current_value is None:
-                self._apply_placeholder_with_lazy_context(widget, param_name, current_value)
+                print(f"🔍 DEBUG: Updating placeholder for '{param_name}'")
+
+                # Generate placeholder text to see what it resolves to
+                from openhcs.core.context.global_config import get_current_global_config
+                from openhcs.core.config import GlobalPipelineConfig
+
+                current_context = get_current_global_config(GlobalPipelineConfig)
+                print(f"🔍 DEBUG: Current thread-local context for placeholder resolution: {current_context}")
+                if hasattr(current_context, 'step_well_filter_config'):
+                    print(f"🔍 DEBUG: step_well_filter_config in context: {current_context.step_well_filter_config}")
+
+                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type, param_name, placeholder_prefix=self.placeholder_prefix
+                )
+                print(f"🔍 DEBUG: Generated placeholder text for '{param_name}': '{placeholder_text}'")
+
+                # CRITICAL FIX: Use the already-generated placeholder text instead of regenerating it
+                # The placeholder_text was generated with the correct thread-local context above
+                if placeholder_text and hasattr(widget, 'setPlaceholderText'):
+                    widget.setPlaceholderText(placeholder_text)
+
+                # Block signals to prevent placeholder application from triggering parameter updates
+                widget.blockSignals(True)
+                try:
+                    # Use the EXACT SAME PyQt6WidgetEnhancer logic that works on initial open
+                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+                finally:
+                    # Always restore signal connections
+                    widget.blockSignals(False)
+            else:
+                print(f"🔍 DEBUG: Skipping placeholder update for '{param_name}' (not None)")
 
         # Recursively refresh nested managers
         self._apply_to_nested_managers(lambda name, manager: manager.refresh_placeholder_text())
 
+    def refresh_placeholder_text_with_context(self, updated_context: Any) -> None:
+        """
+        Refresh placeholder text using a specific context instead of thread-local context.
 
+        This is used for sibling inheritance where we want to show placeholders
+        based on an updated context that hasn't been committed to thread-local yet.
+        """
+        # Only refresh for lazy dataclasses
+        if not self.dataclass_type:
+            return
+
+        is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(self.dataclass_type)
+        if not is_lazy_dataclass:
+            return
+
+        print(f"🔍 DEBUG: refresh_placeholder_text_with_context for {self.dataclass_type.__name__}")
+        print(f"🔍 DEBUG: Using updated context: {updated_context}")
+
+        # Refresh placeholder text for all widgets with None values using the provided context
+        for param_name, widget in self.widgets.items():
+            current_value = self.parameters.get(param_name)
+            print(f"🔍 DEBUG: Field '{param_name}' has value: {current_value} (None: {current_value is None})")
+            if current_value is None:
+                print(f"🔍 DEBUG: Updating placeholder for '{param_name}' with custom context")
+
+                # Use the provided context for placeholder resolution
+                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type, param_name,
+                    app_config=updated_context,
+                    placeholder_prefix=self.placeholder_prefix
+                )
+                print(f"🔍 DEBUG: Generated placeholder text for '{param_name}': '{placeholder_text}'")
+
+                # Apply the placeholder text directly instead of calling _apply_placeholder_with_lazy_context
+                if placeholder_text and hasattr(widget, 'setPlaceholderText'):
+                    widget.setPlaceholderText(placeholder_text)
+
+                # Block signals to prevent placeholder application from triggering parameter updates
+                widget.blockSignals(True)
+                try:
+                    # Use the EXACT SAME PyQt6WidgetEnhancer logic that works on initial open
+                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+                finally:
+                    # Always restore signal connections
+                    widget.blockSignals(False)
+                print(f"🔍 DEBUG: Generated placeholder text for '{param_name}': '{placeholder_text}'")
+
+                if placeholder_text and hasattr(widget, 'setPlaceholderText'):
+                    widget.setPlaceholderText(placeholder_text)
+            else:
+                print(f"🔍 DEBUG: Skipping placeholder update for '{param_name}' (not None)")
 
     def _rebuild_nested_dataclass_instance(self, nested_values: Dict[str, Any],
                                          nested_type: Type, param_name: str) -> Any:
