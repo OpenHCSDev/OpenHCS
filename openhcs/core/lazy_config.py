@@ -321,15 +321,30 @@ class LazyDataclassFactory:
         final_fallback_chain = (fallback_chain or ([static_fallback] if static_fallback else [])) if use_recursive_resolution else ([safe_fallback] + ([static_fallback] if static_fallback else []))
         resolution_config = ResolutionConfig(instance_provider=instance_provider, fallback_chain=final_fallback_chain)
 
-        # Create lazy dataclass with introspected fields, inheriting from base class
-        lazy_class = make_dataclass(
-            lazy_class_name,
-            LazyDataclassFactory._introspect_dataclass_fields(
-                base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
-            ),
-            bases=(base_class,),
-            frozen=True
-        )
+        # Create lazy dataclass with introspected fields
+        # CRITICAL FIX: Avoid inheriting from classes with custom metaclasses to prevent descriptor conflicts
+        # Instead, we'll copy the interface without inheritance and register the type mapping
+        if hasattr(base_class, '__metaclass__') or type(base_class) != type:
+            # Base class has custom metaclass - don't inherit, just copy interface
+            print(f"🔧 LAZY FACTORY: {base_class.__name__} has custom metaclass {type(base_class).__name__}, avoiding inheritance")
+            lazy_class = make_dataclass(
+                lazy_class_name,
+                LazyDataclassFactory._introspect_dataclass_fields(
+                    base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
+                ),
+                bases=(),  # No inheritance to avoid metaclass conflicts
+                frozen=True
+            )
+        else:
+            # Safe to inherit from regular dataclass
+            lazy_class = make_dataclass(
+                lazy_class_name,
+                LazyDataclassFactory._introspect_dataclass_fields(
+                    base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
+                ),
+                bases=(base_class,),
+                frozen=True
+            )
 
         # Add constructor parameter tracking to detect user-set fields
         original_init = lazy_class.__init__

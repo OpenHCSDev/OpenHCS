@@ -282,19 +282,19 @@ def _handle_optional_nested_config(instance, nested_field_name: str, target_fiel
 
 def _apply_subclass_precedence(concrete_values, field_name: str):
     """
-    Apply generic subclass precedence to resolve field collisions.
+    Apply config inheritance precedence to resolve field collisions.
 
-    When multiple classes define the same field, subclasses take precedence
-    over their parent classes. This handles cases like:
-    - StepWellFilterConfig.well_filter takes precedence over WellFilterConfig.well_filter
-    - Any subclass takes precedence over its parent for colliding fields
+    Precedence rules:
+    1. Classes with concrete overrides take precedence over inherit-as-none classes
+    2. More specific configs (e.g., StepWellFilterConfig) take precedence over general configs (e.g., WellFilterConfig)
+    3. Subclasses take precedence over parent classes
 
     Args:
         concrete_values: List of (value, source_class, field_path, config_instance)
         field_name: Name of the field being resolved
 
     Returns:
-        Filtered list with parent class values removed when subclass has concrete value
+        Filtered list with lower-precedence values removed
     """
     if len(concrete_values) <= 1:
         return concrete_values
@@ -303,7 +303,31 @@ def _apply_subclass_precedence(concrete_values, field_name: str):
     if debug_field:
         print(f"🔍 DEBUG: Applying subclass precedence for {len(concrete_values)} concrete values")
 
-    # Group by class hierarchy - remove parent values when subclass has concrete value
+    # Separate values by whether they have concrete overrides
+    override_values = []
+    inherit_values = []
+
+    for value, source_class, field_path, config_instance in concrete_values:
+        if _has_concrete_field_override(source_class, field_name):
+            override_values.append((value, source_class, field_path, config_instance))
+            if debug_field:
+                print(f"🔍 DEBUG: {source_class.__name__}.{field_name} = '{value}' has concrete override")
+        else:
+            inherit_values.append((value, source_class, field_path, config_instance))
+            if debug_field:
+                print(f"🔍 DEBUG: {source_class.__name__}.{field_name} = '{value}' is inherit-as-none")
+
+    # Rule 1: If any class has concrete override, only use override values
+    if override_values:
+        if debug_field:
+            print(f"🔍 DEBUG: Using override values only (found {len(override_values)} override classes)")
+        concrete_values = override_values
+    else:
+        if debug_field:
+            print(f"🔍 DEBUG: Using inherit values only (no override classes found)")
+        concrete_values = inherit_values
+
+    # Rule 2 & 3: Apply traditional subclass precedence within the selected group
     classes_with_values = [source_class for _, source_class, _, _ in concrete_values]
     filtered_values = []
 
@@ -331,12 +355,15 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
     Resolve field using LAZY-FIRST resolution order.
 
     For lazy dataclasses, the resolution order is:
-    1. Check lazy dataclass instances for concrete values (highest MRO precedence first)
-    2. Follow the lazy resolution chain through the context
-    3. Only fall back to static defaults if no concrete values found
+    1. Check if target class has concrete override - if so, use it directly (no inheritance)
+    2. Check lazy dataclass instances for concrete values (highest MRO precedence first)
+    3. Follow the lazy resolution chain through the context
+    4. Only fall back to static defaults if no concrete values found
     """
     from openhcs.core.field_path_detection import FieldPathDetector
     from openhcs.core.lazy_config import get_base_type_for_lazy, FieldPathNavigator
+    from dataclasses import fields
+    import dataclasses
 
     if not global_config:
         return None
@@ -353,32 +380,52 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
             step_config = global_config.step_well_filter_config
             print(f"🔍 LAZY RESOLUTION DEBUG: Context has step_well_filter_config.well_filter = '{step_config.well_filter}'")
 
-    # STEP 1: Check lazy dataclass instances for concrete values (MRO order)
-    # CRITICAL FIX: Include target class if it has concrete override, exclude if inherit-as-none
+    # CRITICAL FIX: Check if target class has concrete override first
+    # If it does, inheritance is blocked - use the override value directly
     if _has_concrete_field_override(base_class, field_name):
-        # Concrete override classes should use their own values, not inherit
-        mro_types = [base_class] + [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
-    else:
-        # Inherit-as-none classes should inherit from parents, not use their own static defaults
-        mro_types = [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
+        # Get the static override value from the class definition
+        class_fields = {f.name: f for f in fields(base_class)}
+        if field_name in class_fields:
+            field_def = class_fields[field_name]
+            static_default = field_def.default if field_def.default is not dataclasses.MISSING else None
+            if static_default is not None:
+                if field_name == "well_filter":
+                    print(f"🔍 OVERRIDE CHECK: {base_class.__name__}.{field_name} has concrete override={static_default}, blocking inheritance")
+                return static_default
 
-    # CRITICAL FIX: Collect ALL concrete values first, then apply subclass precedence
+    # STEP 1: Check lazy dataclass instances for concrete values (MRO order)
+    # Find ALL dataclass types that have this field (not just MRO)
+    all_dataclass_types = []
+
+    # Add the target class and its MRO
+    for cls in base_class.__mro__:
+        if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__:
+            all_dataclass_types.append(cls)
+
+    # Also search for other dataclass types in the global config that have this field
+    # This handles sibling inheritance (e.g., StepWellFilterConfig vs WellFilterConfig)
+    if global_config:
+        for attr_name in dir(global_config):
+            if not attr_name.startswith('_'):
+                attr_value = getattr(global_config, attr_name)
+                if hasattr(attr_value, '__dataclass_fields__') and field_name in attr_value.__dataclass_fields__:
+                    attr_type = type(attr_value)
+                    if attr_type not in all_dataclass_types:
+                        all_dataclass_types.append(attr_type)
+
+    # CRITICAL FIX: Collect ALL concrete values first, then apply config-aware precedence
     concrete_values = []  # List of (value, source_class, field_path, config_instance)
 
-    for mro_class in mro_types:
-        field_paths = FieldPathDetector.find_all_field_paths_unified(type(global_config), mro_class)
+    for dataclass_type in all_dataclass_types:
+        field_paths = FieldPathDetector.find_all_field_paths_unified(type(global_config), dataclass_type)
 
         for field_path in field_paths:
             config_instance = FieldPathNavigator.navigate_to_instance(global_config, field_path)
             if config_instance and hasattr(config_instance, field_name):
                 value = getattr(config_instance, field_name)
-                # CRITICAL FIX: Only treat as concrete if value is not None AND class has concrete override
-                # This prevents inherit-as-none classes from contributing None values that block inheritance
-                if value is not None and _has_concrete_field_override(mro_class, field_name):
-                    concrete_values.append((value, mro_class, field_path, config_instance))
-                elif value is not None and not _has_concrete_field_override(mro_class, field_name):
-                    # This is a user-set value in an inherit-as-none class - also concrete
-                    concrete_values.append((value, mro_class, field_path, config_instance))
+                # Only treat as concrete if value is not None
+                if value is not None:
+                    concrete_values.append((value, dataclass_type, field_path, config_instance))
 
     # GENERIC SUBCLASS PRECEDENCE: Filter out parent class values when subclass has concrete value
     if len(concrete_values) > 1:

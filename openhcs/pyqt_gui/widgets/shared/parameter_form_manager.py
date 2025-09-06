@@ -1238,13 +1238,14 @@ class ParameterFormManager(QWidget):
         """RADICAL SIMPLIFICATION: Use Python's MRO directly like super() would."""
         from dataclasses import fields, is_dataclass
         import dataclasses
+        from openhcs.core.lazy_config import get_base_type_for_lazy
 
         if not (is_dataclass(target_dataclass_type) and is_dataclass(source_dataclass_type)):
             return False
 
-        # Get base classes (unwrap lazy classes)
-        target_base = target_dataclass_type.__bases__[0] if target_dataclass_type.__bases__ else target_dataclass_type
-        source_base = source_dataclass_type.__bases__[0] if source_dataclass_type.__bases__ else source_dataclass_type
+        # Get base classes (unwrap lazy classes properly)
+        target_base = get_base_type_for_lazy(target_dataclass_type) or target_dataclass_type
+        source_base = get_base_type_for_lazy(source_dataclass_type) or source_dataclass_type
 
         # CRITICAL FIX: For lazy dataclasses, check the actual instance value, not static defaults
         # This is because inherit_as_none configs have static defaults but None instance values
@@ -1255,7 +1256,8 @@ class ParameterFormManager(QWidget):
                 return False
         else:
             # Fallback to static field check for non-lazy dataclasses
-            if field_name in target_base.__annotations__:
+            # CRITICAL FIX: Check if target_base has annotations before accessing them
+            if hasattr(target_base, '__annotations__') and field_name in target_base.__annotations__:
                 target_fields = {f.name: f for f in fields(target_base)}
                 if field_name in target_fields:
                     target_field = target_fields[field_name]
