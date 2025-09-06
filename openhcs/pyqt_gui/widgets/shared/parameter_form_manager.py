@@ -424,7 +424,22 @@ class ParameterFormManager(QWidget):
                 # Convert base to lazy instance via direct field mapping
                 from dataclasses import fields
                 try:
-                    lazy_instance = nested_type(**{f.name: getattr(current_value, f.name) for f in fields(current_value)})
+                    # CRITICAL FIX: Use object.__getattribute__ to get raw values and avoid triggering lazy resolution
+                    if hasattr(current_value, '_resolve_field_value'):
+                        # Source is lazy dataclass - get raw values to preserve None vs concrete distinction
+                        field_values = {f.name: object.__getattribute__(current_value, f.name) for f in fields(current_value)}
+                    else:
+                        # Source is regular dataclass - use normal getattr
+                        field_values = {f.name: getattr(current_value, f.name) for f in fields(current_value)}
+
+                    # Create lazy instance using raw value approach to avoid triggering resolution
+                    lazy_instance = object.__new__(nested_type)
+                    for field_name, value in field_values.items():
+                        object.__setattr__(lazy_instance, field_name, value)
+
+                    # Initialize any required lazy dataclass attributes
+                    if hasattr(nested_type, '_is_lazy_dataclass'):
+                        object.__setattr__(lazy_instance, '_is_lazy_dataclass', True)
                 except Exception:
                     lazy_instance = nested_type()
             else:
@@ -667,7 +682,27 @@ class ParameterFormManager(QWidget):
                         pass
 
                 # Update with current form values (including widget values)
-                updated_instance = replace(current_dataclass_instance, **current_form_values)
+                # CRITICAL FIX: For lazy dataclasses, use raw value approach to preserve None vs concrete distinction
+                if hasattr(current_dataclass_instance, '_resolve_field_value'):
+                    # This is a lazy dataclass - create instance with raw values to avoid triggering resolution
+                    updated_instance = object.__new__(type(current_dataclass_instance))
+
+                    # Copy all existing raw values first
+                    import dataclasses
+                    for field in dataclasses.fields(current_dataclass_instance):
+                        existing_value = object.__getattribute__(current_dataclass_instance, field.name)
+                        object.__setattr__(updated_instance, field.name, existing_value)
+
+                    # Then update with current form values using raw assignment
+                    for field_name, value in current_form_values.items():
+                        object.__setattr__(updated_instance, field_name, value)
+
+                    # Initialize any required lazy dataclass attributes
+                    if hasattr(type(current_dataclass_instance), '_is_lazy_dataclass'):
+                        object.__setattr__(updated_instance, '_is_lazy_dataclass', True)
+                else:
+                    # Regular dataclass - use normal replace
+                    updated_instance = replace(current_dataclass_instance, **current_form_values)
 
                 # CRITICAL FIX: Handle root config vs nested config updates generically
                 if hasattr(current_context, self.field_id):

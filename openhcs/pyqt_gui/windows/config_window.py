@@ -332,7 +332,24 @@ class ConfigWindow(QDialog):
         try:
             # ConfigWindow owns dataclass reconstruction - proper separation of concerns
             current_values = self.form_manager.get_current_values()
-            new_config = self.config_class(**current_values)
+
+            # CRITICAL FIX: For lazy dataclasses, create instance with raw values to preserve None vs concrete distinction
+            # LazyDefaultPlaceholderService is already imported at the top
+
+            if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
+                # Create empty instance first (no constructor args to avoid resolution)
+                new_config = object.__new__(self.config_class)
+
+                # Set raw values directly using object.__setattr__ to avoid lazy resolution
+                for field_name, value in current_values.items():
+                    object.__setattr__(new_config, field_name, value)
+
+                # Initialize any required lazy dataclass attributes
+                if hasattr(self.config_class, '_is_lazy_dataclass'):
+                    object.__setattr__(new_config, '_is_lazy_dataclass', True)
+            else:
+                # For non-lazy dataclasses, use normal constructor
+                new_config = self.config_class(**current_values)
 
             # Emit signal and call callback
             self.config_saved.emit(new_config)

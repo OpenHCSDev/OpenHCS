@@ -117,8 +117,23 @@ class ConfigWindow(BaseOpenHCSWindow):
         # Get form values (same method as original)
         form_values = self.config_form.get_config_values()
 
-        # Create new config instance (same as original)
-        new_config = self.config_class(**form_values)
+        # CRITICAL FIX: For lazy dataclasses, create instance with raw values to preserve None vs concrete distinction
+        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+
+        if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
+            # Create empty instance first (no constructor args to avoid resolution)
+            new_config = object.__new__(self.config_class)
+
+            # Set raw values directly using object.__setattr__ to avoid lazy resolution
+            for field_name, value in form_values.items():
+                object.__setattr__(new_config, field_name, value)
+
+            # Initialize any required lazy dataclass attributes
+            if hasattr(self.config_class, '_is_lazy_dataclass'):
+                object.__setattr__(new_config, '_is_lazy_dataclass', True)
+        else:
+            # For non-lazy dataclasses, use normal constructor
+            new_config = self.config_class(**form_values)
 
         # Call the callback if provided
         if self.on_save_callback:

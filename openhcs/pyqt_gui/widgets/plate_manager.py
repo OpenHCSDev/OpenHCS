@@ -1078,13 +1078,62 @@ class PlateManagerWidget(QWidget):
             logger.error(f"Failed to generate plate code: {e}")
             self.service_adapter.show_error_dialog(f"Failed to generate code: {str(e)}")
 
+    def _patch_lazy_constructors(self):
+        """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
+        from contextlib import contextmanager
+        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+        import dataclasses
+
+        @contextmanager
+        def patch_context():
+            # Store original constructors
+            original_constructors = {}
+
+            # Find all lazy dataclass types that need patching
+            from openhcs.core.config import LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig
+            lazy_types = [LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig]
+
+            # Add any other lazy types that might be used
+            for lazy_type in lazy_types:
+                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
+                    # Store original constructor
+                    original_constructors[lazy_type] = lazy_type.__init__
+
+                    # Create patched constructor that uses raw values
+                    def create_patched_init(original_init, dataclass_type):
+                        def patched_init(self, **kwargs):
+                            # Use raw value approach instead of calling original constructor
+                            # This prevents lazy resolution during code execution
+                            for field in dataclasses.fields(dataclass_type):
+                                value = kwargs.get(field.name, None)
+                                object.__setattr__(self, field.name, value)
+
+                            # Initialize any required lazy dataclass attributes
+                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
+                                object.__setattr__(self, '_is_lazy_dataclass', True)
+
+                        return patched_init
+
+                    # Apply the patch
+                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
+
+            try:
+                yield
+            finally:
+                # Restore original constructors
+                for lazy_type, original_init in original_constructors.items():
+                    lazy_type.__init__ = original_init
+
+        return patch_context()
+
     def _handle_edited_orchestrator_code(self, edited_code: str):
         """Handle edited orchestrator code and update UI state (same logic as Textual TUI)."""
         logger.debug("Orchestrator code edited, processing changes...")
         try:
-            # Execute the code (it has all necessary imports)
+            # CRITICAL FIX: Execute code with lazy dataclass constructor patching to preserve None vs concrete distinction
             namespace = {}
-            exec(edited_code, namespace)
+            with self._patch_lazy_constructors():
+                exec(edited_code, namespace)
 
             # Extract variables from executed code (same logic as Textual TUI)
             if 'plate_paths' in namespace and 'pipeline_data' in namespace:
