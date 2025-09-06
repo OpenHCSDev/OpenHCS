@@ -682,38 +682,10 @@ class ParameterFormManager(QWidget):
                         pass
 
                 # Update with current form values (including widget values)
-                # CRITICAL FIX: For lazy dataclasses, use raw value approach to preserve None vs concrete distinction
-                if hasattr(current_dataclass_instance, '_resolve_field_value'):
-                    # This is a lazy dataclass - create instance with raw values to avoid triggering resolution
-                    updated_instance = object.__new__(type(current_dataclass_instance))
-
-                    # Copy all existing raw values first
-                    import dataclasses
-                    for field in dataclasses.fields(current_dataclass_instance):
-                        existing_value = object.__getattribute__(current_dataclass_instance, field.name)
-                        object.__setattr__(updated_instance, field.name, existing_value)
-
-                    # Then update with current form values using raw assignment
-                    for field_name, value in current_form_values.items():
-                        object.__setattr__(updated_instance, field_name, value)
-
-                    # Initialize any required lazy dataclass attributes
-                    if hasattr(type(current_dataclass_instance), '_is_lazy_dataclass'):
-                        object.__setattr__(updated_instance, '_is_lazy_dataclass', True)
-                else:
-                    # Regular dataclass - use normal replace
-                    # CRITICAL FIX: Filter form values to only include fields that exist in this dataclass
-                    import dataclasses
-                    valid_field_names = {f.name for f in dataclasses.fields(current_dataclass_instance)}
-                    filtered_form_values = {k: v for k, v in current_form_values.items() if k in valid_field_names}
-
-                    if filtered_form_values != current_form_values:
-                        print(f"🔍 FIELD FILTER DEBUG: Filtered out invalid fields for {type(current_dataclass_instance).__name__}")
-                        print(f"    Valid fields: {valid_field_names}")
-                        print(f"    Form values: {set(current_form_values.keys())}")
-                        print(f"    Filtered out: {set(current_form_values.keys()) - valid_field_names}")
-
-                    updated_instance = replace(current_dataclass_instance, **filtered_form_values)
+                # CRITICAL FIX: Organize form values according to field paths for arbitrarily composed dataclasses
+                updated_instance = self._create_updated_dataclass_instance(
+                    current_dataclass_instance, current_form_values
+                )
 
                 # CRITICAL FIX: Handle root config vs nested config updates generically
                 if hasattr(current_context, self.field_id):
@@ -786,6 +758,136 @@ class ParameterFormManager(QWidget):
         else:
             # Normal case: update specific fields in context
             return replace(current_context, **context_updates) if context_updates else current_context
+
+    def _create_updated_dataclass_instance(self, current_instance: Any, form_values: Dict[str, Any]) -> Any:
+        """
+        Create updated dataclass instance with proper field path organization.
+
+        This method handles arbitrarily composed dataclasses by using FieldPathDetector
+        to organize form values into the correct nested structure.
+        """
+        from dataclasses import replace, fields, is_dataclass
+        from openhcs.core.field_path_detection import FieldPathDetector
+
+        print(f"🔍 FIELD PATH DEBUG: Creating updated instance for {type(current_instance).__name__}")
+        print(f"    Form values: {list(form_values.keys())}")
+
+        # For lazy dataclasses, use raw value approach to preserve None vs concrete distinction
+        if hasattr(current_instance, '_resolve_field_value'):
+            # This is a lazy dataclass - create instance with raw values to avoid triggering resolution
+            updated_instance = object.__new__(type(current_instance))
+
+            # Copy all existing raw values first
+            for field in fields(current_instance):
+                existing_value = object.__getattribute__(current_instance, field.name)
+                object.__setattr__(updated_instance, field.name, existing_value)
+
+            # Then update with current form values using raw assignment
+            # CRITICAL FIX: Only update fields that actually exist in this dataclass
+            valid_field_names = {f.name for f in fields(current_instance)}
+            for field_name, value in form_values.items():
+                if field_name in valid_field_names:
+                    object.__setattr__(updated_instance, field_name, value)
+                else:
+                    print(f"🔍 FIELD PATH DEBUG: Skipping invalid field '{field_name}' for lazy {type(current_instance).__name__}")
+
+            # Initialize any required lazy dataclass attributes
+            if hasattr(type(current_instance), '_is_lazy_dataclass'):
+                object.__setattr__(updated_instance, '_is_lazy_dataclass', True)
+
+            return updated_instance
+        else:
+            # Regular dataclass - organize form values by field paths
+            return self._organize_form_values_by_field_paths(current_instance, form_values)
+
+    def _organize_form_values_by_field_paths(self, current_instance: Any, form_values: Dict[str, Any]) -> Any:
+        """
+        Organize form values into proper nested dataclass structure using field paths.
+
+        This handles arbitrarily composed dataclasses by:
+        1. Identifying which fields belong directly to this dataclass
+        2. Organizing remaining fields into nested dataclass structures
+        3. Using FieldPathDetector to find the correct field paths
+        """
+        from dataclasses import replace, fields, is_dataclass
+        from openhcs.core.field_path_detection import FieldPathDetector
+
+        # Get valid field names for this dataclass
+        valid_field_names = {f.name for f in fields(current_instance)}
+
+        # Separate direct fields from fields that belong to nested dataclasses
+        direct_fields = {}
+        nested_field_values = {}
+
+        for field_name, value in form_values.items():
+            if field_name in valid_field_names:
+                # This field belongs directly to this dataclass
+                direct_fields[field_name] = value
+                print(f"🔍 FIELD PATH DEBUG: Direct field '{field_name}' = {value}")
+            else:
+                # This field belongs to a nested dataclass - find which one
+                nested_field_path = self._find_nested_field_path(current_instance, field_name)
+                if nested_field_path:
+                    if nested_field_path not in nested_field_values:
+                        nested_field_values[nested_field_path] = {}
+                    nested_field_values[nested_field_path][field_name] = value
+                    print(f"🔍 FIELD PATH DEBUG: Nested field '{field_name}' -> {nested_field_path}")
+                else:
+                    print(f"🔍 FIELD PATH DEBUG: Orphaned field '{field_name}' - no valid path found")
+
+        # Create nested dataclass instances for fields that have values
+        nested_instances = {}
+        for nested_path, nested_values in nested_field_values.items():
+            if hasattr(current_instance, nested_path):
+                current_nested = getattr(current_instance, nested_path)
+                if current_nested and is_dataclass(current_nested):
+                    # Recursively organize nested values
+                    updated_nested = self._organize_form_values_by_field_paths(current_nested, nested_values)
+                    nested_instances[nested_path] = updated_nested
+                    print(f"🔍 FIELD PATH DEBUG: Created nested instance for '{nested_path}'")
+
+        # Combine direct fields and nested instances
+        all_updates = {**direct_fields, **nested_instances}
+
+        if all_updates:
+            print(f"🔍 FIELD PATH DEBUG: Updating {type(current_instance).__name__} with: {list(all_updates.keys())}")
+            return replace(current_instance, **all_updates)
+        else:
+            return current_instance
+
+    def _find_nested_field_path(self, parent_instance: Any, field_name: str) -> Optional[str]:
+        """
+        Find which nested dataclass field contains the given field name.
+
+        Uses FieldPathDetector to search through all nested dataclasses in the parent
+        to find where the field_name belongs.
+        """
+        from dataclasses import fields, is_dataclass
+        from openhcs.core.field_path_detection import FieldPathDetector
+
+        # Search through all fields of the parent dataclass
+        for field in fields(parent_instance):
+            if is_dataclass(field.type):
+                # Check if this nested dataclass contains the field we're looking for
+                nested_field_names = {f.name for f in fields(field.type)}
+                if field_name in nested_field_names:
+                    print(f"🔍 FIELD PATH DEBUG: Found '{field_name}' in nested dataclass '{field.name}'")
+                    return field.name
+
+                # Also check for inheritance - the field might be in a parent class
+                try:
+                    # Get an instance to check inherited fields
+                    if hasattr(parent_instance, field.name):
+                        nested_instance = getattr(parent_instance, field.name)
+                        if nested_instance and hasattr(nested_instance, field_name):
+                            print(f"🔍 FIELD PATH DEBUG: Found '{field_name}' via inheritance in '{field.name}'")
+                            return field.name
+                except Exception as e:
+                    # If we can't access the nested instance, continue searching
+                    print(f"🔍 FIELD PATH DEBUG: Could not check inheritance for '{field.name}': {e}")
+                    continue
+
+        return None
 
     def _refresh_all_placeholders_with_current_context(self) -> None:
         """Refresh all placeholders using current form values to show inheritance."""
