@@ -553,14 +553,28 @@ class PlateManagerWidget(QWidget):
         """
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
 
-        config_window = ConfigWindow(
-            config_class,           # config_class
-            current_config,         # current_config
-            on_save_callback,       # on_save_callback
-            self.color_scheme,      # color_scheme
-            self,                   # parent
-            orchestrator=orchestrator  # Pass orchestrator for context persistence
-        )
+        # CRITICAL FIX: Use orchestrator's config context for proper placeholder resolution
+        # This ensures the config window uses the correct orchestrator context for inheritance
+        if orchestrator and hasattr(orchestrator, 'config_context'):
+            with orchestrator.config_context(for_serialization=False):
+                config_window = ConfigWindow(
+                    config_class,           # config_class
+                    current_config,         # current_config
+                    on_save_callback,       # on_save_callback
+                    self.color_scheme,      # color_scheme
+                    self,                   # parent
+                    orchestrator=orchestrator  # Pass orchestrator for context persistence
+                )
+        else:
+            # Fallback for global config or when no orchestrator is provided
+            config_window = ConfigWindow(
+                config_class,           # config_class
+                current_config,         # current_config
+                on_save_callback,       # on_save_callback
+                self.color_scheme,      # color_scheme
+                self,                   # parent
+                orchestrator=orchestrator  # Pass orchestrator for context persistence
+            )
 
         # CRITICAL: Connect to orchestrator config changes for automatic refresh
         # This ensures the config window stays in sync when tier 3 edits change the underlying config
@@ -1300,17 +1314,17 @@ class PlateManagerWidget(QWidget):
             self.selected_plate_path = selected_plates[0]['path']
             self.plate_selected.emit(self.selected_plate_path)
 
-            # Update thread-local context using orchestrator's merged pipeline context
+            # CRITICAL FIX: Update thread-local context with selected orchestrator's effective config
+            # This ensures pipeline config forms show placeholders from the correct orchestrator context
             if self.selected_plate_path in self.orchestrators:
                 orchestrator = self.orchestrators[self.selected_plate_path]
-                # Auto-sync handles thread-local context setup automatically when pipeline_config is accessed
-                from openhcs.core.lazy_config import ensure_global_config_context
-                from openhcs.core.context.global_config import get_current_global_config
-                shared_context = get_current_global_config(GlobalPipelineConfig)
-                ensure_global_config_context(GlobalPipelineConfig, shared_context)
-                logger.debug(f"Orchestrator context automatically maintained for selected plate: {self.selected_plate_path}")
+                effective_config = orchestrator.get_effective_config()
+                from openhcs.core.config import GlobalPipelineConfig
+                from openhcs.core.context.global_config import set_current_global_config
+                set_current_global_config(GlobalPipelineConfig, effective_config)
+                logger.debug(f"Updated thread-local context for selected orchestrator: {self.selected_plate_path}")
 
-                # Refresh placeholders in any open parameter forms to reflect new context
+                # Refresh placeholders in any open parameter forms to reflect new orchestrator context
                 self._refresh_all_parameter_form_placeholders()
 
         def on_cleared():
