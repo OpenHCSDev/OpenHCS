@@ -168,14 +168,27 @@ class ParameterFormManager(QWidget):
         )
 
         # Get widget creator from registry
-        self.create_widget = create_pyqt6_registry()
+        self._widget_creator = create_pyqt6_registry()
 
 
         # Set up UI
         self.setup_ui()
 
-        # CRITICAL FIX: Refresh placeholders after form is built to show inheritance
-        self._refresh_all_placeholders_with_current_context()
+        # NOTE: Placeholder refresh moved to from_dataclass_instance after user-set detection
+
+    def create_widget(self, param_name: str, param_type: Type, current_value: Any,
+                     widget_id: str, parameter_info: Any = None) -> Any:
+        """Create widget using the registry creator function."""
+        print(f"🔍 WIDGET CREATE: Creating {param_name} (type={param_type}, value={current_value})")
+        widget = self._widget_creator(param_name, param_type, current_value, widget_id, parameter_info)
+        print(f"🔍 WIDGET CREATE: Result = {widget} (type={type(widget)})")
+
+        if widget is None:
+            print(f"🔍 WIDGET CREATE: ERROR - Widget is None! Creating fallback...")
+            from PyQt6.QtWidgets import QLabel
+            widget = QLabel(f"ERROR: Widget creation failed for {param_name}")
+
+        return widget
 
     @classmethod
     def from_dataclass_instance(cls, dataclass_instance: Any, field_id: str,
@@ -237,7 +250,39 @@ class ParameterFormManager(QWidget):
         # Store the original dataclass instance for reset operations
         form_manager._current_config_instance = dataclass_instance
 
+        # CRITICAL FIX: For lazy dataclasses, check which parameters were explicitly set
+        # This uses the extracted parameters that were already processed during form creation
+        dataclass_type_name = type(dataclass_instance).__name__
+        is_lazy = hasattr(dataclass_instance, '_is_lazy_dataclass') or 'Lazy' in dataclass_type_name
+
+        print(f"🔍 USER-SET DETECTION: Checking {dataclass_type_name}, is_lazy={is_lazy}")
+
+        if is_lazy:
+            print(f"🔍 USER-SET DETECTION: Starting detection for {dataclass_type_name}")
+
+            # CORRECT APPROACH: Check the extracted parameters (which contain raw values)
+            # These were extracted using object.__getattribute__ during form creation
+            for field_name, raw_value in parameters.items():
+                # Get resolved value for logging (this may trigger resolution)
+                resolved_value = getattr(dataclass_instance, field_name)
+
+                # SIMPLE RULE: Raw non-None = user-set, Raw None = inherited
+                if raw_value is not None:
+                    form_manager._user_set_fields.add(field_name)
+                    print(f"🔍 USER-SET DETECTION: {field_name} raw={raw_value} resolved={resolved_value} -> marked as user-set")
+                else:
+                    print(f"🔍 USER-SET DETECTION: {field_name} raw={raw_value} resolved={resolved_value} -> not user-set")
+
+            print(f"🔍 USER-SET DETECTION: Final user_set_fields = {form_manager._user_set_fields}")
+        else:
+            print(f"🔍 USER-SET DETECTION: Skipping non-lazy dataclass {dataclass_type_name}")
+
+        # CRITICAL FIX: Refresh placeholders AFTER user-set detection to show correct concrete/placeholder state
+        form_manager._refresh_all_placeholders_with_current_context()
+
         return form_manager
+
+
 
     def setup_ui(self):
         """Set up the UI layout."""
@@ -676,13 +721,25 @@ class ParameterFormManager(QWidget):
         if not self.config.is_lazy_dataclass:
             return
 
+        print(f"🔍 REFRESH DEBUG: Starting placeholder refresh")
+        print(f"🔍 REFRESH DEBUG: _user_set_fields = {getattr(self, '_user_set_fields', 'NOT_SET')}")
+        print(f"🔍 REFRESH DEBUG: widgets count = {len(self.widgets)}")
+
         # Build context from current form values
         current_form_context = self._build_context_from_current_form_values()
 
-        # Refresh placeholders for all None-valued fields
+        # CRITICAL FIX: Apply placeholders to fields that should show inheritance
+        # This includes None values AND inherited values that weren't explicitly set by user
         for param_name, widget in self.widgets.items():
             current_value = self.parameters.get(param_name)
-            if current_value is None:
+            is_user_set = hasattr(self, '_user_set_fields') and param_name in self._user_set_fields
+
+            # Show placeholder if: value is None OR value exists but wasn't set by user (inherited)
+            should_show_placeholder = current_value is None or not is_user_set
+
+            print(f"🔍 REFRESH DEBUG: {param_name}: value={current_value}, user_set={is_user_set}, show_placeholder={should_show_placeholder}")
+
+            if should_show_placeholder:
                 placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                     self.dataclass_type, param_name,
                     app_config=current_form_context,
@@ -690,6 +747,9 @@ class ParameterFormManager(QWidget):
                 )
                 if placeholder_text:
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+            else:
+                # Clear placeholder state for user-set values
+                PyQt6WidgetEnhancer._clear_placeholder_state(widget)
 
     def _emit_parameter_change(self, param_name: str, value: Any) -> None:
         """Handle parameter change from widget and update parameter data model."""
@@ -1326,13 +1386,16 @@ class ParameterFormManager(QWidget):
         print(f"🔍 DEBUG: refresh_placeholder_text_with_context for {self.dataclass_type.__name__}")
         print(f"🔍 DEBUG: Using updated context: {updated_context}")
 
-        # Mathematical simplification: Simple rule - only update placeholders for None values
+        # CRITICAL FIX: Update placeholders for fields that should show inheritance
+        # This includes None values AND inherited values that weren't explicitly set by user
         for param_name, widget in self.widgets.items():
             current_value = self.parameters.get(param_name)
+            is_user_set = hasattr(self, '_user_set_fields') and param_name in self._user_set_fields
 
-            # CRITICAL FIX: Only refresh placeholders if field value is None
-            # Don't check is_user_set here because reset already removed it from _user_set_fields
-            if current_value is not None:
+            # Show placeholder if: value is None OR value exists but wasn't set by user (inherited)
+            should_show_placeholder = current_value is None or not is_user_set
+
+            if not should_show_placeholder:
                 continue
 
             # Simple inheritance check: only update if inheritance is allowed

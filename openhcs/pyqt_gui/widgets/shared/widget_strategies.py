@@ -70,10 +70,10 @@ WIDGET_REPLACEMENT_REGISTRY: Dict[Type, callable] = {
         lambda w: w.setChecked(bool(current_value)) or w
     )(QCheckBox()),
     int: lambda current_value, **kwargs: (
-        lambda w: w.setValue(int(current_value) if current_value else 0) or w
+        lambda w: (w.setValue(int(current_value)), w)[1] if current_value is not None else w
     )(NoScrollSpinBox()),
     float: lambda current_value, **kwargs: (
-        lambda w: w.setValue(float(current_value) if current_value else 0.0) or w
+        lambda w: (w.setValue(float(current_value)), w)[1] if current_value is not None else w
     )(NoScrollDoubleSpinBox()),
     Path: lambda current_value, param_name, parameter_info, **kwargs:
         create_enhanced_path_widget(param_name, current_value, parameter_info),
@@ -129,7 +129,9 @@ class MagicGuiWidgetFactory:
     def create_widget(self, param_name: str, param_type: Type, current_value: Any,
                      widget_id: str, parameter_info: Any = None) -> Any:
         """Create widget using functional registry dispatch."""
+        print(f"🔍 FACTORY DEBUG: Creating widget for {param_name}, type={param_type}, value={current_value}")
         resolved_type = resolve_optional(param_type)
+        print(f"🔍 FACTORY DEBUG: Resolved type: {resolved_type}")
 
         # Handle direct List[Enum] types - create multi-selection checkbox group
         if is_list_of_enums(resolved_type):
@@ -146,12 +148,15 @@ class MagicGuiWidgetFactory:
 
         # Check for OpenHCS custom widget replacements
         replacement_factory = WIDGET_REPLACEMENT_REGISTRY.get(resolved_type)
+        print(f"🔍 FACTORY DEBUG: Replacement factory for {resolved_type}: {replacement_factory}")
         if replacement_factory:
+            print(f"🔍 FACTORY DEBUG: Using replacement factory with extracted_value={extracted_value}")
             widget = replacement_factory(
                 current_value=extracted_value,
                 param_name=param_name,
                 parameter_info=parameter_info
             )
+            print(f"🔍 FACTORY DEBUG: Replacement factory returned: {widget} (type: {type(widget)})")
         else:
             # For string types, use our NoneAwareLineEdit instead of magicgui
             if resolved_type == str:
@@ -163,10 +168,11 @@ class MagicGuiWidgetFactory:
                     magicgui_value = extracted_value
                     if extracted_value is None:
                         # Use appropriate default values for magicgui to prevent "None" string conversion
+                        # CRITICAL FIX: Use minimal defaults that won't look like concrete user values
                         if resolved_type == int:
-                            magicgui_value = 0
+                            magicgui_value = 0  # magicgui needs a value, placeholder will override display
                         elif resolved_type == float:
-                            magicgui_value = 0.0
+                            magicgui_value = 0.0  # magicgui needs a value, placeholder will override display
                         elif resolved_type == bool:
                             magicgui_value = False
                         elif hasattr(resolved_type, '__origin__') and resolved_type.__origin__ is list:
@@ -205,8 +211,10 @@ class MagicGuiWidgetFactory:
 
         # Functional configuration dispatch
         configurator = CONFIGURATION_REGISTRY.get(resolved_type, lambda w: w)
+        print(f"🔍 FACTORY DEBUG: Configurator for {resolved_type}: {configurator}")
         configurator(widget)
 
+        print(f"🔍 FACTORY DEBUG: Final widget: {widget} (type: {type(widget)})")
         return widget
 
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):

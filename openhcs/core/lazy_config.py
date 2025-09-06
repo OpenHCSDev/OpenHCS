@@ -331,6 +331,15 @@ class LazyDataclassFactory:
             frozen=True
         )
 
+        # Add constructor parameter tracking to detect user-set fields
+        original_init = lazy_class.__init__
+        def __init_with_tracking__(self, **kwargs):
+            # Track which fields were explicitly passed to constructor
+            object.__setattr__(self, '_explicitly_set_fields', set(kwargs.keys()))
+            original_init(self, **kwargs)
+
+        lazy_class.__init__ = __init_with_tracking__
+
         # Bind methods declaratively - inline single-use method
         method_bindings = {
             RESOLVE_FIELD_VALUE_METHOD: LazyMethodBindings.create_resolver(resolution_config),
@@ -470,10 +479,7 @@ def _create_field_level_hierarchy_provider(base_class: Type, global_config_type:
         """Provider with simplified field-level inheritance logic."""
         current_config = context_provider() if context_provider else _get_current_config(global_config_type)
 
-        # DEBUG: Show what context the lazy resolution is using
-        if current_config and hasattr(current_config, 'step_well_filter_config'):
-            step_config = current_config.step_well_filter_config
-            print(f"🔍 LAZY PROVIDER DEBUG: field_level_provider got context with step_well_filter_config.well_filter = '{step_config.well_filter}'")
+        # DEBUG: Show what context the lazy resolution is using (removed to prevent infinite loops)
 
         # Get actual global config from app
         actual_global_config = None
