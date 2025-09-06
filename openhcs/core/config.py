@@ -303,8 +303,6 @@ class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     Uses multiple inheritance from PathPlanningConfig and StepWellFilterConfig.
     """
 
-    #well_filter: Optional[List[str]] = None
-    #well_filter_mode: WellFilterMode = None
     #Override sub_dir for materialization-specific default
     sub_dir: str = "checkpoints"
     """Subdirectory for materialized outputs (different from global 'images')."""

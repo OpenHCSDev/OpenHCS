@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, Type, Optional, List, Tuple
 
 from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+from openhcs.core.field_path_detection import FieldPathDetector
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 from openhcs.ui.shared.ui_utils import debug_param, format_field_id, format_param_name, format_reset_button_id
@@ -109,18 +110,8 @@ class ParameterFormService:
             
             # Check for nested dataclasses
             if param_info.is_nested:
-                from openhcs.core.field_path_detection import FieldPathDetector
-
                 # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
-                nested_field_id = FieldPathDetector.find_field_path_for_type(
-                    parent_dataclass_type or type(None),
-                    param_type
-                )
-
-                # FAIL LOUD: If FieldPathDetector can't find the path, the architecture is broken
-                if not nested_field_id:
-                    raise ValueError(f"FieldPathDetector could not find field path for type {param_type} in {parent_dataclass_type}. "
-                                    f"This indicates the dataclass is not properly registered or the type is incorrect.")
+                nested_field_id = self.get_field_path_with_fail_loud(parent_dataclass_type or type(None), param_type)
 
                 nested_structure = self._analyze_nested_dataclass(
                     param_name, param_type, current_value, nested_field_id, parent_dataclass_type
@@ -234,10 +225,26 @@ class ParameterFormService:
         """Convert field path to widget name - replaces generate_field_ids() complexity"""
         return f"{field_path}_{param_name}"
 
+    def get_field_path_with_fail_loud(self, parent_type: Type, param_type: Type) -> str:
+        """Get field path using FieldPathDetector with fail-loud behavior."""
+        field_path = FieldPathDetector.find_field_path_for_type(parent_type, param_type)
+        if not field_path:
+            raise ValueError(f"FieldPathDetector could not find field path for type {param_type} in {parent_type}. "
+                            f"This indicates the dataclass is not properly registered or the type is incorrect.")
+        return field_path
+
+    def generate_field_ids_direct(self, base_field_id: str, param_name: str) -> Dict[str, str]:
+        """Generate field IDs directly without artificial complexity."""
+        widget_id = f"{base_field_id}_{param_name}"
+        return {
+            'widget_id': widget_id,
+            'reset_button_id': f"reset_{widget_id}",
+            'optional_checkbox_id': f"{base_field_id}_{param_name}_enabled"
+        }
+
     def validate_field_path_mapping(self):
         """Ensure all form field_ids map correctly to context fields"""
         from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.core.field_path_detection import FieldPathDetector
         import dataclasses
 
         # Get all dataclass fields from GlobalPipelineConfig

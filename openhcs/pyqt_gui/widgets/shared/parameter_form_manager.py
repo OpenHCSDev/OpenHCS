@@ -54,6 +54,7 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 # Import OpenHCS core components
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+from openhcs.core.field_path_detection import FieldPathDetector
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
 
@@ -282,12 +283,7 @@ class ParameterFormManager(QWidget):
         display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
 
         # Direct field ID generation - no artificial complexity
-        widget_id = f"{self.config.field_id}_{param_info.name}"
-        field_ids = {
-            'widget_id': widget_id,
-            'reset_button_id': f"reset_{widget_id}",
-            'optional_checkbox_id': f"{self.config.field_id}_{param_info.name}_enabled"
-        }
+        field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
 
         # Algebraic simplification: Single expression for content type dispatch
         container, widgets = (
@@ -351,16 +347,7 @@ class ParameterFormManager(QWidget):
         # Algebraic simplification: Single conditional for lazy resolution
         if LazyDefaultPlaceholderService.has_lazy_resolution(nested_type):
             # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
-            from openhcs.core.field_path_detection import FieldPathDetector
-            field_path = FieldPathDetector.find_field_path_for_type(
-                self.dataclass_type,  # Use existing dataclass_type directly
-                nested_type
-            )
-
-            # FAIL LOUD: If FieldPathDetector can't find the path, the architecture is broken
-            if not field_path:
-                raise ValueError(f"FieldPathDetector could not find field path for type {nested_type} in {self.dataclass_type}. "
-                                f"This indicates the dataclass is not properly registered or the type is incorrect.")
+            field_path = self.service.get_field_path_with_fail_loud(self.dataclass_type, nested_type)
 
             # Mathematical simplification: Inline instance creation without helper method
             if current_value and not isinstance(current_value, nested_type):
@@ -448,18 +435,8 @@ class ParameterFormManager(QWidget):
 
     def _create_nested_form_inline(self, param_name: str, param_type: Type, current_value: Any) -> Any:
         """Create nested form - use actual field path instead of artificial field IDs"""
-        from openhcs.core.field_path_detection import FieldPathDetector
-
         # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
-        field_path = FieldPathDetector.find_field_path_for_type(
-            self.dataclass_type,  # Use existing dataclass_type directly - no helper method needed
-            param_type
-        )
-
-        # FAIL LOUD: If FieldPathDetector can't find the path, the architecture is broken
-        if not field_path:
-            raise ValueError(f"FieldPathDetector could not find field path for type {param_type} in {self.dataclass_type}. "
-                            f"This indicates the dataclass is not properly registered or the type is incorrect.")
+        field_path = self.service.get_field_path_with_fail_loud(self.dataclass_type, param_type)
 
         # Extract nested parameters using service with parent context (handles both dataclass and non-dataclass contexts)
         nested_params, nested_types = self.service.extract_nested_parameters(
