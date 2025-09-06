@@ -95,6 +95,7 @@ class GlobalPipelineConfig:
     num_workers: int = 1
     """Number of worker processes/threads for parallelizable tasks."""
 
+    test_str_field: str = "test"
 
     materialization_results_path: Path = Path("results")
     """

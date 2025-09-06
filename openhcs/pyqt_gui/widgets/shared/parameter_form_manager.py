@@ -74,6 +74,33 @@ class NoneAwareLineEdit(QLineEdit):
         self.setText("" if value is None else str(value))
 
 
+class NoneAwareIntEdit(QLineEdit):
+    """QLineEdit that only allows digits and properly handles None values for integer fields."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Set up input validation to only allow digits
+        from PyQt6.QtGui import QIntValidator
+        self.setValidator(QIntValidator())
+
+    def get_value(self):
+        """Get value, returning None for empty text or converting to int."""
+        text = self.text().strip()
+        if text == "":
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            return None
+
+    def set_value(self, value):
+        """Set value, handling None properly."""
+        if value is None:
+            self.setText("")
+        else:
+            self.setText(str(value))
+
+
 class ParameterFormManager(QWidget):
     """
     PyQt6 parameter form manager with simplified implementation.
@@ -250,32 +277,30 @@ class ParameterFormManager(QWidget):
         # Store the original dataclass instance for reset operations
         form_manager._current_config_instance = dataclass_instance
 
-        # CRITICAL FIX: For lazy dataclasses, check which parameters were explicitly set
+        # CRITICAL FIX: Check which parameters were explicitly set for ALL dataclasses
         # This uses the extracted parameters that were already processed during form creation
         dataclass_type_name = type(dataclass_instance).__name__
         is_lazy = hasattr(dataclass_instance, '_is_lazy_dataclass') or 'Lazy' in dataclass_type_name
 
         print(f"🔍 USER-SET DETECTION: Checking {dataclass_type_name}, is_lazy={is_lazy}")
 
-        if is_lazy:
-            print(f"🔍 USER-SET DETECTION: Starting detection for {dataclass_type_name}")
+        # Apply user-set detection to BOTH lazy and non-lazy dataclasses
+        print(f"🔍 USER-SET DETECTION: Starting detection for {dataclass_type_name}")
 
-            # CORRECT APPROACH: Check the extracted parameters (which contain raw values)
-            # These were extracted using object.__getattribute__ during form creation
-            for field_name, raw_value in parameters.items():
-                # Get resolved value for logging (this may trigger resolution)
-                resolved_value = getattr(dataclass_instance, field_name)
+        # CORRECT APPROACH: Check the extracted parameters (which contain raw values)
+        # These were extracted using object.__getattribute__ during form creation
+        for field_name, raw_value in parameters.items():
+            # Get resolved value for logging (this may trigger resolution)
+            resolved_value = getattr(dataclass_instance, field_name)
 
-                # SIMPLE RULE: Raw non-None = user-set, Raw None = inherited
-                if raw_value is not None:
-                    form_manager._user_set_fields.add(field_name)
-                    print(f"🔍 USER-SET DETECTION: {field_name} raw={raw_value} resolved={resolved_value} -> marked as user-set")
-                else:
-                    print(f"🔍 USER-SET DETECTION: {field_name} raw={raw_value} resolved={resolved_value} -> not user-set")
+            # SIMPLE RULE: Raw non-None = user-set, Raw None = inherited
+            if raw_value is not None:
+                form_manager._user_set_fields.add(field_name)
+                print(f"🔍 USER-SET DETECTION: {field_name} raw={raw_value} resolved={resolved_value} -> marked as user-set")
+            else:
+                print(f"🔍 USER-SET DETECTION: {field_name} raw={raw_value} resolved={resolved_value} -> not user-set")
 
-            print(f"🔍 USER-SET DETECTION: Final user_set_fields = {form_manager._user_set_fields}")
-        else:
-            print(f"🔍 USER-SET DETECTION: Skipping non-lazy dataclass {dataclass_type_name}")
+        print(f"🔍 USER-SET DETECTION: Final user_set_fields = {form_manager._user_set_fields}")
 
         # CRITICAL FIX: Refresh placeholders AFTER user-set detection to show correct concrete/placeholder state
         form_manager._refresh_all_placeholders_with_current_context()

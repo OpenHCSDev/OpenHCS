@@ -53,6 +53,12 @@ def create_enhanced_path_widget(param_name: str = "", current_value: Any = None,
     return EnhancedPathWidget(param_name, current_value, parameter_info, PyQt6ColorScheme())
 
 
+def _create_none_aware_int_widget():
+    """Factory function for NoneAwareIntEdit widgets."""
+    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import NoneAwareIntEdit
+    return NoneAwareIntEdit()
+
+
 def register_openhcs_widgets():
     """Register OpenHCS custom widgets with magicgui type system."""
     # Register using string widget types that magicgui recognizes
@@ -70,8 +76,8 @@ WIDGET_REPLACEMENT_REGISTRY: Dict[Type, callable] = {
         lambda w: w.setChecked(bool(current_value)) or w
     )(QCheckBox()),
     int: lambda current_value, **kwargs: (
-        lambda w: (w.setValue(int(current_value)), w)[1] if current_value is not None else w
-    )(NoScrollSpinBox()),
+        lambda w: (w.set_value(current_value), w)[1]
+    )(_create_none_aware_int_widget()),
     float: lambda current_value, **kwargs: (
         lambda w: (w.setValue(float(current_value)), w)[1] if current_value is not None else w
     )(NoScrollDoubleSpinBox()),
