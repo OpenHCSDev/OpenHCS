@@ -303,6 +303,7 @@ class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     Uses multiple inheritance from PathPlanningConfig and StepWellFilterConfig.
     """
 
+    #well_filter: Optional[List[str]] = None
     # Override sub_dir for materialization-specific default
     sub_dir: str = "checkpoints"
     """Subdirectory for materialized outputs (different from global 'images')."""
@@ -334,6 +335,7 @@ class StreamingDefaults:
     persistent: bool = True
     """Whether viewer stays open after pipeline completion."""
 
+@global_pipeline_config(ui_hidden=True)
 @dataclass(frozen=True)
 class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
     """Abstract base configuration for streaming to visualizers.
@@ -341,7 +343,7 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
     Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
     """
     # Override to None to enable lazy resolution from StepWellFilterConfig
-    well_filter: Optional[List[str]] = None
+    #well_filter: Optional[List[str]] = None
 
     @property
     @abstractmethod

@@ -14,6 +14,35 @@ from openhcs.core.lazy_config import get_base_type_for_lazy, FieldPathNavigator
 from openhcs.core.field_path_detection import FieldPathDetector
 
 
+def _has_concrete_field_override(source_class, field_name: str) -> bool:
+    """
+    Check if a class has a concrete field override (not None).
+
+    This determines inheritance design based on static class definition:
+    - Concrete default (not None) = never inherits
+    - None default = always inherits (inherit_as_none design)
+    """
+    from dataclasses import fields
+    import dataclasses
+
+    if not hasattr(source_class, '__dataclass_fields__'):
+        return False
+
+    class_fields = {f.name: f for f in fields(source_class)}
+    if field_name in class_fields:
+        field_def = class_fields[field_name]
+        static_default = field_def.default if field_def.default is not dataclasses.MISSING else None
+        has_override = static_default is not None
+
+        # Debug for well_filter field
+        if field_name == "well_filter":
+            print(f"🔍 OVERRIDE CHECK: {source_class.__name__}.{field_name} default='{static_default}' has_override={has_override}")
+
+        return has_override
+
+    return False
+
+
 def _resolve_field_with_composition_awareness(instance, field_name: str):
     """
     Generic composition-aware field resolution supporting both inheritance and composition.
@@ -59,14 +88,32 @@ def _search_in_composed_dataclasses(instance, field_name: str):
     """Search for field_name in composed dataclasses using working lazy resolution."""
     from dataclasses import fields, is_dataclass
 
+    # INHERITANCE PROTECTION: Collect all potential values with source tracking
+    potential_values = []  # List of (value, source_class, field_path)
+
+    # Only debug for specific field we're troubleshooting
+    debug_field = field_name == "well_filter"
+    if debug_field:
+        print(f"🔍 DEBUG: COMPOSITION SEARCH - Looking for {field_name} in {type(instance).__name__}")
+
     for field in fields(type(instance)):
         try:
             # Use working lazy resolution to get nested value
             nested_value = getattr(instance, field.name)
             if nested_value is not None and is_dataclass(nested_value):
+                # Check if this nested instance has the field directly
+                if hasattr(nested_value, field_name):
+                    value = getattr(nested_value, field_name)
+                    if value is not None:
+                        source_class = type(nested_value)
+                        potential_values.append((value, source_class, field.name))
+                        if debug_field:
+                            print(f"🔍 DEBUG: FOUND - {source_class.__name__}.{field_name} = '{value}' at {field.name}")
+
                 # Recursively search using working lazy resolution (generic N-levels deep)
                 result = _resolve_field_with_composition_awareness(nested_value, field_name)
                 if result is not None:
+                    # For recursive results, we don't have source tracking, so return immediately
                     return result
             elif nested_value is None:
                 # Handle optional nested configs: try both global config and default instances
@@ -82,6 +129,37 @@ def _search_in_composed_dataclasses(instance, field_name: str):
                     return result
         except AttributeError:
             continue
+
+    # INHERITANCE PROTECTION: Apply inheritance design rules to potential values
+    if debug_field:
+        print(f"🔍 DEBUG: INHERITANCE PROTECTION - Found {len(potential_values)} potential values")
+        for value, source_class, field_path in potential_values:
+            print(f"🔍 DEBUG: - {source_class.__name__}.{field_name} = '{value}' at {field_path}")
+
+    if len(potential_values) > 1:
+        # Filter out values from classes that should never inherit
+        concrete_override_values = []
+        inherit_as_none_values = []
+
+        for value, source_class, field_path in potential_values:
+            if _has_concrete_field_override(source_class, field_name):
+                concrete_override_values.append((value, source_class, field_path))
+            else:
+                inherit_as_none_values.append((value, source_class, field_path))
+
+        # Concrete override classes take precedence (they never inherit)
+        if concrete_override_values:
+            # Use the first concrete override value (they don't inherit from others)
+            value, source_class, field_path = concrete_override_values[0]
+            return value
+        elif inherit_as_none_values:
+            # Use the first inherit-as-none value (they can inherit)
+            value, source_class, field_path = inherit_as_none_values[0]
+            return value
+    elif len(potential_values) == 1:
+        # Single value found, return it
+        value, source_class, field_path = potential_values[0]
+        return value
 
     return None
 
@@ -221,7 +299,9 @@ def _apply_subclass_precedence(concrete_values, field_name: str):
     if len(concrete_values) <= 1:
         return concrete_values
 
-    print(f"🔍 DEBUG: Applying subclass precedence for {len(concrete_values)} concrete values")
+    debug_field = any(field_name == "well_filter" for value, source_class, field_path, config_instance in concrete_values)
+    if debug_field:
+        print(f"🔍 DEBUG: Applying subclass precedence for {len(concrete_values)} concrete values")
 
     # Group by class hierarchy - remove parent values when subclass has concrete value
     classes_with_values = [source_class for _, source_class, _, _ in concrete_values]
@@ -237,9 +317,11 @@ def _apply_subclass_precedence(concrete_values, field_name: str):
         if not has_subclass_with_value:
             # No subclass has a concrete value, so include this one
             filtered_values.append((value, source_class, field_path, config_instance))
-            print(f"🔍 DEBUG: Including {source_class.__name__}.{field_name} = '{value}' (no subclass override)")
+            if debug_field:
+                print(f"🔍 DEBUG: Including {source_class.__name__}.{field_name} = '{value}' (no subclass override)")
         else:
-            print(f"🔍 DEBUG: Excluding {source_class.__name__}.{field_name} = '{value}' (subclass takes precedence)")
+            if debug_field:
+                print(f"🔍 DEBUG: Excluding {source_class.__name__}.{field_name} = '{value}' (subclass takes precedence)")
 
     return filtered_values
 
@@ -264,44 +346,71 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
     if not base_class:
         base_class = target_dataclass_type
 
-    print(f"🔍 DEBUG: LAZY-FIRST resolution for {base_class.__name__}.{field_name}")
+    debug_field = field_name == "well_filter"
+    if debug_field:
+        print(f"🔍 DEBUG: LAZY-FIRST resolution for {base_class.__name__}.{field_name}")
 
     # STEP 1: Check lazy dataclass instances for concrete values (MRO order)
-    # CRITICAL FIX: Skip the target class itself for inherit_as_none configs
-    # Target class should inherit from parents, not use its own static defaults
-    mro_types = [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
-    print(f"🔍 DEBUG: MRO classes with field '{field_name}' (excluding target): {[cls.__name__ for cls in mro_types]}")
+    # CRITICAL FIX: Include target class if it has concrete override, exclude if inherit-as-none
+    if _has_concrete_field_override(base_class, field_name):
+        # Concrete override classes should use their own values, not inherit
+        mro_types = [base_class] + [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
+        if debug_field:
+            print(f"🔍 DEBUG: Target class {base_class.__name__} has concrete override, including in MRO search")
+    else:
+        # Inherit-as-none classes should inherit from parents, not use their own static defaults
+        mro_types = [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
+        if debug_field:
+            print(f"🔍 DEBUG: Target class {base_class.__name__} is inherit-as-none, excluding from MRO search")
+
+    if debug_field:
+        print(f"🔍 DEBUG: MRO classes with field '{field_name}': {[cls.__name__ for cls in mro_types]}")
 
     # CRITICAL FIX: Collect ALL concrete values first, then apply subclass precedence
     concrete_values = []  # List of (value, source_class, field_path, config_instance)
 
     for mro_class in mro_types:
         field_paths = FieldPathDetector.find_all_field_paths_unified(type(global_config), mro_class)
-        print(f"🔍 DEBUG: Checking lazy instances for {mro_class.__name__}: {field_paths}")
+        if debug_field:
+            print(f"🔍 DEBUG: Checking lazy instances for {mro_class.__name__}: {field_paths}")
 
         for field_path in field_paths:
             config_instance = FieldPathNavigator.navigate_to_instance(global_config, field_path)
             if config_instance and hasattr(config_instance, field_name):
                 value = getattr(config_instance, field_name)
-                print(f"🔍 DEBUG: Lazy instance {field_path}.{field_name} = '{value}'")
-                if value is not None:
+                if debug_field:
+                    print(f"🔍 DEBUG: Lazy instance {field_path}.{field_name} = '{value}'")
+                # CRITICAL FIX: Only treat as concrete if value is not None AND class has concrete override
+                # This prevents inherit-as-none classes from contributing None values that block inheritance
+                if value is not None and _has_concrete_field_override(mro_class, field_name):
                     concrete_values.append((value, mro_class, field_path, config_instance))
+                    if debug_field:
+                        print(f"🔍 DEBUG: Added concrete value: {mro_class.__name__}.{field_name} = '{value}'")
+                elif value is not None and not _has_concrete_field_override(mro_class, field_name):
+                    # This is a user-set value in an inherit-as-none class - also concrete
+                    concrete_values.append((value, mro_class, field_path, config_instance))
+                    if debug_field:
+                        print(f"🔍 DEBUG: Added user-set value: {mro_class.__name__}.{field_name} = '{value}'")
 
     # GENERIC SUBCLASS PRECEDENCE: Filter out parent class values when subclass has concrete value
     if len(concrete_values) > 1:
-        print(f"🔍 DEBUG: Multiple concrete values found, applying subclass precedence")
+        if debug_field:
+            print(f"🔍 DEBUG: Multiple concrete values found, applying subclass precedence")
         filtered_values = _apply_subclass_precedence(concrete_values, field_name)
         if filtered_values:
             value, source_class, field_path, _ = filtered_values[0]
-            print(f"✅ DEBUG: SUBCLASS PRECEDENCE - using '{value}' from {source_class.__name__} (highest precedence)")
+            if debug_field:
+                print(f"✅ DEBUG: SUBCLASS PRECEDENCE - using '{value}' from {source_class.__name__} (highest precedence)")
             return value
     elif len(concrete_values) == 1:
         value, source_class, field_path, _ = concrete_values[0]
-        print(f"✅ DEBUG: LAZY-FIRST - using concrete value '{value}' from {source_class.__name__}")
+        if debug_field:
+            print(f"✅ DEBUG: LAZY-FIRST - using concrete value '{value}' from {source_class.__name__}")
         return value
 
     # STEP 2: If no concrete values found, create lazy instance and let it resolve
-    print(f"🔍 DEBUG: No concrete values found, falling back to lazy resolution")
+    if debug_field:
+        print(f"🔍 DEBUG: No concrete values found, falling back to lazy resolution")
     try:
         temp_instance = target_dataclass_type()
         if hasattr(temp_instance, '_resolve_field_value'):
@@ -425,17 +534,13 @@ class LazyDefaultPlaceholderService:
                 # This ensures we respect inheritance precedence when searching the context
                 current_app_config = get_current_global_config(GlobalPipelineConfig)
 
-                # First try MRO-aware resolution for inheritance-based fields
+                # SIMPLIFIED: Use LAZY-FIRST resolution only for consistency
                 resolved_value = _resolve_field_with_mro_awareness(current_app_config, dataclass_type, field_name)
 
-                # If not found via MRO, fall back to composition search
-                if resolved_value is None:
-                    resolved_value = _resolve_field_with_composition_awareness(current_app_config, field_name)
-
-                # If still not found in context, fall back to lazy resolution
+                # If not found via LAZY-FIRST, fall back to lazy resolution (no composition search)
                 if resolved_value is None and hasattr(dataclass_type, '_resolve_field_value'):
                     temp_instance = dataclass_type()
-                    resolved_value = _resolve_field_with_composition_awareness(temp_instance, field_name)
+                    resolved_value = _resolve_field_with_mro_awareness(temp_instance, dataclass_type, field_name)
                 elif resolved_value is None:
                     # Final fallback: create instance and use getattr
                     resolved_value = getattr(dataclass_type(), field_name)
