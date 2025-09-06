@@ -132,9 +132,10 @@ class AbstractStep(abc.ABC):
         variable_components: List[VariableComponents] = get_default_variable_components(),
         group_by: Optional[GroupBy] = get_default_group_by(),
         input_source: InputSource = InputSource.PREVIOUS_STEP,
+        step_well_filter_config: 'LazyStepWellFilterConfig' = None,
         materialization_config: Optional['LazyStepMaterializationConfig'] = None,
         napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
-        fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None
+        fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
     ) -> None:
         """
         Initialize a step. These attributes are primarily used during the
@@ -165,6 +166,7 @@ class AbstractStep(abc.ABC):
         self.materialization_config = materialization_config
         self.napari_streaming_config = napari_streaming_config
         self.fiji_streaming_config = fiji_streaming_config
+        self.step_well_filter_config = step_well_filter_config
 
         # Internal compiler hints - set by path planner during compilation
         self.__input_dir__ = None

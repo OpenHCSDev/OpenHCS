@@ -619,9 +619,11 @@ class ParameterFormManager(QWidget):
             return
 
         if value is None and self.config.is_lazy_dataclass:
-            # SIMPLIFIED: Use thread-local context directly (updated during reset)
+            # CRITICAL FIX: Use orchestrator-specific context instead of thread-local context
+            current_form_context = self._build_context_from_current_form_values()
             placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                 self.dataclass_type, param_name,
+                app_config=current_form_context,
                 placeholder_prefix=self.placeholder_prefix
             )
             if placeholder_text:

@@ -1,11 +1,13 @@
 """Generic lazy dataclass factory using flexible resolution."""
 
 # Standard library imports
+import dataclasses
 import inspect
 import logging
 import re
 import threading
 import sys
+from abc import ABCMeta
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass, make_dataclass, MISSING, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
@@ -266,9 +268,8 @@ class LazyDataclassFactory:
             if (is_already_optional or not has_default) and is_dataclass(field.type):
                 # For Optional dataclass fields, create default factory that creates lazy instances
                 # This ensures the UI always has nested lazy instances to render recursively
-                from dataclasses import field as dataclass_field
                 # CRITICAL: field_type is already the lazy type, so use it directly
-                default_value = dataclass_field(default_factory=field_type)
+                default_value = dataclasses.field(default_factory=field_type)
 
             lazy_field_definitions.append((field.name, final_field_type, default_value))
 
@@ -670,8 +671,6 @@ _pending_injections = {}
 
 
 
-from abc import ABCMeta
-
 class InheritAsNoneMeta(ABCMeta):
     """
     Metaclass that applies inherit_as_none modifications during class creation.
@@ -686,17 +685,12 @@ class InheritAsNoneMeta(ABCMeta):
 
         # Check if this class should have inherit_as_none applied
         if hasattr(cls, '_inherit_as_none') and cls._inherit_as_none:
-            print(f"🔧 METACLASS: Applying inherit_as_none to {name}")
-
             # Get explicitly defined fields (in this class's namespace)
             explicitly_defined_fields = set()
             if '__annotations__' in namespace:
                 for field_name in namespace['__annotations__']:
                     if field_name in namespace:
                         explicitly_defined_fields.add(field_name)
-                        print(f"🔧 METACLASS: Found explicit field {name}.{field_name} = {namespace[field_name]}")
-
-            print(f"🔧 METACLASS: Explicitly defined fields in {name}: {explicitly_defined_fields}")
 
             # Process parent classes to find fields that need None overrides
             processed_fields = set()
@@ -714,8 +708,6 @@ class InheritAsNoneMeta(ABCMeta):
 
                         # Add None override if needed
                         if (field_name not in explicitly_defined_fields and parent_has_concrete_default):
-                            print(f"🔧 METACLASS: Adding {name}.{field_name} = None (parent {base.__name__} has concrete default)")
-
                             # Set the class attribute to None
                             setattr(cls, field_name, None)
 
@@ -728,117 +720,10 @@ class InheritAsNoneMeta(ABCMeta):
                         else:
                             processed_fields.add(field_name)
 
-            print(f"🔧 METACLASS: Finished modifying {name}")
-
         return cls
 
 
-def _apply_inherit_as_none_modification(cls):
-    """
-    Modify a class to set inherited fields to None BEFORE dataclass processing.
 
-    This enables inheritance for inherited fields while preserving explicit overrides.
-    """
-    print(f"🔧 DECORATOR: Applying inherit_as_none to {cls.__name__}")
-
-    # Get fields that are explicitly defined in this class (not inherited)
-    # These are fields that appear in the class body with explicit values
-    explicitly_defined_fields = set()
-
-    # Check class annotations and defaults to find explicitly defined fields
-    # CRITICAL FIX: Only include fields that are defined in THIS class, not inherited
-    if hasattr(cls, '__annotations__'):
-        for field_name in cls.__annotations__:
-            # Check if field is defined in THIS class's __dict__ (not inherited)
-            if field_name in cls.__dict__:
-                # Field has both annotation and value in this class - explicitly defined
-                explicitly_defined_fields.add(field_name)
-                print(f"🔧 DECORATOR: Found explicit field {cls.__name__}.{field_name} = {getattr(cls, field_name)}")
-            else:
-                print(f"🔧 DECORATOR: Field {cls.__name__}.{field_name} is inherited (not explicit)")
-
-    print(f"🔧 DECORATOR: Explicitly defined fields in {cls.__name__}: {explicitly_defined_fields}")
-
-    # CRITICAL FIX: Modify class attributes BEFORE dataclass processes them
-    # Track processed fields to avoid multiple processing
-    processed_fields = set()
-
-    for base in cls.__mro__[1:]:  # Skip self (cls.__mro__[0])
-        if hasattr(base, '__annotations__'):
-            for field_name, field_type in base.__annotations__.items():
-                # Skip if we've already processed this field
-                if field_name in processed_fields:
-                    continue
-
-                # Check if parent has this field with a concrete default
-                parent_has_concrete_default = False
-                if hasattr(base, field_name):
-                    parent_value = getattr(base, field_name)
-                    parent_has_concrete_default = parent_value is not None
-
-                # Only override if:
-                # 1. Field is NOT explicitly defined in target class
-                # 2. Parent field has concrete default
-                if (field_name not in explicitly_defined_fields and parent_has_concrete_default):
-
-                    # Get the original value for debug
-                    original_value = getattr(cls, field_name, 'NOT_FOUND') if hasattr(cls, field_name) else 'INHERITED'
-
-                    print(f"🔧 DECORATOR: Setting {cls.__name__}.{field_name} = None (was '{original_value}', parent {base.__name__} has concrete default)")
-
-                    # CRITICAL FIX: Modify the dataclass field default directly
-                    import dataclasses
-                    if field_name in cls.__dataclass_fields__:
-                        # Modify existing field
-                        field_obj = cls.__dataclass_fields__[field_name]
-                        # Create new field with None default
-                        new_field = dataclasses.field(default=None)
-                        # Copy all other attributes
-                        new_field.init = field_obj.init
-                        new_field.repr = field_obj.repr
-                        new_field.hash = field_obj.hash
-                        new_field.compare = field_obj.compare
-                        new_field.metadata = field_obj.metadata
-                        if hasattr(field_obj, 'kw_only'):
-                            new_field.kw_only = field_obj.kw_only
-                        # Replace the field
-                        cls.__dataclass_fields__[field_name] = new_field
-                    else:
-                        # Add new field
-                        if not hasattr(cls, '__annotations__'):
-                            cls.__annotations__ = {}
-                        cls.__annotations__[field_name] = field_type
-                        cls.__dataclass_fields__[field_name] = dataclasses.field(default=None)
-
-                    # Also set class attribute for consistency
-                    try:
-                        setattr(cls, field_name, None)
-                    except (AttributeError, TypeError):
-                        # Frozen dataclass - can't set attribute, but field default is what matters
-                        pass
-
-                    # Verify the change
-                    field_default = cls.__dataclass_fields__[field_name].default
-                    print(f"🔧 DECORATOR: Verified {cls.__name__}.{field_name} field default = '{field_default}'")
-
-                    # Mark as processed
-                    processed_fields.add(field_name)
-                elif field_name in explicitly_defined_fields:
-                    print(f"🔧 DECORATOR: Preserving explicit field {cls.__name__}.{field_name} (not overriding)")
-                    processed_fields.add(field_name)
-                elif not parent_has_concrete_default:
-                    print(f"🔧 DECORATOR: Skipping {cls.__name__}.{field_name} (parent {base.__name__} has None/inherit-as-none default)")
-                    processed_fields.add(field_name)
-
-    print(f"🔧 DECORATOR: Finished modifying {cls.__name__}")
-
-    # CRITICAL DEBUG: Verify the modification actually worked
-    import dataclasses
-    from dataclasses import fields
-    for field in fields(cls):
-        if field.name == 'well_filter':
-            actual_default = field.default if field.default is not dataclasses.MISSING else None
-            print(f"🔧 DECORATOR VERIFY: {cls.__name__}.{field.name} actual default after modification: '{actual_default}'")
 
 
 
@@ -872,15 +757,11 @@ def create_global_default_decorator(target_config_class: Type):
         def decorator(actual_cls):
             print(f"🔧 DECORATOR: Processing {actual_cls.__name__} with inherit_as_none={inherit_as_none}")
 
-            # CRITICAL FIX: Apply inherit_as_none using metaclass approach
+            # Apply inherit_as_none using metaclass approach
             if inherit_as_none:
-                print(f"🔧 DECORATOR: Marking {actual_cls.__name__} for inherit_as_none (will be processed by metaclass)")
-                # Mark the class for metaclass processing
+                # Mark the class for metaclass processing and apply metaclass retroactively
                 actual_cls._inherit_as_none = True
-                # Apply the metaclass retroactively
                 actual_cls = InheritAsNoneMeta(actual_cls.__name__, actual_cls.__bases__, dict(actual_cls.__dict__))
-            else:
-                print(f"🔧 DECORATOR: Skipping inherit_as_none for {actual_cls.__name__} (inherit_as_none=False)")
 
             # Generate field and class names
             field_name = _camel_to_snake(actual_cls.__name__)
@@ -899,12 +780,7 @@ def create_global_default_decorator(target_config_class: Type):
                 print(f"🔧 DECORATOR: Hiding {actual_cls.__name__} from UI (ui_hidden=True)")
 
             # Immediately create lazy version of this config (not dependent on injection)
-            # DEBUG: Check what field defaults the lazy factory sees
-            if inherit_as_none:
-                from dataclasses import fields
-                for field in fields(actual_cls):
-                    if field.name == 'well_filter':
-                        print(f"🔧 LAZY FACTORY: {actual_cls.__name__}.{field.name} default = '{field.default}' (before lazy creation)")
+
 
             lazy_class = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
                 base_class=actual_cls,
@@ -959,8 +835,6 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
     # Mathematical simplification: Single expression for all field construction with optional and inherit_as_none support
     def create_field_definition(config):
         """Create field definition with optional and inherit_as_none support."""
-        from typing import Union
-        from dataclasses import fields as get_fields
 
         field_type = config['config_class']
         is_optional = config.get('optional', False)
