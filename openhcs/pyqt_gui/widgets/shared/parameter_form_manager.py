@@ -702,7 +702,18 @@ class ParameterFormManager(QWidget):
                         object.__setattr__(updated_instance, '_is_lazy_dataclass', True)
                 else:
                     # Regular dataclass - use normal replace
-                    updated_instance = replace(current_dataclass_instance, **current_form_values)
+                    # CRITICAL FIX: Filter form values to only include fields that exist in this dataclass
+                    import dataclasses
+                    valid_field_names = {f.name for f in dataclasses.fields(current_dataclass_instance)}
+                    filtered_form_values = {k: v for k, v in current_form_values.items() if k in valid_field_names}
+
+                    if filtered_form_values != current_form_values:
+                        print(f"🔍 FIELD FILTER DEBUG: Filtered out invalid fields for {type(current_dataclass_instance).__name__}")
+                        print(f"    Valid fields: {valid_field_names}")
+                        print(f"    Form values: {set(current_form_values.keys())}")
+                        print(f"    Filtered out: {set(current_form_values.keys()) - valid_field_names}")
+
+                    updated_instance = replace(current_dataclass_instance, **filtered_form_values)
 
                 # CRITICAL FIX: Handle root config vs nested config updates generically
                 if hasattr(current_context, self.field_id):
