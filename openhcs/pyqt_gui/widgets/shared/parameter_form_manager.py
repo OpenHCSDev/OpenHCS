@@ -541,13 +541,19 @@ class ParameterFormManager(QWidget):
         context_updates = {}
 
         # Update THIS form's dataclass instance
-        # CRITICAL CHANGE: Direct field mapping (no prefix stripping)
-        context_field_name = self.field_id  # Direct mapping!
-        print(f"🔍 CONTEXT DEBUG: field_id='{self.field_id}', context_field_name='{context_field_name}', hasattr={hasattr(current_context, context_field_name)}")
-        if hasattr(current_context, context_field_name):
-            current_dataclass_instance = getattr(current_context, context_field_name)
-            print(f"🔍 CONTEXT DEBUG: current_dataclass_instance={current_dataclass_instance}")
-            if current_dataclass_instance:
+        # CRITICAL FIX: Handle root config vs nested config generically
+        # Check if field_id corresponds to an actual field in the context
+        if hasattr(current_context, self.field_id):
+            # Normal case: This form manager represents a nested field
+            current_dataclass_instance = getattr(current_context, self.field_id)
+            print(f"🔍 CONTEXT DEBUG: NESTED CONFIG - field_id='{self.field_id}', found field in context")
+        else:
+            # Root config case: field_id doesn't exist as a field, so this form represents the root
+            current_dataclass_instance = current_context
+            print(f"🔍 CONTEXT DEBUG: ROOT CONFIG - field_id='{self.field_id}', using current_context directly")
+
+        print(f"🔍 CONTEXT DEBUG: current_dataclass_instance={current_dataclass_instance}")
+        if current_dataclass_instance:
                 # CRITICAL FIX: Get current widget values, not just stored parameters
                 # This captures values that are typed but not yet saved to parameters
                 current_form_values = self.parameters.copy()
@@ -592,7 +598,15 @@ class ParameterFormManager(QWidget):
 
                 # Update with current form values (including widget values)
                 updated_instance = replace(current_dataclass_instance, **current_form_values)
-                context_updates[context_field_name] = updated_instance
+
+                # CRITICAL FIX: Handle root config vs nested config updates generically
+                if hasattr(current_context, self.field_id):
+                    # Nested config: Update specific field in context
+                    context_updates[self.field_id] = updated_instance
+                else:
+                    # Root config: Mark for full context replacement
+                    print(f"🔍 CONTEXT DEBUG: ROOT CONFIG - will replace entire context with updated instance")
+                    context_updates['__root_replacement__'] = updated_instance
 
         # CRITICAL FIX: Also collect current values from all nested managers
         # This captures unsaved values from sibling forms like well_filter_config
@@ -644,7 +658,18 @@ class ParameterFormManager(QWidget):
                     context_updates[nested_name] = updated_nested
 
         # Return updated context preserving COMPLETE inheritance hierarchy with current form values
-        return replace(current_context, **context_updates) if context_updates else current_context
+        # CRITICAL FIX: Handle root config replacement
+        if '__root_replacement__' in context_updates:
+            # Root config case: return the replacement instance with nested updates applied
+            root_replacement = context_updates.pop('__root_replacement__')
+            if context_updates:
+                # Apply any nested updates to the root replacement
+                return replace(root_replacement, **context_updates)
+            else:
+                return root_replacement
+        else:
+            # Normal case: update specific fields in context
+            return replace(current_context, **context_updates) if context_updates else current_context
 
     def _refresh_all_placeholders_with_current_context(self) -> None:
         """Refresh all placeholders using current form values to show inheritance."""

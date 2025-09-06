@@ -78,9 +78,12 @@ class ConfigWindow(QDialog):
         placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
         # Always use ParameterFormManager with dataclass editing mode - unified approach
+        # CRITICAL FIX: Use dataclass type name as field_id for root config (not artificial "config")
+        # This aligns with field path system design where field_id should match actual structure
+        root_field_id = type(current_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
         self.form_manager = ParameterFormManager.from_dataclass_instance(
             dataclass_instance=current_config,
-            field_id="config",
+            field_id=root_field_id,
             placeholder_prefix=placeholder_prefix,
             color_scheme=self.color_scheme,
             use_scroll_area=True
@@ -269,9 +272,11 @@ class ConfigWindow(QDialog):
             placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
             # Create new form manager with the new config
+            # CRITICAL FIX: Use dataclass type name as field_id for root config (not artificial "config")
+            root_field_id = type(new_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
             new_form_manager = ParameterFormManager.from_dataclass_instance(
                 dataclass_instance=new_config,
-                field_id="config",
+                field_id=root_field_id,
                 placeholder_prefix=placeholder_prefix,
                 color_scheme=self.color_scheme,
                 use_scroll_area=True
