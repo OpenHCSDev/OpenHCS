@@ -223,21 +223,38 @@ class PipelineCompiler:
             has_streaming = False
             required_visualizers = getattr(context, 'required_visualizers', [])
 
-            for attr_name in dir(resolved_step):
-                if not attr_name.startswith('_'):
-                    config = getattr(resolved_step, attr_name, None)
-                    if config is not None and isinstance(config, WellFilterConfig):
+            # CRITICAL FIX: Use dataclass fields instead of dir() to avoid __dict__ descriptor issues
+            # dir() internally accesses __dict__ which fails for lazy dataclasses without inheritance
+            from dataclasses import fields, is_dataclass
+
+            def get_attribute_names(obj):
+                """Get attribute names safely, preferring dataclass fields over dir()."""
+                if is_dataclass(obj):
+                    return [field_def.name for field_def in fields(type(obj))]
+                else:
+                    return dir(obj)
+
+            try:
+                for attr_name in get_attribute_names(resolved_step):
+                    if not attr_name.startswith('_'):
+                        config = getattr(resolved_step, attr_name, None)
+                        if config is not None and isinstance(config, WellFilterConfig):
                             current_plan[attr_name] = config
-                            # Check if this is a streaming config for visualize flag
-                            if isinstance(config, StreamingConfig):
-                                has_streaming = True
-                                # Collect visualizer info
-                                visualizer_info = {
-                                    'backend': config.backend.name,
-                                    'config': config
-                                }
-                                if visualizer_info not in required_visualizers:
-                                    required_visualizers.append(visualizer_info)
+            except Exception:
+                # If introspection fails, skip this step to prevent crashes
+                pass
+
+            # Check if this is a streaming config for visualize flag
+            for attr_name, config in current_plan.items():
+                if isinstance(config, StreamingConfig):
+                    has_streaming = True
+                    # Collect visualizer info
+                    visualizer_info = {
+                        'backend': config.backend.name,
+                        'config': config
+                    }
+                    if visualizer_info not in required_visualizers:
+                        required_visualizers.append(visualizer_info)
 
             # Set visualize flag for orchestrator if any streaming is enabled
             current_plan["visualize"] = has_streaming

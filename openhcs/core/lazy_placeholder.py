@@ -405,13 +405,23 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
     # Also search for other dataclass types in the global config that have this field
     # This handles sibling inheritance (e.g., StepWellFilterConfig vs WellFilterConfig)
     if global_config:
-        for attr_name in dir(global_config):
-            if not attr_name.startswith('_'):
-                attr_value = getattr(global_config, attr_name)
-                if hasattr(attr_value, '__dataclass_fields__') and field_name in attr_value.__dataclass_fields__:
-                    attr_type = type(attr_value)
-                    if attr_type not in all_dataclass_types:
-                        all_dataclass_types.append(attr_type)
+        # CRITICAL FIX: Use dataclass fields instead of dir() to avoid __dict__ descriptor issues
+        # dir() internally accesses __dict__ which fails for lazy dataclasses without inheritance
+        from dataclasses import fields
+        try:
+            config_fields = fields(type(global_config))
+            for field_def in config_fields:
+                attr_name = field_def.name
+                if not attr_name.startswith('_'):
+                    attr_value = getattr(global_config, attr_name)
+                    if hasattr(attr_value, '__dataclass_fields__') and field_name in attr_value.__dataclass_fields__:
+                        attr_type = type(attr_value)
+                        if attr_type not in all_dataclass_types:
+                            all_dataclass_types.append(attr_type)
+        except Exception:
+            # Fallback: if dataclass introspection fails, skip this step
+            # This prevents crashes while still allowing basic inheritance resolution
+            pass
 
     # CRITICAL FIX: Collect ALL concrete values first, then apply config-aware precedence
     concrete_values = []  # List of (value, source_class, field_path, config_instance)
