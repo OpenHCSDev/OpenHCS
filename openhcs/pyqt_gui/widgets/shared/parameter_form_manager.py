@@ -365,7 +365,7 @@ class ParameterFormManager(QWidget):
             # Unified manager setup
             self.nested_managers[param_info.name] = nested_manager
             nested_manager.parameter_changed.connect(
-                lambda name, value, parent_name=param_info.name: self._handle_nested_parameter_change(parent_name, value)
+                lambda name, value, parent_name=param_info.name: self._handle_nested_parameter_change(parent_name, None)
             )
             group_box.content_layout.addWidget(nested_manager)
         else:
@@ -525,17 +525,103 @@ class ParameterFormManager(QWidget):
         # 2. Check StepWellFilterConfig (well_filter='5') -> FOUND! Use this value
         # 3. Skip WellFilterConfig (well_filter='2') -> lower precedence
 
-        # Update only THIS form's dataclass instance while preserving all others
+        # CRITICAL FIX: Collect current values from ALL nested managers (sibling forms)
+        # This ensures placeholder resolution sees current unsaved values from all forms
         context_updates = {}
+
+        # Update THIS form's dataclass instance
         form_field_name = self.field_id
         if hasattr(current_context, form_field_name):
             current_dataclass_instance = getattr(current_context, form_field_name)
             if current_dataclass_instance:
-                # Update with current parameter values for this specific dataclass
-                updated_instance = replace(current_dataclass_instance, **self.parameters)
+                # CRITICAL FIX: Get current widget values, not just stored parameters
+                # This captures values that are typed but not yet saved to parameters
+                current_form_values = self.parameters.copy()
+
+                # CRITICAL FIX: Force read current widget values to capture unsaved typing
+                for param_name, widget in self.widgets.items():
+                    try:
+                        widget_value = None
+
+                        # Try multiple methods to get the current widget value
+                        if hasattr(widget, 'get_value'):
+                            widget_value = widget.get_value()
+                        elif hasattr(widget, 'text'):
+                            widget_value = widget.text()
+                        elif hasattr(widget, 'isChecked'):
+                            widget_value = widget.isChecked()
+                        elif hasattr(widget, 'currentData'):
+                            widget_value = widget.currentData()
+                        elif hasattr(widget, 'value'):
+                            widget_value = widget.value()
+                        elif hasattr(widget, 'currentText'):
+                            widget_value = widget.currentText()
+
+                        # Update if widget has any value (including empty string)
+                        if widget_value is not None:
+                            # Convert empty string to None for consistency
+                            if widget_value == "":
+                                widget_value = None
+                            current_form_values[param_name] = widget_value
+                            print(f"🔍 WIDGET DEBUG: {self.field_id}.{param_name} widget value = '{widget_value}'")
+                    except Exception as e:
+                        print(f"🔍 WIDGET DEBUG: Failed to get {param_name} widget value: {e}")
+                        pass
+
+                # Update with current form values (including widget values)
+                updated_instance = replace(current_dataclass_instance, **current_form_values)
                 context_updates[form_field_name] = updated_instance
 
-        # Return updated context preserving COMPLETE inheritance hierarchy
+        # CRITICAL FIX: Also collect current values from all nested managers
+        # This captures unsaved values from sibling forms like well_filter_config
+        for nested_name, nested_manager in self.nested_managers.items():
+            if hasattr(current_context, nested_name):
+                current_nested_instance = getattr(current_context, nested_name)
+                if current_nested_instance and hasattr(nested_manager, 'parameters'):
+                    # CRITICAL FIX: Get current widget values directly, not just parameters
+                    # This ensures we capture values that are typed but not yet saved to parameters
+                    current_nested_values = {}
+
+                    # First, get values from parameters
+                    current_nested_values.update(nested_manager.parameters)
+                    print(f"🔍 NESTED PARAMS DEBUG: {nested_name}.parameters = {nested_manager.parameters}")
+
+                    # Then, override with current widget values to capture unsaved typing
+                    for param_name, widget in nested_manager.widgets.items():
+                        try:
+                            widget_value = None
+
+                            if hasattr(widget, 'get_value'):
+                                widget_value = widget.get_value()
+                            elif hasattr(widget, 'text'):
+                                widget_value = widget.text()
+                            elif hasattr(widget, 'isChecked'):
+                                widget_value = widget.isChecked()
+                            elif hasattr(widget, 'currentData'):
+                                widget_value = widget.currentData()
+                            elif hasattr(widget, 'value'):
+                                widget_value = widget.value()
+                            elif hasattr(widget, 'currentText'):
+                                widget_value = widget.currentText()
+                            else:
+                                continue
+
+                            # Update if widget has any value (including empty string)
+                            if widget_value is not None:
+                                # Convert empty string to None for consistency
+                                if widget_value == "":
+                                    widget_value = None
+                                current_nested_values[param_name] = widget_value
+                                print(f"🔍 NESTED WIDGET DEBUG: {nested_name}.{param_name} widget value = '{widget_value}'")
+                        except Exception as e:
+                            print(f"🔍 NESTED WIDGET DEBUG: Failed to get {nested_name}.{param_name} widget value: {e}")
+                            pass
+
+                    # Update nested instance with current form values (including widget values)
+                    updated_nested = replace(current_nested_instance, **current_nested_values)
+                    context_updates[nested_name] = updated_nested
+
+        # Return updated context preserving COMPLETE inheritance hierarchy with current form values
         return replace(current_context, **context_updates) if context_updates else current_context
 
     def _refresh_all_placeholders_with_current_context(self) -> None:
@@ -705,37 +791,52 @@ class ParameterFormManager(QWidget):
         if param_name not in self.parameters:
             return
 
-        # Resolve reset value using dispatch
-        reset_value = default_value or self._get_reset_value(param_name)
+        # CRITICAL FIX: Set updated context at the very beginning of reset process
+        # This ensures all lazy resolutions during reset use current form values
+        from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
 
-        # Apply reset with functional operations
-        self.parameters[param_name] = reset_value
+        updated_context = self._build_context_from_current_form_values()
+        original_context = get_current_global_config(GlobalPipelineConfig)
 
-        # Mathematical simplification: Simple reset logic
-        # 1. Remove from user-set tracking
-        if hasattr(self, '_user_set_fields'):
-            self._user_set_fields.discard(param_name)
-
-        # 2. CRITICAL FIX: Update thread-local context to exclude reset field
-        # This prevents placeholder resolution from using stale values
-        if reset_value is None and self.config.is_lazy_dataclass:
-            from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
-            from openhcs.core.config import GlobalPipelineConfig
-            from dataclasses import replace
-
-            current_context = get_current_global_config(GlobalPipelineConfig)
-            if current_context and hasattr(current_context, param_name):
-                # Create updated context with reset field set to None
-                updated_context = replace(current_context, **{param_name: None})
+        try:
+            if updated_context:
                 set_current_global_config(GlobalPipelineConfig, updated_context)
 
-        # 3. Update widget value
-        if param_name in self.widgets:
-            widget = self.widgets[param_name]
-            self.update_widget_value(widget, reset_value, param_name)
+            # Resolve reset value using dispatch
+            reset_value = default_value or self._get_reset_value(param_name)
+            print(f"🔍 RESET DEBUG: {param_name} reset_value = {reset_value}, is_lazy_dataclass = {self.config.is_lazy_dataclass}")
 
-        self.nested_managers.get(param_name) and hasattr(self.nested_managers[param_name], 'reset_all_parameters') and self.nested_managers[param_name].reset_all_parameters()
-        self.parameter_changed.emit(param_name, reset_value)
+            # Apply reset with functional operations
+            self.parameters[param_name] = reset_value
+
+            # Mathematical simplification: Simple reset logic
+            # 1. Remove from user-set tracking
+            if hasattr(self, '_user_set_fields'):
+                self._user_set_fields.discard(param_name)
+
+            # 2. Update widget value first
+            if param_name in self.widgets:
+                widget = self.widgets[param_name]
+                self.update_widget_value(widget, reset_value, param_name)
+
+            # 3. CRITICAL FIX: Apply placeholder using current form values, not saved context
+            # This ensures the placeholder reflects the current form state after reset
+            if reset_value is None and self.config.is_lazy_dataclass and param_name in self.widgets:
+                widget = self.widgets[param_name]
+                self._apply_placeholder_with_lazy_context(widget, param_name, reset_value)
+
+            # 4. CRITICAL FIX: For nested forms, emit parameter change to trigger parent's sibling updates
+            # This ensures that when a field is reset in a nested form, sibling forms see the updated inheritance
+            # The parent form manager has access to all sibling managers and can trigger proper updates
+
+            self.nested_managers.get(param_name) and hasattr(self.nested_managers[param_name], 'reset_all_parameters') and self.nested_managers[param_name].reset_all_parameters()
+            self.parameter_changed.emit(param_name, reset_value)
+        finally:
+            # Restore original context after all parameter changes and lazy resolutions are complete
+            if original_context:
+                set_current_global_config(GlobalPipelineConfig, original_context)
+                print(f"🔍 CONTEXT DEBUG: Restored original context in reset_parameter")
 
     def _get_reset_value(self, param_name: str) -> Any:
         """Get reset value using context dispatch."""
@@ -820,6 +921,7 @@ class ParameterFormManager(QWidget):
                 if nested_type:
                     if self.service._type_utils.is_optional_dataclass(nested_type):
                         nested_type = self.service._type_utils.get_optional_inner_type(nested_type)
+
                     reconstructed_instance = self._rebuild_nested_dataclass_instance(nested_values, nested_type, parent_name)
                     print(f"🔍 DEBUG: Reconstructed instance: {reconstructed_instance}")
 
@@ -847,8 +949,15 @@ class ParameterFormManager(QWidget):
 
         print(f"🔍 DEBUG: Updating sibling placeholders for field '{changed_field_name}' with value: {new_value}")
 
-        # Get current thread-local context and create updated version
-        current_context = get_current_global_config(GlobalPipelineConfig)
+        # CRITICAL FIX: Get context with current form values instead of saved thread-local context
+        # This ensures sibling updates use current unsaved values (like "23") not saved values (like "1")
+        current_context = self._build_context_from_current_form_values()
+
+        # DEBUG: Show what context we built
+        print(f"🔍 CONTEXT BUILD DEBUG: Built context for sibling updates:")
+        if current_context and hasattr(current_context, 'step_well_filter_config'):
+            step_config = current_context.step_well_filter_config
+            print(f"  step_well_filter_config.well_filter = '{step_config.well_filter}'")
 
         print(f"🔍 DEBUG: step_well_filter_config type: {type(getattr(current_context, 'step_well_filter_config', None))}")
         print(f"🔍 DEBUG: step_materialization_config type: {type(getattr(current_context, 'step_materialization_config', None))}")
@@ -1211,7 +1320,37 @@ class ParameterFormManager(QWidget):
             if v != field_default:
                 filtered_values[k] = v
 
-        # Construct with only non-default values
+        # CRITICAL FIX: For lazy dataclasses, always use updated context during construction
+        # This ensures lazy field resolution uses current form values, not saved values
+        if nested_type_is_lazy:
+            print(f"🔍 CONTEXT DEBUG: Setting updated context for lazy construction of {nested_type.__name__}")
+            # Get current context with form values for lazy resolution
+            updated_context = self._build_context_from_current_form_values()
+            if updated_context:
+                from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+                from openhcs.core.config import GlobalPipelineConfig
+
+                original_context = get_current_global_config(GlobalPipelineConfig)
+                # CRITICAL FIX: Don't restore context immediately - let it stay active
+                # The issue is that lazy resolution happens AFTER construction, so we need
+                # the context to remain active until the field is actually accessed
+                set_current_global_config(GlobalPipelineConfig, updated_context)
+                print(f"🔍 CONTEXT DEBUG: Set context with step_well_filter_config.well_filter = '{updated_context.step_well_filter_config.well_filter}' - NOT RESTORING YET")
+
+                # Construct with updated context for lazy resolution
+                if filtered_values:
+                    result = nested_type(**filtered_values)
+                else:
+                    result = nested_type()
+
+                print(f"🔍 CONTEXT DEBUG: Constructed {result} - context still active")
+
+                # DON'T restore context here - let it stay active for lazy resolution
+                # The context will be restored later or by the caller
+
+                return result
+
+        # Non-lazy fallback: construct normally
         if filtered_values:
             return nested_type(**filtered_values)
         else:

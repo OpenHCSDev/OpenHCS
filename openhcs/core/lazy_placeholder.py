@@ -346,84 +346,61 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
     if not base_class:
         base_class = target_dataclass_type
 
-    debug_field = field_name == "well_filter"
-    if debug_field:
-        print(f"🔍 DEBUG: LAZY-FIRST resolution for {base_class.__name__}.{field_name}")
+    # DEBUG: Show what context we're using for resolution
+    if field_name == "well_filter":
+        print(f"🔍 LAZY RESOLUTION DEBUG: Resolving {base_class.__name__}.{field_name}")
+        if hasattr(global_config, 'step_well_filter_config'):
+            step_config = global_config.step_well_filter_config
+            print(f"🔍 LAZY RESOLUTION DEBUG: Context has step_well_filter_config.well_filter = '{step_config.well_filter}'")
 
     # STEP 1: Check lazy dataclass instances for concrete values (MRO order)
     # CRITICAL FIX: Include target class if it has concrete override, exclude if inherit-as-none
     if _has_concrete_field_override(base_class, field_name):
         # Concrete override classes should use their own values, not inherit
         mro_types = [base_class] + [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
-        if debug_field:
-            print(f"🔍 DEBUG: Target class {base_class.__name__} has concrete override, including in MRO search")
     else:
         # Inherit-as-none classes should inherit from parents, not use their own static defaults
         mro_types = [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
-        if debug_field:
-            print(f"🔍 DEBUG: Target class {base_class.__name__} is inherit-as-none, excluding from MRO search")
-
-    if debug_field:
-        print(f"🔍 DEBUG: MRO classes with field '{field_name}': {[cls.__name__ for cls in mro_types]}")
 
     # CRITICAL FIX: Collect ALL concrete values first, then apply subclass precedence
     concrete_values = []  # List of (value, source_class, field_path, config_instance)
 
     for mro_class in mro_types:
         field_paths = FieldPathDetector.find_all_field_paths_unified(type(global_config), mro_class)
-        if debug_field:
-            print(f"🔍 DEBUG: Checking lazy instances for {mro_class.__name__}: {field_paths}")
 
         for field_path in field_paths:
             config_instance = FieldPathNavigator.navigate_to_instance(global_config, field_path)
             if config_instance and hasattr(config_instance, field_name):
                 value = getattr(config_instance, field_name)
-                if debug_field:
-                    print(f"🔍 DEBUG: Lazy instance {field_path}.{field_name} = '{value}'")
                 # CRITICAL FIX: Only treat as concrete if value is not None AND class has concrete override
                 # This prevents inherit-as-none classes from contributing None values that block inheritance
                 if value is not None and _has_concrete_field_override(mro_class, field_name):
                     concrete_values.append((value, mro_class, field_path, config_instance))
-                    if debug_field:
-                        print(f"🔍 DEBUG: Added concrete value: {mro_class.__name__}.{field_name} = '{value}'")
                 elif value is not None and not _has_concrete_field_override(mro_class, field_name):
                     # This is a user-set value in an inherit-as-none class - also concrete
                     concrete_values.append((value, mro_class, field_path, config_instance))
-                    if debug_field:
-                        print(f"🔍 DEBUG: Added user-set value: {mro_class.__name__}.{field_name} = '{value}'")
 
     # GENERIC SUBCLASS PRECEDENCE: Filter out parent class values when subclass has concrete value
     if len(concrete_values) > 1:
-        if debug_field:
-            print(f"🔍 DEBUG: Multiple concrete values found, applying subclass precedence")
         filtered_values = _apply_subclass_precedence(concrete_values, field_name)
         if filtered_values:
             value, source_class, field_path, _ = filtered_values[0]
-            if debug_field:
-                print(f"✅ DEBUG: SUBCLASS PRECEDENCE - using '{value}' from {source_class.__name__} (highest precedence)")
             return value
     elif len(concrete_values) == 1:
         value, source_class, field_path, _ = concrete_values[0]
-        if debug_field:
-            print(f"✅ DEBUG: LAZY-FIRST - using concrete value '{value}' from {source_class.__name__}")
         return value
 
     # STEP 2: If no concrete values found, create lazy instance and let it resolve
-    if debug_field:
-        print(f"🔍 DEBUG: No concrete values found, falling back to lazy resolution")
     try:
         temp_instance = target_dataclass_type()
         if hasattr(temp_instance, '_resolve_field_value'):
             resolved_value = temp_instance._resolve_field_value(field_name)
-            print(f"🔍 DEBUG: Lazy resolution returned: '{resolved_value}'")
             return resolved_value
         else:
             # Final fallback to getattr
             resolved_value = getattr(temp_instance, field_name)
-            print(f"🔍 DEBUG: getattr fallback returned: '{resolved_value}'")
             return resolved_value
     except Exception as e:
-        print(f"🔍 DEBUG: Lazy resolution failed: {e}")
         return None
 
 

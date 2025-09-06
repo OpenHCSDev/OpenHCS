@@ -470,6 +470,11 @@ def _create_field_level_hierarchy_provider(base_class: Type, global_config_type:
         """Provider with simplified field-level inheritance logic."""
         current_config = context_provider() if context_provider else _get_current_config(global_config_type)
 
+        # DEBUG: Show what context the lazy resolution is using
+        if current_config and hasattr(current_config, 'step_well_filter_config'):
+            step_config = current_config.step_well_filter_config
+            print(f"🔍 LAZY PROVIDER DEBUG: field_level_provider got context with step_well_filter_config.well_filter = '{step_config.well_filter}'")
+
         # Get actual global config from app
         actual_global_config = None
         is_pipeline_context = True
@@ -591,8 +596,20 @@ def create_dataclass_for_editing(dataclass_type: Type[T], source_config: Any, pr
     if context_provider:
         context_provider(source_config)
 
-    # Initialize field values based on editing mode - inline field processing pattern
-    field_values = {f.name: getattr(source_config, f.name) if preserve_values else None for f in fields(dataclass_type)}
+    # CRITICAL FIX: Create proper lazy instances for nested dataclass fields
+    # This ensures that nested configs use lazy types for proper placeholder resolution
+    field_values = {}
+    for f in fields(dataclass_type):
+        if preserve_values:
+            field_values[f.name] = getattr(source_config, f.name)
+        else:
+            # For editing mode, create lazy instances for nested dataclass fields
+            from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+            if is_dataclass(f.type) and LazyDefaultPlaceholderService.has_lazy_resolution(f.type):
+                # Create lazy instance using the field's lazy type
+                field_values[f.name] = f.type()
+            else:
+                field_values[f.name] = None
 
     return dataclass_type(**field_values)
 
