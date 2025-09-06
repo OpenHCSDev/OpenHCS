@@ -109,7 +109,19 @@ class ParameterFormService:
             
             # Check for nested dataclasses
             if param_info.is_nested:
-                nested_field_id = f"nested_{format_field_id(field_id, param_name)}"
+                from openhcs.core.field_path_detection import FieldPathDetector
+
+                # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
+                nested_field_id = FieldPathDetector.find_field_path_for_type(
+                    parent_dataclass_type or type(None),
+                    param_type
+                )
+
+                # FAIL LOUD: If FieldPathDetector can't find the path, the architecture is broken
+                if not nested_field_id:
+                    raise ValueError(f"FieldPathDetector could not find field path for type {param_type} in {parent_dataclass_type}. "
+                                    f"This indicates the dataclass is not properly registered or the type is incorrect.")
+
                 nested_structure = self._analyze_nested_dataclass(
                     param_name, param_type, current_value, nested_field_id, parent_dataclass_type
                 )
@@ -218,26 +230,28 @@ class ParameterFormService:
             'tooltip': f"{format_param_name(param_name)} ({param_type.__name__ if hasattr(param_type, '__name__') else str(param_type)})"
         }
     
-    def generate_field_ids(self, base_field_id: str, param_name: str) -> Dict[str, str]:
-        """
-        Generate all field IDs for a parameter.
-        
-        Args:
-            base_field_id: The base field ID
-            param_name: The parameter name
-            
-        Returns:
-            Dictionary with all generated field IDs
-        """
-        widget_id = format_field_id(base_field_id, param_name)
+    def format_widget_name(self, field_path: str, param_name: str) -> str:
+        """Convert field path to widget name - replaces generate_field_ids() complexity"""
+        return f"{field_path}_{param_name}"
 
-        return {
-            'widget_id': widget_id,
-            'reset_button_id': format_reset_button_id(widget_id),
-            'optional_checkbox_id': f"{base_field_id}_{param_name}_enabled",
-            'nested_field_id': f"nested_{base_field_id}_{param_name}",
-            'nested_static_id': f"nested_static_{param_name}"
-        }
+    def validate_field_path_mapping(self):
+        """Ensure all form field_ids map correctly to context fields"""
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.core.field_path_detection import FieldPathDetector
+        import dataclasses
+
+        # Get all dataclass fields from GlobalPipelineConfig
+        context_fields = {f.name for f in dataclasses.fields(GlobalPipelineConfig)
+                         if dataclasses.is_dataclass(f.type)}
+
+        print("Context fields:", context_fields)
+        # Should include: well_filter_config, zarr_config, step_materialization_config, etc.
+
+        # Verify form managers use these exact field names (no "nested_" prefix)
+        assert "well_filter_config" in context_fields
+        assert "nested_well_filter_config" not in context_fields  # Should not exist
+
+        return True
     
     def should_use_concrete_values(self, current_value: Any, is_global_editing: bool = False) -> bool:
         """

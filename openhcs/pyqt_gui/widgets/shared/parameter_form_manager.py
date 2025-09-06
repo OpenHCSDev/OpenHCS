@@ -280,7 +280,14 @@ class ParameterFormManager(QWidget):
     def _create_parameter_section(self, param_info) -> QWidget:
         """Mathematical simplification: Unified parameter section creation with dispatch table."""
         display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
-        field_ids = self.service.generate_field_ids(self.config.field_id, param_info.name)
+
+        # Direct field ID generation - no artificial complexity
+        widget_id = f"{self.config.field_id}_{param_info.name}"
+        field_ids = {
+            'widget_id': widget_id,
+            'reset_button_id': f"reset_{widget_id}",
+            'optional_checkbox_id': f"{self.config.field_id}_{param_info.name}_enabled"
+        }
 
         # Algebraic simplification: Single expression for content type dispatch
         container, widgets = (
@@ -343,6 +350,18 @@ class ParameterFormManager(QWidget):
 
         # Algebraic simplification: Single conditional for lazy resolution
         if LazyDefaultPlaceholderService.has_lazy_resolution(nested_type):
+            # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
+            from openhcs.core.field_path_detection import FieldPathDetector
+            field_path = FieldPathDetector.find_field_path_for_type(
+                self.dataclass_type,  # Use existing dataclass_type directly
+                nested_type
+            )
+
+            # FAIL LOUD: If FieldPathDetector can't find the path, the architecture is broken
+            if not field_path:
+                raise ValueError(f"FieldPathDetector could not find field path for type {nested_type} in {self.dataclass_type}. "
+                                f"This indicates the dataclass is not properly registered or the type is incorrect.")
+
             # Mathematical simplification: Inline instance creation without helper method
             if current_value and not isinstance(current_value, nested_type):
                 # Convert base to lazy instance via direct field mapping
@@ -356,7 +375,7 @@ class ParameterFormManager(QWidget):
 
             nested_manager = ParameterFormManager.from_dataclass_instance(
                 dataclass_instance=lazy_instance,
-                field_id=f"nested_{param_info.name}",
+                field_id=field_path,  # Use actual dataclass field name directly
                 placeholder_prefix=self.placeholder_prefix,
                 parent=group_box, use_scroll_area=False,
                 color_scheme=self.config.color_scheme
@@ -428,20 +447,30 @@ class ParameterFormManager(QWidget):
         return container, {'main': container}
 
     def _create_nested_form_inline(self, param_name: str, param_type: Type, current_value: Any) -> Any:
-        """Create nested form - inlined from create_nested_form."""
+        """Create nested form - use actual field path instead of artificial field IDs"""
+        from openhcs.core.field_path_detection import FieldPathDetector
+
+        # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
+        field_path = FieldPathDetector.find_field_path_for_type(
+            self.dataclass_type,  # Use existing dataclass_type directly - no helper method needed
+            param_type
+        )
+
+        # FAIL LOUD: If FieldPathDetector can't find the path, the architecture is broken
+        if not field_path:
+            raise ValueError(f"FieldPathDetector could not find field path for type {param_type} in {self.dataclass_type}. "
+                            f"This indicates the dataclass is not properly registered or the type is incorrect.")
+
         # Extract nested parameters using service with parent context (handles both dataclass and non-dataclass contexts)
         nested_params, nested_types = self.service.extract_nested_parameters(
             current_value, param_type, self.dataclass_type
         )
 
-        # Get field IDs from service
-        field_ids = self.service.generate_field_ids(self.config.field_id, param_name)
-
-        # Return nested manager with inherited configuration
+        # Create nested manager with actual field path (no artificial field ID generation)
         nested_manager = ParameterFormManager(
             nested_params,
             nested_types,
-            field_ids['nested_field_id'],
+            field_path,  # Use actual dataclass field name directly
             param_type,    # Use the actual nested dataclass type, not parent type
             None,  # parameter_info
             None,  # parent
@@ -535,15 +564,9 @@ class ParameterFormManager(QWidget):
         context_updates = {}
 
         # Update THIS form's dataclass instance
-        form_field_name = self.field_id
-        # CRITICAL FIX: Strip 'nested_' prefix for context field lookup
-        # Nested form managers have field_id like 'nested_well_filter_config'
-        # but the context field is just 'well_filter_config'
-        if form_field_name.startswith('nested_'):
-            context_field_name = form_field_name[7:]  # Remove 'nested_' prefix
-        else:
-            context_field_name = form_field_name
-        print(f"🔍 CONTEXT DEBUG: form_field_name='{form_field_name}', context_field_name='{context_field_name}', hasattr={hasattr(current_context, context_field_name)}")
+        # CRITICAL CHANGE: Direct field mapping (no prefix stripping)
+        context_field_name = self.field_id  # Direct mapping!
+        print(f"🔍 CONTEXT DEBUG: field_id='{self.field_id}', context_field_name='{context_field_name}', hasattr={hasattr(current_context, context_field_name)}")
         if hasattr(current_context, context_field_name):
             current_dataclass_instance = getattr(current_context, context_field_name)
             print(f"🔍 CONTEXT DEBUG: current_dataclass_instance={current_dataclass_instance}")
