@@ -404,7 +404,7 @@ def _apply_path_widget_placeholder(widget: Any, placeholder_text: str) -> None:
 
 
 def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> None:
-    """Apply placeholder to combobox with visual preview using robust enum matching."""
+    """Apply placeholder to combobox with visual preview using signal blocking like checkboxes."""
     try:
         default_value = _extract_default_value(placeholder_text)
 
@@ -415,10 +415,20 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
             -1
         )
 
-        if matching_index >= 0:
-            widget.setCurrentIndex(matching_index)
+        # CRITICAL FIX: Block signals to prevent placeholder from being treated as user selection
+        # This is the same approach used by checkboxes - show the placeholder visually
+        # but don't trigger parameter change events
+        widget.blockSignals(True)
+        try:
+            if matching_index >= 0:
+                widget.setCurrentIndex(matching_index)
+            else:
+                widget.setCurrentIndex(-1)
+        finally:
+            # Always restore signal connections
+            widget.blockSignals(False)
 
-        # Always apply placeholder styling to indicate this is a placeholder value
+        # Apply placeholder styling to indicate this is a placeholder value
         _apply_placeholder_styling(
             widget,
             PlaceholderConfig.INTERACTION_HINTS['combobox'],

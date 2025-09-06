@@ -49,6 +49,10 @@ class TimingConfig:
     ACTION_DELAY: float = 1.5
     WINDOW_DELAY: float = 1.5
     SAVE_DELAY: float = 1.5
+    # Visual debugging delays for manual observation
+    VISUAL_OBSERVATION_DELAY: float = 3.0
+    VISUAL_PREPARATION_DELAY: float = 2.0
+    VISUAL_BUG_OBSERVATION_DELAY: float = 10.0
 
     @classmethod
     def from_environment(cls) -> 'TimingConfig':
@@ -711,6 +715,56 @@ class WidgetInteractor:
                 return
 
         raise AssertionError(f"Cannot set value on widget of type {type(widget)}")
+
+    @staticmethod
+    def scroll_to_widget(widget) -> None:
+        """Scroll the config window to make the widget visible for manual observation."""
+        if not widget:
+            return
+
+        # Find the scroll area that contains this widget
+        parent = widget.parentWidget()
+        while parent:
+            # Check if this is a QScrollArea
+            if hasattr(parent, 'ensureWidgetVisible'):
+                try:
+                    parent.ensureWidgetVisible(widget, 50, 50)  # 50px margins
+                    print(f"📍 Scrolled to make widget visible using ensureWidgetVisible")
+                    break
+                except Exception as e:
+                    print(f"⚠️ ensureWidgetVisible failed: {e}")
+
+            # Check if this has scroll bars (QAbstractScrollArea)
+            elif hasattr(parent, 'verticalScrollBar') and hasattr(parent, 'viewport'):
+                try:
+                    # Manual scroll calculation for scroll areas
+                    widget_pos = widget.mapTo(parent.viewport(), widget.rect().center())
+                    v_scroll_bar = parent.verticalScrollBar()
+                    h_scroll_bar = parent.horizontalScrollBar()
+
+                    if v_scroll_bar:
+                        # Calculate target scroll position to center the widget vertically
+                        viewport_height = parent.viewport().height()
+                        target_y = widget_pos.y() - viewport_height // 2
+                        v_scroll_bar.setValue(max(0, min(target_y, v_scroll_bar.maximum())))
+
+                    if h_scroll_bar:
+                        # Calculate target scroll position to center the widget horizontally
+                        viewport_width = parent.viewport().width()
+                        target_x = widget_pos.x() - viewport_width // 2
+                        h_scroll_bar.setValue(max(0, min(target_x, h_scroll_bar.maximum())))
+
+                    print(f"📍 Manually scrolled to widget position")
+                    break
+                except Exception as e:
+                    print(f"⚠️ Manual scroll failed: {e}")
+
+            # Move up the parent hierarchy
+            parent = parent.parentWidget()
+
+        # Process events and wait for scroll animation
+        QApplication.processEvents()
+        _wait_for_gui(TimingConfig.ACTION_DELAY)
 
 # Unified widget operations using the new system
 def _find_config_window() -> Optional[QDialog]:
