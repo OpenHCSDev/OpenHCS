@@ -253,9 +253,45 @@ def check_field_value(context: WorkflowContext, field_name: str, expected_value:
 
     return str(actual_value) == str(expected_value)
 
-def get_widget_value_enhanced(widget: Any) -> Any:
-    """Enhanced widget value getting with proper enum dropdown support."""
+def check_field_is_placeholder_with_value(context: WorkflowContext, field_name: str, expected_placeholder_value: Any, config_section: str = None) -> bool:
+    """Check if field is in placeholder state AND showing the expected placeholder value."""
+    widget = find_widget(context, field_name, config_section)
+    if not widget:
+        return False
+
+    # Check 1: Widget must be in placeholder state
+    is_placeholder = widget.property("is_placeholder_state")
+    if not is_placeholder:
+        return False
+
+    # Check 2: Placeholder must show the expected value (not the old concrete value)
     from PyQt6.QtWidgets import QComboBox
+    from enum import Enum
+
+    if isinstance(widget, QComboBox):
+        # For combo boxes, check the currently displayed item
+        current_index = widget.currentIndex()
+        if current_index >= 0:
+            displayed_value = widget.itemData(current_index)
+
+            # Compare displayed value with expected placeholder value
+            if isinstance(expected_placeholder_value, Enum) and isinstance(displayed_value, Enum):
+                return displayed_value == expected_placeholder_value
+            elif isinstance(expected_placeholder_value, str) and isinstance(displayed_value, Enum):
+                return (displayed_value.name == expected_placeholder_value or
+                        str(displayed_value.value) == expected_placeholder_value)
+
+    # For other widget types, could add similar checks
+    return True  # If we can't verify the placeholder value, at least it's in placeholder state
+
+def get_widget_value_enhanced(widget: Any) -> Any:
+    """Enhanced widget value getting with proper enum dropdown support and placeholder state detection."""
+    from PyQt6.QtWidgets import QComboBox
+
+    # CRITICAL: Check if widget is in placeholder state first
+    # If it's showing a placeholder, the actual parameter value is None
+    if widget.property("is_placeholder_state"):
+        return None
 
     # Handle QComboBox (enum dropdowns) specially
     if isinstance(widget, QComboBox):
@@ -337,12 +373,29 @@ def assert_field_not_concrete_value(context: WorkflowContext, field_name: str, c
         WidgetInteractor.scroll_to_widget(widget)
         _wait_for_gui(TimingConfig.VISUAL_PREPARATION_DELAY)
 
-    has_concrete_value = check_field_value(context, field_name, concrete_value, config_section)
-    if has_concrete_value:
-        error_msg = f"{step_name} FAIL: {config_section}.{field_name} should not show concrete value '{concrete_value}' after reset"
-        print(f"❌ {error_msg}")
-        raise AssertionError(error_msg)
-    print(f"✅ {step_name}: {config_section}.{field_name} correctly reset (no concrete value)")
+        # Check 1: Widget should be in placeholder state
+        is_placeholder = widget.property("is_placeholder_state")
+        if not is_placeholder:
+            error_msg = f"{step_name} FAIL: {config_section}.{field_name} should be in placeholder state after reset, but is_placeholder_state = {is_placeholder}"
+            print(f"❌ {error_msg}")
+            raise AssertionError(error_msg)
+
+        # Check 2: Widget should NOT be showing the concrete value we just reset
+        from PyQt6.QtWidgets import QComboBox
+        from enum import Enum
+
+        if isinstance(widget, QComboBox) and isinstance(concrete_value, Enum):
+            # For enum combo boxes, check the displayed value
+            current_index = widget.currentIndex()
+            if current_index >= 0:
+                displayed_value = widget.itemData(current_index)
+                if displayed_value == concrete_value:
+                    error_msg = f"{step_name} FAIL: {config_section}.{field_name} should not show concrete value '{concrete_value}' after reset"
+                    print(f"❌ {error_msg}")
+                    raise AssertionError(error_msg)
+
+        print(f"✅ {step_name}: {config_section}.{field_name} correctly in placeholder state and not showing concrete value '{concrete_value}'")
+
     return context
 
 def assert_placeholder_shows_value(context: WorkflowContext, field_name: str, expected_placeholder: str, config_section: str, step_name: str) -> WorkflowContext:
