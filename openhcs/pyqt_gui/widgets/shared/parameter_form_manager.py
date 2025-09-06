@@ -1186,17 +1186,34 @@ class ParameterFormManager(QWidget):
         # This is the correct check - we need to examine the nested type, not the parent
         nested_type_is_lazy = LazyDefaultPlaceholderService.has_lazy_resolution(nested_type)
 
-        if nested_type_is_lazy:
-            # Lazy dataclass: preserve None values for lazy resolution, include concrete values
-            # This maintains the "lazy mixed" pattern where some fields are concrete and others are None
-            return nested_type(**nested_values)
-        else:
-            # Non-lazy dataclass: filter out None values and use concrete dataclass
-            filtered_values = {k: v for k, v in nested_values.items() if v is not None}
-            if filtered_values:
-                return nested_type(**filtered_values)
+        # CRITICAL FIX: Filter out None values that match field defaults for both lazy and non-lazy
+        # This prevents explicit None values from appearing in config output
+        from dataclasses import fields
+        import dataclasses
+
+        # Get field defaults for this dataclass
+        field_defaults = {}
+        for field in fields(nested_type):
+            if field.default is not dataclasses.MISSING:
+                field_defaults[field.name] = field.default
+            elif field.default_factory is not dataclasses.MISSING:
+                field_defaults[field.name] = None  # default_factory fields default to None
             else:
-                return nested_type()
+                field_defaults[field.name] = None  # required fields default to None
+
+        # Filter out values that match their field defaults
+        filtered_values = {}
+        for k, v in nested_values.items():
+            field_default = field_defaults.get(k, None)
+            # Only include if value differs from field default
+            if v != field_default:
+                filtered_values[k] = v
+
+        # Construct with only non-default values
+        if filtered_values:
+            return nested_type(**filtered_values)
+        else:
+            return nested_type()
 
     def _apply_to_nested_managers(self, operation_func: callable) -> None:
         """Apply operation to all nested managers."""
