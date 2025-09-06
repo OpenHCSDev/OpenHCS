@@ -1,7 +1,7 @@
 Field Path Detection System
 ============================
 
-**Automatic field path discovery using type introspection for lazy configuration generation.**
+**Automatic field path discovery using type introspection for dataclasses and regular classes.**
 
 *Status: STABLE*
 *Module: openhcs.core.field_path_detection*
@@ -9,29 +9,52 @@ Field Path Detection System
 Overview
 --------
 
-Traditional configuration systems require manual mapping of type relationships, creating maintenance overhead when configuration structures change. OpenHCS eliminates this through automatic field path detection using type introspection.
+Traditional configuration systems require manual mapping of type relationships, creating maintenance overhead when configuration structures change. OpenHCS eliminates this through automatic field path detection using type introspection that works with both dataclasses and regular classes.
 
-.. literalinclude:: ../../../openhcs/core/lazy_config.py
-   :language: python
-   :lines: 592-593
-   :caption: Automatic field path discovery example from openhcs/core/lazy_config.py
+.. automethod:: openhcs.core.field_path_detection.FieldPathDetector.find_field_path_for_type
 
-The system analyzes dataclass annotations to discover direct relationships, nested paths, and inheritance relationships without hardcoded mappings.
+The system analyzes both dataclass field annotations and regular class constructor parameters to discover direct relationships, nested paths, and inheritance relationships without hardcoded mappings.
 
 Automatic Field Path Determination
 -----------------------------------
 
-The system uses type introspection to automatically discover field relationships.
+The system uses type introspection to automatically discover field relationships in both dataclasses and regular classes.
 
 Basic Field Path Discovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The core functionality finds field paths by analyzing type annotations:
+The core functionality finds field paths by analyzing type annotations in dataclasses and constructor parameters in regular classes:
 
-.. literalinclude:: ../../../openhcs/core/field_path_detection.py
-   :language: python
-   :lines: 15-35
-   :caption: FieldPathDetector.find_field_path_for_type from openhcs/core/field_path_detection.py
+.. autoclass:: openhcs.core.field_path_detection.FieldPathDetector
+   :members: find_field_path_for_type
+
+Class Constructor Support
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The FieldPathDetector supports regular classes by analyzing their constructor parameters, enabling field path detection for non-dataclass types:
+
+.. code-block:: python
+
+    class AbstractStep(abc.ABC):
+        def __init__(
+            self,
+            *,
+            name: str = None,
+            step_well_filter_config: 'LazyStepWellFilterConfig' = None,
+            materialization_config: Optional['LazyStepMaterializationConfig'] = None,
+        ):
+            pass
+
+    # Automatically finds constructor parameters
+    path = FieldPathDetector.find_field_path_for_type(AbstractStep, LazyStepWellFilterConfig)
+    # Returns: "step_well_filter_config"
+
+The system handles various annotation formats:
+
+- **String annotations**: ``'LazyStepWellFilterConfig'``
+- **ForwardRef objects**: ``ForwardRef('LazyStepMaterializationConfig')``
+- **Optional types with ForwardRef**: ``Optional[ForwardRef('LazyStepMaterializationConfig')]``
+- **Resolved Optional types**: ``Optional[LazyStepMaterializationConfig]``
 
 **Real-World Usage:**
 
@@ -62,17 +85,11 @@ Comprehensive Path Discovery
 
 For complex scenarios, the system can find all instances of a type:
 
-.. literalinclude:: ../../../openhcs/core/field_path_detection.py
-   :language: python
-   :lines: 52-75
-   :caption: Find all field paths from openhcs/core/field_path_detection.py
+.. automethod:: openhcs.core.field_path_detection.FieldPathDetector.find_all_field_paths_for_type
 
 **Nested Path Discovery:**
 
-.. literalinclude:: ../../../openhcs/core/lazy_config.py
-   :language: python
-   :lines: 403
-   :caption: Real-world usage examples from openhcs/core/lazy_config.py
+.. automethod:: openhcs.core.field_path_detection.FieldPathDetector.find_inheritance_relationships
 
 Dataclass Field Analysis
 -------------------------
@@ -473,7 +490,10 @@ Benefits
 
 - **Zero Hardcoding**: Eliminates all hardcoded field path mappings
 - **Automatic Discovery**: Finds relationships through type introspection
-- **Robust Type Handling**: Handles Optional, Union, and complex type annotations
+- **Universal Class Support**: Works with both dataclasses and regular classes
+- **Robust Type Handling**: Handles Optional, Union, ForwardRef, and complex type annotations
+- **String Annotation Support**: Handles forward references as strings or ForwardRef objects
+- **Constructor Analysis**: Analyzes class constructor parameters for non-dataclass types
 - **Inheritance Support**: Discovers inheritance relationships automatically
 - **Nested Path Support**: Finds paths through nested dataclass structures
 - **Integration Ready**: Seamlessly integrates with lazy config generation

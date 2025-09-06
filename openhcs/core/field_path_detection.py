@@ -7,6 +7,7 @@ for type introspection logic across the UI system.
 """
 
 import dataclasses
+import inspect
 import os
 import typing
 from typing import Type, Optional, Union, get_origin, get_args
@@ -24,37 +25,155 @@ class FieldPathDetector:
         """
         Find field path by inspecting parent type annotations.
 
-        Consolidates the logic from scattered implementations in:
-        - PyQt parameter form manager
-        - Textual parameter form manager
-        - Parameter form abstraction
+        Works with both dataclasses (via fields) and regular classes (via constructor parameters).
 
         Args:
-            parent_type: The parent dataclass type to search within
-            child_type: The child dataclass type to find the field path for
+            parent_type: The parent class/dataclass type to search within
+            child_type: The child type to find the field path for
 
         Returns:
             The field path string (e.g., 'path_planning', 'vfs') or None if not found
         """
         try:
-            if not dataclasses.is_dataclass(parent_type):
+            if not inspect.isclass(parent_type):
                 return None
 
-            # Get all fields from parent type
-            parent_fields = fields(parent_type)
+            # Handle dataclass parent types first (dataclasses are classes, so check this first)
+            if dataclasses.is_dataclass(parent_type):
+                # Get all fields from parent type
+                parent_fields = fields(parent_type)
 
-            for field in parent_fields:
-                field_type = FieldPathDetector._unwrap_optional_type(field.type)
+                for field in parent_fields:
+                    field_type = FieldPathDetector._unwrap_optional_type(field.type)
 
-                # Check for direct type match (handles the common case)
-                if field_type == child_type:
-                    return field.name
+                    # Check for direct type match (handles the common case)
+                    if field_type == child_type:
+                        return field.name
+
+            # Handle regular class parent types by searching constructor parameters
+            # This also serves as fallback for dataclasses if no field match found
+            return FieldPathDetector._find_field_path_in_constructor(parent_type, child_type)
+
+        except Exception:
+            # Fail gracefully for any type introspection issues
+            return None
+
+    @staticmethod
+    def _find_field_path_in_constructor(parent_type: Type, child_type: Type) -> Optional[str]:
+        """
+        Find field path by searching constructor parameters of a class.
+
+        This allows FieldPathDetector to work with regular classes by treating
+        their constructor parameters as if they were dataclass fields.
+
+        Args:
+            parent_type: The parent class type to search within
+            child_type: The child type to find the parameter for
+
+        Returns:
+            The parameter name if found, or None if not found
+        """
+        try:
+            # Get constructor signature
+            sig = inspect.signature(parent_type.__init__)
+
+            # Try to get type hints, but fall back to raw annotations if it fails
+            try:
+                type_hints = typing.get_type_hints(parent_type.__init__)
+            except (NameError, AttributeError):
+                type_hints = {}
+
+            for param_name, param in sig.parameters.items():
+                # Skip 'self' parameter
+                if param_name == 'self':
+                    continue
+
+                # Get parameter type from type hints or raw annotation
+                param_type = type_hints.get(param_name, param.annotation)
+
+                # Skip parameters without type annotations or with None type
+                if param_type is None or param_type == inspect.Parameter.empty:
+                    continue
+
+                # Handle string annotations (forward references)
+                if isinstance(param_type, str):
+                    # Compare string annotation with target type name
+                    if param_type == child_type.__name__:
+                        return param_name
+                    continue
+
+                # Handle ForwardRef objects and Optional types with ForwardRef
+                if FieldPathDetector._matches_forward_ref_type(param_type, child_type):
+                    return param_name
+
+                # Handle resolved Optional types (e.g., typing.Optional[ActualClass])
+                if FieldPathDetector._matches_resolved_optional_type(param_type, child_type):
+                    return param_name
+
+                # Unwrap optional types for regular type objects
+                unwrapped_type = FieldPathDetector._unwrap_optional_type(param_type)
+
+                # Check for direct type match
+                if unwrapped_type == child_type:
+                    return param_name
 
             return None
 
         except Exception:
             # Fail gracefully for any type introspection issues
             return None
+
+    @staticmethod
+    def _matches_resolved_optional_type(param_type: Type, target_type: Type) -> bool:
+        """
+        Check if a resolved Optional type matches the target type.
+
+        Handles cases like:
+        - typing.Optional[ActualClass] where ActualClass is the resolved type
+        """
+        try:
+            # Check if it's Optional/Union with resolved types
+            if hasattr(param_type, '__origin__') and hasattr(param_type, '__args__'):
+                # For Optional/Union types, check each argument
+                for arg in param_type.__args__:
+                    # Skip NoneType
+                    if arg is type(None):
+                        continue
+                    # Check if the argument matches our target type
+                    if arg == target_type:
+                        return True
+
+            return False
+
+        except Exception:
+            return False
+
+    @staticmethod
+    def _matches_forward_ref_type(param_type: Type, target_type: Type) -> bool:
+        """
+        Check if a parameter type (which may contain ForwardRef) matches the target type.
+
+        Handles cases like:
+        - ForwardRef('LazyStepMaterializationConfig')
+        - typing.Optional[ForwardRef('LazyStepMaterializationConfig')]
+        """
+        try:
+            # Check if it's a ForwardRef directly
+            if hasattr(param_type, '__forward_arg__'):
+                return param_type.__forward_arg__ == target_type.__name__
+
+            # Check if it's Optional[ForwardRef(...)] or Union[ForwardRef(...), None]
+            if hasattr(param_type, '__origin__') and hasattr(param_type, '__args__'):
+                # For Optional/Union types, check each argument
+                for arg in param_type.__args__:
+                    if hasattr(arg, '__forward_arg__'):
+                        if arg.__forward_arg__ == target_type.__name__:
+                            return True
+
+            return False
+
+        except Exception:
+            return False
 
     @staticmethod
     def _unwrap_optional_type(field_type: Type) -> Type:

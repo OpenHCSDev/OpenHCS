@@ -111,7 +111,9 @@ class ParameterFormService:
             # Check for nested dataclasses
             if param_info.is_nested:
                 # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
-                nested_field_id = self.get_field_path_with_fail_loud(parent_dataclass_type or type(None), param_type)
+                # Unwrap Optional types to get the actual dataclass type for field path detection
+                unwrapped_param_type = self._type_utils.get_optional_inner_type(param_type) if self._type_utils.is_optional_dataclass(param_type) else param_type
+                nested_field_id = self.get_field_path_with_fail_loud(parent_dataclass_type or type(None), unwrapped_param_type)
 
                 nested_structure = self._analyze_nested_dataclass(
                     param_name, param_type, current_value, nested_field_id, parent_dataclass_type

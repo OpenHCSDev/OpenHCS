@@ -81,7 +81,7 @@ class StepParameterEditorWidget(QWidget):
         # Note: Step editor needs special context setup to show step-level inheritance
 
         self.form_manager = ParameterFormManager(
-            parameters, parameter_types, "step", None,
+            parameters, parameter_types, "step", AbstractStep,
             param_info,
             parent=self,  # Pass self as parent so form manager can access _step_level_configs
             color_scheme=self.color_scheme,
