@@ -153,6 +153,50 @@ This enables context-aware configuration editing where the same field shows diff
 Field Path Detection
 --------------------
 
+Root Config vs Nested Config Handling
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The system distinguishes between root configuration forms and nested dataclass forms using field path detection:
+
+.. code-block:: python
+
+   # Root config form managers use dataclass type name as field_id
+   root_field_id = type(current_config).__name__  # "GlobalPipelineConfig"
+   root_form_manager = ParameterFormManager.from_dataclass_instance(
+       dataclass_instance=current_config,
+       field_id=root_field_id,  # Not artificial "config"
+       placeholder_prefix=placeholder_prefix
+   )
+
+   # Nested config form managers use actual field names
+   nested_field_id = "well_filter_config"  # Actual field in GlobalPipelineConfig
+   nested_form_manager = ParameterFormManager.from_dataclass_instance(
+       dataclass_instance=nested_config,
+       field_id=nested_field_id,  # Direct field mapping
+       placeholder_prefix=placeholder_prefix
+   )
+
+Context Building Detection Pattern
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Generic detection logic determines root vs nested configs without hardcoding class names:
+
+.. code-block:: python
+
+   def _build_context_from_current_form_values(self, exclude_field=None):
+       current_context = get_current_global_config(GlobalPipelineConfig)
+
+       # Generic root vs nested detection
+       if hasattr(current_context, self.field_id):
+           # Nested config: field_id exists as actual field in context
+           current_dataclass_instance = getattr(current_context, self.field_id)
+       else:
+           # Root config: field_id doesn't exist as field (e.g., "GlobalPipelineConfig")
+           current_dataclass_instance = current_context
+
+Automatic Field Path Discovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 The system automatically discovers configuration relationships through type introspection.
 
 .. code-block:: python
@@ -205,3 +249,62 @@ The configuration system integrates with other OpenHCS subsystems.
 - Thread-local contexts are isolated per thread - don't share between threads
 - Lazy dataclasses must be created after setting thread-local context
 - Field path detection requires proper type annotations on dataclass fields
+- Root config form managers must use dataclass type name as field_id, not artificial identifiers
+- Nested config form managers must use actual field names, not prefixed versions
+
+Troubleshooting Field Path Issues
+---------------------------------
+
+Context Building Failures
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Symptom**: Non-nested fields (like ``num_workers``) don't show placeholder inheritance after reset.
+
+**Root Cause**: Using artificial ``field_id="config"`` instead of dataclass type name.
+
+.. code-block:: python
+
+   # WRONG: Artificial field_id
+   form_manager = ParameterFormManager.from_dataclass_instance(
+       dataclass_instance=current_config,
+       field_id="config"  # ❌ GlobalPipelineConfig has no "config" field
+   )
+
+   # CORRECT: Dataclass type name
+   form_manager = ParameterFormManager.from_dataclass_instance(
+       dataclass_instance=current_config,
+       field_id=type(current_config).__name__  # ✅ "GlobalPipelineConfig"
+   )
+
+**Symptom**: Nested fields don't update placeholders after sibling changes.
+
+**Root Cause**: Using artificial ``nested_`` prefix instead of actual field names.
+
+.. code-block:: python
+
+   # WRONG: Artificial prefix
+   nested_manager = ParameterFormManager(..., field_id="nested_well_filter_config")
+
+   # CORRECT: Actual field name
+   field_path = FieldPathDetector.find_field_path_for_type(parent_type, nested_type)
+   nested_manager = ParameterFormManager(..., field_id=field_path)  # "well_filter_config"
+
+Validation and Debugging
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   def debug_field_path_mapping(form_manager, context):
+       """Debug field path mapping issues"""
+       field_id = form_manager.field_id
+
+       if hasattr(context, field_id):
+           print(f"✅ NESTED CONFIG: {field_id} found in context")
+           instance = getattr(context, field_id)
+           print(f"   Instance type: {type(instance).__name__}")
+       else:
+           print(f"✅ ROOT CONFIG: {field_id} not found in context (expected for root)")
+           print(f"   Context type: {type(context).__name__}")
+           print(f"   Field ID matches context type: {field_id == type(context).__name__}")
+
+This debugging approach helps identify whether form managers are using correct field paths and whether context building logic is working properly.

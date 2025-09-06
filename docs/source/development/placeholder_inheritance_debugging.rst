@@ -34,11 +34,36 @@ Field Naming Architecture
 
 The system handles two distinct field naming patterns that require different context building approaches:
 
-**Nested Form Managers** have ``field_id`` values like ``nested_well_filter_config`` but correspond to context fields named ``well_filter_config`` (without the ``nested_`` prefix). Widget names follow the pattern ``nested_well_filter_config.well_filter``.
+**Root Config Form Managers** use ``field_id`` values that match the dataclass type name (e.g., ``GlobalPipelineConfig``, ``PipelineConfig``). These represent the entire root configuration object, not a nested field within it. Widget names follow the pattern ``GlobalPipelineConfig.num_workers``.
 
-**Non-Nested Form Managers** use ``field_id`` of ``config`` for top-level configuration and context fields also named ``config``. Widget names follow the pattern ``config.num_workers``.
+**Nested Form Managers** use ``field_id`` values that match actual dataclass field names (e.g., ``well_filter_config``, ``zarr_config``). These correspond directly to context fields with the same names. Widget names follow the pattern ``well_filter_config.well_filter``.
 
-The critical fix for nested form managers strips the ``nested_`` prefix during context field lookup to ensure ``hasattr()`` checks succeed and the widget reading loop executes properly.
+The critical fixes eliminate artificial field naming:
+
+1. **Nested Form Managers**: Removed ``nested_`` prefix hack, now use actual field names directly
+2. **Root Config Form Managers**: Changed from artificial ``config`` field_id to dataclass type name
+
+Root vs Nested Detection Pattern
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The system uses generic detection logic to distinguish root configs from nested configs:
+
+.. code-block:: python
+
+   def _build_context_from_current_form_values(self, exclude_field=None):
+       current_context = get_current_global_config(GlobalPipelineConfig)
+
+       # Generic root vs nested detection
+       if hasattr(current_context, self.field_id):
+           # Nested config: field_id exists as actual field in context
+           # Examples: "well_filter_config", "zarr_config"
+           current_dataclass_instance = getattr(current_context, self.field_id)
+       else:
+           # Root config: field_id doesn't exist as field in context
+           # Examples: "GlobalPipelineConfig", "PipelineConfig"
+           current_dataclass_instance = current_context
+
+This pattern works generically for any dataclass hierarchy without hardcoding specific class names.
 
 Context Building Process
 ------------------------
@@ -71,7 +96,12 @@ Add these debug prints to trace the inheritance system:
 
    # In _build_context_from_current_form_values()
    print(f"🔍 CONTEXT BUILD DEBUG: {self.field_id} building context with exclude_field='{exclude_field}'")
-   print(f"🔍 CONTEXT DEBUG: form_field_name='{form_field_name}', context_field_name='{context_field_name}', hasattr={hasattr(current_context, context_field_name)}")
+
+   # Root vs nested detection debugging
+   if hasattr(current_context, self.field_id):
+       print(f"🔍 CONTEXT DEBUG: NESTED CONFIG - field_id='{self.field_id}' found in context")
+   else:
+       print(f"🔍 CONTEXT DEBUG: ROOT CONFIG - field_id='{self.field_id}' using current_context directly")
 
    # In widget reading loop
    print(f"🔍 EXCLUSION DEBUG: Checking param_name='{param_name}' vs exclude_field='{exclude_field}'")
@@ -82,14 +112,55 @@ Add these debug prints to trace the inheritance system:
    print(f"🔍 LAZY RESOLUTION DEBUG: Resolving {dataclass_name}.{field_name}")
    print(f"🔍 LAZY RESOLUTION DEBUG: Context has {parent_field} = '{parent_value}'")
 
+Common Debugging Scenarios
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Root Config Context Building Failure**:
+
+.. code-block:: python
+
+   # Symptom: Non-nested fields (num_workers, materialization_results_path) don't reset placeholders
+   # Cause: Using artificial field_id="config" instead of dataclass type name
+
+   # WRONG:
+   form_manager = ParameterFormManager.from_dataclass_instance(
+       field_id="config"  # ❌ GlobalPipelineConfig has no "config" field
+   )
+
+   # CORRECT:
+   form_manager = ParameterFormManager.from_dataclass_instance(
+       field_id=type(current_config).__name__  # ✅ "GlobalPipelineConfig"
+   )
+
+**Nested Config Field Path Issues**:
+
+.. code-block:: python
+
+   # Symptom: Nested fields don't update placeholders after sibling changes
+   # Cause: Using artificial "nested_" prefix instead of actual field names
+
+   # WRONG:
+   nested_manager = ParameterFormManager(..., field_id="nested_well_filter_config")
+
+   # CORRECT:
+   field_path = FieldPathDetector.find_field_path_for_type(parent_type, nested_type)
+   nested_manager = ParameterFormManager(..., field_id=field_path)  # "well_filter_config"
+
 Successful Operation Patterns
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Successful Context Building**:
+**Successful Root Config Context Building**:
 
 .. code-block:: text
 
-   🔍 CONTEXT DEBUG: form_field_name='nested_well_filter_config', context_field_name='well_filter_config', hasattr=True
+   🔍 CONTEXT DEBUG: ROOT CONFIG - field_id='GlobalPipelineConfig' using current_context directly
+   🔍 CONTEXT DEBUG: current_dataclass_instance=GlobalPipelineConfig(...)
+
+**Successful Nested Config Context Building**:
+
+.. code-block:: text
+
+   🔍 CONTEXT DEBUG: NESTED CONFIG - field_id='well_filter_config' found in context
    🔍 CONTEXT DEBUG: current_dataclass_instance=WellFilterConfig(...)
 
 **Successful Exclusion**:
@@ -177,7 +248,53 @@ Non-nested fields don't reset placeholder values properly when a config is saved
 
 This appears related to how the configuration cache system interacts with reset functionality for non-nested fields, where concrete values become part of cached context and reset logic may not properly exclude them.
 
-Architecture Improvement Needed
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Field Path Validation
+~~~~~~~~~~~~~~~~~~~~~
 
-The current use of ``nested_`` string prefixes is a code smell that creates fragile field naming dependencies. The system should migrate to using complete field paths like ``config.step_materialization_config.well_filter`` with context field names that match form manager field paths exactly, eliminating string manipulation and prefix stripping logic.
+**Validation Checks**:
+
+.. code-block:: python
+
+   def validate_field_path_mapping():
+       """Ensure all form field_ids map correctly to context fields"""
+       from openhcs.core.config import GlobalPipelineConfig
+       import dataclasses
+
+       # Get all dataclass fields from GlobalPipelineConfig
+       context_fields = {f.name for f in dataclasses.fields(GlobalPipelineConfig)
+                        if dataclasses.is_dataclass(f.type)}
+
+       # Verify form managers use these exact field names (no artificial prefixes)
+       assert "well_filter_config" in context_fields
+       assert "nested_well_filter_config" not in context_fields  # Should not exist
+
+       return True
+
+**Root Config Validation**:
+
+.. code-block:: python
+
+   def validate_root_config_field_id(form_manager, config_instance):
+       """Ensure root config form managers use dataclass type name as field_id"""
+       expected_field_id = type(config_instance).__name__
+       actual_field_id = form_manager.field_id
+
+       assert actual_field_id == expected_field_id, f"Root config field_id should be '{expected_field_id}', got '{actual_field_id}'"
+
+       # Verify this field_id doesn't exist as a field in the config
+       assert not hasattr(config_instance, actual_field_id), f"field_id '{actual_field_id}' should not exist as field in {type(config_instance).__name__}"
+
+Architecture Improvements Implemented
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The field path system redesign has eliminated the fragile ``nested_`` string prefix dependencies:
+
+**✅ Completed Improvements**:
+
+- **Eliminated artificial field naming**: No more ``nested_`` prefixes or ``config`` field_ids
+- **Direct field path mapping**: Form managers use actual dataclass field names
+- **Root config detection**: Generic ``hasattr()`` logic works for any dataclass hierarchy
+- **Context building alignment**: Field paths match dataclass structure exactly
+- **Visual programming compliance**: UI field names directly reflect code structure
+
+This comprehensive debugging approach helps identify whether issues are in context building, exclusion logic, inheritance resolution, or field path mapping.
