@@ -78,7 +78,15 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
         # Fail-loud: Let AttributeError bubble up naturally (no getattr fallbacks)
         pipeline_value = getattr(pipeline_config, field.name)
         if pipeline_value is not None:
-            merged_config_values[field.name] = pipeline_value
+            # CRITICAL FIX: Convert lazy configs to base configs with resolved values
+            # This ensures that user-set values from lazy configs are preserved in the thread-local context
+            # instead of being replaced with static defaults when GlobalPipelineConfig is instantiated
+            if hasattr(pipeline_value, 'to_base_config'):
+                # This is a lazy config - convert to base config with resolved values
+                merged_config_values[field.name] = pipeline_value.to_base_config()
+            else:
+                # Regular value - use as-is
+                merged_config_values[field.name] = pipeline_value
         else:
             merged_config_values[field.name] = getattr(global_config, field.name)
 
