@@ -231,6 +231,12 @@ def set_widget_value_enhanced(widget: Any, value: Any) -> None:
             print(f"❌ ERROR: String value '{value}' not found in dropdown")
             return
 
+    # Handle EnhancedPathWidget specially (it has set_path method)
+    if hasattr(widget, 'set_path') and 'EnhancedPathWidget' in str(type(widget)):
+        widget.set_path(str(value))
+        print(f"📁 Set path widget to '{value}'")
+        return
+
     # Fall back to original WidgetInteractor for other widget types
     WidgetInteractor.set_widget_value(widget, value)
 
@@ -299,6 +305,10 @@ def get_widget_value_enhanced(widget: Any) -> Any:
         if current_index >= 0:
             return widget.itemData(current_index)
         return None
+
+    # Handle EnhancedPathWidget specially (it has get_path method)
+    if hasattr(widget, 'get_path') and 'EnhancedPathWidget' in str(type(widget)):
+        return widget.get_path()
 
     # Use the same logic as ParameterFormManager.get_widget_value() for other widgets
     from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import WIDGET_GET_DISPATCH
@@ -555,15 +565,52 @@ class TestResetPlaceholderInheritance:
         assert not shows_concrete_value, \
             f"CRITICAL BUG: step_well_filter_config shows concrete value '{TestConstants.CONCRETE_VALUE}' after reset"
 
-    def test_concrete_value_persistence_after_save_reopen(self, app, synthetic_plate_dir):
+    def test_concrete_value_persistence_after_save_reopen(self, app, qtbot, synthetic_plate_dir):
         """Test that concrete values persist after save/reopen and show as concrete, not placeholders."""
         context = setup_application_workflow(create_workflow_context(synthetic_plate_dir))
 
         print("\n🧪 CONCRETE VALUE PERSISTENCE TEST")
         print("=" * 50)
 
-        # Step 1: Set a concrete value in well_filter_config.well_filter
-        print("Step 1: Setting concrete value in well_filter_config.well_filter")
+        # Step 1a: Set a concrete value in materialization_results_path (top-level field) via user interaction
+        print("Step 1a: Setting concrete value in materialization_results_path (top-level) via click+type")
+
+        # Find the widget and simulate user interaction using pytest-qt
+        path_widget = find_widget(context, "materialization_results_path")
+        if path_widget:
+            # Scroll to widget so user can see it
+            WidgetInteractor.scroll_to_widget(path_widget)
+            _wait_for_gui(TimingConfig.VISUAL_PREPARATION_DELAY)
+
+            # For EnhancedPathWidget, we need to interact with the inner QLineEdit (path_input)
+            if hasattr(path_widget, 'path_input'):
+                line_edit = path_widget.path_input
+
+                # Use pytest-qt's qtbot for proper user simulation
+                from PyQt6.QtCore import Qt
+                from PyQt6.QtGui import QKeySequence
+
+                # Click on the line edit to focus it (simulate user click)
+                qtbot.mouseClick(line_edit, Qt.MouseButton.LeftButton)
+                _wait_for_gui(TimingConfig.ACTION_DELAY)
+
+                # Clear existing content and type new value using keyboard simulation
+                qtbot.keySequence(line_edit, QKeySequence.StandardKey.SelectAll)
+                qtbot.keyClicks(line_edit, "/custom/results/path")
+                _wait_for_gui(TimingConfig.ACTION_DELAY)
+
+                # Press Enter to confirm the input
+                qtbot.keyPress(line_edit, Qt.Key.Key_Return)
+                _wait_for_gui(TimingConfig.ACTION_DELAY)
+
+                print("✅ Clicked, typed '/custom/results/path', and pressed Enter")
+            else:
+                print("❌ ERROR: Could not find path_input in materialization_results_path widget")
+        else:
+            print("❌ ERROR: Could not find materialization_results_path widget")
+
+        # Step 1b: Set a concrete value in well_filter_config.well_filter (nested field)
+        print("Step 1b: Setting concrete value in well_filter_config.well_filter (nested)")
         context = edit_field(
             context,
             TestConstants.WELL_FILTER,
@@ -571,34 +618,91 @@ class TestResetPlaceholderInheritance:
             TestConstants.WELL_FILTER_CONFIG
         )
 
-        # Step 2: Save and close config
-        print("Step 2: Saving and closing config")
+        # Step 2: Save and close config using qtbot to click save button
+        print("Step 2: Saving and closing config with qtbot")
+
+        # Find and click the save button first
+        from PyQt6.QtWidgets import QPushButton
+        save_button = None
+        for widget in context.config_window.findChildren(QPushButton):
+            if 'save' in widget.text().lower() or 'apply' in widget.text().lower():
+                save_button = widget
+                break
+
+        if save_button:
+            qtbot.mouseClick(save_button, Qt.MouseButton.LeftButton)
+            _wait_for_gui(TimingConfig.ACTION_DELAY)
+            print("✅ Clicked save button with qtbot")
+        else:
+            print("❌ ERROR: Could not find save button")
+
+        # Then close the window
         _close_config_window(context)
 
         # Step 3: Reopen config
         print("Step 3: Reopening config")
         _open_config_window(context)
 
-        # Step 4: Verify well_filter shows the concrete value that was saved
-        print("Step 4: Verifying well_filter shows concrete value")
-        shows_saved_value = check_field_value(
+        # Step 4a: Verify materialization_results_path shows the concrete value that was saved (top-level)
+        print("Step 4a: Verifying materialization_results_path shows concrete value (top-level)")
+        shows_saved_top_level = check_field_value(
+            context,
+            "materialization_results_path",
+            "/custom/results/path"
+        )
+
+        assert shows_saved_top_level, \
+            f"CRITICAL BUG: materialization_results_path should show saved concrete value '/custom/results/path' after save/reopen"
+
+        # Step 4b: Verify well_filter shows the concrete value that was saved (nested)
+        print("Step 4b: Verifying well_filter shows concrete value (nested)")
+        shows_saved_nested = check_field_value(
             context,
             TestConstants.WELL_FILTER,
             TestConstants.TEST_VALUE_A,
             TestConstants.WELL_FILTER_CONFIG
         )
 
-        assert shows_saved_value, \
+        assert shows_saved_nested, \
             f"CRITICAL BUG: well_filter_config.well_filter should show saved concrete value '{TestConstants.TEST_VALUE_A}' after save/reopen"
 
-        # Step 5: Verify well_filter_mode shows as placeholder (just log for now)
-        print("Step 5: Checking well_filter_mode placeholder state")
-        widget = find_widget(context, TestConstants.WELL_FILTER_MODE, TestConstants.WELL_FILTER_CONFIG)
-        placeholder_text = get_placeholder_text(widget)
-        print(f"well_filter_mode placeholder text: '{placeholder_text}'")
+        # Step 5: Verify that saved fields contain actual selectable concrete text
+        print("Step 5: Verifying saved fields contain selectable concrete text")
 
-        # For now, just verify that the main functionality (concrete value persistence) works
-        # The placeholder behavior can be verified manually
+        # Check materialization_results_path widget has selectable text
+        path_widget = find_widget(context, "materialization_results_path")
+        if path_widget and hasattr(path_widget, 'path_input'):
+            line_edit = path_widget.path_input
+            displayed_text = line_edit.text()
+            is_placeholder = line_edit.property("is_placeholder_state")
+
+            print(f"materialization_results_path text: '{displayed_text}', is_placeholder: {is_placeholder}")
+
+            # Verify it contains the concrete text we typed
+            assert displayed_text == "/custom/results/path", \
+                f"CRITICAL BUG: materialization_results_path text is '{displayed_text}' but should be '/custom/results/path'"
+
+            # Verify it's not in placeholder state
+            assert not is_placeholder, \
+                f"CRITICAL BUG: materialization_results_path should show concrete text, not placeholder"
+
+        # Check well_filter widget has selectable text
+        filter_widget = find_widget(context, TestConstants.WELL_FILTER, TestConstants.WELL_FILTER_CONFIG)
+        if filter_widget:
+            displayed_text = filter_widget.text() if hasattr(filter_widget, 'text') else str(get_widget_value_enhanced(filter_widget))
+            is_placeholder = filter_widget.property("is_placeholder_state")
+
+            print(f"well_filter text: '{displayed_text}', is_placeholder: {is_placeholder}")
+
+            # Verify it contains the concrete text we set
+            assert displayed_text == TestConstants.TEST_VALUE_A, \
+                f"CRITICAL BUG: well_filter text is '{displayed_text}' but should be '{TestConstants.TEST_VALUE_A}'"
+
+            # Verify it's not in placeholder state
+            assert not is_placeholder, \
+                f"CRITICAL BUG: well_filter should show concrete text, not placeholder"
+
+        print("✅ Both saved fields contain selectable concrete text (not placeholders)")
 
         print("✅ Concrete value persistence test completed successfully")
 
