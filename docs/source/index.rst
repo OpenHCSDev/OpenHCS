@@ -57,6 +57,12 @@ Documentation Structure
 
 **New to OpenHCS?** Follow this learning path:
 
+For **Biologists**:
+
+1. **Guide for Biologists**: :doc:`guide_for_biologists/index` - Code free, step-by-step guide to using OpenHCS for biological experiments
+
+For **Developers**:
+
 1. **Getting Started**: :doc:`getting_started/getting_started` - Installation and basic examples
 2. **Core Concepts**: :doc:`concepts/index` - Understanding pipelines, steps, and data organization
 3. **Function Library**: :doc:`concepts/function_library` - Available processing functions and backends
@@ -64,6 +70,13 @@ Documentation Structure
 5. **Integration Guides**: :doc:`guides/index` - System integration and advanced topics
 
 **API Reference**: :doc:`api/index` - Class documentation and technical reference
+
+
+.. toctree::
+   :maxdepth: 2
+   :caption: No-Code user guide for Biologists
+
+   guide_for_biologists/index
 
 .. toctree::
    :maxdepth: 2
