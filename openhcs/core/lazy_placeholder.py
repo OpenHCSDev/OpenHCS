@@ -22,21 +22,16 @@ def _has_concrete_field_override(source_class, field_name: str) -> bool:
     - Concrete default (not None) = never inherits
     - None default = always inherits (inherit_as_none design)
     """
-    from dataclasses import fields
-    import dataclasses
-
-    if not hasattr(source_class, '__dataclass_fields__'):
-        return False
-
-    class_fields = {f.name: f for f in fields(source_class)}
-    if field_name in class_fields:
-        field_def = class_fields[field_name]
-        static_default = field_def.default if field_def.default is not dataclasses.MISSING else None
-        has_override = static_default is not None
+    # CRITICAL FIX: Check class attribute directly, not dataclass field default
+    # The @global_pipeline_config decorator modifies field defaults to None
+    # but the class attribute retains the original concrete value
+    if hasattr(source_class, field_name):
+        class_attr_value = getattr(source_class, field_name)
+        has_override = class_attr_value is not None
 
         # Debug for well_filter field
         if field_name == "well_filter":
-            print(f"🔍 OVERRIDE CHECK: {source_class.__name__}.{field_name} default='{static_default}' has_override={has_override}")
+            print(f"🔍 OVERRIDE CHECK: {source_class.__name__}.{field_name} class_attr='{class_attr_value}' has_override={has_override}")
 
         return has_override
 
@@ -345,6 +340,13 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
     base_class = get_base_type_for_lazy(target_dataclass_type)
     if not base_class:
         base_class = target_dataclass_type
+
+    # Block inheritance if target class has concrete static default
+    if _has_concrete_field_override(base_class, field_name):
+        from dataclasses import fields
+        class_fields = {f.name: f for f in fields(base_class)}
+        if field_name in class_fields and class_fields[field_name].default is not None:
+            return class_fields[field_name].default
 
     # DEBUG: Show what context we're using for resolution
     if field_name == "well_filter":

@@ -1255,15 +1255,13 @@ class ParameterFormManager(QWidget):
                 return False
         else:
             # Fallback to static field check for non-lazy dataclasses
-            if field_name in target_base.__annotations__:
-                target_fields = {f.name: f for f in fields(target_base)}
-                if field_name in target_fields:
-                    target_field = target_fields[field_name]
-                    target_default = target_field.default if target_field.default is not dataclasses.MISSING else None
-
-                    # If target has its own concrete value, it doesn't inherit
-                    if target_default is not None:
-                        return False
+            # CRITICAL FIX: Check class attribute directly, not dataclass field default
+            # The @global_pipeline_config decorator modifies field defaults to None
+            if hasattr(target_base, field_name):
+                class_attr_value = getattr(target_base, field_name)
+                # If target has its own concrete value, it doesn't inherit
+                if class_attr_value is not None:
+                    return False
 
         # Use MRO to find next appropriate parent for inheritance
         return self._is_next_in_mro_with_field(target_base, source_base, field_name)

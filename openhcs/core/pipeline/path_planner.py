@@ -376,8 +376,8 @@ class PathPlanner:
         new_sub_dir = f"{original_sub_dir}_step{position}"
 
         # Update step materialization config with new sub_dir
-        config_class = type(step.materialization_config)
-        step.materialization_config = config_class(**{**step.materialization_config.__dict__, 'sub_dir': new_sub_dir})
+        from dataclasses import replace
+        step.materialization_config = replace(step.materialization_config, sub_dir=new_sub_dir)
 
         # Recalculate the resolved path using the new sub_dir
         resolved_path = self._build_output_path(step.materialization_config)

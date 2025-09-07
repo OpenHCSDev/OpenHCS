@@ -23,6 +23,9 @@ from openhcs.core.field_path_detection import FieldPathDetector
 # Type registry for lazy dataclass to base class mapping
 _lazy_type_registry: Dict[Type, Type] = {}
 
+# Cache for lazy classes to prevent duplicate creation
+_lazy_class_cache: Dict[str, Type] = {}
+
 
 def register_lazy_type_mapping(lazy_type: Type, base_type: Type) -> None:
     """Register mapping between lazy dataclass type and its base type."""
@@ -176,6 +179,25 @@ class LazyMethodBindings:
             try:
                 value = object.__getattribute__(self, name)
                 if value is None and name in {f.name for f in fields(self.__class__)}:
+                    # CRITICAL FIX: Check for concrete overrides in inheritance chain BEFORE lazy resolution
+                    # This ensures concrete values in parent classes block further inheritance
+                    from openhcs.core.lazy_placeholder import _has_concrete_field_override
+                    from openhcs.core.lazy_config import get_base_type_for_lazy
+
+                    # Get the base class for this lazy dataclass
+                    base_class = get_base_type_for_lazy(self.__class__)
+                    if base_class:
+                        # Check MRO for concrete overrides (skip self, already checked)
+                        for cls in base_class.__mro__[1:]:
+                            if hasattr(cls, '__dataclass_fields__') and name in cls.__dataclass_fields__:
+                                if _has_concrete_field_override(cls, name):
+                                    # Found concrete override in inheritance chain - use it and stop
+                                    concrete_value = getattr(cls, name)
+                                    if name == "well_filter":
+                                        print(f"🔍 LAZY GETATTR: Found concrete override in {cls.__name__}.{name} = '{concrete_value}', blocking lazy resolution")
+                                    return concrete_value
+
+                    # No concrete overrides found - proceed with lazy resolution
                     # CRITICAL FIX: Use object.__getattribute__ to get _resolve_field_value method
                     # to avoid potential recursion if _resolve_field_value accesses other attributes
                     resolve_method = object.__getattribute__(self, '_resolve_field_value')
@@ -305,6 +327,11 @@ class LazyDataclassFactory:
         if not is_dataclass(base_class):
             raise ValueError(f"{base_class} must be a dataclass")
 
+        # Check cache first to prevent duplicate creation
+        cache_key = f"{base_class.__name__}_{lazy_class_name}_{id(instance_provider)}"
+        if cache_key in _lazy_class_cache:
+            return _lazy_class_cache[cache_key]
+
         # Inlined resolution config creation (was single-use method)
         # CRITICAL FIX: Handle abstract base classes that can't be instantiated
         try:
@@ -321,15 +348,33 @@ class LazyDataclassFactory:
         final_fallback_chain = (fallback_chain or ([static_fallback] if static_fallback else [])) if use_recursive_resolution else ([safe_fallback] + ([static_fallback] if static_fallback else []))
         resolution_config = ResolutionConfig(instance_provider=instance_provider, fallback_chain=final_fallback_chain)
 
-        # Create lazy dataclass with introspected fields, inheriting from base class
-        lazy_class = make_dataclass(
-            lazy_class_name,
-            LazyDataclassFactory._introspect_dataclass_fields(
-                base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
-            ),
-            bases=(base_class,),
-            frozen=True
-        )
+        # Create lazy dataclass with introspected fields
+        # CRITICAL FIX: Avoid inheriting from classes with custom metaclasses to prevent descriptor conflicts
+        # Exception: InheritAsNoneMeta is safe to inherit from as it only modifies field defaults
+        base_metaclass = type(base_class)
+        has_unsafe_metaclass = (hasattr(base_class, '__metaclass__') or base_metaclass != type) and base_metaclass != InheritAsNoneMeta
+
+        if has_unsafe_metaclass:
+            # Base class has unsafe custom metaclass - don't inherit, just copy interface
+            print(f"🔧 LAZY FACTORY: {base_class.__name__} has custom metaclass {base_metaclass.__name__}, avoiding inheritance")
+            lazy_class = make_dataclass(
+                lazy_class_name,
+                LazyDataclassFactory._introspect_dataclass_fields(
+                    base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
+                ),
+                bases=(),  # No inheritance to avoid metaclass conflicts
+                frozen=True
+            )
+        else:
+            # Safe to inherit from regular dataclass
+            lazy_class = make_dataclass(
+                lazy_class_name,
+                LazyDataclassFactory._introspect_dataclass_fields(
+                    base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
+                ),
+                bases=(base_class,),
+                frozen=True
+            )
 
         # Add constructor parameter tracking to detect user-set fields
         original_init = lazy_class.__init__
@@ -352,6 +397,9 @@ class LazyDataclassFactory:
 
         # Automatically register the lazy dataclass with the type registry
         register_lazy_type_mapping(lazy_class, base_class)
+
+        # Cache the created class to prevent duplicates
+        _lazy_class_cache[cache_key] = lazy_class
 
         return lazy_class
 
@@ -708,6 +756,8 @@ class InheritAsNoneMeta(ABCMeta):
 
         # Check if this class should have inherit_as_none applied
         if hasattr(cls, '_inherit_as_none') and cls._inherit_as_none:
+            # Add multiprocessing safety marker
+            cls._multiprocessing_safe = True
             # Get explicitly defined fields (in this class's namespace)
             explicitly_defined_fields = set()
             if '__annotations__' in namespace:
@@ -745,6 +795,24 @@ class InheritAsNoneMeta(ABCMeta):
 
         return cls
 
+    def __reduce__(cls):
+        """Make classes with this metaclass pickle-safe for multiprocessing."""
+        # Filter out problematic descriptors that cause conflicts during pickle/unpickle
+        safe_dict = {}
+        for key, value in cls.__dict__.items():
+            # Skip descriptors that cause conflicts
+            if hasattr(value, '__get__') and hasattr(value, '__set__'):
+                continue  # Skip data descriptors
+            if hasattr(value, '__dict__') and hasattr(value, '__class__'):
+                # Skip complex objects that might have descriptor conflicts
+                if 'descriptor' in str(type(value)).lower():
+                    continue
+            # Include safe attributes
+            safe_dict[key] = value
+
+        # Return reconstruction using the base type (not the metaclass)
+        return (type, (cls.__name__, cls.__bases__, safe_dict))
+
 
 
 
@@ -780,11 +848,55 @@ def create_global_default_decorator(target_config_class: Type):
         def decorator(actual_cls):
             print(f"🔧 DECORATOR: Processing {actual_cls.__name__} with inherit_as_none={inherit_as_none}")
 
-            # Apply inherit_as_none using metaclass approach
+            # Apply inherit_as_none by modifying class BEFORE @dataclass (multiprocessing-safe)
             if inherit_as_none:
-                # Mark the class for metaclass processing and apply metaclass retroactively
+                # Mark the class for inherit_as_none processing
                 actual_cls._inherit_as_none = True
-                actual_cls = InheritAsNoneMeta(actual_cls.__name__, actual_cls.__bases__, dict(actual_cls.__dict__))
+
+                # Apply inherit_as_none logic by directly modifying the class definition
+                # This must happen BEFORE @dataclass processes the class
+                explicitly_defined_fields = set()
+                if hasattr(actual_cls, '__annotations__'):
+                    for field_name in actual_cls.__annotations__:
+                        # Check if field has a concrete default value in THIS class definition
+                        if hasattr(actual_cls, field_name):
+                            field_value = getattr(actual_cls, field_name)
+                            # Only consider it explicitly defined if it has a concrete value (not None)
+                            if field_value is not None:
+                                explicitly_defined_fields.add(field_name)
+
+                # Process parent classes to find fields that need None overrides
+                processed_fields = set()
+                fields_set_to_none = set()  # Track which fields were actually set to None
+                for base in actual_cls.__bases__:
+                    if hasattr(base, '__annotations__'):
+                        for field_name, field_type in base.__annotations__.items():
+                            if field_name in processed_fields:
+                                continue
+
+                            # Set inherited fields to None (except explicitly defined ones)
+                            if field_name not in explicitly_defined_fields:
+                                # Set the class attribute to None
+                                setattr(actual_cls, field_name, None)
+                                fields_set_to_none.add(field_name)
+
+                                # Ensure annotation exists
+                                if not hasattr(actual_cls, '__annotations__'):
+                                    actual_cls.__annotations__ = {}
+                                actual_cls.__annotations__[field_name] = field_type
+
+                            processed_fields.add(field_name)
+
+                # CRITICAL: Update dataclass field definitions ONLY for fields set to None
+                # This preserves concrete defaults for explicitly defined fields
+                import dataclasses
+                if hasattr(actual_cls, '__dataclass_fields__'):
+                    for field_name in fields_set_to_none:  # Only fields actually set to None
+                        if field_name in actual_cls.__dataclass_fields__:
+                            # Update the existing field to use None as default
+                            field_obj = actual_cls.__dataclass_fields__[field_name]
+                            field_obj.default = None
+                            field_obj.default_factory = dataclasses.MISSING
 
             # Generate field and class names
             field_name = _camel_to_snake(actual_cls.__name__)
@@ -887,6 +999,106 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
         bases=target_class.__bases__,
         frozen=target_class.__dataclass_params__.frozen
     )
+
+    # Add generic sibling inheritance support for all config classes
+    import dataclasses
+    def apply_sibling_inheritance_to_instance(instance, **provided_kwargs):
+        """Apply sibling inheritance to any config instance generically."""
+        from dataclasses import fields, is_dataclass, replace
+
+        if not is_dataclass(instance):
+            return instance
+
+        # Find all fields that should inherit from siblings
+        inheritance_updates = {}
+
+        for field in fields(instance):
+            current_value = getattr(instance, field.name)
+
+            # Only inherit if current value is None and field supports sibling inheritance
+            if current_value is None and is_field_sibling_inheritable(type(instance), field.name):
+                # Find sibling config instances in provided_kwargs that have this field
+                for kwarg_name, kwarg_value in provided_kwargs.items():
+                    if is_dataclass(kwarg_value) and hasattr(kwarg_value, field.name):
+                        sibling_value = getattr(kwarg_value, field.name)
+                        if sibling_value is not None:
+                            inheritance_updates[field.name] = sibling_value
+                            break  # Use first non-None sibling value found
+
+        # Apply inheritance updates if any were found
+        if inheritance_updates:
+            return replace(instance, **inheritance_updates)
+        return instance
+
+    # Apply sibling inheritance to all default_factory config fields
+    original_new = new_class.__new__
+
+    def __new__(cls, **kwargs):
+        """Create instance with automatic sibling inheritance applied to all config fields."""
+        # Create instance normally first
+        if original_new is object.__new__:
+            instance = original_new(cls)
+        else:
+            instance = original_new(cls, **kwargs)
+
+        return instance
+
+    def __init__(self, **kwargs):
+        """Initialize with sibling inheritance applied to config fields."""
+        # Apply sibling inheritance to any config fields that need it
+        resolved_kwargs = dict(kwargs)
+
+        # Get field defaults and apply sibling inheritance
+        for field in fields(self):
+            if field.name not in kwargs:
+                if field.default_factory != dataclasses.MISSING:
+                    # Create default instance with proper None values for inherited fields
+                    default_class = field.default_factory
+
+                    # Check if this class has inherit_as_none fields
+                    if hasattr(default_class, '_inherit_as_none') and default_class._inherit_as_none:
+                        # CRITICAL FIX: Force None values for all fields marked by inherit_as_none
+                        # The decorator sets class attributes to None, but dataclass constructor ignores them
+                        # We need to explicitly pass None for all inherited fields
+                        instance_kwargs = {}
+                        for class_field in fields(default_class):
+                            if hasattr(default_class, class_field.name):
+                                class_value = getattr(default_class, class_field.name)
+                                if class_value is None:
+                                    # Field was set to None by inherit_as_none - FORCE None in constructor
+                                    instance_kwargs[class_field.name] = None
+                                else:
+                                    # Field has concrete value - use it
+                                    instance_kwargs[class_field.name] = class_value
+                            else:
+                                # Field not on class - let dataclass use its default
+                                pass
+
+                        # Create instance with explicit None values to override dataclass defaults
+                        default_instance = default_class(**instance_kwargs)
+                    else:
+                        # Normal instance creation
+                        default_instance = default_class()
+
+                    # Apply sibling inheritance
+                    resolved_instance = apply_sibling_inheritance_to_instance(default_instance, **kwargs)
+                    resolved_kwargs[field.name] = resolved_instance
+                elif field.default != dataclasses.MISSING:
+                    resolved_kwargs[field.name] = field.default
+
+        # Set all field values directly (dataclasses don't have custom __init__)
+        for field_name, field_value in resolved_kwargs.items():
+            object.__setattr__(self, field_name, field_value)
+
+    # Only add custom methods if this is a config class with inheritance relationships
+    has_inheritance = any(
+        any(is_field_sibling_inheritable(config['config_class'], f.name) for f in fields(config['config_class']))
+        for config in configs
+    )
+
+    if has_inheritance:
+        new_class.__new__ = __new__
+        new_class.__init__ = __init__
 
     # Direct module replacement
     module = sys.modules[target_class.__module__]
