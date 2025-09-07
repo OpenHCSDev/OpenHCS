@@ -968,6 +968,10 @@ class ParameterFormManager(QWidget):
 
     def reset_parameter(self, param_name: str, default_value: Any = None) -> None:
         """Reset parameter with streamlined logic."""
+        # Import at function level to avoid scope issues
+        from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+
         print(f"🔍 RESET ENTRY DEBUG: Called reset_parameter for {param_name}")
         print(f"🔍 RESET ENTRY DEBUG: param_name in parameters: {param_name in self.parameters}")
         print(f"🔍 RESET ENTRY DEBUG: Available parameters: {list(self.parameters.keys())}")
@@ -977,8 +981,6 @@ class ParameterFormManager(QWidget):
 
         # CRITICAL FIX: Build context EXCLUDING the field being reset
         # This ensures placeholder resolution doesn't see the old value we're trying to reset
-        from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
-        from openhcs.core.config import GlobalPipelineConfig
 
         updated_context = self._build_context_from_current_form_values(exclude_field=param_name)
         original_context = get_current_global_config(GlobalPipelineConfig)
@@ -987,15 +989,26 @@ class ParameterFormManager(QWidget):
             if updated_context:
                 set_current_global_config(GlobalPipelineConfig, updated_context)
 
-            # Resolve reset value using dispatch
-            reset_value = default_value or self._get_reset_value(param_name)
-            print(f"🔍 RESET DEBUG: {param_name} reset_value = {reset_value}, is_lazy_dataclass = {self.config.is_lazy_dataclass}")
+            # CRITICAL FIX: For reset, remove from parameters instead of setting to reset value
+            # This allows inheritance to work properly after reset
 
-            # Apply reset with functional operations
-            self.parameters[param_name] = reset_value
+            # Check if field has concrete override (should reset to concrete value)
+            from openhcs.core.lazy_placeholder import _has_concrete_field_override
+            has_concrete_override = _has_concrete_field_override(self.dataclass_type, param_name)
 
-            # Mathematical simplification: Simple reset logic
-            # 1. Remove from user-set tracking
+            if has_concrete_override:
+                # Field has concrete override - reset to the concrete value
+                reset_value = getattr(self.dataclass_type, param_name)
+                self.parameters[param_name] = reset_value
+                print(f"🔍 RESET DEBUG: {param_name} has concrete override, reset to {reset_value}")
+            else:
+                # Field should inherit - remove from parameters to allow inheritance
+                if param_name in self.parameters:
+                    del self.parameters[param_name]
+                reset_value = None  # Will show placeholder
+                print(f"🔍 RESET DEBUG: {param_name} removed from parameters to allow inheritance")
+
+            # Remove from user-set tracking
             if hasattr(self, '_user_set_fields'):
                 self._user_set_fields.discard(param_name)
 

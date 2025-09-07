@@ -8,10 +8,11 @@ from typing import Any, Optional, Type
 import dataclasses
 
 # Import functions from their new locations after refactoring
-from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
-from openhcs.core.lazy_config import get_base_type_for_lazy, FieldPathNavigator
+from openhcs.core.lazy_config import get_base_type_for_lazy
 from openhcs.core.field_path_detection import FieldPathDetector
+from openhcs.core.lazy_config import FieldPathNavigator
+from openhcs.core.config import GlobalPipelineConfig
 
 
 def _has_concrete_field_override(source_class, field_name: str) -> bool:
@@ -38,241 +39,12 @@ def _has_concrete_field_override(source_class, field_name: str) -> bool:
     return False
 
 
-def _resolve_field_with_composition_awareness(instance, field_name: str):
-    """
-    Generic composition-aware field resolution supporting both inheritance and composition.
-
-    Supports both patterns:
-    1. Inheritance: field_name exists directly and inherits from global config
-    2. Composition: field_name exists in nested composed dataclasses
-
-    Args:
-        instance: The dataclass instance to search in (uses working lazy resolution)
-        field_name: The field name to find (may be direct or in composed dataclasses)
-
-    Returns:
-        The resolved field value using working lazy resolution, or None if not found
-    """
-    from dataclasses import fields, is_dataclass
-
-    # Check if field exists directly on this instance (avoid triggering lazy resolution)
-    direct_field_names = {f.name for f in fields(type(instance))}
-
-    if field_name in direct_field_names:
-        # INHERITANCE PATTERN: Field exists directly - use working lazy resolution code path
-        try:
-            return getattr(instance, field_name)
-        except AttributeError:
-            return None
-
-    # COMPOSITION PATTERN: Field doesn't exist directly - traverse composed dataclasses
-    result = _search_in_composed_dataclasses(instance, field_name)
-    if result is not None:
-        return result
-
-    # INHERITANCE FALLBACK: Check if field exists in global config with different naming
-    # e.g., well_filter might inherit from well_filter_config.well_filter
-    result = _search_in_global_config_inheritance(instance, field_name)
-    if result is not None:
-        return result
-
-    return None
 
 
-def _search_in_composed_dataclasses(instance, field_name: str):
-    """Search for field_name in composed dataclasses using working lazy resolution."""
-    from dataclasses import fields, is_dataclass
-
-    # INHERITANCE PROTECTION: Collect all potential values with source tracking
-    potential_values = []  # List of (value, source_class, field_path)
-
-    # Only debug for specific field we're troubleshooting
-    debug_field = field_name == "well_filter"
-    if debug_field:
-        print(f"🔍 DEBUG: COMPOSITION SEARCH - Looking for {field_name} in {type(instance).__name__}")
-
-    for field in fields(type(instance)):
-        try:
-            # Use working lazy resolution to get nested value
-            nested_value = getattr(instance, field.name)
-            if nested_value is not None and is_dataclass(nested_value):
-                # Check if this nested instance has the field directly
-                if hasattr(nested_value, field_name):
-                    value = getattr(nested_value, field_name)
-                    if value is not None:
-                        source_class = type(nested_value)
-                        potential_values.append((value, source_class, field.name))
-                        if debug_field:
-                            print(f"🔍 DEBUG: FOUND - {source_class.__name__}.{field_name} = '{value}' at {field.name}")
-
-                # Recursively search using working lazy resolution (generic N-levels deep)
-                result = _resolve_field_with_composition_awareness(nested_value, field_name)
-                if result is not None:
-                    # For recursive results, we don't have source tracking, so return immediately
-                    return result
-            elif nested_value is None:
-                # Handle optional nested configs: try both global config and default instances
-                if hasattr(instance, '_resolve_field_value'):
-                    # First try global config lookup
-                    result = _handle_optional_nested_config(instance, field.name, field_name)
-                    if result is not None:
-                        return result
-
-                # CRITICAL FIX: Also try creating default instance for deeply nested Optional fields
-                result = _create_default_instance_and_search(instance, field.name, field_name)
-                if result is not None:
-                    return result
-        except AttributeError:
-            continue
-
-    # INHERITANCE PROTECTION: Apply inheritance design rules to potential values
-    if debug_field:
-        print(f"🔍 DEBUG: INHERITANCE PROTECTION - Found {len(potential_values)} potential values")
-        for value, source_class, field_path in potential_values:
-            print(f"🔍 DEBUG: - {source_class.__name__}.{field_name} = '{value}' at {field_path}")
-
-    if len(potential_values) > 1:
-        # Filter out values from classes that should never inherit
-        concrete_override_values = []
-        inherit_as_none_values = []
-
-        for value, source_class, field_path in potential_values:
-            if _has_concrete_field_override(source_class, field_name):
-                concrete_override_values.append((value, source_class, field_path))
-            else:
-                inherit_as_none_values.append((value, source_class, field_path))
-
-        # Concrete override classes take precedence (they never inherit)
-        if concrete_override_values:
-            # Use the first concrete override value (they don't inherit from others)
-            value, source_class, field_path = concrete_override_values[0]
-            return value
-        elif inherit_as_none_values:
-            # Use the first inherit-as-none value (they can inherit)
-            value, source_class, field_path = inherit_as_none_values[0]
-            return value
-    elif len(potential_values) == 1:
-        # Single value found, return it
-        value, source_class, field_path = potential_values[0]
-        return value
-
-    return None
 
 
-def _create_default_instance_and_search(instance, nested_field_name: str, target_field_name: str):
-    """Create default instance for Optional nested config and search for target field."""
-    from dataclasses import fields, is_dataclass
-    from typing import Union
-
-    try:
-        # Get the nested config class from the field type
-        for field in fields(type(instance)):
-            if field.name == nested_field_name:
-                nested_config_class = field.type
-
-                # Handle Optional[ConfigClass] types
-                if hasattr(nested_config_class, '__origin__') and nested_config_class.__origin__ is Union:
-                    # Extract the actual config class from Optional[ConfigClass]
-                    nested_config_class = next(
-                        (arg for arg in nested_config_class.__args__
-                         if arg is not type(None) and is_dataclass(arg)),
-                        None
-                    )
-
-                if nested_config_class and is_dataclass(nested_config_class):
-                    # Create default instance and search in it recursively
-                    default_nested = nested_config_class()
-                    result = _resolve_field_with_composition_awareness(default_nested, target_field_name)
-                    if result is not None:
-                        return result
-                break
-    except (AttributeError, TypeError):
-        pass
-
-    return None
 
 
-def _create_default_instance_and_search(instance, nested_field_name: str, target_field_name: str):
-    """Create default instance for Optional nested config and search for target field."""
-    from dataclasses import fields, is_dataclass
-    from typing import Union
-
-    try:
-        # Get the nested config class from the field type
-        for field in fields(type(instance)):
-            if field.name == nested_field_name:
-                nested_config_class = field.type
-
-                # Handle Optional[ConfigClass] types
-                if hasattr(nested_config_class, '__origin__') and nested_config_class.__origin__ is Union:
-                    # Extract the actual config class from Optional[ConfigClass]
-                    nested_config_class = next(
-                        (arg for arg in nested_config_class.__args__
-                         if arg is not type(None) and is_dataclass(arg)),
-                        None
-                    )
-
-                if nested_config_class and is_dataclass(nested_config_class):
-                    # Create default instance and search in it recursively
-                    default_nested = nested_config_class()
-                    result = _resolve_field_with_composition_awareness(default_nested, target_field_name)
-                    if result is not None:
-                        return result
-                break
-    except (AttributeError, TypeError):
-        pass
-
-    return None
-
-
-def _handle_optional_nested_config(instance, nested_field_name: str, target_field_name: str):
-    """Handle optional nested configs that are None by checking global config and defaults."""
-    from openhcs.core.context.global_config import get_current_global_config
-    from openhcs.core.lazy_config import get_base_type_for_lazy
-    from dataclasses import is_dataclass, fields
-
-    try:
-        base_type = get_base_type_for_lazy(type(instance))
-        if base_type:
-            global_config = get_current_global_config(base_type)
-            if global_config and hasattr(global_config, nested_field_name):
-                global_nested = getattr(global_config, nested_field_name)
-                if global_nested is not None and is_dataclass(global_nested):
-                    # Search in the global nested config
-                    result = _resolve_field_with_composition_awareness(global_nested, target_field_name)
-                    if result is not None:
-                        return result
-
-                # CRITICAL FIX: If global nested config is None or doesn't have the field,
-                # fall back to the default values of the nested config class
-                if global_nested is None:
-                    # Get the nested config class from the field type
-                    for field in fields(type(global_config)):
-                        if field.name == nested_field_name:
-                            nested_config_class = field.type
-
-                            # Handle Optional[ConfigClass] types
-                            if hasattr(nested_config_class, '__origin__'):
-                                from typing import Union
-                                if nested_config_class.__origin__ is Union:
-                                    # Extract the actual config class from Optional[ConfigClass]
-                                    nested_config_class = next(
-                                        (arg for arg in nested_config_class.__args__
-                                         if arg is not type(None) and is_dataclass(arg)),
-                                        None
-                                    )
-
-                            if nested_config_class and is_dataclass(nested_config_class):
-                                # Create default instance and search in it
-                                default_nested = nested_config_class()
-                                result = _resolve_field_with_composition_awareness(default_nested, target_field_name)
-                                if result is not None:
-                                    return result
-                            break
-    except (AttributeError, TypeError):
-        pass
-
-    return None
 
 
 def _apply_subclass_precedence(concrete_values, field_name: str):
@@ -406,51 +178,6 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
         return None
 
 
-def _search_in_global_config_inheritance(instance, field_name: str):
-    """Search for field_name in global config using actual inheritance relationships."""
-    print(f"🔍 DEBUG: _search_in_global_config_inheritance called for {type(instance).__name__}.{field_name}")
-    global_config = get_current_global_config(GlobalPipelineConfig)
-    if not global_config:
-        print(f"🔍 DEBUG: No global config found for inheritance search")
-        return None
-
-    # Get the base class of the lazy instance
-    base_class = get_base_type_for_lazy(type(instance))
-    if not base_class:
-        print(f"🔍 DEBUG: No base class found for {type(instance)}")
-        return None
-
-    print(f"🔍 DEBUG: Searching inheritance for {base_class.__name__}.{field_name}")
-
-    # CRITICAL FIX: Use MRO order instead of arbitrary inheritance relationships
-    # This ensures we respect Python's Method Resolution Order for precedence
-    mro_types = [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__')]
-    print(f"🔍 DEBUG: MRO-ordered parent types: {[p.__name__ for p in mro_types]}")
-
-    for parent_type in mro_types:
-        print(f"🔍 DEBUG: Checking parent type: {parent_type.__name__}")
-        # Check if this parent has the field we're looking for
-        if hasattr(parent_type, '__dataclass_fields__'):
-            if field_name in parent_type.__dataclass_fields__:
-                print(f"🔍 DEBUG: Found field '{field_name}' in {parent_type.__name__}")
-                # Find the field path for this parent type in global config
-                field_paths = FieldPathDetector.find_all_field_paths_unified(GlobalPipelineConfig, parent_type)
-                print(f"🔍 DEBUG: Field paths for {parent_type.__name__}: {field_paths}")
-                for field_path in field_paths:
-                    print(f"🔍 DEBUG: Trying field path: {field_path}")
-                    # Navigate to the config instance and get the field value
-                    config_instance = FieldPathNavigator.navigate_to_instance(global_config, field_path)
-                    print(f"🔍 DEBUG: Config instance at {field_path}: {config_instance}")
-                    if config_instance and hasattr(config_instance, field_name):
-                        value = getattr(config_instance, field_name)
-                        print(f"🔍 DEBUG: Found value '{value}' at {field_path}.{field_name}")
-                        if value is not None:
-                            return value
-            else:
-                print(f"🔍 DEBUG: Field '{field_name}' not found in {parent_type.__name__}")
-
-    print(f"🔍 DEBUG: No inheritance value found for {field_name}")
-    return None
 
 
 class LazyDefaultPlaceholderService:
@@ -516,6 +243,8 @@ class LazyDefaultPlaceholderService:
                 # SIMPLIFIED: Use LAZY-FIRST resolution only for consistency
                 resolved_value = _resolve_field_with_mro_awareness(current_app_config, dataclass_type, field_name)
 
+
+
                 # If not found via LAZY-FIRST, fall back to lazy resolution (no composition search)
                 if resolved_value is None and hasattr(dataclass_type, '_resolve_field_value'):
                     temp_instance = dataclass_type()
@@ -528,9 +257,9 @@ class LazyDefaultPlaceholderService:
         else:
             # Default: Use current thread-local context with actual lazy resolution
             if hasattr(dataclass_type, '_resolve_field_value'):
-                # Generic composition-aware placeholder resolution
-                lazy_instance = dataclass_type()
-                resolved_value = _resolve_field_with_composition_awareness(lazy_instance, field_name)
+                # UNIFIED: Use MRO-aware resolution to respect concrete overrides
+                current_app_config = get_current_global_config(GlobalPipelineConfig)
+                resolved_value = _resolve_field_with_mro_awareness(current_app_config, dataclass_type, field_name)
             else:
                 # Fallback for non-lazy dataclasses
                 resolved_value = getattr(dataclass_type(), field_name, None)
@@ -539,9 +268,10 @@ class LazyDefaultPlaceholderService:
         if resolved_value is None:
             value_text = LazyDefaultPlaceholderService.NONE_VALUE_TEXT
         elif hasattr(resolved_value, '__dataclass_fields__'):
-            # CRITICAL FIX: When resolved value is a dataclass, use composition-aware resolution
-            # to extract the specific field at arbitrary nesting levels
-            specific_field_value = _resolve_field_with_composition_awareness(resolved_value, field_name)
+            # UNIFIED: When resolved value is a dataclass, use MRO-aware resolution
+            # to extract the specific field respecting concrete overrides
+            current_app_config = get_current_global_config(GlobalPipelineConfig)
+            specific_field_value = _resolve_field_with_mro_awareness(current_app_config, type(resolved_value), field_name)
             if specific_field_value is not None:
                 # Successfully extracted the specific field value
                 value_text = str(specific_field_value)
