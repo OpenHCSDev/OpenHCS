@@ -115,10 +115,13 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
 
     # Block inheritance if target class has concrete static default
     if _has_concrete_field_override(base_class, field_name):
-        from dataclasses import fields
-        class_fields = {f.name: f for f in fields(base_class)}
-        if field_name in class_fields and class_fields[field_name].default is not None:
-            return class_fields[field_name].default
+        # CRITICAL FIX: Use class attribute directly, not dataclass field default
+        # The @global_pipeline_config decorator modifies field defaults to None
+        # but preserves the original concrete value as a class attribute
+        concrete_value = getattr(base_class, field_name)
+        if field_name == "well_filter":
+            print(f"🔍 CONCRETE OVERRIDE: {base_class.__name__}.{field_name} = {concrete_value} (blocking inheritance)")
+        return concrete_value
 
     # DEBUG: Show what context we're using for resolution
     if field_name == "well_filter":

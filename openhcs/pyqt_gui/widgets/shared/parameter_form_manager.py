@@ -910,7 +910,10 @@ class ParameterFormManager(QWidget):
 
     def reset_all_parameters(self) -> None:
         """Reset all parameters - let reset_parameter handle everything."""
-        for param_name in self.parameters.keys():
+        # CRITICAL FIX: Create a copy of keys to avoid "dictionary changed during iteration" error
+        # reset_parameter can modify self.parameters by removing keys, so we need a stable list
+        param_names = list(self.parameters.keys())
+        for param_name in param_names:
             self.reset_parameter(param_name)
 
         # Handle nested managers once at the end
