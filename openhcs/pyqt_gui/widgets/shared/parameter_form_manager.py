@@ -1235,9 +1235,8 @@ class ParameterFormManager(QWidget):
         return False
 
     def _should_allow_inheritance(self, target_dataclass_type: type, field_name: str, source_dataclass_type: type) -> bool:
-        """RADICAL SIMPLIFICATION: Use Python's MRO directly like super() would."""
-        from dataclasses import fields, is_dataclass
-        import dataclasses
+        """SIMPLIFIED UNIFICATION: Use unified concrete override detection but keep working MRO logic."""
+        from dataclasses import is_dataclass
 
         if not (is_dataclass(target_dataclass_type) and is_dataclass(source_dataclass_type)):
             return False
@@ -1247,6 +1246,12 @@ class ParameterFormManager(QWidget):
         target_base = get_base_type_for_lazy(target_dataclass_type) or target_dataclass_type
         source_base = get_base_type_for_lazy(source_dataclass_type) or source_dataclass_type
 
+        # UNIFIED: Use the same concrete override detection as lazy dataclass system
+        # Check static overrides FIRST - they always block inheritance regardless of instance values
+        from openhcs.core.lazy_placeholder import _has_concrete_field_override
+        if _has_concrete_field_override(target_base, field_name):
+            return False
+
         # CRITICAL FIX: For lazy dataclasses, check the actual instance value, not static defaults
         # This is because inherit_as_none configs have static defaults but None instance values
         if hasattr(self, 'parameters') and field_name in self.parameters:
@@ -1254,74 +1259,25 @@ class ParameterFormManager(QWidget):
             # If the current instance has a concrete value (not None), it doesn't inherit
             if current_instance_value is not None:
                 return False
-        else:
-            # Fallback to static field check for non-lazy dataclasses
-            # CRITICAL FIX: Check class attribute directly, not dataclass field default
-            # The @global_pipeline_config decorator modifies field defaults to None
-            if hasattr(target_base, field_name):
-                class_attr_value = getattr(target_base, field_name)
-                # If target has its own concrete value, it doesn't inherit
-                if class_attr_value is not None:
-                    return False
 
-        # Use MRO to find next appropriate parent for inheritance
-        return self._is_next_in_mro_with_field(target_base, source_base, field_name)
+        # Check MRO precedence: source must be reachable without concrete override blocking
+        target_mro = target_base.__mro__[1:]  # Skip self
 
-    def _is_next_in_mro_with_field(self, target_class: type, source_class: type, field_name: str) -> bool:
-        """Check if source_class is the next class in target's MRO that should provide the field value.
+        # Source must be in target's MRO for inheritance to be possible
+        if source_base not in target_mro:
+            return False
 
-        FIELD-SPECIFIC LOGIC:
-        - Skip None values only if there's a concrete value later in MRO
-        - If no concrete value exists, inherit the None value from the first class that defines it
-        """
-        # DEBUG: Show MRO traversal for well_filter
-        if field_name == "well_filter":
-            print(f"🔍 MRO DEBUG: Checking if {source_class.__name__} should provide {field_name} to {target_class.__name__}")
-            print(f"🔍 MRO DEBUG: {target_class.__name__} MRO: {[cls.__name__ for cls in target_class.__mro__]}")
-        from dataclasses import fields, is_dataclass
-        import dataclasses
+        # Check if there's a concrete override earlier in MRO than source (blocks inheritance)
+        from openhcs.core.lazy_placeholder import _has_concrete_field_override
+        for mro_class in target_mro:
+            if mro_class == source_base:
+                return True  # Reached source without finding concrete override
+            if _has_concrete_field_override(mro_class, field_name):
+                return False  # Found concrete override before reaching source
 
-        # First pass: Check if there's ANY concrete value in the MRO
-        # CRITICAL FIX: Check class attributes directly, not dataclass field defaults
-        has_concrete_value = False
-        for mro_class in target_class.__mro__[1:]:
-            if is_dataclass(mro_class) and hasattr(mro_class, field_name):
-                class_attr_value = getattr(mro_class, field_name)
-                if field_name == "well_filter":
-                    print(f"🔍 MRO DEBUG: First pass - {mro_class.__name__}.{field_name} = {class_attr_value}")
-                if class_attr_value is not None:
-                    has_concrete_value = True
-                    if field_name == "well_filter":
-                        print(f"🔍 MRO DEBUG: Found concrete value in {mro_class.__name__}")
-                    break
+        return False  # Source not found in MRO
 
-        # Second pass: Find the appropriate class to inherit from
-        # CRITICAL FIX: Check class attributes directly, not dataclass field defaults
-        if field_name == "well_filter":
-            print(f"🔍 MRO DEBUG: Second pass - has_concrete_value={has_concrete_value}, looking for {source_class.__name__}")
 
-        for mro_class in target_class.__mro__[1:]:  # Skip self
-            if is_dataclass(mro_class) and hasattr(mro_class, field_name):
-                class_attr_value = getattr(mro_class, field_name)
-
-                if field_name == "well_filter":
-                    print(f"🔍 MRO DEBUG: Second pass - {mro_class.__name__}.{field_name} = {class_attr_value}, checking vs {source_class.__name__}")
-
-                if has_concrete_value:
-                    # Skip None values when concrete value exists later
-                    if class_attr_value is not None:
-                        result = mro_class == source_class
-                        if field_name == "well_filter":
-                            print(f"🔍 MRO DEBUG: Concrete value found - {mro_class.__name__} == {source_class.__name__}? {result}")
-                        return result
-                else:
-                    # No concrete value exists - inherit from first class that defines it
-                    result = mro_class == source_class
-                    if field_name == "well_filter":
-                        print(f"🔍 MRO DEBUG: No concrete value - {mro_class.__name__} == {source_class.__name__}? {result}")
-                    return result
-
-        return False
 
 
 
