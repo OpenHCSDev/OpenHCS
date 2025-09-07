@@ -1,4 +1,4 @@
-Getting Started with OpenHCS
+Introduction to OpenHCS
 ============================
 
 Installation

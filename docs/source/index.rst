@@ -1,4 +1,4 @@
-Welcome to OpenHCS Documentation - test
+Welcome to OpenHCS Documentation
 =================================
 
 OpenHCS is a bioimage analysis platform for high-content screening datasets. It provides unified access to Python image processing libraries with automatic GPU acceleration and memory management for large-scale microscopy data analysis.
