@@ -8,21 +8,21 @@ This page is for non-technical users of OpenHCS, who want to get started with us
 
 To get started, check out the following resources:
 
-**Introduction**: :doc:`intro` - An overview of what OpenHCS is, when to use it, and its main features.
+1. **Introduction**: :doc:`intro` - An overview of what OpenHCS is, when to use it, and its main features.
 
-**Installation**: :doc:`installation_and_setup` - Step-by-step instructions to install OpenHCS on your computer.
+2. **Installation**: :doc:`installation_and_setup` - Step-by-step instructions to install OpenHCS on your computer.
 
-**Interface Layout**: :doc:`basic_interface` - A simple tutorial to help you get familiar with the OpenHCS interface and features.
+3. **Interface Layout**: :doc:`basic_interface` - A simple tutorial to help you get familiar with the OpenHCS interface and features.
 
-**Introductory workflow: stitching**: :doc:`intro_stitching` - Learn how to stitch images together using OpenHCS.
+4. **Introductory workflow: stitching**: :doc:`intro_stitching` - Learn how to stitch images together using OpenHCS.
 
-**Introductory workflow: analysis**: :doc:`intro_analysis` - A beginner-friendly guide to performing image analysis with OpenHCS.
+5. **Introductory workflow: analysis**: :doc:`intro_analysis` - A beginner-friendly guide to performing image analysis with OpenHCS.
 
-**Advanced tips** : :doc:`advanced_tips` - Explore more complex features and workflows to get the most out of OpenHCS.
+6. **Advanced tips** : :doc:`advanced_tips` - Explore more complex features and workflows to get the most out of OpenHCS.
 
-**Glossary**: :doc:`glossary` - Definitions of common terms used in OpenHCS and image analysis.
+7. **Glossary**: :doc:`glossary` - Definitions of common terms used in OpenHCS and image analysis.
 
-**Troubleshooting and FAQ**: :doc:`troubleshooting_FAQ` - Common issues and solutions to help you troubleshoot problems.
+8. **Troubleshooting and FAQ**: :doc:`troubleshooting_FAQ` - Common issues and solutions to help you troubleshoot problems.
 
 
 .. toctree::
