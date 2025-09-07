@@ -289,7 +289,6 @@ class StepWellFilterConfig(WellFilterConfig):
     """Well filter configuration specialized for step-level configs with different defaults."""
     # Override defaults for step-level configurations
     well_filter: Optional[List[str]] = 1
-    well_filter_mode: WellFilterMode = WellFilterMode.INCLUDE
 
 @global_pipeline_config
 @dataclass(frozen=True)
