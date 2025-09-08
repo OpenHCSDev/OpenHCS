@@ -580,6 +580,51 @@ def _assert_step_editor_placeholders_match(step_form_manager, pipeline_placehold
 
     print("✅ Step editor placeholders verified using unified patterns")
 
+
+def _assert_step_editor_shows_saved_values(step_form_manager, saved_values: dict):
+    """Assert step editor shows placeholders that match the saved values from pipeline config."""
+    print("🔍 Testing cross-window consistency: saved values vs step editor placeholders")
+
+    # For step_well_filter_config, also check configs that inherit from it
+    inheritance_groups = {
+        'step_well_filter_config': ['step_well_filter_config', 'step_materialization_config', 'napari_streaming_config']
+    }
+
+    # For each config that had values saved
+    for config, saved_value in saved_values.items():
+        # Get all configs that should show the same value (including the config itself)
+        configs_to_check = inheritance_groups.get(config, [config])
+
+        print(f"🔍 Checking config: {config} (saved value: '{saved_value}')")
+        print(f"  Will verify inheritance in: {configs_to_check}")
+
+        for check_config in configs_to_check:
+            nested_manager = getattr(step_form_manager, 'nested_managers', {}).get(check_config)
+
+            if not nested_manager or not hasattr(nested_manager, 'widgets'):
+                print(f"  ⚠️  Skipping {check_config} - no nested manager or widgets in step editor")
+                continue
+
+            # Check the well_filter field specifically
+            if 'well_filter' in nested_manager.widgets:
+                widget = nested_manager.widgets['well_filter']
+                actual_placeholder = get_placeholder_text(widget)
+                expected_placeholder = f'Pipeline default: {saved_value}'
+
+                print(f"  {check_config}.well_filter:")
+                print(f"    Expected: '{expected_placeholder}'")
+                print(f"    Actual: '{actual_placeholder}'")
+
+                assert actual_placeholder == expected_placeholder, \
+                    f"Cross-window consistency FAILED for {check_config}.well_filter: " \
+                    f"saved '{saved_value}' in {config} but step editor shows '{actual_placeholder}'"
+
+                print(f"    ✅ Correct placeholder")
+            else:
+                print(f"  ⚠️  No well_filter widget found in {check_config}")
+
+    print("✅ Cross-window consistency verified: all saved values and inheritance match step editor placeholders")
+
 # ============================================================================
 # ASSERTION OPERATIONS: Dynamic assertions as workflow steps
 # ============================================================================
@@ -705,19 +750,21 @@ class TestResetPlaceholderInheritance:
         # Cross-window verification using mathematical simplification
         print("\n🔄 Cross-window placeholder consistency check")
 
-        # Set concrete values before saving pipeline config using exact same pattern as earlier in test
+        # Set concrete values and track what we set
         target_configs = ['well_filter_config', 'step_well_filter_config']
+        saved_values = {}
         for i, config in enumerate(target_configs):
             test_value = f'concrete_{i+1}'  # Generate parameterized values: concrete_1, concrete_2
             run_test(context, ('edit', 'well_filter', test_value, config))
+            saved_values[config] = test_value
             print(f"✅ Set concrete value {config}.well_filter = {test_value}")
 
-        pipeline_placeholders = _capture_pipeline_placeholders(context)
-        context = _close_config_window(context)
+        # Save configuration to update thread-local context
+        context = save_and_close_config(context)
 
         step_editor_window, step_form_manager = _open_step_editor_and_get_form_manager(context)
         try:
-            _assert_step_editor_placeholders_match(step_form_manager, pipeline_placeholders)
+            _assert_step_editor_shows_saved_values(step_form_manager, saved_values)
         finally:
             step_editor_window.close()
             QApplication.processEvents()

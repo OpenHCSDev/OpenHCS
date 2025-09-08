@@ -123,7 +123,7 @@ class ParameterFormManager(QWidget):
                  field_id: str, dataclass_type: Type, parameter_info: Dict = None, parent=None,
                  use_scroll_area: bool = True, function_target=None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, placeholder_prefix: str = None,
-                 param_defaults: Dict[str, Any] = None):
+                 param_defaults: Dict[str, Any] = None, global_config_type: Optional[Type] = None):
         """
         Initialize PyQt parameter form manager with mathematically elegant single-parameter design.
 
@@ -144,6 +144,7 @@ class ParameterFormManager(QWidget):
         # Store configuration parameters - dataclass_type is the single source of truth
         self.parent = parent  # Store parent for step-level config detection
         self.dataclass_type = dataclass_type
+        self.global_config_type = global_config_type  # Store for nested manager inheritance
         self.placeholder_prefix = placeholder_prefix or CONSTANTS.DEFAULT_PLACEHOLDER_PREFIX
 
         # Convert old API to new config object internally
@@ -158,10 +159,18 @@ class ParameterFormManager(QWidget):
         )
         config.parameter_info = parameter_info
         config.dataclass_type = dataclass_type
+        config.global_config_type = global_config_type
         config.placeholder_prefix = placeholder_prefix
-        # Mathematical simplification: Cache lazy resolution check to avoid repeated calls
-        config.is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
-        config.is_global_config_editing = not config.is_lazy_dataclass
+
+        # CRITICAL FIX: Use explicit global_config_type when provided, otherwise auto-detect
+        if global_config_type is not None:
+            # Explicit mode: Use global_config_type to determine editing mode
+            config.is_global_config_editing = (dataclass_type == global_config_type)
+            config.is_lazy_dataclass = not config.is_global_config_editing
+        else:
+            # Auto-detection mode: Use lazy resolution check (backward compatibility)
+            config.is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
+            config.is_global_config_editing = not config.is_lazy_dataclass
 
         # Initialize core attributes directly (avoid abstract class instantiation)
         self.parameters = parameters.copy()
@@ -222,7 +231,8 @@ class ParameterFormManager(QWidget):
                               placeholder_prefix: str = "Default",
                               parent=None, use_scroll_area: bool = True,
                               function_target=None, color_scheme=None,
-                              force_show_all_fields: bool = False):
+                              force_show_all_fields: bool = False,
+                              global_config_type: Optional[Type] = None):
         """
         Create ParameterFormManager for editing entire dataclass instance.
 
@@ -271,7 +281,9 @@ class ParameterFormManager(QWidget):
             use_scroll_area=use_scroll_area,
             function_target=function_target,
             color_scheme=color_scheme,
-            placeholder_prefix=placeholder_prefix
+            placeholder_prefix=placeholder_prefix,
+            param_defaults=None,
+            global_config_type=global_config_type  # CRITICAL FIX: Pass global_config_type through
         )
 
         # Store the original dataclass instance for reset operations
@@ -450,7 +462,8 @@ class ParameterFormManager(QWidget):
                 field_id=field_path,  # Use actual dataclass field name directly
                 placeholder_prefix=self.placeholder_prefix,
                 parent=group_box, use_scroll_area=False,
-                color_scheme=self.config.color_scheme
+                color_scheme=self.config.color_scheme,
+                global_config_type=self.global_config_type  # CRITICAL FIX: Pass global_config_type to nested managers
             )
 
             # Unified manager setup
@@ -539,7 +552,9 @@ class ParameterFormManager(QWidget):
             False,  # use_scroll_area
             None,   # function_target
             PyQt6ColorScheme(),  # color_scheme
-            self.placeholder_prefix # Pass through placeholder prefix
+            self.placeholder_prefix, # Pass through placeholder prefix
+            None,  # param_defaults
+            self.global_config_type  # CRITICAL FIX: Pass global_config_type to nested managers
         )
 
         # Store nested manager

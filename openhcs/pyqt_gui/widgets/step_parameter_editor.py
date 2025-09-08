@@ -79,6 +79,7 @@ class StepParameterEditorWidget(QWidget):
         
         # Create parameter form manager for function parameters
         # Note: Step editor needs special context setup to show step-level inheritance
+        from openhcs.core.config import GlobalPipelineConfig
 
         self.form_manager = ParameterFormManager(
             parameters, parameter_types, "step", AbstractStep,
@@ -86,7 +87,8 @@ class StepParameterEditorWidget(QWidget):
             parent=self,  # Pass self as parent so form manager can access _step_level_configs
             color_scheme=self.color_scheme,
             placeholder_prefix="Pipeline default",
-            param_defaults=param_defaults
+            param_defaults=param_defaults,
+            global_config_type=GlobalPipelineConfig  # CRITICAL FIX: Enable thread-local context resolution
         )
         
         self.setup_ui()
