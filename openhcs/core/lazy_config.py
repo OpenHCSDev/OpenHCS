@@ -195,8 +195,20 @@ class LazyMethodBindings:
                         )
 
                         if mro_has_concrete_override:
-                            # First check if the specific global context has a value for this field
+                            # RECURSION GUARD: Prevent infinite loops during global context access
+                            recursion_key = f"_inheritance_resolving_{id(self)}_{name}"
+                            if hasattr(self, recursion_key):
+                                # Already resolving this field, fall back to MRO immediately
+                                for mro_class in base_class.__mro__:
+                                    if _has_concrete_field_override(mro_class, name):
+                                        concrete_value = getattr(mro_class, name)
+                                        return concrete_value
+
+                            # Set recursion guard
+                            object.__setattr__(self, recursion_key, True)
+
                             try:
+                                # First check if the specific global context has a value for this field
                                 # Use the specific global_config_type that was passed to this lazy dataclass
                                 if hasattr(self, '_global_config_type'):
                                     global_config_type = self._global_config_type
@@ -221,11 +233,17 @@ class LazyMethodBindings:
                                                 continue
                             except Exception:
                                 pass  # Fall back to class default if global context access fails
+                            finally:
+                                # Always clear recursion guard
+                                if hasattr(self, recursion_key):
+                                    object.__delattr__(self, recursion_key)
 
-                            # If no global context value found, use class default
-                            concrete_value = getattr(base_class, name)
-                            print(f"🔍 LAZY GETATTR: Target class {base_class.__name__}.{name} has concrete override '{concrete_value}', using class default")
-                            return concrete_value
+                            # If no global context value found, find the actual class with concrete override
+                            for mro_class in base_class.__mro__:
+                                if _has_concrete_field_override(mro_class, name):
+                                    concrete_value = getattr(mro_class, name)
+                                    print(f"🔍 LAZY GETATTR: Found concrete override in {mro_class.__name__}.{name} = '{concrete_value}', using class default")
+                                    return concrete_value
 
 
 

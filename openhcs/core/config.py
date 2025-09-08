@@ -321,7 +321,7 @@ class FunctionRegistryConfig:
     """
 
 
-@global_pipeline_config
+@global_pipeline_config(ui_hidden=True)
 @dataclass(frozen=True)
 class VisualizerConfig:
     """Configuration for shared visualization system settings."""

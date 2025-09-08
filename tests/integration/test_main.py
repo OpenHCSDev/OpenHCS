@@ -220,14 +220,21 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
     reset_memory_backend()
 
     setup_global_gpu_registry()
-    config = _create_pipeline_config(test_config)
+    global_config = _create_pipeline_config(test_config)
 
     # Set up global context for orchestrator
     from openhcs.core.lazy_config import ensure_global_config_context
-    from openhcs.core.config import GlobalPipelineConfig
-    ensure_global_config_context(GlobalPipelineConfig, config)
+    from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+    ensure_global_config_context(GlobalPipelineConfig, global_config)
 
-    orchestrator = PipelineOrchestrator(test_config.plate_dir)
+    # Create PipelineConfig with the same output_dir_suffix for proper inheritance
+    pipeline_config = PipelineConfig(
+        path_planning_config=PathPlanningConfig(
+            output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
+        )
+    )
+
+    orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
     orchestrator.initialize()
     return orchestrator
 
