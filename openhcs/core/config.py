@@ -109,7 +109,7 @@ class GlobalPipelineConfig:
     Examples: "results", "./analysis", "/data/analysis_results", "../shared_results"
 
     Note: This is separate from per-step image materialization, which is controlled
-    by the sub_dir field in each step's materialization_config.
+    by the sub_dir field in each step's step_materialization_config.
     """
 
     microscope: Microscope = Microscope.AUTO
@@ -321,7 +321,7 @@ class FunctionRegistryConfig:
     """
 
 
-@global_pipeline_config(ui_hidden=True)
+@global_pipeline_config
 @dataclass(frozen=True)
 class VisualizerConfig:
     """Configuration for shared visualization system settings."""

@@ -76,20 +76,21 @@ def require_config_context(func):
     return wrapper
 
 
-def get_all_global_config_types() -> list[Type]:
-    """Get all global config types that have been registered.
-
-    Returns:
-        List of all config types that have active contexts
-    """
-    # Get types from thread-local contexts
-    thread_local_types = list(_global_config_contexts.keys())
-
-    # Get types from window contexts
-    window_types = set()
-    for window_context in _window_contexts.values():
-        window_types.update(window_context.keys())
-
-    # Combine and deduplicate
-    all_types = list(set(thread_local_types + list(window_types)))
-    return all_types
+#def get_all_global_config_types() -> list[Type]:
+#    """Get all global config types that have been registered.
+#
+#    Returns:
+#        List of all config types that have active contexts
+#    """
+#    # Get types from thread-local contexts
+#    thread_local_types = list(_global_config_contexts.keys())
+#
+#    # Get types from window contexts
+#    window_types = set()
+#    for window_context in _window_contexts.values():
+#        window_types.update(window_context.keys())
+#
+#    # Combine and deduplicate
+#    all_types = list(set(thread_local_types + list(window_types)))
+#    return all_types
+#

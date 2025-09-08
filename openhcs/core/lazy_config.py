@@ -172,22 +172,26 @@ class LazyMethodBindings:
                 return value
 
             base_class = get_base_type_for_lazy(self.__class__)
-            if not base_class or not any(_has_concrete_field_override(cls, name) for cls in base_class.__mro__):
-                return value
-
-            # Recursion guard using mathematical simplification
-            recursion_key = f"_inheritance_resolving_{id(self)}_{name}"
-            if hasattr(self, recursion_key):
-                return _find_mro_concrete_value(base_class, name)
-
-            object.__setattr__(self, recursion_key, True)
-            try:
-                # Try global context first, then MRO fallback
-                return (_try_global_context_value(self, base_class, name) or
-                       _find_mro_concrete_value(base_class, name))
-            finally:
+            if not base_class:
+                # No base class - fall through to normal lazy resolution
+                pass
+            elif not any(_has_concrete_field_override(cls, name) for cls in base_class.__mro__):
+                # No concrete overrides in MRO - fall through to normal lazy resolution
+                pass
+            else:
+                # Has concrete overrides - apply inheritance fix
+                recursion_key = f"_inheritance_resolving_{id(self)}_{name}"
                 if hasattr(self, recursion_key):
-                    object.__delattr__(self, recursion_key)
+                    return _find_mro_concrete_value(base_class, name)
+
+                object.__setattr__(self, recursion_key, True)
+                try:
+                    # Try global context first, then MRO fallback
+                    return (_try_global_context_value(self, base_class, name) or
+                           _find_mro_concrete_value(base_class, name))
+                finally:
+                    if hasattr(self, recursion_key):
+                        object.__delattr__(self, recursion_key)
 
             # Fallback to normal lazy resolution if no inheritance fix needed
             try:
@@ -1202,7 +1206,7 @@ def resolve_dataclass_with_sibling_inheritance(instance: Any, sibling_source: An
     Example:
         # StepMaterializationConfig inherits from PathPlanningConfig
         resolved = resolve_dataclass_with_sibling_inheritance(
-            materialization_config, path_planning_config
+            step_materialization_config, path_planning_config
         )
     """
     if not is_dataclass(instance):

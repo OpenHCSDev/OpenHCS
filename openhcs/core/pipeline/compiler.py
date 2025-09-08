@@ -135,7 +135,7 @@ class PipelineCompiler:
 
         # === AXIS FILTER RESOLUTION ===
         # Resolve axis filters for steps with materialization configs
-        # This must happen after normalization to ensure materialization_config exists
+        # This must happen after normalization to ensure step_materialization_config exists
         logger.debug("🎯 AXIS FILTER RESOLUTION: Resolving step axis filters...")
         _resolve_step_axis_filters(steps_definition, context, orchestrator)
 
@@ -649,13 +649,13 @@ def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, or
 
     # Process each step that has materialization config with axis filter
     for step_index, step in enumerate(steps_definition):
-        if (step.materialization_config and
-            step.materialization_config.well_filter is not None):
+        if (step.step_materialization_config and
+            step.step_materialization_config.well_filter is not None):
 
             try:
                 # Resolve the axis filter pattern to concrete axis values
                 resolved_axis_values = WellFilterProcessor.resolve_compilation_filter(
-                    step.materialization_config.well_filter,
+                    step.step_materialization_config.well_filter,
                     available_axis_values
                 )
 
@@ -663,16 +663,16 @@ def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, or
                 # Use structure expected by path planner
                 context.step_axis_filters[step_index] = {  # Use step_index instead of step.step_id
                     'resolved_axis_values': sorted(resolved_axis_values),
-                    'filter_mode': step.materialization_config.well_filter_mode,
-                    'original_filter': step.materialization_config.well_filter
+                    'filter_mode': step.step_materialization_config.well_filter_mode,
+                    'original_filter': step.step_materialization_config.well_filter
                 }
 
-                logger.debug(f"Step '{step.name}' axis filter '{step.materialization_config.well_filter}' "
+                logger.debug(f"Step '{step.name}' axis filter '{step.step_materialization_config.well_filter}' "
                            f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
 
             except Exception as e:
                 logger.error(f"Failed to resolve axis filter for step '{step.name}': {e}")
-                raise ValueError(f"Invalid axis filter '{step.materialization_config.well_filter}' "
+                raise ValueError(f"Invalid axis filter '{step.step_materialization_config.well_filter}' "
                                f"for step '{step.name}': {e}")
 
     logger.debug(f"Axis filter resolution complete. {len(context.step_axis_filters)} steps have axis filters.")

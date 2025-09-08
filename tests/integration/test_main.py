@@ -109,12 +109,12 @@ def create_test_pipeline() -> Pipeline:
                 name="Z-Stack Flattening",
                 func=(create_projection, {'method': 'max_projection'}),
                 variable_components=[VariableComponents.Z_INDEX],
-                materialization_config=LazyStepMaterializationConfig()
+                step_materialization_config=LazyStepMaterializationConfig()
             ),
             Step(
                 name="Image Enhancement Processing",
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
-                materialization_config=LazyStepMaterializationConfig(),
+                step_materialization_config=LazyStepMaterializationConfig(),
                 napari_streaming_config=LazyNapariStreamingConfig()  # Enable napari streaming for this step
             ),
             Step(name="Position Computation", func=position_func),

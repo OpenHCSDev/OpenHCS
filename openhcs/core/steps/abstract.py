@@ -133,7 +133,7 @@ class AbstractStep(abc.ABC):
         group_by: Optional[GroupBy] = get_default_group_by(),
         input_source: InputSource = InputSource.PREVIOUS_STEP,
         step_well_filter_config: 'LazyStepWellFilterConfig' = None,
-        materialization_config: Optional['LazyStepMaterializationConfig'] = None,
+        step_materialization_config: Optional['LazyStepMaterializationConfig'] = None,
         napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
         fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
     ) -> None:
@@ -150,7 +150,7 @@ class AbstractStep(abc.ABC):
             input_source: Input source strategy for this step. Defaults to PREVIOUS_STEP
                          for normal pipeline chaining. Use PIPELINE_START to access
                          original input data (replaces @chain_breaker decorator).
-            materialization_config: Optional LazyStepMaterializationConfig for per-step materialized output.
+            step_materialization_config: Optional LazyStepMaterializationConfig for per-step materialized output.
                                    When provided, enables saving materialized copy of step output
                                    to custom location in addition to normal memory backend processing.
                                    Use LazyStepMaterializationConfig() for safe defaults that prevent path collisions.
@@ -163,7 +163,7 @@ class AbstractStep(abc.ABC):
         self.variable_components = variable_components
         self.group_by = group_by
         self.input_source = input_source
-        self.materialization_config = materialization_config
+        self.step_materialization_config = step_materialization_config
         self.napari_streaming_config = napari_streaming_config
         self.fiji_streaming_config = fiji_streaming_config
         self.step_well_filter_config = step_well_filter_config
