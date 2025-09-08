@@ -585,19 +585,23 @@ def _assert_step_editor_shows_saved_values(step_form_manager, saved_values: dict
     """Assert step editor shows placeholders that match the saved values from pipeline config."""
     print("🔍 Testing cross-window consistency: saved values vs step editor placeholders")
 
-    # For step_well_filter_config, also check configs that inherit from it
+    # Define inheritance groups: configs that should show the same values
+    # step_well_filter_config: itself + configs that inherit from it (excluding those with their own overrides)
+    # step_materialization_config: only itself (has its own concrete values)
     inheritance_groups = {
-        'step_well_filter_config': ['step_well_filter_config', 'step_materialization_config', 'napari_streaming_config']
+        'step_well_filter_config': ['step_well_filter_config', 'napari_streaming_config'],  # materialization excluded - has own values
+        'step_materialization_config': ['step_materialization_config'],  # only itself
+        'well_filter_config': ['well_filter_config']  # only itself (not in step editor but for completeness)
     }
 
     all_results = []  # Collect all results (pass/fail) before asserting
 
     # For each config that had values saved
-    for config, saved_value in saved_values.items():
+    for config, saved_fields in saved_values.items():
         # Get all configs that should show the same value (including the config itself)
         configs_to_check = inheritance_groups.get(config, [config])
 
-        print(f"🔍 Checking config: {config} (saved value: '{saved_value}')")
+        print(f"🔍 Checking config: {config} (saved values: {saved_fields})")
         print(f"  Will verify inheritance in: {configs_to_check}")
 
         for check_config in configs_to_check:
@@ -608,44 +612,45 @@ def _assert_step_editor_shows_saved_values(step_form_manager, saved_values: dict
                 all_results.append(f"SKIPPED: {check_config} - no nested manager")
                 continue
 
-            # Check the well_filter field specifically
-            if 'well_filter' in nested_manager.widgets:
-                widget = nested_manager.widgets['well_filter']
+            # Check each saved field (well_filter and well_filter_mode)
+            for field_name, saved_value in saved_fields.items():
+                if field_name in nested_manager.widgets:
+                    widget = nested_manager.widgets[field_name]
 
-                # Handle case where widget creation failed (returns None or invalid widget)
-                if widget is None:
-                    print(f"  ⚠️  {check_config}.well_filter widget is None (creation failed)")
-                    continue
+                    # Handle case where widget creation failed (returns None or invalid widget)
+                    if widget is None:
+                        print(f"  ⚠️  {check_config}.{field_name} widget is None (creation failed)")
+                        continue
 
-                try:
-                    actual_placeholder = get_placeholder_text(widget)
-                    expected_placeholder = f'Pipeline default: {saved_value}'
+                    try:
+                        actual_placeholder = get_placeholder_text(widget)
+                        expected_placeholder = f'Pipeline default: {saved_value}'
 
-                    print(f"  {check_config}.well_filter:")
-                    print(f"    Expected: '{expected_placeholder}'")
-                    print(f"    Actual: '{actual_placeholder}'")
+                        print(f"  {check_config}.{field_name}:")
+                        print(f"    Expected: '{expected_placeholder}'")
+                        print(f"    Actual: '{actual_placeholder}'")
 
-                    if actual_placeholder != expected_placeholder:
-                        result_msg = f"FAILED: {check_config}.well_filter - expected '{expected_placeholder}' but got '{actual_placeholder}'"
-                        all_results.append(result_msg)
-                        print(f"    ❌ FAILED - expected '{expected_placeholder}' but got '{actual_placeholder}'")
-                    else:
-                        result_msg = f"PASSED: {check_config}.well_filter - correctly shows '{actual_placeholder}'"
-                        all_results.append(result_msg)
-                        print(f"    ✅ PASSED")
-                except Exception as e:
-                    print(f"  ⚠️  Error checking {check_config}.well_filter widget: {e}")
-                    all_results.append(f"ERROR: {check_config}.well_filter - {e}")
-                    continue
-            else:
-                print(f"  ⚠️  No well_filter widget found in {check_config}")
-                all_results.append(f"SKIPPED: {check_config} - no well_filter widget")
-                # Let's also check what widgets ARE available
-                if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
-                    available_widgets = list(nested_manager.widgets.keys())
-                    print(f"    Available widgets: {available_widgets}")
+                        if actual_placeholder != expected_placeholder:
+                            result_msg = f"FAILED: {check_config}.{field_name} - expected '{expected_placeholder}' but got '{actual_placeholder}'"
+                            all_results.append(result_msg)
+                            print(f"    ❌ FAILED - expected '{expected_placeholder}' but got '{actual_placeholder}'")
+                        else:
+                            result_msg = f"PASSED: {check_config}.{field_name} - correctly shows '{actual_placeholder}'"
+                            all_results.append(result_msg)
+                            print(f"    ✅ PASSED")
+                    except Exception as e:
+                        print(f"  ⚠️  Error checking {check_config}.{field_name} widget: {e}")
+                        all_results.append(f"ERROR: {check_config}.{field_name} - {e}")
+                        continue
                 else:
-                    print(f"    No widgets available in nested manager")
+                    print(f"  ⚠️  No {field_name} widget found in {check_config}")
+                    all_results.append(f"SKIPPED: {check_config} - no {field_name} widget")
+                    # Let's also check what widgets ARE available
+                    if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
+                        available_widgets = list(nested_manager.widgets.keys())
+                        print(f"    Available widgets: {available_widgets}")
+                    else:
+                        print(f"    No widgets available in nested manager")
 
     # Show summary of all results
     print(f"\n📊 SUMMARY OF ALL CROSS-WINDOW CONSISTENCY CHECKS:")
@@ -788,13 +793,37 @@ class TestResetPlaceholderInheritance:
         print("\n🔄 Cross-window placeholder consistency check")
 
         # Set concrete values and track what we set
-        target_configs = ['well_filter_config', 'step_well_filter_config']
         saved_values = {}
-        for i, config in enumerate(target_configs):
-            test_value = f'concrete_{i+1}'  # Generate parameterized values: concrete_1, concrete_2
-            run_test(context, ('edit', 'well_filter', test_value, config))
-            saved_values[config] = test_value
-            print(f"✅ Set concrete value {config}.well_filter = {test_value}")
+
+        # Set step_well_filter_config values
+        run_test(context, ('edit', 'well_filter', 'concrete_2', 'step_well_filter_config'))
+        run_test(context, ('edit', 'well_filter_mode', 'WellFilterMode.EXCLUDE', 'step_well_filter_config'))
+        saved_values['step_well_filter_config'] = {
+            'well_filter': 'concrete_2',
+            'well_filter_mode': 'WellFilterMode.EXCLUDE'
+        }
+        print(f"✅ Set concrete value step_well_filter_config.well_filter = concrete_2")
+        print(f"✅ Set concrete value step_well_filter_config.well_filter_mode = WellFilterMode.EXCLUDE")
+
+        # Set step_materialization_config to DIFFERENT values
+        run_test(context, ('edit', 'well_filter', 'materialization_value', 'step_materialization_config'))
+        run_test(context, ('edit', 'well_filter_mode', 'WellFilterMode.INCLUDE', 'step_materialization_config'))
+        saved_values['step_materialization_config'] = {
+            'well_filter': 'materialization_value',
+            'well_filter_mode': 'WellFilterMode.INCLUDE'
+        }
+        print(f"✅ Set concrete value step_materialization_config.well_filter = materialization_value")
+        print(f"✅ Set concrete value step_materialization_config.well_filter_mode = WellFilterMode.INCLUDE")
+
+        # Also set well_filter_config for completeness
+        run_test(context, ('edit', 'well_filter', 'concrete_1', 'well_filter_config'))
+        run_test(context, ('edit', 'well_filter_mode', 'WellFilterMode.EXCLUDE', 'well_filter_config'))
+        saved_values['well_filter_config'] = {
+            'well_filter': 'concrete_1',
+            'well_filter_mode': 'WellFilterMode.EXCLUDE'
+        }
+        print(f"✅ Set concrete value well_filter_config.well_filter = concrete_1")
+        print(f"✅ Set concrete value well_filter_config.well_filter_mode = WellFilterMode.EXCLUDE")
 
         # Save configuration to update thread-local context
         context = save_and_close_config(context)
