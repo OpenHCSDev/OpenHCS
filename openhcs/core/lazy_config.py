@@ -134,107 +134,73 @@ class LazyMethodBindings:
     @staticmethod
     def create_getattribute() -> Callable[[Any, str], Any]:
         """Create lazy __getattribute__ method."""
+        # Move imports to module level to avoid repeated inline imports
+        from openhcs.core.lazy_placeholder import _has_concrete_field_override
+        from openhcs.core.context.global_config import get_current_global_config
+        from openhcs.core.field_path_detection import FieldPathDetector, FieldPathNavigator
+
+        def _find_mro_concrete_value(base_class, name):
+            """Extract common MRO traversal pattern."""
+            return next((getattr(cls, name) for cls in base_class.__mro__
+                        if _has_concrete_field_override(cls, name)), None)
+
+        def _try_global_context_value(self, base_class, name):
+            """Extract global context resolution logic."""
+            if not hasattr(self, '_global_config_type'):
+                return None
+
+            current_context = get_current_global_config(self._global_config_type)
+            if not current_context:
+                return None
+
+            field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
+            for field_path in field_paths:
+                try:
+                    context_value = FieldPathNavigator.navigate_to_instance(current_context, field_path)
+                    if context_value and hasattr(context_value, name):
+                        global_value = getattr(context_value, name)
+                        if global_value is not None:
+                            print(f"🔍 LAZY GETATTR: Using global context value for {base_class.__name__}.{name} = '{global_value}' from {field_path} (overriding MRO default)")
+                            return global_value
+                except (AttributeError, TypeError):
+                    continue
+            return None
+
         def __getattribute__(self: Any, name: str) -> Any:
-            # First try to get the attribute normally
-            try:
-                value = object.__getattribute__(self, name)
-                if value is None and name in {f.name for f in fields(self.__class__)}:
-                    # CRITICAL FIX: Check for concrete overrides in inheritance chain BEFORE lazy resolution
-                    # This ensures concrete values in parent classes block further inheritance
-                    from openhcs.core.lazy_placeholder import _has_concrete_field_override
-                    from openhcs.core.lazy_config import get_base_type_for_lazy
-
-                    # Get the base class for this lazy dataclass
-                    base_class = get_base_type_for_lazy(self.__class__)
-                    if base_class:
-                        # GENERIC INHERITANCE FIX: Check if any class in MRO has concrete override
-                        # But only use it if there's no global context value available
-                        mro_has_concrete_override = any(
-                            _has_concrete_field_override(mro_class, name)
-                            for mro_class in base_class.__mro__
-                        )
-
-                        if mro_has_concrete_override:
-                            # RECURSION GUARD: Prevent infinite loops during global context access
-                            recursion_key = f"_inheritance_resolving_{id(self)}_{name}"
-                            if hasattr(self, recursion_key):
-                                # Already resolving this field, fall back to MRO immediately
-                                for mro_class in base_class.__mro__:
-                                    if _has_concrete_field_override(mro_class, name):
-                                        concrete_value = getattr(mro_class, name)
-                                        return concrete_value
-
-                            # Set recursion guard
-                            object.__setattr__(self, recursion_key, True)
-
-                            try:
-                                # First check if the specific global context has a value for this field
-                                # Use the specific global_config_type that was passed to this lazy dataclass
-                                if hasattr(self, '_global_config_type'):
-                                    global_config_type = self._global_config_type
-                                    from openhcs.core.context.global_config import get_current_global_config
-                                    from openhcs.core.field_path_detection import FieldPathDetector
-
-                                    current_context = get_current_global_config(global_config_type)
-                                    if current_context:
-                                        # Try to get the value from the global context using the field path
-                                        field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
-
-                                        for field_path in field_paths:
-                                            try:
-                                                from openhcs.core.field_path_detection import FieldPathNavigator
-                                                context_value = FieldPathNavigator.navigate_to_instance(current_context, field_path)
-                                                if context_value and hasattr(context_value, name):
-                                                    global_value = getattr(context_value, name)
-                                                    if global_value is not None:
-                                                        print(f"🔍 LAZY GETATTR: Using global context value for {base_class.__name__}.{name} = '{global_value}' from {field_path} (overriding MRO default)")
-                                                        return global_value
-                                            except (AttributeError, TypeError):
-                                                continue
-                            except Exception:
-                                pass  # Fall back to class default if global context access fails
-                            finally:
-                                # Always clear recursion guard
-                                if hasattr(self, recursion_key):
-                                    object.__delattr__(self, recursion_key)
-
-                            # If no global context value found, find the actual class with concrete override
-                            for mro_class in base_class.__mro__:
-                                if _has_concrete_field_override(mro_class, name):
-                                    concrete_value = getattr(mro_class, name)
-                                    print(f"🔍 LAZY GETATTR: Found concrete override in {mro_class.__name__}.{name} = '{concrete_value}', using class default")
-                                    return concrete_value
-
-
-
-                        # Check MRO for concrete overrides (skip self, already checked)
-                        for cls in base_class.__mro__[1:]:
-                            if hasattr(cls, '__dataclass_fields__') and name in cls.__dataclass_fields__:
-                                if _has_concrete_field_override(cls, name):
-                                    # Found concrete override in inheritance chain - use it and stop
-                                    concrete_value = getattr(cls, name)
-                                    if name == "well_filter":
-                                        print(f"🔍 LAZY GETATTR: Found concrete override in {cls.__name__}.{name} = '{concrete_value}', blocking lazy resolution")
-                                    return concrete_value
-
-                    # No concrete overrides found - proceed with lazy resolution
-                    # CRITICAL FIX: Use object.__getattribute__ to get _resolve_field_value method
-                    # to avoid potential recursion if _resolve_field_value accesses other attributes
-                    resolve_method = object.__getattribute__(self, '_resolve_field_value')
-                    return resolve_method(name)
+            value = object.__getattribute__(self, name)
+            if value is not None or name not in {f.name for f in fields(self.__class__)}:
                 return value
+
+            base_class = get_base_type_for_lazy(self.__class__)
+            if not base_class or not any(_has_concrete_field_override(cls, name) for cls in base_class.__mro__):
+                return value
+
+            # Recursion guard using mathematical simplification
+            recursion_key = f"_inheritance_resolving_{id(self)}_{name}"
+            if hasattr(self, recursion_key):
+                return _find_mro_concrete_value(base_class, name)
+
+            object.__setattr__(self, recursion_key, True)
+            try:
+                # Try global context first, then MRO fallback
+                return (_try_global_context_value(self, base_class, name) or
+                       _find_mro_concrete_value(base_class, name))
+            finally:
+                if hasattr(self, recursion_key):
+                    object.__delattr__(self, recursion_key)
+
+            # Fallback to normal lazy resolution if no inheritance fix needed
+            try:
+                resolve_method = object.__getattribute__(self, '_resolve_field_value')
+                return resolve_method(name)
             except AttributeError:
                 # If attribute doesn't exist on lazy class, try to get it from base class
-                # This handles methods like get_streaming_kwargs
                 try:
-                    # CRITICAL FIX: Use object.__getattribute__ to avoid recursion
                     base_class = object.__getattribute__(self, '_base_class')
                     if hasattr(base_class, name):
-                        # Create a temporary instance of the base class with current values
                         base_instance = self.to_base_config()
                         return getattr(base_instance, name)
                 except AttributeError:
-                    # _base_class doesn't exist, continue to raise original AttributeError
                     pass
                 raise
         return __getattribute__
