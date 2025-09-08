@@ -113,14 +113,44 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
     if not base_class:
         base_class = target_dataclass_type
 
-    # Block inheritance if target class has concrete static default
+    # CRITICAL FIX: For concrete override classes, check context for user-set values FIRST
+    # before falling back to class default. This ensures saved values are respected.
     if _has_concrete_field_override(base_class, field_name):
-        # CRITICAL FIX: Use class attribute directly, not dataclass field default
-        # The @global_pipeline_config decorator modifies field defaults to None
-        # but preserves the original concrete value as a class attribute
+        # CRITICAL FIX: Use current thread-local context, not the passed global_config parameter
+        # This ensures we use the same context that the MRO logic uses
+        current_context = get_current_global_config(GlobalPipelineConfig)
+
+        if current_context is None:
+            current_context = global_config  # Fallback to passed parameter
+
+        # Check if user has set a concrete value in the context
+        field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
+
+        if field_name == "well_filter":
+            print(f"🔍 USER OVERRIDE DEBUG: Looking for {base_class.__name__} paths: {field_paths}")
+            print(f"🔍 USER OVERRIDE DEBUG: Using current thread-local context: {type(current_context)}")
+            if hasattr(current_context, 'step_well_filter_config'):
+                print(f"🔍 USER OVERRIDE DEBUG: current_context.step_well_filter_config = {current_context.step_well_filter_config}")
+
+        for field_path in field_paths:
+            config_instance = FieldPathNavigator.navigate_to_instance(current_context, field_path)
+            if config_instance is not None:
+                field_value = getattr(config_instance, field_name, None)
+
+                if field_name == "well_filter":
+                    print(f"🔍 USER OVERRIDE DEBUG: Path '{field_path}' -> instance: {config_instance}")
+                    print(f"🔍 USER OVERRIDE DEBUG: Found {field_path}.{field_name} = '{field_value}'")
+
+                # If user has set a concrete value (not None), use it
+                if field_value is not None:
+                    if field_name == "well_filter":
+                        print(f"🔍 USER OVERRIDE: Using user-set value {base_class.__name__}.{field_name} = '{field_value}'")
+                    return field_value
+
+        # No user-set value found, fall back to class default
         concrete_value = getattr(base_class, field_name)
         if field_name == "well_filter":
-            print(f"🔍 CONCRETE OVERRIDE: {base_class.__name__}.{field_name} = {concrete_value} (blocking inheritance)")
+            print(f"🔍 CONCRETE OVERRIDE: {base_class.__name__}.{field_name} = {concrete_value} (no user-set values found)")
         return concrete_value
 
     # DEBUG: Show what context we're using for resolution
