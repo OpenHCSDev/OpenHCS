@@ -115,14 +115,15 @@ class PathPlanner:
         materialized_output_dir = None
         if step.step_materialization_config:
             # Check if this step has well filters and if current well should be materialized
-            step_axis_filter = getattr(self.ctx, 'step_axis_filters', {}).get(sid)
+            step_axis_filters = getattr(self.ctx, 'step_axis_filters', {}).get(sid, {})
+            materialization_filter = step_axis_filters.get('step_materialization_config')
 
-            if step_axis_filter:
+            if materialization_filter:
                 # Inline simple conditional logic for axis filtering
                 from openhcs.core.config import WellFilterMode
-                axis_in_filter = self.ctx.axis_id in step_axis_filter['resolved_axis_values']
+                axis_in_filter = self.ctx.axis_id in materialization_filter['resolved_axis_values']
                 should_materialize = (
-                    axis_in_filter if step_axis_filter['filter_mode'] == WellFilterMode.INCLUDE
+                    axis_in_filter if materialization_filter['filter_mode'] == WellFilterMode.INCLUDE
                     else not axis_in_filter
                 )
 

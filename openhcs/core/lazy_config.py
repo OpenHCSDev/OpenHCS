@@ -341,8 +341,14 @@ class LazyDataclassFactory:
         # Create lazy dataclass with introspected fields
         # CRITICAL FIX: Avoid inheriting from classes with custom metaclasses to prevent descriptor conflicts
         # Exception: InheritAsNoneMeta is safe to inherit from as it only modifies field defaults
+        # Exception: Classes with _inherit_as_none marker are safe even with ABCMeta (processed by @global_pipeline_config)
         base_metaclass = type(base_class)
-        has_unsafe_metaclass = (hasattr(base_class, '__metaclass__') or base_metaclass != type) and base_metaclass != InheritAsNoneMeta
+        has_inherit_as_none_marker = hasattr(base_class, '_inherit_as_none') and base_class._inherit_as_none
+        has_unsafe_metaclass = (
+            (hasattr(base_class, '__metaclass__') or base_metaclass != type) and
+            base_metaclass != InheritAsNoneMeta and
+            not has_inherit_as_none_marker
+        )
 
         if has_unsafe_metaclass:
             # Base class has unsafe custom metaclass - don't inherit, just copy interface

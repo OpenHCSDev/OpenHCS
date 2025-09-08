@@ -131,8 +131,8 @@ class GlobalPipelineConfig:
 @dataclass(frozen=True)
 class WellFilterConfig:
     """Base configuration for well filtering functionality."""
-    well_filter: Optional[List[str]] = None
-    """List of wells to include/exclude. None means all wells."""
+    well_filter: Optional[Union[List[str], str, int]] = None
+    """Well filter specification: list of wells, pattern string, or max count integer. None means all wells."""
 
     well_filter_mode: WellFilterMode = WellFilterMode.INCLUDE
     """Whether well_filter is an include list or exclude list."""
@@ -288,7 +288,7 @@ class PathPlanningConfig(WellFilterConfig):
 class StepWellFilterConfig(WellFilterConfig):
     """Well filter configuration specialized for step-level configs with different defaults."""
     # Override defaults for step-level configurations
-    well_filter: Optional[List[str]] = 1
+    well_filter: Optional[Union[List[str], str, int]] = 1
 
 @global_pipeline_config
 @dataclass(frozen=True)

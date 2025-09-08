@@ -285,6 +285,12 @@ def test_main(plate_dir: Union[Path, str], backend_config: str, data_type_config
     orchestrator = _initialize_orchestrator(test_config)
     pipeline = create_test_pipeline()
 
+    # Test inheritance: napari streaming config should inherit well_filter=1 from StepWellFilterConfig
+    step_with_napari = pipeline.steps[2]  # Image Enhancement Processing step
+    napari_config = step_with_napari.napari_streaming_config
+    assert napari_config.well_filter == 1, f"Expected well_filter=1 from StepWellFilterConfig inheritance, got {napari_config.well_filter}"
+    print(f"✅ Inheritance test passed: napari_streaming_config.well_filter = {napari_config.well_filter}")
+
     results = _execute_pipeline_phases(orchestrator, pipeline)
     validate_separate_materialization(test_config.plate_dir)
 

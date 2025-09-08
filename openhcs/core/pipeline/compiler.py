@@ -224,15 +224,31 @@ class PipelineCompiler:
             from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
             resolved_step = resolve_lazy_configurations_for_serialization([step])[0]
 
-            # Store all WellFilterConfig instances except materialization (already handled above)
-            from openhcs.core.config import WellFilterConfig, StreamingConfig
+            # Store WellFilterConfig instances only if they match the current axis
+            from openhcs.core.config import WellFilterConfig, StreamingConfig, WellFilterMode
             has_streaming = False
             required_visualizers = getattr(context, 'required_visualizers', [])
+
+            # Get step axis filters for this step
+            step_axis_filters = getattr(context, 'step_axis_filters', {}).get(step_index, {})
 
             for attr_name in dir(resolved_step):
                 if not attr_name.startswith('_'):
                     config = getattr(resolved_step, attr_name, None)
                     if config is not None and isinstance(config, WellFilterConfig):
+                        # Check if this config has a well filter and if current axis matches
+                        should_include_config = True
+                        if config.well_filter is not None:
+                            config_filter = step_axis_filters.get(attr_name)
+                            if config_filter:
+                                # Apply axis filter logic
+                                axis_in_filter = context.axis_id in config_filter['resolved_axis_values']
+                                should_include_config = (
+                                    axis_in_filter if config_filter['filter_mode'] == WellFilterMode.INCLUDE
+                                    else not axis_in_filter
+                                )
+
+                        if should_include_config:
                             current_plan[attr_name] = config
                             # Check if this is a streaming config for visualize flag
                             if isinstance(config, StreamingConfig):
@@ -244,6 +260,8 @@ class PipelineCompiler:
                                 }
                                 if visualizer_info not in required_visualizers:
                                     required_visualizers.append(visualizer_info)
+                        else:
+                            logger.debug(f"Excluding {attr_name} for step {step.name}, axis {context.axis_id} (filtered out)")
 
             # Set visualize flag for orchestrator if any streaming is enabled
             current_plan["visualize"] = has_streaming
@@ -624,10 +642,11 @@ class PipelineCompiler:
 
 def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, orchestrator):
     """
-    Resolve axis filters for steps with materialization configs.
+    Resolve axis filters for steps with any WellFilterConfig instances.
 
     This function handles step-level axis filtering by resolving patterns like
     "row:A", ["A01", "B02"], or max counts against the available axis values for the plate.
+    It processes ALL WellFilterConfig instances (materialization, streaming, etc.) uniformly.
 
     Args:
         steps_definition: List of pipeline steps
@@ -635,6 +654,7 @@ def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, or
         orchestrator: Orchestrator instance with access to available axis values
     """
     from openhcs.core.utils import WellFilterProcessor
+    from openhcs.core.config import WellFilterConfig
 
     # Get available axis values from orchestrator using multiprocessing axis
     from openhcs.constants import MULTIPROCESSING_AXIS
@@ -647,35 +667,43 @@ def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, or
     if not hasattr(context, 'step_axis_filters'):
         context.step_axis_filters = {}
 
-    # Process each step that has materialization config with axis filter
+    # Process each step for ALL WellFilterConfig instances
     for step_index, step in enumerate(steps_definition):
-        if (step.step_materialization_config and
-            step.step_materialization_config.well_filter is not None):
+        step_filters = {}
 
-            try:
-                # Resolve the axis filter pattern to concrete axis values
-                resolved_axis_values = WellFilterProcessor.resolve_compilation_filter(
-                    step.step_materialization_config.well_filter,
-                    available_axis_values
-                )
+        # Check all attributes for WellFilterConfig instances
+        for attr_name in dir(step):
+            if not attr_name.startswith('_'):
+                config = getattr(step, attr_name, None)
+                if config is not None and isinstance(config, WellFilterConfig) and config.well_filter is not None:
+                    try:
+                        # Resolve the axis filter pattern to concrete axis values
+                        resolved_axis_values = WellFilterProcessor.resolve_compilation_filter(
+                            config.well_filter,
+                            available_axis_values
+                        )
 
-                # Store resolved axis values in context for path planner
-                # Use structure expected by path planner
-                context.step_axis_filters[step_index] = {  # Use step_index instead of step.step_id
-                    'resolved_axis_values': sorted(resolved_axis_values),
-                    'filter_mode': step.step_materialization_config.well_filter_mode,
-                    'original_filter': step.step_materialization_config.well_filter
-                }
+                        # Store resolved axis values for this config
+                        step_filters[attr_name] = {
+                            'resolved_axis_values': sorted(resolved_axis_values),
+                            'filter_mode': config.well_filter_mode,
+                            'original_filter': config.well_filter
+                        }
 
-                logger.debug(f"Step '{step.name}' axis filter '{step.step_materialization_config.well_filter}' "
-                           f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
+                        logger.debug(f"Step '{step.name}' {attr_name} filter '{config.well_filter}' "
+                                   f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
 
-            except Exception as e:
-                logger.error(f"Failed to resolve axis filter for step '{step.name}': {e}")
-                raise ValueError(f"Invalid axis filter '{step.step_materialization_config.well_filter}' "
-                               f"for step '{step.name}': {e}")
+                    except Exception as e:
+                        logger.error(f"Failed to resolve axis filter for step '{step.name}' {attr_name}: {e}")
+                        raise ValueError(f"Invalid axis filter '{config.well_filter}' "
+                                       f"for step '{step.name}' {attr_name}: {e}")
 
-    logger.debug(f"Axis filter resolution complete. {len(context.step_axis_filters)} steps have axis filters.")
+        # Store step filters if any were found
+        if step_filters:
+            context.step_axis_filters[step_index] = step_filters
+
+    total_filters = sum(len(filters) for filters in context.step_axis_filters.values())
+    logger.debug(f"Axis filter resolution complete. {len(context.step_axis_filters)} steps have axis filters, {total_filters} total filters.")
 
 
 def _should_process_for_well(axis_id, well_filter_config):
