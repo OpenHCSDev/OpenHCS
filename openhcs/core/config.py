@@ -131,7 +131,7 @@ class GlobalPipelineConfig:
 @dataclass(frozen=True)
 class WellFilterConfig:
     """Base configuration for well filtering functionality."""
-    well_filter: Optional[List[str]] = 8
+    well_filter: Optional[List[str]] = None
     """List of wells to include/exclude. None means all wells."""
 
     well_filter_mode: WellFilterMode = WellFilterMode.INCLUDE
@@ -321,6 +321,7 @@ class FunctionRegistryConfig:
     """
 
 
+@global_pipeline_config
 @dataclass(frozen=True)
 class VisualizerConfig:
     """Configuration for shared visualization system settings."""

@@ -187,6 +187,48 @@ class LazyMethodBindings:
                     # Get the base class for this lazy dataclass
                     base_class = get_base_type_for_lazy(self.__class__)
                     if base_class:
+                        # GENERIC INHERITANCE FIX: Check if any class in MRO has concrete override
+                        # But only use it if there's no global context value available
+                        mro_has_concrete_override = any(
+                            _has_concrete_field_override(mro_class, name)
+                            for mro_class in base_class.__mro__
+                        )
+
+                        if mro_has_concrete_override:
+                            # First check if the specific global context has a value for this field
+                            try:
+                                # Use the specific global_config_type that was passed to this lazy dataclass
+                                if hasattr(self, '_global_config_type'):
+                                    global_config_type = self._global_config_type
+                                    from openhcs.core.context.global_config import get_current_global_config
+                                    from openhcs.core.field_path_detection import FieldPathDetector
+
+                                    current_context = get_current_global_config(global_config_type)
+                                    if current_context:
+                                        # Try to get the value from the global context using the field path
+                                        field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
+
+                                        for field_path in field_paths:
+                                            try:
+                                                from openhcs.core.lazy_config import FieldPathNavigator
+                                                context_value = FieldPathNavigator.navigate_to_instance(current_context, field_path)
+                                                if context_value and hasattr(context_value, name):
+                                                    global_value = getattr(context_value, name)
+                                                    if global_value is not None:
+                                                        print(f"🔍 LAZY GETATTR: Using global context value for {base_class.__name__}.{name} = '{global_value}' from {field_path} (overriding MRO default)")
+                                                        return global_value
+                                            except (AttributeError, TypeError):
+                                                continue
+                            except Exception:
+                                pass  # Fall back to class default if global context access fails
+
+                            # If no global context value found, use class default
+                            concrete_value = getattr(base_class, name)
+                            print(f"🔍 LAZY GETATTR: Target class {base_class.__name__}.{name} has concrete override '{concrete_value}', using class default")
+                            return concrete_value
+
+
+
                         # Check MRO for concrete overrides (skip self, already checked)
                         for cls in base_class.__mro__[1:]:
                             if hasattr(cls, '__dataclass_fields__') and name in cls.__dataclass_fields__:
@@ -381,6 +423,8 @@ class LazyDataclassFactory:
         def __init_with_tracking__(self, **kwargs):
             # Track which fields were explicitly passed to constructor
             object.__setattr__(self, '_explicitly_set_fields', set(kwargs.keys()))
+            # Store the global config type for inheritance resolution
+            object.__setattr__(self, '_global_config_type', global_config_type)
             original_init(self, **kwargs)
 
         lazy_class.__init__ = __init_with_tracking__

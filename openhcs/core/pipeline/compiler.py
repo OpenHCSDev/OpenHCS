@@ -113,13 +113,19 @@ class PipelineCompiler:
         from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
         from dataclasses import fields
 
-        # Use unified config access pattern with inheritance preservation
-        effective_config = orchestrator.get_effective_config(for_serialization=False)
-        set_current_global_config(GlobalPipelineConfig, effective_config)
-        logger.debug(f"🔧 THREAD-LOCAL: Set context using unified config pattern that preserves None values for sibling inheritance")
+        # Check if orchestrator has already set up the context
+        current_context = get_current_global_config(GlobalPipelineConfig)
+        if current_context is None and orchestrator.pipeline_config:
+            # If no context exists, apply the orchestrator's pipeline config to establish context
+            # This uses the same merged config pattern that preserves None values for sibling inheritance
+            orchestrator.apply_pipeline_config(orchestrator.pipeline_config)
+            logger.debug(f"🔧 THREAD-LOCAL: Applied orchestrator pipeline config to establish context for sibling inheritance")
+        else:
+            logger.debug(f"🔧 THREAD-LOCAL: Using existing context set by orchestrator (preserves None values for sibling inheritance)")
 
         # Add visualizer config to context for orchestrator access
-        context.visualizer_config = effective_config.visualizer
+        current_config = get_current_global_config(GlobalPipelineConfig)
+        context.visualizer_config = current_config.visualizer_config
 
         # === BACKWARDS COMPATIBILITY PREPROCESSING ===
         # Ensure all steps have complete attribute sets based on AbstractStep constructor

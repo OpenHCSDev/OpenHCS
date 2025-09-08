@@ -156,6 +156,13 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
                 elif value is not None and not _has_concrete_field_override(mro_class, field_name):
                     # This is a user-set value in an inherit-as-none class - also concrete
                     concrete_values.append((value, mro_class, field_path, config_instance))
+                elif value is None and _has_concrete_field_override(mro_class, field_name) and mro_class == base_class:
+                    # SPECIAL CASE: When target class field is reset to None but has concrete override,
+                    # use the class default instead of looking for inheritance
+                    class_default = getattr(mro_class, field_name)
+                    if field_name == "well_filter":
+                        print(f"🔍 RESET TO CLASS DEFAULT: {mro_class.__name__}.{field_name} reset to None, using class default '{class_default}'")
+                    return class_default
 
     # GENERIC SUBCLASS PRECEDENCE: Filter out parent class values when subclass has concrete value
     if len(concrete_values) > 1:
