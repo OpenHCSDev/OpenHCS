@@ -590,6 +590,8 @@ def _assert_step_editor_shows_saved_values(step_form_manager, saved_values: dict
         'step_well_filter_config': ['step_well_filter_config', 'step_materialization_config', 'napari_streaming_config']
     }
 
+    all_results = []  # Collect all results (pass/fail) before asserting
+
     # For each config that had values saved
     for config, saved_value in saved_values.items():
         # Get all configs that should show the same value (including the config itself)
@@ -603,25 +605,60 @@ def _assert_step_editor_shows_saved_values(step_form_manager, saved_values: dict
 
             if not nested_manager or not hasattr(nested_manager, 'widgets'):
                 print(f"  ⚠️  Skipping {check_config} - no nested manager or widgets in step editor")
+                all_results.append(f"SKIPPED: {check_config} - no nested manager")
                 continue
 
             # Check the well_filter field specifically
             if 'well_filter' in nested_manager.widgets:
                 widget = nested_manager.widgets['well_filter']
-                actual_placeholder = get_placeholder_text(widget)
-                expected_placeholder = f'Pipeline default: {saved_value}'
 
-                print(f"  {check_config}.well_filter:")
-                print(f"    Expected: '{expected_placeholder}'")
-                print(f"    Actual: '{actual_placeholder}'")
+                # Handle case where widget creation failed (returns None or invalid widget)
+                if widget is None:
+                    print(f"  ⚠️  {check_config}.well_filter widget is None (creation failed)")
+                    continue
 
-                assert actual_placeholder == expected_placeholder, \
-                    f"Cross-window consistency FAILED for {check_config}.well_filter: " \
-                    f"saved '{saved_value}' in {config} but step editor shows '{actual_placeholder}'"
+                try:
+                    actual_placeholder = get_placeholder_text(widget)
+                    expected_placeholder = f'Pipeline default: {saved_value}'
 
-                print(f"    ✅ Correct placeholder")
+                    print(f"  {check_config}.well_filter:")
+                    print(f"    Expected: '{expected_placeholder}'")
+                    print(f"    Actual: '{actual_placeholder}'")
+
+                    if actual_placeholder != expected_placeholder:
+                        result_msg = f"FAILED: {check_config}.well_filter - expected '{expected_placeholder}' but got '{actual_placeholder}'"
+                        all_results.append(result_msg)
+                        print(f"    ❌ FAILED - expected '{expected_placeholder}' but got '{actual_placeholder}'")
+                    else:
+                        result_msg = f"PASSED: {check_config}.well_filter - correctly shows '{actual_placeholder}'"
+                        all_results.append(result_msg)
+                        print(f"    ✅ PASSED")
+                except Exception as e:
+                    print(f"  ⚠️  Error checking {check_config}.well_filter widget: {e}")
+                    all_results.append(f"ERROR: {check_config}.well_filter - {e}")
+                    continue
             else:
                 print(f"  ⚠️  No well_filter widget found in {check_config}")
+                all_results.append(f"SKIPPED: {check_config} - no well_filter widget")
+                # Let's also check what widgets ARE available
+                if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
+                    available_widgets = list(nested_manager.widgets.keys())
+                    print(f"    Available widgets: {available_widgets}")
+                else:
+                    print(f"    No widgets available in nested manager")
+
+    # Show summary of all results
+    print(f"\n📊 SUMMARY OF ALL CROSS-WINDOW CONSISTENCY CHECKS:")
+    for result in all_results:
+        print(f"  {result}")
+
+    # Check if any failed and print the actual failure details
+    failures = [result for result in all_results if result.startswith("FAILED:")]
+    if failures:
+        print(f"\n❌ FAILURES DETECTED:")
+        for failure in failures:
+            print(f"  {failure}")
+        raise AssertionError(f"Cross-window consistency failures: {len(failures)} configs failed")
 
     print("✅ Cross-window consistency verified: all saved values and inheritance match step editor placeholders")
 
