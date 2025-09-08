@@ -10,11 +10,52 @@ import dataclasses
 import inspect
 import os
 import typing
-from typing import Type, Optional, Union, get_origin, get_args
+from typing import Type, Optional, Union, get_origin, get_args, Any
 from dataclasses import fields
 
 # Configuration flag for switching between inheritance and composition detection
 USE_COMPOSITION_DETECTION = os.getenv('OPENHCS_USE_COMPOSITION_DETECTION', 'false').lower() == 'true'
+
+
+class FieldPathNavigator:
+    """Utility for navigating dot-separated field paths in object hierarchies."""
+
+    @staticmethod
+    def navigate_to_instance(current_global_config: Any, field_path: Optional[str] = None) -> Optional[Any]:
+        """
+        Navigate to instance using explicit field path.
+
+        Args:
+            current_global_config: Thread-local storage object or global config instance
+            field_path: Dot-separated path to navigate (None = root)
+
+        Returns:
+            Instance at the specified field path, or None if not found
+        """
+        # Handle both thread-local storage objects and direct config instances
+        if hasattr(current_global_config, "value"):
+            if not current_global_config.value:
+                return None
+            instance = current_global_config.value
+        else:
+            # Direct config instance
+            instance = current_global_config
+
+        if field_path is None:
+            # Root instance - return the global config directly
+            return instance
+
+        # Navigate dot-separated path
+        for field in field_path.split('.'):
+            if instance is None:
+                return None
+            # Use object.__getattribute__ to avoid triggering lazy resolution during navigation
+            try:
+                instance = object.__getattribute__(instance, field)
+            except AttributeError:
+                return None
+
+        return instance
 
 
 class FieldPathDetector:

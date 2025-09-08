@@ -11,7 +11,7 @@ import dataclasses
 from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
 from openhcs.core.lazy_config import get_base_type_for_lazy
 from openhcs.core.field_path_detection import FieldPathDetector
-from openhcs.core.lazy_config import FieldPathNavigator
+from openhcs.core.field_path_detection import FieldPathNavigator
 from openhcs.core.config import GlobalPipelineConfig
 
 
@@ -103,7 +103,7 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
     3. Only fall back to static defaults if no concrete values found
     """
     from openhcs.core.field_path_detection import FieldPathDetector
-    from openhcs.core.lazy_config import get_base_type_for_lazy, FieldPathNavigator
+    from openhcs.core.lazy_config import get_base_type_for_lazy
 
     if not global_config:
         return None
