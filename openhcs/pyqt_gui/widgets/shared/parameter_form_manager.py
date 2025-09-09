@@ -606,17 +606,26 @@ class ParameterFormManager(QWidget):
         if current_value is not None:
             return
 
-        # Mathematical simplification: Use cached lazy resolution check
-        if not self.config.is_lazy_dataclass:
+        # CRITICAL FIX: Run placeholder resolution for:
+        # 1. Lazy dataclasses (PipelineConfig forms)
+        # 2. Non-lazy dataclasses with context provider (step editors with orchestrator context)
+        if not self.config.is_lazy_dataclass and not (hasattr(self, 'context_provider') and self.context_provider):
             return
 
-        # CRITICAL FIX: Build context from current form values instead of using thread-local context
-        current_form_context = self._build_context_from_current_form_values()
+        # CRITICAL FIX: Use context provider when available (for step editors with orchestrator context)
+        # This ensures step editors resolve against orchestrator's PipelineConfig concrete values
+        if hasattr(self, 'context_provider') and self.context_provider:
+            app_config = self.context_provider()
+            print(f"🔍 PLACEHOLDER DEBUG: Using orchestrator context for {param_name}")
+        else:
+            # Fallback: Build context from current form values (for lazy dataclass editing)
+            app_config = self._build_context_from_current_form_values()
+            print(f"🔍 PLACEHOLDER DEBUG: Using form-built context for {param_name}")
 
-        # Get placeholder resolved against current form state
+        # Get placeholder resolved against appropriate context
         placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
             self.dataclass_type, param_name,
-            app_config=current_form_context,  # Use current form context
+            app_config=app_config,
             placeholder_prefix=self.placeholder_prefix
         )
 
@@ -655,8 +664,16 @@ class ParameterFormManager(QWidget):
         from openhcs.core.config import GlobalPipelineConfig
         from dataclasses import replace
 
-        # Get current thread-local context as base - this contains ALL dataclass instances
-        current_context = get_current_global_config(GlobalPipelineConfig)
+        # CRITICAL FIX: Use context provider when available (for step editors with orchestrator context)
+        # This ensures step editors resolve against orchestrator's PipelineConfig concrete values
+        if hasattr(self, 'context_provider') and self.context_provider:
+            current_context = self.context_provider()
+            print(f"🔍 CONTEXT BUILD DEBUG: Using orchestrator context provider")
+        else:
+            # Fallback: Get current thread-local context as base (for global config editing)
+            current_context = get_current_global_config(GlobalPipelineConfig)
+            print(f"🔍 CONTEXT BUILD DEBUG: Using thread-local context")
+
         if not current_context:
             return None
 
@@ -1119,13 +1136,10 @@ class ParameterFormManager(QWidget):
                     if hasattr(wf_config, 'well_filter_mode'):
                         print(f"🔍 RESET PATH 2 DEBUG: well_filter_mode = {wf_config.well_filter_mode}")
 
-                # CRITICAL FIX: For reset operations, use default thread-local resolution
-                # This ensures reset shows the original thread-local defaults, not saved concrete values
-                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    self.dataclass_type, param_name,
-                    app_config=None,  # Use default thread-local resolution for reset
-                    placeholder_prefix=self.placeholder_prefix
-                )
+                # CRITICAL FIX: For reset operations, show empty placeholder for None fields
+                # Reset should clear the field and show that it's unset, not resolve to any inherited values
+                placeholder_text = None  # Show empty placeholder for reset fields
+                print(f"🔍 RESET DEBUG: Showing empty placeholder for reset field {param_name}")
                 print(f"🔍 RESET PATH 2 DEBUG: Got placeholder_text='{placeholder_text}'")
                 if placeholder_text:
                     from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
