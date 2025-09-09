@@ -321,10 +321,28 @@ class LazyMethodBindings:
 
     @staticmethod
     def create_to_base_config(base_class: Type) -> Callable[[Any], Any]:
-        """Create base config converter method."""
-        return lambda self: base_class(**{
-            f.name: getattr(self, f.name) for f in fields(self)
-        })
+        """Create base config converter method with optional context support."""
+        def to_base_config_with_context(self, *, context=None):
+            if context is not None:
+                # Use provided context for field resolution
+                from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
+                from openhcs.core.config import GlobalPipelineConfig
+
+                current_context = get_current_global_config(GlobalPipelineConfig)
+                set_current_global_config(GlobalPipelineConfig, context)
+                try:
+                    return base_class(**{
+                        f.name: getattr(self, f.name) for f in fields(self)
+                    })
+                finally:
+                    set_current_global_config(GlobalPipelineConfig, current_context)
+            else:
+                # Default behavior - use current context
+                return base_class(**{
+                    f.name: getattr(self, f.name) for f in fields(self)
+                })
+
+        return to_base_config_with_context
 
     @staticmethod
     def create_class_methods() -> Dict[str, Any]:

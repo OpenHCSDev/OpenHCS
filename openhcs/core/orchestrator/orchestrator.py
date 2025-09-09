@@ -82,8 +82,8 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
             # This ensures that user-set values from lazy configs are preserved in the thread-local context
             # instead of being replaced with static defaults when GlobalPipelineConfig is instantiated
             if hasattr(pipeline_value, 'to_base_config'):
-                # This is a lazy config - convert to base config with resolved values
-                merged_config_values[field.name] = pipeline_value.to_base_config()
+                # This is a lazy config - convert to base config with thread-local context for inheritance
+                merged_config_values[field.name] = pipeline_value.to_base_config(context=global_config)
             else:
                 # Regular value - use as-is
                 merged_config_values[field.name] = pipeline_value

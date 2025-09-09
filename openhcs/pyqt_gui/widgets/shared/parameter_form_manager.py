@@ -297,14 +297,9 @@ class ParameterFormManager(QWidget):
         # CRITICAL FIX: Get dataclass type BEFORE the loop, not inside it
         dataclass_type = type(dataclass_instance)
 
-        # CRITICAL FIX: GlobalPipelineConfig should preserve None values like lazy dataclasses
-        from openhcs.core.config import GlobalPipelineConfig
-        is_global_config = isinstance(dataclass_instance, GlobalPipelineConfig)
-        should_preserve_none = is_lazy or is_global_config
-
         # Algebraic simplification: Single loop with conditional attribute access
         for field_obj in fields(dataclass_instance):
-            parameters[field_obj.name] = (object.__getattribute__(dataclass_instance, field_obj.name) if should_preserve_none
+            parameters[field_obj.name] = (object.__getattribute__(dataclass_instance, field_obj.name) if is_lazy
                                         else getattr(dataclass_instance, field_obj.name))
             parameter_types[field_obj.name] = field_obj.type
 
@@ -456,22 +451,11 @@ class ParameterFormManager(QWidget):
         return container, {'main': widget, 'widget': widget, 'reset_button': reset_button}
 
     def _build_nested_content(self, param_info, display_info, field_ids):
-        current_value = self.parameters.get(param_info.name)
-
-        # CRITICAL FIX: For GlobalPipelineConfig, skip nested configs that are None
-        # This prevents showing resolved values for fields that should be empty
-        from openhcs.core.config import GlobalPipelineConfig
-        if hasattr(self, '_current_config_instance') and isinstance(self._current_config_instance, GlobalPipelineConfig) and current_value is None:
-            # Return empty container for None nested configs in saved GlobalPipelineConfig
-            from PyQt6.QtWidgets import QWidget
-            empty_container = QWidget()
-            empty_container.setVisible(False)  # Hide the entire section
-            return empty_container, {}
-
         group_box = GroupBoxWithHelp(
             title=display_info['field_label'], help_target=param_info.type,
             color_scheme=self.config.color_scheme or PyQt6ColorScheme()
         )
+        current_value = self.parameters.get(param_info.name)
 
         # Mathematical simplification: Unified nested type resolution
         nested_type = self._get_actual_nested_type_from_signature(param_info.type) or param_info.type
@@ -634,7 +618,7 @@ class ParameterFormManager(QWidget):
             app_config = self.context_provider()
             print(f"🔍 PLACEHOLDER DEBUG: Using orchestrator context for {param_name}")
         else:
-            # Fallback: Build context from current form values (for lazy dataclass editing)
+            # Fallback: Build context from current form values (for global config editing)
             app_config = self._build_context_from_current_form_values()
             print(f"🔍 PLACEHOLDER DEBUG: Using form-built context for {param_name}")
 
@@ -930,7 +914,26 @@ class ParameterFormManager(QWidget):
                     updater(widget, value)
                 return
 
+    def _clear_widget_to_default_state(self, widget: QWidget) -> None:
+        """Clear widget to its default/empty state for reset operations."""
+        from PyQt6.QtWidgets import QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QTextEdit
 
+        if isinstance(widget, QLineEdit):
+            widget.clear()
+        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+            widget.setValue(widget.minimum())
+        elif isinstance(widget, QComboBox):
+            widget.setCurrentIndex(-1)  # No selection
+        elif isinstance(widget, QCheckBox):
+            widget.setChecked(False)
+        elif isinstance(widget, QTextEdit):
+            widget.clear()
+        else:
+            # For custom widgets, try to call clear() if available
+            if hasattr(widget, 'clear'):
+                widget.clear()
+            else:
+                print(f"⚠️ WARNING: Don't know how to clear {type(widget).__name__}")
 
     def _update_combo_box(self, widget: QComboBox, value: Any) -> None:
         """Update combo box with value matching."""
@@ -1083,26 +1086,10 @@ class ParameterFormManager(QWidget):
             if param_name in self.parameters:
                 del self.parameters[param_name]
 
-            # Get the actual inherited value from the ORIGINAL thread-local global config
-            if self.config.is_lazy_dataclass and original_context:
-                # Get the field path for this form (e.g., "well_filter_config")
-                field_path = self.field_id
-
-                # Navigate to the config section in the ORIGINAL thread-local global config
-                if hasattr(original_context, field_path):
-                    config_section = getattr(original_context, field_path)
-                    if hasattr(config_section, param_name):
-                        reset_value = getattr(config_section, param_name)
-                        print(f"🔍 RESET DEBUG: {param_name} original thread-local value from {field_path}: {reset_value}")
-                    else:
-                        reset_value = None
-                        print(f"🔍 RESET DEBUG: {param_name} not found in {field_path}, using None")
-                else:
-                    reset_value = None
-                    print(f"🔍 RESET DEBUG: {field_path} not found in original thread-local context, using None")
-            else:
-                reset_value = None  # Will show placeholder
-                print(f"🔍 RESET DEBUG: {param_name} not lazy or no original thread-local context, using None")
+            # CRITICAL FIX: For nested lazy dataclass fields, reset means "clear to show inheritance"
+            # We don't set the widget to the inherited value - we clear it and let placeholder show inheritance
+            reset_value = None  # This will clear the widget and show placeholder
+            print(f"🔍 RESET DEBUG: {param_name} removed from parameters, will clear widget and show placeholder")
 
             print(f"🔍 RESET DEBUG: {param_name} removed from parameters to allow inheritance")
 
@@ -1128,13 +1115,16 @@ class ParameterFormManager(QWidget):
             if hasattr(self, '_user_set_fields'):
                 self._user_set_fields.discard(param_name)
 
-            # 2. Update widget value first
+            # 2. Clear widget to show it's been reset (for inheritance)
             print(f"🔍 RESET DEBUG: Checking if {param_name} in self.widgets: {param_name in self.widgets}")
             if param_name in self.widgets:
                 widget = self.widgets[param_name]
-                print(f"🔍 RESET DEBUG: Found widget for {param_name}, calling update_widget_value with reset_value={reset_value}")
-                self.update_widget_value(widget, reset_value, param_name, exclude_field=param_name)
-                print(f"🔍 RESET DEBUG: update_widget_value completed")
+                print(f"🔍 RESET DEBUG: Found widget for {param_name}, clearing widget for inheritance")
+
+                # CRITICAL FIX: For reset operations, clear the widget to its default/empty state
+                # This visually shows the user that the field has been reset and will inherit
+                self._clear_widget_to_default_state(widget)
+                print(f"🔍 RESET DEBUG: Widget cleared to default state")
 
             # 3. CRITICAL FIX: Apply placeholder using the updated context we already set
             # This ensures the placeholder reflects the current form state after reset
@@ -1152,10 +1142,18 @@ class ParameterFormManager(QWidget):
                     if hasattr(wf_config, 'well_filter_mode'):
                         print(f"🔍 RESET PATH 2 DEBUG: well_filter_mode = {wf_config.well_filter_mode}")
 
-                # CRITICAL FIX: For reset operations, show empty placeholder for None fields
-                # Reset should clear the field and show that it's unset, not resolve to any inherited values
-                placeholder_text = None  # Show empty placeholder for reset fields
-                print(f"🔍 RESET DEBUG: Showing empty placeholder for reset field {param_name}")
+                # CRITICAL FIX: For reset operations, ALWAYS use pure thread-local context
+                # This ensures reset shows original thread-local defaults, not orchestrator's saved values
+                # We must bypass the orchestrator's context provider for reset operations
+                from openhcs.core.context.global_config import get_current_global_config
+                from openhcs.core.config import GlobalPipelineConfig
+                pure_thread_local_context = get_current_global_config(GlobalPipelineConfig)
+
+                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type, param_name,
+                    app_config=pure_thread_local_context,  # Use pure thread-local context for reset
+                    placeholder_prefix=self.placeholder_prefix
+                )
                 print(f"🔍 RESET PATH 2 DEBUG: Got placeholder_text='{placeholder_text}'")
                 if placeholder_text:
                     from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
