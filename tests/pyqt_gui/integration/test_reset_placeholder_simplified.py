@@ -200,9 +200,14 @@ def find_reset_button(context: WorkflowContext, field_name: str, config_section:
         for form_manager in form_managers:
             if hasattr(form_manager, 'dataclass_type') and form_manager.dataclass_type:
                 dataclass_name = form_manager.dataclass_type.__name__
+                print(f"🔍 FORM MANAGER DEBUG: Found form manager with dataclass_type = {dataclass_name}")
+                if hasattr(form_manager, 'widgets'):
+                    print(f"🔍 FORM MANAGER DEBUG: Widgets in {dataclass_name}: {list(form_manager.widgets.keys())}")
                 if any(pattern.lower() in dataclass_name.lower() for pattern in expected_dataclass_patterns):
+                    print(f"🔍 FORM MANAGER DEBUG: {dataclass_name} matches patterns {expected_dataclass_patterns}")
                     if hasattr(form_manager, 'widgets') and field_name in form_manager.widgets:
                         target_form_manager = form_manager
+                        print(f"🔍 FORM MANAGER DEBUG: Found target form manager: {dataclass_name}")
                         break
         else:
             target_form_manager = None
@@ -408,7 +413,9 @@ def check_placeholder_value(context: WorkflowContext, field_name: str, expected_
 
 def press_reset_button(context: WorkflowContext, field_name: str, config_section: str = None) -> WorkflowContext:
     """Press reset button and return updated context."""
+    print(f"🔍 PRESS RESET DEBUG: Looking for reset button for {field_name} in {config_section}")
     reset_button = find_reset_button(context, field_name, config_section)
+    print(f"🔍 PRESS RESET DEBUG: Found reset button: {reset_button is not None}")
     if not reset_button:
         section_info = f" in {config_section}" if config_section else ""
         print(f"❌ ERROR: Reset button not found: {field_name}{section_info}")
