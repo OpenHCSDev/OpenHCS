@@ -1082,14 +1082,29 @@ class ParameterFormManager(QWidget):
             self.parameters[param_name] = reset_value
             print(f"🔍 RESET DEBUG: {param_name} has concrete override, reset to {reset_value}")
         else:
-            # Field should inherit - remove from parameters to allow inheritance
+            # Field should inherit - behavior depends on dataclass type
             if param_name in self.parameters:
                 del self.parameters[param_name]
 
-            # CRITICAL FIX: For nested lazy dataclass fields, reset means "clear to show inheritance"
-            # We don't set the widget to the inherited value - we clear it and let placeholder show inheritance
-            reset_value = None  # This will clear the widget and show placeholder
-            print(f"🔍 RESET DEBUG: {param_name} removed from parameters, will clear widget and show placeholder")
+            # CRITICAL FIX: Different reset behavior for static vs lazy dataclasses
+            if self.config.is_lazy_dataclass:
+                # Lazy dataclasses: Clear widget and show inheritance placeholder
+                reset_value = None  # This will clear the widget and show placeholder
+                print(f"🔍 RESET DEBUG: Lazy dataclass - {param_name} removed from parameters, will clear widget and show placeholder")
+            else:
+                # Static dataclasses: Reset to static constructor default
+                import dataclasses
+                if dataclasses.is_dataclass(self.dataclass_type):
+                    field_default = next((f.default for f in dataclasses.fields(self.dataclass_type) if f.name == param_name), dataclasses.MISSING)
+                    if field_default is not dataclasses.MISSING:
+                        reset_value = field_default
+                        print(f"🔍 RESET DEBUG: Static dataclass - {param_name} reset to constructor default: {reset_value}")
+                    else:
+                        reset_value = None
+                        print(f"🔍 RESET DEBUG: Static dataclass - {param_name} has no default, using None")
+                else:
+                    reset_value = None
+                    print(f"🔍 RESET DEBUG: Non-dataclass - {param_name} using None")
 
             print(f"🔍 RESET DEBUG: {param_name} removed from parameters to allow inheritance")
 
@@ -1115,20 +1130,25 @@ class ParameterFormManager(QWidget):
             if hasattr(self, '_user_set_fields'):
                 self._user_set_fields.discard(param_name)
 
-            # 2. Clear widget to show it's been reset (for inheritance)
+            # 2. Update widget based on dataclass type
             print(f"🔍 RESET DEBUG: Checking if {param_name} in self.widgets: {param_name in self.widgets}")
             if param_name in self.widgets:
                 widget = self.widgets[param_name]
-                print(f"🔍 RESET DEBUG: Found widget for {param_name}, clearing widget for inheritance")
 
-                # CRITICAL FIX: For reset operations, clear the widget to its default/empty state
-                # This visually shows the user that the field has been reset and will inherit
-                self._clear_widget_to_default_state(widget)
-                print(f"🔍 RESET DEBUG: Widget cleared to default state")
+                if self.config.is_lazy_dataclass and reset_value is None:
+                    # Lazy dataclasses: Clear widget to show inheritance
+                    print(f"🔍 RESET DEBUG: Lazy dataclass - clearing widget for {param_name}")
+                    self._clear_widget_to_default_state(widget)
+                else:
+                    # Static dataclasses: Set widget to the reset value (constructor default)
+                    print(f"🔍 RESET DEBUG: Static dataclass - setting widget for {param_name} to {reset_value}")
+                    self.update_widget_value(widget, reset_value, param_name, exclude_field=param_name)
 
-            # 3. CRITICAL FIX: Apply placeholder using the updated context we already set
-            # This ensures the placeholder reflects the current form state after reset
-            print(f"🔍 RESET DEBUG: Checking Path 2 conditions: reset_value={reset_value}, is_lazy_dataclass={self.config.is_lazy_dataclass}, param_name in widgets={param_name in self.widgets}")
+                print(f"🔍 RESET DEBUG: Widget update completed")
+
+            # 3. Apply placeholder for lazy dataclasses only
+            # Static dataclasses don't need placeholders - they use concrete constructor defaults
+            print(f"🔍 RESET DEBUG: Checking placeholder conditions: reset_value={reset_value}, is_lazy_dataclass={self.config.is_lazy_dataclass}, param_name in widgets={param_name in self.widgets}")
             if reset_value is None and self.config.is_lazy_dataclass and param_name in self.widgets:
                 widget = self.widgets[param_name]
                 # Use the updated context directly instead of rebuilding it
