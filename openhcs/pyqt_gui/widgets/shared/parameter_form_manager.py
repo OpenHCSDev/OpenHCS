@@ -297,9 +297,14 @@ class ParameterFormManager(QWidget):
         # CRITICAL FIX: Get dataclass type BEFORE the loop, not inside it
         dataclass_type = type(dataclass_instance)
 
+        # CRITICAL FIX: GlobalPipelineConfig should preserve None values like lazy dataclasses
+        from openhcs.core.config import GlobalPipelineConfig
+        is_global_config = isinstance(dataclass_instance, GlobalPipelineConfig)
+        should_preserve_none = is_lazy or is_global_config
+
         # Algebraic simplification: Single loop with conditional attribute access
         for field_obj in fields(dataclass_instance):
-            parameters[field_obj.name] = (object.__getattribute__(dataclass_instance, field_obj.name) if is_lazy
+            parameters[field_obj.name] = (object.__getattribute__(dataclass_instance, field_obj.name) if should_preserve_none
                                         else getattr(dataclass_instance, field_obj.name))
             parameter_types[field_obj.name] = field_obj.type
 
@@ -451,11 +456,22 @@ class ParameterFormManager(QWidget):
         return container, {'main': widget, 'widget': widget, 'reset_button': reset_button}
 
     def _build_nested_content(self, param_info, display_info, field_ids):
+        current_value = self.parameters.get(param_info.name)
+
+        # CRITICAL FIX: For GlobalPipelineConfig, skip nested configs that are None
+        # This prevents showing resolved values for fields that should be empty
+        from openhcs.core.config import GlobalPipelineConfig
+        if isinstance(self.config.instance, GlobalPipelineConfig) and current_value is None:
+            # Return empty container for None nested configs in saved GlobalPipelineConfig
+            from PyQt6.QtWidgets import QWidget
+            empty_container = QWidget()
+            empty_container.setVisible(False)  # Hide the entire section
+            return empty_container, {}
+
         group_box = GroupBoxWithHelp(
             title=display_info['field_label'], help_target=param_info.type,
             color_scheme=self.config.color_scheme or PyQt6ColorScheme()
         )
-        current_value = self.parameters.get(param_info.name)
 
         # Mathematical simplification: Unified nested type resolution
         nested_type = self._get_actual_nested_type_from_signature(param_info.type) or param_info.type
