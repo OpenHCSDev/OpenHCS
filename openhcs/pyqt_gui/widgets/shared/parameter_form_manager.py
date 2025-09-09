@@ -1170,6 +1170,27 @@ class ParameterFormManager(QWidget):
         # Lazy dataclasses are now handled by LazyDataclassEditor, so no structure preservation needed
         return current_values
 
+    def get_user_modified_values(self) -> Dict[str, Any]:
+        """
+        Get only values that were explicitly set by the user (non-None raw values).
+
+        For lazy dataclasses, this preserves lazy resolution for unmodified fields
+        by only returning fields where the raw value is not None.
+        """
+        if not hasattr(self.config, '_resolve_field_value'):
+            # For non-lazy dataclasses, return all current values
+            return self.get_current_values()
+
+        user_modified = {}
+        current_values = self.get_current_values()
+
+        # Only include fields where the raw value is not None
+        for field_name, value in current_values.items():
+            if value is not None:
+                user_modified[field_name] = value
+
+        return user_modified
+
     def _get_optional_checkbox_state(self, param_name: str) -> Optional[bool]:
         """Get checkbox state for optional dataclass parameter."""
         param_type = self.parameter_types.get(param_name)
