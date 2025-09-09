@@ -7,6 +7,7 @@ import logging
 import re
 import threading
 import sys
+import weakref
 from abc import ABCMeta
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass, make_dataclass, MISSING, field
@@ -25,6 +26,106 @@ _lazy_type_registry: Dict[Type, Type] = {}
 
 # Cache for lazy classes to prevent duplicate creation
 _lazy_class_cache: Dict[str, Type] = {}
+
+
+class ContextEventCoordinator:
+    """Generic event coordinator for any global config type changes."""
+
+    def __init__(self):
+        # Type-specific listeners: Dict[Type, List[weakref]]
+        self._listeners: Dict[Type, List] = {}
+
+    def register_listener(self, form_manager, config_type: Type) -> None:
+        """Register form manager for specific config type events."""
+        if config_type not in self._listeners:
+            self._listeners[config_type] = []
+        self._listeners[config_type].append(weakref.ref(form_manager))
+
+    def emit_context_change(self, config_type: Type) -> None:
+        """Emit context change event for specific config type with shared temporary context."""
+        if config_type not in self._listeners:
+            return
+
+        # Get all active form managers for this config type
+        active_managers = []
+        for weak_ref in list(self._listeners[config_type]):
+            if (form_manager := weak_ref()) is not None:
+                active_managers.append(form_manager)
+
+        if not active_managers:
+            return
+
+        # Build shared temporary context from all form managers
+        shared_context = self._build_shared_temporary_context(config_type, active_managers)
+
+        # Refresh all forms with the shared context
+        for form_manager in active_managers:
+            form_manager.refresh_placeholder_text_with_context(shared_context)
+
+    def _build_shared_temporary_context(self, global_config_type, form_managers):
+        """Build shared temporary context from all form managers in the same config window."""
+        print(f"🔍 BUILD SHARED CONTEXT: Starting with global_config_type={global_config_type}")
+
+        # Get the current base context
+        base_context = get_current_global_config(global_config_type)
+        print(f"🔍 BUILD SHARED CONTEXT: base_context={base_context}")
+        if not base_context:
+            print(f"🔍 BUILD SHARED CONTEXT: No base context, returning None")
+            return None
+
+        # Simple approach: collect current form values and build basic context updates
+        context_updates = {}
+        print(f"🔍 BUILD SHARED CONTEXT: Processing {len(form_managers)} form managers")
+
+        for i, manager in enumerate(form_managers):
+            print(f"🔍 BUILD SHARED CONTEXT: Manager {i}: field_id={getattr(manager, 'field_id', 'MISSING')}, dataclass_type={getattr(manager, 'dataclass_type', 'MISSING')}")
+
+            if hasattr(manager, 'field_id') and hasattr(manager, 'get_current_values'):
+                # Skip root config manager (field_id matches class name)
+                if hasattr(manager, 'dataclass_type') and manager.dataclass_type and manager.field_id == manager.dataclass_type.__name__:
+                    print(f"🔍 BUILD SHARED CONTEXT: Skipping root config {manager.field_id}")
+                    continue
+
+                # Get current form values
+                current_values = manager.get_current_values()
+                print(f"🔍 BUILD SHARED CONTEXT: {manager.field_id} current_values={current_values}")
+
+                if current_values and hasattr(manager, 'dataclass_type') and manager.dataclass_type:
+                    # Filter out None values to allow lazy resolution to work
+                    filtered_values = {k: v for k, v in current_values.items() if v is not None}
+                    print(f"🔍 BUILD SHARED CONTEXT: {manager.field_id} filtered_values={filtered_values}")
+
+                    if filtered_values:  # Only create instance if there are non-None values
+                        # Check if the dataclass type is abstract and can't be instantiated
+                        import inspect
+                        if inspect.isabstract(manager.dataclass_type):
+                            print(f"🔍 BUILD SHARED CONTEXT: Skipping {manager.field_id} - abstract class {manager.dataclass_type.__name__}")
+                        else:
+                            # Build dataclass instance with only non-None values (allows lazy resolution for None fields)
+                            current_instance = manager.dataclass_type(**filtered_values)
+                            context_updates[manager.field_id] = current_instance
+                            print(f"🔍 BUILD SHARED CONTEXT: Added {manager.field_id}={current_instance}")
+                    else:
+                        print(f"🔍 BUILD SHARED CONTEXT: Skipping {manager.field_id} - no non-None values")
+                else:
+                    print(f"🔍 BUILD SHARED CONTEXT: Skipping {manager.field_id} - no current values or dataclass type")
+            else:
+                print(f"🔍 BUILD SHARED CONTEXT: Skipping manager {i} - missing field_id or get_current_values")
+
+        print(f"🔍 BUILD SHARED CONTEXT: context_updates={context_updates}")
+
+        # Build final shared context with current form values
+        if context_updates:
+            from dataclasses import replace
+            result = replace(base_context, **context_updates)
+            print(f"🔍 BUILD SHARED CONTEXT: Returning updated context: {result}")
+            return result
+
+        print(f"🔍 BUILD SHARED CONTEXT: No context updates, returning base context")
+        return base_context
+
+# Global instance
+_context_event_coordinator = ContextEventCoordinator()
 
 
 def register_lazy_type_mapping(lazy_type: Type, base_type: Type) -> None:
@@ -153,6 +254,15 @@ class LazyMethodBindings:
             if not current_context:
                 return None
 
+            # Special case: If base_class is the same as the global config type,
+            # directly access the field from current_context (root-level lazy config)
+            if base_class == self._global_config_type:
+                if hasattr(current_context, name):
+                    global_value = getattr(current_context, name)
+                    if global_value is not None:
+                        return global_value
+
+            # Regular case: Navigate through field paths for nested configs
             field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
             for field_path in field_paths:
                 try:
@@ -525,7 +635,9 @@ def _create_field_level_hierarchy_provider(base_class: Type, global_config_type:
         """Provider with simplified field-level inheritance logic."""
         current_config = context_provider() if context_provider else _get_current_config(global_config_type)
 
-        # DEBUG: Show what context the lazy resolution is using (removed to prevent infinite loops)
+        # DEBUG: Show what context the lazy resolution is using
+        if base_class.__name__ == 'GlobalPipelineConfig':
+            print(f"🔍 FIELD LEVEL PROVIDER: {base_class.__name__} using context: {type(current_config)} with num_workers={getattr(current_config, 'num_workers', 'MISSING') if current_config else 'None'}")
 
         # Get actual global config from app
         actual_global_config = None

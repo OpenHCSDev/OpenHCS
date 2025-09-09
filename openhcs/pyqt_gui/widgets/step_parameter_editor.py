@@ -21,6 +21,10 @@ from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnaly
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.core.lazy_config import LazyDataclassFactory
+from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.context.global_config import get_current_global_config
+from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +87,7 @@ class StepParameterEditorWidget(QWidget):
 
         self.form_manager = ParameterFormManager(
             parameters, parameter_types, "step", AbstractStep,
+            lambda: self.orchestrator.get_effective_config(for_serialization=False),  # ✅ Required explicit context
             param_info,
             parent=self,  # Pass self as parent so form manager can access _step_level_configs
             color_scheme=self.color_scheme,
@@ -153,10 +158,7 @@ class StepParameterEditorWidget(QWidget):
 
         Uses type-based discovery to find the corresponding pipeline field as defaults source.
         """
-        from openhcs.core.lazy_config import LazyDataclassFactory
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.core.context.global_config import get_current_global_config
-        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+
 
         # Get the inner dataclass type
         inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)

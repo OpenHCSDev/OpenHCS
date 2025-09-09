@@ -123,7 +123,15 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
         if current_context is None:
             current_context = global_config  # Fallback to passed parameter
 
-        # Check if user has set a concrete value in the context
+        # Special case: If base_class is the same as the global config type,
+        # directly access the field from current_context (root-level lazy config)
+        if base_class == type(current_context):
+            if hasattr(current_context, field_name):
+                field_value = getattr(current_context, field_name, None)
+                if field_value is not None:
+                    return field_value
+
+        # Regular case: Navigate through field paths for nested configs
         field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
 
         if field_name == "well_filter":
@@ -300,6 +308,8 @@ class LazyDefaultPlaceholderService:
                 # UNIFIED: Use MRO-aware resolution to respect concrete overrides
                 current_app_config = get_current_global_config(GlobalPipelineConfig)
                 resolved_value = _resolve_field_with_mro_awareness(current_app_config, dataclass_type, field_name)
+                if field_name == 'num_workers' and dataclass_type.__name__ == 'PipelineConfig':
+                    print(f"🔍 PLACEHOLDER: _resolve_field_with_mro_awareness returned {resolved_value}")
             else:
                 # Fallback for non-lazy dataclasses
                 resolved_value = getattr(dataclass_type(), field_name, None)

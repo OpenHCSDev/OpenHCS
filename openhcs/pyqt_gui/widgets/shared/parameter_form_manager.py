@@ -7,7 +7,7 @@ by leveraging the comprehensive shared infrastructure we've built.
 
 import dataclasses
 import logging
-from typing import Any, Dict, Type, Optional
+from typing import Any, Dict, Type, Optional, Callable
 from dataclasses import replace
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton, QLineEdit, QCheckBox, QComboBox
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -120,18 +120,21 @@ class ParameterFormManager(QWidget):
     parameter_changed = pyqtSignal(str, object)  # param_name, value
 
     def __init__(self, parameters: Dict[str, Any], parameter_types: Dict[str, type],
-                 field_id: str, dataclass_type: Type, parameter_info: Dict = None, parent=None,
+                 field_id: str, dataclass_type: Type, context_provider: Callable[[], Any],
+                 parameter_info: Dict = None, parent=None,
                  use_scroll_area: bool = True, function_target=None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, placeholder_prefix: str = None,
                  param_defaults: Dict[str, Any] = None, global_config_type: Optional[Type] = None):
         """
-        Initialize PyQt parameter form manager with mathematically elegant single-parameter design.
+        Initialize PyQt parameter form manager with explicit context provider.
 
         Args:
             parameters: Dictionary of parameter names to current values
             parameter_types: Dictionary of parameter names to types
             field_id: Unique identifier for the form
             dataclass_type: The dataclass type that deterministically controls all form behavior
+            context_provider: Required function that returns the appropriate context for this form manager.
+                             Must not be None - fail-loud if not provided.
             parameter_info: Optional parameter information dictionary
             parent: Optional parent widget
             use_scroll_area: Whether to use scroll area
@@ -141,11 +144,18 @@ class ParameterFormManager(QWidget):
         """
         QWidget.__init__(self, parent)
 
+        # Fail-loud: context_provider is required
+        if context_provider is None:
+            raise ValueError("context_provider is required for ParameterFormManager")
+
         # Store configuration parameters - dataclass_type is the single source of truth
         self.parent = parent  # Store parent for step-level config detection
         self.dataclass_type = dataclass_type
         self.global_config_type = global_config_type  # Store for nested manager inheritance
         self.placeholder_prefix = placeholder_prefix or CONSTANTS.DEFAULT_PLACEHOLDER_PREFIX
+
+        # Store context provider for explicit context resolution
+        self.context_provider = context_provider
 
         # Convert old API to new config object internally
         if color_scheme is None:
@@ -207,6 +217,25 @@ class ParameterFormManager(QWidget):
         self._widget_creator = create_pyqt6_registry()
 
 
+        # Register for automatic refresh events if global_config_type is provided
+        if self.global_config_type:
+            from openhcs.core.lazy_config import _context_event_coordinator
+            _context_event_coordinator.register_listener(self, self.global_config_type)
+
+            # Connect parameter changes to emit context change events for cross-form updates
+            def handle_parameter_change(param_name, value):
+                print(f"🔍 PARAMETER CHANGED: {self.field_id}.{param_name} = {value}")
+                try:
+                    print(f"🔍 EMIT CONTEXT CHANGE: Calling emit_context_change for {self.global_config_type}")
+                    _context_event_coordinator.emit_context_change(self.global_config_type)
+                    print(f"🔍 EMIT CONTEXT CHANGE: Successfully called emit_context_change")
+                except Exception as e:
+                    print(f"🔍 EMIT CONTEXT CHANGE ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            self.parameter_changed.connect(handle_parameter_change)
+
         # Set up UI
         self.setup_ui()
 
@@ -228,6 +257,7 @@ class ParameterFormManager(QWidget):
 
     @classmethod
     def from_dataclass_instance(cls, dataclass_instance: Any, field_id: str,
+                              context_provider: Callable[[], Any],
                               placeholder_prefix: str = "Default",
                               parent=None, use_scroll_area: bool = True,
                               function_target=None, color_scheme=None,
@@ -236,21 +266,24 @@ class ParameterFormManager(QWidget):
         """
         Create ParameterFormManager for editing entire dataclass instance.
 
-        This replaces LazyDataclassEditor functionality by automatically extracting
-        parameters from the dataclass instance and creating the form manager.
-
         Args:
             dataclass_instance: The dataclass instance to edit
             field_id: Unique identifier for the form
+            context_provider: Required function that returns the appropriate context.
             placeholder_prefix: Prefix for placeholder text
             parent: Parent widget
             use_scroll_area: Whether to use scroll area
             function_target: Optional function target
             color_scheme: Optional color scheme
+            force_show_all_fields: Whether to show all fields
+            global_config_type: Optional global config type
 
         Returns:
             ParameterFormManager configured for dataclass editing
         """
+        # Fail-loud: context_provider is required
+        if context_provider is None:
+            raise ValueError("context_provider is required for from_dataclass_instance")
         from dataclasses import fields, is_dataclass
 
         if not is_dataclass(dataclass_instance):
@@ -270,12 +303,13 @@ class ParameterFormManager(QWidget):
                                         else getattr(dataclass_instance, field_obj.name))
             parameter_types[field_obj.name] = field_obj.type
 
-        # Create ParameterFormManager with extracted data
+        # Create ParameterFormManager with required context provider
         form_manager = cls(
             parameters=parameters,
             parameter_types=parameter_types,
             field_id=field_id,
             dataclass_type=dataclass_type,  # Use determined dataclass type
+            context_provider=context_provider,  # Required context provider
             parameter_info=None,
             parent=parent,
             use_scroll_area=use_scroll_area,
@@ -460,6 +494,7 @@ class ParameterFormManager(QWidget):
             nested_manager = ParameterFormManager.from_dataclass_instance(
                 dataclass_instance=lazy_instance,
                 field_id=field_path,  # Use actual dataclass field name directly
+                context_provider=self.context_provider,  # Propagate parent's context provider
                 placeholder_prefix=self.placeholder_prefix,
                 parent=group_box, use_scroll_area=False,
                 color_scheme=self.config.color_scheme,
@@ -547,6 +582,7 @@ class ParameterFormManager(QWidget):
             nested_types,
             field_path,  # Use actual dataclass field name directly
             param_type,    # Use the actual nested dataclass type, not parent type
+            self.context_provider,  # Propagate parent's context provider
             None,  # parameter_info
             None,  # parent
             False,  # use_scroll_area
@@ -997,34 +1033,56 @@ class ParameterFormManager(QWidget):
             print(f"🔍 RESET ENTRY DEBUG: Early return - {param_name} not in parameters")
             return
 
-        # CRITICAL FIX: Build context EXCLUDING the field being reset
-        # This ensures placeholder resolution doesn't see the old value we're trying to reset
-
-        updated_context = self._build_context_from_current_form_values(exclude_field=param_name)
+        # CRITICAL FIX: Get the original thread-local value BEFORE modifying the context
         original_context = get_current_global_config(GlobalPipelineConfig)
 
-        try:
-            if updated_context:
-                set_current_global_config(GlobalPipelineConfig, updated_context)
+        # Check if field has concrete override (should reset to concrete value)
+        from openhcs.core.lazy_placeholder import _has_concrete_field_override
+        has_concrete_override = _has_concrete_field_override(self.dataclass_type, param_name)
 
-            # CRITICAL FIX: For reset, remove from parameters instead of setting to reset value
-            # This allows inheritance to work properly after reset
+        if has_concrete_override:
+            # Field has concrete override - reset to the concrete value
+            reset_value = getattr(self.dataclass_type, param_name)
+            self.parameters[param_name] = reset_value
+            print(f"🔍 RESET DEBUG: {param_name} has concrete override, reset to {reset_value}")
+        else:
+            # Field should inherit - remove from parameters to allow inheritance
+            if param_name in self.parameters:
+                del self.parameters[param_name]
 
-            # Check if field has concrete override (should reset to concrete value)
-            from openhcs.core.lazy_placeholder import _has_concrete_field_override
-            has_concrete_override = _has_concrete_field_override(self.dataclass_type, param_name)
+            # Get the actual inherited value from the ORIGINAL thread-local global config
+            if self.config.is_lazy_dataclass and original_context:
+                # Get the field path for this form (e.g., "well_filter_config")
+                field_path = self.field_id
 
-            if has_concrete_override:
-                # Field has concrete override - reset to the concrete value
-                reset_value = getattr(self.dataclass_type, param_name)
-                self.parameters[param_name] = reset_value
-                print(f"🔍 RESET DEBUG: {param_name} has concrete override, reset to {reset_value}")
+                # Navigate to the config section in the ORIGINAL thread-local global config
+                if hasattr(original_context, field_path):
+                    config_section = getattr(original_context, field_path)
+                    if hasattr(config_section, param_name):
+                        reset_value = getattr(config_section, param_name)
+                        print(f"🔍 RESET DEBUG: {param_name} original thread-local value from {field_path}: {reset_value}")
+                    else:
+                        reset_value = None
+                        print(f"🔍 RESET DEBUG: {param_name} not found in {field_path}, using None")
+                else:
+                    reset_value = None
+                    print(f"🔍 RESET DEBUG: {field_path} not found in original thread-local context, using None")
             else:
-                # Field should inherit - remove from parameters to allow inheritance
-                if param_name in self.parameters:
-                    del self.parameters[param_name]
                 reset_value = None  # Will show placeholder
-                print(f"🔍 RESET DEBUG: {param_name} removed from parameters to allow inheritance")
+                print(f"🔍 RESET DEBUG: {param_name} not lazy or no original thread-local context, using None")
+
+            print(f"🔍 RESET DEBUG: {param_name} removed from parameters to allow inheritance")
+
+        # CRITICAL FIX: Build context EXCLUDING the field being reset
+        # This ensures placeholder resolution doesn't see the old value we're trying to reset
+        updated_context = self._build_context_from_current_form_values(exclude_field=param_name)
+
+        try:
+            # CRITICAL FIX: Do NOT set thread-local config when working with lazy dataclasses
+            # Lazy dataclasses should only READ from thread-local config, never WRITE to it
+            # The thread-local GlobalPipelineConfig should remain untouched during PipelineConfig editing
+            if updated_context and not self.config.is_lazy_dataclass:
+                set_current_global_config(GlobalPipelineConfig, updated_context)
 
             # Remove from user-set tracking
             if hasattr(self, '_user_set_fields'):
@@ -1034,7 +1092,7 @@ class ParameterFormManager(QWidget):
             print(f"🔍 RESET DEBUG: Checking if {param_name} in self.widgets: {param_name in self.widgets}")
             if param_name in self.widgets:
                 widget = self.widgets[param_name]
-                print(f"🔍 RESET DEBUG: Found widget for {param_name}, calling update_widget_value")
+                print(f"🔍 RESET DEBUG: Found widget for {param_name}, calling update_widget_value with reset_value={reset_value}")
                 self.update_widget_value(widget, reset_value, param_name, exclude_field=param_name)
                 print(f"🔍 RESET DEBUG: update_widget_value completed")
 
@@ -1072,7 +1130,8 @@ class ParameterFormManager(QWidget):
             self.parameter_changed.emit(param_name, reset_value)
         finally:
             # Restore original context after all parameter changes and lazy resolutions are complete
-            if original_context:
+            # Only restore if we actually modified it (non-lazy dataclasses only)
+            if original_context and not self.config.is_lazy_dataclass:
                 set_current_global_config(GlobalPipelineConfig, original_context)
                 print(f"🔍 CONTEXT DEBUG: Restored original context in reset_parameter")
 
@@ -1163,150 +1222,13 @@ class ParameterFormManager(QWidget):
                     reconstructed_instance = self._rebuild_nested_dataclass_instance(nested_values, nested_type, parent_name)
                     print(f"🔍 DEBUG: Reconstructed instance: {reconstructed_instance}")
 
-                    # Update sibling placeholders with updated context directly
-                    print(f"🔍 DEBUG: Calling _update_sibling_placeholders_with_updated_context")
-                    # CRITICAL FIX: Pass the nested manager's dataclass type, not the parent's type
-                    nested_dataclass_type = nested_manager.dataclass_type if nested_manager else nested_type
-                    # CRITICAL FIX: Exclude the manager that was just modified to preserve its concrete input
-                    self._update_sibling_placeholders_with_updated_context(parent_name, reconstructed_instance, nested_dataclass_type, exclude_manager=parent_name)
+                    # ❌ MANUAL SIBLING COORDINATION REMOVED: Enhanced decorator events system handles this automatically
 
                     self.parameter_changed.emit(parent_name, reconstructed_instance)
 
-    def _update_sibling_placeholders_with_updated_context(self, changed_field_name: str, new_value: Any, changed_dataclass_type: type = None, exclude_manager: str = None) -> None:
-        """Update sibling manager placeholders with the updated context directly.
+    # ❌ MANUAL SIBLING COORDINATION REMOVED: Enhanced decorator events system handles this automatically
 
-        Args:
-            changed_field_name: Name of the field that was changed
-            new_value: New value of the field
-            changed_dataclass_type: Type of the dataclass that was changed
-            exclude_manager: Name of the manager to exclude from updates (the one that was just modified)
-        """
-        from openhcs.core.context.global_config import get_current_global_config
-        from openhcs.core.config import GlobalPipelineConfig
-        from dataclasses import replace
-
-        print(f"🔍 DEBUG: Updating sibling placeholders for field '{changed_field_name}' with value: {new_value}")
-
-        # CRITICAL FIX: Get context with current form values instead of saved thread-local context
-        # This ensures sibling updates use current unsaved values (like "23") not saved values (like "1")
-        current_context = self._build_context_from_current_form_values()
-
-        # DEBUG: Show what context we built
-        print(f"🔍 CONTEXT BUILD DEBUG: Built context for sibling updates:")
-        if current_context and hasattr(current_context, 'step_well_filter_config'):
-            step_config = current_context.step_well_filter_config
-            print(f"  step_well_filter_config.well_filter = '{step_config.well_filter}'")
-
-        print(f"🔍 DEBUG: step_well_filter_config type: {type(getattr(current_context, 'step_well_filter_config', None))}")
-        print(f"🔍 DEBUG: step_materialization_config type: {type(getattr(current_context, 'step_materialization_config', None))}")
-
-        if current_context:
-            # Create updated context with the new value
-            updated_context = replace(current_context, **{changed_field_name: new_value})
-            print(f"🔍 DEBUG: Created updated context with {changed_field_name} = {new_value}")
-
-            # PYTHON INHERITANCE APPROACH: Check inheritance relationships using Python's type system
-            print(f"🔍 DEBUG: Checking {len(self.nested_managers)} sibling managers for inheritance relationships")
-
-            # CRITICAL FIX: Use the passed dataclass type (from nested manager) instead of parent's type
-            if changed_dataclass_type is None:
-                # Fallback to self.dataclass_type for backward compatibility
-                changed_dataclass_type = self.dataclass_type
-
-            if not changed_dataclass_type:
-                print(f"🔍 DEBUG: Could not determine changed dataclass type")
-                return
-
-            print(f"🔍 DEBUG: Changed dataclass type: {changed_dataclass_type.__name__} (from nested manager)")
-
-            # CRITICAL DEBUG: List all managers to see if streaming configs are present
-            all_manager_names = list(self.nested_managers.keys())
-            print(f"🔍 DEBUG: All managers: {all_manager_names}")
-
-            for manager_name, manager in self.nested_managers.items():
-                # CRITICAL FIX: Skip the manager that was just modified to preserve its concrete input
-                if exclude_manager and manager_name == exclude_manager:
-                    print(f"🔍 DEBUG: Skipping manager '{manager_name}' (was just modified - preserving concrete input)")
-                    continue
-
-                manager_dataclass_type = getattr(manager, 'dataclass_type', None)
-                if manager_dataclass_type is None:
-                    print(f"🔍 DEBUG: Skipping manager '{manager_name}' (no dataclass_type)")
-                    continue
-
-                print(f"🔍 DEBUG: Checking manager '{manager_name}' ({manager_dataclass_type.__name__})")
-
-                # Check if this manager has any None fields that inherit from the changed dataclass
-                has_affected_fields = self._manager_has_inheritance_from_dataclass(manager, changed_dataclass_type)
-
-                if has_affected_fields:
-                    print(f"🔍 DEBUG: Manager '{manager_name}' has inheritance from {changed_dataclass_type.__name__} - refreshing")
-                    # Track which dataclass triggered this inheritance update for rightmost parent logic
-                    manager._last_changed_dataclass_name = changed_dataclass_type.__name__
-                    manager.refresh_placeholder_text_with_context(updated_context, changed_dataclass_type)
-                else:
-                    # REDUCED DEBUG: Only show streaming configs to reduce output
-                    if 'streaming' in manager_name:
-                        print(f"🔍 DEBUG: *** STREAMING *** Manager '{manager_name}' has no inheritance from {changed_dataclass_type.__name__} - skipping")
-                    # Skip debug for other managers to prevent BrokenPipeError
-        else:
-            print(f"🔍 DEBUG: No current context found - cannot update sibling inheritance")
-
-    def _manager_has_inheritance_from_dataclass(self, manager, changed_dataclass_type: type) -> bool:
-        """Check if manager has fields that should inherit from changed dataclass."""
-        # Check each field to see if it should inherit from the changed dataclass
-        for param_name, current_value in manager.parameters.items():
-            # Simple rule: Only None values that are NOT user-set can inherit
-            is_user_set = hasattr(manager, '_user_set_fields') and param_name in manager._user_set_fields
-
-            if current_value is None and not is_user_set:
-                # Use the simplified field inheritance check
-                if self._should_allow_inheritance(manager.dataclass_type, param_name, changed_dataclass_type):
-                    return True
-        return False
-
-    def _should_allow_inheritance(self, target_dataclass_type: type, field_name: str, source_dataclass_type: type) -> bool:
-        """SIMPLIFIED UNIFICATION: Use unified concrete override detection but keep working MRO logic."""
-        from dataclasses import is_dataclass
-
-        if not (is_dataclass(target_dataclass_type) and is_dataclass(source_dataclass_type)):
-            return False
-
-        # Get base classes (unwrap lazy classes only, not regular inheritance)
-        from openhcs.core.lazy_config import get_base_type_for_lazy
-        target_base = get_base_type_for_lazy(target_dataclass_type) or target_dataclass_type
-        source_base = get_base_type_for_lazy(source_dataclass_type) or source_dataclass_type
-
-        # UNIFIED: Use the same concrete override detection as lazy dataclass system
-        # Check static overrides FIRST - they always block inheritance regardless of instance values
-        from openhcs.core.lazy_placeholder import _has_concrete_field_override
-        if _has_concrete_field_override(target_base, field_name):
-            return False
-
-        # CRITICAL FIX: For lazy dataclasses, check the actual instance value, not static defaults
-        # This is because inherit_as_none configs have static defaults but None instance values
-        if hasattr(self, 'parameters') and field_name in self.parameters:
-            current_instance_value = self.parameters[field_name]
-            # If the current instance has a concrete value (not None), it doesn't inherit
-            if current_instance_value is not None:
-                return False
-
-        # Check MRO precedence: source must be reachable without concrete override blocking
-        target_mro = target_base.__mro__[1:]  # Skip self
-
-        # Source must be in target's MRO for inheritance to be possible
-        if source_base not in target_mro:
-            return False
-
-        # Check if there's a concrete override earlier in MRO than source (blocks inheritance)
-        from openhcs.core.lazy_placeholder import _has_concrete_field_override
-        for mro_class in target_mro:
-            if mro_class == source_base:
-                return True  # Reached source without finding concrete override
-            if _has_concrete_field_override(mro_class, field_name):
-                return False  # Found concrete override before reaching source
-
-        return False  # Source not found in MRO
+    # ❌ MANUAL INHERITANCE CHECKING REMOVED: Enhanced decorator events system handles this automatically
 
 
 
@@ -1390,38 +1312,18 @@ class ParameterFormManager(QWidget):
 
 
     def refresh_placeholder_text(self) -> None:
-        """
-        Refresh placeholder text for all widgets to reflect current GlobalPipelineConfig.
-
-        This method should be called when the GlobalPipelineConfig changes to ensure
-        that lazy dataclass forms show updated placeholder text.
-
-        CRITICAL FIX: Now includes inheritance-aware placeholder updates for all fields.
-        """
-        # Only refresh for lazy dataclasses (PipelineConfig forms)
+        """Refresh placeholder text using explicit context provider."""
+        # Only refresh for lazy dataclasses
         if not self.dataclass_type:
             return
 
         is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(self.dataclass_type)
-
         if not is_lazy_dataclass:
             return
 
-        print(f"🔍 DEBUG: refresh_placeholder_text for {self.dataclass_type.__name__}")
-        print(f"🔍 DEBUG: Current parameters: {self.parameters}")
-
-        # Get current context for inheritance-aware placeholder updates
-        from openhcs.core.context.global_config import get_current_global_config
-        from openhcs.core.config import GlobalPipelineConfig
-
-        current_context = get_current_global_config(GlobalPipelineConfig)
-        print(f"🔍 DEBUG: Current thread-local context for placeholder resolution: {current_context}")
-        if hasattr(current_context, 'step_well_filter_config'):
-            print(f"🔍 DEBUG: step_well_filter_config in context: {current_context.step_well_filter_config}")
-
-        # CRITICAL FIX: Use inheritance-aware placeholder refresh for ALL fields
-        # This ensures inheritance works on window open and reset, not just on field changes
-        self.refresh_placeholder_text_with_context(current_context)
+        # Use explicit context provider (guaranteed to exist)
+        context = self.context_provider()
+        self.refresh_placeholder_text_with_context(context)
 
         # Recursively refresh nested managers
         self._apply_to_nested_managers(lambda name, manager: manager.refresh_placeholder_text())
@@ -1465,11 +1367,13 @@ class ParameterFormManager(QWidget):
                 continue
 
             # Get updated placeholder and apply it
+            print(f"🔍 PLACEHOLDER DEBUG: Resolving {self.dataclass_type.__name__}.{param_name} with updated context")
             updated_placeholder = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                 self.dataclass_type, param_name,
                 app_config=updated_context,
                 placeholder_prefix=self.placeholder_prefix
             )
+            print(f"🔍 PLACEHOLDER DEBUG: Result for {param_name}: {updated_placeholder}")
 
             if updated_placeholder:
                 # CRITICAL FIX: Only update placeholder text, NEVER modify field values
@@ -1532,28 +1436,18 @@ class ParameterFormManager(QWidget):
             if v != field_default:
                 filtered_values[k] = v
 
-        # CRITICAL FIX: For lazy dataclasses, always use updated context during construction
-        # This ensures lazy field resolution uses current form values, not saved values
+        # CRITICAL FIX: For lazy dataclasses, DO NOT modify thread-local context
+        # Lazy dataclasses should only READ from thread-local config, never WRITE to it
+        # The thread-local GlobalPipelineConfig should remain untouched during PipelineConfig editing
         if nested_type_is_lazy:
-            print(f"🔍 CONTEXT DEBUG: Setting updated context for lazy construction of {nested_type.__name__}")
-            # Get current context with form values for lazy resolution
-            updated_context = self._build_context_from_current_form_values()
-            if updated_context:
-                from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
-                from openhcs.core.config import GlobalPipelineConfig
+            print(f"🔍 CONTEXT DEBUG: Constructing lazy {nested_type.__name__} without modifying thread-local context")
+            # Do NOT call set_current_global_config - let lazy resolution use the original thread-local context
 
-                original_context = get_current_global_config(GlobalPipelineConfig)
-                # CRITICAL FIX: Don't restore context immediately - let it stay active
-                # The issue is that lazy resolution happens AFTER construction, so we need
-                # the context to remain active until the field is actually accessed
-                set_current_global_config(GlobalPipelineConfig, updated_context)
-                print(f"🔍 CONTEXT DEBUG: Set context with step_well_filter_config.well_filter = '{updated_context.step_well_filter_config.well_filter}' - NOT RESTORING YET")
-
-                # Construct with updated context for lazy resolution
-                if filtered_values:
-                    result = nested_type(**filtered_values)
-                else:
-                    result = nested_type()
+            # Construct with original thread-local context for lazy resolution
+            if filtered_values:
+                result = nested_type(**filtered_values)
+            else:
+                result = nested_type()
 
                 print(f"🔍 CONTEXT DEBUG: Constructed {result} - context still active")
 

@@ -22,7 +22,7 @@ from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterForm
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.context.global_config import require_config_context
+# ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 
 
@@ -45,7 +45,6 @@ class ConfigWindow(QDialog):
     config_saved = pyqtSignal(object)  # saved config
     config_cancelled = pyqtSignal()
 
-    @require_config_context
     def __init__(self, config_class: Type, current_config: Any,
                  on_save_callback: Optional[Callable] = None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,
@@ -73,6 +72,10 @@ class ConfigWindow(QDialog):
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
+        # Set up context provider based on config type
+        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+        from openhcs.core.context.global_config import get_current_global_config
+
         # Determine placeholder prefix based on actual instance type (not class type)
         is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(current_config))
         placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
@@ -81,12 +84,26 @@ class ConfigWindow(QDialog):
         # CRITICAL FIX: Use dataclass type name as field_id for root config (not artificial "config")
         # This aligns with field path system design where field_id should match actual structure
         root_field_id = type(current_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
+        if is_lazy_dataclass:
+            # For lazy configs: use thread-local context for proper inheritance
+            # This ensures pipeline config forms show thread-local defaults in placeholders
+            context_provider = lambda: get_current_global_config(GlobalPipelineConfig)
+        else:
+            # For non-lazy configs: use thread-local context
+            context_provider = lambda: get_current_global_config(type(current_config))
+
+        # Determine the correct global config type for enhanced decorator events system
+        # For lazy configs like PipelineConfig, we need to use GlobalPipelineConfig
+        global_config_type = GlobalPipelineConfig  # Always use GlobalPipelineConfig for thread-local storage
+
         self.form_manager = ParameterFormManager.from_dataclass_instance(
             dataclass_instance=current_config,
             field_id=root_field_id,
+            context_provider=context_provider,  # ✅ Required explicit context
             placeholder_prefix=placeholder_prefix,
             color_scheme=self.color_scheme,
-            use_scroll_area=True
+            use_scroll_area=True,
+            global_config_type=global_config_type  # ✅ Enable enhanced decorator events system
         )
 
         # No config_editor needed - everything goes through form_manager
@@ -264,6 +281,10 @@ class ConfigWindow(QDialog):
             new_config: New configuration instance to display
         """
         try:
+            # Import required services
+            from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+            from openhcs.core.context.global_config import get_current_global_config
+
             # Update the current config
             self.current_config = new_config
 
@@ -274,12 +295,26 @@ class ConfigWindow(QDialog):
             # Create new form manager with the new config
             # CRITICAL FIX: Use dataclass type name as field_id for root config (not artificial "config")
             root_field_id = type(new_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
+            # Set up context provider based on config type
+
+            is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(new_config))
+            if is_lazy_dataclass:
+                # For lazy configs: use thread-local context for proper inheritance
+                # This ensures pipeline config forms show thread-local defaults in placeholders
+                from openhcs.core.config import GlobalPipelineConfig
+                context_provider = lambda: get_current_global_config(GlobalPipelineConfig)
+            else:
+                # For non-lazy configs: use thread-local context
+                context_provider = lambda: get_current_global_config(type(new_config))
+
             new_form_manager = ParameterFormManager.from_dataclass_instance(
                 dataclass_instance=new_config,
                 field_id=root_field_id,
+                context_provider=context_provider,  # ✅ Required explicit context
                 placeholder_prefix=placeholder_prefix,
                 color_scheme=self.color_scheme,
-                use_scroll_area=True
+                use_scroll_area=True,
+                global_config_type=type(new_config)  # ✅ Enable enhanced decorator events system
             )
 
             # Find and replace the form widget in the layout
