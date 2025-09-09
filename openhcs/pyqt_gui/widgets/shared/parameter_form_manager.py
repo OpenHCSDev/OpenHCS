@@ -461,7 +461,7 @@ class ParameterFormManager(QWidget):
         # CRITICAL FIX: For GlobalPipelineConfig, skip nested configs that are None
         # This prevents showing resolved values for fields that should be empty
         from openhcs.core.config import GlobalPipelineConfig
-        if isinstance(self.config.instance, GlobalPipelineConfig) and current_value is None:
+        if hasattr(self, '_current_config_instance') and isinstance(self._current_config_instance, GlobalPipelineConfig) and current_value is None:
             # Return empty container for None nested configs in saved GlobalPipelineConfig
             from PyQt6.QtWidgets import QWidget
             empty_container = QWidget()
