@@ -85,9 +85,13 @@ class ConfigWindow(QDialog):
         # This aligns with field path system design where field_id should match actual structure
         root_field_id = type(current_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
         if is_lazy_dataclass:
-            # For lazy configs: use thread-local context for proper inheritance
-            # This ensures pipeline config forms show thread-local defaults in placeholders
-            context_provider = lambda: get_current_global_config(GlobalPipelineConfig)
+            # For lazy configs: use orchestrator-specific context if available for proper isolation
+            # This ensures each orchestrator's pipeline config forms are isolated from each other
+            if self.orchestrator:
+                context_provider = lambda: self.orchestrator.get_effective_config(for_serialization=False)
+            else:
+                # Fallback to thread-local context for global config editing
+                context_provider = lambda: get_current_global_config(GlobalPipelineConfig)
         else:
             # For non-lazy configs: use thread-local context
             context_provider = lambda: get_current_global_config(type(current_config))

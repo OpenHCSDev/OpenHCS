@@ -1073,9 +1073,16 @@ class ParameterFormManager(QWidget):
 
             print(f"🔍 RESET DEBUG: {param_name} removed from parameters to allow inheritance")
 
-        # CRITICAL FIX: Build context EXCLUDING the field being reset
-        # This ensures placeholder resolution doesn't see the old value we're trying to reset
-        updated_context = self._build_context_from_current_form_values(exclude_field=param_name)
+        # CRITICAL FIX: For orchestrator-specific forms, use the orchestrator's context for placeholder resolution
+        # This ensures placeholders show the correct orchestrator-specific thread-local values
+        if hasattr(self, 'context_provider') and self.context_provider:
+            # Use orchestrator-specific context for placeholder resolution
+            updated_context = self.context_provider()
+            print(f"🔍 RESET DEBUG: Using orchestrator context for placeholder resolution")
+        else:
+            # Fallback: Build context from current form values (for global configs)
+            updated_context = self._build_context_from_current_form_values(exclude_field=param_name)
+            print(f"🔍 RESET DEBUG: Using form-built context for placeholder resolution")
 
         try:
             # CRITICAL FIX: Do NOT set thread-local config when working with lazy dataclasses
@@ -1112,9 +1119,11 @@ class ParameterFormManager(QWidget):
                     if hasattr(wf_config, 'well_filter_mode'):
                         print(f"🔍 RESET PATH 2 DEBUG: well_filter_mode = {wf_config.well_filter_mode}")
 
+                # CRITICAL FIX: For reset operations, use default thread-local resolution
+                # This ensures reset shows the original thread-local defaults, not saved concrete values
                 placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                     self.dataclass_type, param_name,
-                    app_config=updated_context,  # Use the context we already set
+                    app_config=None,  # Use default thread-local resolution for reset
                     placeholder_prefix=self.placeholder_prefix
                 )
                 print(f"🔍 RESET PATH 2 DEBUG: Got placeholder_text='{placeholder_text}'")

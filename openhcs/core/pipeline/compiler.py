@@ -504,19 +504,18 @@ class PipelineCompiler:
         from openhcs.core.config import GlobalPipelineConfig
         from openhcs.core.context.global_config import set_current_global_config
 
-        # Use orchestrator's current effective config as authoritative source
-        # This ensures compilation resolves the same values as UI placeholders
-        effective_config = orchestrator.get_effective_config(for_serialization=True)
-        set_current_global_config(GlobalPipelineConfig, effective_config)
+        # CRITICAL FIX: Use orchestrator's context manager instead of contaminating thread-local
+        # This ensures compilation resolves the same values as UI placeholders without
+        # permanently contaminating the global thread-local context
+        with orchestrator.config_context(for_serialization=True):
+            # Resolve the entire context recursively to catch all lazy dataclass instances
+            # This ensures that any lazy configs in any part of the context are resolved
+            resolved_context_dict = resolve_lazy_configurations_for_serialization(vars(context))
 
-        # Resolve the entire context recursively to catch all lazy dataclass instances
-        # This ensures that any lazy configs in any part of the context are resolved
-        resolved_context_dict = resolve_lazy_configurations_for_serialization(vars(context))
-
-        # Update context attributes with resolved values
-        for attr_name, resolved_value in resolved_context_dict.items():
-            if not attr_name.startswith('_'):  # Skip private attributes
-                setattr(context, attr_name, resolved_value)
+            # Update context attributes with resolved values
+            for attr_name, resolved_value in resolved_context_dict.items():
+                if not attr_name.startswith('_'):  # Skip private attributes
+                    setattr(context, attr_name, resolved_value)
 
     @staticmethod
     def compile_pipelines(

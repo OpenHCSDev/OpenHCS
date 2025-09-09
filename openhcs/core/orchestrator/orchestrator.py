@@ -962,15 +962,13 @@ class PipelineOrchestrator:
         finally:
             self._auto_sync_enabled = True
 
-        # Set up thread-local context for sibling inheritance using pure function
-        shared_context = get_current_global_config(GlobalPipelineConfig)
-        merged_config = _create_merged_config(pipeline_config, shared_context)
-        set_current_global_config(GlobalPipelineConfig, merged_config)
-
-        # CRITICAL FIX: Do NOT overwrite context with effective_config
-        # The merged_config preserves None values needed for sibling inheritance
-        # Overwriting with effective_config resolves None values to concrete values,
-        # breaking the inheritance chain (materialization_defaults → path_planning)
+        # CRITICAL FIX: Do NOT contaminate thread-local context during PipelineConfig editing
+        # The orchestrator should maintain its own internal context without modifying
+        # the global thread-local context. This prevents reset operations from showing
+        # orchestrator's saved values instead of original thread-local defaults.
+        #
+        # The merged config is computed internally and used by get_effective_config()
+        # but should NOT be set as the global thread-local context.
 
         logger.info(f"Applied orchestrator config for plate: {self.plate_path}")
 
