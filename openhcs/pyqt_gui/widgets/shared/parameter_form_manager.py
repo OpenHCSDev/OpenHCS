@@ -120,11 +120,12 @@ class ParameterFormManager(QWidget):
     parameter_changed = pyqtSignal(str, object)  # param_name, value
 
     def __init__(self, parameters: Dict[str, Any], parameter_types: Dict[str, type],
-                 field_id: str, dataclass_type: Type, context_provider: Callable[[], Any],
+                 field_id: str, dataclass_type: Type, context_provider: Callable[[], Any] = None,
                  parameter_info: Dict = None, parent=None,
                  use_scroll_area: bool = True, function_target=None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, placeholder_prefix: str = None,
-                 param_defaults: Dict[str, Any] = None, global_config_type: Optional[Type] = None):
+                 param_defaults: Dict[str, Any] = None, global_config_type: Optional[Type] = None,
+                 context_event_coordinator=None):
         """
         Initialize PyQt parameter form manager with explicit context provider.
 
@@ -144,9 +145,8 @@ class ParameterFormManager(QWidget):
         """
         QWidget.__init__(self, parent)
 
-        # Fail-loud: context_provider is required
-        if context_provider is None:
-            raise ValueError("context_provider is required for ParameterFormManager")
+        # CRITICAL FIX: context_provider is optional for function forms
+        # Only config forms (with lazy dataclasses) need context providers
 
         # Store configuration parameters - dataclass_type is the single source of truth
         self.parent = parent  # Store parent for step-level config detection
@@ -187,6 +187,9 @@ class ParameterFormManager(QWidget):
         self.parameter_types = parameter_types
         self.config = config
         self.param_defaults = param_defaults or {}
+        print(f"🔍 CONSTRUCTOR DEBUG: param_defaults passed = {param_defaults}")
+        print(f"🔍 CONSTRUCTOR DEBUG: self.param_defaults set to = {self.param_defaults}")
+        print(f"🔍 CONSTRUCTOR DEBUG: dataclass_type = {dataclass_type}")
 
         # Initialize service layer for business logic
         self.service = ParameterFormService()
@@ -217,24 +220,31 @@ class ParameterFormManager(QWidget):
         self._widget_creator = create_pyqt6_registry()
 
 
-        # Register for automatic refresh events if global_config_type is provided
-        if self.global_config_type:
-            from openhcs.core.lazy_config import _context_event_coordinator
-            _context_event_coordinator.register_listener(self, self.global_config_type)
+        # CRITICAL FIX: Register for automatic refresh events using orchestrator-specific coordinator
+        # This prevents cross-orchestrator contamination in the enhanced decorator events system
+        if self.global_config_type and context_event_coordinator:
+            self._context_event_coordinator = context_event_coordinator
+            self._context_event_coordinator.register_listener(self, self.global_config_type)
+            print(f"🔍 FORM MANAGER: Registered with orchestrator-specific coordinator for {self.global_config_type}")
 
             # Connect parameter changes to emit context change events for cross-form updates
             def handle_parameter_change(param_name, value):
                 print(f"🔍 PARAMETER CHANGED: {self.field_id}.{param_name} = {value}")
                 try:
-                    print(f"🔍 EMIT CONTEXT CHANGE: Calling emit_context_change for {self.global_config_type}")
-                    _context_event_coordinator.emit_context_change(self.global_config_type)
-                    print(f"🔍 EMIT CONTEXT CHANGE: Successfully called emit_context_change")
+                    print(f"🔍 EMIT CONTEXT CHANGE: Calling orchestrator-specific emit_context_change for {self.global_config_type}")
+                    self._context_event_coordinator.emit_context_change(self.global_config_type)
+                    print(f"🔍 EMIT CONTEXT CHANGE: Successfully called orchestrator-specific emit_context_change")
                 except Exception as e:
                     print(f"🔍 EMIT CONTEXT CHANGE ERROR: {e}")
                     import traceback
                     traceback.print_exc()
 
             self.parameter_changed.connect(handle_parameter_change)
+        else:
+            # No coordinator provided - forms will work but without cross-form inheritance
+            self._context_event_coordinator = None
+            if self.global_config_type:
+                print(f"🔍 FORM MANAGER: No coordinator provided - cross-form inheritance disabled for {self.global_config_type}")
 
         # Set up UI
         self.setup_ui()
@@ -262,7 +272,8 @@ class ParameterFormManager(QWidget):
                               parent=None, use_scroll_area: bool = True,
                               function_target=None, color_scheme=None,
                               force_show_all_fields: bool = False,
-                              global_config_type: Optional[Type] = None):
+                              global_config_type: Optional[Type] = None,
+                              context_event_coordinator=None):
         """
         Create ParameterFormManager for editing entire dataclass instance.
 
@@ -317,7 +328,8 @@ class ParameterFormManager(QWidget):
             color_scheme=color_scheme,
             placeholder_prefix=placeholder_prefix,
             param_defaults=None,
-            global_config_type=global_config_type  # CRITICAL FIX: Pass global_config_type through
+            global_config_type=global_config_type,  # CRITICAL FIX: Pass global_config_type through
+            context_event_coordinator=context_event_coordinator  # CRITICAL FIX: Pass orchestrator-specific coordinator
         )
 
         # Store the original dataclass instance for reset operations
@@ -498,7 +510,8 @@ class ParameterFormManager(QWidget):
                 placeholder_prefix=self.placeholder_prefix,
                 parent=group_box, use_scroll_area=False,
                 color_scheme=self.config.color_scheme,
-                global_config_type=self.global_config_type  # CRITICAL FIX: Pass global_config_type to nested managers
+                global_config_type=self.global_config_type,  # CRITICAL FIX: Pass global_config_type to nested managers
+                context_event_coordinator=getattr(self, '_context_event_coordinator', None)  # CRITICAL FIX: Pass coordinator to nested forms
             )
 
             # Unified manager setup
@@ -590,7 +603,8 @@ class ParameterFormManager(QWidget):
             PyQt6ColorScheme(),  # color_scheme
             self.placeholder_prefix, # Pass through placeholder prefix
             None,  # param_defaults
-            self.global_config_type  # CRITICAL FIX: Pass global_config_type to nested managers
+            self.global_config_type,  # CRITICAL FIX: Pass global_config_type to nested managers
+            getattr(self, '_context_event_coordinator', None)  # CRITICAL FIX: Pass coordinator to nested forms
         )
 
         # Store nested manager
@@ -1058,16 +1072,34 @@ class ParameterFormManager(QWidget):
 
     def reset_parameter(self, param_name: str, default_value: Any = None) -> None:
         """Reset parameter with streamlined logic."""
-        # Import at function level to avoid scope issues
-        from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
-        from openhcs.core.config import GlobalPipelineConfig
-
         print(f"🔍 RESET ENTRY DEBUG: Called reset_parameter for {param_name}")
         print(f"🔍 RESET ENTRY DEBUG: param_name in parameters: {param_name in self.parameters}")
         print(f"🔍 RESET ENTRY DEBUG: Available parameters: {list(self.parameters.keys())}")
         if param_name not in self.parameters:
             print(f"🔍 RESET ENTRY DEBUG: Early return - {param_name} not in parameters")
             return
+
+        # CRITICAL FIX: Simple reset for function forms AND step editor (use static defaults)
+        if (not self.dataclass_type or not hasattr(self, 'context_provider') or self.context_provider is None or
+            (hasattr(self, 'param_defaults') and self.param_defaults)):
+            # This is a function form OR step editor - reset to static constructor/signature defaults
+            # Fail loud if param_defaults doesn't have the parameter - this indicates a bug
+            reset_value = self.param_defaults[param_name]
+
+            self.parameters[param_name] = reset_value
+
+            # Update the widget if it exists
+            if param_name in self.widgets:
+                widget = self.widgets[param_name]
+                self.update_widget_value(widget, reset_value, param_name, skip_context_behavior=True)
+
+            self.parameter_changed.emit(param_name, reset_value)
+            return
+
+        # Complex reset logic for config forms (dataclasses with inheritance)
+        # Import at function level to avoid scope issues
+        from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
 
         # CRITICAL FIX: Get the original thread-local value BEFORE modifying the context
         original_context = get_current_global_config(GlobalPipelineConfig)
@@ -1262,8 +1294,11 @@ class ParameterFormManager(QWidget):
         """Update parameter values based on checkbox states."""
         for param_name in self.widgets.keys():
             checkbox_state = self._get_optional_checkbox_state(param_name)
-            if checkbox_state is True and current_values[param_name] is None:
-                # Check if we have a stored step-level config
+            if checkbox_state is False:
+                # Checkbox unchecked - parameter should be None
+                current_values[param_name] = None
+            elif checkbox_state is True and current_values[param_name] is None:
+                # Checkbox checked but parameter is None - create default instance
                 if hasattr(self, '_step_level_config_values') and param_name in self._step_level_config_values:
                     # Use stored step-level config
                     current_values[param_name] = self._step_level_config_values[param_name]

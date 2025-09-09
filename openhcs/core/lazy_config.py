@@ -66,8 +66,20 @@ class ContextEventCoordinator:
         """Build shared temporary context from all form managers in the same config window."""
         print(f"🔍 BUILD SHARED CONTEXT: Starting with global_config_type={global_config_type}")
 
-        # Get the current base context
-        base_context = get_current_global_config(global_config_type)
+        # CRITICAL FIX: Use orchestrator context when available for live updates
+        # Check if any form manager has a context provider (indicating orchestrator context)
+        base_context = None
+        for manager in form_managers:
+            if hasattr(manager, 'context_provider') and manager.context_provider:
+                base_context = manager.context_provider()
+                print(f"🔍 BUILD SHARED CONTEXT: Using orchestrator context from form manager")
+                break
+
+        # Fallback to thread-local context if no orchestrator context available
+        if not base_context:
+            base_context = get_current_global_config(global_config_type)
+            print(f"🔍 BUILD SHARED CONTEXT: Using thread-local context as fallback")
+
         print(f"🔍 BUILD SHARED CONTEXT: base_context={base_context}")
         if not base_context:
             print(f"🔍 BUILD SHARED CONTEXT: No base context, returning None")
@@ -124,8 +136,9 @@ class ContextEventCoordinator:
         print(f"🔍 BUILD SHARED CONTEXT: No context updates, returning base context")
         return base_context
 
-# Global instance
-_context_event_coordinator = ContextEventCoordinator()
+# CRITICAL FIX: Remove global coordinator to prevent cross-orchestrator contamination
+# Each orchestrator will have its own coordinator for proper isolation
+# _context_event_coordinator = ContextEventCoordinator()  # REMOVED
 
 
 def register_lazy_type_mapping(lazy_type: Type, base_type: Type) -> None:
@@ -321,28 +334,10 @@ class LazyMethodBindings:
 
     @staticmethod
     def create_to_base_config(base_class: Type) -> Callable[[Any], Any]:
-        """Create base config converter method with optional context support."""
-        def to_base_config_with_context(self, *, context=None):
-            if context is not None:
-                # Use provided context for field resolution
-                from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
-                from openhcs.core.config import GlobalPipelineConfig
-
-                current_context = get_current_global_config(GlobalPipelineConfig)
-                set_current_global_config(GlobalPipelineConfig, context)
-                try:
-                    return base_class(**{
-                        f.name: getattr(self, f.name) for f in fields(self)
-                    })
-                finally:
-                    set_current_global_config(GlobalPipelineConfig, current_context)
-            else:
-                # Default behavior - use current context
-                return base_class(**{
-                    f.name: getattr(self, f.name) for f in fields(self)
-                })
-
-        return to_base_config_with_context
+        """Create base config converter method."""
+        return lambda self: base_class(**{
+            f.name: getattr(self, f.name) for f in fields(self)
+        })
 
     @staticmethod
     def create_class_methods() -> Dict[str, Any]:

@@ -24,9 +24,10 @@ def set_current_global_config(config_type: Type, config_instance: Any) -> None:
         _global_config_contexts[config_type] = threading.local()
     _global_config_contexts[config_type].value = config_instance
 
-    # Emit context change event for automatic UI refresh
-    from openhcs.core.lazy_config import _context_event_coordinator
-    _context_event_coordinator.emit_context_change(config_type)
+    # CRITICAL FIX: No longer emit global context change events during set_current_global_config
+    # Context change events are now handled by orchestrator-specific coordinators via parameter_changed signals
+    # This prevents cross-orchestrator contamination while maintaining live updates within the same orchestrator
+    pass
 
 
 def get_current_global_config(config_type: Type) -> Optional[Any]:

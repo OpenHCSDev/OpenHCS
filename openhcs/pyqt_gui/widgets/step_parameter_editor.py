@@ -93,7 +93,8 @@ class StepParameterEditorWidget(QWidget):
             color_scheme=self.color_scheme,
             placeholder_prefix="Pipeline default",
             param_defaults=param_defaults,
-            global_config_type=GlobalPipelineConfig  # CRITICAL FIX: Enable thread-local context resolution
+            global_config_type=GlobalPipelineConfig,  # CRITICAL FIX: Enable thread-local context resolution
+            context_event_coordinator=self.orchestrator._context_event_coordinator  # CRITICAL FIX: Use orchestrator-specific coordinator
         )
         
         self.setup_ui()

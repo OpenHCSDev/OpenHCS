@@ -100,6 +100,14 @@ class ConfigWindow(QDialog):
         # For lazy configs like PipelineConfig, we need to use GlobalPipelineConfig
         global_config_type = GlobalPipelineConfig  # Always use GlobalPipelineConfig for thread-local storage
 
+        # CRITICAL FIX: Pass orchestrator-specific coordinator when available
+        context_event_coordinator = None
+        if self.orchestrator and hasattr(self.orchestrator, '_context_event_coordinator'):
+            context_event_coordinator = self.orchestrator._context_event_coordinator
+            print(f"🔍 CONFIG WINDOW: Using orchestrator-specific coordinator")
+        else:
+            print(f"🔍 CONFIG WINDOW: No orchestrator coordinator available - cross-form inheritance disabled")
+
         self.form_manager = ParameterFormManager.from_dataclass_instance(
             dataclass_instance=current_config,
             field_id=root_field_id,
@@ -107,7 +115,8 @@ class ConfigWindow(QDialog):
             placeholder_prefix=placeholder_prefix,
             color_scheme=self.color_scheme,
             use_scroll_area=True,
-            global_config_type=global_config_type  # ✅ Enable enhanced decorator events system
+            global_config_type=global_config_type,  # ✅ Enable enhanced decorator events system
+            context_event_coordinator=context_event_coordinator  # ✅ Use orchestrator-specific coordinator
         )
 
         # No config_editor needed - everything goes through form_manager
@@ -311,6 +320,11 @@ class ConfigWindow(QDialog):
                 # For non-lazy configs: use thread-local context
                 context_provider = lambda: get_current_global_config(type(new_config))
 
+            # CRITICAL FIX: Pass orchestrator-specific coordinator when available
+            context_event_coordinator = None
+            if self.orchestrator and hasattr(self.orchestrator, '_context_event_coordinator'):
+                context_event_coordinator = self.orchestrator._context_event_coordinator
+
             new_form_manager = ParameterFormManager.from_dataclass_instance(
                 dataclass_instance=new_config,
                 field_id=root_field_id,
@@ -318,7 +332,8 @@ class ConfigWindow(QDialog):
                 placeholder_prefix=placeholder_prefix,
                 color_scheme=self.color_scheme,
                 use_scroll_area=True,
-                global_config_type=type(new_config)  # ✅ Enable enhanced decorator events system
+                global_config_type=type(new_config),  # ✅ Enable enhanced decorator events system
+                context_event_coordinator=context_event_coordinator  # ✅ Use orchestrator-specific coordinator
             )
 
             # Find and replace the form widget in the layout

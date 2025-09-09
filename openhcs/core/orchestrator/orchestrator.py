@@ -82,8 +82,8 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
             # This ensures that user-set values from lazy configs are preserved in the thread-local context
             # instead of being replaced with static defaults when GlobalPipelineConfig is instantiated
             if hasattr(pipeline_value, 'to_base_config'):
-                # This is a lazy config - convert to base config with thread-local context for inheritance
-                merged_config_values[field.name] = pipeline_value.to_base_config(context=global_config)
+                # This is a lazy config - convert to base config with resolved values
+                merged_config_values[field.name] = pipeline_value.to_base_config()
             else:
                 # Regular value - use as-is
                 merged_config_values[field.name] = pipeline_value
@@ -242,6 +242,12 @@ class PipelineOrchestrator:
         # Initialize auto-sync control for pipeline config
         self._pipeline_config = None
         self._auto_sync_enabled = True
+
+        # CRITICAL FIX: Create orchestrator-specific context event coordinator
+        # This prevents cross-orchestrator contamination in the enhanced decorator events system
+        from openhcs.core.lazy_config import ContextEventCoordinator
+        self._context_event_coordinator = ContextEventCoordinator()
+        print(f"🔍 ORCHESTRATOR: Created orchestrator-specific context event coordinator")
 
         # Initialize per-orchestrator configuration
         # Always ensure orchestrator has a pipeline config - create default if none provided
