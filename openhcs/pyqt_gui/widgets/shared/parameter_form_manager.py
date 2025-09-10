@@ -638,11 +638,22 @@ class ParameterFormManager(QWidget):
         if not self.config.is_lazy_dataclass and not (hasattr(self, 'context_provider') and self.context_provider) and not is_reset_operation:
             return
 
-        # CRITICAL FIX: Always use current form context for placeholder resolution
-        # This ensures placeholders reflect the current form state (including reset fields)
-        # rather than potentially stale saved context
-        app_config = self._build_context_from_current_form_values()
-        print(f"🔍 PLACEHOLDER DEBUG: Using current form context for {param_name} (ensures reset fields show correct inheritance)")
+        # CRITICAL FIX: Use merged context (thread-local base + current form overlays)
+        # This preserves correct baseline inheritance while respecting reset state and user changes
+        if hasattr(self, 'context_provider') and self.context_provider:
+            # Step editors: use orchestrator context with current form overlays
+            base_context = self.context_provider()
+            merged_context = self._build_context_from_current_form_values(base_context=base_context)
+            app_config = merged_context or base_context
+            print(f"🔍 PLACEHOLDER DEBUG: Using orchestrator context + form overlays for {param_name}")
+        else:
+            # Global config editors: use thread-local context with current form overlays
+            from openhcs.core.context.global_config import get_current_global_config
+            from openhcs.core.config import GlobalPipelineConfig
+            base_context = get_current_global_config(GlobalPipelineConfig)
+            merged_context = self._build_context_from_current_form_values(base_context=base_context)
+            app_config = merged_context or base_context
+            print(f"🔍 PLACEHOLDER DEBUG: Using thread-local context + form overlays for {param_name}")
 
         # CRITICAL FIX: For reset fields, handle concrete overrides correctly to respect inheritance hierarchy
         from openhcs.core.lazy_placeholder import _has_concrete_field_override
@@ -682,20 +693,24 @@ class ParameterFormManager(QWidget):
 
 
 
-    def _build_context_from_current_form_values(self, exclude_field: str = None) -> Any:
+    def _build_context_from_current_form_values(self, exclude_field: str = None, base_context: Any = None) -> Any:
         """Build context preserving complete inheritance hierarchy for MRO-based placeholder resolution.
 
         Args:
             exclude_field: Field name to exclude from context building (used during reset)
+            base_context: Base context to overlay current form values on (preserves baseline inheritance)
         """
-        print(f"🔍 CONTEXT BUILD DEBUG: {self.field_id} building context with exclude_field='{exclude_field}'")
+        print(f"🔍 CONTEXT BUILD DEBUG: {self.field_id} building context with exclude_field='{exclude_field}', base_context={'provided' if base_context else 'none'}")
         from openhcs.core.context.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         from dataclasses import replace
+        import copy
 
-        # CRITICAL FIX: Use context provider when available (for step editors with orchestrator context)
-        # This ensures step editors resolve against orchestrator's PipelineConfig concrete values
-        if hasattr(self, 'context_provider') and self.context_provider:
+        # CRITICAL FIX: Use provided base context or fallback to default context sources
+        if base_context:
+            current_context = base_context
+            print(f"🔍 CONTEXT BUILD DEBUG: Using provided base context")
+        elif hasattr(self, 'context_provider') and self.context_provider:
             current_context = self.context_provider()
             print(f"🔍 CONTEXT BUILD DEBUG: Using orchestrator context provider")
         else:
@@ -745,9 +760,9 @@ class ParameterFormManager(QWidget):
                     # CRITICAL FIX: Skip the field being excluded (e.g., during reset)
                     print(f"🔍 EXCLUSION DEBUG: Checking param_name='{param_name}' vs exclude_field='{exclude_field}'")
                     if exclude_field and param_name == exclude_field:
-                        # For excluded field, use None instead of current widget value
-                        current_form_values[param_name] = None
-                        print(f"🔍 WIDGET DEBUG: {self.field_id}.{param_name} EXCLUDED from context (reset)")
+                        # For excluded field, completely skip it from context (don't set to None)
+                        # This allows inheritance resolution to see the base context value
+                        print(f"🔍 WIDGET DEBUG: {self.field_id}.{param_name} EXCLUDED from context (reset) - preserving base context value")
                         continue
 
                     # SHARED RESET STATE: Check if this field has been reset by any manager in the form
@@ -815,8 +830,30 @@ class ParameterFormManager(QWidget):
                     context_updates[self.field_id] = updated_instance
                 else:
                     # Root config: Mark for full context replacement
-                    print(f"🔍 CONTEXT DEBUG: ROOT CONFIG - will replace entire context with updated instance")
-                    context_updates['__root_replacement__'] = updated_instance
+                    # CRITICAL FIX: For root configs, exclude reset fields to preserve thread-local values
+                    if hasattr(self, 'reset_fields') and self.reset_fields:
+                        # Filter out reset fields from the updated instance to preserve base context values
+                        filtered_form_values = {k: v for k, v in current_form_values.items()
+                                              if k not in self.reset_fields}
+                        print(f"🔍 ROOT RESET DEBUG: Excluding reset fields {self.reset_fields} from root replacement")
+                        print(f"🔍 ROOT RESET DEBUG: Filtered form values: {filtered_form_values}")
+
+                        # Create updated instance without reset fields
+                        if hasattr(type(current_dataclass_instance), '_is_lazy_dataclass'):
+                            # Lazy dataclass - use raw assignment
+                            filtered_updated_instance = copy.deepcopy(current_dataclass_instance)
+                            for field_name, value in filtered_form_values.items():
+                                object.__setattr__(filtered_updated_instance, field_name, value)
+                            if hasattr(type(current_dataclass_instance), '_is_lazy_dataclass'):
+                                object.__setattr__(filtered_updated_instance, '_is_lazy_dataclass', True)
+                        else:
+                            # Regular dataclass - use normal replace
+                            filtered_updated_instance = replace(current_dataclass_instance, **filtered_form_values)
+
+                        context_updates['__root_replacement__'] = filtered_updated_instance
+                    else:
+                        print(f"🔍 CONTEXT DEBUG: ROOT CONFIG - will replace entire context with updated instance")
+                        context_updates['__root_replacement__'] = updated_instance
 
         # CRITICAL FIX: Also collect current values from all nested managers
         # This captures unsaved values from sibling forms like well_filter_config
@@ -1019,9 +1056,12 @@ class ParameterFormManager(QWidget):
             exclude_field_for_context = param_name if param_name in self.reset_fields else exclude_field
             print(f"🔍 RESET CONTEXT DEBUG: param_name='{param_name}', in reset_fields={param_name in self.reset_fields}, exclude_field_for_context='{exclude_field_for_context}'")
 
-            # CRITICAL FIX: Use orchestrator-specific context instead of thread-local context
-            # Pass exclude_field to ensure reset doesn't see the old value
-            current_form_context = self._build_context_from_current_form_values(exclude_field=exclude_field_for_context)
+            # CRITICAL FIX: Use thread-local context as base with current form overlays
+            # This ensures reset operations see the correct thread-local inheritance values
+            from openhcs.core.context.global_config import get_current_global_config
+            from openhcs.core.config import GlobalPipelineConfig
+            thread_local_base = get_current_global_config(GlobalPipelineConfig)
+            current_form_context = self._build_context_from_current_form_values(exclude_field=exclude_field_for_context, base_context=thread_local_base)
 
             # DEBUG: Check what the context looks like for this specific field
             if param_name == "well_filter_mode" and exclude_field == "well_filter_mode":

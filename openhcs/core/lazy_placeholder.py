@@ -113,24 +113,26 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
     if not base_class:
         base_class = target_dataclass_type
 
-    # CRITICAL FIX: For concrete override classes, check context for user-set values FIRST
+    # CRITICAL FIX: Always check for direct field access for top-level fields first
+    # This handles reset operations for top-level fields like num_workers
+    current_context = get_current_global_config(GlobalPipelineConfig)
+    if current_context is None:
+        current_context = global_config  # Fallback to passed parameter
+
+    # Special case: If base_class is the same as the global config type,
+    # directly access the field from current_context (root-level lazy config)
+    if base_class == type(current_context):
+        if hasattr(current_context, field_name):
+            field_value = getattr(current_context, field_name, None)
+            if field_value is not None:
+                if field_name == "num_workers":
+                    print(f"🔍 TOP-LEVEL FIELD: {base_class.__name__}.{field_name} = {field_value} (direct context access)")
+                return field_value
+
+    # CRITICAL FIX: For concrete override classes, check context for user-set values
     # before falling back to class default. This ensures saved values are respected.
     # RESET FIX: Skip concrete override check if field has been explicitly reset
     if not ignore_concrete_override and _has_concrete_field_override(base_class, field_name):
-        # CRITICAL FIX: Use current thread-local context, not the passed global_config parameter
-        # This ensures we use the same context that the MRO logic uses
-        current_context = get_current_global_config(GlobalPipelineConfig)
-
-        if current_context is None:
-            current_context = global_config  # Fallback to passed parameter
-
-        # Special case: If base_class is the same as the global config type,
-        # directly access the field from current_context (root-level lazy config)
-        if base_class == type(current_context):
-            if hasattr(current_context, field_name):
-                field_value = getattr(current_context, field_name, None)
-                if field_value is not None:
-                    return field_value
 
         # Regular case: Navigate through field paths for nested configs
         field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
