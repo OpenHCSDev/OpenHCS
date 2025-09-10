@@ -718,6 +718,13 @@ class ParameterFormManager(QWidget):
             current_context = get_current_global_config(GlobalPipelineConfig)
             print(f"🔍 CONTEXT BUILD DEBUG: Using thread-local context")
 
+        # CRITICAL DEBUG: Check what the base context looks like
+        if current_context and hasattr(current_context, 'step_well_filter_config'):
+            step_config = getattr(current_context, 'step_well_filter_config')
+            if hasattr(step_config, 'well_filter'):
+                well_filter_value = getattr(step_config, 'well_filter')
+                print(f"🔍 CONTEXT BUILD DEBUG: Base context has step_well_filter_config.well_filter = {well_filter_value}")
+
         if not current_context:
             return None
 
@@ -865,17 +872,21 @@ class ParameterFormManager(QWidget):
                     # This ensures we capture values that are typed but not yet saved to parameters
                     current_nested_values = {}
 
-                    # First, get values from parameters
-                    current_nested_values.update(nested_manager.parameters)
-                    print(f"🔍 NESTED PARAMS DEBUG: {nested_name}.parameters = {nested_manager.parameters}")
-
-                    # CRITICAL FIX: Override with shared reset state BEFORE widget values
-                    # This ensures reset fields take precedence over saved context
-                    for param_name in current_nested_values.keys():
+                    # CRITICAL FIX: Handle parameters based on reset state
+                    # For reset fields: use None to enable inheritance
+                    # For non-reset fields: preserve non-None values to avoid corrupting configured values
+                    for param_name, param_value in nested_manager.parameters.items():
                         nested_field_path = f"{nested_name}.{param_name}"
                         if nested_field_path in self.shared_reset_fields:
+                            # Field is reset - use None for inheritance resolution
                             current_nested_values[param_name] = None
-                            print(f"🔍 SHARED RESET OVERRIDE: {nested_field_path} overridden to None from shared reset state")
+                            print(f"🔍 SHARED RESET PARAMS: {nested_field_path} set to None (reset field)")
+                        elif param_value is not None:
+                            # Field is not reset and has a value - preserve it to avoid corruption
+                            current_nested_values[param_name] = param_value
+                            print(f"🔍 PRESERVED PARAMS: {nested_field_path} = {param_value} (non-reset field)")
+                    print(f"🔍 NESTED PARAMS DEBUG: {nested_name}.parameters = {nested_manager.parameters}")
+                    print(f"🔍 NESTED PARAMS DEBUG: {nested_name}.filtered_values = {current_nested_values}")
 
                     # Then, override with current widget values to capture unsaved typing
                     for param_name, widget in nested_manager.widgets.items():
@@ -905,34 +916,71 @@ class ParameterFormManager(QWidget):
                             else:
                                 continue
 
-                            # Update if widget has any value (including empty string)
+                            # CRITICAL FIX: Only update if widget has a meaningful value
+                            # Don't overwrite configured values with None from empty widgets
                             if widget_value is not None:
                                 # Convert empty string to None for consistency
                                 if widget_value == "":
                                     widget_value = None
-                                current_nested_values[param_name] = widget_value
-                                print(f"🔍 NESTED WIDGET DEBUG: {nested_name}.{param_name} widget value = '{widget_value}'")
+
+                                # Only update if the widget value is meaningful (not None)
+                                # This preserves configured values from base context
+                                if widget_value is not None:
+                                    current_nested_values[param_name] = widget_value
+                                    print(f"🔍 NESTED WIDGET DEBUG: {nested_name}.{param_name} widget value = '{widget_value}'")
                         except Exception as e:
                             print(f"🔍 NESTED WIDGET DEBUG: Failed to get {nested_name}.{param_name} widget value: {e}")
                             pass
 
-                    # Update nested instance with current form values (including widget values)
-                    updated_nested = replace(current_nested_instance, **current_nested_values)
-                    context_updates[nested_name] = updated_nested
+                    # CRITICAL FIX: Only update nested instance if there are meaningful changes
+                    # If current_nested_values is empty, preserve the original instance from base context
+                    if current_nested_values:
+                        updated_nested = replace(current_nested_instance, **current_nested_values)
+                        context_updates[nested_name] = updated_nested
+                        print(f"🔍 NESTED UPDATE DEBUG: {nested_name} updated with values: {current_nested_values}")
+                    else:
+                        # No meaningful changes, preserve original instance
+                        print(f"🔍 NESTED PRESERVE DEBUG: {nested_name} preserved from base context (no meaningful changes)")
 
         # Return updated context preserving COMPLETE inheritance hierarchy with current form values
         # CRITICAL FIX: Handle root config replacement
         if '__root_replacement__' in context_updates:
             # Root config case: return the replacement instance with nested updates applied
             root_replacement = context_updates.pop('__root_replacement__')
+
+            # CRITICAL DEBUG: Check what the root replacement looks like
+            if hasattr(root_replacement, 'step_well_filter_config'):
+                step_config = getattr(root_replacement, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 CONTEXT BUILD DEBUG: Root replacement has step_well_filter_config.well_filter = {well_filter_value}")
+
             if context_updates:
                 # Apply any nested updates to the root replacement
-                return replace(root_replacement, **context_updates)
+                final_context = replace(root_replacement, **context_updates)
             else:
-                return root_replacement
+                final_context = root_replacement
+
+            # CRITICAL DEBUG: Check what the final context looks like
+            if hasattr(final_context, 'step_well_filter_config'):
+                step_config = getattr(final_context, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 CONTEXT BUILD DEBUG: Final context has step_well_filter_config.well_filter = {well_filter_value}")
+
+            return final_context
         else:
             # Normal case: update specific fields in context
-            return replace(current_context, **context_updates) if context_updates else current_context
+            final_context = replace(current_context, **context_updates) if context_updates else current_context
+
+            # CRITICAL DEBUG: Check what the final context looks like
+            if hasattr(final_context, 'step_well_filter_config'):
+                step_config = getattr(final_context, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 CONTEXT BUILD DEBUG: Final context (normal) has step_well_filter_config.well_filter = {well_filter_value}")
+
+            return final_context
 
     def _refresh_all_placeholders_with_current_context(self) -> None:
         """Refresh all placeholders using current form values to show inheritance."""

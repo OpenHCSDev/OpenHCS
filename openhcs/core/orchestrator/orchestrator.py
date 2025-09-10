@@ -73,24 +73,54 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
     Follows OpenHCS stateless architecture principles - no side effects, explicit dependencies.
     Extracted from apply_pipeline_config to eliminate code duplication.
     """
+    print(f"🔍 MERGE DEBUG: Starting merge with pipeline_config={type(pipeline_config)} and global_config={type(global_config)}")
+
+    # DEBUG: Check what the global_config looks like
+    if hasattr(global_config, 'step_well_filter_config'):
+        step_config = getattr(global_config, 'step_well_filter_config')
+        if hasattr(step_config, 'well_filter'):
+            well_filter_value = getattr(step_config, 'well_filter')
+            print(f"🔍 MERGE DEBUG: global_config has step_well_filter_config.well_filter = {well_filter_value}")
+
     merged_config_values = {}
     for field in fields(GlobalPipelineConfig):
         # Fail-loud: Let AttributeError bubble up naturally (no getattr fallbacks)
         pipeline_value = getattr(pipeline_config, field.name)
+
+        if field.name == 'step_well_filter_config':
+            print(f"🔍 MERGE DEBUG: Processing step_well_filter_config: pipeline_value = {pipeline_value}")
+
         if pipeline_value is not None:
             # CRITICAL FIX: Convert lazy configs to base configs with resolved values
             # This ensures that user-set values from lazy configs are preserved in the thread-local context
             # instead of being replaced with static defaults when GlobalPipelineConfig is instantiated
             if hasattr(pipeline_value, 'to_base_config'):
                 # This is a lazy config - convert to base config with resolved values
-                merged_config_values[field.name] = pipeline_value.to_base_config()
+                converted_value = pipeline_value.to_base_config()
+                merged_config_values[field.name] = converted_value
+                if field.name == 'step_well_filter_config':
+                    print(f"🔍 MERGE DEBUG: Converted lazy config to base: {converted_value}")
             else:
                 # Regular value - use as-is
                 merged_config_values[field.name] = pipeline_value
+                if field.name == 'step_well_filter_config':
+                    print(f"🔍 MERGE DEBUG: Using pipeline value as-is: {pipeline_value}")
         else:
-            merged_config_values[field.name] = getattr(global_config, field.name)
+            global_value = getattr(global_config, field.name)
+            merged_config_values[field.name] = global_value
+            if field.name == 'step_well_filter_config':
+                print(f"🔍 MERGE DEBUG: Using global_config value: {global_value}")
 
-    return GlobalPipelineConfig(**merged_config_values)
+    result = GlobalPipelineConfig(**merged_config_values)
+
+    # DEBUG: Check what the result looks like
+    if hasattr(result, 'step_well_filter_config'):
+        step_config = getattr(result, 'step_well_filter_config')
+        if hasattr(step_config, 'well_filter'):
+            well_filter_value = getattr(step_config, 'well_filter')
+            print(f"🔍 MERGE DEBUG: Final result has step_well_filter_config.well_filter = {well_filter_value}")
+
+    return result
 
 
 def _execute_single_axis_static(
@@ -250,24 +280,14 @@ class PipelineOrchestrator:
         print(f"🔍 ORCHESTRATOR: Created orchestrator-specific context event coordinator")
 
         # Initialize per-orchestrator configuration
-        # Always ensure orchestrator has a pipeline config - create default if none provided
+        # CRITICAL FIX: Do NOT create a default PipelineConfig when none is provided
+        # This prevents lazy dataclass resolution from corrupting the thread-local context
+        # When pipeline_config is None, get_effective_config() will return the shared context directly
+        self.pipeline_config = pipeline_config
         if pipeline_config is None:
-            # Create PipelineConfig with all None values (like an empty form)
-            # This matches what the config save does when no edits are made
-            from openhcs.core.config import PipelineConfig
-            from dataclasses import fields
-
-            # Create field values dict with all None values (like empty form)
-            field_values = {}
-            for field_obj in fields(GlobalPipelineConfig):
-                field_values[field_obj.name] = None
-
-            # Create PipelineConfig with None values for placeholder behavior
-            from openhcs.core.config import PipelineConfig
-            self.pipeline_config = PipelineConfig(**field_values)
-            logger.info("PipelineOrchestrator created default pipeline configuration with None values for placeholders.")
+            logger.info("PipelineOrchestrator using shared context (no pipeline-specific configuration).")
         else:
-            self.pipeline_config = pipeline_config
+            logger.info("PipelineOrchestrator using provided pipeline configuration.")
 
 
 
@@ -990,17 +1010,50 @@ class PipelineOrchestrator:
             shared_context = get_current_global_config(GlobalPipelineConfig)
             if shared_context is None:
                 raise RuntimeError("No global configuration context available")
+
+            # DEBUG: Check what the shared context looks like
+            if hasattr(shared_context, 'step_well_filter_config'):
+                step_config = getattr(shared_context, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 ORCHESTRATOR DEBUG: No pipeline_config, returning shared_context with step_well_filter_config.well_filter = {well_filter_value}")
+
             return shared_context
 
         if for_serialization:
-            return self.pipeline_config.to_base_config()
+            result = self.pipeline_config.to_base_config()
+
+            # DEBUG: Check what the serialization result looks like
+            if hasattr(result, 'step_well_filter_config'):
+                step_config = getattr(result, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 ORCHESTRATOR DEBUG: Serialization result has step_well_filter_config.well_filter = {well_filter_value}")
+
+            return result
         else:
             # Reuse existing merged config logic from apply_pipeline_config
             shared_context = get_current_global_config(GlobalPipelineConfig)
             if not shared_context:
                 raise RuntimeError("No global configuration context available for merging")
 
-            return _create_merged_config(self.pipeline_config, shared_context)
+            # DEBUG: Check what the shared context looks like before merging
+            if hasattr(shared_context, 'step_well_filter_config'):
+                step_config = getattr(shared_context, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 ORCHESTRATOR DEBUG: Shared context before merge has step_well_filter_config.well_filter = {well_filter_value}")
+
+            result = _create_merged_config(self.pipeline_config, shared_context)
+
+            # DEBUG: Check what the merged result looks like
+            if hasattr(result, 'step_well_filter_config'):
+                step_config = getattr(result, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 ORCHESTRATOR DEBUG: Merged result has step_well_filter_config.well_filter = {well_filter_value}")
+
+            return result
 
     @contextlib.contextmanager
     def config_context(self, *, for_serialization: bool = False):

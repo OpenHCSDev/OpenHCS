@@ -573,10 +573,34 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         if not params:
             return False
 
+        # Validate that type hints can be resolved (skip functions with missing dependencies)
+        if not self._validate_type_hints(func, func_name):
+            return False
+
         # Library-specific signature validation
         return self._check_first_parameter(params[0], func_name)
 
 
+    def _validate_type_hints(self, func: Callable, func_name: str) -> bool:
+        """
+        Validate that function type hints can be resolved.
+
+        Returns False if type hints reference missing dependencies (e.g., torch when not installed).
+        This prevents functions with unresolvable type hints from being registered.
+        """
+        try:
+            from typing import get_type_hints
+            # Try to resolve type hints - this will fail if dependencies are missing
+            get_type_hints(func)
+            return True
+        except NameError as e:
+            # Type hint references a missing dependency (e.g., 'torch' not defined)
+            logger.warning(f"Skipping function '{func_name}' due to unresolvable type hints: {e}")
+            return False
+        except Exception:
+            # Other type hint resolution errors - be conservative and allow the function
+            # (this handles edge cases where get_type_hints fails for other reasons)
+            return True
 
     @abstractmethod
     def _check_first_parameter(self, first_param, func_name: str) -> bool:

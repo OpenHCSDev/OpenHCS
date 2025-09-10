@@ -134,8 +134,38 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
     # RESET FIX: Skip concrete override check if field has been explicitly reset
     if not ignore_concrete_override and _has_concrete_field_override(base_class, field_name):
 
-        # Regular case: Navigate through field paths for nested configs
+        # CRITICAL FIX: For nested configs, check thread-local context values first
+        # This ensures nested fields like step_well_filter_config.well_filter use thread-local values
+        if field_name == "well_filter":
+            print(f"🔍 NESTED DEBUG: Checking thread-local context for {base_class.__name__}.{field_name}")
+            print(f"🔍 NESTED DEBUG: current_context type = {type(current_context)}")
+            if hasattr(current_context, 'step_well_filter_config'):
+                step_config = getattr(current_context, 'step_well_filter_config')
+                print(f"🔍 NESTED DEBUG: step_well_filter_config = {step_config}")
+                if hasattr(step_config, 'well_filter'):
+                    step_well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 NESTED DEBUG: step_well_filter_config.well_filter = {step_well_filter_value}")
+
         field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
+        if field_name == "well_filter":
+            print(f"🔍 NESTED DEBUG: Found field paths for {base_class.__name__}: {field_paths}")
+
+        for field_path in field_paths:
+            config_instance = FieldPathNavigator.navigate_to_instance(current_context, field_path)
+            if field_name == "well_filter":
+                print(f"🔍 NESTED DEBUG: field_path={field_path}, config_instance={config_instance}")
+
+            if config_instance and hasattr(config_instance, field_name):
+                field_value = getattr(config_instance, field_name, None)
+                if field_name == "well_filter":
+                    print(f"🔍 NESTED DEBUG: {field_path}.{field_name} = {field_value}")
+
+                if field_value is not None:
+                    if field_name == "well_filter":
+                        print(f"🔍 NESTED THREAD-LOCAL: {base_class.__name__}.{field_name} = {field_value} (from thread-local {field_path})")
+                    return field_value
+
+        # Regular case: Navigate through field paths for nested configs (fallback)
 
         if field_name == "well_filter":
             print(f"🔍 USER OVERRIDE DEBUG: Looking for {base_class.__name__} paths: {field_paths}")
