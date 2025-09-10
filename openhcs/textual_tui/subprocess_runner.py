@@ -166,7 +166,7 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
         # Global config is already a proper object from pickle - no reconstruction needed!
         log_thread_count("using pickled global config")
         logger.info(f"🔥 SUBPROCESS: Using pickled global config: {type(global_config)}")
-        logger.info(f"🔥 SUBPROCESS: Zarr compressor: {global_config.zarr.compressor.value}")
+        logger.info(f"🔥 SUBPROCESS: Zarr compressor: {global_config.zarr_config.compressor.value}")
         log_thread_count("after global config validation")
 
         # NUCLEAR WRAP: GPU registry setup

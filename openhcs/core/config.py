@@ -76,6 +76,7 @@ class ZarrChunkStrategy(Enum):
 
 class MaterializationBackend(Enum):
     """Available backends for materialization (persistent storage only)."""
+    AUTO = "auto"
     ZARR = "zarr"
     DISK = "disk"
 
@@ -168,6 +169,9 @@ class ZarrConfig:
 @dataclass(frozen=True)
 class VFSConfig:
     """Configuration for Virtual File System (VFS) related operations."""
+    read_backend: Backend = Backend.AUTO
+    """Backend for reading input data. AUTO uses metadata-based detection for OpenHCS plates."""
+
     intermediate_backend: Backend = Backend.MEMORY
     """Backend for storing intermediate step results that are not explicitly materialized."""
 

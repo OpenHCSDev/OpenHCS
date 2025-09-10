@@ -105,13 +105,6 @@ class AbstractStep(abc.ABC):
     )
     ```
 
-    # Clause 3 — Declarative Primacy
-    # Clause 66 — Immutability After Construction
-    # Clause 88 — No Inferred Capabilities
-    # Clause 106-A — Declared Memory Types
-    # Clause 246 — Statelessness Mandate
-    # Clause 251 — Declarative Memory Conversion
-    # Clause 503 — Cognitive Load Transfer
     """
 
 

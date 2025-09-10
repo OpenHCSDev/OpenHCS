@@ -891,7 +891,11 @@ class PipelineOrchestrator:
 
         # Single pass through all filenames - extract all components at once
         try:
-            filenames = self.filemanager.list_files(str(self.input_dir), Backend.DISK.value, extensions=DEFAULT_IMAGE_EXTENSIONS)
+            # Use primary backend from microscope handler
+            backend_to_use = self.microscope_handler.get_primary_backend(self.input_dir)
+            logger.debug(f"Using backend '{backend_to_use}' for file listing based on available backends")
+
+            filenames = self.filemanager.list_files(str(self.input_dir), backend_to_use, extensions=DEFAULT_IMAGE_EXTENSIONS)
             logger.debug(f"Parsing {len(filenames)} filenames in single pass...")
 
             for filename in filenames:

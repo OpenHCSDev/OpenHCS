@@ -301,6 +301,8 @@ class OpenHCSMetadataHandler(MetadataHandler):
 
         return available_backends
 
+
+
     def _resolve_plate_root(self, input_dir: Union[str, Path]) -> Path:
         """
         Resolve the plate root directory from an input directory.
@@ -627,6 +629,15 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
             logger.warning(f"Failed to get available backends from metadata for {plate_path}: {e}")
             # Fall back to all compatible backends if metadata reading fails
             return self.compatible_backends
+
+    def get_primary_backend(self, plate_path: Union[str, Path]) -> str:
+        """
+        Get the primary backend name for OpenHCS plates.
+
+        Uses metadata-based detection to determine the primary backend.
+        """
+        available_backends_dict = self.metadata_handler.get_available_backends(plate_path)
+        return next(iter(available_backends_dict.keys()))
 
     def initialize_workspace(self, plate_path: Path, workspace_path: Optional[Path], filemanager: FileManager) -> Path:
         """

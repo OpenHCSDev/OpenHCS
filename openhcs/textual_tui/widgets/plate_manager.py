@@ -962,7 +962,7 @@ class PlateManagerWidget(ButtonListWidget):
                 from openhcs.core.context.global_config import get_current_global_config
                 export_config = get_current_global_config(GlobalPipelineConfig)
                 export_vfs_config = VFSConfig(
-                    intermediate_backend=export_config.vfs.intermediate_backend,
+                    intermediate_backend=export_config.vfs_config.intermediate_backend,
                     materialization_backend=MaterializationBackend.ZARR
                 )
 
