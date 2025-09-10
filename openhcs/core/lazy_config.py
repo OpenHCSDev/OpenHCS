@@ -66,19 +66,27 @@ class ContextEventCoordinator:
         """Build shared temporary context from all form managers in the same config window."""
         print(f"🔍 BUILD SHARED CONTEXT: Starting with global_config_type={global_config_type}")
 
-        # CRITICAL FIX: Use orchestrator context when available for live updates
-        # Check if any form manager has a context provider (indicating orchestrator context)
+        # CRITICAL FIX: Use current form context that respects shared reset state
+        # Find a form manager that can build context from current form values
         base_context = None
         for manager in form_managers:
-            if hasattr(manager, 'context_provider') and manager.context_provider:
-                base_context = manager.context_provider()
-                print(f"🔍 BUILD SHARED CONTEXT: Using orchestrator context from form manager")
+            if hasattr(manager, '_build_context_from_current_form_values'):
+                base_context = manager._build_context_from_current_form_values()
+                print(f"🔍 BUILD SHARED CONTEXT: Using current form context (respects shared reset state)")
                 break
 
-        # Fallback to thread-local context if no orchestrator context available
+        # Fallback to orchestrator context if no form context available
+        if not base_context:
+            for manager in form_managers:
+                if hasattr(manager, 'context_provider') and manager.context_provider:
+                    base_context = manager.context_provider()
+                    print(f"🔍 BUILD SHARED CONTEXT: Using orchestrator context as fallback")
+                    break
+
+        # Final fallback to thread-local context
         if not base_context:
             base_context = get_current_global_config(global_config_type)
-            print(f"🔍 BUILD SHARED CONTEXT: Using thread-local context as fallback")
+            print(f"🔍 BUILD SHARED CONTEXT: Using thread-local context as final fallback")
 
         print(f"🔍 BUILD SHARED CONTEXT: base_context={base_context}")
         if not base_context:

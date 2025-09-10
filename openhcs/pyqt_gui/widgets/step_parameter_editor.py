@@ -49,6 +49,12 @@ class StepParameterEditorWidget(QWidget):
         self.step = step
         self.service_adapter = service_adapter
         self.orchestrator = orchestrator  # Store orchestrator reference for context management
+
+        # CRITICAL FIX: Create step-editor-specific coordinator for internal form updates
+        # This allows forms within the step editor to update each other without affecting external windows
+        from openhcs.core.lazy_config import ContextEventCoordinator
+        self._step_editor_coordinator = ContextEventCoordinator()
+        print(f"🔍 STEP EDITOR: Created step-editor-specific coordinator for internal form updates")
         
         # Analyze AbstractStep signature to get all inherited parameters (mirrors Textual TUI)
         from openhcs.core.steps.abstract import AbstractStep
@@ -93,8 +99,8 @@ class StepParameterEditorWidget(QWidget):
             color_scheme=self.color_scheme,
             placeholder_prefix="Pipeline default",
             param_defaults=param_defaults,
-            global_config_type=GlobalPipelineConfig,  # CRITICAL FIX: Enable thread-local context resolution
-            context_event_coordinator=self.orchestrator._context_event_coordinator  # CRITICAL FIX: Use orchestrator-specific coordinator
+            global_config_type=GlobalPipelineConfig,  # Enable thread-local context resolution
+            context_event_coordinator=self._step_editor_coordinator  # CRITICAL FIX: Use step-editor-specific coordinator for internal updates only
         )
         
         self.setup_ui()

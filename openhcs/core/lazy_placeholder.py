@@ -93,7 +93,7 @@ def _apply_subclass_precedence(concrete_values, field_name: str):
     return filtered_values
 
 
-def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, field_name: str):
+def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, field_name: str, ignore_concrete_override: bool = False):
     """
     Resolve field using LAZY-FIRST resolution order.
 
@@ -115,7 +115,8 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
 
     # CRITICAL FIX: For concrete override classes, check context for user-set values FIRST
     # before falling back to class default. This ensures saved values are respected.
-    if _has_concrete_field_override(base_class, field_name):
+    # RESET FIX: Skip concrete override check if field has been explicitly reset
+    if not ignore_concrete_override and _has_concrete_field_override(base_class, field_name):
         # CRITICAL FIX: Use current thread-local context, not the passed global_config parameter
         # This ensures we use the same context that the MRO logic uses
         current_context = get_current_global_config(GlobalPipelineConfig)
@@ -177,8 +178,9 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
         # Inherit-as-none classes should inherit from parents, not use their own static defaults
         mro_types = [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
 
-    # CRITICAL FIX: Collect ALL concrete values first, then apply subclass precedence
-    concrete_values = []  # List of (value, source_class, field_path, config_instance)
+    # CRITICAL FIX: Stop inheritance at first concrete override (inheritance blocker pattern)
+    # Traverse MRO in order and return the first concrete value found
+    # This respects the inheritance hierarchy where concrete overrides block further inheritance
 
     for mro_class in mro_types:
         field_paths = FieldPathDetector.find_all_field_paths_unified(type(global_config), mro_class)
@@ -187,30 +189,19 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
             config_instance = FieldPathNavigator.navigate_to_instance(global_config, field_path)
             if config_instance and hasattr(config_instance, field_name):
                 value = getattr(config_instance, field_name)
-                # CRITICAL FIX: Only treat as concrete if value is not None AND class has concrete override
-                # This prevents inherit-as-none classes from contributing None values that block inheritance
-                if value is not None and _has_concrete_field_override(mro_class, field_name):
-                    concrete_values.append((value, mro_class, field_path, config_instance))
-                elif value is not None and not _has_concrete_field_override(mro_class, field_name):
-                    # This is a user-set value in an inherit-as-none class - also concrete
-                    concrete_values.append((value, mro_class, field_path, config_instance))
-                elif value is None and _has_concrete_field_override(mro_class, field_name) and mro_class == base_class:
-                    # SPECIAL CASE: When target class field is reset to None but has concrete override,
-                    # use the class default instead of looking for inheritance
-                    class_default = getattr(mro_class, field_name)
-                    if field_name == "well_filter":
-                        print(f"🔍 RESET TO CLASS DEFAULT: {mro_class.__name__}.{field_name} reset to None, using class default '{class_default}'")
-                    return class_default
 
-    # GENERIC SUBCLASS PRECEDENCE: Filter out parent class values when subclass has concrete value
-    if len(concrete_values) > 1:
-        filtered_values = _apply_subclass_precedence(concrete_values, field_name)
-        if filtered_values:
-            value, source_class, field_path, _ = filtered_values[0]
-            return value
-    elif len(concrete_values) == 1:
-        value, source_class, field_path, _ = concrete_values[0]
-        return value
+                # Check if this class has a concrete override (inheritance blocker)
+                if _has_concrete_field_override(mro_class, field_name):
+                    # This class blocks inheritance - use its value and stop (even if None)
+                    if field_name == "well_filter":
+                        print(f"🔍 INHERITANCE BLOCKER: {mro_class.__name__}.{field_name} = {value} (concrete override blocks further inheritance)")
+                    return value
+
+                elif value is not None:
+                    # This is a user-set value in an inherit-as-none class - use it and stop
+                    if field_name == "well_filter":
+                        print(f"🔍 USER VALUE: {mro_class.__name__}.{field_name} = {value} (user-set value)")
+                    return value
 
     # STEP 2: If no concrete values found, create lazy instance and let it resolve
     try:
@@ -262,7 +253,8 @@ class LazyDefaultPlaceholderService:
         field_name: str,
         app_config: Optional[Any] = None,
         force_static_defaults: bool = False,
-        placeholder_prefix: Optional[str] = None
+        placeholder_prefix: Optional[str] = None,
+        ignore_concrete_override: bool = False
     ) -> Optional[str]:
         """Get placeholder text for lazy-resolved field with flexible resolution."""
         if not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type):
@@ -289,7 +281,7 @@ class LazyDefaultPlaceholderService:
                 current_app_config = get_current_global_config(GlobalPipelineConfig)
 
                 # SIMPLIFIED: Use LAZY-FIRST resolution only for consistency
-                resolved_value = _resolve_field_with_mro_awareness(current_app_config, dataclass_type, field_name)
+                resolved_value = _resolve_field_with_mro_awareness(current_app_config, dataclass_type, field_name, ignore_concrete_override)
 
 
 

@@ -198,10 +198,20 @@ class ParameterFormManager(QWidget):
         self.widgets = {}
         self.reset_buttons = {}  # Track reset buttons for API compatibility
         self.nested_managers = {}
+        self.reset_fields = set()  # Track fields that have been explicitly reset to show inheritance
 
         # CRITICAL FIX: Track which fields have been explicitly set by users
         # This prevents placeholder updates from destroying user values
         self._user_set_fields: set = set()
+
+        # SHARED RESET STATE: Track reset fields across all nested managers within this form
+        # This enables coordination between nested managers for inheritance resolution
+        if hasattr(parent, 'shared_reset_fields'):
+            # Nested manager: use parent's shared reset state
+            self.shared_reset_fields = parent.shared_reset_fields
+        else:
+            # Root manager: create new shared reset state
+            self.shared_reset_fields = set()
 
         # Store public API attributes for backward compatibility
         self.field_id = field_id
@@ -597,7 +607,7 @@ class ParameterFormManager(QWidget):
             param_type,    # Use the actual nested dataclass type, not parent type
             self.context_provider,  # Propagate parent's context provider
             None,  # parameter_info
-            None,  # parent
+            self,  # parent - CRITICAL FIX: Pass self as parent to share reset state
             False,  # use_scroll_area
             None,   # function_target
             PyQt6ColorScheme(),  # color_scheme
@@ -623,24 +633,29 @@ class ParameterFormManager(QWidget):
         # CRITICAL FIX: Run placeholder resolution for:
         # 1. Lazy dataclasses (PipelineConfig forms)
         # 2. Non-lazy dataclasses with context provider (step editors with orchestrator context)
-        if not self.config.is_lazy_dataclass and not (hasattr(self, 'context_provider') and self.context_provider):
+        # 3. Non-lazy dataclasses during reset operations (global config editor)
+        is_reset_operation = hasattr(self, 'reset_fields') and param_name in self.reset_fields
+        if not self.config.is_lazy_dataclass and not (hasattr(self, 'context_provider') and self.context_provider) and not is_reset_operation:
             return
 
-        # CRITICAL FIX: Use context provider when available (for step editors with orchestrator context)
-        # This ensures step editors resolve against orchestrator's PipelineConfig concrete values
-        if hasattr(self, 'context_provider') and self.context_provider:
-            app_config = self.context_provider()
-            print(f"🔍 PLACEHOLDER DEBUG: Using orchestrator context for {param_name}")
-        else:
-            # Fallback: Build context from current form values (for global config editing)
-            app_config = self._build_context_from_current_form_values()
-            print(f"🔍 PLACEHOLDER DEBUG: Using form-built context for {param_name}")
+        # CRITICAL FIX: Always use current form context for placeholder resolution
+        # This ensures placeholders reflect the current form state (including reset fields)
+        # rather than potentially stale saved context
+        app_config = self._build_context_from_current_form_values()
+        print(f"🔍 PLACEHOLDER DEBUG: Using current form context for {param_name} (ensures reset fields show correct inheritance)")
+
+        # CRITICAL FIX: For reset fields, handle concrete overrides correctly to respect inheritance hierarchy
+        from openhcs.core.lazy_placeholder import _has_concrete_field_override
+        is_reset_operation = hasattr(self, 'reset_fields') and param_name in self.reset_fields
+        ignore_concrete_override = (is_reset_operation and
+                                  not _has_concrete_field_override(self.dataclass_type, param_name))
 
         # Get placeholder resolved against appropriate context
         placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
             self.dataclass_type, param_name,
             app_config=app_config,
-            placeholder_prefix=self.placeholder_prefix
+            placeholder_prefix=self.placeholder_prefix,
+            ignore_concrete_override=ignore_concrete_override
         )
 
         if placeholder_text is None:
@@ -721,11 +736,11 @@ class ParameterFormManager(QWidget):
 
         print(f"🔍 CONTEXT DEBUG: current_dataclass_instance={current_dataclass_instance}")
         if current_dataclass_instance:
-                # CRITICAL FIX: Get current widget values, not just stored parameters
-                # This captures values that are typed but not yet saved to parameters
-                current_form_values = self.parameters.copy()
+                # CRITICAL FIX: Start with empty dict and prioritize current widget values
+                # This ensures current widget state takes precedence over saved parameters
+                current_form_values = {}
 
-                # CRITICAL FIX: Force read current widget values to capture unsaved typing
+                # CRITICAL FIX: First collect current widget values (highest priority)
                 for param_name, widget in self.widgets.items():
                     # CRITICAL FIX: Skip the field being excluded (e.g., during reset)
                     print(f"🔍 EXCLUSION DEBUG: Checking param_name='{param_name}' vs exclude_field='{exclude_field}'")
@@ -733,6 +748,14 @@ class ParameterFormManager(QWidget):
                         # For excluded field, use None instead of current widget value
                         current_form_values[param_name] = None
                         print(f"🔍 WIDGET DEBUG: {self.field_id}.{param_name} EXCLUDED from context (reset)")
+                        continue
+
+                    # SHARED RESET STATE: Check if this field has been reset by any manager in the form
+                    field_path = f"{self.field_id}.{param_name}"
+                    if field_path in self.shared_reset_fields:
+                        # Field has been reset, use None for inheritance resolution
+                        current_form_values[param_name] = None
+                        print(f"🔍 SHARED RESET DEBUG: {field_path} found in shared reset state, using None")
                         continue
 
                     try:
@@ -809,8 +832,24 @@ class ParameterFormManager(QWidget):
                     current_nested_values.update(nested_manager.parameters)
                     print(f"🔍 NESTED PARAMS DEBUG: {nested_name}.parameters = {nested_manager.parameters}")
 
+                    # CRITICAL FIX: Override with shared reset state BEFORE widget values
+                    # This ensures reset fields take precedence over saved context
+                    for param_name in current_nested_values.keys():
+                        nested_field_path = f"{nested_name}.{param_name}"
+                        if nested_field_path in self.shared_reset_fields:
+                            current_nested_values[param_name] = None
+                            print(f"🔍 SHARED RESET OVERRIDE: {nested_field_path} overridden to None from shared reset state")
+
                     # Then, override with current widget values to capture unsaved typing
                     for param_name, widget in nested_manager.widgets.items():
+                        # SHARED RESET STATE: Check if this nested field has been reset
+                        nested_field_path = f"{nested_name}.{param_name}"
+                        if nested_field_path in self.shared_reset_fields:
+                            # Field has been reset, use None for inheritance resolution
+                            current_nested_values[param_name] = None
+                            print(f"🔍 SHARED RESET DEBUG: {nested_field_path} found in shared reset state, using None")
+                            continue
+
                         try:
                             widget_value = None
 
@@ -975,9 +1014,14 @@ class ParameterFormManager(QWidget):
             return
 
         if value is None and self.config.is_lazy_dataclass:
+            # CRITICAL FIX: For reset fields, exclude them from context to show inheritance
+            # This ensures reset fields don't see their own concrete values in the context
+            exclude_field_for_context = param_name if param_name in self.reset_fields else exclude_field
+            print(f"🔍 RESET CONTEXT DEBUG: param_name='{param_name}', in reset_fields={param_name in self.reset_fields}, exclude_field_for_context='{exclude_field_for_context}'")
+
             # CRITICAL FIX: Use orchestrator-specific context instead of thread-local context
             # Pass exclude_field to ensure reset doesn't see the old value
-            current_form_context = self._build_context_from_current_form_values(exclude_field=exclude_field)
+            current_form_context = self._build_context_from_current_form_values(exclude_field=exclude_field_for_context)
 
             # DEBUG: Check what the context looks like for this specific field
             if param_name == "well_filter_mode" and exclude_field == "well_filter_mode":
@@ -988,10 +1032,18 @@ class ParameterFormManager(QWidget):
                     if hasattr(wf_config, 'well_filter_mode'):
                         print(f"🔍 RESET CONTEXT DEBUG: well_filter_mode = {wf_config.well_filter_mode}")
 
+            # CRITICAL FIX: Only ignore concrete overrides for fields that can actually inherit
+            # If this form represents the TOP of the inheritance hierarchy for this field,
+            # show the class default instead of trying to inherit
+            from openhcs.core.lazy_placeholder import _has_concrete_field_override
+            ignore_concrete_override = (param_name in self.reset_fields and
+                                      not _has_concrete_field_override(self.dataclass_type, param_name))
+
             placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                 self.dataclass_type, param_name,
                 app_config=current_form_context,
-                placeholder_prefix=self.placeholder_prefix
+                placeholder_prefix=self.placeholder_prefix,
+                ignore_concrete_override=ignore_concrete_override
             )
             if placeholder_text:
                 # Apply placeholder to all widget types using PyQt6WidgetEnhancer
@@ -1108,37 +1160,34 @@ class ParameterFormManager(QWidget):
         from openhcs.core.lazy_placeholder import _has_concrete_field_override
         has_concrete_override = _has_concrete_field_override(self.dataclass_type, param_name)
 
-        if has_concrete_override:
-            # Field has concrete override - reset to the concrete value
-            reset_value = getattr(self.dataclass_type, param_name)
-            self.parameters[param_name] = reset_value
-            print(f"🔍 RESET DEBUG: {param_name} has concrete override, reset to {reset_value}")
+        # CRITICAL FIX: Handle reset value based on dataclass type
+        if self.config.is_lazy_dataclass:
+            # Lazy configs: reset should MASK the value (set to None) to show inheritance
+            self.parameters[param_name] = None
+            reset_value = None
         else:
-            # Field should inherit - behavior depends on dataclass type
-            if param_name in self.parameters:
-                del self.parameters[param_name]
+            # Non-lazy configs: reset to actual class field default
+            import dataclasses
+            field_default = None
+            for field in dataclasses.fields(self.dataclass_type):
+                if field.name == param_name:
+                    if field.default != dataclasses.MISSING:
+                        field_default = field.default
+                    elif field.default_factory != dataclasses.MISSING:
+                        field_default = field.default_factory()
+                    break
+            self.parameters[param_name] = field_default
+            reset_value = field_default
+            print(f"🔍 RESET DEBUG: Non-lazy dataclass - reset {param_name} to class default: {field_default}")
 
-            # CRITICAL FIX: Different reset behavior for static vs lazy dataclasses
-            if self.config.is_lazy_dataclass:
-                # Lazy dataclasses: Clear widget and show inheritance placeholder
-                reset_value = None  # This will clear the widget and show placeholder
-                print(f"🔍 RESET DEBUG: Lazy dataclass - {param_name} removed from parameters, will clear widget and show placeholder")
-            else:
-                # Static dataclasses: Reset to static constructor default
-                import dataclasses
-                if dataclasses.is_dataclass(self.dataclass_type):
-                    field_default = next((f.default for f in dataclasses.fields(self.dataclass_type) if f.name == param_name), dataclasses.MISSING)
-                    if field_default is not dataclasses.MISSING:
-                        reset_value = field_default
-                        print(f"🔍 RESET DEBUG: Static dataclass - {param_name} reset to constructor default: {reset_value}")
-                    else:
-                        reset_value = None
-                        print(f"🔍 RESET DEBUG: Static dataclass - {param_name} has no default, using None")
-                else:
-                    reset_value = None
-                    print(f"🔍 RESET DEBUG: Non-dataclass - {param_name} using None")
+        # Track that this field has been explicitly reset to show inheritance
+        self.reset_fields.add(param_name)
 
-            print(f"🔍 RESET DEBUG: {param_name} removed from parameters to allow inheritance")
+        # SHARED RESET STATE: Also add to shared reset state for coordination with nested managers
+        field_path = f"{self.field_id}.{param_name}"
+        self.shared_reset_fields.add(field_path)
+        print(f"🔍 RESET DEBUG: {param_name} reset to None and marked as reset field to show inherited placeholder")
+        print(f"🔍 SHARED RESET DEBUG: Added {field_path} to shared reset state")
 
         # CRITICAL FIX: For orchestrator-specific forms, use the orchestrator's context for placeholder resolution
         # This ensures placeholders show the correct orchestrator-specific thread-local values
@@ -1194,29 +1243,55 @@ class ParameterFormManager(QWidget):
                     if hasattr(wf_config, 'well_filter_mode'):
                         print(f"🔍 RESET PATH 2 DEBUG: well_filter_mode = {wf_config.well_filter_mode}")
 
-                # CRITICAL FIX: For reset operations, ALWAYS use pure thread-local context
-                # This ensures reset shows original thread-local defaults, not orchestrator's saved values
-                # We must bypass the orchestrator's context provider for reset operations
-                from openhcs.core.context.global_config import get_current_global_config
-                from openhcs.core.config import GlobalPipelineConfig
-                pure_thread_local_context = get_current_global_config(GlobalPipelineConfig)
+                # CRITICAL FIX: Use the same placeholder logic as live updates (which works correctly)
+                # This ensures reset uses the same context building logic as normal placeholder updates
+                print(f"🔍 RESET PATH 2 DEBUG: Using live update placeholder logic for {param_name}")
+                self._apply_placeholder_with_lazy_context(widget, param_name, None)
 
-                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    self.dataclass_type, param_name,
-                    app_config=pure_thread_local_context,  # Use pure thread-local context for reset
-                    placeholder_prefix=self.placeholder_prefix
-                )
-                print(f"🔍 RESET PATH 2 DEBUG: Got placeholder_text='{placeholder_text}'")
-                if placeholder_text:
-                    from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+            # 4. CRITICAL FIX: Emit parameter_changed to trigger cross-form updates
+            # This notifies other nested managers that the context has changed
+            # Do this AFTER the placeholder is set correctly to avoid interference
+            print(f"🔍 RESET COORDINATION: Emitting parameter_changed for {param_name} = {reset_value}")
+            self.parameter_changed.emit(param_name, reset_value)
 
-            # 4. CRITICAL FIX: For nested forms, emit parameter change to trigger parent's sibling updates
+            # 5. CRITICAL FIX: For nested forms, emit parameter change to trigger parent's sibling updates
             # This ensures that when a field is reset in a nested form, sibling forms see the updated inheritance
             # The parent form manager has access to all sibling managers and can trigger proper updates
 
             self.nested_managers.get(param_name) and hasattr(self.nested_managers[param_name], 'reset_all_parameters') and self.nested_managers[param_name].reset_all_parameters()
-            self.parameter_changed.emit(param_name, reset_value)
+
+            # Get the concrete class (not the lazy class) to check for concrete overrides
+            from openhcs.core.lazy_config import get_base_type_for_lazy
+            concrete_class = get_base_type_for_lazy(self.dataclass_type) or self.dataclass_type
+            print(f"🔍 RESET EMIT DEBUG: self.dataclass_type={self.dataclass_type.__name__}, concrete_class={concrete_class.__name__}")
+            should_emit = not _has_concrete_field_override(concrete_class, param_name)
+            print(f"🔍 RESET EMIT DEBUG: should_emit={should_emit} for {param_name}")
+
+            if should_emit:
+                print(f"🔍 RESET FINAL DEBUG: Emitting parameter_changed for {param_name} (no concrete override)")
+                self.parameter_changed.emit(param_name, reset_value)
+            else:
+                print(f"🔍 RESET FINAL DEBUG: Skipping parameter_changed for {param_name} (has concrete override - prevents cross-form interference)")
+
+                # CRITICAL FIX: For concrete override fields, still need to update orchestrator context
+                # Other forms that inherit from this field need to see the reset value
+                # Temporarily emit parameter change to update context, then restore correct placeholder
+                print(f"🔍 RESET FINAL DEBUG: Updating context for inheritance chain")
+
+                # Save the current correct placeholder
+                widget = self.widgets.get(param_name)
+                if widget and hasattr(widget, 'placeholderText'):
+                    correct_placeholder = widget.placeholderText()
+                    print(f"🔍 RESET FINAL DEBUG: Saved correct placeholder: '{correct_placeholder}'")
+
+                # Emit parameter change to update orchestrator context
+                self.parameter_changed.emit(param_name, reset_value)
+
+                # Restore the correct placeholder after context update
+                if widget and correct_placeholder:
+                    from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
+                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, correct_placeholder)
+                    print(f"🔍 RESET FINAL DEBUG: Restored correct placeholder: '{correct_placeholder}'")
         finally:
             # Restore original context after all parameter changes and lazy resolutions are complete
             # Only restore if we actually modified it (non-lazy dataclasses only)
