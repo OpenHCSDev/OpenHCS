@@ -83,10 +83,11 @@ class ContextEventCoordinator:
                     print(f"🔍 BUILD SHARED CONTEXT: Using orchestrator context as fallback")
                     break
 
-        # Final fallback to thread-local context
+        # Final fallback to stack introspection
         if not base_context:
-            base_context = get_current_global_config(global_config_type)
-            print(f"🔍 BUILD SHARED CONTEXT: Using thread-local context as final fallback")
+            from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery
+            base_context = ContextDiscovery.discover_context()
+            print(f"🔍 BUILD SHARED CONTEXT: Using stack introspection as final fallback")
 
         print(f"🔍 BUILD SHARED CONTEXT: base_context={base_context}")
         if not base_context:
@@ -181,7 +182,11 @@ THREAD_LOCAL_FIELD_DEBUG_TEMPLATE = "THREAD-LOCAL LAZY FIELD: {field_name} - ori
 LAZY_CLASS_NAME_PREFIX = "Lazy"
 
 # Core helper functions to eliminate duplication
-_get_current_config = lambda config_type: get_current_global_config(config_type)
+def _get_current_config(config_type):
+    """Get current config using stack introspection instead of thread-local."""
+    from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery
+    context = ContextDiscovery.discover_context()
+    return context if context else None
 
 # Primary value resolution pattern - used throughout module for "try sources, return first non-None"
 def _resolve_value_from_sources(field_name: str, *source_funcs):
@@ -250,16 +255,27 @@ class LazyMethodBindings:
 
     @staticmethod
     def create_resolver(resolution_config: ResolutionConfig) -> Callable[[Any, str], Any]:
-        """Create field resolver method."""
-        return lambda self, field_name: resolution_config.resolve_field(field_name)
+        """Create field resolver method using dual-axis resolution."""
+        from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
+
+        def _resolve_field_value(self, field_name: str) -> Any:
+            # Use stack introspection for context discovery
+            context = ContextDiscovery.discover_context()
+            if context:
+                resolver = get_resolver_for_context(context)
+                return resolver.resolve_field(self, field_name)
+
+            # Fallback to original resolution config if no context found
+            return resolution_config.resolve_field(field_name)
+
+        return _resolve_field_value
 
     @staticmethod
     def create_getattribute() -> Callable[[Any, str], Any]:
-        """Create lazy __getattribute__ method."""
-        # Move imports to module level to avoid repeated inline imports
+        """Create lazy __getattribute__ method using stack introspection."""
+        # Import dual-axis resolution components
+        from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
         from openhcs.core.lazy_placeholder import _has_concrete_field_override
-        from openhcs.core.context.global_config import get_current_global_config
-        from openhcs.core.field_path_detection import FieldPathDetector, FieldPathNavigator
 
         def _find_mro_concrete_value(base_class, name):
             """Extract common MRO traversal pattern."""
@@ -267,34 +283,23 @@ class LazyMethodBindings:
                         if _has_concrete_field_override(cls, name)), None)
 
         def _try_global_context_value(self, base_class, name):
-            """Extract global context resolution logic."""
+            """Extract global context resolution logic using stack introspection."""
             if not hasattr(self, '_global_config_type'):
                 return None
 
-            current_context = get_current_global_config(self._global_config_type)
+            # Auto-discover context from call stack instead of thread-local
+            current_context = ContextDiscovery.discover_context()
             if not current_context:
                 return None
 
-            # Special case: If base_class is the same as the global config type,
-            # directly access the field from current_context (root-level lazy config)
-            if base_class == self._global_config_type:
-                if hasattr(current_context, name):
-                    global_value = getattr(current_context, name)
-                    if global_value is not None:
-                        return global_value
+            # Use dual-axis resolver for field resolution
+            resolver = get_resolver_for_context(current_context)
+            resolved_value = resolver.resolve_field(self, name)
 
-            # Regular case: Navigate through field paths for nested configs
-            field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
-            for field_path in field_paths:
-                try:
-                    context_value = FieldPathNavigator.navigate_to_instance(current_context, field_path)
-                    if context_value and hasattr(context_value, name):
-                        global_value = getattr(context_value, name)
-                        if global_value is not None:
-                            print(f"🔍 LAZY GETATTR: Using global context value for {base_class.__name__}.{name} = '{global_value}' from {field_path} (overriding MRO default)")
-                            return global_value
-                except (AttributeError, TypeError):
-                    continue
+            if resolved_value is not None:
+                print(f"🔍 LAZY GETATTR: Using stack-discovered context value for {base_class.__name__}.{name} = '{resolved_value}' (dual-axis resolution)")
+                return resolved_value
+
             return None
 
         def __getattribute__(self: Any, name: str) -> Any:
@@ -324,8 +329,23 @@ class LazyMethodBindings:
                     if hasattr(self, recursion_key):
                         object.__delattr__(self, recursion_key)
 
-            # Fallback to normal lazy resolution if no inheritance fix needed
+            # Fallback to dual-axis resolution if no inheritance fix needed
             try:
+                # Use stack introspection for resolution instead of _resolve_field_value
+                context = ContextDiscovery.discover_context()
+                if context:
+                    resolver = get_resolver_for_context(context)
+                    resolved_value = resolver.resolve_field(self, name)
+                    if resolved_value is not None:
+                        return resolved_value
+
+                # If no scalar value found, check if this is a nested config field that should be auto-created
+                field_obj = next((f for f in fields(self.__class__) if f.name == name), None)
+                if field_obj and is_dataclass(field_obj.type):
+                    # Create lazy instance of the nested config type
+                    return field_obj.type()
+
+                # If no context found, try the old resolve method as final fallback
                 resolve_method = object.__getattribute__(self, '_resolve_field_value')
                 return resolve_method(name)
             except AttributeError:
@@ -592,7 +612,7 @@ class LazyDataclassFactory:
         # In normal app operation, thread-local storage should always be available
         def context_aware_static_fallback(field_name: str) -> Any:
             """Static fallback that warns when used in contexts where thread-local storage should exist."""
-            # Check if we're in a context where thread-local storage should exist
+            # Check if we're in a context where stack introspection should find context
             current_context = _get_current_config(global_config_type)
 
             if current_context is None and HAS_PYQT:
@@ -601,8 +621,8 @@ class LazyDataclassFactory:
                 if app_instance and hasattr(app_instance, 'global_config'):
                     logger.warning(
                         f"🚨 ARCHITECTURE WARNING: Static fallback used for {base_class.__name__}.{field_name} "
-                        f"in PyQt app context where thread-local storage should be available. "
-                        f"This indicates a context management bug."
+                        f"in PyQt app context where stack introspection should find context. "
+                        f"This indicates a context discovery bug."
                     )
 
             # Use static default
@@ -733,7 +753,8 @@ def _create_field_level_hierarchy_provider(base_class: Type, global_config_type:
 # Generic utility functions for clean thread-local storage management
 def ensure_global_config_context(global_config_type: Type, global_config_instance: Any) -> None:
     """Ensure proper thread-local storage setup for any global config type."""
-    set_current_global_config(global_config_type, global_config_instance)
+    from openhcs.core.context.global_config import set_global_config_for_editing
+    set_global_config_for_editing(global_config_type, global_config_instance)
 
 
 

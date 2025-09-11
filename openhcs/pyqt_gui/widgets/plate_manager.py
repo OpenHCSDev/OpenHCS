@@ -616,8 +616,8 @@ class PlateManagerWidget(QWidget):
 
             # Update thread-local storage for MaterializationPathConfig defaults
             from openhcs.core.config import GlobalPipelineConfig
-            from openhcs.core.context.global_config import set_current_global_config
-            set_current_global_config(GlobalPipelineConfig, new_config)
+            from openhcs.core.context.global_config import set_global_config_for_editing
+            set_global_config_for_editing(GlobalPipelineConfig, new_config)
 
             # Save to cache for persistence between sessions
             self._save_global_config_to_cache(new_config)
@@ -1429,24 +1429,7 @@ class PlateManagerWidget(QWidget):
         for orchestrator in self.orchestrators.values():
             self._update_orchestrator_global_config(orchestrator, new_config)
 
-        # Update thread-local storage for currently selected orchestrator
-        # This ensures step forms resolve against the updated orchestrator defaults
-        if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
-            current_orchestrator = self.orchestrators[self.selected_plate_path]
-            effective_config = current_orchestrator.get_effective_config()
-            from openhcs.core.config import GlobalPipelineConfig
-            from openhcs.core.context.global_config import set_current_global_config
-            set_current_global_config(GlobalPipelineConfig, effective_config)
-            logger.debug(f"Updated thread-local storage for currently selected orchestrator: {self.selected_plate_path}")
-
-        # Update thread-local storage for currently selected orchestrator
-        if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
-            current_orchestrator = self.orchestrators[self.selected_plate_path]
-            effective_config = current_orchestrator.get_effective_config()
-            from openhcs.core.config import GlobalPipelineConfig
-            from openhcs.core.context.global_config import set_current_global_config
-            set_current_global_config(GlobalPipelineConfig, effective_config)
-            logger.debug(f"Updated thread-local storage for currently selected orchestrator: {self.selected_plate_path}")
+        # REMOVED: Thread-local modification - dual-axis resolver handles orchestrator context automatically
 
         logger.info(f"Applied new global config to {len(self.orchestrators)} orchestrators")
 

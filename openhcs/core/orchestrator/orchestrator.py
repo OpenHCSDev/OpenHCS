@@ -280,20 +280,18 @@ class PipelineOrchestrator:
         print(f"🔍 ORCHESTRATOR: Created orchestrator-specific context event coordinator")
 
         # Initialize per-orchestrator configuration
-        # CRITICAL FIX: Do NOT create a default PipelineConfig when none is provided
-        # This prevents lazy dataclass resolution from corrupting the thread-local context
-        # When pipeline_config is None, get_effective_config() will return the shared context directly
-        self.pipeline_config = pipeline_config
-        if pipeline_config is None:
-            logger.info("PipelineOrchestrator using shared context (no pipeline-specific configuration).")
-        else:
-            logger.info("PipelineOrchestrator using provided pipeline configuration.")
+        # DUAL-AXIS FIX: Always create a PipelineConfig instance to make orchestrator detectable as context provider
+        # This ensures the orchestrator has a dataclass attribute for stack introspection
+        # PipelineConfig is already the lazy version of GlobalPipelineConfig
+        from openhcs.core.config import PipelineConfig
+        self.pipeline_config = pipeline_config or PipelineConfig()
+        logger.info("PipelineOrchestrator initialized with PipelineConfig for context discovery.")
 
 
 
-        # Set current global config for MaterializationPathConfig defaults
-        shared_context = get_current_global_config(GlobalPipelineConfig)
-        set_current_global_config(GlobalPipelineConfig, shared_context)
+        # REMOVED: Unnecessary thread-local modification
+        # The orchestrator should not modify thread-local storage during initialization
+        # Global config is already available through the dual-axis resolver fallback
 
         if plate_path is None:
             # This case should ideally be prevented by TUI logic if plate_path is mandatory
@@ -1010,19 +1008,6 @@ class PipelineOrchestrator:
             for_serialization: If True, resolves all values for pickling/storage.
                               If False, preserves None values for sibling inheritance.
         """
-        if not self.pipeline_config:
-            shared_context = get_current_global_config(GlobalPipelineConfig)
-            if shared_context is None:
-                raise RuntimeError("No global configuration context available")
-
-            # DEBUG: Check what the shared context looks like
-            if hasattr(shared_context, 'step_well_filter_config'):
-                step_config = getattr(shared_context, 'step_well_filter_config')
-                if hasattr(step_config, 'well_filter'):
-                    well_filter_value = getattr(step_config, 'well_filter')
-                    print(f"🔍 ORCHESTRATOR DEBUG: No pipeline_config, returning shared_context with step_well_filter_config.well_filter = {well_filter_value}")
-
-            return shared_context
 
         if for_serialization:
             result = self.pipeline_config.to_base_config()
@@ -1061,24 +1046,19 @@ class PipelineOrchestrator:
 
     @contextlib.contextmanager
     def config_context(self, *, for_serialization: bool = False):
-        """Context manager for operations requiring orchestrator config context."""
-        original_config = get_current_global_config(GlobalPipelineConfig)
-        try:
-            if self.pipeline_config:
-                effective_config = self.get_effective_config(for_serialization=for_serialization)
-                set_current_global_config(GlobalPipelineConfig, effective_config)
-            yield self
-        finally:
-            set_current_global_config(GlobalPipelineConfig, original_config)
+        """Context manager for operations requiring orchestrator config context.
+
+        With dual-axis resolution, this ensures the orchestrator is in the call stack
+        for context discovery during config resolution.
+        """
+        # The orchestrator is now in the call stack for dual-axis resolver to discover
+        # No thread-local modification needed - stack introspection handles context discovery
+        yield self
 
     def clear_pipeline_config(self) -> None:
         """Clear per-orchestrator configuration."""
-        # Reset thread-local storage to shared global config
-        if self.pipeline_config is not None:
-            shared_context = get_current_global_config(GlobalPipelineConfig)
-            if shared_context is not None:
-                set_current_global_config(GlobalPipelineConfig, shared_context)
-
+        # REMOVED: Thread-local modification - dual-axis resolver handles context automatically
+        # No need to modify thread-local storage when clearing orchestrator config
         self.pipeline_config = None
         logger.info(f"Cleared per-orchestrator config for plate: {self.plate_path}")
 

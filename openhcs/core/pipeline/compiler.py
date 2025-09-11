@@ -221,8 +221,10 @@ class PipelineCompiler:
             current_plan["variable_components"] = step.variable_components
             current_plan["group_by"] = step.group_by
             # Resolve lazy configs for this step BEFORE checking inheritance
+            # Use orchestrator context to ensure proper hierarchical inheritance
             from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-            resolved_step = resolve_lazy_configurations_for_serialization([step])[0]
+            with orchestrator.config_context(for_serialization=True):
+                resolved_step = resolve_lazy_configurations_for_serialization([step])[0]
 
             # Store WellFilterConfig instances only if they match the current axis
             from openhcs.core.config import WellFilterConfig, StreamingConfig, WellFilterMode

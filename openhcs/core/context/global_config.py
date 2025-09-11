@@ -12,37 +12,45 @@ from typing import Dict, Type, Optional, Any
 _global_config_contexts: Dict[Type, threading.local] = {}
 
 
-def set_current_global_config(config_type: Type, config_instance: Any) -> None:
+def set_current_global_config(config_type: Type, config_instance: Any, *, caller_context: str = None) -> None:
     """Set current global config for any dataclass type.
+
+    RESTRICTED USE: This should ONLY be called when actually editing the global config,
+    not for temporary context switching or orchestrator-specific operations.
 
     Args:
         config_type: The config type to set
         config_instance: The config instance to set
+        caller_context: Optional context description for debugging inappropriate usage
     """
+    import inspect
+
+    # Get caller information for debugging inappropriate usage
+    frame = inspect.currentframe().f_back
+    caller_file = frame.f_code.co_filename
+    caller_function = frame.f_code.co_name
+    caller_line = frame.f_lineno
+
+    # Log all thread-local modifications for monitoring
+    context_desc = caller_context or f"{caller_file}:{caller_function}:{caller_line}"
+    print(f"🔧 THREAD-LOCAL MODIFICATION: {config_type.__name__} from {context_desc}")
+
     # Set thread-local context
     if config_type not in _global_config_contexts:
         _global_config_contexts[config_type] = threading.local()
     _global_config_contexts[config_type].value = config_instance
 
-    # DEBUG: Track thread-local context changes with stack trace
-    if hasattr(config_instance, 'step_well_filter_config'):
-        step_config = getattr(config_instance, 'step_well_filter_config')
-        if hasattr(step_config, 'well_filter'):
-            well_filter_value = getattr(step_config, 'well_filter')
-            print(f"🔍 THREAD-LOCAL SET: {config_type.__name__} with step_well_filter_config.well_filter = {well_filter_value}")
 
-            # Show stack trace for corruption cases
-            if well_filter_value == 1:
-                import traceback
-                print("🔍 CORRUPTION STACK TRACE:")
-                stack_lines = traceback.format_stack(limit=10)
-                for line in stack_lines[-5:]:  # Show last 5 stack frames
-                    print(f"🔍   {line.strip()}")
+def set_global_config_for_editing(config_type: Type, config_instance: Any) -> None:
+    """Set global config specifically for editing scenarios.
 
-    # CRITICAL FIX: No longer emit global context change events during set_current_global_config
-    # Context change events are now handled by orchestrator-specific coordinators via parameter_changed signals
-    # This prevents cross-orchestrator contamination while maintaining live updates within the same orchestrator
-    pass
+    This is the ONLY function that should be used for legitimate global config modifications.
+    Use this when:
+    - User is editing global configuration through UI
+    - Application startup is loading cached global config
+    - Tests are setting up global config state
+    """
+    set_current_global_config(config_type, config_instance, caller_context="LEGITIMATE_GLOBAL_CONFIG_EDITING")
 
 
 def get_current_global_config(config_type: Type) -> Optional[Any]:

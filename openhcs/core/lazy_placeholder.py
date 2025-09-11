@@ -95,29 +95,29 @@ def _apply_subclass_precedence(concrete_values, field_name: str):
 
 def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, field_name: str, ignore_concrete_override: bool = False):
     """
-    Resolve field using LAZY-FIRST resolution order.
+    Resolve field using dual-axis resolution with automatic context discovery.
 
     For lazy dataclasses, the resolution order is:
     1. Check lazy dataclass instances for concrete values (highest MRO precedence first)
-    2. Follow the lazy resolution chain through the context
+    2. Follow the dual-axis resolution chain through discovered context
     3. Only fall back to static defaults if no concrete values found
     """
     from openhcs.core.field_path_detection import FieldPathDetector
     from openhcs.core.lazy_config import get_base_type_for_lazy
+    from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
 
-    if not global_config:
+    # Auto-discover context instead of using global_config parameter
+    current_context = ContextDiscovery.discover_context()
+    if not current_context:
+        current_context = global_config  # Fallback to passed parameter if no context discovered
+
+    if not current_context:
         return None
 
     # Get the base class if this is a lazy type
     base_class = get_base_type_for_lazy(target_dataclass_type)
     if not base_class:
         base_class = target_dataclass_type
-
-    # CRITICAL FIX: Always check for direct field access for top-level fields first
-    # This handles reset operations for top-level fields like num_workers
-    current_context = get_current_global_config(GlobalPipelineConfig)
-    if current_context is None:
-        current_context = global_config  # Fallback to passed parameter
 
     # Special case: If base_class is the same as the global config type,
     # directly access the field from current_context (root-level lazy config)
@@ -156,7 +156,12 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
                 print(f"🔍 NESTED DEBUG: field_path={field_path}, config_instance={config_instance}")
 
             if config_instance and hasattr(config_instance, field_name):
-                field_value = getattr(config_instance, field_name, None)
+                # Use raw field access to prevent infinite recursion with lazy instances
+                try:
+                    field_value = object.__getattribute__(config_instance, field_name)
+                except AttributeError:
+                    field_value = None
+
                 if field_name == "well_filter":
                     print(f"🔍 NESTED DEBUG: {field_path}.{field_name} = {field_value}")
 
@@ -176,7 +181,11 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
         for field_path in field_paths:
             config_instance = FieldPathNavigator.navigate_to_instance(current_context, field_path)
             if config_instance is not None:
-                field_value = getattr(config_instance, field_name, None)
+                # Use raw field access to prevent infinite recursion with lazy instances
+                try:
+                    field_value = object.__getattribute__(config_instance, field_name)
+                except AttributeError:
+                    field_value = None
 
                 if field_name == "well_filter":
                     print(f"🔍 USER OVERRIDE DEBUG: Path '{field_path}' -> instance: {config_instance}")
@@ -220,7 +229,11 @@ def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, fiel
         for field_path in field_paths:
             config_instance = FieldPathNavigator.navigate_to_instance(global_config, field_path)
             if config_instance and hasattr(config_instance, field_name):
-                value = getattr(config_instance, field_name)
+                # Use raw field access to prevent infinite recursion with lazy instances
+                try:
+                    value = object.__getattribute__(config_instance, field_name)
+                except AttributeError:
+                    value = None
 
                 # Check if this class has a concrete override (inheritance blocker)
                 if _has_concrete_field_override(mro_class, field_name):
@@ -296,56 +309,67 @@ class LazyDefaultPlaceholderService:
 
         # SIMPLIFIED: Always use the actual lazy resolution logic for consistency
         if force_static_defaults:
-            # For static defaults, temporarily clear context to get base class defaults
-            current_context = get_current_global_config(GlobalPipelineConfig)
-            set_current_global_config(GlobalPipelineConfig, None)
+            # For static defaults, use base class defaults without any context
             try:
-                resolved_value = dataclass_type()._resolve_field_value(field_name) if hasattr(dataclass_type, '_resolve_field_value') else getattr(dataclass_type(), field_name)
-            finally:
-                set_current_global_config(GlobalPipelineConfig, current_context)
-        elif app_config:
-            # For app config, set it as context and use lazy resolution
-            current_context = get_current_global_config(GlobalPipelineConfig)
-            set_current_global_config(GlobalPipelineConfig, app_config)
-            try:
-                # CRITICAL FIX: Use MRO-aware resolution instead of composition-only search
-                # This ensures we respect inheritance precedence when searching the context
-                current_app_config = get_current_global_config(GlobalPipelineConfig)
-
-                # SIMPLIFIED: Use LAZY-FIRST resolution only for consistency
-                resolved_value = _resolve_field_with_mro_awareness(current_app_config, dataclass_type, field_name, ignore_concrete_override)
-
-
-
-                # If not found via LAZY-FIRST, fall back to lazy resolution (no composition search)
-                if resolved_value is None and hasattr(dataclass_type, '_resolve_field_value'):
-                    temp_instance = dataclass_type()
-                    resolved_value = _resolve_field_with_mro_awareness(temp_instance, dataclass_type, field_name)
-                elif resolved_value is None:
-                    # Final fallback: create instance and use getattr
+                # Get base class default without any context resolution
+                from dataclasses import fields
+                field_obj = next((f for f in fields(dataclass_type) if f.name == field_name), None)
+                if field_obj and field_obj.default is not field_obj.default_factory:
+                    resolved_value = field_obj.default
+                elif field_obj and field_obj.default_factory is not field_obj.default_factory:
+                    resolved_value = field_obj.default_factory()
+                else:
                     resolved_value = getattr(dataclass_type(), field_name)
-            finally:
-                set_current_global_config(GlobalPipelineConfig, current_context)
+            except Exception:
+                resolved_value = None
+        elif app_config:
+            # For app config, use dual-axis resolution with provided context
+            from openhcs.core.dual_axis_resolver_implementation import get_resolver_for_context
+            try:
+                # Use dual-axis resolver with the provided app_config as context
+                resolver = get_resolver_for_context(app_config)
+                temp_instance = dataclass_type()
+                resolved_value = resolver.resolve_field(temp_instance, field_name)
+
+                # If not found via dual-axis resolution, fall back to MRO-aware resolution
+                if resolved_value is None:
+                    resolved_value = _resolve_field_with_mro_awareness(app_config, dataclass_type, field_name, ignore_concrete_override)
+
+                # Final fallback: create instance and use getattr
+                if resolved_value is None:
+                    resolved_value = getattr(dataclass_type(), field_name)
+            except Exception:
+                resolved_value = None
         else:
-            # Default: Use current thread-local context with actual lazy resolution
-            if hasattr(dataclass_type, '_resolve_field_value'):
-                # UNIFIED: Use MRO-aware resolution to respect concrete overrides
-                current_app_config = get_current_global_config(GlobalPipelineConfig)
-                resolved_value = _resolve_field_with_mro_awareness(current_app_config, dataclass_type, field_name)
-                if field_name == 'num_workers' and dataclass_type.__name__ == 'PipelineConfig':
-                    print(f"🔍 PLACEHOLDER: _resolve_field_with_mro_awareness returned {resolved_value}")
+            # Default: Use stack introspection for automatic context discovery
+            from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
+
+            context = ContextDiscovery.discover_context()
+            if context and hasattr(dataclass_type, '_resolve_field_value'):
+                # Use dual-axis resolution with discovered context
+                resolver = get_resolver_for_context(context)
+                temp_instance = dataclass_type()
+                resolved_value = resolver.resolve_field(temp_instance, field_name)
             else:
-                # Fallback for non-lazy dataclasses
+                # Fallback for non-lazy dataclasses or when no context discovered
                 resolved_value = getattr(dataclass_type(), field_name, None)
 
         # Format output
         if resolved_value is None:
             value_text = LazyDefaultPlaceholderService.NONE_VALUE_TEXT
         elif hasattr(resolved_value, '__dataclass_fields__'):
-            # UNIFIED: When resolved value is a dataclass, use MRO-aware resolution
+            # UNIFIED: When resolved value is a dataclass, use dual-axis resolution
             # to extract the specific field respecting concrete overrides
-            current_app_config = get_current_global_config(GlobalPipelineConfig)
-            specific_field_value = _resolve_field_with_mro_awareness(current_app_config, type(resolved_value), field_name)
+            from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
+
+            context = ContextDiscovery.discover_context()
+            if context:
+                resolver = get_resolver_for_context(context)
+                temp_instance = type(resolved_value)()
+                specific_field_value = resolver.resolve_field(temp_instance, field_name)
+            else:
+                specific_field_value = getattr(resolved_value, field_name, None)
+
             if specific_field_value is not None:
                 # Successfully extracted the specific field value
                 value_text = str(specific_field_value)

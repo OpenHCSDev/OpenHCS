@@ -430,8 +430,8 @@ class OpenHCSMainWindow(QMainWindow):
 
             # Update thread-local storage for MaterializationPathConfig defaults
             from openhcs.core.config import GlobalPipelineConfig
-            from openhcs.core.context.global_config import set_current_global_config
-            set_current_global_config(GlobalPipelineConfig, new_config)
+            from openhcs.core.context.global_config import set_global_config_for_editing
+            set_global_config_for_editing(GlobalPipelineConfig, new_config)
 
             # Emit signal for other components to update
             self.config_changed.emit(new_config)
