@@ -180,11 +180,26 @@ class StepParameterEditorWidget(QWidget):
         from openhcs.core.lazy_config import get_base_type_for_lazy
         base_class = get_base_type_for_lazy(inner_type) or inner_type
 
+        # CRITICAL FIX: Use orchestrator's pipeline config as context provider for step-level resolution
+        def step_context_provider():
+            """Provide orchestrator's pipeline config for step-level lazy resolution."""
+            if self.orchestrator and self.orchestrator.pipeline_config:
+                # Get the merged config that preserves None values for inheritance
+                from openhcs.core.context.global_config import get_current_global_config
+                current_context = get_current_global_config(GlobalPipelineConfig)
+                if current_context:
+                    return current_context
+                else:
+                    return self.orchestrator.get_effective_config(for_serialization=False)
+            else:
+                return get_current_global_config()
+
         StepLevelConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
             base_class=base_class,
             global_config_type=GlobalPipelineConfig,
             field_path=pipeline_field_name,
-            lazy_class_name=f"StepLevel{base_class.__name__}"
+            lazy_class_name=f"StepLevel{base_class.__name__}",
+            context_provider=step_context_provider
         )
         return StepLevelConfig()
 
