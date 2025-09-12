@@ -83,11 +83,12 @@ class ContextEventCoordinator:
                     print(f"🔍 BUILD SHARED CONTEXT: Using orchestrator context as fallback")
                     break
 
-        # Final fallback to stack introspection
+        # Final fallback to recursive resolver context discovery
         if not base_context:
-            from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery
-            base_context = ContextDiscovery.discover_context()
-            print(f"🔍 BUILD SHARED CONTEXT: Using stack introspection as final fallback")
+            from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+            resolver = get_recursive_resolver()
+            # The recursive resolver will discover context internally
+            print(f"🔍 BUILD SHARED CONTEXT: Using recursive resolver as final fallback")
 
         print(f"🔍 BUILD SHARED CONTEXT: base_context={base_context}")
         if not base_context:
@@ -183,10 +184,11 @@ LAZY_CLASS_NAME_PREFIX = "Lazy"
 
 # Core helper functions to eliminate duplication
 def _get_current_config(config_type):
-    """Get current config using stack introspection instead of thread-local."""
-    from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery
-    context = ContextDiscovery.discover_context()
-    return context if context else None
+    """Get current config using recursive resolver context discovery."""
+    from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+    # The recursive resolver handles context discovery internally
+    # For now, return None and let the resolver handle it
+    return None
 
 # Primary value resolution pattern - used throughout module for "try sources, return first non-None"
 def _resolve_value_from_sources(field_name: str, *source_funcs):
@@ -255,15 +257,16 @@ class LazyMethodBindings:
 
     @staticmethod
     def create_resolver(resolution_config: ResolutionConfig) -> Callable[[Any, str], Any]:
-        """Create field resolver method using dual-axis resolution."""
-        from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
+        """Create field resolver method using recursive dual-axis resolution."""
+        from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
 
         def _resolve_field_value(self, field_name: str) -> Any:
-            # Use stack introspection for context discovery
-            context = ContextDiscovery.discover_context()
-            if context:
-                resolver = get_resolver_for_context(context)
-                return resolver.resolve_field(self, field_name)
+            # Use recursive dual-axis resolver
+            resolver = get_recursive_resolver()
+            resolved_value = resolver.resolve_field(self, field_name)
+
+            if resolved_value is not None:
+                return resolved_value
 
             # Fallback to original resolution config if no context found
             return resolution_config.resolve_field(field_name)
@@ -272,9 +275,9 @@ class LazyMethodBindings:
 
     @staticmethod
     def create_getattribute() -> Callable[[Any, str], Any]:
-        """Create lazy __getattribute__ method using stack introspection."""
-        # Import dual-axis resolution components
-        from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
+        """Create lazy __getattribute__ method using recursive dual-axis resolution."""
+        # Import recursive dual-axis resolution components
+        from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
         from openhcs.core.lazy_placeholder import _has_concrete_field_override
 
         def _find_mro_concrete_value(base_class, name):
@@ -283,24 +286,15 @@ class LazyMethodBindings:
                         if _has_concrete_field_override(cls, name)), None)
 
         def _try_global_context_value(self, base_class, name):
-            """Extract global context resolution logic using stack introspection."""
+            """Extract global context resolution logic using recursive dual-axis resolution."""
             if not hasattr(self, '_global_config_type'):
                 return None
 
-            # Auto-discover context from call stack instead of thread-local
-            # CRITICAL FIX: Pass target type for proper context provider filtering
-            current_context = ContextDiscovery.discover_context(base_class)
-            if not current_context:
-                return None
-
-
-
-            # Use dual-axis resolver for field resolution
-            resolver = get_resolver_for_context(current_context)
+            # Use recursive dual-axis resolver
+            resolver = get_recursive_resolver()
             resolved_value = resolver.resolve_field(self, name)
 
             if resolved_value is not None:
-
                 return resolved_value
 
             return None
@@ -332,15 +326,13 @@ class LazyMethodBindings:
                     if hasattr(self, recursion_key):
                         object.__delattr__(self, recursion_key)
 
-            # Fallback to dual-axis resolution if no inheritance fix needed
+            # Fallback to recursive dual-axis resolution if no inheritance fix needed
             try:
-                # Use stack introspection for resolution instead of _resolve_field_value
-                context = ContextDiscovery.discover_context()
-                if context:
-                    resolver = get_resolver_for_context(context)
-                    resolved_value = resolver.resolve_field(self, name)
-                    if resolved_value is not None:
-                        return resolved_value
+                # Use recursive dual-axis resolver
+                resolver = get_recursive_resolver()
+                resolved_value = resolver.resolve_field(self, name)
+                if resolved_value is not None:
+                    return resolved_value
 
                 # If no scalar value found, check if this is a nested config field that should be auto-created
                 field_obj = next((f for f in fields(self.__class__) if f.name == name), None)

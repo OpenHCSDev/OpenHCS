@@ -286,7 +286,7 @@ class ParameterFormManager(QWidget):
         Uses the same generic detection as ContextDiscovery._is_context_provider:
         looks for any object that has dataclass instance attributes.
         """
-        from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery
+        from openhcs.core.dual_axis_resolver_recursive import ContextDiscovery
 
         # Walk up the parent hierarchy (parent() can be None during widget construction)
         parent = self.parent()
@@ -698,7 +698,7 @@ class ParameterFormManager(QWidget):
                 return None
 
             # Start with current context as base (thread-local or orchestrator)
-            from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery
+            from openhcs.core.dual_axis_resolver_recursive import ContextDiscovery
             base_context = ContextDiscovery.discover_context(base_type)
             if not base_context:
                 return None

@@ -204,13 +204,30 @@ class LazyDefaultPlaceholderService:
 
         prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
 
-        # Thin wrapper: delegate to recursive resolver with temporary context
+        # Create a temporary lazy instance and resolve using the provided context
         try:
-            from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+            from openhcs.core.dual_axis_resolver_recursive import RecursiveContextualResolver, _get_global_config_type_for_target
+            from openhcs.core.context.global_config import get_current_global_config
+            from openhcs.core.lazy_config import get_base_type_for_lazy
 
-            resolver = get_recursive_resolver()
-            # Use the temporary context directly - it should be a dataclass instance with current form values
-            resolved_value = resolver.resolve_field(temporary_context, field_name)
+            # Get the base type for the dataclass
+            base_type = get_base_type_for_lazy(dataclass_type) or dataclass_type
+
+            # Create resolver
+            resolver = RecursiveContextualResolver()
+
+            # Build context hierarchy with temporary context as most specific
+            context_hierarchy = [temporary_context]
+
+            # Add thread-local as fallback
+            global_config_type = _get_global_config_type_for_target(base_type)
+            if global_config_type:
+                thread_local_context = get_current_global_config(global_config_type)
+                if thread_local_context and thread_local_context != temporary_context:
+                    context_hierarchy.append(thread_local_context)
+
+            # Resolve using the context hierarchy
+            resolved_value = resolver._resolve_field_recursive(base_type, field_name, context_hierarchy)
         except Exception:
             resolved_value = None
 

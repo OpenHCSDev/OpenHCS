@@ -231,41 +231,89 @@ class RecursiveContextualResolver:
         Get concrete (non-None) value for target_type.field_name at this specific context level.
 
         This is level-specific - only looks within the given context, no recursion.
+        Enhanced with inheritance search and global config fallback like non-recursive resolver.
         """
-        # Direct type match
-        if type(context) == target_type:
-            try:
-                value = self._get_raw_field_value(context, field_name)
-                if value is not None:
-                    return value
-            except AttributeError:
-                pass
+        context_type = type(context)
 
-        # Find instances of target_type within this context
-        if is_dataclass(type(context)):
-            field_paths = FieldPathDetector.find_all_field_paths_unified(type(context), target_type)
-        else:
-            hierarchy = discover_composition_hierarchy_from_instance(context)
-            field_paths = hierarchy.get(target_type, [])
+        # Try exact type first, then parent types in MRO order for inheritance
+        types_to_search = [target_type]
+        if hasattr(target_type, '__mro__'):
+            # Add parent dataclass types from MRO (skip object)
+            for parent_type in target_type.__mro__[1:]:
+                if is_dataclass(parent_type):
+                    types_to_search.append(parent_type)
 
-            # Also check for lazy versions
-            if not field_paths:
-                for hierarchy_type, paths in hierarchy.items():
-                    base_type = get_base_type_for_lazy(hierarchy_type)
-                    if base_type == target_type:
-                        field_paths = paths
-                        break
+        logger.debug(f"Searching context {context_type.__name__} for {target_type.__name__} and parents: {[t.__name__ for t in types_to_search]}")
 
-        # Navigate to instances and check for concrete values
-        for path in field_paths:
-            instance = FieldPathNavigator.navigate_to_instance(context, path)
-            if instance:
+        # Search for each type in priority order (exact type first, then parents)
+        for search_type in types_to_search:
+            # CRITICAL FIX: Handle direct type match (context type == target type)
+            if context_type == search_type:
+                logger.debug(f"Direct type match - context {context_type.__name__} == target {search_type.__name__}")
+                # Direct field access from context instance
                 try:
-                    value = self._get_raw_field_value(instance, field_name)
+                    value = self._get_raw_field_value(context, field_name)
                     if value is not None:
+                        logger.debug(f"Found direct value for {field_name}: {value}")
                         return value
                 except AttributeError:
-                    continue
+                    logger.debug(f"Field {field_name} not found in direct context")
+                    pass
+                # Continue to field path detection as fallback
+
+            # Find instances of search_type within this context
+            if is_dataclass(context_type):
+                # Use type-based discovery for dataclasses
+                field_paths = FieldPathDetector.find_all_field_paths_unified(context_type, search_type)
+                logger.debug(f"Context is dataclass {context_type.__name__}, searching for {search_type.__name__}")
+
+                # CRITICAL FIX: Also check for lazy versions in dataclass fields
+                if not field_paths:
+                    # Check each field to see if it's a lazy version of our search type
+                    for field in fields(context_type):
+                        field_type = field.type
+                        # Check if this field type is a lazy version of our search type
+                        base_type = get_base_type_for_lazy(field_type)
+                        if base_type == search_type:
+                            field_paths = [field.name]
+                            logger.debug(f"Found lazy field {field.name}: {field_type.__name__} (base: {base_type.__name__}) for target {search_type.__name__}")
+                            break
+            else:
+                # Use instance-based discovery for regular objects
+                hierarchy = discover_composition_hierarchy_from_instance(context)
+
+                # Try both the exact type and any lazy version of the type
+                field_paths = hierarchy.get(search_type, [])
+
+                # If no paths found for base type, try to find lazy version using registry
+                if not field_paths:
+                    for hierarchy_type, paths in hierarchy.items():
+                        # Check if this hierarchy type is a lazy version of our search type
+                        base_type = get_base_type_for_lazy(hierarchy_type)
+                        if base_type == search_type:
+                            field_paths = paths
+                            logger.debug(f"Found lazy type {hierarchy_type.__name__} for base type {search_type.__name__} at paths: {paths}")
+                            break
+
+            logger.debug(f"Found {len(field_paths)} paths for {search_type.__name__}: {field_paths}")
+
+            # Navigate to instances and check for concrete values
+            for path in field_paths:
+                instance = FieldPathNavigator.navigate_to_instance(context, path)
+                if instance:
+                    try:
+                        value = self._get_raw_field_value(instance, field_name)
+                        if value is not None:
+                            logger.debug(f"Found value at {path}.{field_name} from {search_type.__name__}: {value}")
+                            return value
+                    except AttributeError:
+                        # Field doesn't exist on this instance, continue to next path
+                        continue
+
+        # Fallback: Check global config if no value found in current context
+        global_config_value = self._check_global_config_fallback(target_type, field_name)
+        if global_config_value is not None:
+            return global_config_value
 
         return None
 
@@ -318,6 +366,39 @@ class RecursiveContextualResolver:
                     logger.debug(f"Class {cls.__name__} has concrete override but no parents with field - not blocking")
         return None
     
+    def _check_global_config_fallback(self, target_type: Type, field_name: str) -> Any:
+        """
+        Check global config as fallback when current context doesn't have the value.
+
+        Generic implementation that leverages the existing decorator factory system
+        to auto-detect the appropriate global config type and resolve field values.
+        """
+        try:
+            # Auto-detect global config type using existing decorator system
+            global_config_type = _get_global_config_type_for_target(target_type)
+            if not global_config_type:
+                return None
+
+            # Get global config instance from thread-local context
+            global_config = get_current_global_config(global_config_type)
+            if not global_config:
+                return None
+
+            # Use the same field path detection logic as the main resolver
+            field_paths = FieldPathDetector.find_all_field_paths_unified(global_config_type, target_type)
+
+            # Navigate to each instance in global config and check for field value
+            for path in field_paths:
+                instance = FieldPathNavigator.navigate_to_instance(global_config, path)
+                if instance and hasattr(instance, field_name):
+                    value = self._get_raw_field_value(instance, field_name)
+                    if value is not None:
+                        return value
+
+            return None
+        except Exception:
+            return None
+
     def _get_raw_field_value(self, instance: Any, field_name: str) -> Any:
         """
         Get raw field value bypassing lazy resolution to prevent infinite recursion.

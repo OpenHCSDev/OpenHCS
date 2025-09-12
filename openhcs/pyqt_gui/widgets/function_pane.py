@@ -82,7 +82,6 @@ class FunctionPaneWidget(QWidget):
                 parameter_types=parameter_types,
                 field_id=f"func_{index}",
                 dataclass_type=None,  # Function parameters, not dataclass
-                context_provider=None,  # Function forms don't need context provider
                 parameter_info=param_info,
                 parent=self,
                 param_defaults=self.param_defaults  # CRITICAL FIX: Pass function signature defaults
@@ -283,7 +282,6 @@ class FunctionPaneWidget(QWidget):
                 parameter_types=self.form_manager.parameter_types,
                 field_id=f"func_{self.index}",
                 dataclass_type=None,  # Function parameters, not dataclass fields
-                context_provider=None,  # Function forms don't need context provider
                 parameter_info=self.form_manager.parameter_info,
                 use_scroll_area=False,  # Don't use scroll area in function panes
                 function_target=self.func,  # Pass function for docstring fallback
