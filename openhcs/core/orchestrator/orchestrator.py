@@ -24,6 +24,7 @@ from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, D
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+from openhcs.core.lazy_config import ContextProvider
 
 
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
@@ -32,12 +33,12 @@ from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
 from openhcs.core.steps.abstract import AbstractStep, get_step_id
 from openhcs.core.components.validation import convert_enum_by_value
+from openhcs.io.filemanager import FileManager
+from openhcs.io.zarr import ZarrStorageBackend
 # PipelineConfig now imported directly above
 from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
 from openhcs.io.exceptions import StorageWriteError
-from openhcs.io.filemanager import FileManager
 from openhcs.io.base import storage_registry
-from openhcs.io.zarr import ZarrStorageBackend
 from openhcs.microscopes import create_microscope_handler
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 
@@ -238,7 +239,7 @@ _worker_log_file_base = None
 
 
 
-class PipelineOrchestrator:
+class PipelineOrchestrator(ContextProvider):
     """
     Updated orchestrator supporting both global and per-orchestrator configuration.
 
@@ -250,6 +251,7 @@ class PipelineOrchestrator:
     Then, it executes the (now stateless) pipeline definition against these contexts,
     potentially in parallel, using `execute_compiled_plate()`.
     """
+    _context_type = "orchestrator"  # Register as orchestrator context provider
 
     def __init__(
         self,
@@ -284,25 +286,31 @@ class PipelineOrchestrator:
         # This ensures the orchestrator has a dataclass attribute for stack introspection
         # PipelineConfig is already the lazy version of GlobalPipelineConfig
         from openhcs.core.config import PipelineConfig
-        self.pipeline_config = pipeline_config or PipelineConfig()
+        if pipeline_config is None:
+            # CRITICAL FIX: Create pipeline config that inherits from global config
+            # This ensures the orchestrator's pipeline_config has the global values for resolution
+            pipeline_config = PipelineConfig()
+
+        # CRITICAL FIX: Always apply global config inheritance to populate None fields
+        # This ensures the orchestrator's pipeline_config has the global values for resolution
+        try:
+            pipeline_config = self._apply_global_config_inheritance(pipeline_config)
+        except Exception as e:
+            logger.warning(f"Failed to apply global config inheritance: {e}")
+            # Fall back to original pipeline config if inheritance fails
+            pass
+
+        self.pipeline_config = pipeline_config
         logger.info("PipelineOrchestrator initialized with PipelineConfig for context discovery.")
-
-
 
         # REMOVED: Unnecessary thread-local modification
         # The orchestrator should not modify thread-local storage during initialization
         # Global config is already available through the dual-axis resolver fallback
 
-        if plate_path is None:
-            # This case should ideally be prevented by TUI logic if plate_path is mandatory
-            # for an orchestrator instance tied to a specific plate.
-            # If workspace_path is also None, this will be caught later.
-            pass
-        elif isinstance(plate_path, str):
+        # Validate plate_path if provided
+        if plate_path:
             plate_path = Path(plate_path)
-        elif not isinstance(plate_path, Path):
-            raise ValueError(f"Invalid plate_path type: {type(plate_path)}. Must be str or Path.")
-        
+
         if plate_path:
             if not plate_path.is_absolute():
                 raise ValueError(f"Plate path must be absolute: {plate_path}")
@@ -352,6 +360,37 @@ class PipelineOrchestrator:
 
         # Metadata cache service
         self._metadata_cache_service = get_metadata_cache()
+
+    def _apply_global_config_inheritance(self, pipeline_config):
+        """Apply global config inheritance to populate None fields in pipeline config."""
+        from dataclasses import fields
+
+        global_config = get_current_global_config(GlobalPipelineConfig)
+        if not global_config:
+            logger.debug("No global config available for inheritance, returning original pipeline config")
+            return pipeline_config  # Return original if no global config to inherit from
+
+        # Instead of modifying the frozen dataclass, create a new one with inherited values
+        # Get current values and replace None fields with global config values
+        current_values = {}
+        for field in fields(pipeline_config):
+            current_value = getattr(pipeline_config, field.name)
+            if current_value is None:
+                # Inherit from global config
+                global_value = getattr(global_config, field.name, None)
+                current_values[field.name] = global_value
+                if global_value is not None:
+                    logger.debug(f"Inherited {field.name} = {global_value} from global config")
+            else:
+                current_values[field.name] = current_value
+
+        # Create new pipeline config with inherited values
+        from openhcs.core.config import PipelineConfig
+        inherited_config = PipelineConfig(**current_values)
+        logger.debug("Successfully created pipeline config with global inheritance")
+        return inherited_config
+
+
 
     def __setattr__(self, name: str, value: Any) -> None:
         """

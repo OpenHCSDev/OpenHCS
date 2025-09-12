@@ -109,32 +109,7 @@ def find_all_composition_paths_for_type(root_type: Type, target_type: Type) -> L
     return discover_composition_hierarchy(root_type).get(target_type, [])
 
 
-def resolve_field_through_composition(instance: Any, field_name: str) -> Any:
-    """
-    Auto-resolve field through composition hierarchy.
-
-    Resolution order: direct field → composed objects → nested compositions
-    """
-    if not is_dataclass(instance):
-        return None
-
-    # Direct field (highest priority)
-    if hasattr(instance, field_name) and (value := getattr(instance, field_name)) is not None:
-        return value
-
-    # Breadth-first through compositions
-    for field in fields(instance):
-        if (composed_obj := getattr(instance, field.name)) and is_dataclass(composed_obj):
-            if hasattr(composed_obj, field_name) and (value := getattr(composed_obj, field_name)) is not None:
-                return value
-
-    # Depth-first through nested compositions
-    for field in fields(instance):
-        if (composed_obj := getattr(instance, field.name)) and is_dataclass(composed_obj):
-            if (resolved := resolve_field_through_composition(composed_obj, field_name)) is not None:
-                return resolved
-
-    return None
+# resolve_field_through_composition removed - dual-axis resolver handles composition resolution
 
 
 def create_composition_field_provider(
@@ -337,16 +312,12 @@ class CompositionIntegrationUtils:
 
         if use_composition:
             try:
-                composition_value = CompositionFieldResolver.resolve_field_through_composition(
-                    instance, field_name
-                )
+                # Use dual-axis resolver for composition resolution
+                from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+                resolver = get_recursive_resolver()
+                composition_value = resolver.resolve_field(instance, field_name)
                 results['composition_value'] = composition_value
-
-                # Get resolution paths for debugging
-                resolution_paths = CompositionFieldResolver.get_composition_resolution_paths(
-                    instance, field_name
-                )
-                results['composition_paths'] = resolution_paths
+                results['composition_paths'] = ['dual-axis-resolver']  # Simplified path info
             except Exception as e:
                 results['composition_error'] = str(e)
 

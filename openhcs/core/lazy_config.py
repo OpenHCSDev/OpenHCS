@@ -19,6 +19,7 @@ from openhcs.core.context.global_config import (
     set_current_global_config,
 )
 from openhcs.core.field_path_detection import FieldPathDetector
+# Note: dual_axis_resolver_recursive and lazy_placeholder imports kept inline to avoid circular imports
 
 
 # Type registry for lazy dataclass to base class mapping
@@ -146,9 +147,7 @@ class ContextEventCoordinator:
         print(f"🔍 BUILD SHARED CONTEXT: No context updates, returning base context")
         return base_context
 
-# CRITICAL FIX: Remove global coordinator to prevent cross-orchestrator contamination
-# Each orchestrator will have its own coordinator for proper isolation
-# _context_event_coordinator = ContextEventCoordinator()  # REMOVED
+
 
 
 def register_lazy_type_mapping(lazy_type: Type, base_type: Type) -> None:
@@ -179,7 +178,7 @@ TO_BASE_CONFIG_METHOD = "to_base_config"
 WITH_DEFAULTS_METHOD = "with_defaults"
 WITH_OVERRIDES_METHOD = "with_overrides"
 LAZY_FIELD_DEBUG_TEMPLATE = "LAZY FIELD CREATION: {field_name} - original={original_type}, has_default={has_default}, final={final_type}"
-THREAD_LOCAL_FIELD_DEBUG_TEMPLATE = "THREAD-LOCAL LAZY FIELD: {field_name} - original={original_type}, has_default={has_default}, final={final_type}"
+
 LAZY_CLASS_NAME_PREFIX = "Lazy"
 
 # Core helper functions to eliminate duplication
@@ -190,41 +189,9 @@ def _get_current_config(config_type):
     # For now, return None and let the resolver handle it
     return None
 
-# Primary value resolution pattern - used throughout module for "try sources, return first non-None"
-def _resolve_value_from_sources(field_name: str, *source_funcs):
-    """Try multiple source functions, return first non-None value."""
-    for source_func in source_funcs:
-        try:
-            value = source_func(field_name)
-            if value is not None:
-                return value
-        except (AttributeError, Exception):
-            continue
-    return None
+# Helper functions removed - dual-axis resolver handles all resolution
 
-# Common lambda factory patterns - eliminates duplicate lambda creation
-def _create_field_value_extractor(obj_provider):
-    """Create lambda for extracting field values from object provider."""
-    return lambda field_name: _get_raw_field_value(obj_provider(), field_name) if obj_provider() else None
-
-def _create_static_field_extractor(obj):
-    """Create lambda for extracting field values from static object."""
-    return lambda field_name: _get_raw_field_value(obj, field_name)
-
-# Removed single-use _create_resolution_config method - inlined at call site
-
-
-
-@dataclass(frozen=True)
-class ResolutionConfig:
-    """Declarative configuration for recursive lazy resolution."""
-    instance_provider: Callable[[], Any]
-    fallback_chain: List[Callable[[str], Any]]
-
-    def resolve_field(self, field_name: str) -> Any:
-        """Resolve field through primary instance and fallback chain."""
-        primary_source = _create_field_value_extractor(self.instance_provider)
-        return _resolve_value_from_sources(field_name, primary_source, *self.fallback_chain)
+# ResolutionConfig system removed - dual-axis resolver handles all resolution
 
 
 # Functional fallback strategies
@@ -256,27 +223,20 @@ class LazyMethodBindings:
     """Declarative method bindings for lazy dataclasses."""
 
     @staticmethod
-    def create_resolver(resolution_config: ResolutionConfig) -> Callable[[Any, str], Any]:
+    def create_resolver() -> Callable[[Any, str], Any]:
         """Create field resolver method using recursive dual-axis resolution."""
         from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
 
         def _resolve_field_value(self, field_name: str) -> Any:
-            # Use recursive dual-axis resolver
+            # Use recursive dual-axis resolver - handles all resolution
             resolver = get_recursive_resolver()
-            resolved_value = resolver.resolve_field(self, field_name)
-
-            if resolved_value is not None:
-                return resolved_value
-
-            # Fallback to original resolution config if no context found
-            return resolution_config.resolve_field(field_name)
+            return resolver.resolve_field(self, field_name)
 
         return _resolve_field_value
 
     @staticmethod
     def create_getattribute() -> Callable[[Any, str], Any]:
         """Create lazy __getattribute__ method using recursive dual-axis resolution."""
-        # Import recursive dual-axis resolution components
         from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
         from openhcs.core.lazy_placeholder import _has_concrete_field_override
 
@@ -358,9 +318,11 @@ class LazyMethodBindings:
     @staticmethod
     def create_to_base_config(base_class: Type) -> Callable[[Any], Any]:
         """Create base config converter method."""
-        return lambda self: base_class(**{
-            f.name: getattr(self, f.name) for f in fields(self)
-        })
+        def to_base_config(self):
+            # Mathematical simplification: Convert loop to comprehension
+            field_values = {f.name: getattr(self, f.name) for f in fields(self)}
+            return base_class(**field_values)
+        return to_base_config
 
     @staticmethod
     def create_class_methods() -> Dict[str, Any]:
@@ -468,21 +430,7 @@ class LazyDataclassFactory:
         if cache_key in _lazy_class_cache:
             return _lazy_class_cache[cache_key]
 
-        # Inlined resolution config creation (was single-use method)
-        # CRITICAL FIX: Handle abstract base classes that can't be instantiated
-        try:
-            static_fallback = _create_static_field_extractor(base_class())
-        except TypeError as e:
-            if "Can't instantiate abstract class" in str(e):
-                # Abstract class - skip static fallback
-                static_fallback = None
-                print(f"🔧 LAZY FACTORY: Skipping static fallback for abstract class {base_class.__name__}")
-            else:
-                raise
-
-        safe_fallback = _create_field_value_extractor(instance_provider)
-        final_fallback_chain = (fallback_chain or ([static_fallback] if static_fallback else [])) if use_recursive_resolution else ([safe_fallback] + ([static_fallback] if static_fallback else []))
-        resolution_config = ResolutionConfig(instance_provider=instance_provider, fallback_chain=final_fallback_chain)
+        # ResolutionConfig system removed - dual-axis resolver handles all resolution
 
         # Create lazy dataclass with introspected fields
         # CRITICAL FIX: Avoid inheriting from classes with custom metaclasses to prevent descriptor conflicts
@@ -531,7 +479,7 @@ class LazyDataclassFactory:
 
         # Bind methods declaratively - inline single-use method
         method_bindings = {
-            RESOLVE_FIELD_VALUE_METHOD: LazyMethodBindings.create_resolver(resolution_config),
+            RESOLVE_FIELD_VALUE_METHOD: LazyMethodBindings.create_resolver(),
             GET_ATTRIBUTE_METHOD: LazyMethodBindings.create_getattribute(),
             TO_BASE_CONFIG_METHOD: LazyMethodBindings.create_to_base_config(base_class),
             **LazyMethodBindings.create_class_methods()
@@ -547,21 +495,7 @@ class LazyDataclassFactory:
 
         return lazy_class
 
-    @staticmethod
-    def create_lazy_dataclass(
-        defaults_source: Union[Type, Any],
-        lazy_class_name: str,
-        use_recursive_resolution: bool = False,
-        fallback_chain: Optional[List[Callable[[str], Any]]] = None
-    ) -> Type:
-        """Create lazy dataclass with functional configuration."""
-        base_class = defaults_source if isinstance(defaults_source, type) else type(defaults_source)
-        instance_provider = (lambda: defaults_source()) if isinstance(defaults_source, type) else (lambda: defaults_source)
 
-        return LazyDataclassFactory._create_lazy_dataclass_unified(
-            base_class, instance_provider, lazy_class_name,
-            LAZY_FIELD_DEBUG_TEMPLATE, use_recursive_resolution, fallback_chain
-        )
 
 
 
@@ -621,7 +555,9 @@ class LazyDataclassFactory:
                     )
 
             # Use static default
-            return _get_raw_field_value(base_class(), field_name)
+            static_instance = base_class()
+            static_value = _get_raw_field_value(static_instance, field_name)
+            return static_value
 
         fallback_chain = [context_aware_static_fallback]
 
@@ -648,6 +584,7 @@ def _create_field_level_hierarchy_provider(base_class: Type, global_config_type:
     and creates a provider that resolves each field through multiple config sources.
     Handles PyQt app context detection and inheritance-aware validation.
     """
+    import dataclasses
     # Auto-discover unified hierarchy paths (inheritance + composition)
     all_field_paths = FieldPathDetector.find_all_field_paths_unified(global_config_type, base_class)
     parent_types = FieldPathDetector.find_all_relationships(base_class)
@@ -668,76 +605,23 @@ def _create_field_level_hierarchy_provider(base_class: Type, global_config_type:
         inherited_fields, own_fields = frozenset(), frozenset(f.name for f in fields(base_class))
 
     def field_level_provider():
-        """Provider with simplified field-level inheritance logic."""
-        current_config = context_provider() if context_provider else _get_current_config(global_config_type)
+        """Simplified provider that delegates to dual-axis resolver."""
+        from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
 
-        # DEBUG: Show what context the lazy resolution is using
-        if base_class.__name__ == 'GlobalPipelineConfig':
-            print(f"🔍 FIELD LEVEL PROVIDER: {base_class.__name__} using context: {type(current_config)} with num_workers={getattr(current_config, 'num_workers', 'MISSING') if current_config else 'None'}")
+        # Create a dummy instance to use with the dual-axis resolver
+        dummy_instance = base_class()
+        resolver = get_recursive_resolver()
 
-        # Get actual global config from app
-        actual_global_config = None
-        is_pipeline_context = True
-        if HAS_PYQT and (app_instance := QApplication.instance()) and hasattr(app_instance, 'global_config'):
-            actual_global_config = app_instance.global_config
-            is_pipeline_context = current_config is not actual_global_config
-
-        # Build hierarchy paths
-        hierarchy_paths = []
-        if current_field_path:
-            hierarchy_paths.append(('current', current_field_path))
-        hierarchy_paths.extend(('current', path) for path in sibling_paths)
-        if is_pipeline_context:
-            if current_field_path:
-                hierarchy_paths.append(('global', current_field_path))
-            hierarchy_paths.extend(('global', path) for path in sibling_paths)
-        else:
-            hierarchy_paths.extend(('current', path) for path in all_field_paths if path != current_field_path)
-
-        # CRITICAL FIX: Include ALL GlobalPipelineConfig fields for top-level field resolution
+        # Get all fields that need resolution
         global_config_fields = {f.name for f in fields(global_config_type)} if global_config_type else set()
         all_resolvable_fields = inherited_fields | own_fields | global_config_fields
 
-        # Debug removed - field categorization working correctly
-
-        # Create config instance with resolved fields
+        # Create config instance with dual-axis resolved fields
         config_instance = type('FieldLevelInheritanceConfig', (), {})()
 
-        # Debug removed - field processing working correctly
-
         for field_name in all_resolvable_fields:
-            is_inherited = field_name in inherited_fields
-
-            # CRITICAL: Thread-local context must have highest priority for placeholder resolution
-            sources = []
-
-            # ALWAYS include direct access to global config for top-level fields
-            is_global_config_field = global_config_type and field_name in {f.name for f in fields(global_config_type)}
-
-            # Debug removed - conditions working correctly
-
-            if is_global_config_field:
-                if current_config:
-                    sources.append(_create_static_field_extractor(current_config))
-                if actual_global_config and actual_global_config != current_config:
-                    sources.append(_create_static_field_extractor(actual_global_config))
-
-            # Add hierarchy-based sources for inherited/composed fields
-            if hierarchy_paths and not is_global_config_field:
-                for context_type, path in hierarchy_paths:
-                    config = current_config if context_type == 'current' else actual_global_config
-                    if config and (instance := FieldPathNavigator.navigate_to_instance(config, path)):
-                        # Debug removed - instance finding working correctly
-                        # SIMPLIFIED: Use the same static field extractor that works in debug
-                        sources.append(_create_static_field_extractor(instance))
-            elif not hierarchy_paths and not is_global_config_field:
-                # Fallback for non-global fields when no hierarchy paths
-                if current_config:
-                    sources.append(_create_static_field_extractor(current_config))
-                if actual_global_config and actual_global_config != current_config:
-                    sources.append(_create_static_field_extractor(actual_global_config))
-
-            resolved_value = _resolve_value_from_sources(field_name, *sources)
+            # Use dual-axis resolver for all field resolution
+            resolved_value = resolver.resolve_field(dummy_instance, field_name)
             setattr(config_instance, field_name, resolved_value)
 
         return config_instance
@@ -752,6 +636,94 @@ def ensure_global_config_context(global_config_type: Type, global_config_instanc
     set_global_config_for_editing(global_config_type, global_config_instance)
 
 
+# Context provider registry and metaclass for automatic registration
+CONTEXT_PROVIDERS = {}
+
+from abc import ABCMeta
+
+class ContextProviderMeta(ABCMeta):
+    """Metaclass for automatic registration of context provider classes."""
+
+    def __new__(cls, name, bases, attrs):
+        new_class = super().__new__(cls, name, bases, attrs)
+
+        # Only register concrete classes that have a context_type attribute
+        context_type = getattr(new_class, '_context_type', None)
+        if context_type and not getattr(new_class, '__abstractmethods__', None):
+            CONTEXT_PROVIDERS[context_type] = new_class
+            logger.debug(f"Auto-registered context provider: {context_type} -> {name}")
+
+        return new_class
+
+
+class ContextProvider(metaclass=ContextProviderMeta):
+    """Base class for objects that can provide context for lazy resolution."""
+    _context_type: Optional[str] = None  # Override in subclasses
+
+
+def _detect_context_type(obj: Any) -> Optional[str]:
+    """
+    Detect what type of context object this is using registered providers.
+
+    Returns the context type name or None if not a recognized context type.
+    """
+    # Check for functions first (simple callable check)
+    if callable(obj) and hasattr(obj, '__name__'):
+        return "function"
+
+    # Check if object is an instance of any registered context provider
+    for context_type, provider_class in CONTEXT_PROVIDERS.items():
+        if isinstance(obj, provider_class):
+            return context_type
+
+    return None
+
+
+# Generic context injection utilities
+class ContextInjector:
+    """Generic context injection for dual-axis resolution."""
+
+    @staticmethod
+    def inject_context(context_obj: Any, context_type: str = "step") -> None:
+        """
+        Inject context into call stack for dual-axis resolution.
+
+        Args:
+            context_obj: The context object to inject
+            context_type: Type of context (step, pipeline, orchestrator, etc.)
+        """
+        import inspect
+        frame = inspect.currentframe().f_back  # Get caller's frame
+        context_var_name = f"__{context_type}_context__"
+        frame.f_locals[context_var_name] = context_obj
+
+    @staticmethod
+    def with_context(context_obj: Any, context_type: str = "step"):
+        """
+        Context manager for temporary context injection.
+
+        Usage:
+            with ContextInjector.with_context(step_obj, "step"):
+                # Lazy resolution will find step_obj as context
+                lazy_config.some_field  # Uses step_obj for resolution
+        """
+        import inspect
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _context_manager():
+            frame = inspect.currentframe().f_back.f_back  # Get caller's caller frame
+            context_var_name = f"__{context_type}_context__"
+            frame.f_locals[context_var_name] = context_obj
+            try:
+                yield
+            finally:
+                if context_var_name in frame.f_locals:
+                    del frame.f_locals[context_var_name]
+
+        return _context_manager()
+
+
 
 
 def resolve_lazy_configurations_for_serialization(data: Any) -> Any:
@@ -761,11 +733,78 @@ def resolve_lazy_configurations_for_serialization(data: Any) -> Any:
                     if get_base_type_for_lazy(type(data)) is not None
                     else data)
 
+    # CRITICAL FIX: Handle step objects (non-dataclass objects with dataclass attributes)
+    step_context_type = _detect_context_type(resolved_data)
+    if step_context_type:
+        # This is a context object - inject it for its dataclass attributes
+        import inspect
+        frame = inspect.currentframe()
+        context_var_name = f"__{step_context_type}_context__"
+        frame.f_locals[context_var_name] = resolved_data
+        print(f"🔍 CONTEXT_INJECTION DEBUG: Injected {context_var_name} = {type(resolved_data).__name__}")
+
+        try:
+            # Process step attributes recursively
+            resolved_attrs = {}
+            for attr_name in dir(resolved_data):
+                if attr_name.startswith('_'):
+                    continue
+                try:
+                    attr_value = getattr(resolved_data, attr_name)
+                    if not callable(attr_value):  # Skip methods
+                        print(f"🔍 STEP_ATTR_DEBUG: Resolving {type(resolved_data).__name__}.{attr_name} = {type(attr_value).__name__}")
+                        resolved_attrs[attr_name] = resolve_lazy_configurations_for_serialization(attr_value)
+                except (AttributeError, Exception):
+                    continue
+
+            # Handle function objects specially - they can't be recreated with __new__
+            if step_context_type == "function":
+                # For functions, just process attributes for resolution but return original function
+                # The resolved config values will be stored in func plan by compiler
+                return resolved_data
+
+            # Create new step object with resolved attributes
+            # CRITICAL FIX: Copy all original attributes using __dict__ to preserve everything
+            new_step = type(resolved_data).__new__(type(resolved_data))
+
+            # Copy all attributes from the original object's __dict__
+            if hasattr(resolved_data, '__dict__'):
+                new_step.__dict__.update(resolved_data.__dict__)
+
+            # Update with resolved config attributes (these override the originals)
+            for attr_name, attr_value in resolved_attrs.items():
+                setattr(new_step, attr_name, attr_value)
+            return new_step
+        finally:
+            if context_var_name in frame.f_locals:
+                del frame.f_locals[context_var_name]
+            del frame
+
     # Recursively process nested structures based on type
-    if is_dataclass(resolved_data) and not isinstance(resolved_data, type):
+    elif is_dataclass(resolved_data) and not isinstance(resolved_data, type):
         # Process dataclass fields recursively - inline field processing pattern
-        resolved_fields = {f.name: resolve_lazy_configurations_for_serialization(getattr(resolved_data, f.name)) for f in fields(resolved_data)}
-        return type(resolved_data)(**resolved_fields)
+        # CRITICAL FIX: Inject parent object as context for sibling config inheritance
+        context_type = _detect_context_type(resolved_data) or "dataclass"  # Default to "dataclass" for generic dataclasses
+        import inspect
+        frame = inspect.currentframe()
+        context_var_name = f"__{context_type}_context__"
+        frame.f_locals[context_var_name] = resolved_data
+        print(f"🔍 CONTEXT_INJECTION DEBUG: Injected {context_var_name} = {type(resolved_data).__name__}")
+
+        # Add debug to see which fields are being resolved
+        print(f"🔍 FIELD_RESOLUTION DEBUG: Resolving fields for {type(resolved_data).__name__}: {[f.name for f in fields(resolved_data)]}")
+
+        try:
+            resolved_fields = {}
+            for f in fields(resolved_data):
+                field_value = getattr(resolved_data, f.name)
+                print(f"🔍 FIELD_DEBUG: Resolving {type(resolved_data).__name__}.{f.name} = {type(field_value).__name__}")
+                resolved_fields[f.name] = resolve_lazy_configurations_for_serialization(field_value)
+            return type(resolved_data)(**resolved_fields)
+        finally:
+            if context_var_name in frame.f_locals:
+                del frame.f_locals[context_var_name]
+            del frame
 
     elif isinstance(resolved_data, dict):
         # Process dictionary values recursively
@@ -797,37 +836,19 @@ def create_dataclass_for_editing(dataclass_type: Type[T], source_config: Any, pr
     if context_provider:
         context_provider(source_config)
 
-    # CRITICAL FIX: Create proper lazy instances for nested dataclass fields
-    # This ensures that nested configs use lazy types for proper placeholder resolution
-    field_values = {}
-    for f in fields(dataclass_type):
-        if preserve_values:
-            field_values[f.name] = getattr(source_config, f.name)
-        else:
-            # For editing mode, create lazy instances for nested dataclass fields
-            from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-            if is_dataclass(f.type) and LazyDefaultPlaceholderService.has_lazy_resolution(f.type):
-                # Create lazy instance using the field's lazy type
-                field_values[f.name] = f.type()
-            else:
-                field_values[f.name] = None
+    # Mathematical simplification: Convert verbose loop to unified comprehension
+    from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+    field_values = {
+        f.name: (getattr(source_config, f.name) if preserve_values
+                else f.type() if is_dataclass(f.type) and LazyDefaultPlaceholderService.has_lazy_resolution(f.type)
+                else None)
+        for f in fields(dataclass_type)
+    }
 
     return dataclass_type(**field_values)
 
 
-def create_config_for_editing(
-    global_config_type: Type,
-    global_config_instance: Any,
-    preserve_values: bool = False,
-    placeholder_prefix: str = "Default"
-) -> Any:
-    """Create editable config for any global dataclass type."""
-    return create_dataclass_for_editing(
-        global_config_type,
-        global_config_instance,
-        preserve_values=preserve_values,
-        context_provider=lambda config: ensure_global_config_context(global_config_type, config)
-    )
+
 
 
 def rebuild_lazy_config_with_new_global_reference(
@@ -959,13 +980,6 @@ class InheritAsNoneMeta(ABCMeta):
 
         # Return reconstruction using the base type (not the metaclass)
         return (type, (cls.__name__, cls.__bases__, safe_dict))
-
-
-
-
-
-
-
 
 
 def create_global_default_decorator(target_config_class: Type):
@@ -1155,25 +1169,18 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
         for f in fields(target_class)
     ]
 
-    # Mathematical simplification: Single expression for all field construction with optional and inherit_as_none support
+    # Mathematical simplification: Unified field construction with algebraic common factors
     def create_field_definition(config):
         """Create field definition with optional and inherit_as_none support."""
-
         field_type = config['config_class']
         is_optional = config.get('optional', False)
-        inherit_as_none = config.get('inherit_as_none', False)
 
+        # Algebraic simplification: factor out common default_value logic
         if is_optional:
-            # Wrap with Optional and use None as default
             field_type = Union[field_type, type(None)]
             default_value = None
-        elif inherit_as_none:
-            # inherit_as_none modification is now done in the decorator
-            # Just use default factory for the (already modified) field_type
-            default_value = field(default_factory=field_type)
         else:
-            # Use default factory for required fields - use lazy class, not base class
-            # field_type is already the lazy type, so use it for the default factory
+            # Both inherit_as_none and regular cases use same default factory
             default_value = field(default_factory=field_type)
 
         return (config['field_name'], field_type, default_value)
@@ -1188,136 +1195,18 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
         frozen=target_class.__dataclass_params__.frozen
     )
 
-    # Add generic sibling inheritance support for all config classes
-    import dataclasses
-    def apply_sibling_inheritance_to_instance(instance, **provided_kwargs):
-        """Apply sibling inheritance to any config instance generically."""
-        from dataclasses import fields, is_dataclass, replace
-
-        if not is_dataclass(instance):
-            return instance
-
-        # Find all fields that should inherit from siblings
-        inheritance_updates = {}
-
-        for field in fields(instance):
-            current_value = getattr(instance, field.name)
-
-            # Only inherit if current value is None and field supports sibling inheritance
-            if current_value is None and is_field_sibling_inheritable(type(instance), field.name):
-                # Apply inheritance blocking rules: check MRO for blocking classes
-                instance_type = type(instance)
-                blocking_class = None
-
-                # Find the first class in MRO that has a concrete field override
-                for mro_class in instance_type.__mro__[1:]:  # Skip self
-                    if not is_dataclass(mro_class):
-                        continue
-                    if hasattr(mro_class, field.name):
-                        class_attr_value = getattr(mro_class, field.name)
-                        if class_attr_value is not None:
-                            blocking_class = mro_class
-                            break
-
-                # Find sibling config instances, respecting inheritance blocking
-                for kwarg_name, kwarg_value in provided_kwargs.items():
-                    if is_dataclass(kwarg_value) and hasattr(kwarg_value, field.name):
-                        sibling_type = type(kwarg_value)
-
-                        # If there's a blocking class, only inherit from that specific class
-                        if blocking_class:
-                            if sibling_type == blocking_class:
-                                sibling_value = getattr(kwarg_value, field.name)
-                                if sibling_value is not None:
-                                    inheritance_updates[field.name] = sibling_value
-                                    break
-                            # Skip other siblings - blocked by the blocking class
-                        else:
-                            # No blocking class, normal sibling inheritance
-                            sibling_value = getattr(kwarg_value, field.name)
-                            if sibling_value is not None:
-                                inheritance_updates[field.name] = sibling_value
-                                break  # Use first non-None sibling value found
-
-        # Apply inheritance updates if any were found
-        if inheritance_updates:
-            return replace(instance, **inheritance_updates)
-        return instance
-
-    # Apply sibling inheritance to all default_factory config fields
-    original_new = new_class.__new__
-
-    def __new__(cls, **kwargs):
-        """Create instance with automatic sibling inheritance applied to all config fields."""
-        # Create instance normally first
-        if original_new is object.__new__:
-            instance = original_new(cls)
-        else:
-            instance = original_new(cls, **kwargs)
-
-        return instance
-
-    def __init__(self, **kwargs):
-        """Initialize with sibling inheritance applied to config fields."""
-        # Apply sibling inheritance to any config fields that need it
-        resolved_kwargs = dict(kwargs)
-
-        # Get field defaults and apply sibling inheritance
-        for field in fields(self):
-            if field.name not in kwargs:
-                if field.default_factory != dataclasses.MISSING:
-                    # Create default instance with proper None values for inherited fields
-                    default_class = field.default_factory
-
-                    # Check if this class has inherit_as_none fields
-                    if hasattr(default_class, '_inherit_as_none') and default_class._inherit_as_none:
-                        # CRITICAL FIX: Force None values for all fields marked by inherit_as_none
-                        # The decorator sets class attributes to None, but dataclass constructor ignores them
-                        # We need to explicitly pass None for all inherited fields
-                        instance_kwargs = {}
-                        for class_field in fields(default_class):
-                            if hasattr(default_class, class_field.name):
-                                class_value = getattr(default_class, class_field.name)
-                                if class_value is None:
-                                    # Field was set to None by inherit_as_none - FORCE None in constructor
-                                    instance_kwargs[class_field.name] = None
-                                else:
-                                    # Field has concrete value - use it
-                                    instance_kwargs[class_field.name] = class_value
-                            else:
-                                # Field not on class - let dataclass use its default
-                                pass
-
-                        # Create instance with explicit None values to override dataclass defaults
-                        default_instance = default_class(**instance_kwargs)
-                    else:
-                        # Normal instance creation
-                        default_instance = default_class()
-
-                    # Apply sibling inheritance
-                    resolved_instance = apply_sibling_inheritance_to_instance(default_instance, **kwargs)
-                    resolved_kwargs[field.name] = resolved_instance
-                elif field.default != dataclasses.MISSING:
-                    resolved_kwargs[field.name] = field.default
-
-        # Set all field values directly (dataclasses don't have custom __init__)
-        for field_name, field_value in resolved_kwargs.items():
-            object.__setattr__(self, field_name, field_value)
-
-    # Only add custom methods if this is a config class with inheritance relationships
-    has_inheritance = any(
-        any(is_field_sibling_inheritable(config['config_class'], f.name) for f in fields(config['config_class']))
-        for config in configs
-    )
-
-    if has_inheritance:
-        new_class.__new__ = __new__
-        new_class.__init__ = __init__
+    # Sibling inheritance is now handled by the dual-axis resolver system
 
     # Direct module replacement
     module = sys.modules[target_class.__module__]
     setattr(module, target_class.__name__, new_class)
     globals()[target_class.__name__] = new_class
+
+    # Mathematical simplification: Extract common module assignment pattern
+    def _register_lazy_class(lazy_class, class_name, module_name):
+        """Register lazy class in both module and global namespace."""
+        setattr(sys.modules[module_name], class_name, lazy_class)
+        globals()[class_name] = lazy_class
 
     # Create lazy classes and recreate PipelineConfig inline
     for config in configs:
@@ -1327,10 +1216,7 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
             field_path=config['field_name'],
             lazy_class_name=config['lazy_class_name']
         )
-        setattr(sys.modules[config['config_class'].__module__], config['lazy_class_name'], lazy_class)
-
-        # Also make lazy class available globally for type hint resolution
-        globals()[config['lazy_class_name']] = lazy_class
+        _register_lazy_class(lazy_class, config['lazy_class_name'], config['config_class'].__module__)
 
     # Create lazy version of the updated global config itself with proper naming
     # Global configs must start with GLOBAL_CONFIG_PREFIX - fail-loud if not
@@ -1347,11 +1233,8 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
         lazy_class_name=lazy_global_class_name
     )
 
-    # Export lazy global config to the module
-    setattr(sys.modules[target_class.__module__], lazy_global_class_name, lazy_global_class)
-
-    # Also make lazy global config available globally for type hint resolution
-    globals()[lazy_global_class_name] = lazy_global_class
+    # Use extracted helper for consistent registration
+    _register_lazy_class(lazy_global_class, lazy_global_class_name, target_class.__module__)
 
 
 
@@ -1381,72 +1264,8 @@ def auto_create_decorator(global_config_class):
     return global_config_class
 
 
-# Old discovery system removed - decorators handle lazy class creation automatically
 
 
-def is_field_sibling_inheritable(dataclass_type: Type, field_name: str) -> bool:
-    """
-    Check if a field supports sibling inheritance based on dataclass inheritance.
-
-    A field is sibling-inheritable if:
-    1. The dataclass inherits from another dataclass
-    2. The parent dataclass has the same field name
-    3. This enables automatic sibling inheritance without metadata
-
-    Args:
-        dataclass_type: The dataclass type to check
-        field_name: The field name to check
-
-    Returns:
-        True if the field supports sibling inheritance
-    """
-    if not is_dataclass(dataclass_type):
-        return False
-
-    try:
-        # Check if this dataclass has relationships (inheritance OR composition) with field
-        related_types = FieldPathDetector.find_all_relationships(dataclass_type)
-        return any(field_name in {f.name for f in fields(related_type)} for related_type in related_types if is_dataclass(related_type))
-    except (AttributeError, TypeError):
-        return False
 
 
-def resolve_dataclass_with_sibling_inheritance(instance: Any, sibling_source: Any) -> Any:
-    """
-    Generic utility to resolve any dataclass with automatic sibling inheritance.
-
-    For any dataclass that inherits from another dataclass, this function
-    automatically resolves None fields by inheriting from the sibling source.
-
-    Args:
-        instance: The dataclass instance to resolve
-        sibling_source: The sibling object to inherit from
-
-    Returns:
-        New dataclass instance with sibling inheritance resolved
-
-    Example:
-        # StepMaterializationConfig inherits from PathPlanningConfig
-        resolved = resolve_dataclass_with_sibling_inheritance(
-            step_materialization_config, path_planning_config
-        )
-    """
-    if not is_dataclass(instance):
-        return instance
-
-    if sibling_source is None:
-        return instance
-
-    # Resolve all fields using concise comprehension (mathematical simplification)
-    resolved_values = {
-        field.name: (
-            getattr(sibling_source, field.name, None)
-            if (current_value := getattr(instance, field.name, None)) is None
-            and is_field_sibling_inheritable(type(instance), field.name)
-            else current_value
-        )
-        for field in fields(instance)
-    }
-
-    return type(instance)(**resolved_values)
 

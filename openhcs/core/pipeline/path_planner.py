@@ -372,15 +372,24 @@ class PathPlanner:
 
     def _resolve_and_update_paths(self, step: AbstractStep, position: int, original_path: Path, conflict_type: str) -> None:
         """Resolve path conflict by updating sub_dir configuration directly."""
+        # CRITICAL FIX: For lazy configs, resolve to base config first to get the correct static default
+        # before applying path collision resolution. This ensures we use "checkpoints" not "images".
+        materialization_config = step.step_materialization_config
+        if hasattr(materialization_config, 'to_base_config'):
+            # This is a lazy config - resolve it first to get the correct static default
+            materialization_config = materialization_config.to_base_config()
+            print(f"🔍 PATH_COLLISION DEBUG: Resolved lazy config to base: {type(materialization_config).__name__}")
+
         # Generate unique sub_dir name instead of calculating from paths
-        original_sub_dir = step.step_materialization_config.sub_dir
+        original_sub_dir = materialization_config.sub_dir
+        print(f"🔍 PATH_COLLISION DEBUG: step '{step.name}' original_sub_dir = '{original_sub_dir}' (type: {type(materialization_config).__name__})")
         new_sub_dir = f"{original_sub_dir}_step{position}"
 
         # Update step materialization config with new sub_dir
         from dataclasses import replace
-        step.step_materialization_config = replace(step.step_materialization_config, sub_dir=new_sub_dir)
+        step.step_materialization_config = replace(materialization_config, sub_dir=new_sub_dir)
 
-        # Recalculate the resolved path using the new sub_dir
+        # Recalculate the resolved path using the updated config
         resolved_path = self._build_output_path(step.step_materialization_config)
 
         # Update step plans for metadata generation

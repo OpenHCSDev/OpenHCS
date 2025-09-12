@@ -34,6 +34,9 @@ from openhcs.core.config import PathPlanningConfig
 # Import LazyStepMaterializationConfig for type hints
 from openhcs.core.config import LazyStepMaterializationConfig
 
+# Import ContextProvider for automatic step context registration
+from openhcs.core.lazy_config import ContextProvider
+
 # ProcessingContext is used in type hints
 if TYPE_CHECKING:
     from openhcs.core.context.processing_context import ProcessingContext
@@ -61,9 +64,12 @@ def get_step_id(step: 'AbstractStep') -> str:
     return str(id(step))
 
 
-class AbstractStep(abc.ABC):
+class AbstractStep(abc.ABC, ContextProvider):
     """
     Abstract base class for all steps in the OpenHCS pipeline.
+
+    Inherits from ContextProvider to enable automatic context injection
+    for lazy configuration resolution.
 
     This class defines the interface that all steps must implement.
     Steps are stateful during pipeline definition and compilation (holding attributes
@@ -106,14 +112,7 @@ class AbstractStep(abc.ABC):
     ```
 
     """
-
-
-
-    # Step metadata - these are primarily used during pipeline definition and compilation
-    step_id: str
-    enabled: bool = True
-    description: Optional[str] = None
-    name: str # Made non-optional, defaults to class name
+    _context_type = "step"  # Register as step context provider
 
     # Attributes like input_memory_type, output_memory_type, etc.,
     # are defined in concrete subclasses (e.g., FunctionStep) as needed.
@@ -179,16 +178,15 @@ class AbstractStep(abc.ABC):
 
         This method must be implemented by all step subclasses.
         During execution, the step instance is stateless. All necessary
-        configuration and paths are retrieved from `context.step_plans[self.step_id]`.
-        The `context` itself is frozen and must not be modified.
-        Outputs are written to VFS via `context.filemanager` based on the step's plan.
+        configuration and paths are retrieved from context.step_plans[self.step_id].
+        The context itself is frozen and must not be modified.
+        Outputs are written to VFS via context.filemanager based on the steps plan.
         This method returns None.
 
         Args:
             context: The frozen ProcessingContext containing all required fields,
                      including step_plans and filemanager.
-
+        """
         # Clause 246 — Statelessness Mandate
         # Clause 21 — Context Immunity (Context is read-only for steps)
-        """
         raise NotImplementedError("AbstractStep.process() must be implemented by subclasses")

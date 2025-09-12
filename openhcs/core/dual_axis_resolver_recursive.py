@@ -71,11 +71,28 @@ class RecursiveContextualResolver:
         if not base_type:
             return None
 
+        if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
+            print(f"🔍 RESOLVER DEBUG: Resolving {type(lazy_instance).__name__}.{field_name}, base_type = {base_type.__name__}")
+
+        # CRITICAL: Check for static class field overrides first
+        # If the base class has a concrete field override (different from parent classes),
+        # use that instead of hierarchical inheritance
+        static_override_value = self._check_static_override(base_type, field_name)
+        if static_override_value is not None:
+            if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
+                print(f"🔍 RESOLVER DEBUG: Using static override = {static_override_value}")
+            return static_override_value
+
         # Discover context hierarchy
         context_hierarchy = self._discover_context_hierarchy(base_type)
         if not context_hierarchy:
             logger.debug(f"No context hierarchy found for {base_type.__name__}.{field_name}")
+            if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
+                print(f"🔍 RESOLVER DEBUG: No context hierarchy found!")
             return None
+
+        if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
+            print(f"🔍 RESOLVER DEBUG: Found context hierarchy = {[type(ctx).__name__ for ctx in context_hierarchy]}")
 
         # Check cache first
         cache_key = (id(lazy_instance), field_name, tuple(id(ctx) for ctx in context_hierarchy))
@@ -83,7 +100,13 @@ class RecursiveContextualResolver:
             return self._resolution_cache[cache_key]
 
         # Recursive resolution through context hierarchy
+        if field_name == 'well_filter' and 'StepMaterializationConfig' in type(lazy_instance).__name__:
+            print(f"🔍 RESOLVER DEBUG: Starting recursive resolution with hierarchy = {[type(ctx).__name__ for ctx in context_hierarchy]}")
+
         result = self._resolve_field_recursive(base_type, field_name, context_hierarchy)
+
+        if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
+            print(f"🔍 RESOLVER DEBUG: Resolved result = {result}")
 
         # Cache the result
         self._resolution_cache[cache_key] = result
@@ -120,11 +143,16 @@ class RecursiveContextualResolver:
         current_context = context_hierarchy[0]  # Most specific level
         parent_context_hierarchy = context_hierarchy[1:]  # Parent contexts
 
+        if field_name == 'well_filter' and target_type.__name__ == 'StepMaterializationConfig':
+            print(f"🔍 RECURSIVE DEBUG: Resolving {target_type.__name__}.{field_name} at context level: {type(current_context).__name__}")
+
         logger.debug(f"Resolving {target_type.__name__}.{field_name} at context level: {type(current_context).__name__}")
 
         # STEP 1: Check concrete value at THIS context level
         concrete_value = self._get_concrete_value_at_level(current_context, target_type, field_name)
         if concrete_value is not None:
+            if field_name == 'well_filter' and target_type.__name__ == 'StepMaterializationConfig':
+                print(f"🔍 RECURSIVE DEBUG: Found concrete value at {type(current_context).__name__}: {concrete_value}")
             logger.debug(f"Found concrete value at {type(current_context).__name__}: {concrete_value}")
             return concrete_value
 
@@ -132,7 +160,11 @@ class RecursiveContextualResolver:
         if parent_context_hierarchy:
             parent_context = parent_context_hierarchy[0]
             parent_concrete_value = self._get_concrete_value_at_level(parent_context, target_type, field_name)
+            if field_name == 'well_filter' and target_type.__name__ == 'StepMaterializationConfig':
+                print(f"🔍 RECURSIVE DEBUG: Parent context {type(parent_context).__name__} returned: {parent_concrete_value}")
             if parent_concrete_value is not None:
+                if field_name == 'well_filter' and target_type.__name__ == 'StepMaterializationConfig':
+                    print(f"🔍 RECURSIVE DEBUG: Found concrete value in parent context {type(parent_context).__name__}: {parent_concrete_value}")
                 logger.debug(f"Found concrete value in parent context {type(parent_context).__name__}: {parent_concrete_value}")
                 return parent_concrete_value
 
@@ -208,8 +240,37 @@ class RecursiveContextualResolver:
     def _find_parent_context(self, current_context: Any, target_type: Type) -> Optional[Any]:
         """
         Find the parent context by discovering the next context in the call stack.
+
+        For step contexts, the parent should be the orchestrator context.
         """
-        # Just try thread-local context as the final fallback
+        import inspect
+
+        # If current context is a step, look for orchestrator in call stack
+        if 'Step' in type(current_context).__name__:
+            frame = inspect.currentframe()
+            try:
+                current_frame = frame
+                while current_frame:
+                    current_frame = current_frame.f_back
+                    if not current_frame:
+                        break
+
+                    # Check 'self' parameter for orchestrator
+                    if 'self' in current_frame.f_locals:
+                        potential_context = current_frame.f_locals['self']
+                        if 'Orchestrator' in type(potential_context).__name__:
+                            if ContextDiscovery._is_context_provider(potential_context, target_type):
+                                return potential_context
+
+                    # Check other variables for orchestrator
+                    for var_name, var_value in current_frame.f_locals.items():
+                        if var_name != 'self' and 'Orchestrator' in type(var_value).__name__:
+                            if ContextDiscovery._is_context_provider(var_value, target_type):
+                                return var_value
+            finally:
+                del frame
+
+        # Fallback to thread-local context
         thread_local = self._get_thread_local_context(target_type)
         if thread_local and thread_local != current_context:
             return thread_local
@@ -226,6 +287,8 @@ class RecursiveContextualResolver:
         except Exception:
             return None
 
+
+
     def _get_concrete_value_at_level(self, context: Any, target_type: Type, field_name: str) -> Any:
         """
         Get concrete (non-None) value for target_type.field_name at this specific context level.
@@ -233,6 +296,8 @@ class RecursiveContextualResolver:
         This is level-specific - only looks within the given context, no recursion.
         Enhanced with inheritance search and global config fallback like non-recursive resolver.
         """
+
+
         context_type = type(context)
 
         # Try exact type first, then parent types in MRO order for inheritance
@@ -263,37 +328,22 @@ class RecursiveContextualResolver:
 
             # Find instances of search_type within this context
             if is_dataclass(context_type):
-                # Use type-based discovery for dataclasses
+                # FieldPathDetector now handles lazy type detection internally
                 field_paths = FieldPathDetector.find_all_field_paths_unified(context_type, search_type)
-                logger.debug(f"Context is dataclass {context_type.__name__}, searching for {search_type.__name__}")
-
-                # CRITICAL FIX: Also check for lazy versions in dataclass fields
-                if not field_paths:
-                    # Check each field to see if it's a lazy version of our search type
-                    for field in fields(context_type):
-                        field_type = field.type
-                        # Check if this field type is a lazy version of our search type
-                        base_type = get_base_type_for_lazy(field_type)
-                        if base_type == search_type:
-                            field_paths = [field.name]
-                            logger.debug(f"Found lazy field {field.name}: {field_type.__name__} (base: {base_type.__name__}) for target {search_type.__name__}")
-                            break
+                logger.debug(f"Context is dataclass {context_type.__name__}, found {len(field_paths)} paths for {search_type.__name__}")
             else:
                 # Use instance-based discovery for regular objects
                 hierarchy = discover_composition_hierarchy_from_instance(context)
-
-                # Try both the exact type and any lazy version of the type
                 field_paths = hierarchy.get(search_type, [])
 
-                # If no paths found for base type, try to find lazy version using registry
+                # Manual lazy detection still needed for instance-based discovery
                 if not field_paths:
-                    for hierarchy_type, paths in hierarchy.items():
-                        # Check if this hierarchy type is a lazy version of our search type
-                        base_type = get_base_type_for_lazy(hierarchy_type)
-                        if base_type == search_type:
-                            field_paths = paths
-                            logger.debug(f"Found lazy type {hierarchy_type.__name__} for base type {search_type.__name__} at paths: {paths}")
-                            break
+                    field_paths = next((paths for hierarchy_type, paths in hierarchy.items()
+                                      if get_base_type_for_lazy(hierarchy_type) == search_type), [])
+                    if field_paths:
+                        logger.debug(f"Found lazy type for base type {search_type.__name__} at paths: {field_paths}")
+
+
 
             logger.debug(f"Found {len(field_paths)} paths for {search_type.__name__}: {field_paths}")
 
@@ -399,6 +449,42 @@ class RecursiveContextualResolver:
         except Exception:
             return None
 
+    def _check_static_override(self, base_type: Type, field_name: str) -> Any:
+        """
+        Check if the base class has a static field override that should take precedence
+        over hierarchical inheritance.
+
+        Returns the static override value if found, None otherwise.
+        """
+        import dataclasses
+
+        if not is_dataclass(base_type):
+            return None
+
+        # Get parent types from MRO
+        parent_types = [cls for cls in base_type.__mro__[1:] if is_dataclass(cls)]
+        if not parent_types:
+            return None
+
+        # Unified field default extraction pattern
+        def get_field_default(dataclass_type: Type, field_name: str) -> Any:
+            return next((field.default if field.default != dataclasses.MISSING else None
+                        for field in dataclasses.fields(dataclass_type) if field.name == field_name), None)
+
+        # Get base class field default
+        base_field_value = get_field_default(base_type, field_name)
+        if base_field_value is None:
+            return None
+
+        # Get parent class field defaults using same pattern
+        parent_field_values = {get_field_default(parent_type, field_name) for parent_type in parent_types}
+
+        # If base class has a different default than all parents, it's an override
+        if base_field_value not in parent_field_values:
+            return base_field_value
+
+        return None
+
     def _get_raw_field_value(self, instance: Any, field_name: str) -> Any:
         """
         Get raw field value bypassing lazy resolution to prevent infinite recursion.
@@ -425,11 +511,17 @@ class ContextDiscovery:
         For PipelineConfig editing: Prioritizes thread-local GlobalPipelineConfig over orchestrators
         For step-level configs: Prioritizes orchestrators over thread-local to ensure proper inheritance
         """
+        if target_type and target_type.__name__ == 'StepWellFilterConfig':
+            print(f"🔍 CONTEXT_DISCOVERY DEBUG: Starting discovery for {target_type.__name__}")
+
         frame = inspect.currentframe()
 
+        # CRITICAL FIX: For step-level configs, use correct inheritance order: step → pipeline/orchestrator → global
+        # ProcessingContext is NOT part of config inheritance - it's just an execution context
+        orchestrator_context = None
+        step_context = None
 
-
-        # Use pure stack introspection - closest context provider wins (any type)
+        # Use pure stack introspection - but collect all context providers first
         try:
             frame_count = 0
             current_frame = frame
@@ -439,23 +531,52 @@ class ContextDiscovery:
                     break
                 frame_count += 1
 
+                # Check for any injected context (generic pattern)
+                injected_context = ContextDiscovery._find_injected_context(current_frame, target_type)
+                if injected_context:
+                    logger.debug(f"Found injected context provider: {type(injected_context).__name__}")
+                    return injected_context
+
                 # Check 'self' parameter first (method calls are most likely to be context providers)
                 if 'self' in current_frame.f_locals:
                     potential_context = current_frame.f_locals['self']
                     if ContextDiscovery._is_context_provider(potential_context, target_type):
-                        logger.debug(f"Found context provider: self ({type(potential_context).__name__}) - using stack proximity")
-                        return potential_context
+                        context_type = type(potential_context).__name__
+                        if 'Orchestrator' in context_type:
+                            orchestrator_context = potential_context
+                        elif 'FunctionStep' in context_type or 'Step' in context_type:
+                            step_context = potential_context
+                        else:
+                            # Other context types (not ProcessingContext) - return immediately
+                            logger.debug(f"Found context provider: self ({context_type}) - using stack proximity")
+                            return potential_context
 
                 # Check all other objects in current frame
                 for var_name, var_value in current_frame.f_locals.items():
                     if var_name != 'self':
                         # Check if object can provide context for the target type
                         if ContextDiscovery._is_context_provider(var_value, target_type):
-                            logger.debug(f"Found context provider: {var_name} ({type(var_value).__name__}) - using stack proximity")
-                            return var_value
+                            context_type = type(var_value).__name__
+                            if 'Orchestrator' in context_type:
+                                orchestrator_context = var_value
+                            elif 'FunctionStep' in context_type or 'Step' in context_type:
+                                step_context = var_value
+                            else:
+                                # Other context types (not ProcessingContext) - return immediately
+                                logger.debug(f"Found context provider: {var_name} ({context_type}) - using stack proximity")
+                                return var_value
 
         finally:
             del frame
+
+        # PRIORITY ORDER: step → pipeline/orchestrator → global
+        # Return contexts in the correct inheritance order
+        if step_context:
+            logger.debug(f"Using step context: {type(step_context).__name__}")
+            return step_context
+        elif orchestrator_context:
+            logger.debug(f"Using orchestrator context: {type(orchestrator_context).__name__}")
+            return orchestrator_context
 
         # Thread-local is a context provider, not a fallback
         if target_type:
@@ -468,6 +589,22 @@ class ContextDiscovery:
 
         return None
     
+    @staticmethod
+    def _find_injected_context(frame: Any, target_type: type = None) -> Optional[Any]:
+        """
+        Find any injected context in frame locals using generic pattern.
+
+        Looks for variables with naming pattern: __*_context__
+        This allows flexible context injection without hardcoding specific names.
+        """
+        for var_name, var_value in frame.f_locals.items():
+            # Generic pattern: __*_context__ (e.g., __step_context__, __pipeline_context__, etc.)
+            if var_name.startswith('__') and var_name.endswith('_context__'):
+                if ContextDiscovery._is_context_provider(var_value, target_type):
+                    logger.debug(f"Found injected context: {var_name} = {type(var_value).__name__}")
+                    return var_value
+        return None
+
     @staticmethod
     def _is_context_provider(obj: Any, target_type: type = None) -> bool:
         """
@@ -498,6 +635,8 @@ class ContextDiscovery:
                     attr_value is not None):
 
                     attr_type = type(attr_value)
+                    if target_type and target_type.__name__ == 'StepWellFilterConfig':
+                        print(f"🔍 ATTR_DEBUG: Checking {type(obj).__name__}.{attr_name}: {attr_type.__name__} for target {target_type.__name__}")
 
                     # If no target_type specified, accept any dataclass (backward compatibility)
                     if target_type is None:
@@ -524,6 +663,7 @@ class ContextDiscovery:
                     # For step attributes like step_materialization_config: LazyStepMaterializationConfig
                     base_type = get_base_type_for_lazy(attr_type)
                     if base_type == target_type:
+                        print(f"🔍 LAZY_PROVIDER DEBUG: Found lazy context provider: {attr_name}: {attr_type.__name__} (base: {base_type.__name__}) for target {target_type.__name__}")
                         logger.debug(f"Found lazy context provider: {attr_name}: {attr_type.__name__} (base: {base_type.__name__}) for target {target_type.__name__}")
                         return True
 
@@ -552,10 +692,6 @@ class ContextDiscovery:
                 pass
 
         return False
-
-
-
-
 
 
 # Global resolver instance for reuse

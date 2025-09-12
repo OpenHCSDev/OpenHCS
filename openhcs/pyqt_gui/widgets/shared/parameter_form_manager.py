@@ -529,7 +529,11 @@ class ParameterFormManager(QWidget):
         # Algebraic simplification: Single conditional for lazy resolution
         if LazyDefaultPlaceholderService.has_lazy_resolution(nested_type):
             # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
-            field_path = self.service.get_field_path_with_fail_loud(self.dataclass_type, nested_type)
+            # For function parameters (no parent dataclass), use parameter name directly
+            if self.dataclass_type is None:
+                field_path = param_info.name
+            else:
+                field_path = self.service.get_field_path_with_fail_loud(self.dataclass_type, nested_type)
 
             # Mathematical simplification: Inline instance creation without helper method
             if current_value and not isinstance(current_value, nested_type):
@@ -635,7 +639,11 @@ class ParameterFormManager(QWidget):
     def _create_nested_form_inline(self, param_name: str, param_type: Type, current_value: Any) -> Any:
         """Create nested form - use actual field path instead of artificial field IDs"""
         # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
-        field_path = self.service.get_field_path_with_fail_loud(self.dataclass_type, param_type)
+        # For function parameters (no parent dataclass), use parameter name directly
+        if self.dataclass_type is None:
+            field_path = param_name
+        else:
+            field_path = self.service.get_field_path_with_fail_loud(self.dataclass_type, param_type)
 
         # Extract nested parameters using service with parent context (handles both dataclass and non-dataclass contexts)
         nested_params, nested_types = self.service.extract_nested_parameters(

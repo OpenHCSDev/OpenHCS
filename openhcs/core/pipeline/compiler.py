@@ -133,11 +133,7 @@ class PipelineCompiler:
         logger.debug("🔧 BACKWARDS COMPATIBILITY: Normalizing step attributes...")
         _normalize_step_attributes(steps_definition)
 
-        # === AXIS FILTER RESOLUTION ===
-        # Resolve axis filters for steps with materialization configs
-        # This must happen after normalization to ensure step_materialization_config exists
-        logger.debug("🎯 AXIS FILTER RESOLUTION: Resolving step axis filters...")
-        _resolve_step_axis_filters(steps_definition, context, orchestrator)
+
 
         # Pre-initialize step_plans with basic entries for each step
         # Use step index as key instead of step_id for multiprocessing compatibility
@@ -182,6 +178,14 @@ class PipelineCompiler:
             steps_definition
         )
 
+        # === LAZY CONFIG RESOLUTION ===
+        # Resolve ALL lazy configs AFTER path planning (which includes metadata injection)
+        # This ensures metadata injection happens first, then lazy configs are resolved
+        logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving all lazy configs after path planning...")
+        from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+        with orchestrator.config_context(for_serialization=True):
+            steps_definition = resolve_lazy_configurations_for_serialization(steps_definition)
+
         # Loop to supplement step_plans with non-I/O, non-path attributes
         # after PipelinePathPlanner has fully populated them with I/O info.
         for step_index, step in enumerate(steps_definition):
@@ -220,24 +224,49 @@ class PipelineCompiler:
             # Add step-specific attributes (non-I/O, non-path related)
             current_plan["variable_components"] = step.variable_components
             current_plan["group_by"] = step.group_by
-            # Resolve lazy configs for this step BEFORE checking inheritance
-            # Use orchestrator context to ensure proper hierarchical inheritance
-            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-            with orchestrator.config_context(for_serialization=True):
-                resolved_step = resolve_lazy_configurations_for_serialization([step])[0]
+            # Lazy configs were already resolved at the beginning of compilation
+            resolved_step = step
+
+            # DEBUG: Check what the resolved napari config actually has
+            if hasattr(resolved_step, 'napari_streaming_config') and resolved_step.napari_streaming_config:
+                print(f"🔍 COMPILER DEBUG: resolved_step.napari_streaming_config.well_filter = {resolved_step.napari_streaming_config.well_filter}")
+            if hasattr(resolved_step, 'step_well_filter_config') and resolved_step.step_well_filter_config:
+                print(f"🔍 COMPILER DEBUG: resolved_step.step_well_filter_config.well_filter = {resolved_step.step_well_filter_config.well_filter}")
+            if hasattr(resolved_step, 'step_materialization_config') and resolved_step.step_materialization_config:
+                print(f"🔍 COMPILER DEBUG: resolved_step.step_materialization_config.sub_dir = '{resolved_step.step_materialization_config.sub_dir}' (type: {type(resolved_step.step_materialization_config).__name__})")
 
             # Store WellFilterConfig instances only if they match the current axis
             from openhcs.core.config import WellFilterConfig, StreamingConfig, WellFilterMode
             has_streaming = False
             required_visualizers = getattr(context, 'required_visualizers', [])
 
+            # CRITICAL FIX: Ensure required_visualizers is always set on context
+            # This prevents AttributeError during execution phase
+            if not hasattr(context, 'required_visualizers'):
+                context.required_visualizers = []
+
             # Get step axis filters for this step
             step_axis_filters = getattr(context, 'step_axis_filters', {}).get(step_index, {})
+
+            print(f"🔍 STEP DEBUG: Processing step '{step.name}' with attributes: {[attr for attr in dir(resolved_step) if not attr.startswith('_') and 'config' in attr]}")
+            if step.name == "Image Enhancement Processing":
+                print(f"🔍 ATTR DEBUG: All attributes for {step.name}: {[attr for attr in dir(resolved_step) if not attr.startswith('_')]}")
 
             for attr_name in dir(resolved_step):
                 if not attr_name.startswith('_'):
                     config = getattr(resolved_step, attr_name, None)
-                    if config is not None and isinstance(config, WellFilterConfig):
+                    if step.name == "Image Enhancement Processing" and attr_name == "napari_streaming_config":
+                        print(f"🔍 ATTR DEBUG: Found {attr_name} = {config} (type: {type(config).__name__})")
+
+                    # CRITICAL FIX: Handle lazy configs by converting to base config first
+                    # Lazy configs don't inherit from base classes, so isinstance() fails
+                    actual_config = config
+                    if config is not None and hasattr(config, 'to_base_config'):
+                        actual_config = config.to_base_config()
+                        if step.name == "Image Enhancement Processing" and attr_name == "napari_streaming_config":
+                            print(f"🔍 ATTR DEBUG: Converted lazy config to base: {actual_config} (type: {type(actual_config).__name__})")
+
+                    if actual_config is not None and isinstance(actual_config, WellFilterConfig):
                         # Check if this config has a well filter and if current axis matches
                         should_include_config = True
                         if config.well_filter is not None:
@@ -253,26 +282,30 @@ class PipelineCompiler:
                         if should_include_config:
                             current_plan[attr_name] = config
                             # Check if this is a streaming config for visualize flag
-                            if isinstance(config, StreamingConfig):
+                            # CRITICAL FIX: Use actual_config (converted from lazy) for isinstance check
+                            if isinstance(actual_config, StreamingConfig):
                                 has_streaming = True
-                                # Collect visualizer info
+                                print(f"🔍 STREAMING DEBUG: Including {attr_name} for step {step.name}, axis {context.axis_id}")
+                                # Collect visualizer info - use actual_config for backend access
                                 visualizer_info = {
-                                    'backend': config.backend.name,
-                                    'config': config
+                                    'backend': actual_config.backend.name,
+                                    'config': actual_config
                                 }
                                 if visualizer_info not in required_visualizers:
                                     required_visualizers.append(visualizer_info)
+                                    print(f"🔍 STREAMING DEBUG: Added visualizer info for {actual_config.backend.name}")
                         else:
+                            if isinstance(actual_config, StreamingConfig):
+                                print(f"🔍 STREAMING DEBUG: Excluding {attr_name} for step {step.name}, axis {context.axis_id} (filtered out)")
                             logger.debug(f"Excluding {attr_name} for step {step.name}, axis {context.axis_id} (filtered out)")
 
             # Set visualize flag for orchestrator if any streaming is enabled
             current_plan["visualize"] = has_streaming
             context.required_visualizers = required_visualizers
+            print(f"🔍 STREAMING DEBUG: Step {step.name}, axis {context.axis_id}: has_streaming={has_streaming}, required_visualizers={len(required_visualizers)}")
 
-
-
-            # Add FunctionStep specific attributes
-            if isinstance(step, FunctionStep):
+        # Add FunctionStep specific attributes
+        if isinstance(step, FunctionStep):
 
                 # 🎯 SEMANTIC COHERENCE FIX: Prevent group_by/variable_components conflict
                 # When variable_components contains the same value as group_by,
@@ -568,6 +601,24 @@ class PipelineCompiler:
 
             logger.info(f"Starting compilation for axis values: {', '.join(axis_values_to_process)}")
 
+            # === GLOBAL AXIS FILTER RESOLUTION ===
+            # Resolve axis filters once for all axis values to ensure step-level inheritance works
+            logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs for axis filter resolution...")
+            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+            with orchestrator.config_context(for_serialization=True):
+                resolved_steps_for_filters = resolve_lazy_configurations_for_serialization(pipeline_definition)
+
+            logger.debug("🎯 AXIS FILTER RESOLUTION: Resolving step axis filters...")
+            # Create a temporary context to store the global axis filters
+            temp_context = orchestrator.create_context("temp")
+
+            # CRITICAL FIX: Inject orchestrator context during axis filter resolution
+            # This ensures that lazy config resolution finds the orchestrator context instead of step context
+            from openhcs.core.lazy_config import ContextInjector
+            with ContextInjector.with_context(orchestrator, "orchestrator"):
+                _resolve_step_axis_filters(resolved_steps_for_filters, temp_context, orchestrator)
+            global_step_axis_filters = getattr(temp_context, 'step_axis_filters', {})
+
             # Determine responsible axis value for metadata creation (lexicographically first)
             responsible_axis_value = sorted(axis_values_to_process)[0] if axis_values_to_process else None
             logger.debug(f"Designated responsible axis value for metadata creation: {responsible_axis_value}")
@@ -575,6 +626,9 @@ class PipelineCompiler:
             for axis_id in axis_values_to_process:
                 logger.debug(f"Compiling for axis value: {axis_id}")
                 context = orchestrator.create_context(axis_id)
+
+                # Copy global axis filters to this context
+                context.step_axis_filters = global_step_axis_filters
 
                 # Determine if this axis value is responsible for metadata creation
                 is_responsible = (axis_id == responsible_axis_value)
@@ -641,7 +695,7 @@ class PipelineCompiler:
 # _strip_step_attributes is also removed as StepAttributeStripper is called by Orchestrator.
 
 
-def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, orchestrator):
+def _resolve_step_axis_filters(resolved_steps: List[AbstractStep], context, orchestrator):
     """
     Resolve axis filters for steps with any WellFilterConfig instances.
 
@@ -650,7 +704,7 @@ def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, or
     It processes ALL WellFilterConfig instances (materialization, streaming, etc.) uniformly.
 
     Args:
-        steps_definition: List of pipeline steps
+        resolved_steps: List of pipeline steps with lazy configs already resolved
         context: Processing context for the current axis value
         orchestrator: Orchestrator instance with access to available axis values
     """
@@ -668,14 +722,14 @@ def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, or
     if not hasattr(context, 'step_axis_filters'):
         context.step_axis_filters = {}
 
-    # Process each step for ALL WellFilterConfig instances
-    for step_index, step in enumerate(steps_definition):
+    # Process each step for ALL WellFilterConfig instances using the already resolved steps
+    for step_index, resolved_step in enumerate(resolved_steps):
         step_filters = {}
 
-        # Check all attributes for WellFilterConfig instances
-        for attr_name in dir(step):
+        # Check all attributes for WellFilterConfig instances on the RESOLVED step
+        for attr_name in dir(resolved_step):
             if not attr_name.startswith('_'):
-                config = getattr(step, attr_name, None)
+                config = getattr(resolved_step, attr_name, None)
                 if config is not None and isinstance(config, WellFilterConfig) and config.well_filter is not None:
                     try:
                         # Resolve the axis filter pattern to concrete axis values
@@ -691,13 +745,15 @@ def _resolve_step_axis_filters(steps_definition: List[AbstractStep], context, or
                             'original_filter': config.well_filter
                         }
 
-                        logger.debug(f"Step '{step.name}' {attr_name} filter '{config.well_filter}' "
+                        print(f"🔍 AXIS_FILTER DEBUG: Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
+                                   f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
+                        logger.debug(f"Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
                                    f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
 
                     except Exception as e:
-                        logger.error(f"Failed to resolve axis filter for step '{step.name}' {attr_name}: {e}")
+                        logger.error(f"Failed to resolve axis filter for step '{resolved_step.name}' {attr_name}: {e}")
                         raise ValueError(f"Invalid axis filter '{config.well_filter}' "
-                                       f"for step '{step.name}' {attr_name}: {e}")
+                                       f"for step '{resolved_step.name}' {attr_name}: {e}")
 
         # Store step filters if any were found
         if step_filters:
