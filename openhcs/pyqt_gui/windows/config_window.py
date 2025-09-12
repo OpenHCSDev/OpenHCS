@@ -72,51 +72,28 @@ class ConfigWindow(QDialog):
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
-        # Set up context provider based on config type
+        # SIMPLIFIED: Use dual-axis resolution
         from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-        from openhcs.core.context.global_config import get_current_global_config
 
         # Determine placeholder prefix based on actual instance type (not class type)
         is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(current_config))
         placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
-        # Always use ParameterFormManager with dataclass editing mode - unified approach
-        # CRITICAL FIX: Use dataclass type name as field_id for root config (not artificial "config")
-        # This aligns with field path system design where field_id should match actual structure
+        # SIMPLIFIED: Use ParameterFormManager with dual-axis resolution
         root_field_id = type(current_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
-        if is_lazy_dataclass:
-            # For lazy configs: use orchestrator-specific context if available for proper isolation
-            # This ensures each orchestrator's pipeline config forms are isolated from each other
-            if self.orchestrator:
-                context_provider = lambda: self.orchestrator.get_effective_config(for_serialization=False)
-            else:
-                # Fallback to thread-local context for global config editing
-                context_provider = lambda: get_current_global_config(GlobalPipelineConfig)
-        else:
-            # For non-lazy configs: use thread-local context
-            context_provider = lambda: get_current_global_config(type(current_config))
+        global_config_type = GlobalPipelineConfig  # Always use GlobalPipelineConfig for dual-axis resolution
 
-        # Determine the correct global config type for enhanced decorator events system
-        # For lazy configs like PipelineConfig, we need to use GlobalPipelineConfig
-        global_config_type = GlobalPipelineConfig  # Always use GlobalPipelineConfig for thread-local storage
-
-        # CRITICAL FIX: Pass orchestrator-specific coordinator when available
-        context_event_coordinator = None
-        if self.orchestrator and hasattr(self.orchestrator, '_context_event_coordinator'):
-            context_event_coordinator = self.orchestrator._context_event_coordinator
-            print(f"🔍 CONFIG WINDOW: Using orchestrator-specific coordinator")
-        else:
-            print(f"🔍 CONFIG WINDOW: No orchestrator coordinator available - cross-form inheritance disabled")
+        # Get context event coordinator from orchestrator if available
+        context_event_coordinator = getattr(orchestrator, '_context_event_coordinator', None) if orchestrator else None
 
         self.form_manager = ParameterFormManager.from_dataclass_instance(
             dataclass_instance=current_config,
             field_id=root_field_id,
-            context_provider=context_provider,  # ✅ Required explicit context
             placeholder_prefix=placeholder_prefix,
             color_scheme=self.color_scheme,
             use_scroll_area=True,
-            global_config_type=global_config_type,  # ✅ Enable enhanced decorator events system
-            context_event_coordinator=context_event_coordinator  # ✅ Use orchestrator-specific coordinator
+            global_config_type=global_config_type,
+            context_event_coordinator=context_event_coordinator  # RESTORED: Enable real-time updates
         )
 
         # No config_editor needed - everything goes through form_manager
@@ -296,7 +273,6 @@ class ConfigWindow(QDialog):
         try:
             # Import required services
             from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-            from openhcs.core.context.global_config import get_current_global_config
 
             # Update the current config
             self.current_config = new_config
@@ -305,35 +281,20 @@ class ConfigWindow(QDialog):
             is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(new_config))
             placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
-            # Create new form manager with the new config
-            # CRITICAL FIX: Use dataclass type name as field_id for root config (not artificial "config")
+            # SIMPLIFIED: Create new form manager with dual-axis resolution
             root_field_id = type(new_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
-            # Set up context provider based on config type
 
-            is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(new_config))
-            if is_lazy_dataclass:
-                # For lazy configs: use thread-local context for proper inheritance
-                # This ensures pipeline config forms show thread-local defaults in placeholders
-                from openhcs.core.config import GlobalPipelineConfig
-                context_provider = lambda: get_current_global_config(GlobalPipelineConfig)
-            else:
-                # For non-lazy configs: use thread-local context
-                context_provider = lambda: get_current_global_config(type(new_config))
-
-            # CRITICAL FIX: Pass orchestrator-specific coordinator when available
-            context_event_coordinator = None
-            if self.orchestrator and hasattr(self.orchestrator, '_context_event_coordinator'):
-                context_event_coordinator = self.orchestrator._context_event_coordinator
+            # Get context event coordinator from orchestrator if available
+            context_event_coordinator = getattr(self.orchestrator, '_context_event_coordinator', None) if self.orchestrator else None
 
             new_form_manager = ParameterFormManager.from_dataclass_instance(
                 dataclass_instance=new_config,
                 field_id=root_field_id,
-                context_provider=context_provider,  # ✅ Required explicit context
                 placeholder_prefix=placeholder_prefix,
                 color_scheme=self.color_scheme,
                 use_scroll_area=True,
-                global_config_type=type(new_config),  # ✅ Enable enhanced decorator events system
-                context_event_coordinator=context_event_coordinator  # ✅ Use orchestrator-specific coordinator
+                global_config_type=GlobalPipelineConfig,  # FIXED: Always use GlobalPipelineConfig for dual-axis resolution
+                context_event_coordinator=context_event_coordinator  # RESTORED: Enable real-time updates
             )
 
             # Find and replace the form widget in the layout

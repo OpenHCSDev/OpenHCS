@@ -83,9 +83,34 @@ class ContextualResolver:
         3. Only return class defaults if no context is available at any level
         """
 
-        # STEP 1: Check context for THIS type first
+        # STEP 1: Check if THIS class OR any parent class has a concrete field override that blocks inheritance
+        # If any class in the MRO redefines the field, it should block inheritance from higher up in the MRO
+        # This check must happen BEFORE context resolution to enforce inheritance blocking
+        blocking_class = self._find_blocking_class_in_mro(base_type, field_name)
+        if blocking_class:
+            # Check context for THIS type and all classes up to (and including) the blocking class
+            # The blocking class can provide context values, it just blocks inheritance from parent classes
+            allowed_types = []
+            for cls in base_type.__mro__:
+                if is_dataclass(cls):
+                    allowed_types.append(cls)
+                if cls == blocking_class:
+                    break  # Include blocking class but stop before its parents
+
+            # Search for context values only in allowed types (up to and including blocking class)
+            context_value = self._resolve_from_context_hierarchy_with_type_filter(allowed_types, field_name)
+            if context_value is not None:
+                logger.debug(f"Resolved {base_type.__name__}.{field_name} from context (blocked by {blocking_class.__name__}): {context_value}")
+                return context_value
+            else:
+                # No context value - use blocking class default (inheritance blocked)
+                class_default = getattr(blocking_class, field_name, None)
+                logger.debug(f"Class {blocking_class.__name__} blocks inheritance for {base_type.__name__}.{field_name}: {class_default}")
+                return class_default
+
+        # STEP 2: Check context for THIS type first (no concrete override - inheritance allowed)
         # Any concrete value in context blocks inheritance immediately
-        context_value = self._resolve_from_context_hierarchy(base_type, field_name)
+        context_value = self._resolve_from_context_hierarchy(base_type, field_name, search_parent_types=True)
         if context_value is not None:
             logger.debug(f"Resolved {base_type.__name__}.{field_name} from context (blocks inheritance): {context_value}")
             return context_value
@@ -97,7 +122,7 @@ class ContextualResolver:
                 continue
 
             # Check parent context first - concrete values block inheritance
-            parent_context_value = self._resolve_from_context_hierarchy(parent_type, field_name)
+            parent_context_value = self._resolve_from_context_hierarchy(parent_type, field_name, search_parent_types=True)
             if parent_context_value is not None:
                 logger.debug(f"Resolved {base_type.__name__}.{field_name} from parent {parent_type.__name__} context (blocks inheritance): {parent_context_value}")
                 return parent_context_value
@@ -112,7 +137,7 @@ class ContextualResolver:
                 for remaining_parent in remaining_parents:
                     if not is_dataclass(remaining_parent):
                         continue
-                    remaining_context = self._resolve_from_context_hierarchy(remaining_parent, field_name)
+                    remaining_context = self._resolve_from_context_hierarchy(remaining_parent, field_name, search_parent_types=True)
                     if remaining_context is not None:
                         logger.debug(f"Resolved {base_type.__name__}.{field_name} from higher parent {remaining_parent.__name__} context (overrides class block): {remaining_context}")
                         return remaining_context
@@ -134,7 +159,7 @@ class ContextualResolver:
         logger.debug(f"No resolution found for {base_type.__name__}.{field_name}")
         return None
     
-    def _resolve_from_context_hierarchy(self, target_type: Type, field_name: str) -> Any:
+    def _resolve_from_context_hierarchy(self, target_type: Type, field_name: str, search_parent_types: bool = True) -> Any:
         """
         X-axis resolution: Find instances of target_type OR its parent types in context hierarchy.
 
@@ -143,15 +168,20 @@ class ContextualResolver:
 
         This enables proper inheritance: StepMaterializationConfig can inherit from
         StepWellFilterConfig instances found in the orchestrator's pipeline config.
+
+        Args:
+            target_type: The type to search for
+            field_name: The field name to resolve
+            search_parent_types: If False, only search for exact target_type (used for inheritance blocking)
         """
         if not self.context:
             return None
 
         context_type = type(self.context)
 
-        # Try exact type first, then parent types in MRO order
+        # Try exact type first, then parent types in MRO order (if allowed)
         types_to_search = [target_type]
-        if hasattr(target_type, '__mro__'):
+        if search_parent_types and hasattr(target_type, '__mro__'):
             # Add parent dataclass types from MRO (skip object)
             for parent_type in target_type.__mro__[1:]:
                 if is_dataclass(parent_type):
@@ -161,9 +191,24 @@ class ContextualResolver:
 
         # Search for each type in priority order (exact type first, then parents)
         for search_type in types_to_search:
+            # CRITICAL FIX: Handle direct type match (context type == target type)
+            if context_type == search_type:
+                logger.debug(f"Direct type match - context {context_type.__name__} == target {search_type.__name__}")
+                # Direct field access from context instance
+                try:
+                    value = self._get_raw_field_value(self.context, field_name)
+                    if value is not None:
+                        logger.debug(f"Found direct value for {field_name}: {value}")
+                        return value
+                except AttributeError:
+                    logger.debug(f"Field {field_name} not found in direct context")
+                    pass
+                # Continue to field path detection as fallback
+
             if is_dataclass(context_type):
                 # Use type-based discovery for dataclasses
                 field_paths = FieldPathDetector.find_all_field_paths_unified(context_type, search_type)
+                logger.debug(f"Context is dataclass {context_type.__name__}, searching for {search_type.__name__}")
             else:
                 # Use instance-based discovery for regular objects
                 from openhcs.core.composition_detection import discover_composition_hierarchy_from_instance
@@ -172,12 +217,15 @@ class ContextualResolver:
                 # Try both the exact type and any lazy version of the type
                 field_paths = hierarchy.get(search_type, [])
 
-                # If no paths found for base type, try to find lazy version
+                # If no paths found for base type, try to find lazy version using registry
                 if not field_paths:
-                    lazy_type_name = f"Lazy{search_type.__name__}"
+                    from openhcs.core.lazy_config import get_base_type_for_lazy
                     for hierarchy_type, paths in hierarchy.items():
-                        if hierarchy_type.__name__ == lazy_type_name:
+                        # Check if this hierarchy type is a lazy version of our search type
+                        base_type = get_base_type_for_lazy(hierarchy_type)
+                        if base_type == search_type:
                             field_paths = paths
+                            logger.debug(f"Found lazy type {hierarchy_type.__name__} for base type {search_type.__name__} at paths: {paths}")
                             break
 
             logger.debug(f"Found {len(field_paths)} paths for {search_type.__name__}: {field_paths}")
@@ -321,6 +369,66 @@ class ContextualResolver:
 
         logger.debug(f"Class override check {config_class.__name__}.{field_name}: value={class_attr_value}, has_override={has_override}")
         return has_override
+
+    def _find_blocking_class_in_mro(self, base_type: Type, field_name: str) -> Optional[Type]:
+        """
+        Find the first class in MRO that has a concrete field override AND blocks inheritance from parent classes.
+
+        A class blocks inheritance only if:
+        1. It has a concrete field override
+        2. There are parent classes in the MRO that also have the same field
+
+        This prevents legitimate inheritance sources (like GlobalPipelineConfig) from being treated as blockers.
+
+        Returns:
+            The first class in MRO order that blocks inheritance, or None if no blocking class found.
+        """
+        for i, cls in enumerate(base_type.__mro__):
+            if not is_dataclass(cls):
+                continue
+            if self._has_concrete_field_override(cls, field_name):
+                # Check if there are parent classes that also have this field
+                has_parent_with_field = False
+                for parent_cls in base_type.__mro__[i + 1:]:
+                    if not is_dataclass(parent_cls):
+                        continue
+                    if hasattr(parent_cls, field_name):
+                        has_parent_with_field = True
+                        break
+
+                if has_parent_with_field:
+                    logger.debug(f"Found blocking class {cls.__name__} for {base_type.__name__}.{field_name} (blocks parent inheritance)")
+                    return cls
+                else:
+                    logger.debug(f"Class {cls.__name__} has concrete override but no parents with field - not blocking")
+        return None
+
+    def _resolve_from_context_hierarchy_with_type_filter(self, allowed_types: List[Type], field_name: str) -> Any:
+        """
+        X-axis resolution with type filtering: Find instances of allowed types only.
+
+        This is used for inheritance blocking to prevent searching beyond a blocking class.
+        Reuses the existing _resolve_from_context_hierarchy logic but filters the search types.
+
+        Args:
+            allowed_types: List of types to search for in context hierarchy
+            field_name: The field name to resolve
+
+        Returns:
+            Field value from first matching type found in context, or None if not found
+        """
+        if not self.context or not allowed_types:
+            return None
+
+        # Try each allowed type in order using the existing resolution logic
+        for target_type in allowed_types:
+            # Use the existing context hierarchy resolution but restrict to this type only
+            value = self._resolve_from_context_hierarchy(target_type, field_name, search_parent_types=False)
+            if value is not None:
+                logger.debug(f"Found {target_type.__name__}.{field_name} = {value} (type filter)")
+                return value
+
+        return None
     
     def _get_raw_field_value(self, instance: Any, field_name: str) -> Any:
         """
@@ -341,38 +449,18 @@ class ContextDiscovery:
     """
     
     @staticmethod
-    def discover_context() -> Optional[Any]:
+    def discover_context(target_type: type = None) -> Optional[Any]:
         """
         Walk call stack to find objects that can provide resolution context.
 
-        Prioritizes orchestrators over other context providers to ensure proper
-        step-level config inheritance from orchestrator pipeline configs.
+        For PipelineConfig editing: Prioritizes thread-local GlobalPipelineConfig over orchestrators
+        For step-level configs: Prioritizes orchestrators over thread-local to ensure proper inheritance
         """
         frame = inspect.currentframe()
 
-        # First pass: Look for orchestrators (highest priority)
-        orchestrator_context = None
-        try:
-            frame_count = 0
-            current_frame = frame
-            while current_frame:
-                current_frame = current_frame.f_back
-                if not current_frame:
-                    break
-                frame_count += 1
 
-                # Check for orchestrator objects first (highest priority)
-                for var_name, var_value in current_frame.f_locals.items():
-                    if hasattr(var_value, 'pipeline_config') and hasattr(var_value, 'plate_path'):
-                        logger.debug(f"Found orchestrator {var_name} ({type(var_value).__name__}) in frame {frame_count}")
-                        if ContextDiscovery._is_context_provider(var_value):
-                            logger.debug(f"Using orchestrator as primary context provider")
-                            return var_value
 
-        finally:
-            pass
-
-        # Second pass: Look for other context providers if no orchestrator found
+        # Use pure stack introspection - closest context provider wins (any type)
         try:
             frame_count = 0
             current_frame = frame
@@ -385,34 +473,73 @@ class ContextDiscovery:
                 # Check 'self' parameter first (method calls are most likely to be context providers)
                 if 'self' in current_frame.f_locals:
                     potential_context = current_frame.f_locals['self']
-                    if ContextDiscovery._is_context_provider(potential_context):
+                    if ContextDiscovery._is_context_provider(potential_context, target_type):
+                        logger.debug(f"Found context provider: self ({type(potential_context).__name__}) - using stack proximity")
+                        return potential_context
+
+                # Check all other objects in current frame
+                for var_name, var_value in current_frame.f_locals.items():
+                    if var_name != 'self':
+                        # Check for any context providers (generic detection)
+                        if ContextDiscovery._is_context_provider(var_value, target_type):
+                            logger.debug(f"Found context provider: {var_name} ({type(var_value).__name__}) - using stack proximity")
+                            return var_value
+
+        finally:
+            pass
+        try:
+            frame_count = 0
+            current_frame = frame
+            while current_frame:
+                current_frame = current_frame.f_back
+                if not current_frame:
+                    break
+                frame_count += 1
+
+                # Check 'self' parameter first (method calls are most likely to be context providers)
+                if 'self' in current_frame.f_locals:
+                    potential_context = current_frame.f_locals['self']
+                    if ContextDiscovery._is_context_provider(potential_context, target_type):
                         logger.debug(f"Found context provider: self ({type(potential_context).__name__}) - using stack proximity")
                         return potential_context
 
                 # Check all other objects in current frame only if 'self' didn't provide context
                 for var_name, var_value in current_frame.f_locals.items():
-                    if var_name != 'self' and ContextDiscovery._is_context_provider(var_value):
-                        logger.debug(f"Found context provider: {var_name} ({type(var_value).__name__}) - using stack proximity")
-                        return var_value
+                    if var_name != 'self':
+                        if ContextDiscovery._is_context_provider(var_value, target_type):
+                            logger.debug(f"Found context provider: {var_name} ({type(var_value).__name__}) - using stack proximity")
+                            return var_value
 
         finally:
             del frame
 
-        logger.debug("No context provider found in call stack")
+        # Thread-local is a context provider, not a fallback
+        from openhcs.core.context.global_config import get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+
+        thread_local_global_config = get_current_global_config(GlobalPipelineConfig)
+        if thread_local_global_config:
+            logger.debug(f"Using thread-local GlobalPipelineConfig as context provider")
+            return thread_local_global_config
+
         return None
     
     @staticmethod
-    def _is_context_provider(obj: Any) -> bool:
+    def _is_context_provider(obj: Any, target_type: type = None) -> bool:
         """
-        Check if object can provide resolution context using type introspection.
+        Check if object can provide resolution context for the target type.
 
-        Identifies context providers by looking for dataclass instances as attributes,
-        which indicates this object participates in the type-driven hierarchy.
+        Considers objects that have dataclass instances relevant to the target type through:
+        1. Inheritance hierarchy (parent types)
+        2. Composition relationships (step attributes)
+        3. Direct type matches (for step attributes)
         """
         if obj is None or not hasattr(obj, '__dict__'):
             return False
 
-        # Look for dataclass instance attributes (not classes themselves)
+
+
+        # Look for dataclass instance attributes that could provide context for target_type
         for attr_name in dir(obj):
             if attr_name.startswith('_'):
                 continue
@@ -425,13 +552,67 @@ class ContextDiscovery:
                 if (is_dataclass(attr_value) and
                     not inspect.isclass(attr_value) and
                     attr_value is not None):
-                    logger.debug(f"Found dataclass attribute {attr_name}: {type(attr_value).__name__}")
-                    return True
+
+                    attr_type = type(attr_value)
+
+                    # If no target_type specified, accept any dataclass (backward compatibility)
+                    if target_type is None:
+                        logger.debug(f"Found dataclass attribute {attr_name}: {attr_type.__name__} in {type(obj).__name__}")
+                        return True
+
+                    # INHERITANCE RESOLUTION: Check for parent types in MRO
+                    # For inheritance resolution, we need the parent type, not the same type
+                    # E.g., for PipelineConfig resolution, we need GlobalPipelineConfig
+                    if hasattr(target_type, '__mro__'):
+                        # Look for parent types in the MRO (excluding the target type itself)
+                        parent_types = target_type.__mro__[1:]  # Skip the target type itself
+                        if attr_type in parent_types:
+                            logger.debug(f"Found parent context provider: {attr_name}: {attr_type.__name__} for target {target_type.__name__}")
+                            return True
+
+                    # COMPOSITION RESOLUTION: Check for direct type matches (step attributes)
+                    # For step attributes like step_materialization_config: StepMaterializationConfig
+                    if attr_type == target_type:
+                        logger.debug(f"Found direct context provider: {attr_name}: {attr_type.__name__} for target {target_type.__name__}")
+                        return True
+
+                    # LAZY DATACLASS RESOLUTION: Check for lazy versions of target type
+                    # For step attributes like step_materialization_config: LazyStepMaterializationConfig
+                    from openhcs.core.lazy_config import get_base_type_for_lazy
+                    base_type = get_base_type_for_lazy(attr_type)
+                    if base_type == target_type:
+                        logger.debug(f"Found lazy context provider: {attr_name}: {attr_type.__name__} (base: {base_type.__name__}) for target {target_type.__name__}")
+                        return True
 
             except (AttributeError, Exception):
                 continue
 
+        # NESTED COMPOSITION RESOLUTION: Check for target type in nested hierarchy
+        # For orchestrator → pipeline_config → napari_streaming_config: LazyNapariStreamingConfig
+        if target_type is not None:
+            try:
+                from openhcs.core.composition_detection import discover_composition_hierarchy_from_instance
+                hierarchy = discover_composition_hierarchy_from_instance(obj)
+
+                # Check if target_type or its lazy version exists in the hierarchy
+                if target_type in hierarchy:
+                    logger.debug(f"Found nested context provider for {target_type.__name__} at paths: {hierarchy[target_type]}")
+                    return True
+
+                # Check for lazy versions using registry
+                from openhcs.core.lazy_config import get_base_type_for_lazy
+                for hierarchy_type in hierarchy.keys():
+                    base_type = get_base_type_for_lazy(hierarchy_type)
+                    if base_type == target_type:
+                        logger.debug(f"Found nested lazy context provider: {hierarchy_type.__name__} (base: {base_type.__name__}) for target {target_type.__name__} at paths: {hierarchy[hierarchy_type]}")
+                        return True
+
+            except (AttributeError, Exception):
+                pass
+
         return False
+
+
 
 
 

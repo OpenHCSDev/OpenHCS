@@ -345,9 +345,8 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
     """Abstract base configuration for streaming to visualizers.
 
     Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
+    Inherited fields are automatically set to None by @global_pipeline_config(inherit_as_none=True).
     """
-    # Override to None to enable lazy resolution from StepWellFilterConfig
-    #well_filter: Optional[List[str]] = None
 
     @property
     @abstractmethod

@@ -21,9 +21,9 @@ from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnaly
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.core.lazy_config import LazyDataclassFactory
+# REMOVED: LazyDataclassFactory import - no longer needed since step editor
+# uses existing lazy dataclass instances from the step
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.context.global_config import get_current_global_config
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
 logger = logging.getLogger(__name__)
@@ -50,11 +50,10 @@ class StepParameterEditorWidget(QWidget):
         self.service_adapter = service_adapter
         self.orchestrator = orchestrator  # Store orchestrator reference for context management
 
-        # CRITICAL FIX: Create step-editor-specific coordinator for internal form updates
-        # This allows forms within the step editor to update each other without affecting external windows
-        from openhcs.core.lazy_config import ContextEventCoordinator
-        self._step_editor_coordinator = ContextEventCoordinator()
-        print(f"🔍 STEP EDITOR: Created step-editor-specific coordinator for internal form updates")
+        # DISABLED: Live placeholder updates
+        # from openhcs.core.lazy_config import ContextEventCoordinator
+        # self._step_editor_coordinator = ContextEventCoordinator()
+        # print(f"🔍 STEP EDITOR: Created step-editor-specific coordinator for internal form updates")
         
         # Analyze AbstractStep signature to get all inherited parameters (mirrors Textual TUI)
         from openhcs.core.steps.abstract import AbstractStep
@@ -87,20 +86,18 @@ class StepParameterEditorWidget(QWidget):
             parameters[name] = current_value
             parameter_types[name] = info.param_type
         
-        # Create parameter form manager for function parameters
-        # Note: Step editor needs special context setup to show step-level inheritance
+        # SIMPLIFIED: Create parameter form manager using dual-axis resolution
         from openhcs.core.config import GlobalPipelineConfig
 
         self.form_manager = ParameterFormManager(
             parameters, parameter_types, "step", AbstractStep,
-            lambda: self.orchestrator.get_effective_config(for_serialization=False),  # ✅ Required explicit context
             param_info,
             parent=self,  # Pass self as parent so form manager can access _step_level_configs
             color_scheme=self.color_scheme,
             placeholder_prefix="Pipeline default",
             param_defaults=param_defaults,
-            global_config_type=GlobalPipelineConfig,  # Enable thread-local context resolution
-            context_event_coordinator=self._step_editor_coordinator  # CRITICAL FIX: Use step-editor-specific coordinator for internal updates only
+            global_config_type=GlobalPipelineConfig,  # Enable dual-axis resolution
+            context_event_coordinator=None  # DISABLED: Disable live placeholder updates
         )
         
         self.setup_ui()
@@ -159,49 +156,10 @@ class StepParameterEditorWidget(QWidget):
                 return field.name
         return None
 
-    def _create_step_level_config(self, param_name, param_type):
-        """
-        Generic method to create step-level config for any lazy dataclass parameter.
-
-        Uses type-based discovery to find the corresponding pipeline field as defaults source.
-        """
-
-
-        # Get the inner dataclass type
-        inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
-
-        # Find the corresponding pipeline field by type (no manual mapping needed)
-        pipeline_field_name = self._find_pipeline_field_by_type(inner_type)
-        if not pipeline_field_name:
-            # Fallback to standard lazy config if no matching type found
-            return inner_type()
-
-        # Use field-level auto-hierarchy for all step-level configs
-        from openhcs.core.lazy_config import get_base_type_for_lazy
-        base_class = get_base_type_for_lazy(inner_type) or inner_type
-
-        # CRITICAL FIX: Use orchestrator's pipeline config as context provider for step-level resolution
-        def step_context_provider():
-            """Provide orchestrator's pipeline config for step-level lazy resolution."""
-            if self.orchestrator and self.orchestrator.pipeline_config:
-                # Get the merged config that preserves None values for inheritance
-                from openhcs.core.context.global_config import get_current_global_config
-                current_context = get_current_global_config(GlobalPipelineConfig)
-                if current_context:
-                    return current_context
-                else:
-                    return self.orchestrator.get_effective_config(for_serialization=False)
-            else:
-                return get_current_global_config()
-
-        StepLevelConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
-            base_class=base_class,
-            global_config_type=GlobalPipelineConfig,
-            field_path=pipeline_field_name,
-            lazy_class_name=f"StepLevel{base_class.__name__}",
-            context_provider=step_context_provider
-        )
-        return StepLevelConfig()
+    # REMOVED: _create_step_level_config method - dead code
+    # The step editor should use the existing lazy dataclass instances from the step,
+    # not create new "StepLevel" versions. The AbstractStep already has the correct
+    # lazy dataclass types (LazyNapariStreamingConfig, LazyStepMaterializationConfig, etc.)
 
 
 

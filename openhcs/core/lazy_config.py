@@ -288,16 +288,19 @@ class LazyMethodBindings:
                 return None
 
             # Auto-discover context from call stack instead of thread-local
-            current_context = ContextDiscovery.discover_context()
+            # CRITICAL FIX: Pass target type for proper context provider filtering
+            current_context = ContextDiscovery.discover_context(base_class)
             if not current_context:
                 return None
+
+
 
             # Use dual-axis resolver for field resolution
             resolver = get_resolver_for_context(current_context)
             resolved_value = resolver.resolve_field(self, name)
 
             if resolved_value is not None:
-                print(f"🔍 LAZY GETATTR: Using stack-discovered context value for {base_class.__name__}.{name} = '{resolved_value}' (dual-axis resolution)")
+
                 return resolved_value
 
             return None
@@ -1010,9 +1013,9 @@ def create_global_default_decorator(target_config_class: Type):
                 explicitly_defined_fields = set()
                 if hasattr(actual_cls, '__annotations__'):
                     for field_name in actual_cls.__annotations__:
-                        # Check if field has a concrete default value in THIS class definition
-                        if hasattr(actual_cls, field_name):
-                            field_value = getattr(actual_cls, field_name)
+                        # Check if field has a concrete default value in THIS class definition (not inherited)
+                        if field_name in actual_cls.__dict__:  # Only fields defined in THIS class
+                            field_value = actual_cls.__dict__[field_name]
                             # Only consider it explicitly defined if it has a concrete value (not None)
                             if field_value is not None:
                                 explicitly_defined_fields.add(field_name)
@@ -1028,27 +1031,23 @@ def create_global_default_decorator(target_config_class: Type):
 
                             # Set inherited fields to None (except explicitly defined ones)
                             if field_name not in explicitly_defined_fields:
-                                # Set the class attribute to None
+                                # CRITICAL: Force the field to be seen as locally defined by @dataclass
+                                # We need to ensure @dataclass processes this as a local field, not inherited
+
+                                # 1. Set the class attribute to None
                                 setattr(actual_cls, field_name, None)
                                 fields_set_to_none.add(field_name)
 
-                                # Ensure annotation exists
+                                # 2. Ensure annotation exists in THIS class
                                 if not hasattr(actual_cls, '__annotations__'):
                                     actual_cls.__annotations__ = {}
                                 actual_cls.__annotations__[field_name] = field_type
 
                             processed_fields.add(field_name)
 
-                # CRITICAL: Update dataclass field definitions ONLY for fields set to None
-                # This preserves concrete defaults for explicitly defined fields
-                import dataclasses
-                if hasattr(actual_cls, '__dataclass_fields__'):
-                    for field_name in fields_set_to_none:  # Only fields actually set to None
-                        if field_name in actual_cls.__dataclass_fields__:
-                            # Update the existing field to use None as default
-                            field_obj = actual_cls.__dataclass_fields__[field_name]
-                            field_obj.default = None
-                            field_obj.default_factory = dataclasses.MISSING
+                # Note: We modify class attributes here, but we also need to fix the dataclass
+                # field definitions after @dataclass runs, since @dataclass processes the MRO
+                # and may use parent class field definitions instead of our modified attributes.
 
             # Generate field and class names
             field_name = _camel_to_snake(actual_cls.__name__)
@@ -1080,6 +1079,11 @@ def create_global_default_decorator(target_config_class: Type):
             config_module = sys.modules[actual_cls.__module__]
             setattr(config_module, lazy_class_name, lazy_class)
 
+            # CRITICAL: Post-process dataclass fields after @dataclass has run
+            # This fixes the constructor behavior for inherited fields that should be None
+            if inherit_as_none and hasattr(actual_cls, '__dataclass_fields__'):
+                _fix_dataclass_field_defaults_post_processing(actual_cls, fields_set_to_none)
+
             return actual_cls
 
         # Handle both @decorator and @decorator() usage
@@ -1091,6 +1095,46 @@ def create_global_default_decorator(target_config_class: Type):
             return decorator(cls)
 
     return global_default_decorator
+
+
+def _fix_dataclass_field_defaults_post_processing(cls: Type, fields_set_to_none: set) -> None:
+    """
+    Fix dataclass field defaults after @dataclass has processed the class.
+
+    This is necessary because @dataclass processes the MRO and may use parent class
+    field definitions instead of our modified class attributes. We need to ensure
+    that fields we set to None actually use None as the default in the constructor.
+    """
+    import dataclasses
+
+    # Store the original __init__ method
+    original_init = cls.__init__
+
+    def custom_init(self, **kwargs):
+        """Custom __init__ that ensures inherited fields use None defaults."""
+        # For fields that should be None, set them to None if not explicitly provided
+        for field_name in fields_set_to_none:
+            if field_name not in kwargs:
+                kwargs[field_name] = None
+
+        # Call the original __init__ with modified kwargs
+        original_init(self, **kwargs)
+
+    # Replace the __init__ method
+    cls.__init__ = custom_init
+
+    # Also update the field defaults for consistency
+    for field_name in fields_set_to_none:
+        if field_name in cls.__dataclass_fields__:
+            # Get the field object
+            field_obj = cls.__dataclass_fields__[field_name]
+
+            # Update the field default to None (overriding any parent class default)
+            field_obj.default = None
+            field_obj.default_factory = dataclasses.MISSING
+
+            # Also ensure the class attribute is None (should already be set, but double-check)
+            setattr(cls, field_name, None)
 
 
 
@@ -1169,13 +1213,39 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
 
             # Only inherit if current value is None and field supports sibling inheritance
             if current_value is None and is_field_sibling_inheritable(type(instance), field.name):
-                # Find sibling config instances in provided_kwargs that have this field
+                # Apply inheritance blocking rules: check MRO for blocking classes
+                instance_type = type(instance)
+                blocking_class = None
+
+                # Find the first class in MRO that has a concrete field override
+                for mro_class in instance_type.__mro__[1:]:  # Skip self
+                    if not is_dataclass(mro_class):
+                        continue
+                    if hasattr(mro_class, field.name):
+                        class_attr_value = getattr(mro_class, field.name)
+                        if class_attr_value is not None:
+                            blocking_class = mro_class
+                            break
+
+                # Find sibling config instances, respecting inheritance blocking
                 for kwarg_name, kwarg_value in provided_kwargs.items():
                     if is_dataclass(kwarg_value) and hasattr(kwarg_value, field.name):
-                        sibling_value = getattr(kwarg_value, field.name)
-                        if sibling_value is not None:
-                            inheritance_updates[field.name] = sibling_value
-                            break  # Use first non-None sibling value found
+                        sibling_type = type(kwarg_value)
+
+                        # If there's a blocking class, only inherit from that specific class
+                        if blocking_class:
+                            if sibling_type == blocking_class:
+                                sibling_value = getattr(kwarg_value, field.name)
+                                if sibling_value is not None:
+                                    inheritance_updates[field.name] = sibling_value
+                                    break
+                            # Skip other siblings - blocked by the blocking class
+                        else:
+                            # No blocking class, normal sibling inheritance
+                            sibling_value = getattr(kwarg_value, field.name)
+                            if sibling_value is not None:
+                                inheritance_updates[field.name] = sibling_value
+                                break  # Use first non-None sibling value found
 
         # Apply inheritance updates if any were found
         if inheritance_updates:

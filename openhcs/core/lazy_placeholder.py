@@ -39,14 +39,6 @@ def _has_concrete_field_override(source_class, field_name: str) -> bool:
     return False
 
 
-
-
-
-
-
-
-
-
 def _apply_subclass_precedence(concrete_values, field_name: str):
     """
     Apply generic subclass precedence to resolve field collisions.
@@ -93,173 +85,7 @@ def _apply_subclass_precedence(concrete_values, field_name: str):
     return filtered_values
 
 
-def _resolve_field_with_mro_awareness(global_config, target_dataclass_type, field_name: str, ignore_concrete_override: bool = False):
-    """
-    Resolve field using dual-axis resolution with automatic context discovery.
 
-    For lazy dataclasses, the resolution order is:
-    1. Check lazy dataclass instances for concrete values (highest MRO precedence first)
-    2. Follow the dual-axis resolution chain through discovered context
-    3. Only fall back to static defaults if no concrete values found
-    """
-    from openhcs.core.field_path_detection import FieldPathDetector
-    from openhcs.core.lazy_config import get_base_type_for_lazy
-    from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
-
-    # Auto-discover context instead of using global_config parameter
-    current_context = ContextDiscovery.discover_context()
-    if not current_context:
-        current_context = global_config  # Fallback to passed parameter if no context discovered
-
-    if not current_context:
-        return None
-
-    # Get the base class if this is a lazy type
-    base_class = get_base_type_for_lazy(target_dataclass_type)
-    if not base_class:
-        base_class = target_dataclass_type
-
-    # Special case: If base_class is the same as the global config type,
-    # directly access the field from current_context (root-level lazy config)
-    if base_class == type(current_context):
-        if hasattr(current_context, field_name):
-            field_value = getattr(current_context, field_name, None)
-            if field_value is not None:
-                if field_name == "num_workers":
-                    print(f"🔍 TOP-LEVEL FIELD: {base_class.__name__}.{field_name} = {field_value} (direct context access)")
-                return field_value
-
-    # CRITICAL FIX: For concrete override classes, check context for user-set values
-    # before falling back to class default. This ensures saved values are respected.
-    # RESET FIX: Skip concrete override check if field has been explicitly reset
-    if not ignore_concrete_override and _has_concrete_field_override(base_class, field_name):
-
-        # CRITICAL FIX: For nested configs, check thread-local context values first
-        # This ensures nested fields like step_well_filter_config.well_filter use thread-local values
-        if field_name == "well_filter":
-            print(f"🔍 NESTED DEBUG: Checking thread-local context for {base_class.__name__}.{field_name}")
-            print(f"🔍 NESTED DEBUG: current_context type = {type(current_context)}")
-            if hasattr(current_context, 'step_well_filter_config'):
-                step_config = getattr(current_context, 'step_well_filter_config')
-                print(f"🔍 NESTED DEBUG: step_well_filter_config = {step_config}")
-                if hasattr(step_config, 'well_filter'):
-                    step_well_filter_value = getattr(step_config, 'well_filter')
-                    print(f"🔍 NESTED DEBUG: step_well_filter_config.well_filter = {step_well_filter_value}")
-
-        field_paths = FieldPathDetector.find_all_field_paths_unified(type(current_context), base_class)
-        if field_name == "well_filter":
-            print(f"🔍 NESTED DEBUG: Found field paths for {base_class.__name__}: {field_paths}")
-
-        for field_path in field_paths:
-            config_instance = FieldPathNavigator.navigate_to_instance(current_context, field_path)
-            if field_name == "well_filter":
-                print(f"🔍 NESTED DEBUG: field_path={field_path}, config_instance={config_instance}")
-
-            if config_instance and hasattr(config_instance, field_name):
-                # Use raw field access to prevent infinite recursion with lazy instances
-                try:
-                    field_value = object.__getattribute__(config_instance, field_name)
-                except AttributeError:
-                    field_value = None
-
-                if field_name == "well_filter":
-                    print(f"🔍 NESTED DEBUG: {field_path}.{field_name} = {field_value}")
-
-                if field_value is not None:
-                    if field_name == "well_filter":
-                        print(f"🔍 NESTED THREAD-LOCAL: {base_class.__name__}.{field_name} = {field_value} (from thread-local {field_path})")
-                    return field_value
-
-        # Regular case: Navigate through field paths for nested configs (fallback)
-
-        if field_name == "well_filter":
-            print(f"🔍 USER OVERRIDE DEBUG: Looking for {base_class.__name__} paths: {field_paths}")
-            print(f"🔍 USER OVERRIDE DEBUG: Using current thread-local context: {type(current_context)}")
-            if hasattr(current_context, 'step_well_filter_config'):
-                print(f"🔍 USER OVERRIDE DEBUG: current_context.step_well_filter_config = {current_context.step_well_filter_config}")
-
-        for field_path in field_paths:
-            config_instance = FieldPathNavigator.navigate_to_instance(current_context, field_path)
-            if config_instance is not None:
-                # Use raw field access to prevent infinite recursion with lazy instances
-                try:
-                    field_value = object.__getattribute__(config_instance, field_name)
-                except AttributeError:
-                    field_value = None
-
-                if field_name == "well_filter":
-                    print(f"🔍 USER OVERRIDE DEBUG: Path '{field_path}' -> instance: {config_instance}")
-                    print(f"🔍 USER OVERRIDE DEBUG: Found {field_path}.{field_name} = '{field_value}'")
-
-                # If user has set a concrete value (not None), use it
-                if field_value is not None:
-                    if field_name == "well_filter":
-                        print(f"🔍 USER OVERRIDE: Using user-set value {base_class.__name__}.{field_name} = '{field_value}'")
-                    return field_value
-
-        # No user-set value found, fall back to class default
-        concrete_value = getattr(base_class, field_name)
-        if field_name == "well_filter":
-            print(f"🔍 CONCRETE OVERRIDE: {base_class.__name__}.{field_name} = {concrete_value} (no user-set values found)")
-        return concrete_value
-
-    # DEBUG: Show what context we're using for resolution
-    if field_name == "well_filter":
-        print(f"🔍 LAZY RESOLUTION DEBUG: Resolving {base_class.__name__}.{field_name}")
-        if hasattr(global_config, 'step_well_filter_config'):
-            step_config = global_config.step_well_filter_config
-            print(f"🔍 LAZY RESOLUTION DEBUG: Context has step_well_filter_config.well_filter = '{step_config.well_filter}'")
-
-    # STEP 1: Check lazy dataclass instances for concrete values (MRO order)
-    # CRITICAL FIX: Include target class if it has concrete override, exclude if inherit-as-none
-    if _has_concrete_field_override(base_class, field_name):
-        # Concrete override classes should use their own values, not inherit
-        mro_types = [base_class] + [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
-    else:
-        # Inherit-as-none classes should inherit from parents, not use their own static defaults
-        mro_types = [cls for cls in base_class.__mro__[1:] if hasattr(cls, '__dataclass_fields__') and field_name in cls.__dataclass_fields__]
-
-    # CRITICAL FIX: Stop inheritance at first concrete override (inheritance blocker pattern)
-    # Traverse MRO in order and return the first concrete value found
-    # This respects the inheritance hierarchy where concrete overrides block further inheritance
-
-    for mro_class in mro_types:
-        field_paths = FieldPathDetector.find_all_field_paths_unified(type(global_config), mro_class)
-
-        for field_path in field_paths:
-            config_instance = FieldPathNavigator.navigate_to_instance(global_config, field_path)
-            if config_instance and hasattr(config_instance, field_name):
-                # Use raw field access to prevent infinite recursion with lazy instances
-                try:
-                    value = object.__getattribute__(config_instance, field_name)
-                except AttributeError:
-                    value = None
-
-                # Check if this class has a concrete override (inheritance blocker)
-                if _has_concrete_field_override(mro_class, field_name):
-                    # This class blocks inheritance - use its value and stop (even if None)
-                    if field_name == "well_filter":
-                        print(f"🔍 INHERITANCE BLOCKER: {mro_class.__name__}.{field_name} = {value} (concrete override blocks further inheritance)")
-                    return value
-
-                elif value is not None:
-                    # This is a user-set value in an inherit-as-none class - use it and stop
-                    if field_name == "well_filter":
-                        print(f"🔍 USER VALUE: {mro_class.__name__}.{field_name} = {value} (user-set value)")
-                    return value
-
-    # STEP 2: If no concrete values found, create lazy instance and let it resolve
-    try:
-        temp_instance = target_dataclass_type()
-        if hasattr(temp_instance, '_resolve_field_value'):
-            resolved_value = temp_instance._resolve_field_value(field_name)
-            return resolved_value
-        else:
-            # Final fallback to getattr
-            resolved_value = getattr(temp_instance, field_name)
-            return resolved_value
-    except Exception as e:
-        return None
 
 
 
@@ -293,6 +119,44 @@ class LazyDefaultPlaceholderService:
     NONE_VALUE_TEXT = "(none)"
 
     @staticmethod
+    def _get_regular_dataclass_placeholder(
+        dataclass_type: type,
+        field_name: str,
+        placeholder_prefix: Optional[str] = None
+    ) -> Optional[str]:
+        """Get placeholder for regular dataclasses - delegate to dual-axis resolver."""
+        prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
+
+        try:
+            # Use recursive dual-axis resolver - it handles everything correctly
+            from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+
+            resolver = get_recursive_resolver()
+
+            # Create a dummy instance to resolve the field
+            dummy_instance = dataclass_type()
+            resolved_value = resolver.resolve_field(dummy_instance, field_name)
+
+            if resolved_value is not None:
+                return f"{prefix}: {resolved_value}"
+
+            # Fallback to class default
+            if hasattr(dataclass_type, field_name):
+                class_default = getattr(dataclass_type, field_name)
+                if class_default is not None:
+                    return f"{prefix}: {class_default}"
+
+            return None
+        except Exception:
+            return None
+
+
+
+
+
+
+
+    @staticmethod
     def get_lazy_resolved_placeholder(
         dataclass_type: type,
         field_name: str,
@@ -301,83 +165,65 @@ class LazyDefaultPlaceholderService:
         placeholder_prefix: Optional[str] = None,
         ignore_concrete_override: bool = False
     ) -> Optional[str]:
-        """Get placeholder text for lazy-resolved field with flexible resolution."""
-        if not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type):
+        """Get placeholder text by delegating to recursive dual-axis resolver."""
+        # Check if this is a lazy dataclass
+        is_lazy = LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
+
+        # For regular dataclasses, provide class default placeholders
+        if not is_lazy:
+            return LazyDefaultPlaceholderService._get_regular_dataclass_placeholder(
+                dataclass_type, field_name, placeholder_prefix
+            )
+
+        prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
+
+        # Thin wrapper: delegate to recursive resolver
+        try:
+            from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+
+            resolver = get_recursive_resolver()
+            temp_instance = dataclass_type()
+            resolved_value = resolver.resolve_field(temp_instance, field_name)
+        except Exception:
+            resolved_value = None
+
+        return LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
+
+    @staticmethod
+    def get_lazy_resolved_placeholder_with_context(
+        dataclass_type: type,
+        field_name: str,
+        temporary_context: Any,
+        placeholder_prefix: Optional[str] = None
+    ) -> Optional[str]:
+        """Get placeholder text using temporary context for live updates."""
+        # Check if this is a lazy dataclass
+        is_lazy = LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
+        if not is_lazy:
             return None
 
         prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
 
-        # SIMPLIFIED: Always use the actual lazy resolution logic for consistency
-        if force_static_defaults:
-            # For static defaults, use base class defaults without any context
-            try:
-                # Get base class default without any context resolution
-                from dataclasses import fields
-                field_obj = next((f for f in fields(dataclass_type) if f.name == field_name), None)
-                if field_obj and field_obj.default is not field_obj.default_factory:
-                    resolved_value = field_obj.default
-                elif field_obj and field_obj.default_factory is not field_obj.default_factory:
-                    resolved_value = field_obj.default_factory()
-                else:
-                    resolved_value = getattr(dataclass_type(), field_name)
-            except Exception:
-                resolved_value = None
-        elif app_config:
-            # For app config, use dual-axis resolution with provided context
-            from openhcs.core.dual_axis_resolver_implementation import get_resolver_for_context
-            try:
-                # Use dual-axis resolver with the provided app_config as context
-                resolver = get_resolver_for_context(app_config)
-                temp_instance = dataclass_type()
-                resolved_value = resolver.resolve_field(temp_instance, field_name)
+        # Thin wrapper: delegate to recursive resolver with temporary context
+        try:
+            from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
 
-                # If not found via dual-axis resolution, fall back to MRO-aware resolution
-                if resolved_value is None:
-                    resolved_value = _resolve_field_with_mro_awareness(app_config, dataclass_type, field_name, ignore_concrete_override)
+            resolver = get_recursive_resolver()
+            # Use the temporary context directly - it should be a dataclass instance with current form values
+            resolved_value = resolver.resolve_field(temporary_context, field_name)
+        except Exception:
+            resolved_value = None
 
-                # Final fallback: create instance and use getattr
-                if resolved_value is None:
-                    resolved_value = getattr(dataclass_type(), field_name)
-            except Exception:
-                resolved_value = None
-        else:
-            # Default: Use stack introspection for automatic context discovery
-            from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
+        return LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
 
-            context = ContextDiscovery.discover_context()
-            if context and hasattr(dataclass_type, '_resolve_field_value'):
-                # Use dual-axis resolution with discovered context
-                resolver = get_resolver_for_context(context)
-                temp_instance = dataclass_type()
-                resolved_value = resolver.resolve_field(temp_instance, field_name)
-            else:
-                # Fallback for non-lazy dataclasses or when no context discovered
-                resolved_value = getattr(dataclass_type(), field_name, None)
-
+    @staticmethod
+    def _format_placeholder_text(resolved_value: Any, prefix: str) -> Optional[str]:
+        """Format resolved value into placeholder text."""
         # Format output
         if resolved_value is None:
             value_text = LazyDefaultPlaceholderService.NONE_VALUE_TEXT
         elif hasattr(resolved_value, '__dataclass_fields__'):
-            # UNIFIED: When resolved value is a dataclass, use dual-axis resolution
-            # to extract the specific field respecting concrete overrides
-            from openhcs.core.dual_axis_resolver_implementation import ContextDiscovery, get_resolver_for_context
-
-            context = ContextDiscovery.discover_context()
-            if context:
-                resolver = get_resolver_for_context(context)
-                temp_instance = type(resolved_value)()
-                specific_field_value = resolver.resolve_field(temp_instance, field_name)
-            else:
-                specific_field_value = getattr(resolved_value, field_name, None)
-
-            if specific_field_value is not None:
-                # Successfully extracted the specific field value
-                value_text = str(specific_field_value)
-            elif LazyDefaultPlaceholderService.has_lazy_resolution(type(resolved_value)):
-                return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    type(resolved_value), field_name, app_config, force_static_defaults, prefix)
-            else:
-                value_text = LazyDefaultPlaceholderService._format_nested_dataclass_summary(resolved_value)
+            value_text = LazyDefaultPlaceholderService._format_nested_dataclass_summary(resolved_value)
         else:
             # Apply proper formatting for different value types
             if hasattr(resolved_value, 'value') and hasattr(resolved_value, 'name'):  # Enum
@@ -395,6 +241,8 @@ class LazyDefaultPlaceholderService:
             return f"{prefix} {value_text}"
         else:
             return f"{prefix}: {value_text}"
+
+
 
     @staticmethod
     def _get_base_class_from_lazy(lazy_class: Type) -> Type:
