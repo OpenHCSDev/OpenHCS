@@ -14,6 +14,8 @@ Doctrinal Clauses:
 import logging
 import multiprocessing
 import queue
+import subprocess
+import sys
 import threading
 import time
 import zmq
@@ -185,6 +187,114 @@ def _napari_viewer_process(port: int, viewer_title: str):
         if 'context' in locals():
             context.term()
 
+
+def _spawn_detached_napari_process(port: int, viewer_title: str) -> subprocess.Popen:
+    """
+    Spawn a completely detached napari viewer process that survives parent termination.
+
+    This creates a subprocess that runs independently and won't be terminated when
+    the parent process exits, enabling true persistence across pipeline runs.
+    """
+    # Create a Python script that will run the napari viewer
+    # Include full Python path and error handling
+    python_path = ':'.join(sys.path)
+    napari_script = f'''#!/usr/bin/env python3
+import sys
+import os
+import signal
+import traceback
+
+# Set up Python path
+sys.path = {sys.path!r}
+
+# Detach from parent process group (Unix only)
+if hasattr(os, 'setsid'):
+    try:
+        os.setsid()
+    except OSError:
+        pass
+
+print(f"🔬 DETACHED NAPARI: Starting on port {port}")
+print(f"🔬 DETACHED NAPARI: Python path: {{len(sys.path)}} entries")
+
+try:
+    # Import and run the napari viewer function
+    from openhcs.runtime.napari_stream_visualizer import _napari_viewer_process
+    print("🔬 DETACHED NAPARI: Successfully imported _napari_viewer_process")
+
+    # Run the napari viewer
+    print("🔬 DETACHED NAPARI: Calling _napari_viewer_process...")
+    _napari_viewer_process({port}, "{viewer_title}")
+    print("🔬 DETACHED NAPARI: _napari_viewer_process returned")
+
+except Exception as e:
+    print(f"🔬 DETACHED NAPARI: ERROR: {{e}}")
+    traceback.print_exc()
+    sys.exit(1)
+'''
+
+    # Write the script to a temporary file
+    import tempfile
+    import os
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        f.write(napari_script)
+        script_path = f.name
+
+    # Make script executable
+    os.chmod(script_path, 0o755)
+
+    # Spawn the detached process with output to a log file for debugging
+    log_path = script_path.replace('.py', '.log')
+
+    try:
+        # Use subprocess.Popen with detachment flags
+        if sys.platform == "win32":
+            # Windows: Use CREATE_NEW_PROCESS_GROUP to detach
+            process = subprocess.Popen(
+                [sys.executable, script_path],
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                stdout=open(log_path, 'w'),
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL
+            )
+        else:
+            # Unix: Use start_new_session to detach
+            process = subprocess.Popen(
+                [sys.executable, script_path],
+                start_new_session=True,
+                stdout=open(log_path, 'w'),
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL
+            )
+
+        logger.info(f"🔬 VISUALIZER: Detached napari process started, logs at: {log_path}")
+
+        # Clean up the temporary script file after a delay (but keep log file)
+        def cleanup_script():
+            time.sleep(5)  # Give the process more time to start
+            try:
+                os.unlink(script_path)
+            except OSError:
+                pass
+
+        threading.Thread(target=cleanup_script, daemon=True).start()
+
+        return process
+
+    except Exception as e:
+        # Clean up files on error
+        try:
+            os.unlink(script_path)
+        except OSError:
+            pass
+        try:
+            os.unlink(log_path)
+        except OSError:
+            pass
+        raise e
+
+
 class NapariStreamVisualizer:
     """
     Manages a Napari viewer instance for real-time visualization of tensors
@@ -240,6 +350,8 @@ class NapariStreamVisualizer:
             self.port = self.napari_port
             logger.info(f"🔬 VISUALIZER: Starting napari viewer process on port {self.port}")
 
+            # Always use multiprocessing.Process - persistence is handled in stop_viewer()
+            logger.info(f"🔬 VISUALIZER: Creating {'persistent' if self.persistent else 'non-persistent'} napari viewer")
             self.process = multiprocessing.Process(
                 target=_napari_viewer_process,
                 args=(self.port, self.viewer_title),
@@ -263,6 +375,27 @@ class NapariStreamVisualizer:
                 logger.info(f"🔬 VISUALIZER: Napari viewer process started successfully (PID: {self.process.pid})")
             else:
                 logger.error("🔬 VISUALIZER: Failed to start napari viewer process")
+
+    def _try_connect_to_existing_viewer(self, port: int) -> bool:
+        """Try to connect to an existing napari viewer on the given port."""
+        import socket
+
+        # First check if anything is listening on the port
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.1)  # 100ms timeout
+        try:
+            result = sock.connect_ex(('localhost', port))
+            sock.close()
+
+            if result == 0:  # Port is open
+                # Set up ZMQ connection
+                self._setup_zmq_client()
+                return True
+            else:
+                return False
+
+        except Exception:
+            return False
 
     def _setup_zmq_client(self):
         """Set up ZeroMQ client to send data to viewer process."""
