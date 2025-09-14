@@ -495,13 +495,34 @@ class PlateManagerWidget(QWidget):
         # The config window should work with the current orchestrator context
         # Reset behavior will be handled differently to avoid corrupting step editor context
 
-        # Create config for editing based on whether orchestrator has existing config
+        # CRITICAL FIX: Create PipelineConfig that preserves user-set values but shows placeholders for inherited fields
+        # The orchestrator's pipeline_config has concrete values filled in from global config inheritance,
+        # but we need to distinguish between user-set values (keep concrete) and inherited values (show as placeholders)
+        from openhcs.core.lazy_config import create_dataclass_for_editing
+        from dataclasses import fields
+
+        # CRITICAL FIX: Create config for editing that preserves user values while showing placeholders for inherited fields
         if representative_orchestrator.pipeline_config is not None:
-            # Existing config - just use the lazy config directly (it already has editing capabilities)
-            current_plate_config = representative_orchestrator.pipeline_config
+            # Orchestrator has existing config - preserve explicitly set fields, reset others to None for placeholders
+            existing_config = representative_orchestrator.pipeline_config
+            explicitly_set_fields = getattr(existing_config, '_explicitly_set_fields', set())
+
+            # Create field values: keep explicitly set values, use None for inherited fields
+            field_values = {}
+            for field in fields(PipelineConfig):
+                if field.name in explicitly_set_fields:
+                    # User explicitly set this field - preserve the concrete value
+                    field_values[field.name] = object.__getattribute__(existing_config, field.name)
+                else:
+                    # Field was inherited from global config - use None to show placeholder
+                    field_values[field.name] = None
+
+            # Create config with preserved user values and None for inherited fields
+            current_plate_config = PipelineConfig(**field_values)
+            # Preserve the explicitly set fields tracking (bypass frozen restriction)
+            object.__setattr__(current_plate_config, '_explicitly_set_fields', explicitly_set_fields.copy())
         else:
-            # Create new config with placeholders using current global config
-            from openhcs.core.lazy_config import create_dataclass_for_editing
+            # No existing config - create fresh config with all None values (all show as placeholders)
             current_plate_config = create_dataclass_for_editing(PipelineConfig, self.global_config)
 
         def handle_config_save(new_config: PipelineConfig) -> None:

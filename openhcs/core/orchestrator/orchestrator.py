@@ -291,14 +291,9 @@ class PipelineOrchestrator(ContextProvider):
             # This ensures the orchestrator's pipeline_config has the global values for resolution
             pipeline_config = PipelineConfig()
 
-        # CRITICAL FIX: Always apply global config inheritance to populate None fields
-        # This ensures the orchestrator's pipeline_config has the global values for resolution
-        try:
-            pipeline_config = self._apply_global_config_inheritance(pipeline_config)
-        except Exception as e:
-            logger.warning(f"Failed to apply global config inheritance: {e}")
-            # Fall back to original pipeline config if inheritance fails
-            pass
+        # CRITICAL FIX: Do NOT apply global config inheritance during initialization
+        # PipelineConfig should always have None values that resolve through lazy resolution
+        # Copying concrete values breaks the placeholder system and makes all fields appear "explicitly set"
 
         self.pipeline_config = pipeline_config
 
@@ -366,34 +361,7 @@ class PipelineOrchestrator(ContextProvider):
         # Metadata cache service
         self._metadata_cache_service = get_metadata_cache()
 
-    def _apply_global_config_inheritance(self, pipeline_config):
-        """Apply global config inheritance to populate None fields in pipeline config."""
-        from dataclasses import fields
 
-        global_config = get_current_global_config(GlobalPipelineConfig)
-        if not global_config:
-            logger.debug("No global config available for inheritance, returning original pipeline config")
-            return pipeline_config  # Return original if no global config to inherit from
-
-        # Instead of modifying the frozen dataclass, create a new one with inherited values
-        # Get current values and replace None fields with global config values
-        current_values = {}
-        for field in fields(pipeline_config):
-            current_value = getattr(pipeline_config, field.name)
-            if current_value is None:
-                # Inherit from global config
-                global_value = getattr(global_config, field.name, None)
-                current_values[field.name] = global_value
-                if global_value is not None:
-                    logger.debug(f"Inherited {field.name} = {global_value} from global config")
-            else:
-                current_values[field.name] = current_value
-
-        # Create new pipeline config with inherited values
-        from openhcs.core.config import PipelineConfig
-        inherited_config = PipelineConfig(**current_values)
-        logger.debug("Successfully created pipeline config with global inheritance")
-        return inherited_config
 
 
 

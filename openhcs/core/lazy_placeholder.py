@@ -192,37 +192,20 @@ class LazyDefaultPlaceholderService:
                     dataclass_type, field_name, placeholder_prefix
                 )
 
-        # Simple fallback: use orchestrator context if available, otherwise default
+        # Simple fallback: use default prefix
         if placeholder_prefix is None:
-            placeholder_prefix = "Pipeline default" if orchestrator else "Default"
+            placeholder_prefix = "Default"
 
         prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
 
-        # CRITICAL FIX: Use orchestrator's effective config when available
-        # This ensures we get the same resolved values that the compiler would use
+        # Simplified: Always use dual-axis resolver for consistent placeholder behavior
         try:
-            if orchestrator:
-                # Use the same resolution mechanism as the compiler
-                # This ensures proper lazy resolution with orchestrator context
-                with orchestrator.config_context(for_serialization=True):
-                    from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+            from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+            resolver = get_recursive_resolver()
 
-                    # Create a temporary lazy instance to resolve
-                    temp_instance = dataclass_type()
-
-                    # Resolve using the same mechanism as the compiler
-                    resolved_config = resolve_lazy_configurations_for_serialization(temp_instance)
-
-                    # Get the resolved field value
-                    resolved_value = getattr(resolved_config, field_name, None)
-            else:
-                # No orchestrator - use the dual-axis resolver with thread-local context
-                from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
-                resolver = get_recursive_resolver()
-
-                # Create a dummy instance to resolve the field
-                temp_instance = dataclass_type()
-                resolved_value = resolver.resolve_field(temp_instance, field_name)
+            # Create a dummy instance to resolve the field
+            temp_instance = dataclass_type()
+            resolved_value = resolver.resolve_field(temp_instance, field_name)
         except Exception:
             resolved_value = None
 

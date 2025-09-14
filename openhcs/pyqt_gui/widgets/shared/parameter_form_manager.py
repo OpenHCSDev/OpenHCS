@@ -338,6 +338,11 @@ class ParameterFormManager(QWidget):
         if field_name in getattr(dataclass_instance, '_explicitly_set_fields', set()):
             return False
 
+        # CRITICAL FIX: If raw_value is None, always show as placeholder
+        # None values in lazy dataclasses should inherit from parent configs
+        if raw_value is None:
+            return True
+
         # If matches global config value, show as placeholder
         global_config_type = getattr(dataclass_instance, '_global_config_type', None)
         if global_config_type:
@@ -1035,7 +1040,12 @@ class ParameterFormManager(QWidget):
 
             # Apply placeholder only if reset value is None (lazy behavior)
             if reset_value is None:
-                placeholder_text = self._get_placeholder_text(param_name)
+                # CRITICAL FIX: Force fresh placeholder resolution after reset
+                # Don't use cached context that might have stale values
+                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type, param_name,
+                    placeholder_prefix=self.placeholder_prefix
+                )
                 if placeholder_text:
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 

@@ -86,11 +86,11 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 np_data = np.asarray(data)
             
             # Create shared memory block
-            import multiprocessing as mp
+            from multiprocessing import shared_memory
             shm_name = f"napari_stream_{id(data)}_{time.time_ns()}"
-            
+
             try:
-                shm = mp.shared_memory.SharedMemory(create=True, size=np_data.nbytes, name=shm_name)
+                shm = shared_memory.SharedMemory(create=True, size=np_data.nbytes, name=shm_name)
                 shm_array = np.ndarray(np_data.shape, dtype=np_data.dtype, buffer=shm.buf)
                 shm_array[:] = np_data[:]
                 
