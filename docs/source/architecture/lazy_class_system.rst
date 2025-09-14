@@ -1,53 +1,86 @@
 Lazy Configuration System
 =========================
 
-**Dynamic dataclass generation with field-level hierarchy resolution and sibling inheritance.**
+**Dynamic dataclass generation with dual-axis resolution and sophisticated inheritance patterns.**
 
-*Status: STABLE*
+*Status: STABLE - Dual-Axis Implementation*
 *Module: openhcs.core.lazy_config*
 
 Overview
 --------
 
-Traditional configuration systems suffer from the "lost edits" problem - user modifications get overwritten by defaults when switching contexts. OpenHCS solves this through lazy dataclasses that resolve values from different sources based on editing context.
+Traditional configuration systems suffer from the "lost edits" problem - user modifications get overwritten by defaults when switching contexts. OpenHCS solves this through lazy dataclasses that use a sophisticated dual-axis resolution system combining context hierarchy (X-axis) with class inheritance (Y-axis).
 
-.. literalinclude:: ../../../openhcs/core/lazy_config.py
-   :language: python
-   :lines: 301-315
-   :caption: Entry point for creating lazy dataclasses with custom resolution logic.
+.. code-block:: python
 
-The system generates runtime dataclasses with custom resolution logic that preserves user edits while providing appropriate defaults. This enables hierarchical configuration flow (Global → Pipeline → Step) with sophisticated sibling inheritance patterns.
+   # Dual-axis resolution: X-axis (context) + Y-axis (inheritance)
+   # X-axis: step context → orchestrator context → global context
+   # Y-axis: StepMaterializationConfig → StepWellFilterConfig → WellFilterConfig
+
+   lazy_config = LazyStepMaterializationConfig()
+   value = lazy_config.well_filter  # Resolves through dual-axis algorithm
+
+The system generates runtime dataclasses with dual-axis resolution logic that preserves user edits while providing sophisticated inheritance patterns. This enables hierarchical configuration flow (Step → Pipeline/Orchestrator → Global) with sibling inheritance and static override detection.
 
 LazyDataclassFactory
 --------------------
 
-The LazyDataclassFactory generates runtime dataclasses with custom resolution logic. It takes a regular dataclass and creates a new class with the same interface but lazy field resolution behavior.
+The LazyDataclassFactory generates runtime dataclasses with dual-axis resolution logic. It takes a regular dataclass and creates a new class with the same interface but sophisticated field resolution behavior.
 
-.. literalinclude:: ../../../openhcs/core/pipeline_config.py
-   :language: python
-   :lines: 113-118
-   :caption: Real example from openhcs/core/pipeline_config.py
+.. code-block:: python
 
-The factory pattern enables different resolution strategies for different use cases while preserving the original dataclass interface.
+   # Create lazy config with dual-axis resolution
+   LazyStepConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+       base_class=StepMaterializationConfig,
+       global_config_type=GlobalPipelineConfig,
+       field_path="step_materialization_config",
+       lazy_class_name="LazyStepMaterializationConfig"
+   )
 
-Field-Level Auto-Hierarchy Resolution
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   # Generated class uses RecursiveContextualResolver for field access
+   config = LazyStepConfig()
+   value = config.well_filter  # Triggers dual-axis resolution
 
-The primary factory method uses automatic field path discovery with sophisticated sibling inheritance:
+The factory pattern enables sophisticated resolution strategies while preserving the original dataclass interface.
 
-.. literalinclude:: ../../../openhcs/core/lazy_config.py
-   :language: python
-   :lines: 319-326
-   :caption: Method signature from openhcs/core/lazy_config.py
+Dual-Axis Resolution Integration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Nested Configuration Example**
+The primary factory method integrates with the dual-axis resolver for sophisticated inheritance. The factory creates property methods that delegate field access to the dual-axis resolver, enabling sophisticated inheritance patterns while maintaining the familiar dataclass interface.
 
-For nested configurations, the auto-hierarchy constructor automatically discovers field paths:
+.. code-block:: python
 
-.. literalinclude:: ../../../openhcs/core/lazy_config.py
-   :language: python
-   :lines: 589-600
-   :caption: Automatic lazy config generation from openhcs/core/lazy_config.py
+   # Factory creates classes that use RecursiveContextualResolver
+   def _create_field_resolver_method(field_name: str) -> callable:
+       """Create field resolver method using dual-axis resolution."""
+       def _resolve_field_value(self) -> Any:
+           # Use dual-axis resolver for field resolution
+           resolver = RecursiveContextualResolver()
+           return resolver.resolve_field(self, field_name)
+       return _resolve_field_value
+
+This factory method creates a property getter that, when accessed, instantiates the dual-axis resolver and asks it to resolve the field value. The ``self`` parameter refers to the lazy dataclass instance, while ``field_name`` identifies which field is being accessed. This delegation pattern allows the factory to create classes that look like normal dataclasses but have sophisticated resolution behavior.
+
+**Context Discovery Integration**
+
+For nested configurations, the factory integrates with context discovery to enable automatic inheritance from appropriate contexts:
+
+.. code-block:: python
+
+   # Automatic context discovery during field resolution
+   def resolve_field(self, lazy_instance, field_name: str) -> Any:
+       """Resolve field using dual-axis logic with context discovery."""
+
+       # Get base type for inheritance traversal
+       base_type = get_base_type_for_lazy(type(lazy_instance))
+
+       # Discover context hierarchy through stack introspection
+       context_hierarchy = self._discover_context_hierarchy(base_type)
+
+       # Resolve through dual-axis algorithm
+       return self._resolve_through_hierarchy(context_hierarchy, field_name, base_type)
+
+This method shows how field resolution integrates with context discovery. First, it determines the base type of the lazy instance (the original dataclass it was created from). Then it discovers the complete context hierarchy through stack introspection. Finally, it uses the dual-axis algorithm to resolve the field value by searching through the context hierarchy (X-axis) and class inheritance (Y-axis) until it finds a concrete value.
 
 Key Differences Between Constructors
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
