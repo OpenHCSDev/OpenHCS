@@ -833,13 +833,18 @@ class PipelineOrchestrator(ContextProvider):
             else:
                 self._state = OrchestratorState.EXEC_FAILED
 
-            # 🔬 VISUALIZER CLEANUP: Stop napari visualizer if it was auto-created
+            # 🔬 VISUALIZER CLEANUP: Stop napari visualizer if it was auto-created and not persistent
             if visualizer is not None:
                 try:
-                    visualizer.stop_viewer()
-                    logger.info("🔬 ORCHESTRATOR: Stopped napari visualizer")
+                    if not visualizer.persistent:
+                        visualizer.stop_viewer()
+                        logger.info("🔬 ORCHESTRATOR: Stopped non-persistent napari visualizer")
+                    else:
+                        logger.info("🔬 ORCHESTRATOR: Keeping persistent napari visualizer alive")
+                        # Just cleanup ZMQ connection, leave process running
+                        visualizer._cleanup_zmq()
                 except Exception as e:
-                    logger.warning(f"🔬 ORCHESTRATOR: Failed to stop napari visualizer: {e}")
+                    logger.warning(f"🔬 ORCHESTRATOR: Failed to cleanup napari visualizer: {e}")
 
             logger.info(f"🔥 ORCHESTRATOR: Plate execution finished. Results: {execution_results}")
 

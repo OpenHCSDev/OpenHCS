@@ -312,7 +312,8 @@ class NapariStreamVisualizer:
                 logger.info("🔬 VISUALIZER: Keeping persistent napari viewer alive")
                 # Just cleanup our ZMQ connection, leave process running
                 self._cleanup_zmq()
-                self.is_running = False
+                # DON'T set is_running = False for persistent viewers!
+                # The process is still alive and should be reusable
 
     def _cleanup_zmq(self):
         """Clean up ZeroMQ resources."""
