@@ -100,11 +100,11 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
         layers = {}
         napari_ready = False  # Track readiness state
 
-        print(f"🔬 NAPARI PROCESS: Viewer started on data port {port}, control port {control_port}")
+        logger.info(f"🔬 NAPARI PROCESS: Viewer started on data port {port}, control port {control_port}")
 
         # Add cleanup handler for when viewer is closed
         def cleanup_and_exit():
-            print("🔬 NAPARI PROCESS: Viewer closed, cleaning up and exiting...")
+            logger.info("🔬 NAPARI PROCESS: Viewer closed, cleaning up and exiting...")
             try:
                 data_socket.close()
                 control_socket.close()
@@ -152,11 +152,11 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
                         if not napari_ready:
                             # Mark as ready after first ping (GUI should be loaded by now)
                             napari_ready = True
-                            print(f"🔬 NAPARI PROCESS: Marked as ready after ping")
+                            logger.info(f"🔬 NAPARI PROCESS: Marked as ready after ping")
 
                         response = {'type': 'pong', 'ready': napari_ready}
                         control_socket.send(pickle.dumps(response))
-                        print(f"🔬 NAPARI PROCESS: Responded to ping with ready={napari_ready}")
+                        logger.debug(f"🔬 NAPARI PROCESS: Responded to ping with ready={napari_ready}")
 
                 except zmq.Again:
                     pass  # No control messages
@@ -191,13 +191,13 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
                                         image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
                                         shm.close()  # Close our reference
                                     except Exception as e:
-                                        print(f"🔬 NAPARI PROCESS: Failed to load shared memory {shm_name}: {e}")
+                                        logger.error(f"🔬 NAPARI PROCESS: Failed to load shared memory {shm_name}: {e}")
                                         continue
                                 elif direct_data:
                                     # Load from direct data (fallback)
                                     image_data = np.array(direct_data, dtype=dtype).reshape(shape)
                                 else:
-                                    print(f"🔬 NAPARI PROCESS: No image data in message")
+                                    logger.warning(f"🔬 NAPARI PROCESS: No image data in message")
                                     continue
 
                                 # Extract step info from path
@@ -219,7 +219,7 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
                             if replace_layers and layer_name in layers:
                                 # Replace existing layer data
                                 layers[layer_name].data = image_data
-                                print(f"🔬 NAPARI PROCESS: Replaced layer {layer_name}")
+                                logger.debug(f"🔬 NAPARI PROCESS: Replaced layer {layer_name}")
                             else:
                                 # Add new layer (or create if doesn't exist)
                                 if layer_name in layers:
@@ -235,28 +235,28 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
                                     name=unique_layer_name,
                                     colormap='viridis'
                                 )
-                                print(f"🔬 NAPARI PROCESS: Added layer {unique_layer_name} (total layers: {len(layers)})")
+                                logger.info(f"🔬 NAPARI PROCESS: Added layer {unique_layer_name} (total layers: {len(layers)})")
 
                         except zmq.Again:
                             # No more messages available
                             break
 
             except Exception as e:
-                print(f"🔬 NAPARI PROCESS: Error processing message: {e}")
+                logger.error(f"🔬 NAPARI PROCESS: Error processing message: {e}")
 
         # Connect timer to message processing
         timer.timeout.connect(process_messages)
         timer.start(50)  # Process messages every 50ms
 
-        print("🔬 NAPARI PROCESS: Starting Qt event loop")
+        logger.info("🔬 NAPARI PROCESS: Starting Qt event loop")
 
         # Run the Qt event loop - this keeps napari responsive
         app.exec_()
 
     except Exception as e:
-        print(f"🔬 NAPARI PROCESS: Fatal error: {e}")
+        logger.error(f"🔬 NAPARI PROCESS: Fatal error: {e}")
     finally:
-        print("🔬 NAPARI PROCESS: Shutting down")
+        logger.info("🔬 NAPARI PROCESS: Shutting down")
         if 'socket' in locals():
             socket.close()
         if 'context' in locals():
@@ -293,9 +293,11 @@ try:
     from openhcs.runtime.napari_stream_visualizer import _napari_viewer_process
     _napari_viewer_process({port}, "{viewer_title}", {replace_layers})
 except Exception as e:
-    print(f"Detached napari error: {{e}}")
+    import logging
+    logger = logging.getLogger("openhcs.runtime.napari_detached")
+    logger.error(f"Detached napari error: {{e}}")
     import traceback
-    traceback.print_exc()
+    logger.error(traceback.format_exc())
     sys.exit(1)
 '''
 
