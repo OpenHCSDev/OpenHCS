@@ -102,14 +102,39 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
 
         print(f"🔬 NAPARI PROCESS: Viewer started on data port {port}, control port {control_port}")
 
+        # Add cleanup handler for when viewer is closed
+        def cleanup_and_exit():
+            print("🔬 NAPARI PROCESS: Viewer closed, cleaning up and exiting...")
+            try:
+                data_socket.close()
+                control_socket.close()
+                context.term()
+            except:
+                pass
+            sys.exit(0)
+
+        # Connect the viewer close event to cleanup
+        viewer.window.qt_viewer.destroyed.connect(cleanup_and_exit)
+
         # Use proper Qt event loop integration
         import sys
         from qtpy import QtWidgets, QtCore
+
+        # Ensure Qt platform is properly set for detached processes
+        import os
+        if 'QT_QPA_PLATFORM' not in os.environ:
+            os.environ['QT_QPA_PLATFORM'] = 'xcb'
+
+        # Disable shared memory for X11 (helps with display issues in detached processes)
+        os.environ['QT_X11_NO_MITSHM'] = '1'
 
         # Get the Qt application
         app = QtWidgets.QApplication.instance()
         if app is None:
             app = QtWidgets.QApplication(sys.argv)
+
+        # Ensure the application DOES quit when the napari window closes
+        app.setQuitOnLastWindowClosed(True)
 
         # Set up a QTimer for message processing
         timer = QtCore.QTimer()
@@ -289,9 +314,17 @@ except Exception as e:
         else:
             # Unix: Use start_new_session to detach but preserve display environment
             env = os.environ.copy()  # Preserve DISPLAY and other environment variables
+
+            # Ensure Qt platform is set for GUI display
+            if 'QT_QPA_PLATFORM' not in env:
+                env['QT_QPA_PLATFORM'] = 'xcb'  # Use X11 backend
+
+            # Ensure Qt can find the display
+            env['QT_X11_NO_MITSHM'] = '1'  # Disable shared memory for X11 (helps with some display issues)
+
+            # Try without start_new_session to see if GUI displays properly
             process = subprocess.Popen(
                 [sys.executable, "-c", python_code],
-                start_new_session=True,
                 env=env,
                 cwd=os.getcwd()
                 # Don't redirect stdout/stderr to allow GUI to display properly
@@ -348,7 +381,16 @@ class NapariStreamVisualizer:
                 logger.info(f"🔬 VISUALIZER: Reusing existing napari viewer on port {self.napari_port}")
                 # Set the port and connect to existing viewer
                 self.port = self.napari_port
-                self.process = None  # Don't own this external process
+
+                # Check if we have a reference to the global process
+                with _global_process_lock:
+                    if _global_viewer_process and _global_viewer_port == self.napari_port:
+                        self.process = _global_viewer_process
+                        logger.info(f"🔬 VISUALIZER: Found global process reference (PID: {self.process.pid})")
+                    else:
+                        self.process = None  # External process we don't control
+                        logger.info("🔬 VISUALIZER: No global process reference (external viewer)")
+
                 self._setup_zmq_client()
                 self.is_running = True
                 return
@@ -456,40 +498,37 @@ class NapariStreamVisualizer:
             logger.warning(f"🔬 VISUALIZER: Timeout waiting for ports to be bound")
             return False
 
-        # Now use handshake protocol
-        control_context = zmq.Context()
-        control_socket = control_context.socket(zmq.REQ)
-        control_socket.setsockopt(zmq.LINGER, 0)
+        # Now use handshake protocol - create fresh socket for each attempt
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            control_context = zmq.Context()
+            control_socket = control_context.socket(zmq.REQ)
+            control_socket.setsockopt(zmq.LINGER, 0)
+            control_socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout
 
-        try:
-            control_socket.connect(f"tcp://localhost:{self.port + 1000}")
+            try:
+                control_socket.connect(f"tcp://localhost:{self.port + 1000}")
 
-            # Send ping and wait for ready response
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                try:
-                    import pickle
-                    ping_message = {'type': 'ping'}
-                    control_socket.send(pickle.dumps(ping_message), zmq.NOBLOCK)
+                import pickle
+                ping_message = {'type': 'ping'}
+                control_socket.send(pickle.dumps(ping_message))
 
-                    # Wait for response
-                    response = control_socket.recv(zmq.NOBLOCK)
-                    response_data = pickle.loads(response)
+                response = control_socket.recv()
+                response_data = pickle.loads(response)
 
-                    if response_data.get('type') == 'pong' and response_data.get('ready'):
-                        logger.info(f"🔬 VISUALIZER: Napari viewer is ready on port {self.port}")
-                        return True
+                if response_data.get('type') == 'pong' and response_data.get('ready'):
+                    logger.info(f"🔬 VISUALIZER: Napari viewer is ready on port {self.port}")
+                    return True
 
-                except zmq.Again:
-                    pass  # No response yet
-                except Exception as e:
-                    logger.debug(f"🔬 VISUALIZER: Handshake attempt failed: {e}")
+            except zmq.Again:
+                pass  # Timeout waiting for response
+            except Exception as e:
+                logger.debug(f"🔬 VISUALIZER: Handshake attempt failed: {e}")
+            finally:
+                control_socket.close()
+                control_context.term()
 
-                time.sleep(0.5)  # Wait before next ping
-
-        finally:
-            control_socket.close()
-            control_context.term()
+            time.sleep(0.5)  # Wait before next ping
 
         logger.warning(f"🔬 VISUALIZER: Timeout waiting for napari viewer handshake")
         return False
@@ -501,6 +540,7 @@ class NapariStreamVisualizer:
 
         self.zmq_context = zmq.Context()
         self.zmq_socket = self.zmq_context.socket(zmq.PUB)
+        self.zmq_socket.connect(f"tcp://localhost:{self.port}")
 
         # Brief delay for ZMQ connection to establish
         time.sleep(0.1)
