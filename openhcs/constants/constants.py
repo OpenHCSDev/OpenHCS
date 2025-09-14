@@ -113,6 +113,7 @@ DEFAULT_MICROSCOPE: Microscope = Microscope.AUTO
 
 # Backend-related constants
 class Backend(Enum):
+    AUTO = "auto"
     DISK = "disk"
     MEMORY = "memory"
     ZARR = "zarr"

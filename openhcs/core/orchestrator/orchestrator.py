@@ -24,6 +24,7 @@ from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, D
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+from openhcs.core.lazy_config import ContextProvider
 
 
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
@@ -32,12 +33,12 @@ from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
 from openhcs.core.steps.abstract import AbstractStep, get_step_id
 from openhcs.core.components.validation import convert_enum_by_value
+from openhcs.io.filemanager import FileManager
+from openhcs.io.zarr import ZarrStorageBackend
 # PipelineConfig now imported directly above
 from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
 from openhcs.io.exceptions import StorageWriteError
-from openhcs.io.filemanager import FileManager
 from openhcs.io.base import storage_registry
-from openhcs.io.zarr import ZarrStorageBackend
 from openhcs.microscopes import create_microscope_handler
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 
@@ -73,24 +74,54 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
     Follows OpenHCS stateless architecture principles - no side effects, explicit dependencies.
     Extracted from apply_pipeline_config to eliminate code duplication.
     """
+    print(f"🔍 MERGE DEBUG: Starting merge with pipeline_config={type(pipeline_config)} and global_config={type(global_config)}")
+
+    # DEBUG: Check what the global_config looks like
+    if hasattr(global_config, 'step_well_filter_config'):
+        step_config = getattr(global_config, 'step_well_filter_config')
+        if hasattr(step_config, 'well_filter'):
+            well_filter_value = getattr(step_config, 'well_filter')
+            print(f"🔍 MERGE DEBUG: global_config has step_well_filter_config.well_filter = {well_filter_value}")
+
     merged_config_values = {}
     for field in fields(GlobalPipelineConfig):
         # Fail-loud: Let AttributeError bubble up naturally (no getattr fallbacks)
         pipeline_value = getattr(pipeline_config, field.name)
+
+        if field.name == 'step_well_filter_config':
+            print(f"🔍 MERGE DEBUG: Processing step_well_filter_config: pipeline_value = {pipeline_value}")
+
         if pipeline_value is not None:
             # CRITICAL FIX: Convert lazy configs to base configs with resolved values
             # This ensures that user-set values from lazy configs are preserved in the thread-local context
             # instead of being replaced with static defaults when GlobalPipelineConfig is instantiated
             if hasattr(pipeline_value, 'to_base_config'):
                 # This is a lazy config - convert to base config with resolved values
-                merged_config_values[field.name] = pipeline_value.to_base_config()
+                converted_value = pipeline_value.to_base_config()
+                merged_config_values[field.name] = converted_value
+                if field.name == 'step_well_filter_config':
+                    print(f"🔍 MERGE DEBUG: Converted lazy config to base: {converted_value}")
             else:
                 # Regular value - use as-is
                 merged_config_values[field.name] = pipeline_value
+                if field.name == 'step_well_filter_config':
+                    print(f"🔍 MERGE DEBUG: Using pipeline value as-is: {pipeline_value}")
         else:
-            merged_config_values[field.name] = getattr(global_config, field.name)
+            global_value = getattr(global_config, field.name)
+            merged_config_values[field.name] = global_value
+            if field.name == 'step_well_filter_config':
+                print(f"🔍 MERGE DEBUG: Using global_config value: {global_value}")
 
-    return GlobalPipelineConfig(**merged_config_values)
+    result = GlobalPipelineConfig(**merged_config_values)
+
+    # DEBUG: Check what the result looks like
+    if hasattr(result, 'step_well_filter_config'):
+        step_config = getattr(result, 'step_well_filter_config')
+        if hasattr(step_config, 'well_filter'):
+            well_filter_value = getattr(step_config, 'well_filter')
+            print(f"🔍 MERGE DEBUG: Final result has step_well_filter_config.well_filter = {well_filter_value}")
+
+    return result
 
 
 def _execute_single_axis_static(
@@ -208,7 +239,7 @@ _worker_log_file_base = None
 
 
 
-class PipelineOrchestrator:
+class PipelineOrchestrator(ContextProvider):
     """
     Updated orchestrator supporting both global and per-orchestrator configuration.
 
@@ -220,6 +251,7 @@ class PipelineOrchestrator:
     Then, it executes the (now stateless) pipeline definition against these contexts,
     potentially in parallel, using `execute_compiled_plate()`.
     """
+    _context_type = "orchestrator"  # Register as orchestrator context provider
 
     def __init__(
         self,
@@ -243,42 +275,47 @@ class PipelineOrchestrator:
         self._pipeline_config = None
         self._auto_sync_enabled = True
 
+        # CRITICAL FIX: Create orchestrator-specific context event coordinator
+        # This prevents cross-orchestrator contamination in the enhanced decorator events system
+        from openhcs.core.lazy_config import ContextEventCoordinator
+        self._context_event_coordinator = ContextEventCoordinator()
+        print(f"🔍 ORCHESTRATOR: Created orchestrator-specific context event coordinator")
+
         # Initialize per-orchestrator configuration
-        # Always ensure orchestrator has a pipeline config - create default if none provided
+        # DUAL-AXIS FIX: Always create a PipelineConfig instance to make orchestrator detectable as context provider
+        # This ensures the orchestrator has a dataclass attribute for stack introspection
+        # PipelineConfig is already the lazy version of GlobalPipelineConfig
+        from openhcs.core.config import PipelineConfig
         if pipeline_config is None:
-            # Create PipelineConfig with all None values (like an empty form)
-            # This matches what the config save does when no edits are made
-            from openhcs.core.config import PipelineConfig
-            from dataclasses import fields
+            # CRITICAL FIX: Create pipeline config that inherits from global config
+            # This ensures the orchestrator's pipeline_config has the global values for resolution
+            pipeline_config = PipelineConfig()
 
-            # Create field values dict with all None values (like empty form)
-            field_values = {}
-            for field_obj in fields(GlobalPipelineConfig):
-                field_values[field_obj.name] = None
-
-            # Create PipelineConfig with None values for placeholder behavior
-            from openhcs.core.config import PipelineConfig
-            self.pipeline_config = PipelineConfig(**field_values)
-            logger.info("PipelineOrchestrator created default pipeline configuration with None values for placeholders.")
-        else:
-            self.pipeline_config = pipeline_config
-
-
-
-        # Set current global config for MaterializationPathConfig defaults
-        shared_context = get_current_global_config(GlobalPipelineConfig)
-        set_current_global_config(GlobalPipelineConfig, shared_context)
-
-        if plate_path is None:
-            # This case should ideally be prevented by TUI logic if plate_path is mandatory
-            # for an orchestrator instance tied to a specific plate.
-            # If workspace_path is also None, this will be caught later.
+        # CRITICAL FIX: Always apply global config inheritance to populate None fields
+        # This ensures the orchestrator's pipeline_config has the global values for resolution
+        try:
+            pipeline_config = self._apply_global_config_inheritance(pipeline_config)
+        except Exception as e:
+            logger.warning(f"Failed to apply global config inheritance: {e}")
+            # Fall back to original pipeline config if inheritance fails
             pass
-        elif isinstance(plate_path, str):
+
+        self.pipeline_config = pipeline_config
+
+        # CRITICAL FIX: Expose pipeline config as public attribute for dual-axis resolver discovery
+        # The resolver's _is_context_provider method only finds public attributes (skips _private)
+        # This allows the resolver to discover the orchestrator's pipeline config during context resolution
+        self.pipeline_config = pipeline_config
+        logger.info("PipelineOrchestrator initialized with PipelineConfig for context discovery.")
+
+        # REMOVED: Unnecessary thread-local modification
+        # The orchestrator should not modify thread-local storage during initialization
+        # Global config is already available through the dual-axis resolver fallback
+
+        # Validate plate_path if provided
+        if plate_path:
             plate_path = Path(plate_path)
-        elif not isinstance(plate_path, Path):
-            raise ValueError(f"Invalid plate_path type: {type(plate_path)}. Must be str or Path.")
-        
+
         if plate_path:
             if not plate_path.is_absolute():
                 raise ValueError(f"Plate path must be absolute: {plate_path}")
@@ -328,6 +365,37 @@ class PipelineOrchestrator:
 
         # Metadata cache service
         self._metadata_cache_service = get_metadata_cache()
+
+    def _apply_global_config_inheritance(self, pipeline_config):
+        """Apply global config inheritance to populate None fields in pipeline config."""
+        from dataclasses import fields
+
+        global_config = get_current_global_config(GlobalPipelineConfig)
+        if not global_config:
+            logger.debug("No global config available for inheritance, returning original pipeline config")
+            return pipeline_config  # Return original if no global config to inherit from
+
+        # Instead of modifying the frozen dataclass, create a new one with inherited values
+        # Get current values and replace None fields with global config values
+        current_values = {}
+        for field in fields(pipeline_config):
+            current_value = getattr(pipeline_config, field.name)
+            if current_value is None:
+                # Inherit from global config
+                global_value = getattr(global_config, field.name, None)
+                current_values[field.name] = global_value
+                if global_value is not None:
+                    logger.debug(f"Inherited {field.name} = {global_value} from global config")
+            else:
+                current_values[field.name] = current_value
+
+        # Create new pipeline config with inherited values
+        from openhcs.core.config import PipelineConfig
+        inherited_config = PipelineConfig(**current_values)
+        logger.debug("Successfully created pipeline config with global inheritance")
+        return inherited_config
+
+
 
     def __setattr__(self, name: str, value: Any) -> None:
         """
@@ -719,7 +787,7 @@ class PipelineOrchestrator:
             logger.info(f"🔥 ORCHESTRATOR: Plate execution completed, checking for analysis consolidation")
             # Run automatic analysis consolidation if enabled
             shared_context = get_current_global_config(GlobalPipelineConfig)
-            if shared_context.analysis_consolidation.enabled:
+            if shared_context.analysis_consolidation_config.enabled:
                 try:
                     # Get results directory from compiled contexts (Option 2: use existing paths)
                     results_dir = None
@@ -865,7 +933,11 @@ class PipelineOrchestrator:
 
         # Single pass through all filenames - extract all components at once
         try:
-            filenames = self.filemanager.list_files(str(self.input_dir), Backend.DISK.value, extensions=DEFAULT_IMAGE_EXTENSIONS)
+            # Use primary backend from microscope handler
+            backend_to_use = self.microscope_handler.get_primary_backend(self.input_dir)
+            logger.debug(f"Using backend '{backend_to_use}' for file listing based on available backends")
+
+            filenames = self.filemanager.list_files(str(self.input_dir), backend_to_use, extensions=DEFAULT_IMAGE_EXTENSIONS)
             logger.debug(f"Parsing {len(filenames)} filenames in single pass...")
 
             for filename in filenames:
@@ -935,6 +1007,10 @@ class PipelineOrchestrator:
     def pipeline_config(self, value: Optional['PipelineConfig']) -> None:
         """Set pipeline configuration with auto-sync to thread-local context."""
         self._pipeline_config = value
+        # CRITICAL FIX: Also update public attribute for dual-axis resolver discovery
+        # This ensures the resolver can always find the current pipeline config
+        if hasattr(self, '__dict__'):  # Avoid issues during __init__
+            self.__dict__['pipeline_config'] = value
         if self._auto_sync_enabled and value is not None:
             self._sync_to_thread_local()
 
@@ -962,15 +1038,13 @@ class PipelineOrchestrator:
         finally:
             self._auto_sync_enabled = True
 
-        # Set up thread-local context for sibling inheritance using pure function
-        shared_context = get_current_global_config(GlobalPipelineConfig)
-        merged_config = _create_merged_config(pipeline_config, shared_context)
-        set_current_global_config(GlobalPipelineConfig, merged_config)
-
-        # CRITICAL FIX: Do NOT overwrite context with effective_config
-        # The merged_config preserves None values needed for sibling inheritance
-        # Overwriting with effective_config resolves None values to concrete values,
-        # breaking the inheritance chain (materialization_defaults → path_planning)
+        # CRITICAL FIX: Do NOT contaminate thread-local context during PipelineConfig editing
+        # The orchestrator should maintain its own internal context without modifying
+        # the global thread-local context. This prevents reset operations from showing
+        # orchestrator's saved values instead of original thread-local defaults.
+        #
+        # The merged config is computed internally and used by get_effective_config()
+        # but should NOT be set as the global thread-local context.
 
         logger.info(f"Applied orchestrator config for plate: {self.plate_path}")
 
@@ -982,42 +1056,83 @@ class PipelineOrchestrator:
             for_serialization: If True, resolves all values for pickling/storage.
                               If False, preserves None values for sibling inheritance.
         """
-        if not self.pipeline_config:
-            shared_context = get_current_global_config(GlobalPipelineConfig)
-            if shared_context is None:
-                raise RuntimeError("No global configuration context available")
-            return shared_context
 
         if for_serialization:
-            return self.pipeline_config.to_base_config()
+            result = self.pipeline_config.to_base_config()
+
+            # DEBUG: Check what the serialization result looks like
+            if hasattr(result, 'step_well_filter_config'):
+                step_config = getattr(result, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 ORCHESTRATOR DEBUG: Serialization result has step_well_filter_config.well_filter = {well_filter_value}")
+
+            return result
         else:
             # Reuse existing merged config logic from apply_pipeline_config
             shared_context = get_current_global_config(GlobalPipelineConfig)
             if not shared_context:
                 raise RuntimeError("No global configuration context available for merging")
 
-            return _create_merged_config(self.pipeline_config, shared_context)
+            # DEBUG: Check what the shared context looks like before merging
+            if hasattr(shared_context, 'step_well_filter_config'):
+                step_config = getattr(shared_context, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 ORCHESTRATOR DEBUG: Shared context before merge has step_well_filter_config.well_filter = {well_filter_value}")
+
+            result = _create_merged_config(self.pipeline_config, shared_context)
+
+            # DEBUG: Check what the merged result looks like
+            if hasattr(result, 'step_well_filter_config'):
+                step_config = getattr(result, 'step_well_filter_config')
+                if hasattr(step_config, 'well_filter'):
+                    well_filter_value = getattr(step_config, 'well_filter')
+                    print(f"🔍 ORCHESTRATOR DEBUG: Merged result has step_well_filter_config.well_filter = {well_filter_value}")
+
+            return result
 
     @contextlib.contextmanager
     def config_context(self, *, for_serialization: bool = False):
-        """Context manager for operations requiring orchestrator config context."""
-        original_config = get_current_global_config(GlobalPipelineConfig)
+        """Context manager for operations requiring orchestrator config context.
+
+        With dual-axis resolution, this ensures the orchestrator is in the call stack
+        for context discovery during config resolution.
+        """
+        # CRITICAL FIX: Use direct frame injection to make orchestrator discoverable by context discovery
+        # This ensures placeholders and compiler use the same context discovery mechanism
+        import inspect
+
+        # Inject into multiple frames to ensure discovery
+        frames_to_inject = []
+        current_frame = inspect.currentframe()
+        frame_count = 0
+
+        # Walk up the call stack and inject into multiple frames
+        while current_frame and frame_count < 5:
+            if current_frame.f_back:  # Don't inject into the current frame
+                frames_to_inject.append(current_frame.f_back)
+            current_frame = current_frame.f_back
+            frame_count += 1
+
+        context_var_name = "__orchestrator_context__"
+
+        # Inject into all frames
+        for frame in frames_to_inject:
+            frame.f_locals[context_var_name] = self
+
         try:
-            if self.pipeline_config:
-                effective_config = self.get_effective_config(for_serialization=for_serialization)
-                set_current_global_config(GlobalPipelineConfig, effective_config)
             yield self
         finally:
-            set_current_global_config(GlobalPipelineConfig, original_config)
+            # Clean up from all frames
+            for frame in frames_to_inject:
+                if context_var_name in frame.f_locals:
+                    del frame.f_locals[context_var_name]
 
     def clear_pipeline_config(self) -> None:
         """Clear per-orchestrator configuration."""
-        # Reset thread-local storage to shared global config
-        if self.pipeline_config is not None:
-            shared_context = get_current_global_config(GlobalPipelineConfig)
-            if shared_context is not None:
-                set_current_global_config(GlobalPipelineConfig, shared_context)
-
+        # REMOVED: Thread-local modification - dual-axis resolver handles context automatically
+        # No need to modify thread-local storage when clearing orchestrator config
         self.pipeline_config = None
         logger.info(f"Cleared per-orchestrator config for plate: {self.plate_path}")
 

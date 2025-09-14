@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from openhcs.constants.constants import READ_BACKEND, WRITE_BACKEND, Backend
+from openhcs.constants import Microscope
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.config import MaterializationBackend
@@ -63,37 +64,47 @@ class MaterializationFlagPlanner:
 
             if will_use_zarr:
                 # Steps with zarr_config should write to materialization backend
-                step_plan[WRITE_BACKEND] = vfs_config.materialization_backend.value
+                materialization_backend = MaterializationFlagPlanner._resolve_materialization_backend(context, vfs_config)
+                step_plan[WRITE_BACKEND] = materialization_backend
             elif i == len(pipeline_definition) - 1:  # Last step without zarr - write to materialization backend
-                step_plan[WRITE_BACKEND] = vfs_config.materialization_backend.value
+                materialization_backend = MaterializationFlagPlanner._resolve_materialization_backend(context, vfs_config)
+                step_plan[WRITE_BACKEND] = materialization_backend
             else:  # Other steps - write to memory
                 step_plan[WRITE_BACKEND] = Backend.MEMORY.value
 
             # === PER-STEP MATERIALIZATION BACKEND SELECTION ===
             if "materialized_output_dir" in step_plan:
-                step_plan["materialized_backend"] = vfs_config.materialization_backend.value
+                materialization_backend = MaterializationFlagPlanner._resolve_materialization_backend(context, vfs_config)
+                step_plan["materialized_backend"] = materialization_backend
 
     @staticmethod
     def _get_first_step_read_backend(context: ProcessingContext) -> str:
-        """Get read backend for first step based on compatible backends (in priority order) and availability."""
-        compatible_backends = context.microscope_handler.compatible_backends
+        """Get read backend for first step based on VFS config and metadata-based auto-detection."""
+        vfs_config = context.get_vfs_config()
 
-        if len(compatible_backends) == 1:
-            # Only one compatible - use its string value
-            return compatible_backends[0].value
-        else:
-            # Multiple compatible - check availability in priority order
-            available_backends = context.microscope_handler.metadata_handler.get_available_backends(context.input_dir)
+        # Check if user explicitly configured a read backend
+        if vfs_config.read_backend != Backend.AUTO:
+            return vfs_config.read_backend.value
 
-            # Use first compatible backend (highest priority) that's actually available
-            for backend_enum in compatible_backends:
-                backend_name = backend_enum.value
-                if available_backends.get(backend_name, False):
-                    return backend_name
+        # AUTO mode: Use unified backend detection
+        return MaterializationFlagPlanner._detect_backend_for_context(context, fallback_backend=Backend.DISK.value)
 
-            # No compatible backends are available - fail loud
-            compatible_names = [b.value for b in compatible_backends]
-            raise RuntimeError(f"No compatible backends are actually available. Compatible: {compatible_names}, Available: {available_backends}")
+    @staticmethod
+    def _resolve_materialization_backend(context: ProcessingContext, vfs_config) -> str:
+        """Resolve materialization backend, handling AUTO option."""
+        # Check if user explicitly configured a materialization backend
+        if vfs_config.materialization_backend != MaterializationBackend.AUTO:
+            return vfs_config.materialization_backend.value
+
+        # AUTO mode: Use unified backend detection
+        return MaterializationFlagPlanner._detect_backend_for_context(context, fallback_backend=MaterializationBackend.DISK.value)
+
+    @staticmethod
+    def _detect_backend_for_context(context: ProcessingContext, fallback_backend: str) -> str:
+        """Unified backend detection logic for both read and materialization backends."""
+        # Use the microscope handler's get_primary_backend method
+        # This handles both OpenHCS (metadata-based) and other microscopes (compatibility-based)
+        return context.microscope_handler.get_primary_backend(context.input_dir)
 
 
 

@@ -962,7 +962,7 @@ class PlateManagerWidget(ButtonListWidget):
                 from openhcs.core.context.global_config import get_current_global_config
                 export_config = get_current_global_config(GlobalPipelineConfig)
                 export_vfs_config = VFSConfig(
-                    intermediate_backend=export_config.vfs.intermediate_backend,
+                    intermediate_backend=export_config.vfs_config.intermediate_backend,
                     materialization_backend=MaterializationBackend.ZARR
                 )
 
@@ -1189,10 +1189,7 @@ class PlateManagerWidget(ButtonListWidget):
 
             self.app.global_config = global_config  # Update app-level config
 
-            # Update thread-local storage for MaterializationPathConfig defaults
-            from openhcs.core.config import GlobalPipelineConfig
-            from openhcs.core.context.global_config import set_current_global_config
-            set_current_global_config(GlobalPipelineConfig, global_config)
+            # REMOVED: Thread-local modification - dual-axis resolver handles context automatically
 
             for orchestrator in self.orchestrators.values():
                 asyncio.create_task(orchestrator.apply_new_global_config(global_config))

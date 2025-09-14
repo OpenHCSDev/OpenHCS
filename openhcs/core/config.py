@@ -76,6 +76,7 @@ class ZarrChunkStrategy(Enum):
 
 class MaterializationBackend(Enum):
     """Available backends for materialization (persistent storage only)."""
+    AUTO = "auto"
     ZARR = "zarr"
     DISK = "disk"
 
@@ -109,12 +110,13 @@ class GlobalPipelineConfig:
     Examples: "results", "./analysis", "/data/analysis_results", "../shared_results"
 
     Note: This is separate from per-step image materialization, which is controlled
-    by the sub_dir field in each step's materialization_config.
+    by the sub_dir field in each step's step_materialization_config.
     """
 
     microscope: Microscope = Microscope.AUTO
     """Default microscope type for auto-detection."""
 
+    #use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true')
     use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true')
     """Use ThreadPoolExecutor instead of ProcessPoolExecutor for debugging. Reads from OPENHCS_USE_THREADING environment variable."""
 
@@ -131,8 +133,8 @@ class GlobalPipelineConfig:
 @dataclass(frozen=True)
 class WellFilterConfig:
     """Base configuration for well filtering functionality."""
-    well_filter: Optional[List[str]] = None
-    """List of wells to include/exclude. None means all wells."""
+    well_filter: Optional[Union[List[str], str, int]] = None
+    """Well filter specification: list of wells, pattern string, or max count integer. None means all wells."""
 
     well_filter_mode: WellFilterMode = WellFilterMode.INCLUDE
     """Whether well_filter is an include list or exclude list."""
@@ -168,6 +170,9 @@ class ZarrConfig:
 @dataclass(frozen=True)
 class VFSConfig:
     """Configuration for Virtual File System (VFS) related operations."""
+    read_backend: Backend = Backend.AUTO
+    """Backend for reading input data. AUTO uses metadata-based detection for OpenHCS plates."""
+
     intermediate_backend: Backend = Backend.MEMORY
     """Backend for storing intermediate step results that are not explicitly materialized."""
 
@@ -288,8 +293,7 @@ class PathPlanningConfig(WellFilterConfig):
 class StepWellFilterConfig(WellFilterConfig):
     """Well filter configuration specialized for step-level configs with different defaults."""
     # Override defaults for step-level configurations
-    well_filter: Optional[List[str]] = 1
-    well_filter_mode: WellFilterMode = WellFilterMode.INCLUDE
+    well_filter: Optional[Union[List[str], str, int]] = 1
 
 @global_pipeline_config
 @dataclass(frozen=True)
@@ -322,6 +326,7 @@ class FunctionRegistryConfig:
     """
 
 
+@global_pipeline_config
 @dataclass(frozen=True)
 class VisualizerConfig:
     """Configuration for shared visualization system settings."""
@@ -341,9 +346,8 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
     """Abstract base configuration for streaming to visualizers.
 
     Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
+    Inherited fields are automatically set to None by @global_pipeline_config(inherit_as_none=True).
     """
-    # Override to None to enable lazy resolution from StepWellFilterConfig
-    #well_filter: Optional[List[str]] = None
 
     @property
     @abstractmethod

@@ -18,14 +18,75 @@ def _unwrap_optional(field_type: Type) -> Type:
     return field_type
 
 
-def discover_composition_hierarchy(dataclass_type: Type) -> Dict[Type, List[str]]:
-    """Auto-discover composition relationships and field paths."""
-    if not is_dataclass(dataclass_type):
-        raise ValueError(f"{dataclass_type} must be a dataclass")
+def discover_composition_hierarchy_from_instance(instance: Any) -> Dict[Type, List[str]]:
+    """Auto-discover composition relationships by introspecting an actual instance."""
+    hierarchy = {}
+    visited_objects = set()  # Prevent infinite recursion
+
+    def traverse(obj: Any, obj_type: Type, path_prefix: str = ""):
+        obj_id = id(obj)
+        if obj_id in visited_objects:
+            return
+        visited_objects.add(obj_id)
+
+        if is_dataclass(obj_type):
+            # Handle dataclass fields
+            for field in fields(obj_type):
+                field_type = _unwrap_optional(field.type)
+                field_path = f"{path_prefix}.{field.name}" if path_prefix else field.name
+
+                if is_dataclass(field_type):
+                    hierarchy.setdefault(field_type, []).append(field_path)
+                    # Get the actual field value to continue traversal
+                    # Use object.__getattribute__ to avoid triggering lazy resolution
+                    try:
+                        field_value = object.__getattribute__(obj, field.name)
+                        if field_value is not None:
+                            traverse(field_value, field_type, field_path)
+                    except AttributeError:
+                        pass
+        else:
+            # Handle regular object by introspecting its actual attributes
+            for attr_name in dir(obj):
+                if attr_name.startswith('_'):
+                    continue
+
+                try:
+                    attr_value = object.__getattribute__(obj, attr_name)
+
+                    # Skip methods and other non-data attributes
+                    if callable(attr_value):
+                        continue
+
+                    # Check if this attribute is a dataclass instance
+                    if attr_value is not None and is_dataclass(attr_value):
+                        attr_type = type(attr_value)
+                        field_path = f"{path_prefix}.{attr_name}" if path_prefix else attr_name
+                        hierarchy.setdefault(attr_type, []).append(field_path)
+                        traverse(attr_value, attr_type, field_path)
+
+                except (AttributeError, TypeError):
+                    continue
+
+    traverse(instance, type(instance))
+    return hierarchy
+
+
+def discover_composition_hierarchy(root_type: Type) -> Dict[Type, List[str]]:
+    """Auto-discover composition relationships and field paths for dataclass types."""
+    if not is_dataclass(root_type):
+        # For non-dataclass types, we can't reliably discover composition without an instance
+        # Return empty hierarchy - caller should use discover_composition_hierarchy_from_instance
+        return {}
 
     hierarchy = {}
+    visited_types = set()
 
     def traverse(current_type: Type, path_prefix: str = ""):
+        if current_type in visited_types:
+            return
+        visited_types.add(current_type)
+
         for field in fields(current_type):
             field_type = _unwrap_optional(field.type)
             field_path = f"{path_prefix}.{field.name}" if path_prefix else field.name
@@ -34,7 +95,7 @@ def discover_composition_hierarchy(dataclass_type: Type) -> Dict[Type, List[str]
                 hierarchy.setdefault(field_type, []).append(field_path)
                 traverse(field_type, field_path)
 
-    traverse(dataclass_type)
+    traverse(root_type)
     return hierarchy
 
 
@@ -48,32 +109,7 @@ def find_all_composition_paths_for_type(root_type: Type, target_type: Type) -> L
     return discover_composition_hierarchy(root_type).get(target_type, [])
 
 
-def resolve_field_through_composition(instance: Any, field_name: str) -> Any:
-    """
-    Auto-resolve field through composition hierarchy.
-
-    Resolution order: direct field → composed objects → nested compositions
-    """
-    if not is_dataclass(instance):
-        return None
-
-    # Direct field (highest priority)
-    if hasattr(instance, field_name) and (value := getattr(instance, field_name)) is not None:
-        return value
-
-    # Breadth-first through compositions
-    for field in fields(instance):
-        if (composed_obj := getattr(instance, field.name)) and is_dataclass(composed_obj):
-            if hasattr(composed_obj, field_name) and (value := getattr(composed_obj, field_name)) is not None:
-                return value
-
-    # Depth-first through nested compositions
-    for field in fields(instance):
-        if (composed_obj := getattr(instance, field.name)) and is_dataclass(composed_obj):
-            if (resolved := resolve_field_through_composition(composed_obj, field_name)) is not None:
-                return resolved
-
-    return None
+# resolve_field_through_composition removed - dual-axis resolver handles composition resolution
 
 
 def create_composition_field_provider(
@@ -276,16 +312,12 @@ class CompositionIntegrationUtils:
 
         if use_composition:
             try:
-                composition_value = CompositionFieldResolver.resolve_field_through_composition(
-                    instance, field_name
-                )
+                # Use dual-axis resolver for composition resolution
+                from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+                resolver = get_recursive_resolver()
+                composition_value = resolver.resolve_field(instance, field_name)
                 results['composition_value'] = composition_value
-
-                # Get resolution paths for debugging
-                resolution_paths = CompositionFieldResolver.get_composition_resolution_paths(
-                    instance, field_name
-                )
-                results['composition_paths'] = resolution_paths
+                results['composition_paths'] = ['dual-axis-resolver']  # Simplified path info
             except Exception as e:
                 results['composition_error'] = str(e)
 

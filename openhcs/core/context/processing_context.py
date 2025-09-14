@@ -130,13 +130,13 @@ class ProcessingContext:
         if not hasattr(self, 'global_config') or self.global_config is None:
             # This case should ideally not happen if Orchestrator always sets it.
             raise RuntimeError("GlobalPipelineConfig not set on ProcessingContext.")
-        return self.global_config.vfs
+        return self.global_config.vfs_config
 
     def get_path_planning_config(self) -> PathPlanningConfig:
         """Returns the PathPlanningConfig part of the global configuration."""
         if not hasattr(self, 'global_config') or self.global_config is None:
             raise RuntimeError("GlobalPipelineConfig not set on ProcessingContext.")
-        return self.global_config.path_planning
+        return self.global_config.path_planning_config
 
     def get_num_workers(self) -> int:
         """Returns the number of workers from the global configuration."""

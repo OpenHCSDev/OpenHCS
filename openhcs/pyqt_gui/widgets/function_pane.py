@@ -69,18 +69,23 @@ class FunctionPaneWidget(QWidget):
         # Parameter management (extracted from Textual version)
         if self.func:
             param_info = SignatureAnalyzer.analyze(self.func)
+            print(f"🔍 FUNCTION PANE DEBUG: param_info = {param_info}")
             parameters = {name: self.kwargs.get(name, info.default_value) for name, info in param_info.items()}
             parameter_types = {name: info.param_type for name, info in param_info.items()}
-            
+
+            # Store function signature defaults
+            self.param_defaults = {name: info.default_value for name, info in param_info.items()}
+            print(f"🔍 FUNCTION PANE DEBUG: param_defaults = {self.param_defaults}")
+
             self.form_manager = ParameterFormManager(
                 parameters=parameters,
                 parameter_types=parameter_types,
                 field_id=f"func_{index}",
                 dataclass_type=None,  # Function parameters, not dataclass
                 parameter_info=param_info,
-                parent=self
+                parent=self,
+                param_defaults=self.param_defaults  # CRITICAL FIX: Pass function signature defaults
             )
-            self.param_defaults = {name: info.default_value for name, info in param_info.items()}
         else:
             self.form_manager = None
             self.param_defaults = {}
@@ -280,7 +285,8 @@ class FunctionPaneWidget(QWidget):
                 parameter_info=self.form_manager.parameter_info,
                 use_scroll_area=False,  # Don't use scroll area in function panes
                 function_target=self.func,  # Pass function for docstring fallback
-                color_scheme=self.color_scheme
+                color_scheme=self.color_scheme,
+                param_defaults=getattr(self, 'param_defaults', {})  # CRITICAL FIX: Pass function signature defaults
             )
 
             # Connect parameter changes
@@ -492,16 +498,20 @@ class FunctionPaneWidget(QWidget):
             param_info = SignatureAnalyzer.analyze(self.func)
             parameters = {name: self.kwargs.get(name, info.default_value) for name, info in param_info.items()}
             parameter_types = {name: info.param_type for name, info in param_info.items()}
-            
+
+            # Store function signature defaults
+            self.param_defaults = {name: info.default_value for name, info in param_info.items()}
+
             self.form_manager = ParameterFormManager(
                 parameters=parameters,
                 parameter_types=parameter_types,
                 field_id=f"func_{self.index}",
                 dataclass_type=None,  # Function parameters, not dataclass
+                context_provider=None,  # Function forms don't need context provider
                 parameter_info=param_info,
-                parent=self
+                parent=self,
+                param_defaults=self.param_defaults  # CRITICAL FIX: Pass function signature defaults
             )
-            self.param_defaults = {name: info.default_value for name, info in param_info.items()}
         else:
             self.form_manager = None
             self.param_defaults = {}

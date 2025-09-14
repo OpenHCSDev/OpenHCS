@@ -10,11 +10,52 @@ import dataclasses
 import inspect
 import os
 import typing
-from typing import Type, Optional, Union, get_origin, get_args
+from typing import Type, Optional, Union, get_origin, get_args, Any
 from dataclasses import fields
 
 # Configuration flag for switching between inheritance and composition detection
 USE_COMPOSITION_DETECTION = os.getenv('OPENHCS_USE_COMPOSITION_DETECTION', 'false').lower() == 'true'
+
+
+class FieldPathNavigator:
+    """Utility for navigating dot-separated field paths in object hierarchies."""
+
+    @staticmethod
+    def navigate_to_instance(current_global_config: Any, field_path: Optional[str] = None) -> Optional[Any]:
+        """
+        Navigate to instance using explicit field path.
+
+        Args:
+            current_global_config: Thread-local storage object or global config instance
+            field_path: Dot-separated path to navigate (None = root)
+
+        Returns:
+            Instance at the specified field path, or None if not found
+        """
+        # Handle both thread-local storage objects and direct config instances
+        if hasattr(current_global_config, "value"):
+            if not current_global_config.value:
+                return None
+            instance = current_global_config.value
+        else:
+            # Direct config instance
+            instance = current_global_config
+
+        if field_path is None:
+            # Root instance - return the global config directly
+            return instance
+
+        # Navigate dot-separated path
+        for field in field_path.split('.'):
+            if instance is None:
+                return None
+            # Use object.__getattribute__ to avoid triggering lazy resolution during navigation
+            try:
+                instance = object.__getattribute__(instance, field)
+            except AttributeError:
+                return None
+
+        return instance
 
 
 class FieldPathDetector:
@@ -225,8 +266,10 @@ class FieldPathDetector:
                 field_type = FieldPathDetector._unwrap_optional_type(field.type)
                 field_path = f"{current_path}.{field.name}" if current_path else field.name
 
-                # Direct type match
+                # Direct type match or lazy type match
                 if field_type == target_type:
+                    paths.append(field_path)
+                elif FieldPathDetector._is_lazy_version_of_target(field_type, target_type):
                     paths.append(field_path)
                 # Recursive search in nested dataclasses
                 elif dataclasses.is_dataclass(field_type):
@@ -234,6 +277,15 @@ class FieldPathDetector:
 
         _recursive_search(parent_type)
         return paths
+
+    @staticmethod
+    def _is_lazy_version_of_target(field_type: Type, target_type: Type) -> bool:
+        """Check if field_type is a lazy version of target_type."""
+        try:
+            from openhcs.core.lazy_config import get_base_type_for_lazy
+            return get_base_type_for_lazy(field_type) == target_type
+        except ImportError:
+            return False
 
     @staticmethod
     def find_inheritance_relationships(target_type: Type) -> list[Type]:
@@ -332,31 +384,4 @@ class FieldPathDetector:
 
         return deduplicated
 
-    @staticmethod
-    def resolve_field_unified(instance, field_name: str):
-        """
-        Unified field resolution that works with both inheritance and composition.
-
-        This provides the most comprehensive field resolution by trying both
-        inheritance-based attribute access and composition-based traversal.
-
-        Args:
-            instance: The dataclass instance to resolve from
-            field_name: The field name to resolve
-
-        Returns:
-            The resolved field value, or None if not found
-        """
-        # First try direct attribute access (works for inheritance)
-        if hasattr(instance, field_name):
-            value = getattr(instance, field_name)
-            if value is not None:
-                return value
-
-        # Then try composition-based resolution
-        from openhcs.core.composition_detection import resolve_field_through_composition
-        composition_result = resolve_field_through_composition(instance, field_name)
-        if composition_result is not None:
-            return composition_result
-
-        return None
+    # resolve_field_unified removed - pointless wrapper around dual-axis resolver

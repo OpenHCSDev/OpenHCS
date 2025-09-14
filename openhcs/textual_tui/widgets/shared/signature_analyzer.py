@@ -328,13 +328,25 @@ class SignatureAnalyzer:
         """
         sig = inspect.signature(callable_obj)
         # Build comprehensive namespace for forward reference resolution
+        # Start with our modules, then overlay the function's original globals to preserve imports
         globalns = {
-            **getattr(callable_obj, '__globals__', {}),
             **vars(lazy_module),
-            **vars(config_module)
+            **vars(config_module),
+            **getattr(callable_obj, '__globals__', {})
         }
 
-        type_hints = get_type_hints(callable_obj, globalns=globalns)
+        try:
+            type_hints = get_type_hints(callable_obj, globalns=globalns)
+        except (NameError, AttributeError) as e:
+            # If type hint resolution fails, try with just the function's original globals
+            try:
+                type_hints = get_type_hints(callable_obj, globalns=getattr(callable_obj, '__globals__', {}))
+            except:
+                # If that still fails, return empty type hints
+                type_hints = {}
+        except Exception:
+            # For any other type hint resolution errors, return empty type hints
+            type_hints = {}
 
         # Extract docstring information (with fallback for robustness)
         try:

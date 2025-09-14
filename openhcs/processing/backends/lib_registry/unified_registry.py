@@ -204,7 +204,82 @@ class LibraryRegistryBase(ABC):
 
             return contract_wrapper
 
+    def _inject_optional_dataclass_params(self, func: Callable) -> Callable:
+        """Inject optional lazy dataclass parameters into function signature."""
+        import inspect
+        from functools import wraps
+        from typing import Optional
 
+        # Get original signature
+        original_sig = inspect.signature(func)
+        original_params = list(original_sig.parameters.values())
+
+        # Import existing lazy config types
+        from openhcs.core.config import LazyNapariStreamingConfig, LazyFijiStreamingConfig, LazyStepMaterializationConfig
+
+        # Define common lazy dataclass parameters to inject
+        dataclass_params = [
+            ('napari_streaming_config', 'Optional[LazyNapariStreamingConfig]', LazyNapariStreamingConfig),
+            ('fiji_streaming_config', 'Optional[LazyFijiStreamingConfig]', LazyFijiStreamingConfig),
+            ('step_materialization_config', 'Optional[LazyStepMaterializationConfig]', LazyStepMaterializationConfig),
+        ]
+
+        # Check if any parameters need to be added
+        existing_param_names = {p.name for p in original_params}
+        params_to_add = [(name, type_hint, lazy_class) for name, type_hint, lazy_class in dataclass_params
+                        if name not in existing_param_names]
+
+        if not params_to_add:
+            return func  # No parameters to add
+
+        # Create new parameters
+        new_params = original_params.copy()
+
+        # Find insertion point (before **kwargs if it exists)
+        insert_index = len(new_params)
+        for i, param in enumerate(new_params):
+            if param.kind == inspect.Parameter.VAR_KEYWORD:
+                insert_index = i
+                break
+
+        # Add dataclass parameters
+        from typing import Optional
+        for param_name, type_hint, lazy_class in params_to_add:
+            new_param = inspect.Parameter(
+                param_name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=None,
+                annotation=Optional[lazy_class]  # Use actual type object, not string
+            )
+            new_params.insert(insert_index, new_param)
+            insert_index += 1
+
+        # Create enhanced wrapper function
+        @wraps(func)
+        def enhanced_wrapper(*args, **kwargs):
+            # Extract dataclass parameters from kwargs (they're just ignored for now)
+            regular_kwargs = {k: v for k, v in kwargs.items()
+                            if k not in [name for name, _, _ in dataclass_params]}
+
+            # Call original function with regular parameters only
+            return func(*args, **regular_kwargs)
+
+        # Apply the modified signature
+        new_sig = original_sig.replace(parameters=new_params)
+        enhanced_wrapper.__signature__ = new_sig
+
+        # Enhance annotations
+        if hasattr(func, '__annotations__'):
+            enhanced_wrapper.__annotations__ = func.__annotations__.copy()
+        else:
+            enhanced_wrapper.__annotations__ = {}
+
+        # Add type annotations for injected parameters
+        from typing import Optional
+        for param_name, type_hint, lazy_class in params_to_add:
+            enhanced_wrapper.__annotations__[param_name] = Optional[lazy_class]
+
+        return enhanced_wrapper
 
     def _get_function_by_name(self, module_path: str, func_name: str):
         """Get function object by module path and name."""
@@ -303,12 +378,14 @@ class LibraryRegistryBase(ABC):
 
             # Apply the same wrappers as during discovery
             if hasattr(self, 'create_library_adapter'):
-                # External library - apply library adapter + contract wrapper
+                # External library - apply library adapter + contract wrapper + param injection
                 adapted_func = self.create_library_adapter(func, contract)
-                final_func = self.apply_contract_wrapper(adapted_func, contract)
+                contract_wrapped_func = self.apply_contract_wrapper(adapted_func, contract)
+                final_func = self._inject_optional_dataclass_params(contract_wrapped_func)
             else:
-                # OpenHCS - apply contract wrapper only
-                final_func = self.apply_contract_wrapper(func, contract)
+                # OpenHCS - apply contract wrapper + param injection
+                contract_wrapped_func = self.apply_contract_wrapper(func, contract)
+                final_func = self._inject_optional_dataclass_params(contract_wrapped_func)
 
             metadata = FunctionMetadata(
                 name=func_name,
@@ -573,10 +650,34 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         if not params:
             return False
 
+        # Validate that type hints can be resolved (skip functions with missing dependencies)
+        if not self._validate_type_hints(func, func_name):
+            return False
+
         # Library-specific signature validation
         return self._check_first_parameter(params[0], func_name)
 
 
+    def _validate_type_hints(self, func: Callable, func_name: str) -> bool:
+        """
+        Validate that function type hints can be resolved.
+
+        Returns False if type hints reference missing dependencies (e.g., torch when not installed).
+        This prevents functions with unresolvable type hints from being registered.
+        """
+        try:
+            from typing import get_type_hints
+            # Try to resolve type hints - this will fail if dependencies are missing
+            get_type_hints(func)
+            return True
+        except NameError as e:
+            # Type hint references a missing dependency (e.g., 'torch' not defined)
+            logger.warning(f"Skipping function '{func_name}' due to unresolvable type hints: {e}")
+            return False
+        except Exception:
+            # Other type hint resolution errors - be conservative and allow the function
+            # (this handles edge cases where get_type_hints fails for other reasons)
+            return True
 
     @abstractmethod
     def _check_first_parameter(self, first_param, func_name: str) -> bool:
@@ -631,7 +732,10 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
                 adapted_func = self.create_library_adapter(func, contract)
 
                 # Apply contract wrapper (slice_by_slice for FLEXIBLE)
-                final_func = self.apply_contract_wrapper(adapted_func, contract)
+                contract_wrapped_func = self.apply_contract_wrapper(adapted_func, contract)
+
+                # Inject optional dataclass parameters
+                final_func = self._inject_optional_dataclass_params(contract_wrapped_func)
 
                 metadata = FunctionMetadata(
                     name=func_name,
