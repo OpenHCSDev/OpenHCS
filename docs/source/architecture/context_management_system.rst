@@ -1,204 +1,343 @@
 Context Management System
 =========================
 
-**Generic thread-local storage for global configuration context management.**
+**Dual-axis context discovery with frame injection and automatic context hierarchy resolution.**
 
-*Status: STABLE*
-*Module: openhcs.core.context.global_config*
+*Status: STABLE - Dual-Axis Implementation*
+*Module: openhcs.core.dual_axis_resolver_recursive*
 
 Overview
 --------
 
-Configuration systems require thread-safe context management to support concurrent processing while maintaining configuration isolation. The context management system provides generic thread-local storage that supports multiple global configuration types with automatic context switching.
+Configuration systems require sophisticated context management to support hierarchical resolution patterns while maintaining proper inheritance chains. The context management system uses frame injection and stack introspection to automatically discover context hierarchy without explicit parameter passing.
+
+The system operates on the principle that configuration resolution should be transparent to consuming code - functions and methods should not need to explicitly pass context objects around, yet the resolution system should still have access to the appropriate context for making inheritance decisions. This is achieved through a frame injection mechanism that temporarily places context objects into the call stack where they can be discovered through systematic introspection.
 
 .. code-block:: python
 
-   # Generic context management for any configuration type
-   set_current_global_config(GlobalPipelineConfig, config_instance)
-   current_config = get_current_global_config(GlobalPipelineConfig)
-   
-   # Thread-safe isolation - each thread maintains separate context
-   # Supports future extension to multiple global config types
+   # Automatic context discovery through stack introspection
+   context_hierarchy = ContextDiscovery.discover_context(target_type)
+   # Returns: [step_context, orchestrator_context, global_context]
 
-This eliminates hardcoded context management while providing thread-safe configuration access for concurrent pipeline processing.
+   # Frame injection for context provision
+   ContextInjector.inject_context(orchestrator, "orchestrator")
+   # Injects: frame.f_locals["__orchestrator_context__"] = orchestrator
 
-Generic Thread-Local Storage
------------------------------
+   # Automatic cleanup in finally blocks
+   # No explicit context management required
 
-The system uses type-based context storage that automatically handles thread isolation without requiring explicit thread management.
+The :py:class:`~openhcs.core.dual_axis_resolver_recursive.ContextDiscovery` class implements the discovery algorithm, while :py:class:`~openhcs.core.lazy_config.ContextInjector` provides the injection mechanism. This eliminates explicit context passing while providing sophisticated context hierarchy resolution for dual-axis inheritance patterns.
 
-.. literalinclude:: ../../../openhcs/core/context/global_config.py
-   :language: python
-   :lines: 13-26
-   :caption: Generic thread-local storage for any global config type
+Frame Injection System
+----------------------
 
-The type-based approach enables multiple global configuration types to coexist while maintaining thread isolation automatically.
+The system uses frame injection to provide context without explicit parameter passing. This mechanism works by temporarily placing context objects into the local variable namespace of call stack frames, where they can be discovered by the resolution system through systematic stack traversal.
 
-Context-Aware Operations
-------------------------
+Context Injection Mechanism
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The system provides decorators for operations that require active configuration context, ensuring proper context availability.
-
-.. literalinclude:: ../../../openhcs/core/context/global_config.py
-   :language: python
-   :lines: 29-42
-   :caption: Decorator to ensure config context is available for UI operations
-
-This prevents context-dependent operations from executing without proper configuration setup.
-
-Integration with Lazy Resolution
---------------------------------
-
-The context management system integrates seamlessly with lazy configuration resolution to provide automatic field value lookup.
+The frame injection mechanism operates by manipulating the ``f_locals`` dictionary of call stack frames. When a context needs to be provided, the system injects a specially-named variable into the caller's frame, following a consistent naming pattern that the discovery system can recognize.
 
 .. code-block:: python
 
-   # Lazy field resolution uses context management automatically
-   class LazyConfigResolver:
-       def _resolve_field_value(self, field_name: str) -> Any:
-           # Automatic context lookup through generic context management
-           current_config = get_current_global_config(self._global_config_type)
-           if current_config and hasattr(current_config, field_name):
-               return getattr(current_config, field_name)
+   # Frame injection for context provision
+   class ContextInjector:
+       @staticmethod
+       def inject_context(context_obj: Any, context_type: str = "step") -> None:
+           """Inject context into call stack for dual-axis resolution."""
+           import inspect
+           frame = inspect.currentframe().f_back  # Get caller's frame
+           context_var_name = f"__{context_type}_context__"
+           frame.f_locals[context_var_name] = context_obj
+
+   # Automatic cleanup with context managers
+   @staticmethod
+   def with_context(context_obj: Any, context_type: str = "step"):
+       """Context manager for temporary context injection."""
+       @contextmanager
+       def _context_manager():
+           frame = inspect.currentframe().f_back.f_back
+           context_var_name = f"__{context_type}_context__"
+           frame.f_locals[context_var_name] = context_obj
+           try:
+               yield
+           finally:
+               if context_var_name in frame.f_locals:
+                   del frame.f_locals[context_var_name]
+       return _context_manager()
+
+The :py:meth:`~openhcs.core.lazy_config.ContextInjector.inject_context` method provides direct injection, while :py:meth:`~openhcs.core.lazy_config.ContextInjector.with_context` offers a context manager pattern for automatic cleanup. The naming convention uses double underscores to avoid conflicts with normal variables while making the injected contexts easily identifiable.
+
+Context Discovery System
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The system automatically discovers injected contexts through stack introspection. This discovery process reverses the injection mechanism by systematically examining each frame in the call stack for variables that match the expected naming pattern.
+
+The discovery algorithm works by walking up the Python call stack frame by frame, examining the local variables in each frame for specially-named context variables. This approach allows the system to find contexts that were injected at any level of the call hierarchy.
+
+.. code-block:: python
+
+   # Automatic context discovery
+   class ContextDiscovery:
+       @staticmethod
+       def discover_context(target_type: type = None) -> Optional[Any]:
+           """Walk call stack to find objects that can provide resolution context."""
+
+           # Walk up the call stack
+           frame = inspect.currentframe()
+           while frame:
+               # Look for injected context variables
+               context = ContextDiscovery._find_injected_context(frame, target_type)
+               if context:
+                   return context
+               frame = frame.f_back
+
            return None
 
-This enables lazy dataclasses to resolve field values from the current thread-local context without explicit context passing.
+       @staticmethod
+       def _find_injected_context(frame: Any, target_type: type = None) -> Optional[Any]:
+           """Find any injected context in frame locals using generic pattern."""
+           for var_name, var_value in frame.f_locals.items():
+               # Generic pattern: __*_context__ (e.g., __step_context__, __orchestrator_context__)
+               if var_name.startswith('__') and var_name.endswith('_context__'):
+                   if ContextDiscovery._is_context_provider(var_value, target_type):
+                       return var_value
+           return None
+
+The ``discover_context`` method implements the core discovery loop: starting from the current frame, it walks up the call stack using ``frame.f_back`` until it finds a context or reaches the top. The ``_find_injected_context`` helper examines each frame's local variables, looking for names that match the injection pattern (``__*_context__``). The ``_is_context_provider`` method validates that the found object can actually provide the needed context type.
+
+Integration with Dual-Axis Resolution
+-------------------------------------
+
+The context management system integrates with the dual-axis resolver to provide sophisticated inheritance patterns.
+
+Recursive Context Hierarchy
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The system builds complete context hierarchies by discovering multiple context types in priority order. This hierarchy forms the X-axis of the dual-axis resolution system, ensuring that more specific contexts take precedence over general ones.
+
+.. code-block:: python
+
+   # Context hierarchy discovery for dual-axis resolution
+   def _discover_context_hierarchy(self, target_type: Type) -> List[Any]:
+       """Discover full context hierarchy from most specific to least specific."""
+       hierarchy = []
+
+       # Use context discovery to find the most specific context
+       most_specific_context = ContextDiscovery.discover_context(target_type)
+       if most_specific_context:
+           hierarchy.append(most_specific_context)
+
+           # Try to find parent contexts
+           parent_context = self._find_parent_context(most_specific_context, target_type)
+           while parent_context and parent_context not in hierarchy:
+               hierarchy.append(parent_context)
+               parent_context = self._find_parent_context(parent_context, target_type)
+
+       return hierarchy  # [step_context, orchestrator_context, global_context]
+
+This method builds the context hierarchy by first finding the most specific context available through stack introspection, then recursively discovering parent contexts. The ``_find_parent_context`` method examines the current context to determine what its parent context should be (e.g., a step context's parent is the orchestrator context). The loop continues until no more parent contexts can be found, creating a complete hierarchy from specific to general.
+
+This enables automatic context hierarchy resolution without explicit context management code, forming the X-axis traversal order for dual-axis resolution.
 
 Orchestrator Context Management
 ------------------------------
 
-The orchestrator automatically manages configuration context for pipeline execution with proper context switching.
+The orchestrator automatically provides context for dual-axis resolution through frame injection and context discovery.
+
+Orchestrator as Context Provider
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   class PipelineOrchestrator:
-       def apply_pipeline_config(self, pipeline_config):
-           """Apply pipeline configuration with automatic context management."""
-           # Create merged configuration preserving None values
-           effective_config = _create_merged_config(pipeline_config, self.global_config)
-           
-           # Set thread-local context for lazy resolution
-           set_current_global_config(GlobalPipelineConfig, effective_config)
-           
-           # All subsequent operations use this context automatically
-           logger.debug("Set thread-local context for pipeline execution")
+   class PipelineOrchestrator(ContextProvider):
+       """Orchestrator provides context for step-level configuration resolution."""
 
-This ensures that all pipeline operations have access to the correct configuration context without manual context passing.
+       _context_type = "orchestrator"  # Automatic context registration
 
-Future Extensibility
---------------------
+       def __init__(self, ...):
+           # Orchestrator automatically registers as context provider
+           super().__init__()
 
-The generic design supports multiple global configuration domains simultaneously, enabling OpenHCS to expand into new functional areas.
+           # Apply global config inheritance to pipeline config
+           self._apply_global_config_inheritance()
 
-Creating New Global Configuration Domains
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+       def _apply_global_config_inheritance(self):
+           """Merge global config values into pipeline config for proper inheritance."""
+           if self.pipeline_config and self.global_config:
+               # Create merged config that inherits None values from global config
+               merged_config = self._merge_configs(self.pipeline_config, self.global_config)
+               self.pipeline_config = merged_config
 
-The system enables creation of entirely new global configuration domains using the same @auto_create_decorator pattern:
+Context Injection During Compilation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   # Create new global configuration domain
-   @auto_create_decorator
-   @dataclass(frozen=True)
-   class GlobalAnalysisConfig:
-       default_statistical_method: str = "robust"
-       confidence_interval: float = 0.95
-       parallel_analysis: bool = True
+   # Orchestrator context is automatically injected during lazy config resolution
+   def resolve_lazy_configurations_for_serialization(resolved_data):
+       """Resolve lazy configs with automatic context injection."""
 
-   # Automatically generates @global_analysis_config decorator
-   # Any dataclass can now inherit these fields:
-   @global_analysis_config
-   @dataclass(frozen=True)
-   class ExperimentAnalysisConfig:
-       experiment_id: str = "exp001"
-       # Inherits default_statistical_method, confidence_interval, parallel_analysis
+       # Detect if this is a context provider (orchestrator, step, etc.)
+       context_type = _detect_context_type(resolved_data)
+       if context_type:
+           # Inject context into call stack
+           import inspect
+           frame = inspect.currentframe()
+           context_var_name = f"__{context_type}_context__"
+           frame.f_locals[context_var_name] = resolved_data
 
-Multi-Domain Context Isolation
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+           try:
+               # Process with injected context - dual-axis resolver will find it
+               return _process_with_context(resolved_data)
+           finally:
+               # Clean up injected context
+               if context_var_name in frame.f_locals:
+                   del frame.f_locals[context_var_name]
 
-Each global configuration domain maintains independent thread-local context:
+This ensures that compilation uses the same context hierarchy as UI operations, maintaining consistency between placeholder resolution and actual execution.
 
-.. code-block:: python
+Frame Injection Safety
+---------------------
 
-   # Independent context management for different domains
-   set_current_global_config(GlobalPipelineConfig, pipeline_config)
-   set_current_global_config(GlobalAnalysisConfig, analysis_config)
-   set_current_global_config(GlobalVisualizationConfig, viz_config)
+The frame injection system is designed for OpenHCS's single-threaded compilation model with proper cleanup guarantees.
 
-   # Each domain maintains separate thread-local context
-   pipeline_context = get_current_global_config(GlobalPipelineConfig)
-   analysis_context = get_current_global_config(GlobalAnalysisConfig)
-   viz_context = get_current_global_config(GlobalVisualizationConfig)
+Memory Management
+~~~~~~~~~~~~~~~~~
 
-   # No cross-domain interference - each operates independently
-
-The type-based approach enables multiple configuration domains to coexist with independent context management.
-
-Thread Safety Guarantees
-------------------------
-
-The system provides automatic thread isolation without requiring explicit synchronization in user code.
+Frame injection includes comprehensive cleanup to prevent memory leaks:
 
 .. code-block:: python
 
-   # Thread A
-   set_current_global_config(GlobalPipelineConfig, config_a)
-   
-   # Thread B (concurrent execution)
-   set_current_global_config(GlobalPipelineConfig, config_b)
-   
-   # Each thread sees only its own configuration
-   # No cross-thread interference or synchronization required
+   # Automatic cleanup in finally blocks
+   def resolve_lazy_configurations_for_serialization(resolved_data):
+       context_var_name = f"__{context_type}_context__"
+       frame.f_locals[context_var_name] = resolved_data
 
-This enables concurrent pipeline processing with independent configuration contexts, supporting the multiprocessing orchestration system.
+       try:
+           # Process with injected context
+           return _process_with_context(resolved_data)
+       finally:
+           # Guaranteed cleanup even on exceptions
+           if context_var_name in frame.f_locals:
+               del frame.f_locals[context_var_name]
+           del frame  # Remove local reference
 
-Context Synchronization Patterns
---------------------------------
-Thread-local context must stay synchronized with UI state during parameter operations.
+Exception Safety
+~~~~~~~~~~~~~~~~
 
-Form State vs Context State
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Forms maintain internal parameter state separate from thread-local context, requiring explicit synchronization.
+The system ensures proper cleanup even when exceptions occur during resolution:
 
-:py:attr:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.parameters` stores internal form state, while :py:class:`~openhcs.core.context.global_config._global_config_contexts` maintains thread-local context. These two states can diverge during form operations, requiring careful synchronization to prevent placeholder resolution bugs.
+.. code-block:: python
 
-Reset-Specific Context Updates
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Reset operations require immediate context updates to prevent placeholder resolution bugs.
+   # Exception-safe context management
+   @contextmanager
+   def with_context(context_obj: Any, context_type: str = "step"):
+       frame = inspect.currentframe().f_back.f_back
+       context_var_name = f"__{context_type}_context__"
+       frame.f_locals[context_var_name] = context_obj
+       try:
+           yield
+       finally:
+           # Always runs, even on exceptions
+           if context_var_name in frame.f_locals:
+               del frame.f_locals[context_var_name]
 
-:py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.reset_parameter` uses :py:func:`~dataclasses.replace` and :py:func:`~openhcs.core.context.global_config.set_current_global_config` to update context when fields are reset to None. This ensures that subsequent placeholder generation resolves against the correct context instead of stale values.
-
-Context Update Triggers
+Single-Threaded Safety
 ~~~~~~~~~~~~~~~~~~~~~~
-Context updates occur during specific lifecycle events, not continuous synchronization.
 
-**Save Operations:**
-Configuration save operations update context using :py:func:`~openhcs.core.context.global_config.set_current_global_config` with orchestrator effective config.
+Frame injection is safe for OpenHCS because:
 
-**Reset Operations:**
-Field reset operations update context using :py:func:`~dataclasses.replace` to set reset fields to None in the current context.
+1. **Compilation is single-threaded** - No concurrent access to frame locals
+2. **UI operations are single-threaded** - Qt main thread or TUI main thread
+3. **Worker processes use resolved configs** - No lazy resolution in workers
+4. **Proper cleanup** - Finally blocks ensure cleanup even on exceptions
 
-Context Isolation Patterns
---------------------------
-Different UI contexts require different thread-local context configurations.
+The frame injection approach works correctly for OpenHCS's architecture while providing sophisticated context hierarchy resolution.
 
-Step Editor Context Isolation
+UI Integration Patterns
+-----------------------
+Different UI contexts use different context injection patterns for dual-axis resolution.
+
+Step Editor Context Injection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Step editors show step configurations with isolated context that reflects their parent pipeline configuration without affecting other UI components.
+Step editors inject orchestrator context to enable proper step-level inheritance:
 
-:py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy` creates step-specific lazy configs with custom context providers. The `context_provider` parameter allows step editors to resolve against their parent pipeline config instead of the global thread-local context. This enables step forms to show "Pipeline default: X" values that reflect their specific pipeline's configuration, even when multiple pipelines are open simultaneously.
+.. code-block:: python
 
-**Step Context Provider Pattern:**
-Step editors pass a lambda that returns their parent pipeline config: `lambda: parent_pipeline_config`. This creates a resolution chain where step fields resolve against their specific pipeline, then fall back to global defaults, without interfering with other UI components that use different context providers.
+   # Step editor context injection pattern
+   def create_step_editor(orchestrator, step_config_type):
+       """Create step editor with orchestrator context injection."""
+
+       # Inject orchestrator context for dual-axis resolution
+       ContextInjector.inject_context(orchestrator, "orchestrator")
+
+       try:
+           # Create lazy config - will resolve through:
+           # step context → orchestrator context → global context
+           LazyStepConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+               base_class=step_config_type,
+               global_config_type=GlobalPipelineConfig,
+               field_path="step_materialization_config"
+           )
+
+           return LazyStepConfig()
+
+       finally:
+           # Context cleanup handled automatically by resolver
+           pass
 
 Pipeline Editor Context
 ~~~~~~~~~~~~~~~~~~~~~~~
-Pipeline editors (plate manager style) handle pipeline-level configuration editing using standard thread-local context resolution. :py:meth:`~openhcs.core.orchestrator.orchestrator.PipelineOrchestrator.apply_pipeline_config` sets up pipeline editing context with merged config using :py:func:`~openhcs.core.orchestrator.orchestrator._create_merged_config`.
+Pipeline editors use global context without orchestrator injection:
 
-Pipeline Config Editing Context
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Pipeline config editing (accessed from plate manager) uses thread-local context with the current pipeline configuration. This allows pipeline-specific forms to show proper inheritance from global config while maintaining isolation from other pipeline configurations.
+.. code-block:: python
 
-Global Config Editing Context
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Global config editing (accessed from main window) uses :py:func:`~openhcs.core.context.global_config.set_current_global_config` with the new global config instance directly. Since this is the top-level configuration, fields show static defaults rather than resolving against higher-level context.
+   # Pipeline editor context pattern
+   def create_pipeline_editor(global_config):
+       """Create pipeline editor with global context only."""
+
+       # Set global context (no orchestrator injection needed)
+       set_current_global_config(GlobalPipelineConfig, global_config)
+
+       # Pipeline configs resolve directly against global defaults
+       LazyPipelineConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+           base_class=PipelineConfig,
+           global_config_type=GlobalPipelineConfig,
+           field_path=None  # Root config
+       )
+
+       return LazyPipelineConfig()
+
+Global Config Editor Context
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Global config editors show static defaults with no context injection:
+
+.. code-block:: python
+
+   # Global config editor pattern
+   def create_global_config_editor():
+       """Create global config editor with static defaults."""
+
+       # No context injection - uses static class defaults only
+       LazyGlobalConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+           base_class=GlobalPipelineConfig,
+           global_config_type=GlobalPipelineConfig,
+           field_path=None
+       )
+
+       return LazyGlobalConfig()
+
+Migration from Thread-Local to Frame Injection
+----------------------------------------------
+The context management system is transitioning from thread-local storage to frame injection for better consistency.
+
+**Current State**: Mixed usage of thread-local context and frame injection
+**Target State**: Unified frame injection with dual-axis resolution
+**Benefits**: Perfect consistency between UI and compilation resolution
+
+See Also
+--------
+- :doc:`configuration_system_architecture` - Dual-axis resolution system
+- :doc:`placeholder_resolution_system` - UI placeholder generation using context discovery
+- :doc:`lazy_class_system` - Lazy dataclass system that uses context management
