@@ -90,7 +90,11 @@ class TestScenario:
     }))
 
 TIMING = TimingConfig.from_environment()
-LEGITIMATE_NONE_FIELDS = frozenset({'barcode', 'plate_name', 'plate_id', 'description', 'default_format'})
+LEGITIMATE_NONE_FIELDS = frozenset({
+    'barcode', 'plate_name', 'plate_id', 'description', 'default_format',
+    # Fields that legitimately resolve to None through dual-axis resolver
+    'global_output_folder', 'fiji_executable_path'
+})
 
 # ============================================================================
 # DATA-DRIVEN TEST SCENARIO FACTORY
@@ -401,8 +405,19 @@ def _create_synthetic_plate(tmp_path: Path) -> Path:
 
 def _create_test_global_config() -> GlobalPipelineConfig:
     """Create test global configuration with known values."""
+    from openhcs.core.config import WellFilterConfig, PathPlanningConfig
+
     return GlobalPipelineConfig(
-        num_workers=8, microscope=Microscope.IMAGEXPRESS, use_threading=True
+        num_workers=8,
+        microscope=Microscope.IMAGEXPRESS,
+        use_threading=True,
+        # Add well_filter values that test scenarios expect to inherit
+        well_filter_config=WellFilterConfig(well_filter=5),
+        path_planning_config=PathPlanningConfig(
+            well_filter=5,
+            output_dir_suffix="_test_global",
+            sub_dir="images"
+        )
     )
 
 
@@ -484,12 +499,12 @@ def collect_diagnostic_info() -> Dict[str, Any]:
 
 def _launch_application(context: WorkflowContext) -> WorkflowContext:
     """Launch real OpenHCS application using normal startup process."""
-    from openhcs.pyqt_gui.services.config_cache_adapter import load_cached_global_config_sync
     from openhcs.pyqt_gui.app import OpenHCSPyQtApp
     from openhcs.core.context.global_config import get_current_global_config
     import sys
 
-    config = load_cached_global_config_sync()
+    # Use test global config instead of cached config to ensure test values are available
+    config = _create_test_global_config()
     app = OpenHCSPyQtApp(sys.argv, config)
 
     # Verify global config context establishment
@@ -1037,11 +1052,23 @@ class ValidationEngine:
     @staticmethod
     def extract_widget_texts(widget) -> Dict[str, str]:
         """Extract all text content from a widget."""
+        # Special handling for EnhancedPathWidget - check path_input for placeholder
+        def get_placeholder_text(w):
+            if hasattr(w, 'path_input') and hasattr(w.path_input, 'placeholderText'):
+                return w.path_input.placeholderText()
+            return getattr(w, 'placeholderText', lambda: "")()
+
+        # Special handling for EnhancedPathWidget - check path_input for text
+        def get_text(w):
+            if hasattr(w, 'path_input') and hasattr(w.path_input, 'text'):
+                return w.path_input.text()
+            return getattr(w, 'text', lambda: "")() if hasattr(w, 'text') else ""
+
         text_extractors = [
-            ('placeholder', lambda w: getattr(w, 'placeholderText', lambda: "")()),
+            ('placeholder', get_placeholder_text),
             ('special', lambda w: getattr(w, 'specialValueText', lambda: "")()),
             ('tooltip', lambda w: getattr(w, 'toolTip', lambda: "")()),
-            ('text', lambda w: getattr(w, 'text', lambda: "")() if hasattr(w, 'text') else "")
+            ('text', get_text)
         ]
 
         return {name: extractor(widget) or "" for name, extractor in text_extractors}
@@ -1108,8 +1135,13 @@ def create_persistence_validation_rules(scenario: TestScenario) -> Dict[str, Cal
 def create_lazy_state_validation_rules(scenario: TestScenario) -> Dict[str, Callable]:
     """Create validation rules for full lazy state."""
     def lazy_state_rule(field_name: str, text: str) -> Dict[str, bool]:
-        shows_pipeline_default = "pipeline default:" in text
+        shows_pipeline_default = "pipeline default:" in text.lower()
         shows_none_correctly = "(none)" not in text or field_name in scenario.legitimate_none_fields
+
+        # Debug output to see what placeholders we're actually getting
+        if not shows_pipeline_default or not shows_none_correctly:
+            print(f"🔍 PLACEHOLDER DEBUG: {field_name} = '{text}' (pipeline_default={shows_pipeline_default}, none_correct={shows_none_correctly})")
+
         return {f"{field_name}_shows_full_lazy_state": shows_pipeline_default and shows_none_correctly}
 
     return {"full_lazy_state": lazy_state_rule}

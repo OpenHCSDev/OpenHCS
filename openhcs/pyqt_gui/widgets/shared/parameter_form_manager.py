@@ -794,10 +794,6 @@ class ParameterFormManager(QWidget):
 
 
 
-
-
-
-
     def _refresh_all_placeholders_with_current_context(self) -> None:
         """Refresh all placeholders using dual-axis resolution."""
         if not self.config.is_lazy_dataclass:
