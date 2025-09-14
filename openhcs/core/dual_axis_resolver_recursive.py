@@ -71,28 +71,15 @@ class RecursiveContextualResolver:
         if not base_type:
             return None
 
-        if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
-            print(f"🔍 RESOLVER DEBUG: Resolving {type(lazy_instance).__name__}.{field_name}, base_type = {base_type.__name__}")
-
-        # CRITICAL: Check for static class field overrides first
-        # If the base class has a concrete field override (different from parent classes),
-        # use that instead of hierarchical inheritance
-        static_override_value = self._check_static_override(base_type, field_name)
-        if static_override_value is not None:
-            if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
-                print(f"🔍 RESOLVER DEBUG: Using static override = {static_override_value}")
-            return static_override_value
+        # CRITICAL FIX: Removed top-level static override check
+        # Static overrides should only block Y-axis inheritance (within same context),
+        # not X-axis inheritance (across context levels)
 
         # Discover context hierarchy
         context_hierarchy = self._discover_context_hierarchy(base_type)
         if not context_hierarchy:
             logger.debug(f"No context hierarchy found for {base_type.__name__}.{field_name}")
-            if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
-                print(f"🔍 RESOLVER DEBUG: No context hierarchy found!")
             return None
-
-        if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
-            print(f"🔍 RESOLVER DEBUG: Found context hierarchy = {[type(ctx).__name__ for ctx in context_hierarchy]}")
 
         # Check cache first
         cache_key = (id(lazy_instance), field_name, tuple(id(ctx) for ctx in context_hierarchy))
@@ -100,13 +87,7 @@ class RecursiveContextualResolver:
             return self._resolution_cache[cache_key]
 
         # Recursive resolution through context hierarchy
-        if field_name == 'well_filter' and 'StepMaterializationConfig' in type(lazy_instance).__name__:
-            print(f"🔍 RESOLVER DEBUG: Starting recursive resolution with hierarchy = {[type(ctx).__name__ for ctx in context_hierarchy]}")
-
         result = self._resolve_field_recursive(base_type, field_name, context_hierarchy)
-
-        if field_name == 'well_filter' and ('NapariStreamingConfig' in type(lazy_instance).__name__ or 'StepMaterializationConfig' in type(lazy_instance).__name__):
-            print(f"🔍 RESOLVER DEBUG: Resolved result = {result}")
 
         # Cache the result
         self._resolution_cache[cache_key] = result
@@ -151,24 +132,12 @@ class RecursiveContextualResolver:
         # STEP 1: Check concrete value at THIS context level
         concrete_value = self._get_concrete_value_at_level(current_context, target_type, field_name)
         if concrete_value is not None:
-            if field_name == 'well_filter' and target_type.__name__ == 'StepMaterializationConfig':
-                print(f"🔍 RECURSIVE DEBUG: Found concrete value at {type(current_context).__name__}: {concrete_value}")
             logger.debug(f"Found concrete value at {type(current_context).__name__}: {concrete_value}")
             return concrete_value
 
-        # STEP 2: Check if field exists in parent context with concrete value
-        if parent_context_hierarchy:
-            parent_context = parent_context_hierarchy[0]
-            parent_concrete_value = self._get_concrete_value_at_level(parent_context, target_type, field_name)
-            if field_name == 'well_filter' and target_type.__name__ == 'StepMaterializationConfig':
-                print(f"🔍 RECURSIVE DEBUG: Parent context {type(parent_context).__name__} returned: {parent_concrete_value}")
-            if parent_concrete_value is not None:
-                if field_name == 'well_filter' and target_type.__name__ == 'StepMaterializationConfig':
-                    print(f"🔍 RECURSIVE DEBUG: Found concrete value in parent context {type(parent_context).__name__}: {parent_concrete_value}")
-                logger.debug(f"Found concrete value in parent context {type(parent_context).__name__}: {parent_concrete_value}")
-                return parent_concrete_value
-
-        # STEP 3: Exhaust Y-axis at THIS context level only
+        # STEP 2: Exhaust Y-axis inheritance at THIS context level
+        # CRITICAL FIX: Do Y-axis inheritance BEFORE checking parent contexts
+        # This ensures each context level is fully exhausted before moving up
         # Find the first blocking class in MRO (if any)
         blocking_class = self._find_blocking_class_in_mro(target_type, field_name)
         logger.debug(f"Blocking class for {target_type.__name__}.{field_name}: {blocking_class.__name__ if blocking_class else 'None'}")
@@ -300,17 +269,14 @@ class RecursiveContextualResolver:
 
         context_type = type(context)
 
-        # Try exact type first, then parent types in MRO order for inheritance
+        # CRITICAL FIX: Only search for the exact target type in context
+        # Inheritance should happen through MRO logic in the calling method,
+        # not through cross-field inheritance between different config types
         types_to_search = [target_type]
-        if hasattr(target_type, '__mro__'):
-            # Add parent dataclass types from MRO (skip object)
-            for parent_type in target_type.__mro__[1:]:
-                if is_dataclass(parent_type):
-                    types_to_search.append(parent_type)
 
-        logger.debug(f"Searching context {context_type.__name__} for {target_type.__name__} and parents: {[t.__name__ for t in types_to_search]}")
+        logger.debug(f"Searching context {context_type.__name__} for exact type {target_type.__name__} only")
 
-        # Search for each type in priority order (exact type first, then parents)
+        # Search for the exact target type only
         for search_type in types_to_search:
             # CRITICAL FIX: Handle direct type match (context type == target type)
             if context_type == search_type:
@@ -361,7 +327,7 @@ class RecursiveContextualResolver:
                         continue
 
         # Fallback: Check global config if no value found in current context
-        global_config_value = self._check_global_config_fallback(target_type, field_name)
+        global_config_value = self._check_global_config_fallback_direct(target_type, field_name)
         if global_config_value is not None:
             return global_config_value
 
@@ -426,33 +392,125 @@ class RecursiveContextualResolver:
         try:
             # Auto-detect global config type using existing decorator system
             global_config_type = _get_global_config_type_for_target(target_type)
+            if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                print(f"🔍 GLOBAL_FALLBACK: global_config_type = {global_config_type}")
             if not global_config_type:
                 return None
 
             # Get global config instance from thread-local context
             global_config = get_current_global_config(global_config_type)
+            if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                print(f"🔍 GLOBAL_FALLBACK: global_config = {global_config}")
             if not global_config:
                 return None
 
             # Use the same field path detection logic as the main resolver
             field_paths = FieldPathDetector.find_all_field_paths_unified(global_config_type, target_type)
+            if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                print(f"🔍 GLOBAL_FALLBACK: field_paths = {field_paths}")
 
             # Navigate to each instance in global config and check for field value
             for path in field_paths:
                 instance = FieldPathNavigator.navigate_to_instance(global_config, path)
+                if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                    print(f"🔍 GLOBAL_FALLBACK: path={path}, instance={instance}")
                 if instance and hasattr(instance, field_name):
                     value = self._get_raw_field_value(instance, field_name)
+                    if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                        print(f"🔍 GLOBAL_FALLBACK: value={value}")
                     if value is not None:
                         return value
 
             return None
-        except Exception:
+        except Exception as e:
+            if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                print(f"🔍 GLOBAL_FALLBACK: Exception: {e}")
+            return None
+
+    def _check_global_config_fallback_direct(self, target_type: Type, field_name: str) -> Any:
+        """
+        Check global config as fallback by accessing thread-local storage directly.
+
+        This bypasses any orchestrator context overrides and accesses the raw thread-local
+        global config storage directly.
+        """
+        try:
+            # Import here to avoid circular imports
+            from openhcs.core.context.global_config import _global_config_contexts
+            from openhcs.core.field_path_detection import FieldPathDetector, FieldPathNavigator
+
+            # Auto-detect global config type (function is defined in this file)
+            global_config_type = _get_global_config_type_for_target(target_type)
+
+            if not global_config_type:
+                return None
+
+            # Access thread-local storage directly
+            if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                print(f"🔍 DIRECT_FALLBACK: Available contexts: {list(_global_config_contexts.keys())}")
+
+            # Try the detected global config type first
+            context = _global_config_contexts.get(global_config_type)
+
+            # If not found, try to find any GlobalPipelineConfig-like type in the available contexts
+            if not context:
+                for available_type in _global_config_contexts.keys():
+                    if 'GlobalPipelineConfig' in available_type.__name__:
+                        context = _global_config_contexts.get(available_type)
+                        global_config_type = available_type  # Update to use the correct type
+                        if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                            print(f"🔍 DIRECT_FALLBACK: Found alternative context: {available_type}")
+                        break
+
+            if not context:
+                if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                    print(f"🔍 DIRECT_FALLBACK: No thread-local context for {global_config_type}")
+                return None
+
+            global_config = getattr(context, 'value', None)
+            if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                print(f"🔍 DIRECT_FALLBACK: global_config = {global_config}")
+            if not global_config:
+                return None
+
+            # Use field path detection to find the target type in global config
+            field_paths = FieldPathDetector.find_all_field_paths_unified(global_config_type, target_type)
+            if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                print(f"🔍 DIRECT_FALLBACK: field_paths = {field_paths}")
+
+            # Navigate to each instance and check for field value
+            for path in field_paths:
+                instance = FieldPathNavigator.navigate_to_instance(global_config, path)
+                if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                    print(f"🔍 DIRECT_FALLBACK: path={path}, instance={instance}")
+                if instance and hasattr(instance, field_name):
+                    value = self._get_raw_field_value(instance, field_name)
+                    if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                        print(f"🔍 DIRECT_FALLBACK: value={value}")
+                    if value is not None:
+                        return value
+
+            return None
+        except Exception as e:
+            if field_name == 'well_filter' and target_type.__name__ == 'PathPlanningConfig':
+                print(f"🔍 DIRECT_FALLBACK: Exception: {e}")
             return None
 
     def _check_static_override(self, base_type: Type, field_name: str) -> Any:
         """
-        Check if the base class has a static field override that should take precedence
-        over hierarchical inheritance.
+        Check if the base class or any class in its MRO has a static field override for the SPECIFIC FIELD
+        that should take precedence over hierarchical inheritance.
+
+        CRITICAL:
+        1. Uses class attributes, not dataclass field defaults, because the
+           @global_pipeline_config decorator sets all field defaults to None for inherit_as_none behavior,
+           but the original class attributes retain the concrete override values.
+        2. Field-specific blocking: Only blocks inheritance for the specific field that has an override,
+           not for all fields in the class.
+
+        This handles inheritance chains like StepMaterializationConfig -> StepWellFilterConfig -> WellFilterConfig
+        where StepWellFilterConfig has well_filter=1 override, so StepMaterializationConfig.well_filter should also be blocked,
+        but StepMaterializationConfig.output_dir_suffix should still inherit normally.
 
         Returns the static override value if found, None otherwise.
         """
@@ -461,27 +519,25 @@ class RecursiveContextualResolver:
         if not is_dataclass(base_type):
             return None
 
-        # Get parent types from MRO
-        parent_types = [cls for cls in base_type.__mro__[1:] if is_dataclass(cls)]
-        if not parent_types:
+        # CRITICAL FIX: Use class attributes, not dataclass field defaults
+        # The @global_pipeline_config decorator modifies field defaults to None
+        # but the class attribute retains the original concrete value
+        def get_class_attribute(dataclass_type: Type, field_name: str) -> Any:
+            if hasattr(dataclass_type, field_name):
+                return getattr(dataclass_type, field_name)
             return None
 
-        # Unified field default extraction pattern
-        def get_field_default(dataclass_type: Type, field_name: str) -> Any:
-            return next((field.default if field.default != dataclasses.MISSING else None
-                        for field in dataclasses.fields(dataclass_type) if field.name == field_name), None)
+        # Check each class in MRO for concrete overrides FOR THIS SPECIFIC FIELD
+        # Walk through MRO to find the first class with a concrete override for this field
+        for cls in base_type.__mro__:
+            if not is_dataclass(cls):
+                continue
 
-        # Get base class field default
-        base_field_value = get_field_default(base_type, field_name)
-        if base_field_value is None:
-            return None
-
-        # Get parent class field defaults using same pattern
-        parent_field_values = {get_field_default(parent_type, field_name) for parent_type in parent_types}
-
-        # If base class has a different default than all parents, it's an override
-        if base_field_value not in parent_field_values:
-            return base_field_value
+            class_value = get_class_attribute(cls, field_name)
+            if class_value is not None:
+                # Found a concrete override for this specific field - this blocks inheritance for this field only
+                logger.debug(f"Static override detected: {base_type.__name__}.{field_name} inherits concrete value {class_value} from {cls.__name__}")
+                return class_value
 
         return None
 
@@ -525,20 +581,14 @@ class ContextDiscovery:
         try:
             frame_count = 0
             current_frame = frame
-            while current_frame:
-                current_frame = current_frame.f_back
-                if not current_frame:
-                    break
-                frame_count += 1
-
-                # Check for any injected context (generic pattern)
+            while current_frame and frame_count < 10:  # Limit to prevent infinite loops
                 injected_context = ContextDiscovery._find_injected_context(current_frame, target_type)
                 if injected_context:
                     logger.debug(f"Found injected context provider: {type(injected_context).__name__}")
                     return injected_context
 
                 # Check 'self' parameter first (method calls are most likely to be context providers)
-                if 'self' in current_frame.f_locals:
+                if current_frame and 'self' in current_frame.f_locals:
                     potential_context = current_frame.f_locals['self']
                     if ContextDiscovery._is_context_provider(potential_context, target_type):
                         context_type = type(potential_context).__name__
@@ -552,19 +602,24 @@ class ContextDiscovery:
                             return potential_context
 
                 # Check all other objects in current frame
-                for var_name, var_value in current_frame.f_locals.items():
-                    if var_name != 'self':
-                        # Check if object can provide context for the target type
-                        if ContextDiscovery._is_context_provider(var_value, target_type):
-                            context_type = type(var_value).__name__
-                            if 'Orchestrator' in context_type:
-                                orchestrator_context = var_value
-                            elif 'FunctionStep' in context_type or 'Step' in context_type:
-                                step_context = var_value
-                            else:
-                                # Other context types (not ProcessingContext) - return immediately
-                                logger.debug(f"Found context provider: {var_name} ({context_type}) - using stack proximity")
-                                return var_value
+                if current_frame:
+                    for var_name, var_value in current_frame.f_locals.items():
+                        if var_name != 'self':
+                            # Check if object can provide context for the target type
+                            if ContextDiscovery._is_context_provider(var_value, target_type):
+                                context_type = type(var_value).__name__
+                                if 'Orchestrator' in context_type:
+                                    orchestrator_context = var_value
+                                elif 'FunctionStep' in context_type or 'Step' in context_type:
+                                    step_context = var_value
+                                else:
+                                    # Other context types (not ProcessingContext) - return immediately
+                                    logger.debug(f"Found context provider: {var_name} ({context_type}) - using stack proximity")
+                                    return var_value
+
+                # Move to next frame
+                current_frame = current_frame.f_back if current_frame else None
+                frame_count += 1
 
         finally:
             del frame
@@ -635,8 +690,7 @@ class ContextDiscovery:
                     attr_value is not None):
 
                     attr_type = type(attr_value)
-                    if target_type and target_type.__name__ == 'StepWellFilterConfig':
-                        print(f"🔍 ATTR_DEBUG: Checking {type(obj).__name__}.{attr_name}: {attr_type.__name__} for target {target_type.__name__}")
+
 
                     # If no target_type specified, accept any dataclass (backward compatibility)
                     if target_type is None:

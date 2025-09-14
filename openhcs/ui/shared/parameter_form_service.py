@@ -445,20 +445,43 @@ class ParameterFormService:
 
     def _get_actual_dataclass_field_default(self, param_name: str, dataclass_type: Type) -> Any:
         """
-        Get the actual default value for a dataclass field by creating a default instance.
+        Get the actual default value for a dataclass field.
 
-        This ensures we get the real defaults (like num_workers=16) instead of hardcoded primitives.
+        Handles both direct assignment and field(default_factory=...) cases:
+        - Direct assignment: num_workers: int = 1 → return class attribute
+        - field(default_factory): use_threading: bool = field(default_factory=lambda: ...) → call default_factory
+
+        Returns:
+        - If class attribute is None → return None (show placeholder)
+        - If class attribute has concrete value → return that value
+        - If field(default_factory) → call default_factory and return result
 
         Raises:
-            ValueError: If dataclass creation fails or field doesn't exist
+            ValueError: If field doesn't exist
         """
-        try:
-            # Create a default instance of the dataclass to get actual field defaults
-            default_instance = dataclass_type()
-            if not hasattr(default_instance, param_name):
-                raise ValueError(f"Field '{param_name}' not found in dataclass {dataclass_type.__name__}")
-            return getattr(default_instance, param_name)
-        except Exception as e:
-            raise ValueError(
-                f"Failed to get default value for field '{param_name}' in dataclass {dataclass_type.__name__}: {e}"
-            ) from e
+        from dataclasses import fields, MISSING
+
+        # First check if it's a direct class attribute (most common case)
+        if hasattr(dataclass_type, param_name):
+            return getattr(dataclass_type, param_name)
+
+        # If not a class attribute, check if it's a field(default_factory=...) field
+        dataclass_fields = {f.name: f for f in fields(dataclass_type)}
+        if param_name not in dataclass_fields:
+            raise ValueError(f"Field '{param_name}' not found in dataclass {dataclass_type.__name__}")
+
+        field_info = dataclass_fields[param_name]
+
+        # Handle field(default_factory=...) case
+        if field_info.default_factory is not MISSING:
+            try:
+                return field_info.default_factory()
+            except Exception as e:
+                raise ValueError(f"Failed to call default_factory for field '{param_name}': {e}") from e
+
+        # Handle field with explicit default
+        if field_info.default is not MISSING:
+            return field_info.default
+
+        # Field has no default (should not happen in practice)
+        raise ValueError(f"Field '{param_name}' has no default value or default_factory")

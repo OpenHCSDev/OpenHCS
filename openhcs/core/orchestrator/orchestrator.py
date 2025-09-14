@@ -301,6 +301,11 @@ class PipelineOrchestrator(ContextProvider):
             pass
 
         self.pipeline_config = pipeline_config
+
+        # CRITICAL FIX: Expose pipeline config as public attribute for dual-axis resolver discovery
+        # The resolver's _is_context_provider method only finds public attributes (skips _private)
+        # This allows the resolver to discover the orchestrator's pipeline config during context resolution
+        self.pipeline_config = pipeline_config
         logger.info("PipelineOrchestrator initialized with PipelineConfig for context discovery.")
 
         # REMOVED: Unnecessary thread-local modification
@@ -1002,6 +1007,10 @@ class PipelineOrchestrator(ContextProvider):
     def pipeline_config(self, value: Optional['PipelineConfig']) -> None:
         """Set pipeline configuration with auto-sync to thread-local context."""
         self._pipeline_config = value
+        # CRITICAL FIX: Also update public attribute for dual-axis resolver discovery
+        # This ensures the resolver can always find the current pipeline config
+        if hasattr(self, '__dict__'):  # Avoid issues during __init__
+            self.__dict__['pipeline_config'] = value
         if self._auto_sync_enabled and value is not None:
             self._sync_to_thread_local()
 
@@ -1090,9 +1099,35 @@ class PipelineOrchestrator(ContextProvider):
         With dual-axis resolution, this ensures the orchestrator is in the call stack
         for context discovery during config resolution.
         """
-        # The orchestrator is now in the call stack for dual-axis resolver to discover
-        # No thread-local modification needed - stack introspection handles context discovery
-        yield self
+        # CRITICAL FIX: Use direct frame injection to make orchestrator discoverable by context discovery
+        # This ensures placeholders and compiler use the same context discovery mechanism
+        import inspect
+
+        # Inject into multiple frames to ensure discovery
+        frames_to_inject = []
+        current_frame = inspect.currentframe()
+        frame_count = 0
+
+        # Walk up the call stack and inject into multiple frames
+        while current_frame and frame_count < 5:
+            if current_frame.f_back:  # Don't inject into the current frame
+                frames_to_inject.append(current_frame.f_back)
+            current_frame = current_frame.f_back
+            frame_count += 1
+
+        context_var_name = "__orchestrator_context__"
+
+        # Inject into all frames
+        for frame in frames_to_inject:
+            frame.f_locals[context_var_name] = self
+
+        try:
+            yield self
+        finally:
+            # Clean up from all frames
+            for frame in frames_to_inject:
+                if context_var_name in frame.f_locals:
+                    del frame.f_locals[context_var_name]
 
     def clear_pipeline_config(self) -> None:
         """Clear per-orchestrator configuration."""

@@ -97,7 +97,8 @@ class StepParameterEditorWidget(QWidget):
             placeholder_prefix="Pipeline default",
             param_defaults=param_defaults,
             global_config_type=GlobalPipelineConfig,  # Enable dual-axis resolution
-            context_event_coordinator=None  # DISABLED: Disable live placeholder updates
+            context_event_coordinator=None,  # DISABLED: Disable live placeholder updates
+            orchestrator=self.orchestrator  # Pass orchestrator for compiler-grade placeholder resolution
         )
         
         self.setup_ui()

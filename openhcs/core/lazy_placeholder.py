@@ -116,6 +116,17 @@ class LazyDefaultPlaceholderService:
         return (hasattr(dataclass_type, '_resolve_field_value') and
                 hasattr(dataclass_type, 'to_base_config'))
 
+    @staticmethod
+    def _get_lazy_type_for_base(base_type: type) -> Optional[type]:
+        """Get the lazy type for a base dataclass type (reverse lookup)."""
+        from openhcs.core.lazy_config import _lazy_type_registry
+
+        # Reverse lookup in the lazy type registry
+        for lazy_type, registered_base_type in _lazy_type_registry.items():
+            if registered_base_type == base_type:
+                return lazy_type
+        return None
+
     NONE_VALUE_TEXT = "(none)"
 
     @staticmethod
@@ -163,31 +174,94 @@ class LazyDefaultPlaceholderService:
         app_config: Optional[Any] = None,
         force_static_defaults: bool = False,
         placeholder_prefix: Optional[str] = None,
-        ignore_concrete_override: bool = False
+        ignore_concrete_override: bool = False,
+        orchestrator: Optional[Any] = None
     ) -> Optional[str]:
-        """Get placeholder text by delegating to recursive dual-axis resolver."""
+        """Get placeholder text using the exact same mechanism as the compiler."""
         # Check if this is a lazy dataclass
         is_lazy = LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
 
-        # For regular dataclasses, provide class default placeholders
+        # If not lazy, try to find the lazy version of this base type
         if not is_lazy:
-            return LazyDefaultPlaceholderService._get_regular_dataclass_placeholder(
-                dataclass_type, field_name, placeholder_prefix
-            )
+            lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(dataclass_type)
+            if lazy_type:
+                dataclass_type = lazy_type
+                is_lazy = True
+            else:
+                return LazyDefaultPlaceholderService._get_regular_dataclass_placeholder(
+                    dataclass_type, field_name, placeholder_prefix
+                )
+
+        # Simple fallback: use orchestrator context if available, otherwise default
+        if placeholder_prefix is None:
+            placeholder_prefix = "Pipeline default" if orchestrator else "Default"
 
         prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
 
-        # Thin wrapper: delegate to recursive resolver
+        # CRITICAL FIX: Use orchestrator's effective config when available
+        # This ensures we get the same resolved values that the compiler would use
         try:
-            from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+            if orchestrator:
+                # Use the same resolution mechanism as the compiler
+                # This ensures proper lazy resolution with orchestrator context
+                with orchestrator.config_context(for_serialization=True):
+                    from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
 
-            resolver = get_recursive_resolver()
-            temp_instance = dataclass_type()
-            resolved_value = resolver.resolve_field(temp_instance, field_name)
+                    # Create a temporary lazy instance to resolve
+                    temp_instance = dataclass_type()
+
+                    # Resolve using the same mechanism as the compiler
+                    resolved_config = resolve_lazy_configurations_for_serialization(temp_instance)
+
+                    # Get the resolved field value
+                    resolved_value = getattr(resolved_config, field_name, None)
+            else:
+                # No orchestrator - use the dual-axis resolver with thread-local context
+                from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+                resolver = get_recursive_resolver()
+
+                # Create a dummy instance to resolve the field
+                temp_instance = dataclass_type()
+                resolved_value = resolver.resolve_field(temp_instance, field_name)
         except Exception:
             resolved_value = None
 
         return LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
+
+    @staticmethod
+    def _find_field_in_config(config, target_type: type, field_name: str):
+        """
+        Find a field value in the effective config by searching for instances of target_type.
+
+        This searches through the config hierarchy to find the appropriate instance
+        that contains the field we're looking for.
+        """
+        import dataclasses
+
+        # Direct field access if config is the target type
+        if isinstance(config, target_type):
+            return getattr(config, field_name, None)
+
+        # Search through all fields in the config
+        if dataclasses.is_dataclass(config):
+            for field in dataclasses.fields(config):
+                field_value = getattr(config, field.name, None)
+                if field_value is None:
+                    continue
+
+                # Check if this field is an instance of target_type
+                if isinstance(field_value, target_type):
+                    return getattr(field_value, field_name, None)
+
+                # Recursively search nested configs
+                if dataclasses.is_dataclass(field_value):
+                    nested_result = LazyDefaultPlaceholderService._find_field_in_config(
+                        field_value, target_type, field_name
+                    )
+                    if nested_result is not None:
+                        return nested_result
+
+        return None
 
     @staticmethod
     def get_lazy_resolved_placeholder_with_context(
@@ -232,6 +306,8 @@ class LazyDefaultPlaceholderService:
             resolved_value = None
 
         return LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
+
+
 
     @staticmethod
     def _format_placeholder_text(resolved_value: Any, prefix: str) -> Optional[str]:

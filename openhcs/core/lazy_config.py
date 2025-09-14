@@ -288,17 +288,19 @@ class LazyMethodBindings:
 
             # Fallback to recursive dual-axis resolution if no inheritance fix needed
             try:
-                # Use recursive dual-axis resolver
+                # Check if this is a nested config field first
+                field_obj = next((f for f in fields(self.__class__) if f.name == name), None)
+                if field_obj and is_dataclass(field_obj.type):
+                    # CRITICAL FIX: For nested config fields, always return lazy instance
+                    # This preserves None raw values for placeholder behavior while still
+                    # allowing the lazy instance to resolve through dual-axis resolution
+                    return field_obj.type()
+
+                # For scalar fields, use recursive dual-axis resolver
                 resolver = get_recursive_resolver()
                 resolved_value = resolver.resolve_field(self, name)
                 if resolved_value is not None:
                     return resolved_value
-
-                # If no scalar value found, check if this is a nested config field that should be auto-created
-                field_obj = next((f for f in fields(self.__class__) if f.name == name), None)
-                if field_obj and is_dataclass(field_obj.type):
-                    # Create lazy instance of the nested config type
-                    return field_obj.type()
 
                 # If no context found, try the old resolve method as final fallback
                 resolve_method = object.__getattribute__(self, '_resolve_field_value')

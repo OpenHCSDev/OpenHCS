@@ -116,6 +116,7 @@ class GlobalPipelineConfig:
     microscope: Microscope = Microscope.AUTO
     """Default microscope type for auto-detection."""
 
+    #use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true')
     use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true')
     """Use ThreadPoolExecutor instead of ProcessPoolExecutor for debugging. Reads from OPENHCS_USE_THREADING environment variable."""
 

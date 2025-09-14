@@ -277,15 +277,26 @@ PLACEHOLDER_STRATEGIES: Dict[str, Callable[[Any, str], None]] = {
 
 
 def _extract_default_value(placeholder_text: str) -> str:
-    """Extract default value from placeholder text, handling enum values properly."""
-    value = placeholder_text.replace(PlaceholderConfig.PLACEHOLDER_PREFIX, "").strip()
+    """Extract default value from placeholder text, handling any prefix dynamically."""
+    # CRITICAL FIX: Handle dynamic prefixes like "Pipeline default:", "Step default:", etc.
+    # Look for the pattern "prefix: value" and extract the value part
+    if ':' in placeholder_text:
+        # Split on the first colon and take the part after it
+        parts = placeholder_text.split(':', 1)
+        if len(parts) == 2:
+            value = parts[1].strip()
+        else:
+            value = placeholder_text.strip()
+    else:
+        # Fallback: if no colon, use the whole text
+        value = placeholder_text.strip()
 
     # Handle enum values like "Microscope.AUTO" -> "AUTO"
     if '.' in value and not value.startswith('('):  # Avoid breaking "(none)" values
-        parts = value.split('.')
-        if len(parts) == 2:
+        enum_parts = value.split('.')
+        if len(enum_parts) == 2:
             # Return just the enum member name
-            return parts[1]
+            return enum_parts[1]
 
     return value
 
@@ -358,16 +369,10 @@ def _apply_lineedit_placeholder(widget: Any, text: str) -> None:
 
 
 def _apply_spinbox_placeholder(widget: Any, text: str) -> None:
-    """Apply placeholder to spinbox using numeric-only special value text."""
-    # Extract numeric value from placeholder text for integer/float fields
-    numeric_value = _extract_numeric_value_from_placeholder(text)
-
-    # For numeric fields, show only the number, not the full text
-    if numeric_value is not None:
-        widget.setSpecialValueText(str(numeric_value))
-    else:
-        # Fallback to full text for non-numeric placeholders
-        widget.setSpecialValueText(text)
+    """Apply placeholder to spinbox showing full placeholder text with prefix."""
+    # CRITICAL FIX: Always show the full placeholder text, not just the numeric value
+    # This ensures users see "Pipeline default: 1" instead of just "1"
+    widget.setSpecialValueText(text)
 
     # Set widget to minimum value to show the special value text
     if hasattr(widget, 'minimum'):
