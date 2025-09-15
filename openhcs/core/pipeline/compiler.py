@@ -284,16 +284,44 @@ class PipelineCompiler:
                             # Check if this is a streaming config for visualize flag
                             # CRITICAL FIX: Use actual_config (converted from lazy) for isinstance check
                             if isinstance(actual_config, StreamingConfig):
-                                has_streaming = True
-                                print(f"🔍 STREAMING DEBUG: Including {attr_name} for step {step.name}, axis {context.axis_id}")
-                                # Collect visualizer info - use actual_config for backend access
-                                visualizer_info = {
-                                    'backend': actual_config.backend.name,
-                                    'config': actual_config
-                                }
-                                if visualizer_info not in required_visualizers:
-                                    required_visualizers.append(visualizer_info)
-                                    print(f"🔍 STREAMING DEBUG: Added visualizer info for {actual_config.backend.name}")
+                                # Validate that the visualizer can actually be created
+                                try:
+                                    # Test visualizer creation without actually creating it
+                                    if hasattr(actual_config, 'create_visualizer'):
+                                        # For napari, check if napari is available and environment supports GUI
+                                        if actual_config.backend.name == 'NAPARI_STREAM':
+                                            from openhcs.utils.import_utils import optional_import
+                                            import os
+
+                                            # Check if running in headless/CI environment
+                                            is_headless = (
+                                                os.getenv('OPENHCS_CPU_ONLY', 'false').lower() == 'true' or
+                                                os.getenv('CI', 'false').lower() == 'true' or
+                                                os.getenv('DISPLAY') is None
+                                            )
+
+                                            if is_headless:
+                                                logger.info(f"Napari streaming disabled for step '{step.name}': running in headless environment (CI/CPU_ONLY mode)")
+                                                continue  # Skip this streaming config
+
+                                            napari = optional_import("napari")
+                                            if napari is None:
+                                                logger.warning(f"Napari streaming disabled for step '{step.name}': napari not installed. Install with: pip install 'openhcs[viz]' or pip install napari")
+                                                continue  # Skip this streaming config
+
+                                    has_streaming = True
+                                    print(f"🔍 STREAMING DEBUG: Including {attr_name} for step {step.name}, axis {context.axis_id}")
+                                    # Collect visualizer info - use actual_config for backend access
+                                    visualizer_info = {
+                                        'backend': actual_config.backend.name,
+                                        'config': actual_config
+                                    }
+                                    if visualizer_info not in required_visualizers:
+                                        required_visualizers.append(visualizer_info)
+                                        print(f"🔍 STREAMING DEBUG: Added visualizer info for {actual_config.backend.name}")
+                                except Exception as e:
+                                    logger.warning(f"Streaming disabled for step '{step.name}': {e}")
+                                    continue  # Skip this streaming config
                         else:
                             if isinstance(actual_config, StreamingConfig):
                                 print(f"🔍 STREAMING DEBUG: Excluding {attr_name} for step {step.name}, axis {context.axis_id} (filtered out)")
