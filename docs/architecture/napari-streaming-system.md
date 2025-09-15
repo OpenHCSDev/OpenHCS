@@ -11,19 +11,23 @@ Traditional visualization approaches embed viewers in the main process, causing 
 ### Compiler Detection
 
 ```python
-# Pipeline steps declare streaming intent:
+# Pipeline steps declare streaming intent using LazyNapariStreamingConfig:
 Step(
-    name="Image Enhancement",
+    name="Image Enhancement Processing",
     func=enhance_images,
-    materialization_config=LazyStepMaterializationConfig(),
-    stream_to_napari=True  # Triggers automatic visualizer creation
+    step_materialization_config=LazyStepMaterializationConfig(),
+    napari_streaming_config=LazyNapariStreamingConfig(well_filter=2)
 )
 
-# Compiler detects streaming requirements:
-has_napari_streaming = any(getattr(step, 'stream_to_napari', False) 
-                          for step in pipeline_definition)
-if has_napari_streaming:
-    context.create_visualizer = True
+# Compiler detects streaming configs during compilation:
+for attr_name in dir(resolved_step):
+    config = getattr(resolved_step, attr_name, None)
+    if isinstance(actual_config, StreamingConfig):
+        has_streaming = True
+        required_visualizers.append({
+            'backend': actual_config.backend.name,
+            'config': actual_config
+        })
 ```
 
 The compiler scans pipeline steps during compilation and sets the visualizer creation flag when any step enables napari streaming.
@@ -129,15 +133,15 @@ This minimizes ZeroMQ message size and memory copying for large image arrays whi
 Step(
     name="Final Results",
     func=generate_results,
-    materialization_config=LazyStepMaterializationConfig(),
-    stream_to_napari=True  # Only final results streamed
+    step_materialization_config=LazyStepMaterializationConfig(),
+    napari_streaming_config=LazyNapariStreamingConfig()  # Only final results streamed
 )
 
 # Memory-only steps don't stream (no materialization):
 Step(
-    name="Intermediate Processing", 
+    name="Intermediate Processing",
     func=process_intermediate,
-    stream_to_napari=True  # No effect - nothing materialized
+    napari_streaming_config=LazyNapariStreamingConfig()  # No effect - nothing materialized
 )
 ```
 

@@ -16,25 +16,25 @@ OpenHCS provides automatic real-time visualization of pipeline results using nap
 Quick Start
 -----------
 
-Enable napari streaming for any pipeline step by adding ``stream_to_napari=True``:
+Enable napari streaming for any pipeline step by adding ``napari_streaming_config``:
 
 .. code-block:: python
 
    from openhcs import Step, Pipeline
-   from openhcs.config import LazyStepMaterializationConfig
+   from openhcs.core.lazy_config import LazyStepMaterializationConfig, LazyNapariStreamingConfig
 
    # Create pipeline with real-time visualization
    pipeline = Pipeline([
        Step(
            name="Image Enhancement",
            func=enhance_images,
-           materialization_config=LazyStepMaterializationConfig(),
-           stream_to_napari=True  # Enable real-time visualization
+           step_materialization_config=LazyStepMaterializationConfig(),
+           napari_streaming_config=LazyNapariStreamingConfig()  # Enable real-time visualization
        ),
        Step(
-           name="Cell Segmentation", 
+           name="Cell Segmentation",
            func=segment_cells,
-           stream_to_napari=True  # This step will also be visualized
+           napari_streaming_config=LazyNapariStreamingConfig(well_filter=2)  # This step will also be visualized
        )
    ])
 
@@ -87,15 +87,15 @@ Example configurations:
    Step(
        name="Final Results",
        func=generate_results,
-       materialization_config=LazyStepMaterializationConfig(),
-       stream_to_napari=True
+       step_materialization_config=LazyStepMaterializationConfig(),
+       napari_streaming_config=LazyNapariStreamingConfig()
    )
 
    # This step won't be visualized (no materialization, stays in memory)
    Step(
        name="Intermediate Processing",
        func=process_intermediate,
-       stream_to_napari=True  # No effect - nothing gets materialized
+       napari_streaming_config=LazyNapariStreamingConfig()  # No effect - nothing gets materialized
    )
 
 Viewer Management
@@ -206,26 +206,26 @@ Integration Examples
 .. code-block:: python
 
    from openhcs import Pipeline, Step
-   from openhcs.config import LazyStepMaterializationConfig
+   from openhcs.core.lazy_config import LazyStepMaterializationConfig, LazyNapariStreamingConfig
 
    pipeline = Pipeline([
        # Preprocessing (not visualized)
        Step(name="Load Images", func=load_images),
-       
+
        # Enhancement (visualized)
        Step(
            name="Enhance Images",
            func=enhance_images,
-           materialization_config=LazyStepMaterializationConfig(),
-           stream_to_napari=True
+           step_materialization_config=LazyStepMaterializationConfig(),
+           napari_streaming_config=LazyNapariStreamingConfig()
        ),
-       
+
        # Final analysis (visualized)
        Step(
            name="Cell Analysis",
            func=analyze_cells,
-           materialization_config=LazyStepMaterializationConfig(),
-           stream_to_napari=True
+           step_materialization_config=LazyStepMaterializationConfig(),
+           napari_streaming_config=LazyNapariStreamingConfig()
        )
    ])
 

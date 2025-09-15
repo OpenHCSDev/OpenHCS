@@ -22,21 +22,25 @@ The system automatically detects visualization requirements during pipeline comp
 
 .. code-block:: python
 
-   # Pipeline steps declare streaming intent
+   # Pipeline steps declare streaming intent using LazyNapariStreamingConfig
    Step(
-       name="Image Enhancement",
+       name="Image Enhancement Processing",
        func=enhance_images,
-       materialization_config=LazyStepMaterializationConfig(),
-       stream_to_napari=True  # Triggers automatic visualizer creation
+       step_materialization_config=LazyStepMaterializationConfig(),
+       napari_streaming_config=LazyNapariStreamingConfig(well_filter=2)
    )
 
-   # Compiler detects streaming requirements during compilation
-   has_napari_streaming = any(getattr(step, 'stream_to_napari', False) 
-                             for step in pipeline_definition)
-   if has_napari_streaming:
-       context.create_visualizer = True
+   # Compiler detects streaming configs during compilation
+   for attr_name in dir(resolved_step):
+       config = getattr(resolved_step, attr_name, None)
+       if isinstance(actual_config, StreamingConfig):
+           has_streaming = True
+           required_visualizers.append({
+               'backend': actual_config.backend.name,
+               'config': actual_config
+           })
 
-The compiler scans pipeline steps during compilation and sets the visualizer creation flag when any step enables napari streaming. This ensures visualizers are only created when actually needed.
+The compiler scans pipeline steps during compilation and detects ``StreamingConfig`` instances. This ensures visualizers are only created when streaming configurations are present.
 
 Process-Based Architecture
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -167,15 +171,15 @@ Streaming is enabled per-step and respects materialization configuration:
    Step(
        name="Final Results",
        func=generate_results,
-       materialization_config=LazyStepMaterializationConfig(),
-       stream_to_napari=True  # Only final results streamed
+       step_materialization_config=LazyStepMaterializationConfig(),
+       napari_streaming_config=LazyNapariStreamingConfig()  # Only final results streamed
    )
 
    # Memory-only steps don't stream (no materialization)
    Step(
-       name="Intermediate Processing", 
+       name="Intermediate Processing",
        func=process_intermediate,
-       stream_to_napari=True  # No effect - nothing materialized
+       napari_streaming_config=LazyNapariStreamingConfig()  # No effect - nothing materialized
    )
 
 Streaming respects the materialization configuration, ensuring only persistent outputs appear in visualization.
