@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any, Tuple
 
-from openhcs.core.pipeline_config import PipelineConfig
+from openhcs.core.config import PipelineConfig
 
 from PIL import Image
 from textual.app import ComposeResult
@@ -958,10 +958,11 @@ class PlateManagerWidget(ButtonListWidget):
                 self.app.current_status = f"Exporting to OME-ZARR: {export_path}"
 
                 # Create export-specific config with ZARR materialization
-                from openhcs.core.config import get_current_global_config, GlobalPipelineConfig
+                from openhcs.core.config import GlobalPipelineConfig
+                from openhcs.core.context.global_config import get_current_global_config
                 export_config = get_current_global_config(GlobalPipelineConfig)
                 export_vfs_config = VFSConfig(
-                    intermediate_backend=export_config.vfs.intermediate_backend,
+                    intermediate_backend=export_config.vfs_config.intermediate_backend,
                     materialization_backend=MaterializationBackend.ZARR
                 )
 
@@ -1148,8 +1149,7 @@ class PlateManagerWidget(ButtonListWidget):
         # Use orchestrator's existing config if it exists, otherwise use global config as source
         source_config = representative_orchestrator.pipeline_config or self.global_config
 
-        from openhcs.core.config import create_pipeline_config_for_editing
-        current_plate_config = create_pipeline_config_for_editing(source_config)
+        current_plate_config = create_dataclass_for_editing(PipelineConfig, source_config)
 
         def handle_config_save(new_config: PipelineConfig) -> None:
             """Apply per-orchestrator configuration without global side effects."""
@@ -1172,14 +1172,15 @@ class PlateManagerWidget(ButtonListWidget):
 
         This maintains the existing global configuration workflow but uses lazy loading.
         """
-        from openhcs.core.config import get_default_global_config
-        from openhcs.core.pipeline_config import create_pipeline_config_for_editing, PipelineConfig
+        
+        from openhcs.core.config import PipelineConfig
+        from openhcs.core.lazy_config import create_dataclass_for_editing
 
         # Get current global config from app or use default
-        current_global_config = self.app.global_config or get_default_global_config()
+        current_global_config = self.app.global_config or GlobalPipelineConfig()
 
         # Create lazy PipelineConfig for editing with proper thread-local context
-        current_lazy_config = create_pipeline_config_for_editing(current_global_config, preserve_values=True)
+        current_lazy_config = create_dataclass_for_editing(PipelineConfig, current_global_config, preserve_values=True)
 
         def handle_global_config_save(new_config: PipelineConfig) -> None:
             """Apply global configuration to all orchestrators."""
@@ -1188,9 +1189,7 @@ class PlateManagerWidget(ButtonListWidget):
 
             self.app.global_config = global_config  # Update app-level config
 
-            # Update thread-local storage for MaterializationPathConfig defaults
-            from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
-            set_current_global_config(GlobalPipelineConfig, global_config)
+            # REMOVED: Thread-local modification - dual-axis resolver handles context automatically
 
             for orchestrator in self.orchestrators.values():
                 asyncio.create_task(orchestrator.apply_new_global_config(global_config))

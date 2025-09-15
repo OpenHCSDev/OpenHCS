@@ -53,6 +53,12 @@ def create_enhanced_path_widget(param_name: str = "", current_value: Any = None,
     return EnhancedPathWidget(param_name, current_value, parameter_info, PyQt6ColorScheme())
 
 
+def _create_none_aware_int_widget():
+    """Factory function for NoneAwareIntEdit widgets."""
+    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import NoneAwareIntEdit
+    return NoneAwareIntEdit()
+
+
 def register_openhcs_widgets():
     """Register OpenHCS custom widgets with magicgui type system."""
     # Register using string widget types that magicgui recognizes
@@ -70,10 +76,10 @@ WIDGET_REPLACEMENT_REGISTRY: Dict[Type, callable] = {
         lambda w: w.setChecked(bool(current_value)) or w
     )(QCheckBox()),
     int: lambda current_value, **kwargs: (
-        lambda w: w.setValue(int(current_value) if current_value else 0) or w
-    )(NoScrollSpinBox()),
+        lambda w: (w.set_value(current_value), w)[1]
+    )(_create_none_aware_int_widget()),
     float: lambda current_value, **kwargs: (
-        lambda w: w.setValue(float(current_value) if current_value else 0.0) or w
+        lambda w: (w.setValue(float(current_value)), w)[1] if current_value is not None else w
     )(NoScrollDoubleSpinBox()),
     Path: lambda current_value, param_name, parameter_info, **kwargs:
         create_enhanced_path_widget(param_name, current_value, parameter_info),
@@ -129,7 +135,9 @@ class MagicGuiWidgetFactory:
     def create_widget(self, param_name: str, param_type: Type, current_value: Any,
                      widget_id: str, parameter_info: Any = None) -> Any:
         """Create widget using functional registry dispatch."""
+        print(f"🔍 FACTORY DEBUG: Creating widget for {param_name}, type={param_type}, value={current_value}")
         resolved_type = resolve_optional(param_type)
+        print(f"🔍 FACTORY DEBUG: Resolved type: {resolved_type}")
 
         # Handle direct List[Enum] types - create multi-selection checkbox group
         if is_list_of_enums(resolved_type):
@@ -146,12 +154,15 @@ class MagicGuiWidgetFactory:
 
         # Check for OpenHCS custom widget replacements
         replacement_factory = WIDGET_REPLACEMENT_REGISTRY.get(resolved_type)
+        print(f"🔍 FACTORY DEBUG: Replacement factory for {resolved_type}: {replacement_factory}")
         if replacement_factory:
+            print(f"🔍 FACTORY DEBUG: Using replacement factory with extracted_value={extracted_value}")
             widget = replacement_factory(
                 current_value=extracted_value,
                 param_name=param_name,
                 parameter_info=parameter_info
             )
+            print(f"🔍 FACTORY DEBUG: Replacement factory returned: {widget} (type: {type(widget)})")
         else:
             # For string types, use our NoneAwareLineEdit instead of magicgui
             if resolved_type == str:
@@ -163,38 +174,53 @@ class MagicGuiWidgetFactory:
                     magicgui_value = extracted_value
                     if extracted_value is None:
                         # Use appropriate default values for magicgui to prevent "None" string conversion
+                        # CRITICAL FIX: Use minimal defaults that won't look like concrete user values
                         if resolved_type == int:
-                            magicgui_value = 0
+                            magicgui_value = 0  # magicgui needs a value, placeholder will override display
                         elif resolved_type == float:
-                            magicgui_value = 0.0
+                            magicgui_value = 0.0  # magicgui needs a value, placeholder will override display
                         elif resolved_type == bool:
                             magicgui_value = False
+                        elif hasattr(resolved_type, '__origin__') and resolved_type.__origin__ is list:
+                            magicgui_value = []  # Empty list for List[T] types
+                        elif hasattr(resolved_type, '__origin__') and resolved_type.__origin__ is tuple:
+                            magicgui_value = ()  # Empty tuple for tuple[T, ...] types
                         # For other types, let magicgui handle None (might still cause issues but less common)
 
                     widget = create_widget(annotation=resolved_type, value=magicgui_value)
 
-                    # If original value was None, clear the widget to show placeholder behavior
-                    if extracted_value is None and hasattr(widget, 'native'):
-                        native_widget = widget.native
-                        if hasattr(native_widget, 'setText'):
-                            native_widget.setText("")  # Clear text for None values
-                        elif hasattr(native_widget, 'setChecked') and resolved_type == bool:
-                            native_widget.setChecked(False)  # Uncheck for None bool values
+                    # Check if magicgui returned a basic QWidget (which indicates failure)
+                    if hasattr(widget, 'native') and type(widget.native).__name__ == 'QWidget':
+                        logger.warning(f"magicgui returned basic QWidget for {param_name} ({resolved_type}), using fallback")
+                        widget = create_string_fallback_widget(current_value=extracted_value)
+                    elif type(widget).__name__ == 'QWidget':
+                        logger.warning(f"magicgui returned basic QWidget for {param_name} ({resolved_type}), using fallback")
+                        widget = create_string_fallback_widget(current_value=extracted_value)
+                    else:
+                        # If original value was None, clear the widget to show placeholder behavior
+                        if extracted_value is None and hasattr(widget, 'native'):
+                            native_widget = widget.native
+                            if hasattr(native_widget, 'setText'):
+                                native_widget.setText("")  # Clear text for None values
+                            elif hasattr(native_widget, 'setChecked') and resolved_type == bool:
+                                native_widget.setChecked(False)  # Uncheck for None bool values
 
-                    # Extract native PyQt6 widget from magicgui wrapper if needed
-                    if hasattr(widget, 'native'):
-                        native_widget = widget.native
-                        native_widget._magicgui_widget = widget  # Store reference for signal connections
-                        widget = native_widget
-                except (ValueError, TypeError) as e:
+                        # Extract native PyQt6 widget from magicgui wrapper if needed
+                        if hasattr(widget, 'native'):
+                            native_widget = widget.native
+                            native_widget._magicgui_widget = widget  # Store reference for signal connections
+                            widget = native_widget
+                except Exception as e:
                     # Fallback to string widget for any type magicgui cannot handle
                     logger.warning(f"Widget creation failed for {param_name} ({resolved_type}): {e}", exc_info=True)
                     widget = create_string_fallback_widget(current_value=extracted_value)
 
         # Functional configuration dispatch
         configurator = CONFIGURATION_REGISTRY.get(resolved_type, lambda w: w)
+        print(f"🔍 FACTORY DEBUG: Configurator for {resolved_type}: {configurator}")
         configurator(widget)
 
+        print(f"🔍 FACTORY DEBUG: Final widget: {widget} (type: {type(widget)})")
         return widget
 
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
@@ -251,15 +277,26 @@ PLACEHOLDER_STRATEGIES: Dict[str, Callable[[Any, str], None]] = {
 
 
 def _extract_default_value(placeholder_text: str) -> str:
-    """Extract default value from placeholder text, handling enum values properly."""
-    value = placeholder_text.replace(PlaceholderConfig.PLACEHOLDER_PREFIX, "").strip()
+    """Extract default value from placeholder text, handling any prefix dynamically."""
+    # CRITICAL FIX: Handle dynamic prefixes like "Pipeline default:", "Step default:", etc.
+    # Look for the pattern "prefix: value" and extract the value part
+    if ':' in placeholder_text:
+        # Split on the first colon and take the part after it
+        parts = placeholder_text.split(':', 1)
+        if len(parts) == 2:
+            value = parts[1].strip()
+        else:
+            value = placeholder_text.strip()
+    else:
+        # Fallback: if no colon, use the whole text
+        value = placeholder_text.strip()
 
     # Handle enum values like "Microscope.AUTO" -> "AUTO"
     if '.' in value and not value.startswith('('):  # Avoid breaking "(none)" values
-        parts = value.split('.')
-        if len(parts) == 2:
+        enum_parts = value.split('.')
+        if len(enum_parts) == 2:
             # Return just the enum member name
-            return parts[1]
+            return enum_parts[1]
 
     return value
 
@@ -332,16 +369,10 @@ def _apply_lineedit_placeholder(widget: Any, text: str) -> None:
 
 
 def _apply_spinbox_placeholder(widget: Any, text: str) -> None:
-    """Apply placeholder to spinbox using numeric-only special value text."""
-    # Extract numeric value from placeholder text for integer/float fields
-    numeric_value = _extract_numeric_value_from_placeholder(text)
-
-    # For numeric fields, show only the number, not the full text
-    if numeric_value is not None:
-        widget.setSpecialValueText(str(numeric_value))
-    else:
-        # Fallback to full text for non-numeric placeholders
-        widget.setSpecialValueText(text)
+    """Apply placeholder to spinbox showing full placeholder text with prefix."""
+    # CRITICAL FIX: Always show the full placeholder text, not just the numeric value
+    # This ensures users see "Pipeline default: 1" instead of just "1"
+    widget.setSpecialValueText(text)
 
     # Set widget to minimum value to show the special value text
     if hasattr(widget, 'minimum'):
@@ -392,7 +423,7 @@ def _apply_path_widget_placeholder(widget: Any, placeholder_text: str) -> None:
 
 
 def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> None:
-    """Apply placeholder to combobox with visual preview using robust enum matching."""
+    """Apply placeholder to combobox with visual preview using signal blocking like checkboxes."""
     try:
         default_value = _extract_default_value(placeholder_text)
 
@@ -403,10 +434,20 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
             -1
         )
 
-        if matching_index >= 0:
-            widget.setCurrentIndex(matching_index)
+        # CRITICAL FIX: Block signals to prevent placeholder from being treated as user selection
+        # This is the same approach used by checkboxes - show the placeholder visually
+        # but don't trigger parameter change events
+        widget.blockSignals(True)
+        try:
+            if matching_index >= 0:
+                widget.setCurrentIndex(matching_index)
+            else:
+                widget.setCurrentIndex(-1)
+        finally:
+            # Always restore signal connections
+            widget.blockSignals(False)
 
-        # Always apply placeholder styling to indicate this is a placeholder value
+        # Apply placeholder styling to indicate this is a placeholder value
         _apply_placeholder_styling(
             widget,
             PlaceholderConfig.INTERACTION_HINTS['combobox'],

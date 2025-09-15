@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional, Callable, Any
 from concurrent.futures import ThreadPoolExecutor
 
-from openhcs.core.config import GlobalPipelineConfig, get_default_global_config
+from openhcs.core.config import GlobalPipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +187,7 @@ async def load_cached_global_config(strategy: Optional[CacheExecutionStrategy] =
     
     # Fallback to default config
     logger.info("Using default global configuration")
-    return get_default_global_config()
+    return GlobalPipelineConfig()
 
 
 def load_cached_global_config_sync() -> GlobalPipelineConfig:
@@ -209,4 +209,4 @@ def load_cached_global_config_sync() -> GlobalPipelineConfig:
 
     # Fallback to default config
     logger.info("Using default global configuration")
-    return get_default_global_config()
+    return GlobalPipelineConfig()

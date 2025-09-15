@@ -15,6 +15,7 @@ from openhcs.ui.shared.parameter_form_base import ParameterFormManagerBase, Para
 from openhcs.ui.shared.parameter_form_service import ParameterFormService
 from openhcs.ui.shared.parameter_form_config_factory import textual_config
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
+from openhcs.core.field_path_detection import FieldPathDetector
 
 # Import Textual-specific components
 from .typed_widget_factory import TypedWidgetFactory
@@ -118,8 +119,8 @@ class ParameterFormManager(ParameterFormManagerBase):
             param_info.name, param_info.type, param_info.description
         )
         
-        # Get field IDs from service
-        field_ids = self.service.generate_field_ids(self.config.field_id, param_info.name)
+        # Direct field ID generation - no artificial complexity
+        field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
         
         # Create 3-column layout: label + input + reset
         with Horizontal() as row:
@@ -200,8 +201,8 @@ class ParameterFormManager(ParameterFormManagerBase):
             param_info.name, param_info.type, param_info.description
         )
         
-        # Get field IDs
-        field_ids = self.service.generate_field_ids(self.config.field_id, param_info.name)
+        # Direct field ID generation - no artificial complexity
+        field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
         
         # Create checkbox
         from textual.widgets import Checkbox
@@ -221,29 +222,31 @@ class ParameterFormManager(ParameterFormManagerBase):
     
     def create_parameter_widget(self, param_name: str, param_type: Type, current_value: Any) -> Any:
         """Create a widget for a single parameter using existing factory."""
-        # Delegate to existing widget factory with service-generated ID
-        field_ids = self.service.generate_field_ids(self.config.field_id, param_name)
+        # Direct field ID generation - no artificial complexity
+        field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_name)
         return TypedWidgetFactory.create_widget(param_type, current_value, field_ids['widget_id'])
     
     def create_nested_form(self, param_name: str, param_type: Type, current_value: Any) -> Any:
-        """Create a nested form using simplified constructor."""
+        """Create a nested form using actual field path instead of artificial field IDs"""
         # Get parent dataclass type for context
         parent_dataclass_type = getattr(self.config, 'dataclass_type', None) if hasattr(self.config, 'dataclass_type') else None
+
+        # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
+        field_path = self.service.get_field_path_with_fail_loud(parent_dataclass_type or type(None), param_type)
 
         # Extract nested parameters using service with parent context
         nested_params, nested_types = self.service.extract_nested_parameters(
             current_value, param_type, parent_dataclass_type
         )
-        
-        # Create nested config
-        field_ids = self.service.generate_field_ids(self.config.field_id, param_name)
-        nested_config = textual_config(field_ids['nested_field_id'])
+
+        # Create nested config with actual field path
+        nested_config = textual_config(field_path)
         
         # Return nested manager with backward-compatible API
         return ParameterFormManager(
             nested_params,
             nested_types,
-            field_ids['nested_field_id'],
+            field_path,  # Use actual dataclass field name directly
             None,  # parameter_info
             False,  # is_global_config_editing
             None,   # global_config_type

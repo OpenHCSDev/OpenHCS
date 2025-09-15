@@ -4,44 +4,43 @@ Configuration System Architecture
 Overview
 --------
 
-Traditional configuration systems suffer from the "lost edits" problem - user modifications get overwritten by defaults when switching contexts. OpenHCS solves this through lazy dataclasses that resolve values from different sources based on editing context.
+Traditional configuration systems suffer from the "lost edits" problem where user modifications get overwritten by defaults when switching contexts. OpenHCS solves this through lazy dataclasses that resolve values using a sophisticated dual-axis resolution system.
 
-.. code-block:: python
+The system treats configuration fields as mathematical variables that can resolve to different values depending on the current context and inheritance relationships. When a field has a ``None`` value, the system automatically searches through multiple sources to find the appropriate value, preserving user edits while providing intelligent defaults.
 
-   @dataclass(frozen=True)
-   class StepMaterializationConfig:
-       num_workers: Optional[int] = None  # Lazy: resolves from pipeline → global
-       gpu_enabled: Optional[bool] = None  # Lazy: resolves from pipeline → global
+Configuration classes use Optional fields to indicate which values should participate in lazy resolution, while concrete values represent either user overrides or static class defaults. This design allows the same configuration class to behave differently depending on the context in which it's used.
 
-   # Context-aware resolution
-   step_config.num_workers  # Shows pipeline value if set, else global value
-   pipeline_config.num_workers  # Shows global value if not overridden
+The :pyobject:`openhcs.core.config.StepMaterializationConfig` dataclass demonstrates this pattern with Optional fields for lazy resolution and concrete values for static overrides. The dual-axis resolution system handles both scenarios automatically through the :pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver`.
 
-This enables hierarchical configuration flow (Global → Pipeline → Step) while preserving user edits at each level.
+In this example, ``well_filter`` is marked as Optional with a None default, signaling that it should resolve through the dual-axis system when accessed. The system will search through step context, then orchestrator context, then global context to find a concrete value. In contrast, ``sub_dir`` has a concrete string default, indicating this is a static override that should always use "checkpoints" regardless of context.
 
-Lazy Resolution System
----------------------
+Consider a step materialization configuration where the ``well_filter`` field might inherit from the pipeline's well filter settings, while the ``sub_dir`` field uses a static override specific to materialization steps. The dual-axis resolver handles both scenarios automatically, ensuring that user intentions are preserved while maintaining logical inheritance patterns.
 
-Configuration values resolve dynamically based on the current editing context and hierarchy.
+This enables hierarchical configuration flow from specific contexts (Step) through intermediate contexts (Pipeline/Orchestrator) to general contexts (Global), with sophisticated inheritance patterns that respect both user edits and class-level overrides.
 
-.. code-block:: python
+Dual-Axis Resolution System
+---------------------------
 
-   # Resolution hierarchy: User-set → Thread-local → Constructor defaults
+Configuration values resolve through a recursive dual-axis algorithm that combines context hierarchy discovery (X-axis) with class inheritance traversal (Y-axis). This mathematical approach ensures that field resolution follows predictable, debuggable patterns while supporting complex inheritance scenarios.
 
-   class LazyConfigResolver:
-       def resolve_field(self, field_name: str, context: str) -> Any:
-           # 1. Check if user explicitly set this field
-           if hasattr(self, field_name) and getattr(self, field_name) is not None:
-               return getattr(self, field_name)
+The **X-axis** represents the context hierarchy, moving from most specific (step-level context) through intermediate levels (orchestrator/pipeline context) to most general (global context). The **Y-axis** represents class inheritance relationships, following Python's Method Resolution Order (MRO) to find fields in parent classes.
 
-           # 2. Check thread-local context (current global config)
-           if context_value := self._get_from_context(field_name):
-               return context_value
+**Enhanced Resolution Algorithm (2024 Update)**
 
-           # 3. Fall back to constructor default
-           return self._get_constructor_default(field_name)
+The algorithm has been enhanced to provide more predictable inheritance behavior by ensuring each context level is fully exhausted before moving to the next level. This depth-first approach prevents premature context switching and ensures proper inheritance chain traversal.
 
-This ensures user edits are preserved while providing appropriate defaults for each editing context.
+The enhanced dual-axis resolution algorithm is implemented in :pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver.resolve_field` and :pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver._resolve_field_recursive`. The algorithm combines X-axis context hierarchy traversal (step → orchestrator → global) with Y-axis class inheritance MRO traversal, using depth-first context exhaustion to ensure predictable resolution behavior.
+
+This enhanced algorithm ensures that each context level is fully exhausted through Y-axis inheritance before moving to the next context level. The depth-first approach provides more predictable resolution behavior and ensures that static overrides are properly respected within their context scope.
+
+**Key Improvements:**
+
+- **Depth-First Resolution**: Each context level is fully exhausted before moving up the hierarchy
+- **Field-Specific Static Overrides**: Static overrides now block inheritance only for specific fields, not entire classes
+- **Enhanced Context Search**: Only searches for exact target types, eliminating cross-type inheritance confusion
+- **Direct Global Fallback**: New direct thread-local access method for more reliable global config fallback
+
+:pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver` implements this enhanced algorithm with improved caching and more robust error handling. The :pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver.resolve_field` method now uses the recursive depth-first approach for more predictable inheritance behavior.
 
 Configuration Structure
 -----------------------
@@ -53,155 +52,121 @@ Core Configuration Classes
 
 **GlobalPipelineConfig**: Top-level configuration containing all subsystem configurations
 
-.. code-block:: python
-
-   @dataclass(frozen=True)
-   class GlobalPipelineConfig:
-       # Core execution settings
-       num_workers: int = 4
-       gpu_enabled: bool = True
-
-       # Storage and memory
-       zarr: ZarrConfig = field(default_factory=ZarrConfig)
-
-       # Analysis and data management
-       analysis_consolidation: AnalysisConsolidationConfig = field(default_factory=AnalysisConsolidationConfig)
-       plate_metadata: PlateMetadataConfig = field(default_factory=PlateMetadataConfig)
-
-       # Function registry behavior
-       function_registry: FunctionRegistryConfig = field(default_factory=FunctionRegistryConfig)
+The :pyobject:`openhcs.core.config.GlobalPipelineConfig` serves as the root configuration object with core execution settings, storage configurations, and subsystem configurations for analysis consolidation, plate metadata, and function registry behavior.
 
 **AnalysisConsolidationConfig**: Controls automatic analysis result consolidation
 
-.. code-block:: python
-
-   @dataclass(frozen=True)
-   class AnalysisConsolidationConfig:
-       enabled: bool = True
-       metaxpress_style: bool = True
-       well_pattern: str = r"([A-Z]\d{2})"
-       file_extensions: tuple[str, ...] = (".csv",)
-       exclude_patterns: tuple[str, ...] = (r".*consolidated.*", r".*summary.*")
-       output_filename: str = "metaxpress_style_summary.csv"
+The :pyobject:`openhcs.core.config.AnalysisConsolidationConfig` manages automatic consolidation of analysis results with MetaXpress-style output formatting and configurable file patterns.
 
 **PlateMetadataConfig**: MetaXpress-compatible plate metadata
 
-.. code-block:: python
+The :pyobject:`openhcs.core.config.PlateMetadataConfig` provides MetaXpress-compatible plate metadata fields for analysis consolidation and HCS viewing compatibility.
 
-   @dataclass(frozen=True)
-   class PlateMetadataConfig:
-       barcode: Optional[str] = None
-       plate_name: Optional[str] = None
-       plate_id: Optional[str] = None
-       description: Optional[str] = None
-       acquisition_user: str = "OpenHCS"
-       z_step: str = "1"
+Context Discovery System
+------------------------
 
-.. code-block:: python
+Configuration contexts are discovered automatically through stack introspection, eliminating the need for explicit parameter passing. The system uses an enhanced frame injection mechanism where context objects are temporarily placed into the call stack's local variables, allowing the resolver to find them through systematic stack traversal.
 
-   @dataclass(frozen=True)
-   class GlobalPipelineConfig:
-       """Root configuration object."""
-       vfs_config: VFSConfig = field(default_factory=VFSConfig)
-       path_planning_config: PathPlanningConfig = field(default_factory=PathPlanningConfig)
-       zarr_config: ZarrConfig = field(default_factory=ZarrConfig)
-       num_workers: int = 4
-       microscope: str = "ImageXpress"
+**Enhanced Frame Injection (2024 Update)**
 
-       num_workers: Optional[int] = None  # Lazy: resolves from pipeline → global
-       save_intermediate: Optional[bool] = None  # Lazy: resolves from pipeline → global
+The frame injection system has been significantly enhanced to provide more reliable context discovery with proper cleanup and safety mechanisms. The new implementation injects context into multiple frames to ensure discovery reliability and includes comprehensive error handling.
 
-Thread-Local Context System
-----------------------------
+The enhanced frame injection system is implemented in :pyobject:`openhcs.core.orchestrator.orchestrator.PipelineOrchestrator.config_context` with multi-frame support and proper cleanup mechanisms. Context discovery is handled by :pyobject:`openhcs.core.dual_axis_resolver_recursive.ContextDiscovery.discover_context` with safety limits and comprehensive error handling.
 
-Configuration contexts are stored per-thread to avoid parameter passing while maintaining isolation.
+**Key Enhancements:**
 
-.. code-block:: python
+- **Multi-Frame Injection**: Context is injected into multiple frames to ensure reliable discovery
+- **Safety Limits**: Frame traversal is limited to prevent infinite loops
+- **Proper Cleanup**: Context variables are properly cleaned up after use
+- **Enhanced Error Handling**: Null checks and frame validation prevent crashes
+- **Injected Context Priority**: Explicitly injected contexts take priority over discovered contexts
 
-   # Type-keyed thread-local storage
-   _global_config_contexts: Dict[Type, threading.local] = {}
+The enhanced injection process uses ``inspect.currentframe()`` to walk up the call stack and inject the context variable into multiple frames. This ensures that the context discovery process can find the context even if the call stack structure varies. The discovery process includes safety limits and proper null checking to prevent infinite loops or crashes.
 
-   def set_current_global_config(config_type: Type, config_instance: Any) -> None:
-       """Set current global config for any dataclass type."""
-       if config_type not in _global_config_contexts:
-           _global_config_contexts[config_type] = threading.local()
-       _global_config_contexts[config_type].value = config_instance
+The :pyobject:`openhcs.core.orchestrator.orchestrator.PipelineOrchestrator` now provides enhanced context injection through its :pyobject:`openhcs.core.orchestrator.orchestrator.PipelineOrchestrator.config_context` method, while :pyobject:`openhcs.core.dual_axis_resolver_recursive.ContextDiscovery` implements the enhanced discovery algorithm with safety mechanisms.
 
-This provides isolated configuration contexts per thread without parameter passing.
+This approach provides robust automatic context discovery without requiring explicit parameter threading through function calls, making the configuration system transparent to consuming code while maintaining sophisticated resolution capabilities and preventing common failure modes.
 
 Lazy Dataclass Factory
 -----------------------
 
-The LazyDataclassFactory generates runtime dataclasses with context-aware field resolution.
+The LazyDataclassFactory generates runtime dataclasses with dual-axis field resolution. This factory pattern creates new classes that maintain the same interface as the original dataclass but replace field access with sophisticated resolution logic that can traverse context hierarchies and class inheritance patterns.
 
-.. code-block:: python
+The factory works by creating a new class dynamically at runtime that has the same fields and interface as the original dataclass, but replaces simple field access with property methods that delegate to the dual-axis resolver. This allows existing code to continue using familiar dataclass patterns while gaining sophisticated inheritance capabilities.
 
-   # Create lazy config for editing
-   LazyStepConfig = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
-       base_class=StepMaterializationConfig,
-       global_config_type=GlobalPipelineConfig,
-       field_path="materialization_defaults",
-       lazy_class_name="LazyStepMaterializationConfig"
-   )
+The :pyobject:`openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy` method creates lazy configurations with dual-axis resolution. These lazy configs resolve field values through context hierarchy and class inheritance patterns, enabling sophisticated configuration inheritance while maintaining the familiar dataclass interface.
 
-   # Field resolution: user-set → thread-local → static defaults
-   config = LazyStepConfig()
-   config.num_workers  # Resolves from context if None, else uses user value
+This example shows the factory creating a lazy version of ``StepMaterializationConfig``. The ``base_class`` parameter specifies the original dataclass to wrap, while ``global_config_type`` indicates what type of global configuration this should resolve against. The ``field_path`` tells the system where to find instances of this config type within the global configuration structure. When ``config.well_filter`` is accessed, it triggers the dual-axis resolution process instead of returning a simple field value.
 
-This enables context-aware configuration editing where the same field shows different values based on editing scope.
+The :pyobject:`openhcs.core.lazy_config.LazyDataclassFactory` creates these runtime classes by examining the original dataclass structure and generating property methods that delegate to the dual-axis resolver. The :pyobject:`openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy` method is the primary entry point, automatically discovering field relationships and creating appropriate resolution logic.
 
-Field Path Detection
---------------------
+This enables sophisticated inheritance patterns where fields can inherit from sibling configurations at the same hierarchy level, while maintaining the familiar dataclass interface that consuming code expects.
 
-The system automatically discovers configuration relationships through type introspection.
+Context Hierarchy and Inheritance
+---------------------------------
 
-.. code-block:: python
+The dual-axis resolver combines context hierarchy discovery with sophisticated inheritance patterns.
 
-   @staticmethod
-   def find_field_path_for_type(parent_type: Type, child_type: Type) -> Optional[str]:
-       """Find field path for child_type within parent_type structure."""
-       # Direct field matching
-       for field in dataclasses.fields(parent_type):
-           if field.type == child_type:
-               return field.name
+Context Hierarchy (X-Axis)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-       # Recursive search in nested dataclasses
-       for field in dataclasses.fields(parent_type):
-           if dataclasses.is_dataclass(field.type):
-               nested_path = find_field_path_for_type(field.type, child_type)
-               if nested_path:
-                   return f"{field.name}.{nested_path}"
-       return None
+Contexts are discovered in priority order through stack introspection:
 
-This eliminates hardcoded field mappings and adapts automatically to configuration structure changes.
+Context hierarchy discovery is implemented in :pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver._discover_context_hierarchy`, which builds the complete context hierarchy from most specific (step) to least specific (global) using recursive parent context discovery.
+
+Class Inheritance (Y-Axis)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For each context level, the resolver searches through the class inheritance hierarchy:
+
+Y-axis class inheritance traversal is handled by :pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver._resolve_at_context_level`, which searches through the class inheritance hierarchy using Python's MRO and :pyobject:`openhcs.core.field_path_detection.FieldPathDetector` for automatic field path discovery.
+
+Static Override Detection
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The system detects when subclasses override parent class defaults:
+
+Static override detection is implemented in :pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver._check_static_override`, which compares field defaults across the inheritance hierarchy to detect when subclasses override parent class defaults for specific fields.
+
+This ensures that static class overrides (like `sub_dir = "checkpoints"`) take precedence over inherited values.
 
 Integration Examples
 -------------------
 
-The configuration system integrates with other OpenHCS subsystems.
+The dual-axis resolution system integrates with compilation and UI systems.
 
-.. code-block:: python
+Compilation Integration
+~~~~~~~~~~~~~~~~~~~~~~~
 
-   # Component system integration
-   from openhcs.core.components.framework import ComponentConfiguration
-   from openhcs.constants import get_openhcs_config
+The compiler uses the same dual-axis resolver to ensure consistency between UI and execution:
 
-   component_config = get_openhcs_config()
-   validator = GenericValidator(component_config)
+**Compilation Integration**: The compiler uses the same dual-axis resolver with proper context injection to ensure consistency between UI and execution environments.
 
-   # UI framework integration
-   def create_config_editor(dataclass_type: Type, current_config: Any):
-       set_current_global_config(GlobalPipelineConfig, current_config)
-       return LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
-           base_class=dataclass_type,
-           global_config_type=GlobalPipelineConfig,
-           field_path=FieldPathDetector.find_field_path_for_type(
-               GlobalPipelineConfig, dataclass_type
-           )
-       )()
+UI Integration
+~~~~~~~~~~~~~~
 
-**Common Gotchas**:
+UI components use the same resolver for placeholder generation:
 
-- Thread-local contexts are isolated per thread - don't share between threads
-- Lazy dataclasses must be created after setting thread-local context
-- Field path detection requires proper type annotations on dataclass fields
+**UI Integration**: UI components use the same resolver for placeholder generation, ensuring perfect consistency between UI placeholders and compilation resolution through :pyobject:`openhcs.core.lazy_placeholder.LazyDefaultPlaceholderService`.
+
+**Key Benefits**:
+
+- **Consistency**: UI placeholders match compilation resolution exactly
+- **Automatic Context Discovery**: No explicit parameter threading required
+- **Sophisticated Inheritance**: Supports sibling inheritance and static overrides
+- **Frame Injection Safety**: Proper cleanup prevents memory leaks
+- **Single-Threaded Safety**: Frame injection works correctly in OpenHCS's single-threaded compilation model
+
+Troubleshooting Resolution Issues
+---------------------------------
+
+Troubleshooting Resolution Issues
+---------------------------------
+
+**Context Discovery Failures**: When lazy configs resolve to static defaults instead of inheriting from context, check that context injection is happening properly and context variables follow the naming pattern ``__*_context__``.
+
+**Inheritance Chain Issues**: When fields don't inherit from sibling configurations, verify that :pyobject:`openhcs.core.field_path_detection.FieldPathDetector` is finding the correct inheritance relationships.
+
+**Static Override Problems**: When static overrides don't take precedence, ensure that :pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver._check_static_override` is detecting field-level differences correctly.
+
+The dual-axis resolution system provides comprehensive debugging capabilities through its resolver methods to help identify and resolve inheritance behavior issues.

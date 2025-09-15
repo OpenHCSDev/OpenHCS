@@ -111,28 +111,29 @@ class PathPlanner:
                     funcplan[f"{func.__name__}_{dk}_{pos}"] = saves
 
         # Handle optional materialization and input conversion
-        # Read materialization_config directly from step object (not step plans, which aren't populated yet)
+        # Read step_materialization_config directly from step object (not step plans, which aren't populated yet)
         materialized_output_dir = None
-        if step.materialization_config:
+        if step.step_materialization_config:
             # Check if this step has well filters and if current well should be materialized
-            step_axis_filter = getattr(self.ctx, 'step_axis_filters', {}).get(sid)
+            step_axis_filters = getattr(self.ctx, 'step_axis_filters', {}).get(sid, {})
+            materialization_filter = step_axis_filters.get('step_materialization_config')
 
-            if step_axis_filter:
+            if materialization_filter:
                 # Inline simple conditional logic for axis filtering
                 from openhcs.core.config import WellFilterMode
-                axis_in_filter = self.ctx.axis_id in step_axis_filter['resolved_axis_values']
+                axis_in_filter = self.ctx.axis_id in materialization_filter['resolved_axis_values']
                 should_materialize = (
-                    axis_in_filter if step_axis_filter['filter_mode'] == WellFilterMode.INCLUDE
+                    axis_in_filter if materialization_filter['filter_mode'] == WellFilterMode.INCLUDE
                     else not axis_in_filter
                 )
 
                 if should_materialize:
-                    materialized_output_dir = self._build_output_path(step.materialization_config)
+                    materialized_output_dir = self._build_output_path(step.step_materialization_config)
                 else:
                     logger.debug(f"Skipping materialization for step {step.name}, axis {self.ctx.axis_id} (filtered out)")
             else:
                 # No axis filter - create materialization path as normal
-                materialized_output_dir = self._build_output_path(step.materialization_config)
+                materialized_output_dir = self._build_output_path(step.step_materialization_config)
 
         input_conversion_dir = self._get_optional_path("input_conversion_config", sid)
 
@@ -155,13 +156,13 @@ class PathPlanner:
         # Add optional paths if configured
         if materialized_output_dir:
             # Per-step materialization uses its own config to determine plate root
-            materialized_plate_root = self.build_output_plate_root(self.plate_path, step.materialization_config, is_per_step_materialization=False)
+            materialized_plate_root = self.build_output_plate_root(self.plate_path, step.step_materialization_config, is_per_step_materialization=False)
             self.plans[sid].update({
                 'materialized_output_dir': str(materialized_output_dir),
                 'materialized_plate_root': str(materialized_plate_root),
-                'materialized_sub_dir': step.materialization_config.sub_dir,  # Store resolved sub_dir for materialization
+                'materialized_sub_dir': step.step_materialization_config.sub_dir,  # Store resolved sub_dir for materialization
                 'materialized_backend': self.vfs.materialization_backend.value,
-                'materialization_config': step.materialization_config  # Store config for well filtering (will be resolved by compiler)
+                'materialization_config': step.step_materialization_config  # Store config for well filtering (will be resolved by compiler)
             })
         if input_conversion_dir:
             self.plans[sid].update({
@@ -349,8 +350,8 @@ class PathPlanner:
 
         # Collect all materialization steps with their paths and positions
         mat_steps = [
-            (step, self.plans.get(i, {}).get('pipeline_position', 0), self._build_output_path(step.materialization_config))
-            for i, step in enumerate(pipeline) if step.materialization_config
+            (step, self.plans.get(i, {}).get('pipeline_position', 0), self._build_output_path(step.step_materialization_config))
+            for i, step in enumerate(pipeline) if step.step_materialization_config
         ]
 
         # Group by path for conflict detection
@@ -371,16 +372,25 @@ class PathPlanner:
 
     def _resolve_and_update_paths(self, step: AbstractStep, position: int, original_path: Path, conflict_type: str) -> None:
         """Resolve path conflict by updating sub_dir configuration directly."""
+        # CRITICAL FIX: For lazy configs, resolve to base config first to get the correct static default
+        # before applying path collision resolution. This ensures we use "checkpoints" not "images".
+        materialization_config = step.step_materialization_config
+        if hasattr(materialization_config, 'to_base_config'):
+            # This is a lazy config - resolve it first to get the correct static default
+            materialization_config = materialization_config.to_base_config()
+            print(f"🔍 PATH_COLLISION DEBUG: Resolved lazy config to base: {type(materialization_config).__name__}")
+
         # Generate unique sub_dir name instead of calculating from paths
-        original_sub_dir = step.materialization_config.sub_dir
+        original_sub_dir = materialization_config.sub_dir
+        print(f"🔍 PATH_COLLISION DEBUG: step '{step.name}' original_sub_dir = '{original_sub_dir}' (type: {type(materialization_config).__name__})")
         new_sub_dir = f"{original_sub_dir}_step{position}"
 
         # Update step materialization config with new sub_dir
-        config_class = type(step.materialization_config)
-        step.materialization_config = config_class(**{**step.materialization_config.__dict__, 'sub_dir': new_sub_dir})
+        from dataclasses import replace
+        step.step_materialization_config = replace(materialization_config, sub_dir=new_sub_dir)
 
-        # Recalculate the resolved path using the new sub_dir
-        resolved_path = self._build_output_path(step.materialization_config)
+        # Recalculate the resolved path using the updated config
+        resolved_path = self._build_output_path(step.step_materialization_config)
 
         # Update step plans for metadata generation
         if step_plan := self.plans.get(position):  # Use position (step index) instead of step_id

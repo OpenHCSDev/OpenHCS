@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSettings, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QIcon, QKeySequence
 
-from openhcs.core.config import GlobalPipelineConfig, get_default_global_config
+from openhcs.core.config import GlobalPipelineConfig
 from openhcs.io.filemanager import FileManager
 from openhcs.io.base import storage_registry
 
@@ -48,7 +48,7 @@ class OpenHCSMainWindow(QMainWindow):
         super().__init__()
         
         # Core configuration
-        self.global_config = global_config or get_default_global_config()
+        self.global_config = global_config or GlobalPipelineConfig()
         
         # Create shared components
         self.storage_registry = storage_registry
@@ -429,8 +429,9 @@ class OpenHCSMainWindow(QMainWindow):
             self.global_config = new_config
 
             # Update thread-local storage for MaterializationPathConfig defaults
-            from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
-            set_current_global_config(GlobalPipelineConfig, new_config)
+            from openhcs.core.config import GlobalPipelineConfig
+            from openhcs.core.context.global_config import set_global_config_for_editing
+            set_global_config_for_editing(GlobalPipelineConfig, new_config)
 
             # Emit signal for other components to update
             self.config_changed.emit(new_config)

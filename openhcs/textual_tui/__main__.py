@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from openhcs.core.config import get_default_global_config
+
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 
 from .app import OpenHCSTUIApp

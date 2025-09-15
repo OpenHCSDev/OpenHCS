@@ -18,13 +18,64 @@ from openhcs.io.exceptions import StorageResolutionError
 logger = logging.getLogger(__name__)
 
 
-class StorageBackend(ABC):
+class DataSink(ABC):
     """
-    Abstract base class for basic storage operations.
+    Abstract base class for data destinations.
 
-    Defines the fundamental operations required for interacting with a storage system,
-    independent of specific data types like microscopy images.
+    Defines the minimal interface for sending data to any destination,
+    whether storage, streaming, or other data handling systems.
+
+    This interface follows OpenHCS principles:
+    - Fail-loud: No defensive programming, explicit error handling
+    - Minimal: Only essential operations both storage and streaming need
+    - Generic: Enables any type of data destination backend
     """
+
+    @abstractmethod
+    def save(self, data: Any, identifier: Union[str, Path], **kwargs) -> None:
+        """
+        Send data to the destination.
+
+        Args:
+            data: The data to send
+            identifier: Unique identifier for the data (path-like for compatibility)
+            **kwargs: Backend-specific arguments
+
+        Raises:
+            TypeError: If identifier is not a valid type
+            ValueError: If data cannot be sent to destination
+        """
+        pass
+
+    @abstractmethod
+    def save_batch(self, data_list: List[Any], identifiers: List[Union[str, Path]], **kwargs) -> None:
+        """
+        Send multiple data objects to the destination in a single operation.
+
+        Args:
+            data_list: List of data objects to send
+            identifiers: List of unique identifiers (must match length of data_list)
+            **kwargs: Backend-specific arguments
+
+        Raises:
+            ValueError: If data_list and identifiers have different lengths
+            TypeError: If any identifier is not a valid type
+            ValueError: If any data cannot be sent to destination
+        """
+        pass
+
+
+class StorageBackend(DataSink):
+    """
+    Abstract base class for persistent storage operations.
+
+    Extends DataSink with retrieval capabilities and file system operations
+    for backends that provide persistent storage with file-like semantics.
+
+    Concrete implementations should use StorageBackendMeta for automatic registration.
+    """
+
+    # Inherits save() and save_batch() from DataSink
 
     @abstractmethod
     def load(self, file_path: Union[str, Path], **kwargs) -> Any:
@@ -311,36 +362,31 @@ class StorageBackend(ABC):
             return False
 
 
-def _create_storage_registry() -> Dict[str, StorageBackend]:
+def _create_storage_registry() -> Dict[str, DataSink]:
     """
-    Create a new storage registry.
+    Create a new storage registry using metaclass-based discovery.
 
     This function creates a dictionary mapping backend names to their respective
-    storage backend instances. It is the canonical factory for creating backend
-    registries in the system.
+    storage backend instances using automatic discovery and registration.
+
+    Now returns Dict[str, DataSink] to support both StorageBackend and StreamingBackend.
 
     Returns:
-        A dictionary mapping backend names to backend instances
+        A dictionary mapping backend names to DataSink instances (polymorphic)
 
     Note:
-        This is an internal factory function. Use the global storage_registry
-        instance instead of calling this directly.
+        This function now uses the metaclass-based registry system for automatic
+        backend discovery, eliminating hardcoded imports.
     """
-    # Import here to avoid circular imports
-    from openhcs.io.disk import DiskStorageBackend
-    from openhcs.io.memory import MemoryStorageBackend
-    from openhcs.io.zarr import ZarrStorageBackend
+    # Import the metaclass-based registry system
+    from openhcs.io.backend_registry import create_storage_registry
 
-    return {
-        Backend.DISK.value: DiskStorageBackend(),
-        Backend.MEMORY.value: MemoryStorageBackend(),
-        Backend.ZARR.value: ZarrStorageBackend()
-    }
+    return create_storage_registry()
 
 
 # Global singleton storage registry - created once at module import time
 # This is the shared registry instance that all components should use
-storage_registry = _create_storage_registry()
+storage_registry: Dict[str, DataSink] = _create_storage_registry()
 
 
 def reset_memory_backend() -> None:

@@ -113,9 +113,12 @@ DEFAULT_MICROSCOPE: Microscope = Microscope.AUTO
 
 # Backend-related constants
 class Backend(Enum):
+    AUTO = "auto"
     DISK = "disk"
     MEMORY = "memory"
     ZARR = "zarr"
+    NAPARI_STREAM = "napari_stream"
+    FIJI_STREAM = "fiji_stream"
 
 class FileFormat(Enum):
     TIFF = list(DEFAULT_IMAGE_EXTENSIONS)
@@ -145,6 +148,9 @@ DEFAULT_CPU_THREAD_COUNT = 4
 DEFAULT_PATCH_SIZE = 128
 DEFAULT_SEARCH_RADIUS = 20
 # Consolidated definition for CPU thread count
+
+# Napari streaming constants
+DEFAULT_NAPARI_STREAM_PORT = 5555
 
 
 # Memory-related constants

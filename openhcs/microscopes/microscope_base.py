@@ -156,6 +156,25 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         """
         return self.compatible_backends
 
+    def get_primary_backend(self, plate_path: Union[str, Path]) -> str:
+        """
+        Get the primary backend name for this plate.
+
+        Default implementation returns the first compatible backend.
+        Override this method only if you need custom backend selection logic
+        (like OpenHCS which reads from metadata).
+
+        Args:
+            plate_path: Path to the plate folder
+
+        Returns:
+            Backend name string (e.g., 'disk', 'zarr')
+        """
+        available_backends = self.get_available_backends(plate_path)
+        if not available_backends:
+            raise RuntimeError(f"No available backends for {self.microscope_type} microscope at {plate_path}")
+        return available_backends[0].value
+
     def initialize_workspace(self, plate_path: Path, workspace_path: Optional[Path], filemanager: FileManager) -> Path:
         """
         Default workspace initialization: create workspace in plate folder and mirror with symlinks.

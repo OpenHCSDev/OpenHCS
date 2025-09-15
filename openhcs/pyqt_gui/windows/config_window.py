@@ -21,7 +21,9 @@ from PyQt6.QtGui import QFont
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.core.config import GlobalPipelineConfig, require_config_context
+from openhcs.core.config import GlobalPipelineConfig
+# ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
+from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 
 
 
@@ -43,7 +45,6 @@ class ConfigWindow(QDialog):
     config_saved = pyqtSignal(object)  # saved config
     config_cancelled = pyqtSignal()
 
-    @require_config_context
     def __init__(self, config_class: Type, current_config: Any,
                  on_save_callback: Optional[Callable] = None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,
@@ -71,18 +72,28 @@ class ConfigWindow(QDialog):
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
 
+        # SIMPLIFIED: Use dual-axis resolution
+        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+
         # Determine placeholder prefix based on actual instance type (not class type)
-        from openhcs.core.config import LazyDefaultPlaceholderService
         is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(current_config))
         placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
-        # Always use ParameterFormManager with dataclass editing mode - unified approach
+        # SIMPLIFIED: Use ParameterFormManager with dual-axis resolution
+        root_field_id = type(current_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
+        global_config_type = GlobalPipelineConfig  # Always use GlobalPipelineConfig for dual-axis resolution
+
+        # Get context event coordinator from orchestrator if available
+        context_event_coordinator = getattr(orchestrator, '_context_event_coordinator', None) if orchestrator else None
+
         self.form_manager = ParameterFormManager.from_dataclass_instance(
             dataclass_instance=current_config,
-            field_id="config",
+            field_id=root_field_id,
             placeholder_prefix=placeholder_prefix,
             color_scheme=self.color_scheme,
-            use_scroll_area=True
+            use_scroll_area=True,
+            global_config_type=global_config_type,
+            context_event_coordinator=context_event_coordinator  # RESTORED: Enable real-time updates
         )
 
         # No config_editor needed - everything goes through form_manager
@@ -260,21 +271,30 @@ class ConfigWindow(QDialog):
             new_config: New configuration instance to display
         """
         try:
+            # Import required services
+            from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+
             # Update the current config
             self.current_config = new_config
 
             # Determine placeholder prefix based on actual instance type (same logic as __init__)
-            from openhcs.core.config import LazyDefaultPlaceholderService
             is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(new_config))
             placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
 
-            # Create new form manager with the new config
+            # SIMPLIFIED: Create new form manager with dual-axis resolution
+            root_field_id = type(new_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
+
+            # Get context event coordinator from orchestrator if available
+            context_event_coordinator = getattr(self.orchestrator, '_context_event_coordinator', None) if self.orchestrator else None
+
             new_form_manager = ParameterFormManager.from_dataclass_instance(
                 dataclass_instance=new_config,
-                field_id="config",
+                field_id=root_field_id,
                 placeholder_prefix=placeholder_prefix,
                 color_scheme=self.color_scheme,
-                use_scroll_area=True
+                use_scroll_area=True,
+                global_config_type=GlobalPipelineConfig,  # FIXED: Always use GlobalPipelineConfig for dual-axis resolution
+                context_event_coordinator=context_event_coordinator  # RESTORED: Enable real-time updates
             )
 
             # Find and replace the form widget in the layout
@@ -325,9 +345,18 @@ class ConfigWindow(QDialog):
     def save_config(self):
         """Save the configuration preserving lazy behavior for unset fields."""
         try:
-            # ConfigWindow owns dataclass reconstruction - proper separation of concerns
-            current_values = self.form_manager.get_current_values()
-            new_config = self.config_class(**current_values)
+            if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
+                # BETTER APPROACH: For lazy dataclasses, only save user-modified values
+                # Get only values that were explicitly set by the user (non-None raw values)
+                user_modified_values = self.form_manager.get_user_modified_values()
+
+                # Create fresh lazy instance with only user-modified values
+                # This preserves lazy resolution for unmodified fields
+                new_config = self.config_class(**user_modified_values)
+            else:
+                # For non-lazy dataclasses, use all current values
+                current_values = self.form_manager.get_current_values()
+                new_config = self.config_class(**current_values)
 
             # Emit signal and call callback
             self.config_saved.emit(new_config)

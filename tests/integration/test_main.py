@@ -18,9 +18,9 @@ from openhcs.constants.constants import VariableComponents
 from openhcs.constants.input_source import InputSource
 from openhcs.core.config import (
     GlobalPipelineConfig, MaterializationBackend,
-    PathPlanningConfig, VFSConfig, ZarrConfig
+    PathPlanningConfig, StepWellFilterConfig, VFSConfig, ZarrConfig
 )
-from openhcs.core.lazy_config import LazyStepMaterializationConfig
+from openhcs.core.lazy_config import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.pipeline import Pipeline
@@ -40,6 +40,9 @@ from tests.integration.helpers.fixture_utils import (
     microscope_config, plate_dir, test_params, print_thread_activity_report
 )
 
+from openhcs.core.lazy_config import ensure_global_config_context
+from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+
 
 @dataclass(frozen=True)
 class TestConstants:
@@ -57,6 +60,9 @@ class TestConstants:
     DEFAULT_SUB_DIR: str = "images"
     OUTPUT_SUFFIX: str = "_outputs"
     ZARR_STORE_NAME: str = "images.zarr"
+    STEP_WELL_FILTER_TEST: int = 2
+    PIPELINE_STEP_WELL_FILTER_TEST: int = None
+    GLOBAL_STEP_WELL_FILTER_TEST: int = 3
 
     # Metadata validation
     METADATA_FILENAME: str = "openhcs_metadata.json"
@@ -109,12 +115,14 @@ def create_test_pipeline() -> Pipeline:
                 name="Z-Stack Flattening",
                 func=(create_projection, {'method': 'max_projection'}),
                 variable_components=[VariableComponents.Z_INDEX],
-                materialization_config=LazyStepMaterializationConfig()
+                step_materialization_config=LazyStepMaterializationConfig()
             ),
             Step(
                 name="Image Enhancement Processing",
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
-                materialization_config=LazyStepMaterializationConfig()
+                step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
+                step_materialization_config=LazyStepMaterializationConfig(),
+                napari_streaming_config=LazyNapariStreamingConfig(well_filter=2)  # Enable napari streaming for this step
             ),
             Step(name="Position Computation", func=position_func),
             Step(
@@ -199,16 +207,17 @@ def _create_pipeline_config(test_config: TestConfig) -> GlobalPipelineConfig:
     """Create pipeline configuration for test execution."""
     return GlobalPipelineConfig(
         num_workers=CONSTANTS.DEFAULT_WORKERS,
-        path_planning=PathPlanningConfig(
+        path_planning_config=PathPlanningConfig(
             sub_dir=CONSTANTS.DEFAULT_SUB_DIR,
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
-        vfs=VFSConfig(materialization_backend=MaterializationBackend(test_config.backend_config)),
-        zarr=ZarrConfig(
+        vfs_config=VFSConfig(materialization_backend=MaterializationBackend(test_config.backend_config)),
+        zarr_config=ZarrConfig(
             store_name=CONSTANTS.ZARR_STORE_NAME,
             ome_zarr_metadata=True,
             write_plate_metadata=True
         ),
+        step_well_filter_config=StepWellFilterConfig(well_filter=CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST),
         use_threading=test_config.use_threading
     )
 
@@ -219,14 +228,21 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
     reset_memory_backend()
 
     setup_global_gpu_registry()
-    config = _create_pipeline_config(test_config)
+    global_config = _create_pipeline_config(test_config)
 
-    # Set up global context for orchestrator
-    from openhcs.core.lazy_config import ensure_global_config_context
-    from openhcs.core.config import GlobalPipelineConfig
-    ensure_global_config_context(GlobalPipelineConfig, config)
+    # Set up global context for orchestrator - legitimate test setup
+    ensure_global_config_context(GlobalPipelineConfig, global_config)
 
-    orchestrator = PipelineOrchestrator(test_config.plate_dir)
+    # Create PipelineConfig with lazy configs for proper hierarchical inheritance
+    pipeline_config = PipelineConfig(
+        path_planning_config=LazyPathPlanningConfig(
+            output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
+        ),
+        #step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+        #step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+    )
+
+    orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
     orchestrator.initialize()
     return orchestrator
 
@@ -276,6 +292,15 @@ def test_main(plate_dir: Union[Path, str], backend_config: str, data_type_config
 
     orchestrator = _initialize_orchestrator(test_config)
     pipeline = create_test_pipeline()
+
+    # Test orchestrator's pipeline config has the correct values
+    # The dual-axis resolver will use these values during pipeline execution
+    orchestrator_step_config = orchestrator.pipeline_config.step_well_filter_config
+#    if CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST == None:
+#        print(f"StepWellFilterConfig.well_filter in PipelineConfig not set, should be resolved from GlobalPipelineConfig")
+#        assert orchestrator_step_config.well_filter == CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST, f"Expected orchestrator's step_well_filter_config.well_filter={CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST}, got {orchestrator_step_config.well_filter}"
+#    assert orchestrator_step_config.well_filter == CONSTANTS.STEP_WELL_FILTER_TEST, f"Expected orchestrator's step_well_filter_config.well_filter={CONSTANTS.STEP_WELL_FILTER_TEST}, got {orchestrator_step_config.well_filter}"
+#    print(f"✅ Orchestrator config test passed: step_well_filter_config.well_filter = {orchestrator_step_config.well_filter}")
 
     results = _execute_pipeline_phases(orchestrator, pipeline)
     validate_separate_materialization(test_config.plate_dir)

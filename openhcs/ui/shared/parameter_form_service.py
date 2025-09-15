@@ -10,7 +10,8 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Dict, Any, Type, Optional, List, Tuple
 
-from openhcs.core.config import LazyDefaultPlaceholderService
+from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+from openhcs.core.field_path_detection import FieldPathDetector
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 from openhcs.ui.shared.ui_utils import debug_param, format_field_id, format_param_name, format_reset_button_id
@@ -109,7 +110,16 @@ class ParameterFormService:
             
             # Check for nested dataclasses
             if param_info.is_nested:
-                nested_field_id = f"nested_{format_field_id(field_id, param_name)}"
+                # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
+                # Unwrap Optional types to get the actual dataclass type for field path detection
+                unwrapped_param_type = self._type_utils.get_optional_inner_type(param_type) if self._type_utils.is_optional_dataclass(param_type) else param_type
+
+                # For function parameters (no parent dataclass), use parameter name directly
+                if parent_dataclass_type is None:
+                    nested_field_id = param_name
+                else:
+                    nested_field_id = self.get_field_path_with_fail_loud(parent_dataclass_type, unwrapped_param_type)
+
                 nested_structure = self._analyze_nested_dataclass(
                     param_name, param_type, current_value, nested_field_id, parent_dataclass_type
                 )
@@ -218,26 +228,44 @@ class ParameterFormService:
             'tooltip': f"{format_param_name(param_name)} ({param_type.__name__ if hasattr(param_type, '__name__') else str(param_type)})"
         }
     
-    def generate_field_ids(self, base_field_id: str, param_name: str) -> Dict[str, str]:
-        """
-        Generate all field IDs for a parameter.
-        
-        Args:
-            base_field_id: The base field ID
-            param_name: The parameter name
-            
-        Returns:
-            Dictionary with all generated field IDs
-        """
-        widget_id = format_field_id(base_field_id, param_name)
+    def format_widget_name(self, field_path: str, param_name: str) -> str:
+        """Convert field path to widget name - replaces generate_field_ids() complexity"""
+        return f"{field_path}_{param_name}"
 
+    def get_field_path_with_fail_loud(self, parent_type: Type, param_type: Type) -> str:
+        """Get field path using FieldPathDetector with fail-loud behavior."""
+        field_path = FieldPathDetector.find_field_path_for_type(parent_type, param_type)
+        if not field_path:
+            raise ValueError(f"FieldPathDetector could not find field path for type {param_type} in {parent_type}. "
+                            f"This indicates the dataclass is not properly registered or the type is incorrect.")
+        return field_path
+
+    def generate_field_ids_direct(self, base_field_id: str, param_name: str) -> Dict[str, str]:
+        """Generate field IDs directly without artificial complexity."""
+        widget_id = f"{base_field_id}_{param_name}"
         return {
             'widget_id': widget_id,
-            'reset_button_id': format_reset_button_id(widget_id),
-            'optional_checkbox_id': f"{base_field_id}_{param_name}_enabled",
-            'nested_field_id': f"nested_{base_field_id}_{param_name}",
-            'nested_static_id': f"nested_static_{param_name}"
+            'reset_button_id': f"reset_{widget_id}",
+            'optional_checkbox_id': f"{base_field_id}_{param_name}_enabled"
         }
+
+    def validate_field_path_mapping(self):
+        """Ensure all form field_ids map correctly to context fields"""
+        from openhcs.core.config import GlobalPipelineConfig
+        import dataclasses
+
+        # Get all dataclass fields from GlobalPipelineConfig
+        context_fields = {f.name for f in dataclasses.fields(GlobalPipelineConfig)
+                         if dataclasses.is_dataclass(f.type)}
+
+        print("Context fields:", context_fields)
+        # Should include: well_filter_config, zarr_config, step_materialization_config, etc.
+
+        # Verify form managers use these exact field names (no "nested_" prefix)
+        assert "well_filter_config" in context_fields
+        assert "nested_well_filter_config" not in context_fields  # Should not exist
+
+        return True
     
     def should_use_concrete_values(self, current_value: Any, is_global_editing: bool = False) -> bool:
         """
@@ -417,20 +445,43 @@ class ParameterFormService:
 
     def _get_actual_dataclass_field_default(self, param_name: str, dataclass_type: Type) -> Any:
         """
-        Get the actual default value for a dataclass field by creating a default instance.
+        Get the actual default value for a dataclass field.
 
-        This ensures we get the real defaults (like num_workers=16) instead of hardcoded primitives.
+        Handles both direct assignment and field(default_factory=...) cases:
+        - Direct assignment: num_workers: int = 1 → return class attribute
+        - field(default_factory): use_threading: bool = field(default_factory=lambda: ...) → call default_factory
+
+        Returns:
+        - If class attribute is None → return None (show placeholder)
+        - If class attribute has concrete value → return that value
+        - If field(default_factory) → call default_factory and return result
 
         Raises:
-            ValueError: If dataclass creation fails or field doesn't exist
+            ValueError: If field doesn't exist
         """
-        try:
-            # Create a default instance of the dataclass to get actual field defaults
-            default_instance = dataclass_type()
-            if not hasattr(default_instance, param_name):
-                raise ValueError(f"Field '{param_name}' not found in dataclass {dataclass_type.__name__}")
-            return getattr(default_instance, param_name)
-        except Exception as e:
-            raise ValueError(
-                f"Failed to get default value for field '{param_name}' in dataclass {dataclass_type.__name__}: {e}"
-            ) from e
+        from dataclasses import fields, MISSING
+
+        # First check if it's a direct class attribute (most common case)
+        if hasattr(dataclass_type, param_name):
+            return getattr(dataclass_type, param_name)
+
+        # If not a class attribute, check if it's a field(default_factory=...) field
+        dataclass_fields = {f.name: f for f in fields(dataclass_type)}
+        if param_name not in dataclass_fields:
+            raise ValueError(f"Field '{param_name}' not found in dataclass {dataclass_type.__name__}")
+
+        field_info = dataclass_fields[param_name]
+
+        # Handle field(default_factory=...) case
+        if field_info.default_factory is not MISSING:
+            try:
+                return field_info.default_factory()
+            except Exception as e:
+                raise ValueError(f"Failed to call default_factory for field '{param_name}': {e}") from e
+
+        # Handle field with explicit default
+        if field_info.default is not MISSING:
+            return field_info.default
+
+        # Field has no default (should not happen in practice)
+        raise ValueError(f"Field '{param_name}' has no default value or default_factory")

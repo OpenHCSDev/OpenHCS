@@ -21,7 +21,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
 from PyQt6.QtGui import QFont, QDrag
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-from openhcs.core.config import GlobalPipelineConfig, set_current_global_config, get_current_global_config
+from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
 from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.pyqt_gui.widgets.mixins import (
@@ -534,9 +535,10 @@ class PipelineEditorWidget(QWidget):
                 self.service_adapter.show_error_dialog("Invalid code format received from editor")
                 return
 
-            # Execute the code (it has all necessary imports)
+            # CRITICAL FIX: Execute code with lazy dataclass constructor patching to preserve None vs concrete distinction
             namespace = {}
-            exec(edited_code, namespace)
+            with self._patch_lazy_constructors():
+                exec(edited_code, namespace)
 
             # Get the pipeline_steps from the namespace
             if 'pipeline_steps' in namespace:
@@ -554,7 +556,55 @@ class PipelineEditorWidget(QWidget):
         except Exception as e:
             logger.error(f"Failed to parse edited pipeline code: {e}")
             self.service_adapter.show_error_dialog(f"Failed to parse pipeline code: {str(e)}")
-    
+
+    def _patch_lazy_constructors(self):
+        """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
+        from contextlib import contextmanager
+        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+        import dataclasses
+
+        @contextmanager
+        def patch_context():
+            # Store original constructors
+            original_constructors = {}
+
+            # Find all lazy dataclass types that need patching
+            from openhcs.core.config import LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig
+            lazy_types = [LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig]
+
+            # Add any other lazy types that might be used
+            for lazy_type in lazy_types:
+                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
+                    # Store original constructor
+                    original_constructors[lazy_type] = lazy_type.__init__
+
+                    # Create patched constructor that uses raw values
+                    def create_patched_init(original_init, dataclass_type):
+                        def patched_init(self, **kwargs):
+                            # Use raw value approach instead of calling original constructor
+                            # This prevents lazy resolution during code execution
+                            for field in dataclasses.fields(dataclass_type):
+                                value = kwargs.get(field.name, None)
+                                object.__setattr__(self, field.name, value)
+
+                            # Initialize any required lazy dataclass attributes
+                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
+                                object.__setattr__(self, '_is_lazy_dataclass', True)
+
+                        return patched_init
+
+                    # Apply the patch
+                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
+
+            try:
+                yield
+            finally:
+                # Restore original constructors
+                for lazy_type, original_init in original_constructors.items():
+                    lazy_type.__init__ = original_init
+
+        return patch_context()
+
     def load_pipeline_from_file(self, file_path: Path):
         """
         Load pipeline from file with automatic migration for backward compatibility.

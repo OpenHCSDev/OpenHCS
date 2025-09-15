@@ -32,7 +32,7 @@ from openhcs.core.memory.gpu_utils import (check_cupy_gpu_available,
                                                check_tf_gpu_available,
                                                check_torch_gpu_available)
 # Import necessary config classes
-from openhcs.core.config import GlobalPipelineConfig, get_default_global_config
+from openhcs.core.config import GlobalPipelineConfig
 
 
 logger = logging.getLogger(__name__) # Ensure logger is consistently named if used across module
@@ -223,7 +223,7 @@ def setup_global_gpu_registry(global_config: Optional[GlobalPipelineConfig] = No
     config_to_use: GlobalPipelineConfig
     if global_config is None:
         logger.info("No global_config provided to setup_global_gpu_registry, using default configuration.")
-        config_to_use = get_default_global_config()
+        config_to_use = GlobalPipelineConfig()
     else:
         config_to_use = global_config
     

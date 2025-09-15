@@ -304,8 +304,8 @@ class PyQtServiceAdapter:
             return self.app.global_config
         else:
             # Fallback to default config
-            from openhcs.core.config import get_default_global_config
-            return get_default_global_config()
+            
+            return GlobalPipelineConfig()
     
     def set_global_config(self, config):
         """

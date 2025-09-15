@@ -258,7 +258,7 @@ def get_default_pyqt_gui_config() -> PyQtGUIConfig:
     Provides a default instance of PyQtGUIConfig.
     
     This function provides sensible defaults for the PyQt GUI application,
-    following the same pattern as get_default_global_config().
+    following the same pattern as GlobalPipelineConfig().
     
     Returns:
         PyQtGUIConfig: Default configuration instance

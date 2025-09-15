@@ -14,8 +14,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional, Union, Dict, Any, List, Type
 from enum import Enum
+from abc import ABC, abstractmethod
 from openhcs.constants import Microscope
 from openhcs.constants.constants import Backend
+
+# Import decorator for automatic decorator creation
+from openhcs.core.lazy_config import auto_create_decorator
 
 # Import TilingLayout for TUI configuration
 try:
@@ -72,6 +76,7 @@ class ZarrChunkStrategy(Enum):
 
 class MaterializationBackend(Enum):
     """Available backends for materialization (persistent storage only)."""
+    AUTO = "auto"
     ZARR = "zarr"
     DISK = "disk"
 
@@ -81,16 +86,71 @@ class WellFilterMode(Enum):
     INCLUDE = "include"  # Materialize only specified wells
     EXCLUDE = "exclude"  # Materialize all wells except specified ones
 
+@auto_create_decorator
+@dataclass(frozen=True)
+class GlobalPipelineConfig:
+    """
+    Root configuration object for an OpenHCS pipeline session.
+    This object is intended to be instantiated at application startup and treated as immutable.
+    """
+    num_workers: int = 1
+    """Number of worker processes/threads for parallelizable tasks."""
+
+    test_str_field: str = "test"
+
+    materialization_results_path: Path = Path("results")
+    """
+    Path for materialized analysis results (CSV, JSON files from special outputs).
+
+    This is a pipeline-wide setting that controls where all special output materialization
+    functions save their analysis results, regardless of which step produces them.
+
+    Can be relative to plate folder or absolute path.
+    Default: "results" creates a results/ folder in the plate directory.
+    Examples: "results", "./analysis", "/data/analysis_results", "../shared_results"
+
+    Note: This is separate from per-step image materialization, which is controlled
+    by the sub_dir field in each step's step_materialization_config.
+    """
+
+    microscope: Microscope = Microscope.AUTO
+    """Default microscope type for auto-detection."""
+
+    #use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true')
+    use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true')
+    """Use ThreadPoolExecutor instead of ProcessPoolExecutor for debugging. Reads from OPENHCS_USE_THREADING environment variable."""
+
+    # Future extension point:
+    # logging_config: Optional[Dict[str, Any]] = None # For configuring logging levels, handlers
+    # plugin_settings: Dict[str, Any] = field(default_factory=dict) # For plugin-specific settings
+
+
+# PipelineConfig will be created automatically by the injection system
+# (GlobalPipelineConfig → PipelineConfig by removing "Global" prefix)
+
+
+@global_pipeline_config
+@dataclass(frozen=True)
+class WellFilterConfig:
+    """Base configuration for well filtering functionality."""
+    well_filter: Optional[Union[List[str], str, int]] = None
+    """Well filter specification: list of wells, pattern string, or max count integer. None means all wells."""
+
+    well_filter_mode: WellFilterMode = WellFilterMode.INCLUDE
+    """Whether well_filter is an include list or exclude list."""
+
+
+@global_pipeline_config
 @dataclass(frozen=True)
 class ZarrConfig:
     """Configuration for Zarr storage backend."""
     store_name: str = "images"
     """Name of the zarr store directory."""
 
-    compressor: ZarrCompressor = ZarrCompressor.LZ4
+    compressor: ZarrCompressor = ZarrCompressor.ZLIB
     """Compression algorithm to use."""
 
-    compression_level: int = 9
+    compression_level: int = 3
     """Compression level (1-9 for LZ4, higher = more compression)."""
 
     shuffle: bool = True
@@ -106,15 +166,21 @@ class ZarrConfig:
     """Write plate-level metadata for HCS viewing (required for OME-ZARR viewers like napari)."""
 
 
+@global_pipeline_config
 @dataclass(frozen=True)
 class VFSConfig:
     """Configuration for Virtual File System (VFS) related operations."""
+    read_backend: Backend = Backend.AUTO
+    """Backend for reading input data. AUTO uses metadata-based detection for OpenHCS plates."""
+
     intermediate_backend: Backend = Backend.MEMORY
     """Backend for storing intermediate step results that are not explicitly materialized."""
 
     materialization_backend: MaterializationBackend = MaterializationBackend.DISK
     """Backend for explicitly materialized outputs (e.g., final results, user-requested saves)."""
 
+
+@global_pipeline_config
 @dataclass(frozen=True)
 class AnalysisConsolidationConfig:
     """Configuration for automatic analysis results consolidation."""
@@ -137,6 +203,7 @@ class AnalysisConsolidationConfig:
     """Name of the consolidated output file."""
 
 
+@global_pipeline_config
 @dataclass(frozen=True)
 class PlateMetadataConfig:
     """Configuration for plate metadata in MetaXpress-style output."""
@@ -159,6 +226,7 @@ class PlateMetadataConfig:
     """Z-step information for MetaXpress compatibility."""
 
 
+@global_pipeline_config
 @dataclass(frozen=True)
 class ExperimentalAnalysisConfig:
     """Configuration for experimental analysis system."""
@@ -190,16 +258,19 @@ class ExperimentalAnalysisConfig:
     """Default format to use if auto-detection fails."""
 
 
+@global_pipeline_config
 @dataclass(frozen=True)
-class PathPlanningConfig:
+class PathPlanningConfig(WellFilterConfig):
     """
     Configuration for pipeline path planning and directory structure.
 
     This class handles path construction concerns including plate root directories,
     output directory suffixes, and subdirectory organization. It does not handle
     analysis results location, which is controlled at the pipeline level.
+
+    Inherits well filtering functionality from WellFilterConfig.
     """
-    output_dir_suffix: str = "_outputs"
+    output_dir_suffix: str = "_openhcs"
     """Default suffix for general step output directories."""
 
     global_output_folder: Optional[Path] = None
@@ -214,13 +285,19 @@ class PathPlanningConfig:
     sub_dir: str = "images"
     """
     Subdirectory within plate folder for storing processed data.
-    Automatically adds .zarr suffix when using zarr backend.
     Examples: "images", "processed", "data/images"
     """
 
-
+@global_pipeline_config
 @dataclass(frozen=True)
-class StepMaterializationConfig(PathPlanningConfig):
+class StepWellFilterConfig(WellFilterConfig):
+    """Well filter configuration specialized for step-level configs with different defaults."""
+    # Override defaults for step-level configurations
+    well_filter: Optional[Union[List[str], str, int]] = 1
+
+@global_pipeline_config
+@dataclass(frozen=True)
+class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     """
     Configuration for per-step materialization - configurable in UI.
 
@@ -228,329 +305,128 @@ class StepMaterializationConfig(PathPlanningConfig):
     to set pipeline-level defaults for step materialization behavior. All step
     materialization instances will inherit these defaults unless explicitly overridden.
 
-    Inherits from PathPlanningConfig to ensure all required path planning fields
-    (like global_output_folder) are available for the lazy loading system.
-
-    Well Filtering Options:
-    - well_filter=1 materializes first well only (enables quick checkpointing)
-    - well_filter=None materializes all wells
-    - well_filter=["A01", "B03"] materializes only specified wells
-    - well_filter="A01:A12" materializes well range
-    - well_filter=5 materializes first 5 wells processed
-    - well_filter_mode controls include/exclude behavior
+    Uses multiple inheritance from PathPlanningConfig and StepWellFilterConfig.
     """
 
-    # Well filtering defaults
-    well_filter: Optional[Union[List[str], str, int]] = 1
+    #Override sub_dir for materialization-specific default
+    sub_dir: str = "checkpoints"
+    """Subdirectory for materialized outputs (different from global 'images')."""
+
+
+@global_pipeline_config
+@dataclass(frozen=True)
+class FunctionRegistryConfig:
+    """Configuration for function registry behavior across all libraries."""
+    enable_scalar_functions: bool = True
     """
-    Well filtering for selective step materialization:
-    - 1: Materialize first well only (default - enables quick checkpointing)
-    - None: Materialize all wells
-    - List[str]: Specific well IDs ["A01", "B03", "D12"]
-    - str: Pattern/range "A01:A12", "row:A", "col:01-06"
-    - int: Maximum number of wells (first N processed)
-    """
-
-    well_filter_mode: WellFilterMode = WellFilterMode.INCLUDE
-    """
-    Well filtering mode for step materialization:
-    - INCLUDE: Materialize only wells matching the filter
-    - EXCLUDE: Materialize all wells except those matching the filter
-    """
-
-    # Override PathPlanningConfig defaults to enable sibling inheritance
-    output_dir_suffix: Optional[str] = None
-    """Override to None - inherits from sibling path_planning.output_dir_suffix when None."""
-
-    global_output_folder: Optional[Path] = None
-    """Override to None - inherits from sibling path_planning.global_output_folder when None."""
-
-    sub_dir: str = "checkpoints"  # vs global "images" - own field, no inheritance
-
-
-
-
-# Generic thread-local storage for any global config type
-_global_config_contexts: Dict[Type, threading.local] = {}
-
-def set_current_global_config(config_type: Type, config_instance: Any) -> None:
-    """Set current global config for any dataclass type."""
-    if config_type not in _global_config_contexts:
-        _global_config_contexts[config_type] = threading.local()
-    _global_config_contexts[config_type].value = config_instance
-
-def get_current_global_config(config_type: Type) -> Optional[Any]:
-    """Get current global config for any dataclass type."""
-    context = _global_config_contexts.get(config_type)
-    return getattr(context, 'value', None) if context else None
-
-
-def require_config_context(func):
-    """Decorator to ensure config context is available for UI operations."""
-    import functools
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        current_context = get_current_global_config(GlobalPipelineConfig)
-        if current_context is None:
-            raise RuntimeError(
-                f"{func.__name__} requires active configuration context. "
-                f"Use orchestrator.config_context() or ensure global config is set."
-            )
-        return func(*args, **kwargs)
-    return wrapper
-
-
-def is_field_sibling_inheritable(dataclass_type: Type, field_name: str) -> bool:
-    """
-    Check if a field supports sibling inheritance based on dataclass inheritance.
-
-    A field is sibling-inheritable if:
-    1. The dataclass inherits from another dataclass
-    2. The parent dataclass has the same field name
-    3. This enables automatic sibling inheritance without metadata
-
-    Args:
-        dataclass_type: The dataclass type to check
-        field_name: The field name to check
-
-    Returns:
-        True if the field supports sibling inheritance
-    """
-    if not dataclasses.is_dataclass(dataclass_type):
-        return False
-
-    try:
-        # Check if this dataclass inherits from another dataclass
-        for base_class in dataclass_type.__bases__:
-            if dataclasses.is_dataclass(base_class):
-                # Check if the parent has the same field
-                parent_fields = {f.name for f in dataclasses.fields(base_class)}
-                if field_name in parent_fields:
-                    return True
-        return False
-    except (AttributeError, TypeError):
-        return False
-
-
-def resolve_dataclass_with_sibling_inheritance(instance: Any, sibling_source: Any) -> Any:
-    """
-    Generic utility to resolve any dataclass with automatic sibling inheritance.
-
-    For any dataclass that inherits from another dataclass, this function
-    automatically resolves None fields by inheriting from the sibling source.
-
-    Args:
-        instance: The dataclass instance to resolve
-        sibling_source: The sibling object to inherit from
-
-    Returns:
-        New dataclass instance with sibling inheritance resolved
-
-    Example:
-        # StepMaterializationConfig inherits from PathPlanningConfig
-        resolved = resolve_dataclass_with_sibling_inheritance(
-            materialization_config, path_planning_config
-        )
-    """
-    if not dataclasses.is_dataclass(instance):
-        return instance
-
-    if sibling_source is None:
-        return instance
-
-    # Get all fields and resolve them
-    resolved_values = {}
-    for field in dataclasses.fields(instance):
-        field_name = field.name
-        current_value = getattr(instance, field_name, None)
-
-        # Only inherit if field is None and field supports inheritance
-        if current_value is None and is_field_sibling_inheritable(type(instance), field_name):
-            resolved_value = getattr(sibling_source, field_name, None)
-            resolved_values[field_name] = resolved_value
-        else:
-            resolved_values[field_name] = current_value
-
-    # Create new instance with resolved values
-    return type(instance)(**resolved_values)
-
-
-# Type registry for lazy dataclass to base class mapping
-_lazy_type_registry: Dict[Type, Type] = {}
-
-def register_lazy_type_mapping(lazy_type: Type, base_type: Type) -> None:
-    """Register mapping between lazy dataclass type and its base type."""
-    _lazy_type_registry[lazy_type] = base_type
-
-def get_base_type_for_lazy(lazy_type: Type) -> Optional[Type]:
-    """Get the base type for a lazy dataclass type."""
-    return _lazy_type_registry.get(lazy_type)
-
-
-class LazyDefaultPlaceholderService:
-    """
-    Enhanced service supporting factory-created lazy classes with flexible resolution.
-
-    Provides consistent placeholder pattern for both static and dynamic lazy configuration classes.
+    Whether to register functions that return scalars.
+    When True: Scalar-returning functions are wrapped as (array, scalar) tuples.
+    When False: Scalar-returning functions are filtered out entirely.
+    Applies uniformly to all libraries (CuPy, scikit-image, pyclesperanto).
     """
 
-    # Configurable placeholder prefix - default for when no prefix is explicitly provided
-    PLACEHOLDER_PREFIX = "Default"
 
-    @staticmethod
-    def has_lazy_resolution(dataclass_type: type) -> bool:
-        """Check if dataclass has lazy resolution methods (created by factory)."""
-        # Handle Optional[LazyDataclass] types by unwrapping them first
-        from typing import get_origin, get_args, Union
+@global_pipeline_config
+@dataclass(frozen=True)
+class VisualizerConfig:
+    """Configuration for shared visualization system settings."""
+    temp_directory: Optional[Path] = None
+    """Directory for temporary visualization files. If None, will auto-create in system temp."""
 
-        # Unwrap Optional types (Union[Type, None])
-        if get_origin(dataclass_type) is Union:
-            args = get_args(dataclass_type)
-            if len(args) == 2 and type(None) in args:
-                # Get the non-None type from Optional[Type]
-                dataclass_type = next(arg for arg in args if arg is not type(None))
+@global_pipeline_config
+@dataclass(frozen=True)
+class StreamingDefaults:
+    """Default configuration for streaming to visualizers."""
+    persistent: bool = True
+    """Whether viewer stays open after pipeline completion."""
 
-        return (hasattr(dataclass_type, '_resolve_field_value') and
-                hasattr(dataclass_type, 'to_base_config'))
+@global_pipeline_config(ui_hidden=True)
+@dataclass(frozen=True)
+class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
+    """Abstract base configuration for streaming to visualizers.
 
-    NONE_VALUE_TEXT = "(none)"
+    Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
+    Inherited fields are automatically set to None by @global_pipeline_config(inherit_as_none=True).
+    """
 
-    @staticmethod
-    def get_lazy_resolved_placeholder(
-        dataclass_type: type,
-        field_name: str,
-        app_config: Optional[Any] = None,
-        force_static_defaults: bool = False,
-        placeholder_prefix: Optional[str] = None
-    ) -> Optional[str]:
-        """Get placeholder text for lazy-resolved field with flexible resolution."""
-        if not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type):
-            return None
+    @property
+    @abstractmethod
+    def backend(self) -> Backend:
+        """Backend enum for this streaming type."""
+        pass
 
-        prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
+    @property
+    @abstractmethod
+    def step_plan_output_key(self) -> str:
+        """Key to use in step_plan for this config's output paths."""
+        pass
 
-        # Resolve field value based on strategy
-        if force_static_defaults:
-            base_class = (LazyDefaultPlaceholderService._get_base_class_from_lazy(dataclass_type)
-                         if hasattr(dataclass_type, 'to_base_config') else dataclass_type)
-            resolved_value = getattr(base_class(), field_name)
-        elif app_config:
-            from openhcs.core.lazy_config import LazyDataclassFactory
-            dynamic_class = LazyDataclassFactory.create_lazy_dataclass(
-                defaults_source=app_config, lazy_class_name=f"Dynamic{dataclass_type.__name__}")
-            resolved_value = getattr(dynamic_class(), field_name)
-        else:
-            # Context resolution with isolation fix for top-level fields
-            current_context = get_current_global_config(GlobalPipelineConfig)
-            if (hasattr(dataclass_type, '_resolve_field_value') and current_context and
-                hasattr(current_context, field_name)):
-                set_current_global_config(GlobalPipelineConfig, None)
-                try:
-                    resolved_value = dataclass_type()._resolve_field_value(field_name)
-                finally:
-                    set_current_global_config(GlobalPipelineConfig, current_context)
-            else:
-                instance = dataclass_type()
-                resolved_value = (instance._resolve_field_value(field_name)
-                                if hasattr(instance, '_resolve_field_value') else getattr(instance, field_name))
+    @abstractmethod
+    def get_streaming_kwargs(self, global_config) -> dict:
+        """Return kwargs needed for this streaming backend."""
+        pass
 
-        # Format output
-        if resolved_value is None:
-            value_text = LazyDefaultPlaceholderService.NONE_VALUE_TEXT
-        elif hasattr(resolved_value, '__dataclass_fields__'):
-            if LazyDefaultPlaceholderService.has_lazy_resolution(type(resolved_value)):
-                return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    type(resolved_value), field_name, app_config, force_static_defaults, prefix)
-            else:
-                value_text = LazyDefaultPlaceholderService._format_nested_dataclass_summary(resolved_value)
-        else:
-            value_text = str(resolved_value)
+    @abstractmethod
+    def create_visualizer(self, filemanager, visualizer_config):
+        """Create and return the appropriate visualizer for this streaming config."""
+        pass
 
-        # Apply prefix formatting
-        if not prefix:
-            return value_text
-        elif prefix.endswith(': '):
-            return f"{prefix}{value_text}"
-        elif prefix.endswith(':'):
-            return f"{prefix} {value_text}"
-        else:
-            return f"{prefix}: {value_text}"
 
-    @staticmethod
-    def _get_base_class_from_lazy(lazy_class: Type) -> Type:
-        """
-        Extract the base class from a lazy dataclass using type registry.
-        """
-        # First check the type registry
-        base_type = get_base_type_for_lazy(lazy_class)
-        if base_type:
-            return base_type
+@global_pipeline_config
+@dataclass(frozen=True)
+class NapariStreamingConfig(StreamingConfig):
+    """Configuration for napari streaming."""
+    napari_port: int = 5555
+    """Port for napari streaming communication."""
 
-        # Check if the lazy class has a to_base_config method
-        if hasattr(lazy_class, 'to_base_config'):
-            # Create a dummy instance to inspect the to_base_config method
-            dummy_instance = lazy_class()
-            base_instance = dummy_instance.to_base_config()
-            return type(base_instance)
+    @property
+    def backend(self) -> Backend:
+        return Backend.NAPARI_STREAM
 
-        # If no mapping found, raise an error - this indicates missing registration
-        raise ValueError(
-            f"No base type registered for lazy class {lazy_class.__name__}. "
-            f"Use register_lazy_type_mapping() to register the mapping."
+    @property
+    def step_plan_output_key(self) -> str:
+        return "napari_streaming_paths"
+
+    def get_streaming_kwargs(self, global_config) -> dict:
+        return {"napari_port": self.napari_port}
+
+    def create_visualizer(self, filemanager, visualizer_config):
+        from openhcs.runtime.napari_stream_visualizer import NapariStreamVisualizer
+        return NapariStreamVisualizer(
+            filemanager,
+            visualizer_config,
+            viewer_title="OpenHCS Pipeline Visualization",
+            persistent=self.persistent,
+            napari_port=self.napari_port
         )
 
-    @staticmethod
-    def _format_nested_dataclass_summary(dataclass_instance) -> str:
-        """
-        Format nested dataclass with all field values for user-friendly placeholders.
 
-        Uses generic dataclass introspection to show all fields with their current values,
-        providing a complete and maintainable summary without hardcoded field mappings.
-        """
-        import dataclasses
+@global_pipeline_config
+@dataclass(frozen=True)
+class FijiStreamingConfig(StreamingConfig):
+    """Configuration for fiji streaming."""
+    fiji_executable_path: Optional[Path] = None
+    """Path to Fiji/ImageJ executable. If None, will auto-detect."""
 
-        class_name = dataclass_instance.__class__.__name__
+    @property
+    def backend(self) -> Backend:
+        return Backend.FIJI_STREAM
 
-        # Get all fields from the dataclass using introspection
-        all_fields = [f.name for f in dataclasses.fields(dataclass_instance)]
+    @property
+    def step_plan_output_key(self) -> str:
+        return "fiji_streaming_paths"
 
-        # Extract all field values
-        field_summaries = []
-        for field_name in all_fields:
-            try:
-                value = getattr(dataclass_instance, field_name)
+    def get_streaming_kwargs(self, global_config) -> dict:
+        return {"fiji_executable_path": self.fiji_executable_path}
 
-                # Skip None values to keep summary concise
-                if value is None:
-                    continue
-
-                # Format different value types appropriately
-                if hasattr(value, 'value') and hasattr(value, 'name'):  # Enum
-                    from openhcs.ui.shared.ui_utils import format_enum_display
-                    formatted_value = format_enum_display(value)
-                elif isinstance(value, str) and len(value) > 20:  # Long strings
-                    formatted_value = f"{value[:17]}..."
-                elif dataclasses.is_dataclass(value):  # Nested dataclass
-                    formatted_value = f"{value.__class__.__name__}(...)"
-                else:
-                    formatted_value = str(value)
-
-                field_summaries.append(f"{field_name}={formatted_value}")
-
-            except (AttributeError, Exception):
-                # Skip fields that can't be accessed
-                continue
-
-        if field_summaries:
-            return ", ".join(field_summaries)
-        else:
-            # Fallback when no non-None fields are found
-            return f"{class_name} (default settings)"
-
-
-# LazyStepMaterializationConfig is imported from pipeline_config.py to avoid circular dependency
-
+    def create_visualizer(self, filemanager, visualizer_config):
+        from openhcs.runtime.fiji_stream_visualizer import FijiStreamVisualizer
+        return FijiStreamVisualizer(
+            filemanager,
+            viewer_title="OpenHCS Fiji Visualization",
+            visualizer_config=visualizer_config,
+            persistent=self.persistent
+        )
 
 @dataclass(frozen=True)
 class TilingKeybinding:
@@ -558,7 +434,6 @@ class TilingKeybinding:
     key: str
     action: str  # method name that already exists
     description: str
-
 
 @dataclass(frozen=True)
 class TilingKeybindings:
@@ -590,17 +465,6 @@ class TilingKeybindings:
     open_all: TilingKeybinding = TilingKeybinding("ctrl+shift+o", "open_all_windows", "Open All")
 
 
-@dataclass(frozen=True)
-class FunctionRegistryConfig:
-    """Configuration for function registry behavior across all libraries."""
-    enable_scalar_functions: bool = True
-    """
-    Whether to register functions that return scalars.
-    When True: Scalar-returning functions are wrapped as (array, scalar) tuples.
-    When False: Scalar-returning functions are filtered out entirely.
-    Applies uniformly to all libraries (CuPy, scikit-image, pyclesperanto).
-    """
-
 
 @dataclass(frozen=True)
 class TUIConfig:
@@ -618,112 +482,7 @@ class TUIConfig:
     """Declarative mapping of all tiling keybindings."""
 
 
-@dataclass(frozen=True)
-class GlobalPipelineConfig:
-    """
-    Root configuration object for an OpenHCS pipeline session.
-    This object is intended to be instantiated at application startup and treated as immutable.
-    """
-    num_workers: int = field(default_factory=lambda: os.cpu_count() or 1)
-    """Number of worker processes/threads for parallelizable tasks."""
+# Inject all accumulated fields at the end of module loading
+from openhcs.core.lazy_config import _inject_all_pending_fields
+_inject_all_pending_fields()
 
-    path_planning: PathPlanningConfig = field(default_factory=PathPlanningConfig)
-    """Configuration for path planning (directory suffixes)."""
-
-    vfs: VFSConfig = field(default_factory=VFSConfig)
-    """Configuration for Virtual File System behavior."""
-
-    zarr: ZarrConfig = field(default_factory=ZarrConfig)
-    """Configuration for Zarr storage backend."""
-
-    materialization_results_path: Path = Path("results")
-    """
-    Path for materialized analysis results (CSV, JSON files from special outputs).
-
-    This is a pipeline-wide setting that controls where all special output materialization
-    functions save their analysis results, regardless of which step produces them.
-
-    Can be relative to plate folder or absolute path.
-    Default: "results" creates a results/ folder in the plate directory.
-    Examples: "results", "./analysis", "/data/analysis_results", "../shared_results"
-
-    Note: This is separate from per-step image materialization, which is controlled
-    by the sub_dir field in each step's materialization_config.
-    """
-
-    analysis_consolidation: AnalysisConsolidationConfig = field(default_factory=AnalysisConsolidationConfig)
-    """Configuration for automatic analysis results consolidation."""
-
-    plate_metadata: PlateMetadataConfig = field(default_factory=PlateMetadataConfig)
-    """Configuration for plate metadata in consolidated outputs."""
-
-    experimental_analysis: ExperimentalAnalysisConfig = field(default_factory=ExperimentalAnalysisConfig)
-    """Configuration for experimental analysis system."""
-
-    function_registry: FunctionRegistryConfig = field(default_factory=FunctionRegistryConfig)
-    """Configuration for function registry behavior."""
-
-    materialization_defaults: StepMaterializationConfig = field(default_factory=StepMaterializationConfig)
-    """Default configuration for per-step materialization - configurable in UI."""
-
-    microscope: Microscope = Microscope.AUTO
-    """Default microscope type for auto-detection."""
-
-    use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true')
-    """Use ThreadPoolExecutor instead of ProcessPoolExecutor for debugging. Reads from OPENHCS_USE_THREADING environment variable."""
-
-    # Future extension point:
-    # logging_config: Optional[Dict[str, Any]] = None # For configuring logging levels, handlers
-    # plugin_settings: Dict[str, Any] = field(default_factory=dict) # For plugin-specific settings
-
-
-
-# --- Default Configuration Provider ---
-
-# Pre-instantiate default sub-configs for clarity if they have many fields or complex defaults.
-# For simple cases, direct instantiation in get_default_global_config is also fine.
-_DEFAULT_PATH_PLANNING_CONFIG = PathPlanningConfig()
-_DEFAULT_VFS_CONFIG = VFSConfig(
-    # Example: Set a default persistent_storage_root_path if desired for out-of-the-box behavior
-    # persistent_storage_root_path="./openhcs_output_data"
-)
-_DEFAULT_ZARR_CONFIG = ZarrConfig()
-_DEFAULT_ANALYSIS_CONSOLIDATION_CONFIG = AnalysisConsolidationConfig()
-_DEFAULT_PLATE_METADATA_CONFIG = PlateMetadataConfig()
-_DEFAULT_EXPERIMENTAL_ANALYSIS_CONFIG = ExperimentalAnalysisConfig()
-_DEFAULT_FUNCTION_REGISTRY_CONFIG = FunctionRegistryConfig()
-_DEFAULT_MATERIALIZATION_DEFAULTS = StepMaterializationConfig()
-_DEFAULT_TUI_CONFIG = TUIConfig()
-
-def get_default_global_config() -> GlobalPipelineConfig:
-    """
-    Provides a default instance of GlobalPipelineConfig.
-
-    This function is called if no specific configuration is provided to the
-    PipelineOrchestrator, ensuring the application can run with sensible defaults.
-    """
-    logger.info("Initializing with default GlobalPipelineConfig.")
-    return GlobalPipelineConfig(
-        # num_workers is already handled by field(default_factory) in GlobalPipelineConfig
-        path_planning=_DEFAULT_PATH_PLANNING_CONFIG,
-        vfs=_DEFAULT_VFS_CONFIG,
-        zarr=_DEFAULT_ZARR_CONFIG,
-        analysis_consolidation=_DEFAULT_ANALYSIS_CONSOLIDATION_CONFIG,
-        plate_metadata=_DEFAULT_PLATE_METADATA_CONFIG,
-        function_registry=_DEFAULT_FUNCTION_REGISTRY_CONFIG,
-        materialization_defaults=_DEFAULT_MATERIALIZATION_DEFAULTS
-    )
-
-
-# Create and export lazy versions of config classes for code generation
-# Lazy config classes are automatically created by the dynamic system in lazy_config.py
-# No hardcoded lazy class creation needed - the system discovers and creates them automatically
-
-# Import pipeline-specific classes - circular import solved by moving import to end
-from openhcs.core.pipeline_config import (
-    set_current_pipeline_config,
-    ensure_pipeline_config_context,
-    create_pipeline_config_for_editing
-)
-# Note: PipelineConfig removed from re-export to avoid import collision
-# Import directly from openhcs.core.pipeline_config when needed

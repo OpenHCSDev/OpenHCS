@@ -19,7 +19,7 @@ from textual.widgets import Static, Button, TextArea
 from rich.syntax import Syntax
 
 # OpenHCS imports
-from openhcs.core.config import GlobalPipelineConfig, get_default_global_config
+from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.io.base import storage_registry
 from openhcs.io.filemanager import FileManager
@@ -266,7 +266,7 @@ class OpenHCSTUIApp(App):
         super().__init__()
         
         # Core configuration - minimal TUI responsibility
-        self.global_config = global_config or get_default_global_config()
+        self.global_config = global_config or GlobalPipelineConfig()
         
         # Create shared components (pattern from SimpleOpenHCSTUILauncher)
         self.storage_registry = storage_registry

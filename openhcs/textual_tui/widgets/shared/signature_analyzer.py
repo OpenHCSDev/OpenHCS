@@ -6,6 +6,9 @@ import dataclasses
 import re
 from typing import Any, Dict, Callable, get_type_hints, NamedTuple, Union, Optional, Type
 from dataclasses import dataclass
+import openhcs.core.lazy_config as lazy_module
+import openhcs.core.config as config_module
+
 
 @dataclass(frozen=True)
 class AnalysisConstants:
@@ -324,7 +327,26 @@ class SignatureAnalyzer:
                             If None, auto-detects based on context.
         """
         sig = inspect.signature(callable_obj)
-        type_hints = get_type_hints(callable_obj)
+        # Build comprehensive namespace for forward reference resolution
+        # Start with our modules, then overlay the function's original globals to preserve imports
+        globalns = {
+            **vars(lazy_module),
+            **vars(config_module),
+            **getattr(callable_obj, '__globals__', {})
+        }
+
+        try:
+            type_hints = get_type_hints(callable_obj, globalns=globalns)
+        except (NameError, AttributeError) as e:
+            # If type hint resolution fails, try with just the function's original globals
+            try:
+                type_hints = get_type_hints(callable_obj, globalns=getattr(callable_obj, '__globals__', {}))
+            except:
+                # If that still fails, return empty type hints
+                type_hints = {}
+        except Exception:
+            # For any other type hint resolution errors, return empty type hints
+            type_hints = {}
 
         # Extract docstring information (with fallback for robustness)
         try:

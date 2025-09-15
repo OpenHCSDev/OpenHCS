@@ -43,7 +43,9 @@ class ConfigFormWidget(ScrollableContainer):
             param_defaults[name] = info.default_value
 
         # Create shared form manager with parameter info for help functionality
-        self.form_manager = ParameterFormManager(parameters, parameter_types, "config", param_info, is_global_config_editing=is_global_config_editing)
+        # CRITICAL FIX: Use dataclass type name as field_id for root config (not artificial "config")
+        root_field_id = dataclass_type.__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
+        self.form_manager = ParameterFormManager(parameters, parameter_types, root_field_id, param_info, is_global_config_editing=is_global_config_editing)
         self.param_defaults = param_defaults
 
         # Initialize field values for reactive updates

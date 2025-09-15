@@ -250,7 +250,9 @@ class ParameterFormManagerBase(ABC):
             "has_custom_defaults": defaults is not None
         })
 
-        for param_name in self.parameters.keys():
+        # CRITICAL FIX: Iterate over a static list of keys to avoid 'dictionary changed during iteration'
+        param_names = list(self.parameters.keys())
+        for param_name in param_names:
             if defaults and param_name in defaults:
                 default_value = defaults[param_name]
             else:

@@ -25,7 +25,7 @@ Fundamental systems that define OpenHCS architecture.
 Configuration Systems
 =====================
 
-Lazy configuration, resolution, and field path detection.
+Lazy configuration, dual-axis resolution, inheritance detection, and field path systems.
 
 .. toctree::
    :maxdepth: 1
@@ -33,6 +33,10 @@ Lazy configuration, resolution, and field path detection.
    configuration_system_architecture
    lazy_class_system
    configuration_resolution
+   composition_detection_system
+   context_management_system
+   placeholder_resolution_system
+   dynamic_dataclass_factory
    orchestrator_configuration_management
    field_path_detection
    component_configuration_framework
@@ -47,6 +51,7 @@ File management, memory types, and backend systems.
 
    storage_and_memory_system
    memory_type_system
+   napari_streaming_system
 
 System Integration
 ==================
@@ -99,12 +104,13 @@ Dynamic code generation and parser systems.
 User Interface Systems
 ======================
 
-TUI architecture and UI development patterns.
+TUI architecture, UI development patterns, and form management systems.
 
 .. toctree::
    :maxdepth: 1
 
    tui_system
+   parameter_form_lifecycle
    code_ui_interconversion
    service-layer-architecture
 
@@ -123,10 +129,12 @@ Quick Start Paths
 
 **New to OpenHCS?** Start with :doc:`function_pattern_system` → :doc:`configuration_system_architecture` → :doc:`storage_and_memory_system`
 
-**Configuration Systems?** Focus on :doc:`lazy_class_system` → :doc:`configuration_resolution` → :doc:`field_path_detection`
+**Configuration Systems?** Focus on :doc:`lazy_class_system` → :doc:`configuration_resolution` → :doc:`composition_detection_system` → :doc:`context_management_system`
+
+**Real-Time Visualization?** Begin with :doc:`napari_streaming_system` → :doc:`storage_and_memory_system` → :doc:`system_integration`
+
+**UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`placeholder_resolution_system` → :doc:`tui_system` → :doc:`code_ui_interconversion`
 
 **System Integration?** Jump to :doc:`system_integration` → :doc:`special_io_system` → :doc:`microscope_handler_integration`
 
 **Performance Optimization?** Focus on :doc:`gpu_resource_management` → :doc:`compilation_system_detailed` → :doc:`multiprocessing_coordination_system`
-
-**UI Development?** Begin with :doc:`tui_system` → :doc:`code_ui_interconversion` → :doc:`service-layer-architecture`

@@ -205,7 +205,21 @@ def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, re
     child_indent_str = "    " * (indent_level + 1)
 
     # Get a default instance of the same class for comparison
-    default_instance = instance.__class__()
+    # CRITICAL FIX: For lazy dataclasses, create instance with raw values to preserve None vs concrete distinction
+    if hasattr(instance, '_resolve_field_value'):
+        # This is a lazy dataclass - create empty instance without triggering resolution
+        default_instance = object.__new__(instance.__class__)
+
+        # Set all fields to None (their raw default state) using object.__setattr__
+        for field in dataclasses.fields(instance):
+            object.__setattr__(default_instance, field.name, None)
+
+        # Initialize any required lazy dataclass attributes
+        if hasattr(instance.__class__, '_is_lazy_dataclass'):
+            object.__setattr__(default_instance, '_is_lazy_dataclass', True)
+    else:
+        # Regular dataclass - use normal constructor
+        default_instance = instance.__class__()
 
     for field in dataclasses.fields(instance):
         field_name = field.name
@@ -630,7 +644,7 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
 
     # Add always-needed imports for generated code structure
     all_function_imports['openhcs.core.steps.function_step'].add('FunctionStep')
-    all_function_imports['openhcs.core.pipeline_config'].add('PipelineConfig')
+    all_function_imports['openhcs.core.config'].add('PipelineConfig')
     all_function_imports['openhcs.core.orchestrator.orchestrator'].add('PipelineOrchestrator')
     all_function_imports['openhcs.core.config'].add('GlobalPipelineConfig')  # Always needed for global_config constructor
 

@@ -24,7 +24,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtGui import QFont
 
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.pipeline_config import PipelineConfig
+from openhcs.core.config import PipelineConfig
 from openhcs.io.filemanager import FileManager
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator, OrchestratorState
 from openhcs.core.pipeline import Pipeline
@@ -295,9 +295,9 @@ class PlateManagerWidget(QWidget):
     def _update_orchestrator_global_config(self, orchestrator, new_global_config):
         """Update orchestrator's global config reference and rebuild pipeline config if needed."""
         from openhcs.core.lazy_config import rebuild_lazy_config_with_new_global_reference
-        from openhcs.core.config import GlobalPipelineConfig, set_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
 
-        # Update shared global context (orchestrator uses shared context now)
+        # SIMPLIFIED: Update shared global context (dual-axis resolver handles context)
         from openhcs.core.lazy_config import ensure_global_config_context
         ensure_global_config_context(GlobalPipelineConfig, new_global_config)
 
@@ -495,26 +495,40 @@ class PlateManagerWidget(QWidget):
         # The config window should work with the current orchestrator context
         # Reset behavior will be handled differently to avoid corrupting step editor context
 
-        # Create config for editing based on whether orchestrator has existing config
+        # CRITICAL FIX: Create PipelineConfig that preserves user-set values but shows placeholders for inherited fields
+        # The orchestrator's pipeline_config has concrete values filled in from global config inheritance,
+        # but we need to distinguish between user-set values (keep concrete) and inherited values (show as placeholders)
+        from openhcs.core.lazy_config import create_dataclass_for_editing
+        from dataclasses import fields
+
+        # CRITICAL FIX: Create config for editing that preserves user values while showing placeholders for inherited fields
         if representative_orchestrator.pipeline_config is not None:
-            # Existing config - use the editing function that preserves user values
-            from openhcs.core.pipeline_config import create_editing_config_from_existing_lazy_config
-            current_plate_config = create_editing_config_from_existing_lazy_config(
-                representative_orchestrator.pipeline_config,
-                None  # Use thread-local context set up above
-            )
+            # Orchestrator has existing config - preserve explicitly set fields, reset others to None for placeholders
+            existing_config = representative_orchestrator.pipeline_config
+            explicitly_set_fields = getattr(existing_config, '_explicitly_set_fields', set())
+
+            # Create field values: keep explicitly set values, use None for inherited fields
+            field_values = {}
+            for field in fields(PipelineConfig):
+                if field.name in explicitly_set_fields:
+                    # User explicitly set this field - preserve the concrete value
+                    field_values[field.name] = object.__getattribute__(existing_config, field.name)
+                else:
+                    # Field was inherited from global config - use None to show placeholder
+                    field_values[field.name] = None
+
+            # Create config with preserved user values and None for inherited fields
+            current_plate_config = PipelineConfig(**field_values)
+            # Preserve the explicitly set fields tracking (bypass frozen restriction)
+            object.__setattr__(current_plate_config, '_explicitly_set_fields', explicitly_set_fields.copy())
         else:
-            # Create new config with placeholders using current global config
-            from openhcs.core.pipeline_config import create_pipeline_config_for_editing
-            current_plate_config = create_pipeline_config_for_editing(self.global_config)
+            # No existing config - create fresh config with all None values (all show as placeholders)
+            current_plate_config = create_dataclass_for_editing(PipelineConfig, self.global_config)
 
         def handle_config_save(new_config: PipelineConfig) -> None:
             """Apply per-orchestrator configuration without global side effects."""
-            # DEBUG: Check what's in the new_config and thread-local context
-            from openhcs.core.config import get_current_global_config, GlobalPipelineConfig
+            # SIMPLIFIED: Debug logging without thread-local context
             from dataclasses import fields
-            context_before_save = get_current_global_config(GlobalPipelineConfig)
-            logger.debug(f"🔍 CONFIG SAVE - thread-local context before apply: {context_before_save}")
             logger.debug(f"🔍 CONFIG SAVE - new_config type: {type(new_config)}")
             for field in fields(new_config):
                 raw_value = object.__getattribute__(new_config, field.name)
@@ -555,14 +569,28 @@ class PlateManagerWidget(QWidget):
         """
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
 
-        config_window = ConfigWindow(
-            config_class,           # config_class
-            current_config,         # current_config
-            on_save_callback,       # on_save_callback
-            self.color_scheme,      # color_scheme
-            self,                   # parent
-            orchestrator=orchestrator  # Pass orchestrator for context persistence
-        )
+        # CRITICAL FIX: Use orchestrator's config context for proper placeholder resolution
+        # This ensures the config window uses the correct orchestrator context for inheritance
+        if orchestrator and hasattr(orchestrator, 'config_context'):
+            with orchestrator.config_context(for_serialization=False):
+                config_window = ConfigWindow(
+                    config_class,           # config_class
+                    current_config,         # current_config
+                    on_save_callback,       # on_save_callback
+                    self.color_scheme,      # color_scheme
+                    self,                   # parent
+                    orchestrator=orchestrator  # Pass orchestrator for context persistence
+                )
+        else:
+            # Fallback for global config or when no orchestrator is provided
+            config_window = ConfigWindow(
+                config_class,           # config_class
+                current_config,         # current_config
+                on_save_callback,       # on_save_callback
+                self.color_scheme,      # color_scheme
+                self,                   # parent
+                orchestrator=orchestrator  # Pass orchestrator for context persistence
+            )
 
         # CRITICAL: Connect to orchestrator config changes for automatic refresh
         # This ensures the config window stays in sync when tier 3 edits change the underlying config
@@ -593,18 +621,19 @@ class PlateManagerWidget(QWidget):
 
         Uses concrete GlobalPipelineConfig for direct editing with static placeholder defaults.
         """
-        from openhcs.core.config import get_default_global_config, GlobalPipelineConfig
+        from openhcs.core.config import GlobalPipelineConfig
 
         # Get current global config from service adapter or use default
-        current_global_config = self.service_adapter.get_global_config() or get_default_global_config()
+        current_global_config = self.service_adapter.get_global_config() or GlobalPipelineConfig()
 
         def handle_global_config_save(new_config: GlobalPipelineConfig) -> None:
             """Apply global configuration to all orchestrators and save to cache."""
             self.service_adapter.set_global_config(new_config)  # Update app-level config
 
             # Update thread-local storage for MaterializationPathConfig defaults
-            from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
-            set_current_global_config(GlobalPipelineConfig, new_config)
+            from openhcs.core.config import GlobalPipelineConfig
+            from openhcs.core.context.global_config import set_global_config_for_editing
+            set_global_config_for_editing(GlobalPipelineConfig, new_config)
 
             # Save to cache for persistence between sessions
             self._save_global_config_to_cache(new_config)
@@ -612,17 +641,9 @@ class PlateManagerWidget(QWidget):
             for orchestrator in self.orchestrators.values():
                 self._update_orchestrator_global_config(orchestrator, new_config)
 
-            # Update thread-local storage for currently selected orchestrator
-            # This ensures step forms resolve against the updated orchestrator defaults
+            # SIMPLIFIED: Dual-axis resolver handles context discovery automatically
             if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
-                current_orchestrator = self.orchestrators[self.selected_plate_path]
-                effective_config = current_orchestrator.get_effective_config()
-                from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
-                set_current_global_config(GlobalPipelineConfig, effective_config)
-                logger.debug(f"Updated thread-local storage for currently selected orchestrator: {self.selected_plate_path}")
-
-            # Refresh placeholder text in any open parameter forms
-            self._refresh_all_parameter_form_placeholders()
+                logger.debug(f"Global config applied to selected orchestrator: {self.selected_plate_path}")
 
             self.service_adapter.show_info_dialog("Global configuration applied to all orchestrators")
 
@@ -1064,13 +1085,62 @@ class PlateManagerWidget(QWidget):
             logger.error(f"Failed to generate plate code: {e}")
             self.service_adapter.show_error_dialog(f"Failed to generate code: {str(e)}")
 
+    def _patch_lazy_constructors(self):
+        """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
+        from contextlib import contextmanager
+        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+        import dataclasses
+
+        @contextmanager
+        def patch_context():
+            # Store original constructors
+            original_constructors = {}
+
+            # Find all lazy dataclass types that need patching
+            from openhcs.core.config import LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig
+            lazy_types = [LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig]
+
+            # Add any other lazy types that might be used
+            for lazy_type in lazy_types:
+                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
+                    # Store original constructor
+                    original_constructors[lazy_type] = lazy_type.__init__
+
+                    # Create patched constructor that uses raw values
+                    def create_patched_init(original_init, dataclass_type):
+                        def patched_init(self, **kwargs):
+                            # Use raw value approach instead of calling original constructor
+                            # This prevents lazy resolution during code execution
+                            for field in dataclasses.fields(dataclass_type):
+                                value = kwargs.get(field.name, None)
+                                object.__setattr__(self, field.name, value)
+
+                            # Initialize any required lazy dataclass attributes
+                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
+                                object.__setattr__(self, '_is_lazy_dataclass', True)
+
+                        return patched_init
+
+                    # Apply the patch
+                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
+
+            try:
+                yield
+            finally:
+                # Restore original constructors
+                for lazy_type, original_init in original_constructors.items():
+                    lazy_type.__init__ = original_init
+
+        return patch_context()
+
     def _handle_edited_orchestrator_code(self, edited_code: str):
         """Handle edited orchestrator code and update UI state (same logic as Textual TUI)."""
         logger.debug("Orchestrator code edited, processing changes...")
         try:
-            # Execute the code (it has all necessary imports)
+            # CRITICAL FIX: Execute code with lazy dataclass constructor patching to preserve None vs concrete distinction
             namespace = {}
-            exec(edited_code, namespace)
+            with self._patch_lazy_constructors():
+                exec(edited_code, namespace)
 
             # Extract variables from executed code (same logic as Textual TUI)
             if 'plate_paths' in namespace and 'pipeline_data' in namespace:
@@ -1088,10 +1158,8 @@ class PlateManagerWidget(QWidget):
                     for orchestrator in self.orchestrators.values():
                         self._update_orchestrator_global_config(orchestrator, new_global_config)
 
-                    # Update service adapter and thread-local storage
+                    # SIMPLIFIED: Update service adapter (dual-axis resolver handles context)
                     self.service_adapter.set_global_config(new_global_config)
-                    from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
-                    set_current_global_config(GlobalPipelineConfig, new_global_config)
 
                     self.global_config_changed.emit()
 
@@ -1299,18 +1367,9 @@ class PlateManagerWidget(QWidget):
             self.selected_plate_path = selected_plates[0]['path']
             self.plate_selected.emit(self.selected_plate_path)
 
-            # Update thread-local context using orchestrator's merged pipeline context
+            # SIMPLIFIED: Dual-axis resolver handles context discovery automatically
             if self.selected_plate_path in self.orchestrators:
-                orchestrator = self.orchestrators[self.selected_plate_path]
-                # Auto-sync handles thread-local context setup automatically when pipeline_config is accessed
-                from openhcs.core.pipeline_config import ensure_pipeline_config_context
-                from openhcs.core.config import get_current_global_config
-                shared_context = get_current_global_config(GlobalPipelineConfig)
-                ensure_pipeline_config_context(shared_context)
-                logger.debug(f"Orchestrator context automatically maintained for selected plate: {self.selected_plate_path}")
-
-                # Refresh placeholders in any open parameter forms to reflect new context
-                self._refresh_all_parameter_form_placeholders()
+                logger.debug(f"Selected orchestrator: {self.selected_plate_path}")
 
         def on_cleared():
             self.selected_plate_path = ""
@@ -1365,64 +1424,14 @@ class PlateManagerWidget(QWidget):
         for orchestrator in self.orchestrators.values():
             self._update_orchestrator_global_config(orchestrator, new_config)
 
-        # Update thread-local storage for currently selected orchestrator
-        # This ensures step forms resolve against the updated orchestrator defaults
-        if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
-            current_orchestrator = self.orchestrators[self.selected_plate_path]
-            effective_config = current_orchestrator.get_effective_config()
-            from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
-            set_current_global_config(GlobalPipelineConfig, effective_config)
-            logger.debug(f"Updated thread-local storage for currently selected orchestrator: {self.selected_plate_path}")
-
-        # Update thread-local storage for currently selected orchestrator
-        if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
-            current_orchestrator = self.orchestrators[self.selected_plate_path]
-            effective_config = current_orchestrator.get_effective_config()
-            from openhcs.core.config import set_current_global_config, GlobalPipelineConfig
-            set_current_global_config(GlobalPipelineConfig, effective_config)
-            logger.debug(f"Updated thread-local storage for currently selected orchestrator: {self.selected_plate_path}")
+        # REMOVED: Thread-local modification - dual-axis resolver handles orchestrator context automatically
 
         logger.info(f"Applied new global config to {len(self.orchestrators)} orchestrators")
 
-        # Refresh placeholder text in any open parameter forms
-        self._refresh_all_parameter_form_placeholders()
+        # SIMPLIFIED: Dual-axis resolver handles placeholder updates automatically
 
-    def _refresh_all_parameter_form_placeholders(self) -> None:
-        """
-        Refresh placeholder text in all open parameter form windows.
-
-        This ensures that lazy dataclass forms show updated placeholder text
-        when the GlobalPipelineConfig changes.
-        """
-        # Check if there are any floating windows with parameter forms
-        if hasattr(self, 'service_adapter') and hasattr(self.service_adapter, 'app'):
-            app = self.service_adapter.app
-            if hasattr(app, 'floating_windows'):
-                for window in app.floating_windows.values():
-                    # Get the widget from the window's layout
-                    layout = window.layout()
-                    if layout and layout.count() > 0:
-                        widget = layout.itemAt(0).widget()
-                        # Look for parameter form managers in the widget
-                        self._refresh_widget_parameter_forms(widget)
-
-    def _refresh_widget_parameter_forms(self, widget) -> None:
-        """Recursively refresh parameter forms using functional patterns."""
-        # Check if this widget has a parameter form manager
-        if hasattr(widget, 'form_manager') and hasattr(widget.form_manager, 'refresh_placeholder_text'):
-            widget.form_manager.refresh_placeholder_text()
-
-        # Functional pattern: process children with filter and map
-        if hasattr(widget, 'children'):
-            # Direct refresh for widgets with refresh_placeholder_text
-            [child.refresh_placeholder_text()
-             for child in widget.children()
-             if hasattr(child, 'refresh_placeholder_text')]
-
-            # Recursive refresh for other widgets
-            [self._refresh_widget_parameter_forms(child)
-             for child in widget.children()
-             if not hasattr(child, 'refresh_placeholder_text')]
+    # REMOVED: _refresh_all_parameter_form_placeholders and _refresh_widget_parameter_forms
+    # SIMPLIFIED: Dual-axis resolver handles placeholder updates automatically
 
     # ========== Helper Methods ==========
 

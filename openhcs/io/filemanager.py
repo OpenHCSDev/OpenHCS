@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Set, Union, Tuple, Optional, Any
 
 from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSIONS
-from openhcs.io.base import StorageBackend
+from openhcs.io.base import DataSink
 from openhcs.io.exceptions import PathMismatchError, StorageResolutionError
 from openhcs.validation import validate_path_types, validate_backend_parameter
 import traceback
@@ -26,6 +26,7 @@ class FileManager:
 
         Args:
             registry: Registry for storage backends. Must be provided.
+                     Now accepts Dict[str, DataSink] (includes StorageBackend and StreamingBackend)
 
         Raises:
             ValueError: If registry is not provided.
@@ -51,18 +52,21 @@ class FileManager:
 
         logger.debug("FileManager initialized with registry")
 
-    def _get_backend(self, backend_name: str) -> StorageBackend:
+    def _get_backend(self, backend_name: str) -> DataSink:
         """
         Get a backend by name.
 
         This method uses the instance registry to get the backend instance directly.
         All FileManagers that use the same registry share the same backend instances.
 
+        Returns DataSink (base interface) - could be StorageBackend or StreamingBackend.
+        Load operations will fail-loud on StreamingBackend (no load method).
+
         Args:
             backend_name: Name of the backend to get (e.g., "disk", "memory", "zarr")
 
         Returns:
-            The backend instance
+            The backend instance (DataSink - polymorphic)
 
         Raises:
             StorageResolutionError: If the backend is not found in the registry
