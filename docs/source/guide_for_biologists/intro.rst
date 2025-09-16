@@ -4,7 +4,7 @@ What is OpenHCS?
 OpenHCS is designed for biologists who work with large amounts of microscopy images and need a reliable, automated way to process and analyze their data. If you find yourself spending too much time stitching images together, running repetitive analyses, or struggling to keep your results organized and reproducible, OpenHCS can help.
 
 When should I use OpenHCS?
------------
+--------------------------
 You should use OpenHCS if you have any of the following needs:
 
 1. **Stitch images from different microscopes:**
