@@ -65,7 +65,8 @@ def __getattr__(name):
 
 
 
-
+#Documentation URL
+DOCUMENTATION_URL = "https://openhcs.readthedocs.io/en/latest/"
 
 
 class OrchestratorState(Enum):

@@ -8,14 +8,15 @@ textual-window floating windows with native Qt docking.
 import logging
 from typing import Optional, Dict, Any
 from pathlib import Path
+import webbrowser
 
 from PyQt6.QtWidgets import (
     QMainWindow, QApplication, QDockWidget, QWidget, QVBoxLayout,
     QHBoxLayout, QMenuBar, QStatusBar, QToolBar, QSplitter,
     QMessageBox, QFileDialog, QDialog
 )
-from PyQt6.QtCore import Qt, QSettings, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon, QKeySequence
+from PyQt6.QtCore import Qt, QSettings, QTimer, pyqtSignal, QUrl
+from PyQt6.QtGui import QAction, QIcon, QKeySequence, QDesktopServices
 
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.io.filemanager import FileManager
@@ -84,7 +85,7 @@ class OpenHCSMainWindow(QMainWindow):
     
     def setup_ui(self):
         """Setup basic UI structure."""
-        self.setWindowTitle("OpenHCS - High-Content Screening Platform")
+        self.setWindowTitle("OpenHCS")
         self.setMinimumSize(640, 480)
 
         # Make main window floating (not tiled) like other OpenHCS components
@@ -249,23 +250,30 @@ class OpenHCSMainWindow(QMainWindow):
         # File menu
         file_menu = menubar.addMenu("&File")
         
-        # New pipeline action
-        new_action = QAction("&New Pipeline", self)
-        new_action.setShortcut(QKeySequence.StandardKey.New)
-        new_action.triggered.connect(self.new_pipeline)
-        file_menu.addAction(new_action)
-        
-        # Open pipeline action
-        open_action = QAction("&Open Pipeline", self)
-        open_action.setShortcut(QKeySequence.StandardKey.Open)
-        open_action.triggered.connect(self.open_pipeline)
-        file_menu.addAction(open_action)
-        
-        # Save pipeline action
-        save_action = QAction("&Save Pipeline", self)
-        save_action.setShortcut(QKeySequence.StandardKey.Save)
-        save_action.triggered.connect(self.save_pipeline)
-        file_menu.addAction(save_action)
+       # Theme submenu
+        theme_menu = file_menu.addMenu("&Theme")
+
+        # Dark theme action
+        dark_theme_action = QAction("&Dark Theme", self)
+        dark_theme_action.triggered.connect(self.switch_to_dark_theme)
+        theme_menu.addAction(dark_theme_action)
+
+        # Light theme action
+        light_theme_action = QAction("&Light Theme", self)
+        light_theme_action.triggered.connect(self.switch_to_light_theme)
+        theme_menu.addAction(light_theme_action)
+
+        theme_menu.addSeparator()
+
+        # Load theme from file action
+        load_theme_action = QAction("&Load Theme from File...", self)
+        load_theme_action.triggered.connect(self.load_theme_from_file)
+        theme_menu.addAction(load_theme_action)
+
+        # Save theme to file action
+        save_theme_action = QAction("&Save Theme to File...", self)
+        save_theme_action.triggered.connect(self.save_theme_to_file)
+        theme_menu.addAction(save_theme_action)
         
         file_menu.addSeparator()
         
@@ -290,64 +298,30 @@ class OpenHCSMainWindow(QMainWindow):
         pipeline_action.triggered.connect(self.show_pipeline_editor)
         view_menu.addAction(pipeline_action)
 
-
-
         # Log Viewer window
         log_action = QAction("&Log Viewer", self)
         log_action.setShortcut("Ctrl+L")
         log_action.triggered.connect(self.show_log_viewer)
         view_menu.addAction(log_action)
         
-        # Tools menu
-        tools_menu = menubar.addMenu("&Tools")
-
         # Configuration action
-        config_action = QAction("&Configuration", self)
+        config_action = QAction("&Global Configuration", self)
+        config_action.setShortcut("Ctrl+G")
         config_action.triggered.connect(self.show_configuration)
-        tools_menu.addAction(config_action)
+        view_menu.addAction(config_action)
 
-        tools_menu.addSeparator()
+        view_menu.addSeparator()
 
-        # Theme submenu
-        theme_menu = tools_menu.addMenu("&Theme")
-
-        # Dark theme action
-        dark_theme_action = QAction("&Dark Theme", self)
-        dark_theme_action.triggered.connect(self.switch_to_dark_theme)
-        theme_menu.addAction(dark_theme_action)
-
-        # Light theme action
-        light_theme_action = QAction("&Light Theme", self)
-        light_theme_action.triggered.connect(self.switch_to_light_theme)
-        theme_menu.addAction(light_theme_action)
-
-        theme_menu.addSeparator()
-
-        # Load theme from file action
-        load_theme_action = QAction("&Load Theme from File...", self)
-        load_theme_action.triggered.connect(self.load_theme_from_file)
-        theme_menu.addAction(load_theme_action)
-
-        # Save theme to file action
-        save_theme_action = QAction("&Save Theme to File...", self)
-        save_theme_action.triggered.connect(self.save_theme_to_file)
-        theme_menu.addAction(save_theme_action)
         
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
         # General help action
-        help_action = QAction("&OpenHCS Help", self)
+        help_action = QAction("&Documentation", self)
         help_action.setShortcut("F1")
         help_action.triggered.connect(self.show_help)
         help_menu.addAction(help_action)
 
-        help_menu.addSeparator()
-
-        # About action
-        about_action = QAction("&About OpenHCS", self)
-        about_action.triggered.connect(self.show_about)
-        help_menu.addAction(about_action)
     
     def setup_status_bar(self):
         """Setup application status bar."""
@@ -521,23 +495,15 @@ class OpenHCSMainWindow(QMainWindow):
             logger.debug("Pipeline editor not yet created - connection will be made when both exist")
 
     def show_help(self):
-        """Show general OpenHCS help - reuses Textual TUI help system."""
-        from openhcs.pyqt_gui.windows.help_window import HelpWindow
-
-        # Create and show help window (reuses existing help content)
-        help_window = HelpWindow(parent=self)
-        help_window.show()
-
-    def show_about(self):
-        """Show about dialog."""
-        QMessageBox.about(
-            self,
-            "About OpenHCS",
-            "OpenHCS - High-Content Screening Platform\n\n"
-            "A comprehensive platform for microscopy image processing\n"
-            "and high-content screening analysis.\n\n"
-            "PyQt6 GUI Version 1.0.0"
-        )
+        """Opens documentation URL in default web browser."""
+        from openhcs.constants.constants import DOCUMENTATION_URL
+        import webbrowser
+        
+        url =  (DOCUMENTATION_URL)
+        if not QDesktopServices.openUrl(QUrl.fromUserInput(url)):
+            #fallback for wsl users because it wants to be special
+            webbrowser.open(url)
+            
     
     def on_config_changed(self, new_config: GlobalPipelineConfig):
         """Handle global configuration changes."""
