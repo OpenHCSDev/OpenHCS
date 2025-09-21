@@ -173,39 +173,18 @@ class FunctionSelectorDialog(QDialog):
         self.filtered_functions = self.all_functions_metadata.copy()
 
     def populate_module_tree(self):
-        """Populate the module tree with hierarchical function organization (inlined per RST principle)."""
+        """Populate the module tree with hierarchical function organization based purely on module paths."""
         self.module_tree.clear()
 
-        # Inline organization logic (single-use method elimination)
-        library_modules = {}
+        # Build hierarchical structure directly from module paths
+        module_hierarchy = {}
         for func_name, metadata in self.all_functions_metadata.items():
-            library = self._determine_library(metadata)
             module_path = self._extract_module_path(metadata)
+            # Build hierarchical structure by splitting module path on '.'
+            self._add_function_to_hierarchy(module_hierarchy, module_path, func_name)
 
-            # Initialize nested structure
-            if library not in library_modules:
-                library_modules[library] = {}
-            if module_path not in library_modules[library]:
-                library_modules[library][module_path] = []
-
-            library_modules[library][module_path].append(func_name)
-
-        # Build tree structure
-        for library_name, modules in library_modules.items():
-            library_item = QTreeWidgetItem(self.module_tree)
-            library_item.setText(0, f"{library_name} ({sum(len(funcs) for funcs in modules.values())} functions)")
-            library_item.setData(0, Qt.ItemDataRole.UserRole, {"type": "library", "name": library_name})
-            library_item.setExpanded(True)
-
-            for module_path, functions in modules.items():
-                module_item = QTreeWidgetItem(library_item)
-                module_item.setText(0, f"{module_path} ({len(functions)} functions)")
-                module_item.setData(0, Qt.ItemDataRole.UserRole, {
-                    "type": "module",
-                    "library": library_name,
-                    "module": module_path,
-                    "functions": functions
-                })
+        # Build tree structure directly from module hierarchy (no library grouping)
+        self._build_module_hierarchy_tree(self.module_tree, module_hierarchy, [], is_root=True)
 
     def _update_filtered_view(self, filtered_functions: Dict[str, Any], filter_description: str = ""):
         """Mathematical simplification: factor out common filter update pattern (RST principle)."""
@@ -261,18 +240,91 @@ class FunctionSelectorDialog(QDialog):
         return LibraryDetector.get_function_library(func_name, module)
 
     def _extract_module_path(self, metadata) -> str:
-        """Extract module path from metadata (simple, direct approach)."""
+        """Extract full module path from metadata for hierarchical tree building."""
         module = metadata.get('module', '')
         if not module:
             return 'unknown'
 
-        # Use the module path directly - it's already there
-        parts = module.split('.')
-        if len(parts) >= 2:
-            return f"{parts[-2]}.{parts[-1]}"
-        return parts[-1] if parts else 'unknown'
+        # Return the full module path for hierarchical tree building
+        return module
 
+    def _add_function_to_hierarchy(self, hierarchy: dict, module_path: str, func_name: str):
+        """Add a function to the hierarchical module structure."""
+        if module_path == 'unknown':
+            # Handle unknown modules
+            if 'functions' not in hierarchy:
+                hierarchy['functions'] = []
+            hierarchy['functions'].append(func_name)
+            return
 
+        # Split module path and build hierarchy
+        parts = module_path.split('.')
+        current_level = hierarchy
+
+        for part in parts:
+            if part not in current_level:
+                current_level[part] = {}
+            current_level = current_level[part]
+
+        # Add function to the deepest level
+        if 'functions' not in current_level:
+            current_level['functions'] = []
+        current_level['functions'].append(func_name)
+
+    def _count_functions_in_hierarchy(self, hierarchy: dict) -> int:
+        """Count total functions in a hierarchical structure."""
+        count = 0
+        for key, value in hierarchy.items():
+            if key == 'functions':
+                count += len(value)
+            elif isinstance(value, dict):
+                count += self._count_functions_in_hierarchy(value)
+        return count
+
+    def _build_module_hierarchy_tree(self, parent_container, hierarchy: dict,
+                                   module_path_parts: list, is_root: bool = False):
+        """Recursively build the hierarchical module tree."""
+        for key, value in hierarchy.items():
+            if key == 'functions':
+                # This level has functions - create a module node if there are functions
+                if value:  # Only create node if there are functions
+                    current_path = '.'.join(module_path_parts) if module_path_parts else 'unknown'
+                    if is_root:
+                        # For root level, add directly to tree widget
+                        module_item = QTreeWidgetItem(parent_container)
+                    else:
+                        # For nested levels, add to parent item
+                        module_item = QTreeWidgetItem(parent_container)
+                    module_item.setText(0, f"{current_path} ({len(value)} functions)")
+                    module_item.setData(0, Qt.ItemDataRole.UserRole, {
+                        "type": "module",
+                        "module": current_path,
+                        "functions": value
+                    })
+            elif isinstance(value, dict):
+                # This is a module part - create a tree node and recurse
+                new_path_parts = module_path_parts + [key]
+
+                # Count functions in this subtree
+                subtree_function_count = self._count_functions_in_hierarchy(value)
+
+                if is_root:
+                    # For root level, add directly to tree widget
+                    module_part_item = QTreeWidgetItem(parent_container)
+                else:
+                    # For nested levels, add to parent item
+                    module_part_item = QTreeWidgetItem(parent_container)
+
+                module_part_item.setText(0, f"{key} ({subtree_function_count} functions)")
+                module_part_item.setData(0, Qt.ItemDataRole.UserRole, {
+                    "type": "module_part",
+                    "module_part": key,
+                    "full_path": '.'.join(new_path_parts)
+                })
+                module_part_item.setExpanded(True)
+
+                # Recursively build subtree
+                self._build_module_hierarchy_tree(module_part_item, value, new_path_parts, is_root=False)
 
     @classmethod
     def clear_metadata_cache(cls) -> None:
@@ -314,8 +366,11 @@ class FunctionSelectorDialog(QDialog):
 
         # Create tree widget with configuration
         self.module_tree = QTreeWidget()
-        self.module_tree.setHeaderLabel("Libraries and Modules")
+        self.module_tree.setHeaderLabel("Module Structure")
         self.module_tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        # Enable deselection by clicking in empty space
+        self.module_tree.mousePressEvent = self._tree_mouse_press_event
 
         # Create panes using factored pattern (RST principle)
         left_widget = self._create_pane_widget("Module Structure", self.module_tree)
@@ -483,7 +538,10 @@ class FunctionSelectorDialog(QDialog):
     def on_tree_selection_changed(self):
         """Handle tree selection using mathematical simplification (RST principle)."""
         selected_items = self.module_tree.selectedItems()
+
+        # If no items selected, show all functions
         if not selected_items:
+            self._update_filtered_view(self.all_functions_metadata, "showing all functions")
             return
 
         item = selected_items[0]
@@ -501,14 +559,30 @@ class FunctionSelectorDialog(QDialog):
                 }
                 self._update_filtered_view(filtered, "filtered by module")
 
-            elif node_type == "library":
-                library_name = data.get("name")
+            elif node_type == "module_part":
+                # Filter by module part - find all functions whose modules start with this path
+                module_part_path = data.get("full_path", "")
                 filtered = {
                     name: metadata for name, metadata in self.all_functions_metadata.items()
-                    if self._determine_library(metadata) == library_name
+                    if self._extract_module_path(metadata).startswith(module_part_path)
                 }
-                self._update_filtered_view(filtered, "filtered by library")
-    
+                self._update_filtered_view(filtered, f"filtered by module part: {module_part_path}")
+        else:
+            # No data means show all functions
+            self._update_filtered_view(self.all_functions_metadata, "showing all functions")
+
+    def _tree_mouse_press_event(self, event):
+        """Handle mouse press events on the tree to allow deselection."""
+        # Get the item at the click position
+        item = self.module_tree.itemAt(event.pos())
+
+        if item is None:
+            # Clicked in empty space - clear selection
+            self.module_tree.clearSelection()
+        else:
+            # Clicked on an item - use default behavior
+            QTreeWidget.mousePressEvent(self.module_tree, event)
+
     def on_table_selection_changed(self):
         """Handle table selection changes."""
         selected_items = self.function_table.selectedItems()

@@ -49,6 +49,7 @@ from .widget_strategies import PyQt6WidgetEnhancer
 # Import PyQt-specific components
 from .clickable_help_components import GroupBoxWithHelp, LabelWithHelp
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from .layout_constants import CURRENT_LAYOUT
 
 # Import OpenHCS core components
 from openhcs.core.config import GlobalPipelineConfig
@@ -484,6 +485,9 @@ class ParameterFormManager(QWidget):
     def setup_ui(self):
         """Set up the UI layout."""
         layout = QVBoxLayout(self)
+        # Apply configurable layout settings
+        layout.setSpacing(CURRENT_LAYOUT.main_layout_spacing)
+        layout.setContentsMargins(*CURRENT_LAYOUT.main_layout_margins)
 
         # Build form content
         form_widget = self.build_form()
@@ -508,6 +512,9 @@ class ParameterFormManager(QWidget):
         """
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
+        # Apply configurable content layout settings
+        content_layout.setSpacing(CURRENT_LAYOUT.content_layout_spacing)
+        content_layout.setContentsMargins(*CURRENT_LAYOUT.content_layout_margins)
 
         # Use unified widget creation for all parameter types
         for param_info in self.form_structure.parameters:
@@ -546,6 +553,10 @@ class ParameterFormManager(QWidget):
     def _build_regular_content(self, param_info, display_info, field_ids):
         container = QWidget()
         layout = QHBoxLayout(container)
+        # Apply configurable parameter row layout settings
+        layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
+        layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
+
         label = LabelWithHelp(
             text=display_info['field_label'], param_name=param_info.name,
             param_description=display_info['description'], param_type=param_info.type,
@@ -567,7 +578,7 @@ class ParameterFormManager(QWidget):
         layout.addWidget(widget, 1)
         reset_button = QPushButton(CONSTANTS.RESET_BUTTON_TEXT)
         reset_button.setObjectName(field_ids['reset_button_id'])
-        reset_button.setMaximumWidth(60)
+        reset_button.setMaximumWidth(CURRENT_LAYOUT.reset_button_width)
         reset_button.clicked.connect(lambda: self.reset_parameter(param_info.name))
         layout.addWidget(reset_button)
         return container, {'main': widget, 'widget': widget, 'reset_button': reset_button}
@@ -654,6 +665,10 @@ class ParameterFormManager(QWidget):
     def _build_optional_content(self, param_info, display_info, field_ids):
         container = QWidget()
         layout = QVBoxLayout(container)
+        # Apply configurable optional parameter layout settings
+        layout.setSpacing(CURRENT_LAYOUT.optional_layout_spacing)
+        layout.setContentsMargins(*CURRENT_LAYOUT.optional_layout_margins)
+
         checkbox = QCheckBox(display_info['field_label'])
         current_value = self.parameters.get(param_info.name)
         # Check if this is a step-level config that should start unchecked

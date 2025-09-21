@@ -117,22 +117,19 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
         return table
 
     def _build_module_tree(self) -> Tree:
-        """Build hierarchical tree widget showing module structure by library."""
-        tree = Tree("All Libraries", id="module_tree")
+        """Build hierarchical tree widget showing module structure based purely on module paths."""
+        tree = Tree("Module Structure", id="module_tree")
         tree.root.expand()
 
-        # Group functions by library and module
-        library_modules = self._organize_by_library_and_module()
+        # Build hierarchical structure directly from module paths
+        module_hierarchy = {}
+        for func_name, metadata in self.all_functions_metadata.items():
+            module_path = self._extract_module_path(metadata)
+            # Build hierarchical structure by splitting module path on '.'
+            self._add_function_to_hierarchy(module_hierarchy, module_path, func_name)
 
-        # Build tree structure
-        for library_name, modules in library_modules.items():
-            library_node = tree.root.add(f"{library_name} ({sum(len(funcs) for funcs in modules.values())} functions)")
-            library_node.data = {"type": "library", "name": library_name}
-            library_node.expand()
-
-            for module_path, functions in modules.items():
-                module_node = library_node.add(f"{module_path} ({len(functions)} functions)")
-                module_node.data = {"type": "module", "library": library_name, "module": module_path, "functions": functions}
+        # Build tree structure directly from module hierarchy
+        self._build_module_hierarchy_tree(tree.root, module_hierarchy, [])
 
         return tree
 

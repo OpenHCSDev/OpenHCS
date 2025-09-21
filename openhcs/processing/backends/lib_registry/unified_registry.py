@@ -205,7 +205,17 @@ class LibraryRegistryBase(ABC):
             return contract_wrapper
 
     def _inject_optional_dataclass_params(self, func: Callable) -> Callable:
-        """Inject optional lazy dataclass parameters into function signature."""
+        """Inject optional lazy dataclass parameters into function signature.
+
+        Can be disabled by setting ENABLE_CONFIG_INJECTION = False.
+        """
+        # Configuration flag to enable/disable config injection
+        ENABLE_CONFIG_INJECTION = False  # Set to True to re-enable config injection
+
+        if not ENABLE_CONFIG_INJECTION:
+            return func  # Return function unchanged when disabled
+
+        # Original injection logic (commented out for now but preserved)
         import inspect
         from functools import wraps
         from typing import Optional
