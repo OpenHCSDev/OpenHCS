@@ -478,6 +478,10 @@ class ParameterFormManager(QWidget):
         # CRITICAL FIX: Refresh placeholders AFTER user-set detection to show correct concrete/placeholder state
         form_manager._refresh_all_placeholders_with_current_context()
 
+        # CRITICAL FIX: Ensure nested managers also get their placeholders refreshed after full hierarchy is built
+        # This fixes the issue where nested dataclass placeholders don't load properly on initial form creation
+        form_manager._apply_to_nested_managers(lambda name, manager: manager.refresh_placeholder_text())
+
         return form_manager
 
 
@@ -825,7 +829,13 @@ class ParameterFormManager(QWidget):
             current_value = self.parameters.get(param_name)
 
             if current_value is None:
-                placeholder_text = self._get_placeholder_text(param_name)
+                # CRITICAL FIX: Use direct placeholder resolution like reset does
+                # This bypasses hierarchy search issues during initial form creation
+                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type, param_name,
+                    placeholder_prefix=self.placeholder_prefix,
+                    orchestrator=self.orchestrator
+                )
                 if placeholder_text:
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
             else:
