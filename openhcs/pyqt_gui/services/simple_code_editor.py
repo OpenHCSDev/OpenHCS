@@ -484,6 +484,12 @@ class QScintillaCodeEditorDialog(QDialog):
         if file_path:
             try:
                 selected_path = Path(file_path)
+
+                # Ensure file always ends with .py extension
+                if not selected_path.suffix.lower() == '.py':
+                    selected_path = selected_path.with_suffix('.py')
+                    file_path = str(selected_path)
+
                 # Cache the parent directory for future dialogs
                 cache_dialog_path(PathCacheKey.CODE_EDITOR, selected_path.parent)
 
