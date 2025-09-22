@@ -232,6 +232,49 @@ def _configure_worker_logging(log_file_base: str):
     worker_logger.info(f"🔥 WORKER: Import hook installed for auto-discovered functions")
 
 
+def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
+    """
+    Configure logging and GPU registry for worker process.
+
+    This function is called once per worker process when it starts.
+    It sets up both logging and GPU registry initialization.
+
+    Args:
+        log_file_base: Base path for worker log files (empty string if no logging)
+        global_config_dict: Serialized global configuration for GPU registry setup
+    """
+    import logging
+
+    # Configure logging only if log_file_base is provided
+    if log_file_base:
+        _configure_worker_logging(log_file_base)
+        worker_logger = logging.getLogger("openhcs.worker")
+    else:
+        # Set up basic logging for GPU registry messages
+        logging.basicConfig(level=logging.INFO)
+        worker_logger = logging.getLogger("openhcs.worker")
+        worker_logger.info("🔥 WORKER: No log file base provided, using basic logging")
+
+    # Initialize GPU registry for this worker process
+    try:
+        worker_logger.info("🔥 WORKER: Initializing GPU registry for worker process")
+
+        # Reconstruct global config from dict
+        from openhcs.core.config import GlobalPipelineConfig
+        global_config = GlobalPipelineConfig(**global_config_dict)
+
+        # Initialize GPU registry for this worker
+        from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
+        setup_global_gpu_registry(global_config)
+
+        worker_logger.info("🔥 WORKER: GPU registry initialized successfully")
+
+    except Exception as e:
+        worker_logger.error(f"🔥 WORKER: Failed to initialize GPU registry: {e}")
+        # Don't raise - let worker continue without GPU if needed
+        worker_logger.warning("🔥 WORKER: Continuing without GPU registry - GPU functions may fail")
+
+
 # Global variable to store log file base for worker processes
 _worker_log_file_base = None
 
@@ -655,16 +698,35 @@ class PipelineOrchestrator(ContextProvider):
                 executor = concurrent.futures.ThreadPoolExecutor(max_workers=actual_max_workers)
             else:
                 logger.info("🔥 PRODUCTION MODE: Using ProcessPoolExecutor for true parallelism")
+
+                # Get global config for worker GPU registry initialization
+                from openhcs.core.context.global_config import get_current_global_config
+                from openhcs.core.config import GlobalPipelineConfig
+                global_config = get_current_global_config(GlobalPipelineConfig)
+
                 if log_file_base:
-                    logger.info(f"🔥 WORKER LOGGING: Configuring worker processes with log base: {log_file_base}")
+                    logger.info(f"🔥 WORKER LOGGING: Configuring worker processes with log base and GPU registry: {log_file_base}")
+                    # Convert global config to dict for serialization
+                    global_config_dict = {
+                        'num_workers': global_config.num_workers,
+                        # Add other fields as needed for GPU registry
+                    }
                     executor = concurrent.futures.ProcessPoolExecutor(
                         max_workers=actual_max_workers,
-                        initializer=_configure_worker_logging,
-                        initargs=(log_file_base,)
+                        initializer=_configure_worker_with_gpu,
+                        initargs=(log_file_base, global_config_dict)
                     )
                 else:
-                    logger.info("🔥 WORKER LOGGING: No log base provided, workers will inherit logging")
-                    executor = concurrent.futures.ProcessPoolExecutor(max_workers=actual_max_workers)
+                    logger.info("🔥 WORKER LOGGING: No log base provided, configuring workers with GPU registry only")
+                    # Still need GPU registry even without logging
+                    global_config_dict = {
+                        'num_workers': global_config.num_workers,
+                    }
+                    executor = concurrent.futures.ProcessPoolExecutor(
+                        max_workers=actual_max_workers,
+                        initializer=_configure_worker_with_gpu,
+                        initargs=("", global_config_dict)  # Empty log base, but still init GPU
+                    )
 
             logger.info(f"🔥 DEATH_MARKER: ENTERING_{executor_type.upper()}_CONTEXT")
             with executor:

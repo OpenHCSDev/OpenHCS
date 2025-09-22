@@ -136,21 +136,9 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
 
         log_thread_count("after status write")
         
-        # Step 1: Initialize GPU registry (like test_main.py)
-        death_marker("STEP1_START", "GPU registry initialization")
-        logger.info("SUBPROCESS: Initializing GPU registry")
-
-        death_marker("BEFORE_GPU_IMPORT")
-        log_thread_count("before GPU scheduler import")
-
-        # NUCLEAR WRAP: GPU scheduler import
-        def import_gpu_scheduler():
-            from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
-            return setup_global_gpu_registry
-        setup_global_gpu_registry = force_error_detection("import_gpu_scheduler", import_gpu_scheduler)
-        death_marker("AFTER_GPU_IMPORT")
-
-        log_thread_count("after GPU scheduler import")
+        # Step 1: Validate global config (GPU registry will be initialized by workers)
+        death_marker("STEP1_START", "Global config validation")
+        logger.info("SUBPROCESS: Validating global config (GPU registry initialization deferred to workers)")
 
         death_marker("BEFORE_CONFIG_IMPORT")
         # NUCLEAR WRAP: Config import
@@ -169,11 +157,7 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
         logger.info(f"🔥 SUBPROCESS: Zarr compressor: {global_config.zarr_config.compressor.value}")
         log_thread_count("after global config validation")
 
-        # NUCLEAR WRAP: GPU registry setup
-        force_error_detection("setup_global_gpu_registry", setup_global_gpu_registry, global_config=global_config)
-
-        log_thread_count("after GPU registry setup")
-        logger.info("SUBPROCESS: GPU registry initialized")
+        logger.info("SUBPROCESS: Global config validated - GPU registry will be initialized by workers")
 
         # PROCESS-LEVEL CUDA STREAM SETUP for true parallelism
         logger.info("🔥 SUBPROCESS: Setting up process-specific CUDA streams...")
