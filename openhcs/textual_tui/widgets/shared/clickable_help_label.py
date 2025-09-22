@@ -42,11 +42,45 @@ class ClickableHelpLabel(Static):
         if self.help_target:
             # Show function/class help using unified manager
             await HelpWindowManager.show_docstring_help(self.app, self.help_target)
-        elif self.param_name and self.param_description:
+        elif self.param_name:
+            # ENHANCEMENT: Try to extract field documentation dynamically if description is missing
+            description = self.param_description
+            if not description or description == "No description available":
+                # Try to extract field documentation from the parent dataclass
+                description = self._extract_field_documentation()
+
             # Show parameter help using unified manager
             await HelpWindowManager.show_parameter_help(
-                self.app, self.param_name, self.param_description, self.param_type
+                self.app, self.param_name, description or "No description available", self.param_type
             )
+
+    def _extract_field_documentation(self) -> Optional[str]:
+        """Try to extract field documentation from the parent dataclass context."""
+        try:
+            # Try to find the parent dataclass from the widget hierarchy
+            parent_dataclass_type = self._find_parent_dataclass_type()
+            if parent_dataclass_type and self.param_name:
+                from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
+                return SignatureAnalyzer.extract_field_documentation(parent_dataclass_type, self.param_name)
+        except Exception:
+            pass
+        return None
+
+    def _find_parent_dataclass_type(self) -> Optional[type]:
+        """Try to find the dataclass type from the parent widget hierarchy."""
+        try:
+            # Walk up the widget hierarchy looking for parameter form managers
+            current = self.parent
+            while current:
+                # Check if this widget has dataclass type information
+                if hasattr(current, 'dataclass_type'):
+                    return current.dataclass_type
+                elif hasattr(current, 'config') and hasattr(current.config, 'dataclass_type'):
+                    return current.config.dataclass_type
+                current = getattr(current, 'parent', None)
+        except Exception:
+            pass
+        return None
 
 
 class ClickableFunctionTitle(ClickableHelpLabel):
@@ -109,8 +143,42 @@ class HelpIndicator(Static):
         if self.help_target:
             # Show function/class help using unified manager
             await HelpWindowManager.show_docstring_help(self.app, self.help_target)
-        elif self.param_name and self.param_description:
+        elif self.param_name:
+            # ENHANCEMENT: Try to extract field documentation dynamically if description is missing
+            description = self.param_description
+            if not description or description == "No description available":
+                # Try to extract field documentation from the parent dataclass
+                description = self._extract_field_documentation()
+
             # Show parameter help using unified manager
             await HelpWindowManager.show_parameter_help(
-                self.app, self.param_name, self.param_description, self.param_type
+                self.app, self.param_name, description or "No description available", self.param_type
             )
+
+    def _extract_field_documentation(self) -> Optional[str]:
+        """Try to extract field documentation from the parent dataclass context."""
+        try:
+            # Try to find the parent dataclass from the widget hierarchy
+            parent_dataclass_type = self._find_parent_dataclass_type()
+            if parent_dataclass_type and self.param_name:
+                from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
+                return SignatureAnalyzer.extract_field_documentation(parent_dataclass_type, self.param_name)
+        except Exception:
+            pass
+        return None
+
+    def _find_parent_dataclass_type(self) -> Optional[type]:
+        """Try to find the dataclass type from the parent widget hierarchy."""
+        try:
+            # Walk up the widget hierarchy looking for parameter form managers
+            current = self.parent
+            while current:
+                # Check if this widget has dataclass type information
+                if hasattr(current, 'dataclass_type'):
+                    return current.dataclass_type
+                elif hasattr(current, 'config') and hasattr(current.config, 'dataclass_type'):
+                    return current.config.dataclass_type
+                current = getattr(current, 'parent', None)
+        except Exception:
+            pass
+        return None
