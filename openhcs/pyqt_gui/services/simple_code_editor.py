@@ -451,11 +451,20 @@ class QScintillaCodeEditorDialog(QDialog):
 
     def _open_file(self):
         """Open file dialog and load content."""
+        from openhcs.core.path_cache import PathCacheKey, get_cached_dialog_path, cache_dialog_path
+
+        # Get cached initial directory
+        initial_dir = str(get_cached_dialog_path(PathCacheKey.CODE_EDITOR, fallback=Path.home()))
+
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open Python File", "", "Python Files (*.py);;All Files (*)"
+            self, "Open Python File", initial_dir, "Python Files (*.py);;All Files (*)"
         )
         if file_path:
             try:
+                selected_path = Path(file_path)
+                # Cache the parent directory for future dialogs
+                cache_dialog_path(PathCacheKey.CODE_EDITOR, selected_path.parent)
+
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                 self.editor.setText(content)
@@ -464,11 +473,20 @@ class QScintillaCodeEditorDialog(QDialog):
 
     def _save_as(self):
         """Save content to file."""
+        from openhcs.core.path_cache import PathCacheKey, get_cached_dialog_path, cache_dialog_path
+
+        # Get cached initial directory
+        initial_dir = str(get_cached_dialog_path(PathCacheKey.CODE_EDITOR, fallback=Path.home()))
+
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Python File", "", "Python Files (*.py);;All Files (*)"
+            self, "Save Python File", initial_dir, "Python Files (*.py);;All Files (*)"
         )
         if file_path:
             try:
+                selected_path = Path(file_path)
+                # Cache the parent directory for future dialogs
+                cache_dialog_path(PathCacheKey.CODE_EDITOR, selected_path.parent)
+
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(self.editor.text())
                 QMessageBox.information(self, "Success", f"File saved to {file_path}")

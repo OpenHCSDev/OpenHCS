@@ -33,6 +33,7 @@ class PathCacheKey(Enum):
     PIPELINE_FILES = "pipeline_files"        # .pipeline files
     STEP_SETTINGS = "step_settings"          # .step files
     DEBUG_FILES = "debug_files"              # .pkl debug files
+    CODE_EDITOR = "code_editor"              # .py files from code editor
     
     # Additional contexts for future use
     PLATE_BROWSER = "plate_browser"
