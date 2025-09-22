@@ -384,9 +384,29 @@ def _create_storage_registry() -> Dict[str, DataSink]:
     return create_storage_registry()
 
 
-# Global singleton storage registry - created once at module import time
+# Global singleton storage registry - created lazily to avoid GPU imports in subprocess mode
 # This is the shared registry instance that all components should use
-storage_registry: Dict[str, DataSink] = _create_storage_registry()
+import os
+if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+    # Subprocess runner mode - create minimal registry with only essential backends
+    storage_registry: Dict[str, DataSink] = {}
+    logger.info("Subprocess runner mode - storage registry will be created lazily")
+else:
+    # Normal mode - create full registry at import time
+    storage_registry: Dict[str, DataSink] = _create_storage_registry()
+
+
+def ensure_storage_registry() -> None:
+    """
+    Ensure storage registry is initialized.
+
+    In subprocess runner mode, the registry is created lazily to avoid
+    importing GPU libraries during subprocess runner initialization.
+    """
+    global storage_registry
+    if not storage_registry:
+        storage_registry.update(_create_storage_registry())
+        logger.info("Lazily created storage registry")
 
 
 def reset_memory_backend() -> None:

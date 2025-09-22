@@ -30,32 +30,37 @@ class RegistryService:
         """Get unified metadata for all functions from all registries."""
         if cls._metadata_cache is not None:
             return cls._metadata_cache
-            
+
         logger.info("Discovering functions from all registries...")
         all_functions = {}
-        
+
         # Discover all registry classes automatically
         registry_classes = cls._discover_registries()
-        
+
         # Load functions from each registry
         for registry_class in registry_classes:
             try:
                 registry_instance = registry_class()
-                
+
                 # Skip if library not available
                 if not registry_instance.is_library_available():
                     logger.warning(f"Library {registry_instance.library_name} not available, skipping")
                     continue
-                
+
                 # Get functions from this registry (with caching)
                 functions = registry_instance._load_or_discover_functions()
                 logger.info(f"Retrieved {len(functions)} {registry_instance.library_name} functions")
-                all_functions.update(functions)
-                
+
+                # Use composite keys to prevent function name collisions between backends
+                # Format: "backend:function_name" (e.g., "torch:stack_percentile_normalize")
+                for func_name, metadata in functions.items():
+                    composite_key = f"{registry_instance.library_name}:{func_name}"
+                    all_functions[composite_key] = metadata
+
             except Exception as e:
                 logger.warning(f"Failed to load registry {registry_class.__name__}: {e}")
                 continue
-        
+
         logger.info(f"Total functions discovered: {len(all_functions)}")
         cls._metadata_cache = all_functions
         return all_functions

@@ -7,6 +7,7 @@ with OpenHCS patterns.
 """
 
 import logging
+import os
 from typing import List, Optional, Union
 
 # Import OpenHCS decorator
@@ -15,14 +16,22 @@ from openhcs.core.memory.decorators import pyclesperanto as pyclesperanto_func
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# Try to import pyclesperanto
-try:
-    import pyclesperanto as cle
-    PYCLESPERANTO_AVAILABLE = True
-    logger.info("pyclesperanto available - GPU acceleration enabled")
-except ImportError:
+# Check if we're in subprocess runner mode and should skip GPU imports
+if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+    # Subprocess runner mode - skip GPU imports
     PYCLESPERANTO_AVAILABLE = False
-    logger.warning("pyclesperanto not available - install with: pip install pyclesperanto")
+    cle = None
+    logger.info("Subprocess runner mode - skipping pyclesperanto import")
+else:
+    # Normal mode - try to import pyclesperanto
+    try:
+        import pyclesperanto as cle
+        PYCLESPERANTO_AVAILABLE = True
+        logger.info("pyclesperanto available - GPU acceleration enabled")
+    except ImportError:
+        PYCLESPERANTO_AVAILABLE = False
+        cle = None
+        logger.warning("pyclesperanto not available - install with: pip install pyclesperanto")
 
 def _check_pyclesperanto_available():
     """Check if pyclesperanto is available and raise error if not."""

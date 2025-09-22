@@ -12,21 +12,32 @@ Doctrinal Clauses:
 from __future__ import annotations 
 
 import logging
+import os
 from typing import Any, List, Optional, Tuple
 
 from openhcs.core.memory.decorators import cupy as cupy_func
 from openhcs.core.utils import optional_import
 
-# Import CuPy as an optional dependency
-cp = optional_import("cupy")
-ndimage = None
-if cp is not None:
-    cupyx_scipy = optional_import("cupyx.scipy")
-    if cupyx_scipy is not None:
-        ndimage = cupyx_scipy.ndimage
+logger = logging.getLogger(__name__)
 
-# Import CuCIM for edge detection
-cucim_filters = optional_import("cucim.skimage.filters")
+# Check if we're in subprocess runner mode and should skip GPU imports
+if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+    # Subprocess runner mode - skip GPU imports
+    cp = None
+    ndimage = None
+    cucim_filters = None
+    logger.info("Subprocess runner mode - skipping cupy import")
+else:
+    # Normal mode - import CuPy as an optional dependency
+    cp = optional_import("cupy")
+    ndimage = None
+    if cp is not None:
+        cupyx_scipy = optional_import("cupyx.scipy")
+        if cupyx_scipy is not None:
+            ndimage = cupyx_scipy.ndimage
+
+    # Import CuCIM for edge detection
+    cucim_filters = optional_import("cucim.skimage.filters")
 
 logger = logging.getLogger(__name__)
 

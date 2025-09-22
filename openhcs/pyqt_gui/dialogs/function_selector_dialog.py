@@ -154,14 +154,24 @@ class FunctionSelectorDialog(QDialog):
         self.all_functions_metadata = {}
 
         # Convert FunctionMetadata to dict format for UI compatibility
-        for func_name, metadata in unified_functions.items():
-            self.all_functions_metadata[func_name] = {
+        # Handle composite keys (backend:function_name) from registry service
+        for composite_key, metadata in unified_functions.items():
+            # Extract backend and function name from composite key
+            if ':' in composite_key:
+                backend, func_name = composite_key.split(':', 1)
+            else:
+                # Fallback for non-composite keys
+                backend = metadata.registry.library_name if metadata.registry else 'unknown'
+                func_name = composite_key
+
+            self.all_functions_metadata[composite_key] = {
                 'name': metadata.name,
                 'func': metadata.func,
                 'module': metadata.module,
                 'contract': metadata.contract,
                 'tags': metadata.tags,
-                'doc': metadata.doc
+                'doc': metadata.doc,
+                'backend': backend  # Add explicit backend field for UI
             }
 
         # Cache the results for future use
@@ -456,9 +466,9 @@ class FunctionSelectorDialog(QDialog):
         self.function_table.setRowCount(len(functions_metadata))
         self.function_table.setSortingEnabled(False)  # Disable during population
 
-        for row, (func_name, metadata) in enumerate(functions_metadata.items()):
-            # Extract backend from function attributes or use tags
-            backend = metadata.get('tags', ['unknown'])[0] if metadata.get('tags') else 'unknown'
+        for row, (composite_key, metadata) in enumerate(functions_metadata.items()):
+            # Use explicit backend field from metadata
+            backend = metadata.get('backend', 'unknown')
 
             # Format tags as comma-separated string
             tags_str = ", ".join(metadata.get('tags', [])) if metadata.get('tags') else ""
@@ -473,7 +483,7 @@ class FunctionSelectorDialog(QDialog):
 
             # Create all table items using factored pattern
             items_data = [
-                metadata.get('name', func_name),
+                metadata.get('name', metadata.get('name', composite_key.split(':')[-1] if ':' in composite_key else composite_key)),
                 metadata.get('module', 'unknown'),
                 backend.title(),
                 contract_name,

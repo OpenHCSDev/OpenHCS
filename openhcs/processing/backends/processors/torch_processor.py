@@ -12,17 +12,26 @@ Doctrinal Clauses:
 from __future__ import annotations 
 
 import logging
+import os
 from typing import Any, List, Optional, Tuple
 
 from openhcs.core.utils import optional_import
 from openhcs.core.memory.decorators import torch as torch_func
 
-# Import PyTorch as an optional dependency
-torch = optional_import("torch")
-F = optional_import("torch.nn.functional") if torch is not None else None
-HAS_TORCH = torch is not None
-
 logger = logging.getLogger(__name__)
+
+# Check if we're in subprocess runner mode and should skip GPU imports
+if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+    # Subprocess runner mode - skip GPU imports
+    torch = None
+    F = None
+    HAS_TORCH = False
+    logger.info("Subprocess runner mode - skipping torch import")
+else:
+    # Normal mode - import PyTorch as an optional dependency
+    torch = optional_import("torch")
+    F = optional_import("torch.nn.functional") if torch is not None else None
+    HAS_TORCH = torch is not None
 
 
 def create_linear_weight_mask(height: int, width: int, margin_ratio: float = 0.1) -> "torch.Tensor":

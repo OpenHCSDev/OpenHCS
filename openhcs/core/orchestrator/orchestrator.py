@@ -34,7 +34,15 @@ from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
 from openhcs.core.steps.abstract import AbstractStep, get_step_id
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.io.filemanager import FileManager
-from openhcs.io.zarr import ZarrStorageBackend
+# Conditional zarr import - skip in subprocess runner mode
+import os
+if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+    # Subprocess runner mode - create placeholder
+    class ZarrStorageBackend:
+        """Placeholder for subprocess runner mode."""
+        pass
+else:
+    from openhcs.io.zarr import ZarrStorageBackend
 # PipelineConfig now imported directly above
 from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
 from openhcs.io.exceptions import StorageWriteError
@@ -42,7 +50,14 @@ from openhcs.io.base import storage_registry
 from openhcs.microscopes import create_microscope_handler
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 
-from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
+# Conditional analysis import - skip in subprocess runner mode
+if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+    # Subprocess runner mode - create placeholder
+    def consolidate_analysis_results(*args, **kwargs):
+        """Placeholder for subprocess runner mode."""
+        raise RuntimeError("Analysis consolidation not available in subprocess runner mode")
+else:
+    from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
 
 # Import generic component system - required for orchestrator functionality
 from openhcs.core.components.multiprocessing import MultiprocessingCoordinator
@@ -234,10 +249,10 @@ def _configure_worker_logging(log_file_base: str):
 
 def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
     """
-    Configure logging and GPU registry for worker process.
+    Configure logging, function registry, and GPU registry for worker process.
 
     This function is called once per worker process when it starts.
-    It sets up both logging and GPU registry initialization.
+    It sets up logging, function registry, and GPU registry initialization.
 
     Args:
         log_file_base: Base path for worker log files (empty string if no logging)
@@ -250,10 +265,29 @@ def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
         _configure_worker_logging(log_file_base)
         worker_logger = logging.getLogger("openhcs.worker")
     else:
-        # Set up basic logging for GPU registry messages
+        # Set up basic logging for worker messages
         logging.basicConfig(level=logging.INFO)
         worker_logger = logging.getLogger("openhcs.worker")
         worker_logger.info("🔥 WORKER: No log file base provided, using basic logging")
+
+    # Initialize function registry for this worker process
+    try:
+        worker_logger.info("🔥 WORKER: Initializing function registry for worker process")
+
+        # Import and initialize function registry (will auto-discover all libraries)
+        import openhcs.processing.func_registry as func_registry_module
+
+        # Force initialization if not already done (workers need full registry)
+        with func_registry_module._registry_lock:
+            if not func_registry_module._registry_initialized:
+                func_registry_module._auto_initialize_registry()
+
+        worker_logger.info("🔥 WORKER: Function registry initialized successfully")
+
+    except Exception as e:
+        worker_logger.error(f"🔥 WORKER: Failed to initialize function registry: {e}")
+        # Don't raise - let worker continue, registry will auto-init on first function call
+        worker_logger.warning("🔥 WORKER: Function registry will auto-initialize on first function call")
 
     # Initialize GPU registry for this worker process
     try:

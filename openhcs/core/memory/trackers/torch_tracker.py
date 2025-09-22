@@ -1,25 +1,33 @@
 import logging
+import os
 from typing import TYPE_CHECKING, Dict
 
 from openhcs.core.utils import optional_import
 
 logger = logging.getLogger(__name__)
 
-# Import torch as an optional dependency
-if TYPE_CHECKING:
-    import torch
-
-torch = optional_import("torch")
-TORCH_CUDA_AVAILABLE = False
-if torch is not None:
-    try:
-        TORCH_CUDA_AVAILABLE = torch.cuda.is_available()
-        if not TORCH_CUDA_AVAILABLE:
-            logger.info("PyTorch found, but CUDA is not available. TorchMemoryTracker will not be functional.")
-    except Exception:
-        logger.info("PyTorch found, but CUDA is not available. TorchMemoryTracker will not be functional.")
+# Check if we're in subprocess runner mode and should skip GPU imports
+if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+    # Subprocess runner mode - skip GPU imports
+    torch = None
+    TORCH_CUDA_AVAILABLE = False
+    logger.info("Subprocess runner mode - skipping torch import in memory tracker")
 else:
-    logger.info("PyTorch library not found. TorchMemoryTracker will not be available.")
+    # Normal mode - import torch as an optional dependency
+    if TYPE_CHECKING:
+        import torch
+
+    torch = optional_import("torch")
+    TORCH_CUDA_AVAILABLE = False
+    if torch is not None:
+        try:
+            TORCH_CUDA_AVAILABLE = torch.cuda.is_available()
+            if not TORCH_CUDA_AVAILABLE:
+                logger.info("PyTorch found, but CUDA is not available. TorchMemoryTracker will not be functional.")
+        except Exception:
+            logger.info("PyTorch found, but CUDA is not available. TorchMemoryTracker will not be functional.")
+    else:
+        logger.info("PyTorch library not found. TorchMemoryTracker will not be available.")
 
 
 class TorchMemoryTracker: # Implements MemoryTracker protocol

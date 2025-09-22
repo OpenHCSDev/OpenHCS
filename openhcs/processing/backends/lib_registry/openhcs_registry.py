@@ -131,8 +131,11 @@ class OpenHCSRegistry(LibraryRegistryBase):
                     # Apply contract wrapper (adds slice_by_slice for FLEXIBLE)
                     wrapped_func = self.apply_contract_wrapper(func, contract)
 
+                    # Generate unique function name using module information
+                    unique_name = self._generate_function_name(name, module_name)
+
                     metadata = FunctionMetadata(
-                        name=name,
+                        name=unique_name,
                         func=wrapped_func,
                         contract=contract,
                         registry=self,
@@ -142,7 +145,7 @@ class OpenHCSRegistry(LibraryRegistryBase):
                         original_name=name
                     )
 
-                    functions[name] = metadata
+                    functions[unique_name] = metadata
 
         return functions
 

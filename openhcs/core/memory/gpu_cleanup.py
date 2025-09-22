@@ -1,24 +1,35 @@
 """
 GPU memory cleanup utilities for different frameworks.
 
-This module provides unified GPU memory cleanup functions for PyTorch, CuPy, 
+This module provides unified GPU memory cleanup functions for PyTorch, CuPy,
 TensorFlow, and JAX. The cleanup functions are designed to be called after
 processing steps to free up GPU memory that's no longer needed.
 """
 
 import logging
+import os
 from typing import Optional
 from openhcs.core.utils import optional_import
 from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES # Import directly if always available
 
 logger = logging.getLogger(__name__)
 
-# --- Top-level optional imports for GPU frameworks ---
-torch = optional_import("torch")
-cupy = optional_import("cupy")
-tensorflow = optional_import("tensorflow")
-jax = optional_import("jax")
-pyclesperanto = optional_import("pyclesperanto")
+# Check if we're in subprocess runner mode and should skip GPU imports
+if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+    # Subprocess runner mode - skip GPU imports
+    torch = None
+    cupy = None
+    tensorflow = None
+    jax = None
+    pyclesperanto = None
+    logger.info("Subprocess runner mode - skipping GPU library imports in gpu_cleanup")
+else:
+    # Normal mode - import GPU frameworks as optional dependencies
+    torch = optional_import("torch")
+    cupy = optional_import("cupy")
+    tensorflow = optional_import("tensorflow")
+    jax = optional_import("jax")
+    pyclesperanto = optional_import("pyclesperanto")
 
 # --- Cleanup functions ---
 

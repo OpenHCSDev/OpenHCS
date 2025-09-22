@@ -78,7 +78,7 @@ def _create_virtual_modules() -> None:
 
     # Group functions by their full module path
     functions_by_module = {}
-    for func_name, metadata in all_functions.items():
+    for composite_key, metadata in all_functions.items():
         # Only create virtual modules for external library functions with slice_by_slice
         if (hasattr(metadata.func, 'slice_by_slice') and
             not hasattr(metadata.func, '__processing_contract__') and
@@ -141,13 +141,14 @@ def _auto_initialize_registry() -> None:
         all_functions = RegistryService.get_all_functions_with_metadata()
 
         # Initialize registry structure based on discovered registries
-        for func_name, metadata in all_functions.items():
+        # Handle composite keys from RegistryService (backend:function_name)
+        for composite_key, metadata in all_functions.items():
             registry_name = metadata.registry.library_name
             if registry_name not in FUNC_REGISTRY:
                 FUNC_REGISTRY[registry_name] = []
 
         # Register all functions
-        for func_name, metadata in all_functions.items():
+        for composite_key, metadata in all_functions.items():
             registry_name = metadata.registry.library_name
             FUNC_REGISTRY[registry_name].append(metadata.func)
 
@@ -202,13 +203,14 @@ def initialize_registry() -> None:
         all_functions = RegistryService.get_all_functions_with_metadata()
 
         # Initialize registry structure based on discovered registries
-        for func_name, metadata in all_functions.items():
+        # Handle composite keys from RegistryService (backend:function_name)
+        for composite_key, metadata in all_functions.items():
             registry_name = metadata.registry.library_name
             if registry_name not in FUNC_REGISTRY:
                 FUNC_REGISTRY[registry_name] = []
 
         # Register all functions
-        for func_name, metadata in all_functions.items():
+        for composite_key, metadata in all_functions.items():
             registry_name = metadata.registry.library_name
             FUNC_REGISTRY[registry_name].append(metadata.func)
 
@@ -603,7 +605,7 @@ def get_all_function_names(memory_type: str) -> List[str]:
 
 
 # Auto-initialize the registry on module import (following storage_registry pattern)
-# Skip initialization in subprocess workers for faster startup
+# Skip initialization in subprocess runner mode for faster startup
 import os
-if not os.environ.get('OPENHCS_SUBPROCESS_MODE'):
+if not os.environ.get('OPENHCS_SUBPROCESS_NO_GPU'):
     _auto_initialize_registry()

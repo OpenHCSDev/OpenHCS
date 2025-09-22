@@ -31,11 +31,20 @@ def optional_import(module_name):
         return None
 
 # Optional dependencies at module level (not instance level to avoid pickle issues)
-torch = optional_import("torch")
-jax = optional_import("jax")
-jnp = optional_import("jax.numpy")
-cupy = optional_import("cupy")
-tf = optional_import("tensorflow")
+# Skip GPU libraries in subprocess runner mode
+if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+    torch = None
+    jax = None
+    jnp = None
+    cupy = None
+    tf = None
+    logger.info("Subprocess runner mode - skipping GPU library imports in disk backend")
+else:
+    torch = optional_import("torch")
+    jax = optional_import("jax")
+    jnp = optional_import("jax.numpy")
+    cupy = optional_import("cupy")
+    tf = optional_import("tensorflow")
 tifffile = optional_import("tifffile")
 
 class FileFormatRegistry:

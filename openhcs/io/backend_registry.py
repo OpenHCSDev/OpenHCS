@@ -192,9 +192,20 @@ def discover_all_backends() -> None:
     Uses direct imports to avoid circular dependency issues while
     still triggering metaclass registration.
     """
-    # Import backend modules directly to trigger metaclass registration
-    try:
-        from openhcs.io import disk, memory, zarr, napari_stream, fiji_stream
-        logger.debug(f"Discovered {len(STORAGE_BACKENDS)} storage backends: {list(STORAGE_BACKENDS.keys())}")
-    except ImportError as e:
-        logger.warning(f"Could not import some backend modules: {e}")
+    import os
+
+    # Check if we're in subprocess runner mode and should skip GPU-heavy backends
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        # Subprocess runner mode - only import essential backends
+        try:
+            from openhcs.io import disk, memory
+            logger.debug(f"Subprocess runner mode - discovered {len(STORAGE_BACKENDS)} essential backends: {list(STORAGE_BACKENDS.keys())}")
+        except ImportError as e:
+            logger.warning(f"Could not import essential backend modules: {e}")
+    else:
+        # Normal mode - import all backend modules to trigger metaclass registration
+        try:
+            from openhcs.io import disk, memory, zarr, napari_stream, fiji_stream
+            logger.debug(f"Discovered {len(STORAGE_BACKENDS)} storage backends: {list(STORAGE_BACKENDS.keys())}")
+        except ImportError as e:
+            logger.warning(f"Could not import some backend modules: {e}")

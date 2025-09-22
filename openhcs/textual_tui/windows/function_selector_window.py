@@ -66,8 +66,23 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
         """Load function data with enhanced metadata from registry."""
         registry_service = RegistryService()
 
-        # Get unified metadata for all functions
-        self.all_functions_metadata = registry_service.get_all_functions_with_metadata()
+        # Get unified metadata for all functions (now with composite keys)
+        unified_functions = registry_service.get_all_functions_with_metadata()
+
+        # Convert to format expected by TUI, handling composite keys
+        self.all_functions_metadata = {}
+        for composite_key, metadata in unified_functions.items():
+            # Extract backend and function name from composite key
+            if ':' in composite_key:
+                backend, func_name = composite_key.split(':', 1)
+            else:
+                # Fallback for non-composite keys
+                backend = metadata.registry.library_name if metadata.registry else 'unknown'
+                func_name = composite_key
+
+            # Store with composite key but add backend info for UI
+            self.all_functions_metadata[composite_key] = metadata
+
         self.filtered_functions = self.all_functions_metadata.copy()
 
     def compose(self) -> ComposeResult:
@@ -210,9 +225,14 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
         """Populate table with function metadata."""
         table.clear()
 
-        for func_name, metadata in functions_metadata.items():
-            # Extract backend from function attributes or use module info
-            backend = getattr(metadata.func, 'input_memory_type', 'unknown')
+        for composite_key, metadata in functions_metadata.items():
+            # Extract backend from composite key
+            if ':' in composite_key:
+                backend, func_name = composite_key.split(':', 1)
+            else:
+                # Fallback for non-composite keys
+                backend = getattr(metadata.func, 'input_memory_type', 'unknown')
+                func_name = composite_key
 
             # Format tags as comma-separated string
             tags_str = ", ".join(metadata.tags) if metadata.tags else ""
@@ -224,11 +244,11 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
             row_key = table.add_row(
                 metadata.name,
                 metadata.module.split('.')[-1] if metadata.module else "unknown",  # Show only last part of module
-                backend,
+                backend.title(),  # Capitalize backend name for display
                 metadata.contract.name if metadata.contract else "unknown",
                 tags_str,
                 description,
-                key=func_name
+                key=composite_key  # Use composite key for row identification
             )
 
             # Store function reference for selection
@@ -284,10 +304,10 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
         table = self.query_one("#function_table", DataTable)
 
         if event.row_key:
-            # Get function from filtered metadata
-            func_name = str(event.row_key.value)
-            if func_name in self.filtered_functions:
-                metadata = self.filtered_functions[func_name]
+            # Get function from filtered metadata using composite key
+            composite_key = str(event.row_key.value)
+            if composite_key in self.filtered_functions:
+                metadata = self.filtered_functions[composite_key]
                 self.selected_function = metadata.func
 
                 # Enable select button

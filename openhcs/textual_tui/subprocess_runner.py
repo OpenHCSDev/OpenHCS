@@ -19,23 +19,18 @@ import atexit
 import os
 from pathlib import Path
 from typing import Dict, List, Any
-from openhcs.core.steps.abstract import AbstractStep
-from openhcs.core.context.processing_context import ProcessingContext
+
+logger = logging.getLogger(__name__)
 
 # Enable subprocess mode - this single variable controls all subprocess behavior
 os.environ['OPENHCS_SUBPROCESS_MODE'] = '1'
 
-# Initialize function registry for subprocess workers
-def _initialize_subprocess_registry():
-    """Initialize function registry optimized for subprocess workers."""
-    import openhcs.processing.func_registry as func_registry_module
+# Prevent GPU library imports in subprocess runner - workers will handle GPU initialization
+os.environ['OPENHCS_SUBPROCESS_NO_GPU'] = '1'
 
-    with func_registry_module._registry_lock:
-        if not func_registry_module._registry_initialized:
-            # Use the new auto-initialization system
-            func_registry_module._auto_initialize_registry()
-
-_initialize_subprocess_registry()
+# Subprocess runner doesn't need function registry at all
+# Workers will initialize their own function registries when needed
+logger.info("Subprocess runner: No function registry needed - workers will handle initialization")
 
 def setup_subprocess_logging(log_file_path: str):
     """Set up dedicated logging for the subprocess - all logs go to the specified file."""
@@ -157,40 +152,7 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
         logger.info(f"🔥 SUBPROCESS: Zarr compressor: {global_config.zarr_config.compressor.value}")
         log_thread_count("after global config validation")
 
-        logger.info("SUBPROCESS: Global config validated - GPU registry will be initialized by workers")
-
-        # PROCESS-LEVEL CUDA STREAM SETUP for true parallelism
-        logger.info("🔥 SUBPROCESS: Setting up process-specific CUDA streams...")
-        try:
-            import os
-            process_id = os.getpid()
-
-            # Set unique CUDA stream for this process based on PID
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    # Create process-specific stream
-                    torch.cuda.set_device(0)  # Use GPU 0
-                    process_stream = torch.cuda.Stream()
-                    torch.cuda.set_stream(process_stream)
-                    logger.info(f"🔥 SUBPROCESS: Created PyTorch CUDA stream for process {process_id}")
-            except ImportError:
-                logger.debug("PyTorch not available for stream setup")
-
-            try:
-                import cupy as cp
-                if cp.cuda.is_available():
-                    # Create process-specific stream
-                    cp.cuda.Device(0).use()  # Use GPU 0
-                    process_stream = cp.cuda.Stream()
-                    cp.cuda.Stream.null = process_stream  # Set as default stream
-                    logger.info(f"🔥 SUBPROCESS: Created CuPy CUDA stream for process {process_id}")
-            except ImportError:
-                logger.debug("CuPy not available for stream setup")
-
-        except Exception as stream_error:
-            logger.warning(f"🔥 SUBPROCESS: Could not set up process streams: {stream_error}")
-            # Continue anyway - not critical
+        logger.info("SUBPROCESS: Global config validated - GPU registry and CUDA streams will be initialized by workers")
 
         # Step 2: Create orchestrator and initialize (like test_main.py)
         logger.info("🔥 SUBPROCESS: Creating orchestrator...")
@@ -205,22 +167,17 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
 
         log_thread_count("after orchestrator import")
 
-        # NUCLEAR WRAP: Storage registry import
+        # NUCLEAR WRAP: Storage registry import (lazy initialization for subprocess mode)
         def import_storage_registry():
-            from openhcs.io.base import storage_registry
+            from openhcs.io.base import storage_registry, ensure_storage_registry
+            ensure_storage_registry()  # Ensure registry is created in subprocess mode
             return storage_registry
         storage_registry = force_error_detection("import_storage_registry", import_storage_registry)
 
         log_thread_count("after storage registry import")
 
-        # NUCLEAR WRAP: Function registry import (CRITICAL for auto-discovered functions)
-        def import_function_registry():
-            from openhcs.processing.func_registry import FUNC_REGISTRY
-            return FUNC_REGISTRY
-        FUNC_REGISTRY = force_error_detection("import_function_registry", import_function_registry)
-
-        log_thread_count("after function registry import")
-        logger.info("SUBPROCESS: Function registry initialized")
+        # Skip function registry import in subprocess runner - workers will initialize their own
+        logger.info("SUBPROCESS: Function registry initialization deferred to workers")
 
 
 
@@ -278,15 +235,8 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
         # This is where hangs often occur - add extra monitoring
         logger.info("🔥 SUBPROCESS: About to call execute_compiled_plate...")
 
-        # Add GPU memory monitoring before execution
-        try:
-            import torch
-            if torch.cuda.is_available():
-                gpu_mem_before = torch.cuda.memory_allocated() / 1024**3
-                gpu_mem_reserved = torch.cuda.memory_reserved() / 1024**3
-                logger.info(f"🔥 SUBPROCESS: GPU memory before execution - Allocated: {gpu_mem_before:.2f}GB, Reserved: {gpu_mem_reserved:.2f}GB")
-        except Exception as e:
-            logger.warning(f"🔥 SUBPROCESS: Could not check GPU memory: {e}")
+        # Skip GPU memory monitoring in subprocess runner - workers will handle GPU monitoring
+        logger.info("🔥 SUBPROCESS: GPU memory monitoring deferred to workers")
 
         # Let's debug what's actually happening - use normal threading
         logger.info("🔥 SUBPROCESS: Starting execution with detailed monitoring...")
@@ -306,16 +256,10 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
             count = 0
             while monitoring_active.is_set():
                 count += 1
-                logger.info(f"🔥 SUBPROCESS: MONITOR #{count} - Still executing, checking GPU memory...")
+                logger.info(f"🔥 SUBPROCESS: MONITOR #{count} - Still executing...")
 
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        allocated = torch.cuda.memory_allocated() / 1024**3
-                        reserved = torch.cuda.memory_reserved() / 1024**3
-                        logger.info(f"🔥 SUBPROCESS: GPU Memory - Allocated: {allocated:.2f}GB, Reserved: {reserved:.2f}GB")
-                except:
-                    pass
+                # Skip GPU memory monitoring in subprocess runner
+                logger.info("🔥 SUBPROCESS: GPU memory monitoring deferred to workers")
 
                 # Check if we can get thread info
                 try:

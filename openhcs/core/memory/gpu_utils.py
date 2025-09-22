@@ -10,6 +10,7 @@ Doctrinal Clauses:
 """
 
 import logging
+import os
 from typing import Optional
 
 from openhcs.core.utils import optional_import
@@ -24,6 +25,11 @@ def check_cupy_gpu_available() -> Optional[int]:
     Returns:
         GPU device ID if available, None otherwise
     """
+    # Skip GPU checks in subprocess runner mode
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        logger.debug("Subprocess runner mode - skipping cupy GPU check")
+        return None
+
     cp = optional_import("cupy")
     if cp is None:
         logger.debug("Cupy not installed")
@@ -51,6 +57,11 @@ def check_torch_gpu_available() -> Optional[int]:
     Returns:
         GPU device ID if available, None otherwise
     """
+    # Skip GPU checks in subprocess runner mode
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        logger.debug("Subprocess runner mode - skipping torch GPU check")
+        return None
+
     torch = optional_import("torch")
     if torch is None:
         logger.debug("Torch not installed")
@@ -78,6 +89,11 @@ def check_tf_gpu_available() -> Optional[int]:
     Returns:
         GPU device ID if available, None otherwise
     """
+    # Skip GPU checks in subprocess runner mode
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        logger.debug("Subprocess runner mode - skipping tensorflow GPU check")
+        return None
+
     tf = optional_import("tensorflow")
     if tf is None:
         logger.debug("TensorFlow not installed")
@@ -108,6 +124,11 @@ def check_jax_gpu_available() -> Optional[int]:
     Returns:
         GPU device ID if available, None otherwise
     """
+    # Skip GPU checks in subprocess runner mode
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        logger.debug("Subprocess runner mode - skipping JAX GPU check")
+        return None
+
     jax = optional_import("jax")
     if jax is None:
         logger.debug("JAX not installed")

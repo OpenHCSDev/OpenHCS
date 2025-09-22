@@ -356,12 +356,27 @@ class SignatureAnalyzer:
         """
         sig = inspect.signature(callable_obj)
         # Build comprehensive namespace for forward reference resolution
-        # Start with our modules, then overlay the function's original globals to preserve imports
+        # Start with function's globals (which contain the actual types), then add our modules as fallback
         globalns = {
             **vars(lazy_module),
             **vars(config_module),
             **getattr(callable_obj, '__globals__', {})
         }
+
+        # For OpenHCS functions, prioritize the function's actual module globals
+        if hasattr(callable_obj, '__module__') and callable_obj.__module__:
+            try:
+                import sys
+                actual_module = sys.modules.get(callable_obj.__module__)
+                if actual_module:
+                    # Function's module globals should take precedence for type resolution
+                    globalns = {
+                        **vars(lazy_module),
+                        **vars(config_module),
+                        **vars(actual_module)  # This overwrites with the actual module types
+                    }
+            except Exception:
+                pass  # Fall back to original globalns
 
         try:
             type_hints = get_type_hints(callable_obj, globalns=globalns)
@@ -375,6 +390,8 @@ class SignatureAnalyzer:
         except Exception:
             # For any other type hint resolution errors, return empty type hints
             type_hints = {}
+
+
 
         # Extract docstring information (with fallback for robustness)
         try:
@@ -422,6 +439,8 @@ class SignatureAnalyzer:
             param_type = type_hints.get(param_name, Any)
             default_value = param.default if param.default != inspect.Parameter.empty else None
             is_required = param.default == inspect.Parameter.empty
+
+
 
             # Get parameter description from docstring
             param_description = docstring_info.parameters.get(param_name) if docstring_info else None
