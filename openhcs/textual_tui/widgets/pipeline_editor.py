@@ -170,6 +170,7 @@ class PipelineEditorWidget(ButtonListWidget):
             self.query_one("#edit_step").disabled = not (len(selected_values) == 1)  # Edit requires exactly one selection
             self.query_one("#load_pipeline").disabled = not (has_plate and is_initialized)
             self.query_one("#save_pipeline").disabled = not has_steps
+            self.query_one("#code_pipeline").disabled = not (has_plate and is_initialized)  # Same as add button
 
         except Exception:
             # Buttons might not be mounted yet
@@ -313,6 +314,7 @@ class PipelineEditorWidget(ButtonListWidget):
             # - Edit requires valid selection that maps to actual step
             add_enabled = has_plate and is_initialized
             load_enabled = has_plate and is_initialized
+            code_enabled = has_plate and is_initialized  # Same as add button - orchestrator init is sufficient
 
             logger.debug(f"PipelineEditor: Setting add_step.disabled = {not add_enabled}, load_pipeline.disabled = {not load_enabled}")
 
@@ -321,7 +323,7 @@ class PipelineEditorWidget(ButtonListWidget):
             self.query_one("#edit_step").disabled = not (has_steps and has_valid_selection)
             self.query_one("#load_pipeline").disabled = not load_enabled
             self.query_one("#save_pipeline").disabled = not has_steps
-            self.query_one("#code_pipeline").disabled = not has_steps
+            self.query_one("#code_pipeline").disabled = not code_enabled  # Changed from has_steps to code_enabled
         except Exception:
             # Buttons might not be mounted yet
             pass
@@ -700,10 +702,6 @@ class PipelineEditorWidget(ButtonListWidget):
     async def action_code_pipeline(self) -> None:
         """Edit pipeline as Python code in terminal window."""
         logger.debug("Code button pressed - opening pipeline editor")
-
-        if not self.pipeline_steps:
-            self.app.current_status = "No pipeline steps to edit"
-            return
 
         if not self.current_plate:
             self.app.current_status = "No plate selected"

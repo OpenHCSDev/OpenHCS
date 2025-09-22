@@ -22,12 +22,12 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
     }
 
     .left-pane {
-        width: 40%;
+        width: 30%;  /* Reduced from 40% to take up less width */
         border-right: solid $primary;
     }
 
     .right-pane {
-        width: 60%;
+        width: 70%;  /* Increased from 60% to give more space to table */
     }
 
     .pane-title {

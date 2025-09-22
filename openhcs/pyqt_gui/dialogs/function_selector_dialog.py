@@ -105,8 +105,8 @@ class FunctionSelectorDialog(QDialog):
     MIN_HEIGHT = 500
     MODULE_COLUMN_WIDTH = 250
     DESCRIPTION_COLUMN_WIDTH = 200
-    TREE_PROPORTION = 400
-    TABLE_PROPORTION = 600
+    TREE_PROPORTION = 300  # Reduced from 400 to take up less width
+    TABLE_PROPORTION = 700  # Increased from 600 to give more space to table
 
     # Signals
     function_selected = pyqtSignal(object)  # Selected function
@@ -399,15 +399,16 @@ class FunctionSelectorDialog(QDialog):
         self.function_table.setSortingEnabled(True)
         self.function_table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # Configure column widths using mathematical simplification (RST principle)
+        # Configure column widths - make all columns resizable and movable
         header = self.function_table.horizontalHeader()
+        header.setSectionsMovable(True)  # Allow column reordering
         resize_modes = [
-            QHeaderView.ResizeMode.ResizeToContents,  # Name
-            QHeaderView.ResizeMode.Interactive,       # Module
-            QHeaderView.ResizeMode.ResizeToContents,  # Backend
-            QHeaderView.ResizeMode.ResizeToContents,  # Contract
-            QHeaderView.ResizeMode.ResizeToContents,  # Tags
-            QHeaderView.ResizeMode.Stretch            # Description
+            QHeaderView.ResizeMode.Interactive,  # Name - resizable
+            QHeaderView.ResizeMode.Interactive,  # Module - resizable
+            QHeaderView.ResizeMode.Interactive,  # Backend - resizable
+            QHeaderView.ResizeMode.Interactive,  # Contract - resizable
+            QHeaderView.ResizeMode.Interactive,  # Tags - resizable
+            QHeaderView.ResizeMode.Interactive   # Description - resizable (changed from Stretch)
         ]
         for col, mode in enumerate(resize_modes):
             header.setSectionResizeMode(col, mode)

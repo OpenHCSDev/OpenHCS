@@ -487,10 +487,6 @@ class PipelineEditorWidget(QWidget):
         """Handle Code Pipeline button - edit pipeline as Python code."""
         logger.debug("Code button pressed - opening code editor")
 
-        if not self.pipeline_steps:
-            self.service_adapter.show_error_dialog("No pipeline steps to edit")
-            return
-
         if not self.current_plate:
             self.service_adapter.show_error_dialog("No plate selected")
             return
@@ -760,7 +756,7 @@ class PipelineEditorWidget(QWidget):
         self.buttons["del_step"].setEnabled(has_steps)
         self.buttons["edit_step"].setEnabled(has_steps and has_selection)
         self.buttons["save_pipeline"].setEnabled(has_steps)
-        self.buttons["code_pipeline"].setEnabled(has_steps)
+        self.buttons["code_pipeline"].setEnabled(has_plate and is_initialized)  # Same as add button - orchestrator init is sufficient
     
     def update_status(self, message: str):
         """
