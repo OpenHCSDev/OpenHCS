@@ -561,9 +561,18 @@ class ParameterFormManager(QWidget):
         layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
         layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
 
+        # ENHANCEMENT: Extract field documentation dynamically if description is missing
+        # Now uses caching and lazy dataclass resolution for better performance
+        description = display_info['description']
+        if not description or description.startswith("Parameter: "):
+            from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
+            extracted_description = SignatureAnalyzer.extract_field_documentation(self.dataclass_type, param_info.name)
+            if extracted_description:
+                description = extracted_description
+
         label = LabelWithHelp(
             text=display_info['field_label'], param_name=param_info.name,
-            param_description=display_info['description'], param_type=param_info.type,
+            param_description=description, param_type=param_info.type,
             color_scheme=self.config.color_scheme or PyQt6ColorScheme()
         )
         layout.addWidget(label)
