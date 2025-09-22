@@ -20,7 +20,7 @@ from openhcs.core.steps.function_step import FunctionStep
 from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 # REMOVED: LazyDataclassFactory import - no longer needed since step editor
 # uses existing lazy dataclass instances from the step
 from openhcs.core.config import GlobalPipelineConfig
@@ -40,20 +40,25 @@ class StepParameterEditorWidget(QWidget):
     # Signals
     step_parameter_changed = pyqtSignal()
     
-    def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None, orchestrator=None, parent=None):
+    def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None,
+                 orchestrator=None, gui_config: Optional[PyQtGUIConfig] = None, parent=None):
         super().__init__(parent)
 
-        # Initialize color scheme
+        # Initialize color scheme and GUI config
         self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.gui_config = gui_config or get_default_pyqt_gui_config()
 
         self.step = step
         self.service_adapter = service_adapter
         self.orchestrator = orchestrator  # Store orchestrator reference for context management
 
-        # DISABLED: Live placeholder updates
-        # from openhcs.core.lazy_config import ContextEventCoordinator
-        # self._step_editor_coordinator = ContextEventCoordinator()
-        # print(f"🔍 STEP EDITOR: Created step-editor-specific coordinator for internal form updates")
+        # Live placeholder updates not yet ready - disable for now
+        self._step_editor_coordinator = None
+        # TODO: Re-enable when live updates feature is fully implemented
+        # if hasattr(self.gui_config, 'enable_live_step_parameter_updates') and self.gui_config.enable_live_step_parameter_updates:
+        #     from openhcs.core.lazy_config import ContextEventCoordinator
+        #     self._step_editor_coordinator = ContextEventCoordinator()
+        #     logger.debug("🔍 STEP EDITOR: Created step-editor-specific coordinator for live step parameter updates")
         
         # Analyze AbstractStep signature to get all inherited parameters (mirrors Textual TUI)
         from openhcs.core.steps.abstract import AbstractStep
@@ -97,7 +102,7 @@ class StepParameterEditorWidget(QWidget):
             placeholder_prefix="Pipeline default",
             param_defaults=param_defaults,
             global_config_type=GlobalPipelineConfig,  # Enable dual-axis resolution
-            context_event_coordinator=None,  # DISABLED: Disable live placeholder updates
+            context_event_coordinator=self._step_editor_coordinator,  # Enable live updates if configured
             orchestrator=self.orchestrator  # Pass orchestrator for compiler-grade placeholder resolution
         )
         
