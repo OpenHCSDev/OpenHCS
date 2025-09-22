@@ -775,73 +775,11 @@ class FunctionListEditorWidget(Container):
         # Update pattern data first
         self._update_pattern_data()
 
-        # Generate imports for all functions in the pattern
-        imports = set()
-        self._collect_function_imports(self.pattern_data, imports)
+        # Use centralized code generation from debug module to ensure consistent collision resolution
+        from openhcs.debug.pickle_to_python import generate_complete_function_pattern_code
+        return generate_complete_function_pattern_code(self.pattern_data)
 
-        # Create the Python code
-        code_lines = [
-            "# Edit this function pattern and save to apply changes",
-            "# The pattern variable will be parsed and applied to the TUI",
-            "",
-        ]
 
-        # Add imports
-        if imports:
-            code_lines.extend(sorted(imports))
-            code_lines.append("")
-
-        # Add the pattern assignment
-        code_lines.append("# Function pattern:")
-        pattern_repr = self._format_pattern_for_code(self.pattern_data)
-        code_lines.append(f"pattern = {pattern_repr}")
-
-        return "\n".join(code_lines)
-
-    def _collect_function_imports(self, pattern, imports):
-        """Recursively collect import statements for all functions in pattern."""
-        if callable(pattern):
-            if hasattr(pattern, '__module__') and hasattr(pattern, '__name__'):
-                imports.add(f"from {pattern.__module__} import {pattern.__name__}")
-        elif isinstance(pattern, tuple) and len(pattern) == 2:
-            func, _ = pattern
-            self._collect_function_imports(func, imports)
-        elif isinstance(pattern, list):
-            for item in pattern:
-                self._collect_function_imports(item, imports)
-        elif isinstance(pattern, dict):
-            for value in pattern.values():
-                self._collect_function_imports(value, imports)
-
-    def _format_pattern_for_code(self, pattern, indent=0) -> str:
-        """Format pattern as readable Python code."""
-        indent_str = "    " * indent
-
-        if callable(pattern):
-            return pattern.__name__
-        elif isinstance(pattern, tuple) and len(pattern) == 2:
-            func, kwargs = pattern
-            func_name = func.__name__ if callable(func) else str(func)
-            kwargs_str = repr(kwargs)
-            return f"({func_name}, {kwargs_str})"
-        elif isinstance(pattern, list):
-            if not pattern:
-                return "[]"
-            items = []
-            for item in pattern:
-                item_str = self._format_pattern_for_code(item, indent + 1)
-                items.append(f"{indent_str}    {item_str}")
-            return "[\n" + ",\n".join(items) + f"\n{indent_str}]"
-        elif isinstance(pattern, dict):
-            if not pattern:
-                return "{}"
-            items = []
-            for key, value in pattern.items():
-                value_str = self._format_pattern_for_code(value, indent + 1)
-                items.append(f"{indent_str}    {repr(key)}: {value_str}")
-            return "{\n" + ",\n".join(items) + f"\n{indent_str}" + "}"
-        else:
-            return repr(pattern)
 
     def _get_component_button_text(self) -> str:
         """Get text for the component selection button based on current group_by setting."""

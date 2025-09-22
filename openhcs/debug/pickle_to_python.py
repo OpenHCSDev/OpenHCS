@@ -142,12 +142,12 @@ def format_imports_as_strings(function_imports, enum_imports):
 
 def generate_complete_function_pattern_code(func_obj, indent=0, clean_mode=False):
     """Generate complete Python code for function pattern with imports."""
-    # Generate pattern representation
-    pattern_repr = generate_readable_function_repr(func_obj, indent, clean_mode)
-
-    # Collect imports from this pattern
+    # Collect imports from this pattern first to get name mappings
     function_imports, enum_imports, decorated_functions = collect_imports_from_data(func_obj)
     import_lines, name_mappings = format_imports_as_strings(function_imports, enum_imports)
+
+    # Generate pattern representation using the name mappings for collision resolution
+    pattern_repr = generate_readable_function_repr(func_obj, indent, clean_mode, name_mappings)
 
     # Build complete code
     code_lines = ["# Edit this function pattern and save to apply changes", ""]
