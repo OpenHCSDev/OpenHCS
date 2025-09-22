@@ -56,16 +56,41 @@ class DocstringExtractor:
         if not target:
             return DocstringInfo()
 
-        docstring = inspect.getdoc(target)
+        # ENHANCEMENT: Handle lazy dataclasses by extracting from their base class
+        actual_target = DocstringExtractor._resolve_lazy_target(target)
+
+        docstring = inspect.getdoc(actual_target)
         if not docstring:
             return DocstringInfo()
 
         # Try AST-based parsing first for better accuracy
         try:
-            return DocstringExtractor._parse_docstring_ast(target, docstring)
+            return DocstringExtractor._parse_docstring_ast(actual_target, docstring)
         except Exception:
             # Fall back to regex-based parsing
             return DocstringExtractor._parse_docstring(docstring)
+
+    @staticmethod
+    def _resolve_lazy_target(target: Union[Callable, type]) -> Union[Callable, type]:
+        """Resolve lazy dataclass to its base class for docstring extraction.
+
+        Lazy dataclasses are dynamically created and may not have proper docstrings.
+        This method attempts to find the original base class that the lazy class
+        was created from.
+        """
+        if not hasattr(target, '__name__'):
+            return target
+
+        # Check if this looks like a lazy dataclass (starts with "Lazy")
+        if target.__name__.startswith('Lazy'):
+            # Try to find the base class in the MRO
+            for base in getattr(target, '__mro__', []):
+                if base != target and base.__name__ != 'object':
+                    # Found a base class that's not the lazy class itself
+                    if not base.__name__.startswith('Lazy'):
+                        return base
+
+        return target
 
     @staticmethod
     def _parse_docstring_ast(target: Union[Callable, type], docstring: str) -> DocstringInfo:
@@ -285,6 +310,9 @@ class DocstringExtractor:
 
 class SignatureAnalyzer:
     """Universal analyzer for extracting parameter information from any target."""
+
+    # Class-level cache for field documentation to avoid re-parsing
+    _field_docs_cache = {}
     
     @staticmethod
     def analyze(target: Union[Callable, Type, object], skip_first_param: Optional[bool] = None) -> Dict[str, ParameterInfo]:
@@ -499,6 +527,10 @@ class SignatureAnalyzer:
             # Extract inline field documentation using AST
             inline_docs = SignatureAnalyzer._extract_inline_field_docs(dataclass_type)
 
+            # ENHANCEMENT: For dataclasses modified by decorators (like GlobalPipelineConfig),
+            # also extract field documentation from the field types themselves
+            field_type_docs = SignatureAnalyzer._extract_field_type_docs(dataclass_type)
+
             parameters = {}
 
             for field in dataclasses.fields(dataclass_type):
@@ -521,10 +553,13 @@ class SignatureAnalyzer:
                 # 1. Field metadata (highest priority)
                 if hasattr(field, 'metadata') and 'description' in field.metadata:
                     field_description = field.metadata['description']
-                # 2. Inline documentation strings (new!)
+                # 2. Inline documentation strings (from AST parsing)
                 elif field.name in inline_docs:
                     field_description = inline_docs[field.name]
-                # 3. Docstring parameters (fallback)
+                # 3. Field type documentation (for decorator-modified classes)
+                elif field.name in field_type_docs:
+                    field_description = field_type_docs[field.name]
+                # 4. Docstring parameters (fallback)
                 else:
                     field_description = docstring_info.parameters.get(field.name)
 
@@ -572,15 +607,73 @@ class SignatureAnalyzer:
             import ast
             import re
 
-            source = inspect.getsource(dataclass_type)
+            # Try to get source code - handle cases where it might not be available
+            source = None
+            try:
+                source = inspect.getsource(dataclass_type)
+            except (OSError, TypeError):
+                # ENHANCEMENT: For decorator-modified classes, try multiple source file strategies
+                try:
+                    # Strategy 1: Try the file where the class is currently defined
+                    source_file = inspect.getfile(dataclass_type)
+                    with open(source_file, 'r', encoding='utf-8') as f:
+                        file_content = f.read()
+                    source = SignatureAnalyzer._extract_class_source_from_file(file_content, dataclass_type.__name__)
+
+                    # Strategy 2: If that fails, try to find the original source file
+                    # This handles decorator-modified classes where inspect.getfile() returns the wrong file
+                    if not source:
+                        try:
+                            import os
+                            source_dir = os.path.dirname(source_file)
+
+                            # Try common source files in the same directory
+                            candidate_files = []
+
+                            # If the current file is lazy_config.py, try config.py
+                            if source_file.endswith('lazy_config.py'):
+                                candidate_files.append(os.path.join(source_dir, 'config.py'))
+
+                            # Try other common patterns
+                            for filename in os.listdir(source_dir):
+                                if filename.endswith('.py') and filename != os.path.basename(source_file):
+                                    candidate_files.append(os.path.join(source_dir, filename))
+
+                            # Try each candidate file
+                            for candidate_file in candidate_files:
+                                if os.path.exists(candidate_file):
+                                    with open(candidate_file, 'r', encoding='utf-8') as f:
+                                        candidate_content = f.read()
+                                    source = SignatureAnalyzer._extract_class_source_from_file(candidate_content, dataclass_type.__name__)
+                                    if source:  # Found it!
+                                        break
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            if not source:
+                return {}
+
             tree = ast.parse(source)
 
-            # Find the class definition
+            # Find the class definition - be more flexible with class name matching
             class_node = None
+            target_class_name = dataclass_type.__name__
+
+            # Handle cases where the class might have been renamed or modified
             for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef) and node.name == dataclass_type.__name__:
-                    class_node = node
-                    break
+                if isinstance(node, ast.ClassDef):
+                    # Try exact match first
+                    if node.name == target_class_name:
+                        class_node = node
+                        break
+                    # Also try without common prefixes/suffixes that decorators might add
+                    base_name = target_class_name.replace('Lazy', '').replace('Config', '')
+                    node_base_name = node.name.replace('Lazy', '').replace('Config', '')
+                    if base_name and node_base_name and base_name == node_base_name:
+                        class_node = node
+                        break
 
             if not class_node:
                 return {}
@@ -596,9 +689,13 @@ class SignatureAnalyzer:
                     # Check if the next node is a string literal (documentation)
                     if i + 1 < len(class_node.body):
                         next_node = class_node.body[i + 1]
-                        if isinstance(next_node, ast.Expr) and isinstance(next_node.value, ast.Constant):
-                            if isinstance(next_node.value.value, str):
+                        if isinstance(next_node, ast.Expr):
+                            # Handle both ast.Constant (Python 3.8+) and ast.Str (older versions)
+                            if isinstance(next_node.value, ast.Constant) and isinstance(next_node.value.value, str):
                                 field_docs[field_name] = next_node.value.value.strip()
+                                continue
+                            elif hasattr(ast, 'Str') and isinstance(next_node.value, ast.Str):
+                                field_docs[field_name] = next_node.value.s.strip()
                                 continue
 
                     # Method 2: Check for inline comments on the same line
@@ -627,6 +724,292 @@ class SignatureAnalyzer:
             # Return empty dict if AST parsing fails
             # Could add logging here for debugging: logger.debug(f"AST parsing failed: {e}")
             return {}
+
+    @staticmethod
+    def _extract_field_type_docs(dataclass_type: type) -> Dict[str, str]:
+        """Extract field documentation from field types for decorator-modified dataclasses.
+
+        This handles cases where dataclasses have been modified by decorators (like @auto_create_decorator)
+        that inject fields from other dataclasses. In such cases, the AST parsing of the main class
+        won't find documentation for the injected fields, so we need to extract documentation from
+        the field types themselves.
+
+        For example, GlobalPipelineConfig has injected fields like 'path_planning_config' of type
+        PathPlanningConfig. We extract the class docstring from PathPlanningConfig to use as the
+        field description.
+        """
+        try:
+            import dataclasses
+
+            field_type_docs = {}
+
+            # Get all dataclass fields
+            if not dataclasses.is_dataclass(dataclass_type):
+                return {}
+
+            fields = dataclasses.fields(dataclass_type)
+
+            for field in fields:
+                # Check if this field's type is a dataclass
+                field_type = field.type
+
+                # Handle Optional types
+                if hasattr(field_type, '__origin__') and field_type.__origin__ is Union:
+                    # Extract the non-None type from Optional[T]
+                    args = field_type.__args__
+                    non_none_types = [arg for arg in args if arg is not type(None)]
+                    if len(non_none_types) == 1:
+                        field_type = non_none_types[0]
+
+                # If the field type is a dataclass, extract its docstring as field documentation
+                if dataclasses.is_dataclass(field_type):
+                    # ENHANCEMENT: Resolve lazy dataclasses to their base classes for documentation
+                    resolved_field_type = SignatureAnalyzer._resolve_lazy_dataclass_for_docs(field_type)
+
+                    docstring_info = DocstringExtractor.extract(resolved_field_type)
+                    if docstring_info.summary:
+                        field_type_docs[field.name] = docstring_info.summary
+                    elif docstring_info.description:
+                        # Use first line of description if no summary
+                        first_line = docstring_info.description.split('\n')[0].strip()
+                        if first_line:
+                            field_type_docs[field.name] = first_line
+
+            return field_type_docs
+
+        except Exception as e:
+            # Return empty dict if extraction fails
+            return {}
+
+    @staticmethod
+    def _extract_class_source_from_file(file_content: str, class_name: str) -> Optional[str]:
+        """Extract the source code for a specific class from a file.
+
+        This method is used when inspect.getsource() fails (e.g., for decorator-modified classes)
+        to extract the class definition directly from the source file.
+
+        Args:
+            file_content: The content of the source file
+            class_name: The name of the class to extract
+
+        Returns:
+            The source code for the class, or None if not found
+        """
+        try:
+            lines = file_content.split('\n')
+            class_lines = []
+            in_class = False
+            class_indent = 0
+
+            for line in lines:
+                # Look for the class definition
+                if line.strip().startswith(f'class {class_name}'):
+                    in_class = True
+                    class_indent = len(line) - len(line.lstrip())
+                    class_lines.append(line)
+                elif in_class:
+                    # Check if we've reached the end of the class
+                    if line.strip() and not line.startswith(' ') and not line.startswith('\t'):
+                        # Non-indented line that's not empty - end of class
+                        break
+                    elif line.strip() and len(line) - len(line.lstrip()) <= class_indent:
+                        # Line at same or less indentation than class - end of class
+                        break
+                    else:
+                        # Still inside the class
+                        class_lines.append(line)
+
+            if class_lines:
+                return '\n'.join(class_lines)
+            return None
+
+        except Exception:
+            return None
+
+    @staticmethod
+    def extract_field_documentation(dataclass_type: type, field_name: str) -> Optional[str]:
+        """Extract documentation for a specific field from a dataclass.
+
+        This method tries multiple approaches to find documentation for a specific field:
+        1. Inline field documentation (AST parsing)
+        2. Field type documentation (for nested dataclasses)
+        3. Docstring parameters
+        4. Field metadata
+
+        Args:
+            dataclass_type: The dataclass type containing the field
+            field_name: Name of the field to get documentation for
+
+        Returns:
+            Field documentation string, or None if not found
+        """
+        try:
+            import dataclasses
+
+            if not dataclasses.is_dataclass(dataclass_type):
+                return None
+
+            # ENHANCEMENT: Resolve lazy dataclasses to their base classes
+            # PipelineConfig should resolve to GlobalPipelineConfig for documentation
+            resolved_type = SignatureAnalyzer._resolve_lazy_dataclass_for_docs(dataclass_type)
+
+            # Check cache first for performance
+            cache_key = (resolved_type.__name__, resolved_type.__module__)
+            if cache_key not in SignatureAnalyzer._field_docs_cache:
+                # Extract all field documentation for this dataclass and cache it
+                SignatureAnalyzer._field_docs_cache[cache_key] = SignatureAnalyzer._extract_all_field_docs(resolved_type)
+
+            cached_docs = SignatureAnalyzer._field_docs_cache[cache_key]
+            if field_name in cached_docs:
+                return cached_docs[field_name]
+
+            return None
+
+        except Exception:
+            return None
+
+    @staticmethod
+    def _resolve_lazy_dataclass_for_docs(dataclass_type: type) -> type:
+        """Resolve lazy dataclasses to their base classes for documentation extraction.
+
+        This handles the case where PipelineConfig (lazy) should resolve to GlobalPipelineConfig
+        for documentation purposes.
+
+        Args:
+            dataclass_type: The dataclass type (potentially lazy)
+
+        Returns:
+            The resolved dataclass type for documentation extraction
+        """
+        try:
+            # Check if this is a lazy dataclass by looking for common patterns
+            class_name = dataclass_type.__name__
+
+            # Handle PipelineConfig -> GlobalPipelineConfig
+            if class_name == 'PipelineConfig':
+                try:
+                    from openhcs.core.config import GlobalPipelineConfig
+                    return GlobalPipelineConfig
+                except ImportError:
+                    pass
+
+            # Handle LazyXxxConfig -> XxxConfig mappings
+            if class_name.startswith('Lazy') and class_name.endswith('Config'):
+                try:
+                    # Remove 'Lazy' prefix: LazyWellFilterConfig -> WellFilterConfig
+                    base_class_name = class_name[4:]  # Remove 'Lazy'
+
+                    # Try to import from openhcs.core.config
+                    from openhcs.core import config as config_module
+                    if hasattr(config_module, base_class_name):
+                        return getattr(config_module, base_class_name)
+                except (ImportError, AttributeError):
+                    pass
+
+            # For other lazy dataclasses, try to find the Global version
+            if not class_name.startswith('Global') and class_name.endswith('Config'):
+                try:
+                    # Try to find GlobalXxxConfig version
+                    global_class_name = f'Global{class_name}'
+                    module = __import__(dataclass_type.__module__, fromlist=[global_class_name])
+                    if hasattr(module, global_class_name):
+                        return getattr(module, global_class_name)
+                except (ImportError, AttributeError):
+                    pass
+
+            # If no resolution found, return the original type
+            return dataclass_type
+
+        except Exception:
+            return dataclass_type
+
+    @staticmethod
+    def _extract_all_field_docs(dataclass_type: type) -> Dict[str, str]:
+        """Extract all field documentation for a dataclass and return as a dictionary.
+
+        This method combines all documentation extraction approaches and caches the results.
+
+        Args:
+            dataclass_type: The dataclass type to extract documentation from
+
+        Returns:
+            Dictionary mapping field names to their documentation
+        """
+        all_docs = {}
+
+        try:
+            import dataclasses
+
+            # Try inline field documentation first
+            inline_docs = SignatureAnalyzer._extract_inline_field_docs(dataclass_type)
+            all_docs.update(inline_docs)
+
+            # Try field type documentation (for nested dataclasses)
+            field_type_docs = SignatureAnalyzer._extract_field_type_docs(dataclass_type)
+            for field_name, doc in field_type_docs.items():
+                if field_name not in all_docs:  # Don't overwrite inline docs
+                    all_docs[field_name] = doc
+
+            # Try docstring parameters
+            docstring_info = DocstringExtractor.extract(dataclass_type)
+            if docstring_info.parameters:
+                for field_name, doc in docstring_info.parameters.items():
+                    if field_name not in all_docs:  # Don't overwrite previous docs
+                        all_docs[field_name] = doc
+
+            # Try field metadata
+            fields = dataclasses.fields(dataclass_type)
+            for field in fields:
+                if field.name not in all_docs:  # Don't overwrite previous docs
+                    if hasattr(field, 'metadata') and 'description' in field.metadata:
+                        all_docs[field.name] = field.metadata['description']
+
+            # ENHANCEMENT: Try inheritance - check parent classes for missing field documentation
+            for field in fields:
+                if field.name not in all_docs:  # Only for fields still missing documentation
+                    # Walk up the inheritance chain
+                    for base_class in dataclass_type.__mro__[1:]:  # Skip the class itself
+                        if base_class == object:
+                            continue
+                        if dataclasses.is_dataclass(base_class):
+                            # Check if this base class has the field with documentation
+                            try:
+                                base_fields = dataclasses.fields(base_class)
+                                base_field_names = [f.name for f in base_fields]
+                                if field.name in base_field_names:
+                                    # Try to get documentation from the base class
+                                    inherited_doc = SignatureAnalyzer.extract_field_documentation(base_class, field.name)
+                                    if inherited_doc:
+                                        all_docs[field.name] = inherited_doc
+                                        break  # Found documentation, stop looking
+                            except Exception:
+                                continue  # Try next base class
+
+        except Exception:
+            pass  # Return whatever we managed to extract
+
+        return all_docs
+
+    @staticmethod
+    def extract_field_documentation_from_context(field_name: str, context_types: list[type]) -> Optional[str]:
+        """Extract field documentation by searching through multiple dataclass types.
+
+        This method is useful when you don't know exactly which dataclass contains
+        a field, but you have a list of candidate types to search through.
+
+        Args:
+            field_name: Name of the field to get documentation for
+            context_types: List of dataclass types to search through
+
+        Returns:
+            Field documentation string, or None if not found
+        """
+        for dataclass_type in context_types:
+            if dataclass_type:
+                doc = SignatureAnalyzer.extract_field_documentation(dataclass_type, field_name)
+                if doc:
+                    return doc
+        return None
 
     @staticmethod
     def _analyze_dataclass_instance(instance: object) -> Dict[str, ParameterInfo]:
