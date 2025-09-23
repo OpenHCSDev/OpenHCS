@@ -129,6 +129,164 @@ class GlobalPipelineConfig:
 # (GlobalPipelineConfig → PipelineConfig by removing "Global" prefix)
 
 
+def _get_available_colormaps():
+    """Get available colormaps using introspection - napari first, then matplotlib."""
+    # Try napari first (preferred for napari visualization)
+    try:
+        from napari.utils.colormaps import AVAILABLE_COLORMAPS
+        return list(AVAILABLE_COLORMAPS.keys())
+    except ImportError:
+        pass
+
+    # Try matplotlib as fallback
+    try:
+        import matplotlib.pyplot as plt
+        return list(plt.colormaps())
+    except ImportError:
+        pass
+
+    # If both fail, return empty list - fail loud, no hardcoding
+    raise ImportError("Neither napari nor matplotlib colormaps are available. Install napari or matplotlib.")
+
+
+def _create_colormap_enum():
+    """Create a dynamic enum for available colormaps using pure introspection."""
+    available_cmaps = _get_available_colormaps()
+
+    if not available_cmaps:
+        raise ValueError("No colormaps available for enum creation")
+
+    # Create enum members dictionary with proper Python identifier conversion
+    members = {}
+    for cmap_name in available_cmaps:
+        # Convert to valid Python identifier
+        enum_name = cmap_name.replace(' ', '_').replace('-', '_').replace('.', '_').upper()
+        # Handle names that start with numbers
+        if enum_name and enum_name[0].isdigit():
+            enum_name = f"CMAP_{enum_name}"
+        # Ensure we have a valid identifier
+        if enum_name and enum_name.replace('_', '').replace('CMAP', '').isalnum():
+            members[enum_name] = cmap_name
+
+    if not members:
+        raise ValueError("No valid colormap identifiers could be created")
+
+    # Create the enum class dynamically
+    return Enum('NapariColormap', members)
+
+
+# Create the colormap enum using pure introspection
+NapariColormap = _create_colormap_enum()
+
+
+class NapariDimensionMode(Enum):
+    """How to handle different dimensions in napari visualization."""
+    SLICE = "slice"  # Show as 2D slice (take middle slice)
+    STACK = "stack"  # Show as 3D stack/volume
+
+
+def _create_napari_display_config():
+    """Dynamically create NapariDisplayConfig with component-specific fields."""
+    # Define components locally to avoid circular import
+    from enum import Enum
+
+    class VariableComponents(Enum):
+        SITE = "site"
+        CHANNEL = "channel"
+        Z_INDEX = "z_index"
+        WELL = "well"
+
+    variable_components = list(VariableComponents)
+
+    # Create field annotations and defaults
+    annotations = {
+        'colormap': NapariColormap,
+    }
+    defaults = {
+        'colormap': NapariColormap.GRAY,
+    }
+
+    # Add dynamic component mode fields
+    for component in variable_components:
+        field_name = f"{component.value}_mode"
+        annotations[field_name] = NapariDimensionMode
+        # Default: channel=SLICE (separate 2D slices), everything else=STACK (3D volumes)
+        default_mode = NapariDimensionMode.SLICE if component.value == 'channel' else NapariDimensionMode.STACK
+        defaults[field_name] = default_mode
+
+    # Create the class dynamically
+    def __init__(self, **kwargs):
+        # Set defaults for any missing fields
+        for field_name, default_value in defaults.items():
+            if field_name not in kwargs:
+                kwargs[field_name] = default_value
+
+        # Set all attributes
+        for field_name, value in kwargs.items():
+            object.__setattr__(self, field_name, value)
+
+    def get_dimension_mode(self, component) -> NapariDimensionMode:
+        """Get the dimension mode for a given component."""
+        # Handle enum components, component names, or string values
+        if hasattr(component, 'value'):
+            component_value = component.value
+        elif hasattr(component, 'name'):
+            component_value = component.name.lower()
+        else:
+            # Handle string input
+            component_value = str(component).lower()
+
+        # Look up the corresponding field
+        field_name = f"{component_value}_mode"
+        mode = getattr(self, field_name, None)
+
+        # Handle None values from inheritance system - use defaults
+        if mode is None:
+            # Default: channel=SLICE (separate 2D slices), everything else=STACK (3D volumes)
+            return NapariDimensionMode.SLICE if component_value == 'channel' else NapariDimensionMode.STACK
+
+        return mode
+
+    def get_colormap_name(self) -> str:
+        """Get the string name of the colormap for serialization."""
+        return self.colormap.value
+
+
+
+    # Create class attributes
+    class_attrs = {
+        '__annotations__': annotations,
+        '__init__': __init__,
+        'get_dimension_mode': get_dimension_mode,
+        'get_colormap_name': get_colormap_name,
+
+        '__doc__': """Configuration for napari display behavior for all OpenHCS components.
+
+        This class is dynamically generated with individual fields for each variable component.
+        Each component has a corresponding {component}_mode field that controls whether
+        it's displayed as a slice or stack in napari.
+        """,
+    }
+
+    # Add default values as class attributes for dataclass compatibility
+    for field_name, default_value in defaults.items():
+        class_attrs[field_name] = default_value
+
+    # Create the class
+    NapariDisplayConfig = type('NapariDisplayConfig', (), class_attrs)
+
+    # Make it a frozen dataclass
+    NapariDisplayConfig = dataclass(frozen=True)(NapariDisplayConfig)
+
+    return NapariDisplayConfig
+
+# Create the dynamic class
+NapariDisplayConfig = _create_napari_display_config()
+
+# Apply the global pipeline config decorator
+NapariDisplayConfig = global_pipeline_config(NapariDisplayConfig)
+
+
 @global_pipeline_config
 @dataclass(frozen=True)
 class WellFilterConfig:
@@ -374,7 +532,7 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
 
 @global_pipeline_config
 @dataclass(frozen=True)
-class NapariStreamingConfig(StreamingConfig):
+class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
     """Configuration for napari streaming."""
     napari_port: int = 5555
     """Port for napari streaming communication."""
@@ -387,8 +545,17 @@ class NapariStreamingConfig(StreamingConfig):
     def step_plan_output_key(self) -> str:
         return "napari_streaming_paths"
 
-    def get_streaming_kwargs(self, global_config) -> dict:
-        return {"napari_port": self.napari_port}
+    def get_streaming_kwargs(self, context) -> dict:
+        kwargs = {
+            "napari_port": self.napari_port,
+            "display_config": self  # self is now the display config
+        }
+
+        # Include microscope handler for component parsing
+        if context:
+            kwargs["microscope_handler"] = context.microscope_handler
+
+        return kwargs
 
     def create_visualizer(self, filemanager, visualizer_config):
         from openhcs.runtime.napari_stream_visualizer import NapariStreamVisualizer
@@ -397,7 +564,8 @@ class NapariStreamingConfig(StreamingConfig):
             visualizer_config,
             viewer_title="OpenHCS Pipeline Visualization",
             persistent=self.persistent,
-            napari_port=self.napari_port
+            napari_port=self.napari_port,
+            display_config=self  # self is now the display config
         )
 
 

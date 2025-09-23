@@ -31,6 +31,7 @@ from openhcs.pyqt_gui.widgets.mixins import (
 )
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ class PipelineEditorWidget(QWidget):
     status_message = pyqtSignal(str)  # status message
     
     def __init__(self, file_manager: FileManager, service_adapter,
-                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
+                 color_scheme: Optional[PyQt6ColorScheme] = None, gui_config: Optional[PyQtGUIConfig] = None, parent=None):
         """
         Initialize the pipeline editor widget.
 
@@ -90,6 +91,7 @@ class PipelineEditorWidget(QWidget):
             file_manager: FileManager instance for file operations
             service_adapter: PyQt service adapter for dialogs and operations
             color_scheme: Color scheme for styling (optional, uses service adapter if None)
+            gui_config: GUI configuration (optional, uses default if None)
             parent: Parent widget
         """
         super().__init__(parent)
@@ -98,6 +100,7 @@ class PipelineEditorWidget(QWidget):
         self.file_manager = file_manager
         self.service_adapter = service_adapter
         self.global_config = service_adapter.get_global_config()
+        self.gui_config = gui_config or get_default_pyqt_gui_config()
 
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or service_adapter.get_current_color_scheme()
@@ -314,18 +317,152 @@ class PipelineEditorWidget(QWidget):
     
     def format_item_for_display(self, step: FunctionStep) -> Tuple[str, str]:
         """
-        Format step for display in the list (extracted from Textual version).
-        
+        Format step for display in the list with constructor value preview.
+
         Args:
             step: FunctionStep to format
-            
+
         Returns:
             Tuple of (display_text, step_name)
         """
         step_name = getattr(step, 'name', 'Unknown Step')
-        display_text = f"📋 {step_name}"
+
+        # Build preview of key constructor values
+        preview_parts = []
+
+        # Function preview
+        func = getattr(step, 'func', None)
+        if func:
+            if isinstance(func, list) and func:
+                if len(func) == 1:
+                    func_name = getattr(func[0], '__name__', str(func[0]))
+                    preview_parts.append(f"func={func_name}")
+                else:
+                    preview_parts.append(f"func=[{len(func)} functions]")
+            elif callable(func):
+                func_name = getattr(func, '__name__', str(func))
+                preview_parts.append(f"func={func_name}")
+            elif isinstance(func, dict):
+                preview_parts.append(f"func={{dict with {len(func)} keys}}")
+
+        # Variable components preview
+        var_components = getattr(step, 'variable_components', None)
+        if var_components:
+            if len(var_components) == 1:
+                comp_name = getattr(var_components[0], 'name', str(var_components[0]))
+                preview_parts.append(f"components=[{comp_name}]")
+            else:
+                comp_names = [getattr(c, 'name', str(c)) for c in var_components[:2]]
+                if len(var_components) > 2:
+                    comp_names.append(f"+{len(var_components)-2} more")
+                preview_parts.append(f"components=[{', '.join(comp_names)}]")
+
+        # Group by preview
+        group_by = getattr(step, 'group_by', None)
+        if group_by and group_by.value is not None:  # Check for GroupBy.NONE
+            group_name = getattr(group_by, 'name', str(group_by))
+            preview_parts.append(f"group_by={group_name}")
+
+        # Input source preview
+        input_source = getattr(step, 'input_source', None)
+        if input_source:
+            source_name = getattr(input_source, 'name', str(input_source))
+            if source_name != 'PREVIOUS_STEP':  # Only show if not default
+                preview_parts.append(f"input={source_name}")
+
+        # Optional configurations preview
+        config_indicators = []
+        if hasattr(step, 'step_materialization_config') and step.step_materialization_config:
+            config_indicators.append("MAT")
+        if hasattr(step, 'napari_streaming_config') and step.napari_streaming_config:
+            config_indicators.append("NAP")
+        if hasattr(step, 'fiji_streaming_config') and step.fiji_streaming_config:
+            config_indicators.append("FIJI")
+        if hasattr(step, 'step_well_filter_config') and step.step_well_filter_config:
+            config_indicators.append("FILT")
+
+        if config_indicators:
+            preview_parts.append(f"configs=[{','.join(config_indicators)}]")
+
+        # Build display text
+        if preview_parts:
+            preview = " | ".join(preview_parts)
+            display_text = f"▶ {step_name}  ({preview})"
+        else:
+            display_text = f"▶ {step_name}"
+
         return display_text, step_name
-    
+
+    def _create_step_tooltip(self, step: FunctionStep) -> str:
+        """Create detailed tooltip for a step showing all constructor values."""
+        step_name = getattr(step, 'name', 'Unknown Step')
+        tooltip_lines = [f"Step: {step_name}"]
+
+        # Function details
+        func = getattr(step, 'func', None)
+        if func:
+            if isinstance(func, list):
+                if len(func) == 1:
+                    func_name = getattr(func[0], '__name__', str(func[0]))
+                    tooltip_lines.append(f"Function: {func_name}")
+                else:
+                    func_names = [getattr(f, '__name__', str(f)) for f in func[:3]]
+                    if len(func) > 3:
+                        func_names.append(f"... +{len(func)-3} more")
+                    tooltip_lines.append(f"Functions: {', '.join(func_names)}")
+            elif callable(func):
+                func_name = getattr(func, '__name__', str(func))
+                tooltip_lines.append(f"Function: {func_name}")
+            elif isinstance(func, dict):
+                tooltip_lines.append(f"Function: Dictionary with {len(func)} routing keys")
+        else:
+            tooltip_lines.append("Function: None")
+
+        # Variable components
+        var_components = getattr(step, 'variable_components', None)
+        if var_components:
+            comp_names = [getattr(c, 'name', str(c)) for c in var_components]
+            tooltip_lines.append(f"Variable Components: [{', '.join(comp_names)}]")
+        else:
+            tooltip_lines.append("Variable Components: None")
+
+        # Group by
+        group_by = getattr(step, 'group_by', None)
+        if group_by and group_by.value is not None:  # Check for GroupBy.NONE
+            group_name = getattr(group_by, 'name', str(group_by))
+            tooltip_lines.append(f"Group By: {group_name}")
+        else:
+            tooltip_lines.append("Group By: None")
+
+        # Input source
+        input_source = getattr(step, 'input_source', None)
+        if input_source:
+            source_name = getattr(input_source, 'name', str(input_source))
+            tooltip_lines.append(f"Input Source: {source_name}")
+        else:
+            tooltip_lines.append("Input Source: None")
+
+        # Additional configurations with details
+        config_details = []
+        if hasattr(step, 'step_materialization_config') and step.step_materialization_config:
+            config_details.append("• Materialization Config: Enabled")
+        if hasattr(step, 'napari_streaming_config') and step.napari_streaming_config:
+            napari_config = step.napari_streaming_config
+            port = getattr(napari_config, 'napari_port', 'default')
+            config_details.append(f"• Napari Streaming: Port {port}")
+        if hasattr(step, 'fiji_streaming_config') and step.fiji_streaming_config:
+            config_details.append("• Fiji Streaming: Enabled")
+        if hasattr(step, 'step_well_filter_config') and step.step_well_filter_config:
+            well_config = step.step_well_filter_config
+            well_filter = getattr(well_config, 'well_filter', 'default')
+            config_details.append(f"• Well Filter: {well_filter}")
+
+        if config_details:
+            tooltip_lines.append("")  # Empty line separator
+            tooltip_lines.extend(config_details)
+
+        return '\n'.join(tooltip_lines)
+
     def action_add_step(self):
         """Handle Add Step button (adapted from Textual version)."""
 
@@ -354,27 +491,21 @@ class PipelineEditorWidget(QWidget):
         # Create and show editor dialog within the correct config context
         orchestrator = self._get_current_orchestrator()
 
-        # Auto-sync handles context setup automatically when pipeline_config is accessed
+        # SIMPLIFIED: Orchestrator context is automatically available through type-based registry
+        # No need for explicit context management - dual-axis resolver handles it automatically
         if not orchestrator:
             logger.info("No orchestrator found for step editor context, This should not happen.")
-            editor = DualEditorWindow(
-                step_data=new_step,
-                is_new=True,
-                on_save_callback=handle_save,
-                orchestrator=orchestrator,
-                parent=self
-            )
-        else:
-            with orchestrator.config_context(for_serialization=False):
-                editor = DualEditorWindow(
-                    step_data=new_step,
-                    is_new=True,
-                    on_save_callback=handle_save,
-                    orchestrator=orchestrator,
-                    parent=self
-                )
-            # Set original step for change detection within the scoped context
-            editor.set_original_step_for_change_detection()
+
+        editor = DualEditorWindow(
+            step_data=new_step,
+            is_new=True,
+            on_save_callback=handle_save,
+            orchestrator=orchestrator,
+            gui_config=self.gui_config,
+            parent=self
+        )
+        # Set original step for change detection
+        editor.set_original_step_for_change_detection()
         editor.show()
         editor.raise_()
         editor.activateWindow()
@@ -422,28 +553,20 @@ class PipelineEditorWidget(QWidget):
             self.pipeline_changed.emit(self.pipeline_steps)
             self.status_message.emit(f"Updated step: {edited_step.name}")
 
-        # Create and show editor dialog within the correct config context
+        # SIMPLIFIED: Orchestrator context is automatically available through type-based registry
+        # No need for explicit context management - dual-axis resolver handles it automatically
         orchestrator = self._get_current_orchestrator()
-        if orchestrator:
-            with orchestrator.config_context(for_serialization=False):
-                editor = DualEditorWindow(
-                    step_data=step_to_edit,
-                    is_new=False,
-                    on_save_callback=handle_save,
-                    orchestrator=orchestrator,
-                    parent=self
-                )
-                # Set original step for change detection within the scoped context
-                editor.set_original_step_for_change_detection()
-        else:
-            editor = DualEditorWindow(
-                step_data=step_to_edit,
-                is_new=False,
-                on_save_callback=handle_save,
-                orchestrator=orchestrator,
-                parent=self
-            )
-            editor.set_original_step_for_change_detection()
+
+        editor = DualEditorWindow(
+            step_data=step_to_edit,
+            is_new=False,
+            on_save_callback=handle_save,
+            orchestrator=orchestrator,
+            gui_config=self.gui_config,
+            parent=self
+        )
+        # Set original step for change detection
+        editor.set_original_step_for_change_detection()
         editor.show()
         editor.raise_()
         editor.activateWindow()
@@ -686,14 +809,13 @@ class PipelineEditorWidget(QWidget):
         if plate_path == self.current_plate:
             logger.debug(f"Refreshing placeholders for orchestrator config change: {plate_path}")
 
-            # Refresh any open step forms within the orchestrator's scoped context
-            # This ensures step forms resolve against the updated effective config
+            # SIMPLIFIED: Orchestrator context is automatically available through type-based registry
+            # No need for explicit context management - dual-axis resolver handles it automatically
             orchestrator = self._get_current_orchestrator()
             if orchestrator:
-                with orchestrator.config_context(for_serialization=False):
-                    # Trigger refresh of any open configuration windows or step forms
-                    # The scoped context ensures they resolve against the updated orchestrator config
-                    logger.debug(f"Step forms will now resolve against updated orchestrator config for: {plate_path}")
+                # Trigger refresh of any open configuration windows or step forms
+                # The type-based registry ensures they resolve against the updated orchestrator config
+                logger.debug(f"Step forms will now resolve against updated orchestrator config for: {plate_path}")
             else:
                 logger.debug(f"No orchestrator found for config refresh: {plate_path}")
     
@@ -714,7 +836,7 @@ class PipelineEditorWidget(QWidget):
                 display_text, step_data = format_step_item(step)
                 item = QListWidgetItem(display_text)
                 item.setData(Qt.ItemDataRole.UserRole, step_data)
-                item.setToolTip(f"Step: {getattr(step, 'name', 'Unknown')}")
+                item.setToolTip(self._create_step_tooltip(step))
                 self.step_list.addItem(item)
 
         # Use utility to preserve selection during update
@@ -908,5 +1030,11 @@ class PipelineEditorWidget(QWidget):
             new_config: New global configuration
         """
         self.global_config = new_config
+
+        # CRITICAL FIX: Refresh all placeholders when global config changes
+        # This ensures pipeline config editor shows updated inherited values
+        if hasattr(self, 'form_manager') and self.form_manager:
+            self.form_manager.refresh_placeholder_text()
+            logger.info("Refreshed pipeline config placeholders after global config change")
 
 

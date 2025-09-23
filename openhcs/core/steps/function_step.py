@@ -936,18 +936,27 @@ class FunctionStep(AbstractStep):
 
             # 📄 STREAMING: Execute all configured streaming backends
             from openhcs.core.config import StreamingConfig
-            for config_instance in step_plan.values():
-                if isinstance(config_instance, StreamingConfig):
-                    # Get paths at runtime like materialization does
-                    step_output_dir = step_plan["output_dir"]
-                    get_paths_for_axis = step_plan["get_paths_for_axis"]  # Get the path getter from step_plan
-                    streaming_paths = get_paths_for_axis(step_output_dir, Backend.MEMORY.value)
-                    streaming_data = filemanager.load_batch(streaming_paths, Backend.MEMORY.value)
-                    kwargs = config_instance.get_streaming_kwargs(None)  # Get kwargs from config directly
 
-                    # Execute streaming - backend from config enum
-                    filemanager.save_batch(streaming_data, streaming_paths, config_instance.backend.value, **kwargs)
-                    logger.info(f"🔍 {config_instance.backend.name}: Streamed {len(streaming_paths)} files for step {step_name}")
+            streaming_configs_found = []
+            for key, config_instance in step_plan.items():
+                if isinstance(config_instance, StreamingConfig):
+                    streaming_configs_found.append((key, config_instance))
+
+            for key, config_instance in streaming_configs_found:
+                # Get paths at runtime like materialization does
+                step_output_dir = step_plan["output_dir"]
+                get_paths_for_axis = step_plan["get_paths_for_axis"]  # Get the path getter from step_plan
+                streaming_paths = get_paths_for_axis(step_output_dir, Backend.MEMORY.value)
+                streaming_data = filemanager.load_batch(streaming_paths, Backend.MEMORY.value)
+                kwargs = config_instance.get_streaming_kwargs(context)  # Pass context for microscope handler access
+
+                # Add step information for proper layer naming
+                kwargs["step_index"] = step_index
+                kwargs["step_name"] = step_name
+
+                # Execute streaming - backend from config enum
+                filemanager.save_batch(streaming_data, streaming_paths, config_instance.backend.value, **kwargs)
+                logger.info(f"🔍 {config_instance.backend.name}: Streamed {len(streaming_paths)} files for step {step_name}")
 
             logger.info(f"FunctionStep {step_index} ({step_name}) completed for well {axis_id}.")
 

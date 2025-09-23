@@ -140,11 +140,7 @@ class MemoryStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         for data, output_path in zip(data_list, output_paths):
             self.save(data, output_path)
 
-        # 🔧 DEBUG: Show memory contents after batch write
-        print(f"🔧 MEMORY DEBUG: Batch saved {len(output_paths)} files")
-        print(f"🔧 MEMORY DEBUG: Paths written: {[str(p) for p in output_paths]}")
-        print(f"🔧 MEMORY DEBUG: Total files in memory: {len(self._memory_store)}")
-        print(f"🔧 MEMORY DEBUG: Memory keys (first 10): {list(self._memory_store.keys())[:10]}")
+
 
         # Show directory structure (thread-safe copy of keys)
         directories = set()

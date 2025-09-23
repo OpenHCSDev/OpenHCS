@@ -255,21 +255,21 @@ class PipelineCompiler:
             for attr_name in dir(resolved_step):
                 if not attr_name.startswith('_'):
                     config = getattr(resolved_step, attr_name, None)
-                    if step.name == "Image Enhancement Processing" and attr_name == "napari_streaming_config":
-                        print(f"🔍 ATTR DEBUG: Found {attr_name} = {config} (type: {type(config).__name__})")
-
                     # CRITICAL FIX: Handle lazy configs by converting to base config first
                     # Lazy configs don't inherit from base classes, so isinstance() fails
                     actual_config = config
                     if config is not None and hasattr(config, 'to_base_config'):
                         actual_config = config.to_base_config()
-                        if step.name == "Image Enhancement Processing" and attr_name == "napari_streaming_config":
-                            print(f"🔍 ATTR DEBUG: Converted lazy config to base: {actual_config} (type: {type(actual_config).__name__})")
 
-                    if actual_config is not None and isinstance(actual_config, WellFilterConfig):
+                    # Unified handling: compute inclusion for any WellFilterConfig (StreamingConfig subclasses it)
+                    is_streaming = actual_config is not None and isinstance(actual_config, StreamingConfig)
+                    is_wellfilter = actual_config is not None and isinstance(actual_config, WellFilterConfig)
+
+                    include_config = False
+                    if is_wellfilter:
                         # Check if this config has a well filter and if current axis matches
                         should_include_config = True
-                        if config.well_filter is not None:
+                        if actual_config.well_filter is not None:
                             config_filter = step_axis_filters.get(attr_name)
                             if config_filter:
                                 # Apply axis filter logic
@@ -278,59 +278,59 @@ class PipelineCompiler:
                                     axis_in_filter if config_filter['filter_mode'] == WellFilterMode.INCLUDE
                                     else not axis_in_filter
                                 )
-
                         if should_include_config:
-                            current_plan[attr_name] = config
-                            # Check if this is a streaming config for visualize flag
-                            # CRITICAL FIX: Use actual_config (converted from lazy) for isinstance check
-                            if isinstance(actual_config, StreamingConfig):
-                                # Validate that the visualizer can actually be created
-                                try:
-                                    # Test visualizer creation without actually creating it
-                                    if hasattr(actual_config, 'create_visualizer'):
-                                        # For napari, check if napari is available and environment supports GUI
-                                        if actual_config.backend.name == 'NAPARI_STREAM':
-                                            from openhcs.utils.import_utils import optional_import
-                                            import os
+                            include_config = True
 
-                                            # Check if running in headless/CI environment
-                                            is_headless = (
-                                                os.getenv('OPENHCS_CPU_ONLY', 'false').lower() == 'true' or
-                                                os.getenv('CI', 'false').lower() == 'true' or
-                                                os.getenv('DISPLAY') is None
-                                            )
+                    # Only add the config to the plan if it's included (or not a WellFilterConfig)
+                    if include_config or (not is_wellfilter and actual_config is not None):
+                        current_plan[attr_name] = config
 
-                                            if is_headless:
-                                                logger.info(f"Napari streaming disabled for step '{step.name}': running in headless environment (CI/CPU_ONLY mode)")
-                                                continue  # Skip this streaming config
+                    # Streaming extras only apply if the streaming config is included
+                    if is_streaming and include_config:
+                        # Validate that the visualizer can actually be created
+                        try:
+                            # Only validate configs that actually have a backend (real streaming configs)
+                            if not hasattr(actual_config, 'backend'):
+                                continue
 
-                                            napari = optional_import("napari")
-                                            if napari is None:
-                                                logger.warning(f"Napari streaming disabled for step '{step.name}': napari not installed. Install with: pip install 'openhcs[viz]' or pip install napari")
-                                                continue  # Skip this streaming config
+                            # Test visualizer creation without actually creating it
+                            if hasattr(actual_config, 'create_visualizer'):
+                                # For napari, check if napari is available and environment supports GUI
+                                if actual_config.backend.name == 'NAPARI_STREAM':
+                                    from openhcs.utils.import_utils import optional_import
+                                    import os
 
-                                    has_streaming = True
-                                    print(f"🔍 STREAMING DEBUG: Including {attr_name} for step {step.name}, axis {context.axis_id}")
-                                    # Collect visualizer info - use actual_config for backend access
-                                    visualizer_info = {
-                                        'backend': actual_config.backend.name,
-                                        'config': actual_config
-                                    }
-                                    if visualizer_info not in required_visualizers:
-                                        required_visualizers.append(visualizer_info)
-                                        print(f"🔍 STREAMING DEBUG: Added visualizer info for {actual_config.backend.name}")
-                                except Exception as e:
-                                    logger.warning(f"Streaming disabled for step '{step.name}': {e}")
-                                    continue  # Skip this streaming config
-                        else:
-                            if isinstance(actual_config, StreamingConfig):
-                                print(f"🔍 STREAMING DEBUG: Excluding {attr_name} for step {step.name}, axis {context.axis_id} (filtered out)")
-                            logger.debug(f"Excluding {attr_name} for step {step.name}, axis {context.axis_id} (filtered out)")
+                                    # Check if running in headless/CI environment
+                                    is_headless = (
+                                        os.getenv('OPENHCS_CPU_ONLY', 'false').lower() == 'true' or
+                                        os.getenv('CI', 'false').lower() == 'true' or
+                                        os.getenv('DISPLAY') is None
+                                    )
+
+                                    if is_headless:
+                                        logger.info(f"Napari streaming disabled for step '{step.name}': running in headless environment (CI/CPU_ONLY mode)")
+                                        continue  # Skip this streaming config
+
+                                    napari = optional_import("napari")
+                                    if napari is None:
+                                        logger.warning(f"Napari streaming disabled for step '{step.name}': napari not installed. Install with: pip install 'openhcs[viz]' or pip install napari")
+                                        continue  # Skip this streaming config
+
+                            has_streaming = True
+                            # Collect visualizer info - use actual_config for backend access
+                            visualizer_info = {
+                                'backend': actual_config.backend.name,
+                                'config': actual_config
+                            }
+                            if visualizer_info not in required_visualizers:
+                                required_visualizers.append(visualizer_info)
+                        except Exception as e:
+                            logger.warning(f"Streaming disabled for step '{step.name}': {e}")
+                            continue  # Skip this streaming config
 
             # Set visualize flag for orchestrator if any streaming is enabled
             current_plan["visualize"] = has_streaming
             context.required_visualizers = required_visualizers
-            print(f"🔍 STREAMING DEBUG: Step {step.name}, axis {context.axis_id}: has_streaming={has_streaming}, required_visualizers={len(required_visualizers)}")
 
         # Add FunctionStep specific attributes
         if isinstance(step, FunctionStep):

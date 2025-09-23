@@ -686,10 +686,14 @@ class PipelineOrchestrator(ContextProvider):
         # 🔬 AUTOMATIC VISUALIZER CREATION: Create visualizers if compiler detected streaming
         if visualizer is None:
             context = next(iter(compiled_contexts.values()))
+            logger.info(f"🔬 ORCHESTRATOR: Checking for required visualizers: {len(context.required_visualizers)} found")
             for visualizer_info in context.required_visualizers:
                 config = visualizer_info['config']
+                logger.info(f"🔬 ORCHESTRATOR: Creating visualizer with config: {config}")
                 visualizer = config.create_visualizer(self.filemanager, context.visualizer_config)
+                logger.info(f"🔬 ORCHESTRATOR: Starting visualizer: {visualizer}")
                 visualizer.start_viewer()
+                logger.info(f"🔬 ORCHESTRATOR: Visualizer started, is_running: {visualizer.is_running}")
                 break
 
         self._state = OrchestratorState.EXECUTING

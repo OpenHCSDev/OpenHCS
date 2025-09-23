@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Set
 from os import PathLike
+import os
 
 import numpy as np
 
@@ -62,86 +63,96 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         return self._publisher
 
 
-    
-    def save(self, data: Any, file_path: Union[str, Path], **kwargs) -> None:
-        """
-        Stream a single image to napari.
-        
-        Args:
-            data: Image data (numpy array or compatible)
-            file_path: Path identifier for the image
-            **kwargs: Additional metadata
-        """
-        try:
-            napari_port = kwargs.get('napari_port')
-            logger.info(f"🔍 NAPARI BACKEND: save() called with napari_port={napari_port}, data_type={type(data)}")
-            publisher = self._get_publisher(napari_port)
-            
-            # Convert data to numpy if needed
-            if hasattr(data, 'cpu'):  # PyTorch tensor
-                np_data = data.cpu().numpy()
-            elif hasattr(data, 'get'):  # CuPy array
-                np_data = data.get()
-            else:
-                np_data = np.asarray(data)
-            
-            # Create shared memory block
-            from multiprocessing import shared_memory
-            shm_name = f"napari_stream_{id(data)}_{time.time_ns()}"
 
-            try:
-                shm = shared_memory.SharedMemory(create=True, size=np_data.nbytes, name=shm_name)
-                shm_array = np.ndarray(np_data.shape, dtype=np_data.dtype, buffer=shm.buf)
-                shm_array[:] = np_data[:]
-                
-                # Send metadata via ZeroMQ
-                metadata = {
-                    'path': str(file_path),
-                    'shape': np_data.shape,
-                    'dtype': str(np_data.dtype),
-                    'shm_name': shm_name,
-                    'timestamp': time.time()
-                }
-                
-                publisher.send_json(metadata)
-                logger.debug(f"Streamed {file_path} to napari (shape: {np_data.shape})")
-                
-                # Store reference to prevent cleanup
-                self._shared_memory_blocks[shm_name] = shm
-                
-            except Exception as e:
-                logger.warning(f"Failed to create shared memory for {file_path}: {e}")
-                # Fallback: send data directly (less efficient)
-                metadata = {
-                    'path': str(file_path),
-                    'data': np_data.tolist(),
-                    'shape': np_data.shape,
-                    'dtype': str(np_data.dtype),
-                    'timestamp': time.time()
-                }
-                publisher.send_json(metadata)
-                
-        except Exception as e:
-            logger.warning(f"Failed to stream {file_path} to napari: {e}")
-    
+    def save(self, data: Any, file_path: Union[str, Path], **kwargs) -> None:
+        """Stream single image to napari."""
+        self.save_batch([data], [file_path], **kwargs)
+
     def save_batch(self, data_list: List[Any], file_paths: List[Union[str, Path]], **kwargs) -> None:
         """
-        Stream multiple images to napari.
-        
+        Stream multiple images to napari as a batch.
+
         Args:
             data_list: List of image data
             file_paths: List of path identifiers
             **kwargs: Additional metadata
         """
+
+
         if len(data_list) != len(file_paths):
             raise ValueError("data_list and file_paths must have the same length")
-        
-        for data, path in zip(data_list, file_paths):
-            self.save(data, path, **kwargs)
-    
+
+        try:
+            publisher = self._get_publisher(kwargs['napari_port'])
+            display_config = kwargs['display_config']
+            microscope_handler = kwargs['microscope_handler']
+            step_index = kwargs.get('step_index', 0)
+            step_name = kwargs.get('step_name', 'unknown_step')
+        except KeyError as e:
+            raise
+
+        # Prepare batch of images
+        batch_images = []
+        for data, file_path in zip(data_list, file_paths):
+            # Convert to numpy
+            if hasattr(data, 'cpu'):
+                np_data = data.cpu().numpy()
+            elif hasattr(data, 'get'):
+                np_data = data.get()
+            else:
+                np_data = np.asarray(data)
+
+            # Create shared memory
+            from multiprocessing import shared_memory
+            shm_name = f"napari_{id(data)}_{time.time_ns()}"
+            shm = shared_memory.SharedMemory(create=True, size=np_data.nbytes, name=shm_name)
+            shm_array = np.ndarray(np_data.shape, dtype=np_data.dtype, buffer=shm.buf)
+            shm_array[:] = np_data[:]
+            self._shared_memory_blocks[shm_name] = shm
+
+            # Parse component metadata
+            filename = os.path.basename(str(file_path))
+            component_metadata = microscope_handler.parser.parse_filename(filename)
+
+            batch_images.append({
+                'path': str(file_path),
+                'shape': np_data.shape,
+                'dtype': str(np_data.dtype),
+                'shm_name': shm_name,
+                'component_metadata': component_metadata,
+                'step_index': step_index,
+                'step_name': step_name
+            })
+
+        # Build component modes
+        from openhcs.constants import VariableComponents
+        component_modes = {}
+        for component in VariableComponents:
+            field_name = f"{component.value}_mode"
+            mode = getattr(display_config, field_name)
+            component_modes[component.value] = mode.value
+
+
+        # Include well if available on the display config (not always part of VariableComponents)
+        if hasattr(display_config, 'well_mode'):
+            component_modes['well'] = display_config.well_mode.value
+
+        # Send batch message
+        message = {
+            'type': 'batch',
+            'images': batch_images,
+'display_config': {
+                'colormap': display_config.get_colormap_name(),
+                'component_modes': component_modes
+            },
+            'timestamp': time.time()
+        }
+
+        publisher.send_json(message)
+
     # REMOVED: All file system methods (load, load_batch, exists, list_files, delete, etc.)
     # These are no longer inherited - clean interface!
-    
+
     def cleanup_connections(self) -> None:
         """Clean up ZeroMQ connections without affecting shared memory or napari window."""
         # Close publisher and context
@@ -175,7 +186,7 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         self.cleanup_connections()
 
         logger.debug("Napari streaming backend cleaned up (napari window remains open)")
-    
+
     def __del__(self):
         """Cleanup on deletion."""
         self.cleanup()

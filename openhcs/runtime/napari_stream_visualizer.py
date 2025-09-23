@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import zmq
+import numpy as np
 from typing import Any, Dict, Optional
 
 from openhcs.io.filemanager import FileManager
@@ -66,6 +67,242 @@ def _cleanup_global_viewer() -> None:
 
             _global_viewer_process = None
 
+
+def _parse_component_info_from_path(path_str: str):
+    """
+    Fallback component parsing from path (used when component metadata unavailable).
+
+    Args:
+        path_str: Path string like 'step_name/A01/s1_c2_z3.tif'
+
+    Returns:
+        Dict with basic component info extracted from filename
+    """
+    try:
+        import os
+        import re
+        filename = os.path.basename(path_str)
+
+        # Basic regex for common patterns
+        pattern = r'(?:s(\d+))?(?:_c(\d+))?(?:_z(\d+))?'
+        match = re.search(pattern, filename)
+
+        components = {}
+        if match:
+            site, channel, z_index = match.groups()
+            if site:
+                components['site'] = site
+            if channel:
+                components['channel'] = channel
+            if z_index:
+                components['z_index'] = z_index
+
+        return components
+    except Exception:
+        return {}
+
+
+def _handle_component_aware_display(viewer, layers, component_groups, image_data, path,
+                                   colormap, display_config, replace_layers, component_metadata=None):
+    """
+    Handle component-aware display following OpenHCS stacking patterns.
+
+    Creates separate layers for each step and well, with proper component-based stacking.
+    Each step gets its own layer. Each well gets its own layer. Components marked as
+    SLICE create separate layers, components marked as STACK are stacked together.
+    """
+    try:
+        # Use component metadata from ZMQ message - fail loud if not available
+        if not component_metadata:
+            raise ValueError(f"No component metadata available for path: {path}")
+        component_info = component_metadata
+
+        # Get step information from component metadata
+        step_index = component_info.get('step_index', 0)
+        step_name = component_info.get('step_name', 'unknown_step')
+
+        # Create step prefix for layer naming
+        step_prefix = f"step_{step_index:02d}_{step_name}"
+
+        # Get well identifier (configurable: slice vs stack)
+        well_id = component_info.get('well', 'unknown_well')
+
+        # Build component_modes from config (dict or object), default to channel=slice, others=stack
+        component_modes = None
+        if isinstance(display_config, dict):
+            cm = display_config.get('component_modes') or display_config.get('componentModes')
+            if isinstance(cm, dict) and cm:
+                component_modes = cm
+        if component_modes is None:
+            # Handle object-like config (NapariDisplayConfig)
+            component_modes = {}
+            for component in ['site', 'channel', 'z_index', 'well']:
+                mode_field = f"{component}_mode"
+                if hasattr(display_config, mode_field):
+                    mode_value = getattr(display_config, mode_field)
+                    component_modes[component] = getattr(mode_value, 'value', str(mode_value))
+                else:
+                    component_modes[component] = 'slice' if component == 'channel' else 'stack'
+
+        # Create layer grouping key: step_prefix + optionally well + slice_components
+        # Each unique combination gets its own layer
+        layer_key_parts = [step_prefix]
+        if component_modes.get('well', 'stack') == 'slice':
+            layer_key_parts.append(well_id)
+
+        # Add slice components to layer key (these create separate layers)
+        for component_name, mode in component_modes.items():
+            if mode == 'slice' and component_name in component_info and component_name != 'well':
+                layer_key_parts.append(f"{component_name}_{component_info[component_name]}")
+
+        layer_key = "_".join(layer_key_parts)
+
+        # Reconcile cached layer/group state with live napari viewer after possible manual deletions
+        try:
+            current_layer_names = {l.name for l in viewer.layers}
+            if layer_key not in current_layer_names:
+                # Drop any stale references so we will recreate the layer
+                layers.pop(layer_key, None)
+                component_groups.pop(layer_key, None)
+                logger.debug(f"🔬 NAPARI PROCESS: Reconciling state — '{layer_key}' not in viewer; purged stale caches")
+        except Exception:
+            # Fail-loud elsewhere; reconciliation is best-effort and must not mask display
+            pass
+
+        # Initialize layer group if needed
+        if layer_key not in component_groups:
+            component_groups[layer_key] = []
+
+        # Add image to layer group
+        component_groups[layer_key].append({
+            'data': image_data,
+            'components': component_info,
+            'path': str(path)
+        })
+
+        # Get all images for this layer
+        layer_images = component_groups[layer_key]
+
+        # Determine if we should stack or use single image
+        stack_components = [comp for comp, mode in component_modes.items()
+                          if mode == 'stack' and comp in component_info]
+
+        if len(layer_images) == 1:
+            # Single image - add directly
+            layer_name = layer_key
+
+            # Check if layer exists in actual napari viewer
+            existing_layer = None
+            for layer in viewer.layers:
+                if layer.name == layer_name:
+                    existing_layer = layer
+                    break
+
+            if existing_layer is not None:
+                # Update existing layer
+                existing_layer.data = image_data
+                layers[layer_name] = existing_layer
+                logger.info(f"🔬 NAPARI PROCESS: Updated existing layer {layer_name}")
+            else:
+                # Create new layer - this should always work for new names
+                logger.info(f"🔬 NAPARI PROCESS: Creating new layer {layer_name}, viewer has {len(viewer.layers)} existing layers")
+                logger.info(f"🔬 NAPARI PROCESS: Existing layer names: {[layer.name for layer in viewer.layers]}")
+                logger.info(f"🔬 NAPARI PROCESS: Image data shape: {image_data.shape}, dtype: {image_data.dtype}")
+                logger.info(f"🔬 NAPARI PROCESS: Viewer type: {type(viewer)}")
+                try:
+                    new_layer = viewer.add_image(image_data, name=layer_name, colormap=colormap)
+                    layers[layer_name] = new_layer
+                    logger.info(f"🔬 NAPARI PROCESS: Successfully created new layer {layer_name}")
+                    logger.info(f"🔬 NAPARI PROCESS: Viewer now has {len(viewer.layers)} layers")
+                except Exception as e:
+                    logger.error(f"🔬 NAPARI PROCESS: FAILED to create layer {layer_name}: {e}")
+                    logger.error(f"🔬 NAPARI PROCESS: Exception type: {type(e)}")
+                    import traceback
+                    logger.error(f"🔬 NAPARI PROCESS: Traceback: {traceback.format_exc()}")
+                    raise
+        else:
+            # Multiple images - create multi-dimensional array for napari
+            try:
+                # Sort images by stack components for consistent ordering
+                if stack_components:
+                    def sort_key(img_info):
+                        return tuple(img_info['components'].get(comp, 0) for comp in stack_components)
+                    layer_images.sort(key=sort_key)
+
+                # Group images by stack component values to create proper dimensions
+                if len(stack_components) == 1:
+                    # Single stack component - simple 3D stack
+                    image_stack = [img['data'] for img in layer_images]
+                    from openhcs.core.memory.stack_utils import stack_slices
+                    stacked_data = stack_slices(image_stack, memory_type='numpy', gpu_id=0)
+                else:
+                    # Multiple stack components - create multi-dimensional array
+                    # Get unique values for each stack component
+                    component_values = {}
+                    for comp in stack_components:
+                        values = sorted(set(img['components'].get(comp, 0) for img in layer_images))
+                        component_values[comp] = values
+
+                    # Create multi-dimensional array
+                    # Shape: (comp1_size, comp2_size, ..., height, width)
+                    shape_dims = [len(component_values[comp]) for comp in stack_components]
+                    first_img = layer_images[0]['data']
+                    full_shape = tuple(shape_dims + list(first_img.shape))
+                    stacked_data = np.zeros(full_shape, dtype=first_img.dtype)
+
+                    # Fill the multi-dimensional array
+                    for img_info in layer_images:
+                        # Get indices for this image
+                        indices = []
+                        for comp in stack_components:
+                            comp_value = img_info['components'].get(comp, 0)
+                            comp_index = component_values[comp].index(comp_value)
+                            indices.append(comp_index)
+
+                        # Place image in the correct position
+                        stacked_data[tuple(indices)] = img_info['data']
+
+                # Update or create stack layer
+                layer_name = layer_key
+
+                # Check if layer exists in actual napari viewer
+                existing_layer = None
+                for layer in viewer.layers:
+                    if layer.name == layer_name:
+                        existing_layer = layer
+                        break
+
+                if existing_layer is not None:
+                    # Update existing layer
+                    existing_layer.data = stacked_data
+                    layers[layer_name] = existing_layer
+                    logger.info(f"🔬 NAPARI PROCESS: Updated existing stack layer {layer_name} (shape: {stacked_data.shape})")
+                else:
+                    # Create new layer - this should always work for new names
+                    logger.info(f"🔬 NAPARI PROCESS: Creating new stack layer {layer_name}, viewer has {len(viewer.layers)} existing layers")
+                    try:
+                        new_layer = viewer.add_image(stacked_data, name=layer_name, colormap=colormap)
+                        layers[layer_name] = new_layer
+                        logger.info(f"🔬 NAPARI PROCESS: Successfully created new stack layer {layer_name} (shape: {stacked_data.shape})")
+                    except Exception as e:
+                        logger.error(f"🔬 NAPARI PROCESS: FAILED to create stack layer {layer_name}: {e}")
+                        import traceback
+                        logger.error(f"🔬 NAPARI PROCESS: Traceback: {traceback.format_exc()}")
+                        raise
+
+            except Exception as e:
+                logger.error(f"🔬 NAPARI PROCESS: Failed to create stack for layer {layer_key}: {e}")
+                import traceback
+                logger.error(f"🔬 NAPARI PROCESS: Traceback: {traceback.format_exc()}")
+                raise
+
+    except Exception as e:
+        import traceback
+        logger.error(f"🔬 NAPARI PROCESS: Component-aware display failed for {path}: {e}")
+        logger.error(f"🔬 NAPARI PROCESS: Component-aware display traceback: {traceback.format_exc()}")
+        raise  # Fail loud - no fallback
+
+
 def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = False):
     """
     Napari viewer process entry point. Runs in a separate process.
@@ -97,8 +334,17 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
 
         # Create napari viewer in this process (main thread)
         viewer = napari.Viewer(title=viewer_title, show=True)
+
+        # Initialize layers dictionary with existing layers (for reconnection scenarios)
         layers = {}
+        for layer in viewer.layers:
+            layers[layer.name] = layer
+
         napari_ready = False  # Track readiness state
+
+        # Component grouping for stacking (following OpenHCS pattern)
+        component_groups = {}  # {component_type: {group_key: [images]}}
+        display_config = None  # Store display config for component mode decisions
 
         logger.info(f"🔬 NAPARI PROCESS: Viewer started on data port {port}, control port {control_port}")
 
@@ -141,108 +387,122 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
 
         def process_messages():
             nonlocal napari_ready
+            # Handle control messages (handshake) first
             try:
-                # Handle control messages (handshake) first
-                try:
-                    control_message = control_socket.recv(zmq.NOBLOCK)
-                    control_data = pickle.loads(control_message)
+                control_message = control_socket.recv(zmq.NOBLOCK)
+                control_data = pickle.loads(control_message)
 
-                    if control_data.get('type') == 'ping':
-                        # Client is checking if we're ready
-                        if not napari_ready:
-                            # Mark as ready after first ping (GUI should be loaded by now)
-                            napari_ready = True
-                            logger.info(f"🔬 NAPARI PROCESS: Marked as ready after ping")
+                if control_data.get('type') == 'ping':
+                    # Client is checking if we're ready
+                    if not napari_ready:
+                        # Mark as ready after first ping (GUI should be loaded by now)
+                        napari_ready = True
+                        logger.info(f"🔬 NAPARI PROCESS: Marked as ready after ping")
 
-                        response = {'type': 'pong', 'ready': napari_ready}
-                        control_socket.send(pickle.dumps(response))
-                        logger.debug(f"🔬 NAPARI PROCESS: Responded to ping with ready={napari_ready}")
+                    response = {'type': 'pong', 'ready': napari_ready}
+                    control_socket.send(pickle.dumps(response))
+                    logger.debug(f"🔬 NAPARI PROCESS: Responded to ping with ready={napari_ready}")
 
-                except zmq.Again:
-                    pass  # No control messages
+            except zmq.Again:
+                pass  # No control messages
 
-                # Debug: Print current layer count (only when layers change)
-                # Removed continuous debug printing to avoid terminal spam
+            # Debug: Print current layer count (only when layers change)
+            # Removed continuous debug printing to avoid terminal spam
 
-                # Process data messages only if ready
-                if napari_ready:
-                    # Process multiple messages per timer tick for better throughput
-                    for _ in range(10):  # Process up to 10 messages per tick
-                        try:
-                            message = data_socket.recv(zmq.NOBLOCK)
+            # Process data messages only if ready
+            if napari_ready:
+                # Process multiple messages per timer tick for better throughput
+                for _ in range(10):  # Process up to 10 messages per tick
+                    try:
+                        message = data_socket.recv(zmq.NOBLOCK)
 
-                            # Try to parse as JSON first (from NapariStreamingBackend)
-                            try:
-                                import json
-                                data = json.loads(message.decode('utf-8'))
+                        # Try to parse as JSON first (from NapariStreamingBackend)
+                        import json
+                        data = json.loads(message.decode('utf-8'))
 
-                                # Handle streaming backend format
-                                path = data.get('path', 'unknown')
-                                shape = data.get('shape')
-                                dtype = data.get('dtype')
-                                shm_name = data.get('shm_name')
-                                direct_data = data.get('data')
+                        # Check if this is a batch message
+                        if data.get('type') == 'batch':
+                            # Handle batch of images
+                            images = data.get('images', [])
+                            display_config_dict = data.get('display_config')
 
-                                if shm_name:
-                                    # Load from shared memory
-                                    try:
-                                        from multiprocessing import shared_memory
-                                        shm = shared_memory.SharedMemory(name=shm_name)
-                                        image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
-                                        shm.close()  # Close our reference
-                                    except Exception as e:
-                                        logger.error(f"🔬 NAPARI PROCESS: Failed to load shared memory {shm_name}: {e}")
-                                        continue
-                                elif direct_data:
-                                    # Load from direct data (fallback)
-                                    image_data = np.array(direct_data, dtype=dtype).reshape(shape)
-                                else:
-                                    logger.warning(f"🔬 NAPARI PROCESS: No image data in message")
-                                    continue
+                            # Use display_config_dict directly - no need to store globally
 
-                                # Extract step info from path
-                                layer_name = str(path).replace('/', '_').replace('\\', '_')
+                                # Process all images in the batch together
+                            for image_info in images:
+                                path = image_info.get('path', 'unknown')
+                                shape = image_info.get('shape')
+                                dtype = image_info.get('dtype')
+                                shm_name = image_info.get('shm_name')
+                                component_metadata = image_info.get('component_metadata', {})
 
-                            except (json.JSONDecodeError, UnicodeDecodeError):
-                                # Try to parse as pickle (from direct visualizer calls)
-                                data = pickle.loads(message)
+                                # Add step information to component metadata
+                                component_metadata['step_index'] = image_info.get('step_index', 0)
+                                component_metadata['step_name'] = image_info.get('step_name', 'unknown_step')
 
-                                step_id = data.get('step_id', 'unknown')
-                                image_data = data.get('image_data')
-                                axis_id = data.get('axis_id', 'unknown')
-                                layer_name = f"{step_id}_{axis_id}"
+                                # Load from shared memory
+                                from multiprocessing import shared_memory
+                                shm = shared_memory.SharedMemory(name=shm_name)
+                                image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                                shm.close()  # Close our reference
 
-                                if image_data is None:
-                                    continue
+                                # Extract colormap from display config
+                                colormap = 'viridis'  # Default
+                                if display_config_dict and 'colormap' in display_config_dict:
+                                    colormap = display_config_dict['colormap']
 
-                            # Handle layer management based on replace_layers setting
-                            if replace_layers and layer_name in layers:
-                                # Replace existing layer data
-                                layers[layer_name].data = image_data
-                                logger.debug(f"🔬 NAPARI PROCESS: Replaced layer {layer_name}")
-                            else:
-                                # Add new layer (or create if doesn't exist)
-                                if layer_name in layers:
-                                    # Create unique name for new layer
-                                    import time
-                                    timestamp = int(time.time() * 1000) % 100000  # Last 5 digits of timestamp
-                                    unique_layer_name = f"{layer_name}_{timestamp}"
-                                else:
-                                    unique_layer_name = layer_name
-
-                                layers[unique_layer_name] = viewer.add_image(
-                                    image_data,
-                                    name=unique_layer_name,
-                                    colormap='viridis'
+                                # Component-aware layer management (following OpenHCS pattern)
+                                _handle_component_aware_display(
+                                    viewer, layers, component_groups, image_data, path,
+                                    colormap, display_config_dict or {}, replace_layers, component_metadata
                                 )
-                                logger.info(f"🔬 NAPARI PROCESS: Added layer {unique_layer_name} (total layers: {len(layers)})")
+                        else:
+                            # Handle single image format
+                            path = data.get('path', 'unknown')
+                            shape = data.get('shape')
+                            dtype = data.get('dtype')
+                            shm_name = data.get('shm_name')
+                            direct_data = data.get('data')
+                            display_config_dict = data.get('display_config')
+                            component_metadata = data.get('component_metadata', {})
 
-                        except zmq.Again:
-                            # No more messages available
-                            break
+                            # Add step information to component metadata
+                            component_metadata['step_index'] = data.get('step_index', 0)
+                            component_metadata['step_name'] = data.get('step_name', 'unknown_step')
 
-            except Exception as e:
-                logger.error(f"🔬 NAPARI PROCESS: Error processing message: {e}")
+                            # Use display_config_dict directly - no need to store globally
+
+                            if shm_name:
+                                # Load from shared memory
+                                from multiprocessing import shared_memory
+                                shm = shared_memory.SharedMemory(name=shm_name)
+                                image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                                shm.close()  # Close our reference
+                            elif direct_data:
+                                # Load from direct data (fallback)
+                                image_data = np.array(direct_data, dtype=dtype).reshape(shape)
+                            else:
+                                logger.warning(f"🔬 NAPARI PROCESS: No image data in message")
+                                continue
+
+                            # Extract colormap from display config
+                            colormap = 'viridis'  # Default
+                            if display_config_dict and 'colormap' in display_config_dict:
+                                colormap = display_config_dict['colormap']
+
+                            # Component-aware layer management (following OpenHCS pattern)
+                            _handle_component_aware_display(
+                                viewer, layers, component_groups, image_data, path,
+                                colormap, display_config_dict or {}, replace_layers, component_metadata
+                            )
+
+
+
+                    except zmq.Again:
+                        # No more messages available
+                        break
+
+
 
         # Connect timer to message processing
         timer.timeout.connect(process_messages)
@@ -347,13 +607,14 @@ class NapariStreamVisualizer:
     for Qt compatibility and true persistence across pipeline runs.
     """
 
-    def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Real-Time Visualization", persistent: bool = True, napari_port: int = DEFAULT_NAPARI_STREAM_PORT, replace_layers: bool = False):
+    def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Real-Time Visualization", persistent: bool = True, napari_port: int = DEFAULT_NAPARI_STREAM_PORT, replace_layers: bool = False, display_config=None):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
         self.persistent = persistent  # If True, viewer process stays alive after pipeline completion
         self.visualizer_config = visualizer_config
         self.napari_port = napari_port  # Port for napari streaming
         self.replace_layers = replace_layers  # If True, replace existing layers; if False, add new layers
+        self.display_config = display_config  # Configuration for display behavior
         self.port: Optional[int] = None
         self.process: Optional[multiprocessing.Process] = None
         self.zmq_context: Optional[zmq.Context] = None
@@ -549,23 +810,14 @@ class NapariStreamVisualizer:
         logger.info(f"🔬 VISUALIZER: ZMQ client connected to port {self.port}")
 
     def send_image_data(self, step_id: str, image_data: np.ndarray, axis_id: str = "unknown"):
-        """Send image data to the napari viewer process via ZeroMQ."""
-        if not self.is_running or self.zmq_socket is None:
-            logger.warning(f"🔬 VISUALIZER: Cannot send data - viewer not running")
-            return
-
-        try:
-            import pickle
-            message_data = {
-                'step_id': step_id,
-                'image_data': image_data,
-                'axis_id': axis_id
-            }
-            message = pickle.dumps(message_data)
-            self.zmq_socket.send(message, zmq.NOBLOCK)
-            logger.info(f"🔬 VISUALIZER: Sent image data for {step_id}_{axis_id} (shape: {image_data.shape})")
-        except Exception as e:
-            logger.error(f"🔬 VISUALIZER: Failed to send image data: {e}")
+        """
+        DISABLED: This method bypasses component-aware stacking.
+        All visualization must go through the streaming backend.
+        """
+        raise RuntimeError(
+            f"send_image_data() is disabled. Use streaming backend for component-aware display. "
+            f"step_id: {step_id}, axis_id: {axis_id}, shape: {image_data.shape}"
+        )
 
     def stop_viewer(self):
         """Stop the napari viewer process (only if not persistent)."""
@@ -611,32 +863,16 @@ class NapariStreamVisualizer:
 
     def visualize_path(self, step_id: str, path: str, backend: str, axis_id: Optional[str] = None):
         """
-        Load data from a path and send it to the napari viewer process.
-        This method is called by the orchestrator for visualization.
+        DISABLED: This method bypasses component-aware stacking.
+        All visualization must go through the streaming backend.
         """
-        if not self.is_running:
-            logger.warning(f"🔬 VISUALIZER: Cannot visualize - viewer not running")
-            return
+        raise RuntimeError(
+            f"visualize_path() is disabled. Use streaming backend for component-aware display. "
+            f"Path: {path}, step_id: {step_id}, axis_id: {axis_id}"
+        )
 
-        try:
-            # Load data using FileManager
-            loaded_data = self.filemanager.load(path, backend)
-            if loaded_data is not None:
-                # Prepare data for display (includes GPU->CPU conversion, slicing)
-                display_data = self._prepare_data_for_display(loaded_data, step_id)
-
-                if display_data is not None:
-                    self.send_image_data(step_id, display_data, axis_id or "unknown")
-                    logger.debug(f"🔬 VISUALIZER: Visualized data from {path}")
-                else:
-                    logger.warning(f"🔬 VISUALIZER: Could not prepare data for display from {path}")
-            else:
-                logger.warning(f"🔬 VISUALIZER: FileManager returned None for path '{path}', backend '{backend}'")
-        except Exception as e:
-            logger.error(f"🔬 VISUALIZER: Error visualizing path '{path}': {e}", exc_info=True)
-
-    def _prepare_data_for_display(self, data: Any, step_id_for_log: str) -> Optional[np.ndarray]:
-        """Converts loaded data to a displayable NumPy array (e.g., 2D slice)."""
+    def _prepare_data_for_display(self, data: Any, step_id_for_log: str, display_config=None) -> Optional[np.ndarray]:
+        """Converts loaded data to a displayable NumPy array (slice or stack based on config)."""
         cpu_tensor: Optional[np.ndarray] = None
         try:
             # GPU to CPU conversion logic
@@ -668,26 +904,58 @@ class NapariStreamVisualizer:
             if cpu_tensor is None: # Should not happen if logic above is correct
                 return None
 
-            # Slicing logic
-            display_slice: Optional[np.ndarray] = None
-            if cpu_tensor.ndim == 3: # ZYX
-                display_slice = cpu_tensor[cpu_tensor.shape[0] // 2, :, :]
-            elif cpu_tensor.ndim == 2: # YX
-                display_slice = cpu_tensor
-            elif cpu_tensor.ndim > 3: # e.g. CZYX or TZYX
-                logger.warning(f"Tensor for step '{step_id_for_log}' has ndim > 3 ({cpu_tensor.ndim}). Taking a default slice.")
-                slicer = [0] * (cpu_tensor.ndim - 2) # Slice first channels/times
-                slicer[-1] = cpu_tensor.shape[-3] // 2 # Middle Z
-                try:
-                    display_slice = cpu_tensor[tuple(slicer)]
-                except IndexError: # Handle cases where slicing might fail (e.g. very small dimensions)
-                    logger.error(f"Slicing failed for tensor with shape {cpu_tensor.shape} for step '{step_id_for_log}'.", exc_info=True)
-                    display_slice = None
-            else:
-                logger.warning(f"Tensor for step '{step_id_for_log}' has unsupported ndim for display: {cpu_tensor.ndim}.")
-                return None
+            # Determine display mode based on configuration
+            # Default behavior: show as stack unless config specifies otherwise
+            should_slice = False
 
-            return display_slice.copy() if display_slice is not None else None
+            if display_config:
+                # Check if any component mode is set to SLICE
+                from openhcs.core.config import NapariDimensionMode
+                from openhcs.constants import VariableComponents
+
+                # Check individual component mode fields
+                for component in VariableComponents:
+                    field_name = f"{component.value}_mode"
+                    if hasattr(display_config, field_name):
+                        mode = getattr(display_config, field_name)
+                        if mode == NapariDimensionMode.SLICE:
+                            should_slice = True
+                            break
+            else:
+                # Default: slice for backward compatibility
+                should_slice = True
+
+            # Slicing/stacking logic
+            display_data: Optional[np.ndarray] = None
+
+            if should_slice:
+                # Original slicing behavior
+                if cpu_tensor.ndim == 3: # ZYX
+                    display_data = cpu_tensor[cpu_tensor.shape[0] // 2, :, :]
+                elif cpu_tensor.ndim == 2: # YX
+                    display_data = cpu_tensor
+                elif cpu_tensor.ndim > 3: # e.g. CZYX or TZYX
+                    logger.debug(f"Tensor for step '{step_id_for_log}' has ndim > 3 ({cpu_tensor.ndim}). Taking a slice.")
+                    slicer = [0] * (cpu_tensor.ndim - 2) # Slice first channels/times
+                    slicer[-1] = cpu_tensor.shape[-3] // 2 # Middle Z
+                    try:
+                        display_data = cpu_tensor[tuple(slicer)]
+                    except IndexError: # Handle cases where slicing might fail (e.g. very small dimensions)
+                        logger.error(f"Slicing failed for tensor with shape {cpu_tensor.shape} for step '{step_id_for_log}'.", exc_info=True)
+                        display_data = None
+                else:
+                    logger.warning(f"Tensor for step '{step_id_for_log}' has unsupported ndim for slicing: {cpu_tensor.ndim}.")
+                    return None
+            else:
+                # Stack mode: send the full data to napari (napari can handle 3D+ data)
+                if cpu_tensor.ndim >= 2:
+                    display_data = cpu_tensor
+                    logger.debug(f"Sending {cpu_tensor.ndim}D stack to napari for step '{step_id_for_log}' (shape: {cpu_tensor.shape})")
+                else:
+                    logger.warning(f"Tensor for step '{step_id_for_log}' has unsupported ndim for stacking: {cpu_tensor.ndim}.")
+                    return None
+
+            return display_data.copy() if display_data is not None else None
 
         except Exception as e:
             logger.error(f"Error preparing data from step '{step_id_for_log}' for display: {e}", exc_info=True)
