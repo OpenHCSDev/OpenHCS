@@ -37,7 +37,7 @@ class DualEditorWindow(QDialog):
     
     def __init__(self, step_data: Optional[FunctionStep] = None, is_new: bool = False,
                  on_save_callback: Optional[Callable] = None, color_scheme: Optional[PyQt6ColorScheme] = None,
-                 orchestrator=None, parent=None):
+                 orchestrator=None, gui_config=None, parent=None):
         """
         Initialize the dual editor window.
 
@@ -47,6 +47,7 @@ class DualEditorWindow(QDialog):
             on_save_callback: Function to call when step is saved
             color_scheme: Color scheme for UI components
             orchestrator: Orchestrator instance for context management
+            gui_config: Optional GUI configuration passed from PipelineEditor
             parent: Parent widget
         """
         super().__init__(parent)
@@ -56,6 +57,7 @@ class DualEditorWindow(QDialog):
 
         # Initialize color scheme
         self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.gui_config = gui_config
 
         # Business logic state (extracted from Textual version)
         self.is_new = is_new
