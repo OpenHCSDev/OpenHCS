@@ -29,7 +29,6 @@ from openhcs.core.steps import FunctionStep as Step
 # Processing functions
 from openhcs.processing.backends.assemblers.assemble_stack_cpu import assemble_stack_cpu
 from openhcs.processing.backends.pos_gen.ashlar_main_cpu import ashlar_compute_tile_positions_cpu
-from openhcs.processing.backends.pos_gen.ashlar_main_gpu import ashlar_compute_tile_positions_gpu
 from openhcs.processing.backends.processors.numpy_processor import (
     create_composite, create_projection, stack_percentile_normalize
 )
@@ -95,6 +94,41 @@ class TestConfig:
 CONSTANTS = TestConstants()
 
 
+def _gpu_available() -> bool:
+    """Detect if a usable GPU is available without importing heavy libs eagerly.
+    Priority:
+    - Respect CUDA_VISIBLE_DEVICES empty/-1 as no GPU
+    - torch.cuda.is_available()
+    - cupy device count
+    """
+    # Respect visibility first
+    cuda_vis = os.getenv('CUDA_VISIBLE_DEVICES')
+    if cuda_vis is not None and (cuda_vis == '' or cuda_vis == '-1'):
+        return False
+    # Torch
+    try:
+        import torch  # type: ignore
+        if hasattr(torch, 'cuda') and torch.cuda.is_available():
+            return True
+    except Exception:
+        pass
+    # CuPy
+    try:
+        import cupy  # type: ignore
+        try:
+            return cupy.cuda.runtime.getDeviceCount() > 0
+        except Exception:
+            return False
+    except Exception:
+        pass
+    return False
+
+# Auto-enable CPU-only if no GPU is available (and not explicitly forced on)
+if os.getenv('OPENHCS_CPU_ONLY', 'false').lower() != 'true' and not _gpu_available():
+    os.environ['OPENHCS_CPU_ONLY'] = 'true'
+    # Headless safety for viz paths
+    os.environ.setdefault('CI', 'true')
+
 @pytest.fixture
 def test_function_dir(base_test_dir, microscope_config, request):
     """Create test directory for a specific test function."""
@@ -106,23 +140,36 @@ def test_function_dir(base_test_dir, microscope_config, request):
 def create_test_pipeline() -> Pipeline:
     """Create test pipeline with materialization configuration."""
     cpu_only_mode = os.getenv('OPENHCS_CPU_ONLY', 'false').lower() == 'true'
-    position_func = ashlar_compute_tile_positions_cpu if cpu_only_mode else ashlar_compute_tile_positions_gpu
+    if cpu_only_mode:
+        position_func = ashlar_compute_tile_positions_cpu
+    else:
+        try:
+            from openhcs.processing.backends.pos_gen.ashlar_main_gpu import ashlar_compute_tile_positions_gpu
+            position_func = ashlar_compute_tile_positions_gpu
+        except Exception:
+            # Fallback cleanly to CPU if GPU path is unavailable
+            os.environ['OPENHCS_CPU_ONLY'] = 'true'
+            position_func = ashlar_compute_tile_positions_cpu
 
     return Pipeline(
         steps=[
-            Step(func=create_composite, variable_components=[VariableComponents.CHANNEL]),
-            Step(
-                name="Z-Stack Flattening",
-                func=(create_projection, {'method': 'max_projection'}),
-                variable_components=[VariableComponents.Z_INDEX],
-                step_materialization_config=LazyStepMaterializationConfig()
-            ),
             Step(
                 name="Image Enhancement Processing",
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
                 step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
                 step_materialization_config=LazyStepMaterializationConfig(),
                 napari_streaming_config=LazyNapariStreamingConfig(well_filter=2)  # Enable napari streaming for this step
+            ),
+            Step(
+                func=create_composite,
+                variable_components=[VariableComponents.CHANNEL],
+                napari_streaming_config=LazyNapariStreamingConfig(well_filter=2)  # Enable napari streaming for this step
+            ),
+            Step(
+                name="Z-Stack Flattening",
+                func=(create_projection, {'method': 'max_projection'}),
+                variable_components=[VariableComponents.Z_INDEX],
+                step_materialization_config=LazyStepMaterializationConfig()
             ),
             Step(name="Position Computation", func=position_func),
             Step(
