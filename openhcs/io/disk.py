@@ -159,7 +159,24 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         tifffile.imwrite(path, data)
 
     def _tiff_reader(self, path):
-        return tifffile.imread(path)
+        # For symlinks, try multiple approaches to handle filesystem issues
+        path_obj = Path(path)
+
+        if path_obj.is_symlink():
+            # First try reading the symlink directly (let OS handle it)
+            try:
+                return tifffile.imread(str(path))
+            except FileNotFoundError:
+                # If that fails, try the target path
+                try:
+                    target_path = path_obj.readlink()
+                    return tifffile.imread(str(target_path))
+                except FileNotFoundError:
+                    # If target doesn't exist, try resolving the symlink
+                    resolved_path = path_obj.resolve()
+                    return tifffile.imread(str(resolved_path))
+        else:
+            return tifffile.imread(str(path))
 
     def _text_writer(self, path, data):
         path.write_text(str(data))
