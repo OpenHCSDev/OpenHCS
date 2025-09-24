@@ -103,19 +103,20 @@ class DualEditorWindow(QDialog):
         self.resize(1000, 700)
         
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        
+        layout.setSpacing(5)
+        layout.setContentsMargins(5, 5, 5, 5)
+
         # Header
         header_label = QLabel(title)
         header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; padding: 10px;")
+        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; padding: 5px;")
         layout.addWidget(header_label)
-        
+
         # Tabbed content
         self.tab_widget = QTabWidget()
         self.tab_widget.setStyleSheet(f"""
             QTabWidget::pane {{
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
+                border: none;
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
             }}
             QTabBar::tab {{
@@ -125,6 +126,7 @@ class DualEditorWindow(QDialog):
                 margin-right: 2px;
                 border-top-left-radius: 4px;
                 border-top-right-radius: 4px;
+                border: none;
             }}
             QTabBar::tab:selected {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
@@ -220,17 +222,19 @@ class DualEditorWindow(QDialog):
             Widget containing action buttons
         """
         panel = QFrame()
-        panel.setFrameStyle(QFrame.Shape.Box)
+        panel.setFrameStyle(QFrame.Shape.NoFrame)
         panel.setStyleSheet(f"""
             QFrame {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
+                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
+                border: none;
                 border-radius: 3px;
-                padding: 10px;
+                padding: 5px;
             }}
         """)
 
         layout = QHBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
 
         # Changes indicator
         self.changes_label = QLabel("")
@@ -247,7 +251,7 @@ class DualEditorWindow(QDialog):
             QPushButton {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.status_error)};
                 color: white;
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.status_error)};
+                border: none;
                 border-radius: 3px;
                 padding: 8px;
             }}
@@ -266,7 +270,7 @@ class DualEditorWindow(QDialog):
             QPushButton {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
                 color: white;
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
+                border: none;
                 border-radius: 3px;
                 padding: 8px;
             }}
@@ -276,7 +280,7 @@ class DualEditorWindow(QDialog):
             QPushButton:disabled {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
                 color: {self.color_scheme.to_hex(self.color_scheme.border_light)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.separator_color)};
+                border: none;
             }}
         """)
         layout.addWidget(self.save_button)

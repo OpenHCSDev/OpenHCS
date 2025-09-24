@@ -244,16 +244,16 @@ class PipelineEditorWidget(QWidget):
         panel = QWidget()
         panel.setStyleSheet(f"""
             QWidget {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.frame_bg)};
+                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
                 border: none;
-                padding: 2px;
+                padding: 0px;
             }}
         """)
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(2)
-        
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
         # Button configurations (extracted from Textual version)
         button_configs = [
             ("Add", "add_step", "Add new pipeline step"),
@@ -263,9 +263,11 @@ class PipelineEditorWidget(QWidget):
             ("Save", "save_pipeline", "Save pipeline to file"),
             ("Code", "code_pipeline", "Edit pipeline as Python code"),
         ]
-        
+
         # Create buttons in a single row
         row_layout = QHBoxLayout()
+        row_layout.setContentsMargins(2, 2, 2, 2)
+        row_layout.setSpacing(2)
 
         for name, action, tooltip in button_configs:
             button = QPushButton(name)
@@ -280,7 +282,10 @@ class PipelineEditorWidget(QWidget):
             row_layout.addWidget(button)
 
         layout.addLayout(row_layout)
-        
+
+        # Set maximum height to constrain the button panel
+        panel.setMaximumHeight(40)
+
         return panel
     
     def create_status_section(self) -> QWidget:
@@ -293,7 +298,7 @@ class PipelineEditorWidget(QWidget):
         frame = QWidget()
         frame.setStyleSheet(f"""
             QWidget {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.frame_bg)};
+                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
                 border: none;
                 padding: 2px;
             }}

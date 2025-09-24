@@ -54,10 +54,10 @@ class StyleSheetGenerator:
             }}
             QGroupBox {{
                 font-weight: bold;
-                border: 1px solid {cs.to_hex(cs.border_color)};
+                border: none;
                 border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
+                margin-top: 5px;
+                padding-top: 5px;
                 background-color: {cs.to_hex(cs.panel_bg)};
                 color: {cs.to_hex(cs.text_primary)};
             }}
@@ -182,7 +182,7 @@ class StyleSheetGenerator:
         cs = self.color_scheme
         return f"""
             QProgressBar {{
-                border: 1px solid {cs.to_hex(cs.border_color)};
+                border: none;
                 border-radius: 3px;
                 background-color: {cs.to_hex(cs.progress_bg)};
                 color: {cs.to_hex(cs.text_primary)};
@@ -205,7 +205,7 @@ class StyleSheetGenerator:
         return f"""
             QFrame {{
                 background-color: {cs.to_hex(cs.frame_bg)};
-                border: 1px solid {cs.to_hex(cs.border_color)};
+                border: none;
                 border-radius: 3px;
                 padding: 5px;
             }}
@@ -272,10 +272,10 @@ class StyleSheetGenerator:
             }}
             QGroupBox {{
                 font-weight: bold;
-                border: 1px solid {cs.to_hex(cs.border_color)};
+                border: none;
                 border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
+                margin-top: 5px;
+                padding-top: 5px;
                 background-color: {cs.to_hex(cs.panel_bg)};
                 color: {cs.to_hex(cs.text_primary)};
             }}
@@ -291,7 +291,7 @@ class StyleSheetGenerator:
             QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
                 background-color: {cs.to_hex(cs.input_bg)};
                 color: {cs.to_hex(cs.input_text)};
-                border: 1px solid {cs.to_hex(cs.input_border)};
+                border: none;
                 border-radius: 3px;
                 padding: 5px;
             }}
@@ -303,9 +303,9 @@ class StyleSheetGenerator:
             }}
             QFrame {{
                 background-color: {cs.to_hex(cs.panel_bg)};
-                border: 1px solid {cs.to_hex(cs.border_color)};
+                border: none;
                 border-radius: 3px;
-                padding: 10px;
+                padding: 5px;
             }}
         """
 

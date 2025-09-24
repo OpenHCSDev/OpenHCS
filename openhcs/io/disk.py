@@ -307,7 +307,6 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         """
         disk_directory = Path(directory)
 
-
         if not disk_directory.is_dir():
             raise ValueError(f"Path is not a directory: {disk_directory}")
 
@@ -317,7 +316,8 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             files = self._list_files_breadth_first(disk_directory, pattern)
         else:
             glob_pattern = pattern if pattern else "*"
-            files = [p for p in disk_directory.glob(glob_pattern) if p.is_file()]
+            # Include both regular files and symlinks (even broken ones)
+            files = [p for p in disk_directory.glob(glob_pattern) if p.is_file() or p.is_symlink()]
 
         # Filter by extensions if provided
         if extensions:
