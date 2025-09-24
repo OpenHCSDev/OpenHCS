@@ -177,6 +177,12 @@ class SystemMonitorWidget(QWidget):
         self.cpu_gpu_plot = pg.PlotWidget(title="CPU/GPU Usage")
         self.ram_vram_plot = pg.PlotWidget(title="RAM/VRAM Usage")
 
+        # Disable mouse interaction on plots
+        self.cpu_gpu_plot.setMouseEnabled(x=False, y=False)
+        self.ram_vram_plot.setMouseEnabled(x=False, y=False)
+        self.cpu_gpu_plot.setMenuEnabled(False)
+        self.ram_vram_plot.setMenuEnabled(False)
+
         # Store plot data items for efficient updates using configured colors and line width
         colors = self.monitor_config.chart_colors
         line_width = self.monitor_config.line_width

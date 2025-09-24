@@ -265,28 +265,22 @@ class PipelineEditorWidget(QWidget):
             ("Code", "code_pipeline", "Edit pipeline as Python code"),
         ]
         
-        # Create buttons in rows
-        for i in range(0, len(button_configs), 3):
-            row_layout = QHBoxLayout()
-            
-            for j in range(3):
-                if i + j < len(button_configs):
-                    name, action, tooltip = button_configs[i + j]
-                    
-                    button = QPushButton(name)
-                    button.setToolTip(tooltip)
-                    button.setMinimumHeight(30)
-                    button.setStyleSheet(self.style_generator.generate_button_style())
-                    
-                    # Connect button to action
-                    button.clicked.connect(lambda checked, a=action: self.handle_button_action(a))
-                    
-                    self.buttons[action] = button
-                    row_layout.addWidget(button)
-                else:
-                    row_layout.addStretch()
-            
-            layout.addLayout(row_layout)
+        # Create buttons in a single row
+        row_layout = QHBoxLayout()
+
+        for name, action, tooltip in button_configs:
+            button = QPushButton(name)
+            button.setToolTip(tooltip)
+            button.setMinimumHeight(30)
+            button.setStyleSheet(self.style_generator.generate_button_style())
+
+            # Connect button to action
+            button.clicked.connect(lambda checked, a=action: self.handle_button_action(a))
+
+            self.buttons[action] = button
+            row_layout.addWidget(button)
+
+        layout.addLayout(row_layout)
         
         return panel
     
