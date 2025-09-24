@@ -129,6 +129,21 @@ if os.getenv('OPENHCS_CPU_ONLY', 'false').lower() != 'true' and not _gpu_availab
     # Headless safety for viz paths
     os.environ.setdefault('CI', 'true')
 
+
+
+def _headless_mode() -> bool:
+    """Treat CI/CPU-only/headless as headless for viz suppression in tests."""
+    try:
+        if os.getenv('CI', '').lower() == 'true':
+            return True
+        if os.getenv('OPENHCS_CPU_ONLY', '').lower() == 'true':
+            return True
+        if os.getenv('OPENHCS_HEADLESS', '').lower() == 'true':
+            return True
+    except Exception:
+        pass
+    return False
+
 @pytest.fixture
 def test_function_dir(base_test_dir, microscope_config, request):
     """Create test directory for a specific test function."""
@@ -151,6 +166,9 @@ def create_test_pipeline() -> Pipeline:
             os.environ['OPENHCS_CPU_ONLY'] = 'true'
             position_func = ashlar_compute_tile_positions_cpu
 
+    # Suppress visualizer configs entirely when headless
+    streaming_cfg = None if _headless_mode() else LazyNapariStreamingConfig(well_filter=2)
+
     return Pipeline(
         steps=[
             Step(
@@ -158,12 +176,12 @@ def create_test_pipeline() -> Pipeline:
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
                 step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
                 step_materialization_config=LazyStepMaterializationConfig(),
-                napari_streaming_config=LazyNapariStreamingConfig(well_filter=2)  # Enable napari streaming for this step
+                napari_streaming_config=streaming_cfg
             ),
             Step(
                 func=create_composite,
                 variable_components=[VariableComponents.CHANNEL],
-                napari_streaming_config=LazyNapariStreamingConfig(well_filter=2)  # Enable napari streaming for this step
+                napari_streaming_config=streaming_cfg
             ),
             Step(
                 name="Z-Stack Flattening",
