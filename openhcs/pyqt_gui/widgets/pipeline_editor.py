@@ -23,7 +23,7 @@ from PyQt6.QtGui import QFont, QDrag, QPainter, QColor, QPen, QFontMetrics
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.config_framework.global_config import set_current_global_config, get_current_global_config
+from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
 from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.pyqt_gui.widgets.mixins import (
@@ -244,16 +244,16 @@ class PipelineEditorWidget(QWidget):
         panel = QWidget()
         panel.setStyleSheet(f"""
             QWidget {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
+                background-color: {self.color_scheme.to_hex(self.color_scheme.frame_bg)};
                 border: none;
-                padding: 0px;
+                padding: 2px;
             }}
         """)
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
+        
         # Button configurations (extracted from Textual version)
         button_configs = [
             ("Add", "add_step", "Add new pipeline step"),
@@ -263,11 +263,9 @@ class PipelineEditorWidget(QWidget):
             ("Save", "save_pipeline", "Save pipeline to file"),
             ("Code", "code_pipeline", "Edit pipeline as Python code"),
         ]
-
+        
         # Create buttons in a single row
         row_layout = QHBoxLayout()
-        row_layout.setContentsMargins(2, 2, 2, 2)
-        row_layout.setSpacing(2)
 
         for name, action, tooltip in button_configs:
             button = QPushButton(name)
@@ -282,10 +280,7 @@ class PipelineEditorWidget(QWidget):
             row_layout.addWidget(button)
 
         layout.addLayout(row_layout)
-
-        # Set maximum height to constrain the button panel
-        panel.setMaximumHeight(40)
-
+        
         return panel
     
     def create_status_section(self) -> QWidget:
@@ -298,7 +293,7 @@ class PipelineEditorWidget(QWidget):
         frame = QWidget()
         frame.setStyleSheet(f"""
             QWidget {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
+                background-color: {self.color_scheme.to_hex(self.color_scheme.frame_bg)};
                 border: none;
                 padding: 2px;
             }}
@@ -1085,7 +1080,7 @@ class PipelineEditorWidget(QWidget):
         # CRITICAL FIX: Refresh all placeholders when global config changes
         # This ensures pipeline config editor shows updated inherited values
         if hasattr(self, 'form_manager') and self.form_manager:
-            self.form_manager._refresh_all_placeholders()
+            self.form_manager.refresh_placeholder_text()
             logger.info("Refreshed pipeline config placeholders after global config change")
 
 
