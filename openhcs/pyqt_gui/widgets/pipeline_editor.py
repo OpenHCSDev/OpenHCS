@@ -15,10 +15,11 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
     QListWidgetItem, QLabel, QMessageBox, QFileDialog, QFrame,
-    QSplitter, QTextEdit, QScrollArea
+    QSplitter, QTextEdit, QScrollArea, QStyledItemDelegate, QStyle,
+    QStyleOptionViewItem, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
-from PyQt6.QtGui import QFont, QDrag
+from PyQt6.QtGui import QFont, QDrag, QPainter, QColor, QPen, QFontMetrics
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.config import GlobalPipelineConfig
@@ -35,6 +36,50 @@ from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 
 logger = logging.getLogger(__name__)
 
+
+class StepListItemDelegate(QStyledItemDelegate):
+    """Custom delegate to render step name in white and preview text in grey without breaking hover/selection/borders."""
+    def __init__(self, name_color: QColor, preview_color: QColor, parent=None):
+        super().__init__(parent)
+        self.name_color = name_color
+        self.preview_color = preview_color
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        # Prepare a copy to let style draw backgrounds, hover, selection, borders, etc.
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        # Capture text and prevent default text draw
+        text = opt.text or ""
+        opt.text = ""
+
+        painter.save()
+        # Let the current style paint the item (background, selection, hover, separators)
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+
+        # Now custom-draw the text with mixed colors
+        rect = opt.rect.adjusted(6, 0, -6, 0)
+        painter.setFont(opt.font)
+        fm = QFontMetrics(opt.font)
+        baseline_y = rect.y() + (rect.height() + fm.ascent() - fm.descent()) // 2
+
+        sep_idx = text.find("  (")
+        if sep_idx != -1 and text.endswith(")"):
+            name_part = text[:sep_idx]
+            preview_part = text[sep_idx:]
+
+            painter.setPen(QPen(self.name_color))
+            painter.drawText(rect.x(), baseline_y, name_part)
+            name_width = fm.horizontalAdvance(name_part)
+
+            painter.setPen(QPen(self.preview_color))
+            painter.drawText(rect.x() + name_width, baseline_y, preview_part)
+        else:
+            painter.setPen(QPen(self.name_color))
+            painter.drawText(rect.x(), baseline_y, text)
+
+        painter.restore()
 
 class ReorderableListWidget(QListWidget):
     """
@@ -169,6 +214,14 @@ class PipelineEditorWidget(QWidget):
                 background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
             }}
         """)
+        # Set custom delegate to render white name and grey preview
+        try:
+            name_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_primary))
+            preview_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_disabled))
+            self.step_list.setItemDelegate(StepListItemDelegate(name_color, preview_color, self.step_list))
+        except Exception:
+            # Fallback silently if color scheme isn't ready
+            pass
         splitter.addWidget(self.step_list)
         
         # Button panel
