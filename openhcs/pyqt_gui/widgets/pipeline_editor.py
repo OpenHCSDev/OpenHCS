@@ -177,8 +177,8 @@ class PipelineEditorWidget(QWidget):
     def setup_ui(self):
         """Setup the user interface."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
         
         # Title
         title_label = QLabel("Pipeline Editor")
@@ -197,13 +197,12 @@ class PipelineEditorWidget(QWidget):
             QListWidget {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
                 color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
+                border: none;
                 padding: 5px;
             }}
             QListWidget::item {{
                 padding: 8px;
-                border-bottom: 1px solid {self.color_scheme.to_hex(self.color_scheme.separator_color)};
+                border: none;
                 border-radius: 3px;
                 margin: 2px;
             }}
@@ -242,18 +241,18 @@ class PipelineEditorWidget(QWidget):
         Returns:
             Widget containing action buttons
         """
-        panel = QFrame()
-        panel.setFrameStyle(QFrame.Shape.Box)
+        panel = QWidget()
         panel.setStyleSheet(f"""
-            QFrame {{
+            QWidget {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.frame_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
-                padding: 5px;
+                border: none;
+                padding: 2px;
             }}
         """)
-        
+
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
         
         # Button configurations (extracted from Textual version)
         button_configs = [
@@ -291,18 +290,18 @@ class PipelineEditorWidget(QWidget):
         Returns:
             Widget containing status information
         """
-        frame = QFrame()
-        frame.setFrameStyle(QFrame.Shape.Box)
+        frame = QWidget()
         frame.setStyleSheet(f"""
-            QFrame {{
+            QWidget {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.frame_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
-                padding: 5px;
+                border: none;
+                padding: 2px;
             }}
         """)
-        
+
         layout = QVBoxLayout(frame)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
         
         # Status label
         self.status_label = QLabel("Ready")

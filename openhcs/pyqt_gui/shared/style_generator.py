@@ -97,13 +97,13 @@ class StyleSheetGenerator:
             QTreeWidget, QListWidget {{
                 background-color: {cs.to_hex(cs.panel_bg)};
                 color: {cs.to_hex(cs.text_primary)};
-                border: 1px solid {cs.to_hex(cs.border_color)};
+                border: none;
                 border-radius: 3px;
                 selection-background-color: {cs.to_hex(cs.selection_bg)};
             }}
             QTreeWidget::item, QListWidget::item {{
                 padding: 4px;
-                border-bottom: 1px solid {cs.to_hex(cs.separator_color)};
+                border: none;
             }}
             QTreeWidget::item:hover, QListWidget::item:hover {{
                 background-color: {cs.to_hex(cs.hover_bg)};
@@ -126,7 +126,7 @@ class StyleSheetGenerator:
             QPushButton {{
                 background-color: {cs.to_hex(cs.button_normal_bg)};
                 color: {cs.to_hex(cs.button_text)};
-                border: 1px solid {cs.to_hex(cs.border_light)};
+                border: none;
                 border-radius: 3px;
                 padding: 5px;
             }}
@@ -369,13 +369,13 @@ class StyleSheetGenerator:
             QListWidget {{
                 background-color: {cs.to_hex(cs.panel_bg)};
                 color: {cs.to_hex(cs.text_primary)};
-                border: 1px solid {cs.to_hex(cs.border_color)};
+                border: none;
                 border-radius: 3px;
                 padding: 5px;
             }}
             QListWidget::item {{
                 padding: 5px;
-                border-bottom: 1px solid {cs.to_hex(cs.separator_color)};
+                border: none;
             }}
             QListWidget::item:selected {{
                 background-color: {cs.to_hex(cs.selection_bg)};
@@ -386,14 +386,14 @@ class StyleSheetGenerator:
             }}
             QFrame {{
                 background-color: {cs.to_hex(cs.window_bg)};
-                border: 1px solid {cs.to_hex(cs.border_color)};
+                border: none;
                 border-radius: 3px;
                 padding: 5px;
             }}
             QPushButton {{
                 background-color: {cs.to_hex(cs.button_normal_bg)};
                 color: {cs.to_hex(cs.button_text)};
-                border: 1px solid {cs.to_hex(cs.border_light)};
+                border: none;
                 border-radius: 3px;
                 padding: 5px;
             }}
@@ -408,7 +408,7 @@ class StyleSheetGenerator:
                 color: {cs.to_hex(cs.button_disabled_text)};
             }}
             QProgressBar {{
-                border: 1px solid {cs.to_hex(cs.border_color)};
+                border: none;
                 border-radius: 3px;
                 background-color: {cs.to_hex(cs.progress_bg)};
                 color: {cs.to_hex(cs.text_primary)};
