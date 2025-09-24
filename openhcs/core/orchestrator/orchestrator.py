@@ -253,6 +253,12 @@ def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
         global_config_dict: Serialized global configuration for GPU registry setup
     """
     import logging
+    import os
+
+    # Workers should be allowed to import GPU libs if available.
+    # The parent subprocess runner may set OPENHCS_SUBPROCESS_NO_GPU=1 to stay lean,
+    # but that flag must not leak into worker processes.
+    os.environ.pop('OPENHCS_SUBPROCESS_NO_GPU', None)
 
     # Configure logging only if log_file_base is provided
     if log_file_base:
