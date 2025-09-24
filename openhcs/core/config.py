@@ -129,8 +129,31 @@ class GlobalPipelineConfig:
 # (GlobalPipelineConfig → PipelineConfig by removing "Global" prefix)
 
 
+
+def _headless_mode() -> bool:
+    """Detect headless/CI contexts where viz deps should not be required at import time."""
+    try:
+        if os.getenv('CI', '').lower() == 'true':
+            return True
+        if os.getenv('OPENHCS_CPU_ONLY', '').lower() == 'true':
+            return True
+        if os.getenv('OPENHCS_HEADLESS', '').lower() == 'true':
+            return True
+    except Exception:
+        # Fail-closed to False; only explicit envs enable headless mode
+        pass
+    return False
+
+
 def _get_available_colormaps():
     """Get available colormaps using introspection - napari first, then matplotlib."""
+    # In headless/CI/CPU-only contexts, avoid importing viz libs; return minimal stable set
+    if _headless_mode():
+        return [
+            'gray',
+            'viridis',
+        ]
+
     # Try napari first (preferred for napari visualization)
     try:
         from napari.utils.colormaps import AVAILABLE_COLORMAPS
