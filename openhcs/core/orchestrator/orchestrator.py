@@ -34,15 +34,9 @@ from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
 from openhcs.core.steps.abstract import AbstractStep, get_step_id
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.io.filemanager import FileManager
-# Conditional zarr import - skip in subprocess runner mode
+# Zarr backend is CPU-only; always import it (even in subprocess/no-GPU mode)
 import os
-if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-    # Subprocess runner mode - create placeholder
-    class ZarrStorageBackend:
-        """Placeholder for subprocess runner mode."""
-        pass
-else:
-    from openhcs.io.zarr import ZarrStorageBackend
+from openhcs.io.zarr import ZarrStorageBackend
 # PipelineConfig now imported directly above
 from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
 from openhcs.io.exceptions import StorageWriteError
