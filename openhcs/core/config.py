@@ -438,6 +438,12 @@ class ExperimentalAnalysisConfig:
     default_format: Optional[str] = None
     """Default format to use if auto-detection fails."""
 
+    enable_wells_exclusion: bool = True
+    """Whether to support wells exclusion from analysis (via 'Exclude Wells' row in config)."""
+
+    metaxpress_summary_enabled: bool = True
+    """Whether to generate MetaXpress-style summary output by default."""
+
 
 @global_pipeline_config
 @dataclass(frozen=True)

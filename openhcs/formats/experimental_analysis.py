@@ -105,6 +105,7 @@ def read_plate_layout(config_path):
     ctrl_groups=None
     ctrl_positions_replicates=None
     ctrl_positions=None
+    excluded_wells=None
 
     def sanitize_compare(string1,string2):
         string1 = string1.lower()
@@ -147,6 +148,16 @@ def read_plate_layout(config_path):
             if ctrl_wells is None:
                 ctrl_wells = []
             ctrl_wells+=row.dropna().tolist()
+            continue
+
+        #get excluded wells
+        row_content = str(row.iloc[0]) if pd.notna(row.iloc[0]) else ''
+        if (sanitize_compare(row_content,'exclude wells') or
+            sanitize_compare(row_content,'excluded wells') or
+            sanitize_compare(row_content,'exclude')):
+            if excluded_wells is None:
+                excluded_wells = []
+            excluded_wells += row.dropna().tolist()[1:]  # Skip the first element (row name)
             continue
 
         #get replicate for ctrl position
@@ -209,7 +220,7 @@ def read_plate_layout(config_path):
                     if not doses[y] in layout["N"+str(specific_N)][condition].keys():
                         layout["N"+str(specific_N)][condition][doses[y]]=[]
                     layout["N"+str(specific_N)][condition][doses[y]].append((wells[y],plate_groups[y]))
-    return scope, layout, conditions, ctrl_positions
+    return scope, layout, conditions, ctrl_positions, excluded_wells
 
 def get_features_EDDU_CX5(raw_df):
     return raw_df.iloc[:,raw_df.columns.str.find("Replicate").argmax()+1:-1].columns
@@ -444,6 +455,55 @@ def average_plates_one_replicate(averaged_plates_names_dict,plates_dict,raw_df):
         averaged_plates_dict[plate_average_name]=average_plates(plates_to_average,raw_df)
     return averaged_plates_dict
 
+def filter_excluded_wells(data_dict, excluded_wells):
+    """
+    Filter out excluded wells from experimental data structures.
+
+    Args:
+        data_dict: Dictionary containing experimental data (plates_dict, experiment_dict_locations, etc.)
+        excluded_wells: List of well IDs to exclude (e.g., ['A01', 'B03', 'C12'])
+
+    Returns:
+        Filtered data dictionary with excluded wells removed
+    """
+    if excluded_wells is None or len(excluded_wells) == 0:
+        return data_dict
+
+    # Convert excluded wells to set for faster lookup
+    excluded_set = set(str(well).upper() for well in excluded_wells)
+
+    # Filter plates_dict if it exists
+    if isinstance(data_dict, dict):
+        filtered_dict = {}
+        for key, value in data_dict.items():
+            if isinstance(value, dict):
+                # Check if this looks like a well ID (e.g., 'A01', 'B12')
+                if isinstance(key, str) and len(key) == 3 and key[0].isalpha() and key[1:].isdigit():
+                    # This is a well-level dictionary
+                    if key.upper() not in excluded_set:
+                        filtered_dict[key] = filter_excluded_wells(value, excluded_wells)
+                else:
+                    # Recursively filter nested dictionaries
+                    filtered_dict[key] = filter_excluded_wells(value, excluded_wells)
+            elif isinstance(value, list):
+                # Filter lists that might contain well tuples
+                filtered_list = []
+                for item in value:
+                    if isinstance(item, tuple) and len(item) >= 1:
+                        # Check if first element looks like a well ID
+                        well_id = str(item[0]).upper()
+                        if well_id not in excluded_set:
+                            filtered_list.append(item)
+                    else:
+                        filtered_list.append(item)
+                filtered_dict[key] = filtered_list
+            else:
+                filtered_dict[key] = value
+        return filtered_dict
+    else:
+        return data_dict
+
+
 def load_plate_groups(config_path):
     xls = pd.ExcelFile(config_path)
     df = pd.read_excel(xls, 'plate_groups',index_col=0,header=None)
@@ -665,7 +725,7 @@ def run_experimental_analysis(
         stacklevel=2
     )
     # Parse experimental configuration
-    scope, plate_layout, conditions, ctrl_positions = read_plate_layout(config_file)
+    scope, plate_layout, conditions, ctrl_positions, excluded_wells = read_plate_layout(config_file)
     plate_groups = load_plate_groups(config_file)
     experiment_dict_locations = make_experiment_dict_locations(plate_groups, plate_layout, conditions)
 
@@ -675,6 +735,15 @@ def run_experimental_analysis(
     well_dict = create_well_dict(df, scope=scope)
     plates_dict = create_plates_dict(df, scope=scope)
     plates_dict = fill_plates_dict(df, plates_dict, scope=scope)
+
+    # Apply wells exclusion if specified
+    if excluded_wells is not None and len(excluded_wells) > 0:
+        print(f"Excluding {len(excluded_wells)} wells from analysis: {excluded_wells}")
+        plates_dict = filter_excluded_wells(plates_dict, excluded_wells)
+        experiment_dict_locations = filter_excluded_wells(experiment_dict_locations, excluded_wells)
+        # Also filter control positions if they contain excluded wells
+        if ctrl_positions is not None:
+            ctrl_positions = filter_excluded_wells(ctrl_positions, excluded_wells)
 
     # Create experiment data structure
     experiment_dict_values_raw = make_experiment_dict_values(plates_dict, experiment_dict_locations, features, plate_groups)

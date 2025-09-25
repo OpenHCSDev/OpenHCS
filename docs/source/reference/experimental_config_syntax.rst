@@ -37,6 +37,16 @@ Define control wells for normalization:
    Plate Group         1    1    1    1    1    1    1    1    1    1    1    1
    Group N             1    1    1    1    2    2    2    2    3    3    3    3
 
+### Wells Exclusion Block (Optional)
+
+Exclude specific wells from analysis (e.g., due to contamination or imaging defects):
+
+.. code-block:: text
+
+   Exclude Wells       A01  B03  C12  H05
+
+**Note**: Wells listed in the ``Exclude Wells`` row will be completely removed from all analysis steps, including normalization calculations. This is useful for handling contaminated wells, imaging artifacts, or other experimental issues.
+
 **Field Definitions:**
 
 - **Controls**: Well positions for control conditions
