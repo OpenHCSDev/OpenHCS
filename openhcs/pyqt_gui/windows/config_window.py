@@ -292,11 +292,13 @@ class ConfigWindow(QDialog):
         if item_type == 'dataclass':
             # Navigate to the dataclass section in the form
             field_name = data.get('field_name')
-            if field_name and hasattr(self.form_manager, 'scroll_to_section'):
-                self.form_manager.scroll_to_section(field_name)
+            if field_name:
+                self._scroll_to_section(field_name)
                 logger.debug(f"Navigating to section: {field_name}")
             else:
-                logger.debug(f"Clicked on root dataclass: {data.get('class', {}).get('__name__', 'Unknown')}")
+                class_obj = data.get('class')
+                class_name = getattr(class_obj, '__name__', 'Unknown') if class_obj else 'Unknown'
+                logger.debug(f"Clicked on root dataclass: {class_name}")
 
         elif item_type == 'inheritance_link':
             # Find and navigate to the target class in the tree
@@ -329,6 +331,41 @@ class ConfigWindow(QDialog):
                 return True
 
         return False
+
+    def _scroll_to_section(self, field_name: str):
+        """Scroll to a specific section in the form."""
+        try:
+            # Check if we have a scroll area
+            if hasattr(self, 'scroll_area') and self.scroll_area:
+                # Find the group box for this field name
+                form_widget = self.scroll_area.widget()
+                if form_widget:
+                    group_box = self._find_group_box_by_name(form_widget, field_name)
+                    if group_box:
+                        # Scroll to the group box
+                        self.scroll_area.ensureWidgetVisible(group_box)
+                        logger.debug(f"Scrolled to section: {field_name}")
+                        return
+
+            logger.debug(f"Could not find section to scroll to: {field_name}")
+        except Exception as e:
+            logger.warning(f"Error scrolling to section {field_name}: {e}")
+
+    def _find_group_box_by_name(self, parent_widget, field_name: str):
+        """Recursively find a group box by field name."""
+        # Look for group boxes with matching titles or object names
+        for child in parent_widget.findChildren(QWidget):
+            if hasattr(child, 'title') and callable(child.title):
+                # QGroupBox has title() method
+                title = child.title()
+                if field_name.lower() in title.lower() or title.lower() in field_name.lower():
+                    return child
+            elif hasattr(child, 'objectName') and child.objectName():
+                # Check object name
+                if field_name.lower() in child.objectName().lower():
+                    return child
+
+        return None
 
 
 
