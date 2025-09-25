@@ -18,7 +18,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from openhcs.constants.constants import VALID_MEMORY_TYPES, get_openhcs_config
 from openhcs.core.steps.function_step import FunctionStep
-from openhcs.core.pipeline.compiler import FunctionReference
 
 from openhcs.core.components.validation import GenericValidator
 
@@ -437,6 +436,7 @@ class FuncStepContractValidator:
     @staticmethod
     def _resolve_function_reference(func_or_ref):
         """Resolve a FunctionReference to an actual function, or return the original."""
+        from openhcs.core.pipeline.compiler import FunctionReference
         if isinstance(func_or_ref, FunctionReference):
             return func_or_ref.resolve()
         return func_or_ref
@@ -469,6 +469,7 @@ class FuncStepContractValidator:
         functions = []
 
         # Case 1: Direct FunctionReference
+        from openhcs.core.pipeline.compiler import FunctionReference
         if isinstance(func, FunctionReference):
             resolved_func = func.resolve()
             functions.append(resolved_func)
@@ -491,6 +492,7 @@ class FuncStepContractValidator:
 
         # Case 4: List of patterns
         if isinstance(func, list):
+            from openhcs.core.pipeline.compiler import FunctionReference
             for i, f in enumerate(func):
                 # Check if it's a valid pattern (including FunctionReference)
                 is_valid_pattern = (
@@ -507,6 +509,7 @@ class FuncStepContractValidator:
 
         # Case 5: Dict of keyed patterns
         if isinstance(func, dict):
+            from openhcs.core.pipeline.compiler import FunctionReference
             for key, f in func.items():
                 # Check if it's a valid pattern (including FunctionReference)
                 is_valid_pattern = (
