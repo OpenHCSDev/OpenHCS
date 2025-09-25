@@ -726,7 +726,9 @@ class FunctionListEditorWidget(Container):
         # Use complete function pattern code generation from pickle_to_python
         from openhcs.debug.pickle_to_python import generate_complete_function_pattern_code
 
-        return generate_complete_function_pattern_code(self.pattern_data, clean_mode=True)
+        # Disable clean_mode to preserve all parameters when same function appears multiple times
+        # This prevents parsing issues when the same function has different parameter sets
+        return generate_complete_function_pattern_code(self.pattern_data, clean_mode=False)
 
 
 

@@ -479,6 +479,10 @@ def _execute_chain_core(
         # Construct execution key: function_name_dict_key_chain_position
         execution_key = f"{func_name}_{dict_key}_{i}"
 
+        logger.info(f"🔍 FUNCPLAN DEBUG: execution_key = {execution_key}")
+        logger.info(f"🔍 FUNCPLAN DEBUG: funcplan keys = {list(funcplan.keys()) if funcplan else 'EMPTY'}")
+        logger.info(f"🔍 FUNCPLAN DEBUG: step_special_outputs_plan = {step_special_outputs_plan}")
+
         if execution_key in funcplan:
             # Get outputs this specific function should save
             outputs_to_save = funcplan[execution_key]
@@ -604,10 +608,33 @@ def _process_single_pattern_group(
                 device_id, input_memory_type_from_plan, step_index, dict_key_for_funcplan
             )
         elif callable(executable_func_or_chain):
-            # For single functions, we don't need chain execution, but we still need the right dict_key
+            # For single functions, apply funcplan filtering like in chain execution
+            funcplan = context.step_plans[step_index].get("funcplan", {})
+            func_name = getattr(executable_func_or_chain, '__name__', 'unknown')
+            execution_key = f"{func_name}_{dict_key_for_funcplan}_0"  # Position 0 for single functions
+
+            logger.info(f"🔍 SINGLE FUNC FUNCPLAN DEBUG: execution_key = {execution_key}")
+            logger.info(f"🔍 SINGLE FUNC FUNCPLAN DEBUG: funcplan keys = {list(funcplan.keys()) if funcplan else 'EMPTY'}")
+            logger.info(f"🔍 SINGLE FUNC FUNCPLAN DEBUG: special_outputs_map = {special_outputs_map}")
+
+            if execution_key in funcplan:
+                # Get outputs this specific function should save
+                outputs_to_save = funcplan[execution_key]
+                filtered_special_outputs_map = {
+                    key: special_outputs_map[key]
+                    for key in outputs_to_save
+                    if key in special_outputs_map
+                }
+                logger.info(f"🔍 SINGLE FUNC FUNCPLAN: {execution_key} -> {outputs_to_save}")
+                logger.info(f"🔍 SINGLE FUNC FUNCPLAN: filtered_special_outputs_map = {filtered_special_outputs_map}")
+            else:
+                # Fallback: no funcplan entry, save nothing
+                filtered_special_outputs_map = {}
+                logger.info(f"🔍 SINGLE FUNC FUNCPLAN: No entry for {execution_key}, saving nothing")
+
             processed_stack = _execute_function_core(
                 executable_func_or_chain, main_data_stack, final_base_kwargs, context,
-                special_inputs_map, special_outputs_map, axis_id, input_memory_type_from_plan, device_id
+                special_inputs_map, filtered_special_outputs_map, axis_id, input_memory_type_from_plan, device_id
             )
         else:
             raise TypeError(f"Invalid executable_func_or_chain: {type(executable_func_or_chain)}")

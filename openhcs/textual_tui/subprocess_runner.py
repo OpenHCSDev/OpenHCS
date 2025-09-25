@@ -202,15 +202,15 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
         log_thread_count("after orchestrator initialization")
         logger.info("🔥 SUBPROCESS: Orchestrator initialized!")
         
-        # Step 3: Get wells and prepare pipeline (like test_main.py)
-        # NUCLEAR WRAP: Get wells
-        from openhcs.constants import MULTIPROCESSING_AXIS
-        wells = force_error_detection("orchestrator_get_wells", lambda: orchestrator.get_component_keys(MULTIPROCESSING_AXIS))
-        logger.info(f"🔥 SUBPROCESS: Found {len(wells)} wells: {wells}")
+        # Step 3: Use wells from pre-compiled contexts (not rediscovery)
+        # The UI already compiled contexts for the specific wells in this plate
+        wells = list(compiled_contexts.keys())
+        logger.info(f"🔥 SUBPROCESS: Using pre-compiled wells for plate {plate_path}: {wells}")
+        logger.info(f"🔥 SUBPROCESS: Found {len(wells)} wells from compiled contexts")
 
-        # AGGRESSIVE VALIDATION: Check wells
+        # AGGRESSIVE VALIDATION: Check wells from compiled contexts
         if not wells:
-            error_msg = "🔥 CRITICAL: No wells found by orchestrator!"
+            error_msg = f"🔥 CRITICAL: No wells found in compiled contexts for plate {plate_path}!"
             logger.error(error_msg)
             print(f"🔥 SUBPROCESS STDOUT CRITICAL: {error_msg}")
             raise RuntimeError(error_msg)

@@ -11,7 +11,7 @@ from typing import Type, Any, Callable, Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QScrollArea, QWidget, QFrame,
+    QScrollArea, QWidget, QFrame, QSplitter, QTreeWidget, QTreeWidgetItem,
     QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -145,18 +145,29 @@ class ConfigWindow(QDialog):
 
         header_layout.addStretch()
         layout.addWidget(header_widget)
-        
-        # Parameter form - always use form_manager (unified approach)
+
+        # Create splitter with tree view on left and form on right
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left panel - Inheritance hierarchy tree
+        self.tree_widget = self._create_inheritance_tree()
+        splitter.addWidget(self.tree_widget)
+
+        # Right panel - Parameter form
         if self._should_use_scroll_area():
-            scroll_area = QScrollArea()
-            scroll_area.setWidgetResizable(True)
-            scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            scroll_area.setWidget(self.form_manager)
-            layout.addWidget(scroll_area)
+            self.scroll_area = QScrollArea()
+            self.scroll_area.setWidgetResizable(True)
+            self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.scroll_area.setWidget(self.form_manager)
+            splitter.addWidget(self.scroll_area)
         else:
             # For simple dataclasses, show form directly without scrolling
-            layout.addWidget(self.form_manager)
+            splitter.addWidget(self.form_manager)
+
+        # Set splitter proportions (30% tree, 70% form)
+        splitter.setSizes([300, 700])
+        layout.addWidget(splitter)
         
         # Button panel
         button_panel = self.create_button_panel()
@@ -164,7 +175,44 @@ class ConfigWindow(QDialog):
         
         # Apply centralized styling
         self.setStyleSheet(self.style_generator.generate_config_window_style())
-    
+
+    def _create_inheritance_tree(self) -> QTreeWidget:
+        """Create tree widget showing inheritance hierarchy for navigation."""
+        tree = QTreeWidget()
+        tree.setHeaderLabel("Configuration Hierarchy")
+        tree.setMaximumWidth(350)
+        tree.setMinimumWidth(250)
+
+        # Style the tree
+        tree.setStyleSheet(f"""
+            QTreeWidget {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
+                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
+                border-radius: 3px;
+                color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
+                font-size: 12px;
+            }}
+            QTreeWidget::item {{
+                padding: 4px;
+                border-bottom: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
+            }}
+            QTreeWidget::item:selected {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.accent_color)};
+                color: white;
+            }}
+            QTreeWidget::item:hover {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.hover_color)};
+            }}
+        """)
+
+        # Build inheritance hierarchy
+        self._populate_inheritance_tree(tree)
+
+        # Connect selection to navigation
+        tree.itemClicked.connect(self._on_tree_item_clicked)
+
+        return tree
+
 
     
 
