@@ -82,7 +82,7 @@ def _refresh_function_object(func_value):
 
 
 def _get_fresh_function(func):
-    """Get a fresh function object by importing from the original module."""
+    """Get a fresh function object using registry metadata for proper library mapping."""
     import importlib
 
     # First try direct import from the function's module
@@ -92,37 +92,41 @@ def _get_fresh_function(func):
     except (ImportError, AttributeError):
         pass
 
-    # For external registry functions, try known library mappings
-    func_name = func.__name__
-    module_name = func.__module__
+    # For registry functions, use the registry system to get the proper library object
+    try:
+        from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 
-    # Handle pyclesperanto functions
-    if module_name == 'pyclesperanto' or module_name.startswith('openhcs.pyclesperanto'):
-        try:
-            import pyclesperanto as cle
-            if hasattr(cle, func_name):
-                return getattr(cle, func_name)
-        except ImportError:
-            pass
+        # Get all function metadata to find this function
+        all_functions = RegistryService.get_all_functions_with_metadata()
 
-    # Handle skimage functions (should work with direct import)
-    if module_name.startswith('skimage') or module_name.startswith('openhcs.skimage'):
-        # Extract the real skimage module path
-        real_module = module_name.replace('openhcs.', '') if module_name.startswith('openhcs.') else module_name
-        try:
-            module = importlib.import_module(real_module)
-            return getattr(module, func_name)
-        except (ImportError, AttributeError):
-            pass
+        # Find the metadata for this function by matching name and module
+        func_metadata = None
+        for composite_key, metadata in all_functions.items():
+            if (metadata.func.__name__ == func.__name__ and
+                metadata.func.__module__ == func.__module__):
+                func_metadata = metadata
+                break
 
-    # Handle cupy/cucim functions
-    if module_name.startswith('cucim') or module_name.startswith('openhcs.cucim'):
-        real_module = module_name.replace('openhcs.', '') if module_name.startswith('openhcs.') else module_name
-        try:
-            module = importlib.import_module(real_module)
-            return getattr(module, func_name)
-        except (ImportError, AttributeError):
-            pass
+        if func_metadata:
+            # Use the registry to get the library object and extract the fresh function
+            registry = func_metadata.registry
+            if hasattr(registry, 'get_library_object'):
+                library_obj = registry.get_library_object()
+                if library_obj and hasattr(library_obj, func.__name__):
+                    return getattr(library_obj, func.__name__)
+
+            # Fallback: try importing using the original module from metadata
+            if func_metadata.module:
+                try:
+                    # Remove openhcs prefix if present (virtual modules)
+                    real_module = func_metadata.module.replace('openhcs.', '') if func_metadata.module.startswith('openhcs.') else func_metadata.module
+                    module = importlib.import_module(real_module)
+                    return getattr(module, func_metadata.original_name or func.__name__)
+                except (ImportError, AttributeError):
+                    pass
+
+    except Exception:
+        pass  # Fall back to original if registry lookup fails
 
     return None
 
