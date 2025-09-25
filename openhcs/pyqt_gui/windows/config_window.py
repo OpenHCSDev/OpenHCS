@@ -167,7 +167,9 @@ class ConfigWindow(QDialog):
 
         # Set splitter proportions (30% tree, 70% form)
         splitter.setSizes([300, 700])
-        layout.addWidget(splitter)
+
+        # Add splitter with stretch factor so it expands to fill available space
+        layout.addWidget(splitter, 1)  # stretch factor = 1
         
         # Button panel
         button_panel = self.create_button_panel()
@@ -183,24 +185,18 @@ class ConfigWindow(QDialog):
         tree.setMaximumWidth(350)
         tree.setMinimumWidth(250)
 
-        # Make tree more compact
-        tree.setIndentation(15)  # Reduce indentation
-        tree.setRootIsDecorated(True)  # Show expand/collapse icons
-        tree.setUniformRowHeights(True)  # Consistent row heights
-
-        # Style the tree - compact and minimal
+        # Style the tree with original appearance
         tree.setStyleSheet(f"""
             QTreeWidget {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: none;
+                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
+                border-radius: 3px;
                 color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
                 font-size: 12px;
-                outline: none;
             }}
             QTreeWidget::item {{
-                padding: 2px 4px;
-                border: none;
-                height: 20px;
+                padding: 4px;
+                border-bottom: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
             }}
             QTreeWidget::item:selected {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
@@ -208,9 +204,6 @@ class ConfigWindow(QDialog):
             }}
             QTreeWidget::item:hover {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
-            }}
-            QTreeWidget::branch {{
-                background: transparent;
             }}
         """)
 
@@ -223,26 +216,25 @@ class ConfigWindow(QDialog):
         return tree
 
     def _populate_inheritance_tree(self, tree: QTreeWidget):
-        """Populate the inheritance tree with configuration hierarchy."""
+        """Populate the inheritance tree with only dataclasses visible in the UI."""
         import dataclasses
-        from typing import get_origin, get_args
 
         # Create root item for the main config class
         config_name = self.config_class.__name__ if self.config_class else "Configuration"
         root_item = QTreeWidgetItem([config_name])
+        root_item.setData(0, Qt.ItemDataRole.UserRole, {'type': 'dataclass', 'class': self.config_class})
         tree.addTopLevelItem(root_item)
 
-        # If this is a dataclass, show its fields and nested dataclasses
+        # Only show dataclasses that are visible in the UI (have form sections)
         if dataclasses.is_dataclass(self.config_class):
-            self._add_dataclass_fields_to_tree(root_item, self.config_class)
+            self._add_ui_visible_dataclasses_to_tree(root_item, self.config_class)
 
         # Expand the tree
         tree.expandAll()
 
-    def _add_dataclass_fields_to_tree(self, parent_item: QTreeWidgetItem, dataclass_type):
-        """Recursively add dataclass fields to the tree, showing inheritance."""
+    def _add_ui_visible_dataclasses_to_tree(self, parent_item: QTreeWidgetItem, dataclass_type):
+        """Add only dataclasses that are visible in the UI form."""
         import dataclasses
-        from typing import get_origin, get_args
 
         # Get all fields from this dataclass
         fields = dataclasses.fields(dataclass_type)
@@ -251,22 +243,22 @@ class ConfigWindow(QDialog):
             field_name = field.name
             field_type = field.type
 
-            # Check if this field is a dataclass (nested config)
+            # Only show dataclass fields (these appear as sections in the UI)
             if dataclasses.is_dataclass(field_type):
                 # Create a child item for this nested dataclass
                 field_item = QTreeWidgetItem([f"{field_name} ({field_type.__name__})"])
+                field_item.setData(0, Qt.ItemDataRole.UserRole, {
+                    'type': 'dataclass',
+                    'class': field_type,
+                    'field_name': field_name
+                })
                 parent_item.addChild(field_item)
 
                 # Show inheritance hierarchy for this dataclass
                 self._add_inheritance_info(field_item, field_type)
 
-                # Recursively add fields from the nested dataclass
-                self._add_dataclass_fields_to_tree(field_item, field_type)
-            else:
-                # Regular field - just show the name and type
-                type_name = getattr(field_type, '__name__', str(field_type))
-                field_item = QTreeWidgetItem([f"{field_name}: {type_name}"])
-                parent_item.addChild(field_item)
+                # Recursively add nested dataclasses
+                self._add_ui_visible_dataclasses_to_tree(field_item, field_type)
 
     def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
         """Add inheritance information for a dataclass."""
@@ -278,16 +270,65 @@ class ConfigWindow(QDialog):
 
         if config_bases:
             inheritance_item = QTreeWidgetItem(["Inherits from:"])
+            inheritance_item.setData(0, Qt.ItemDataRole.UserRole, {'type': 'inheritance_header'})
             parent_item.addChild(inheritance_item)
 
             for base_class in config_bases:
                 base_item = QTreeWidgetItem([base_class.__name__])
+                base_item.setData(0, Qt.ItemDataRole.UserRole, {
+                    'type': 'inheritance_link',
+                    'target_class': base_class
+                })
                 inheritance_item.addChild(base_item)
 
     def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
         """Handle tree item clicks for navigation."""
-        # For now, just log the selection
-        logger.debug(f"Tree item clicked: {item.text(0)}")
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        item_type = data.get('type')
+
+        if item_type == 'dataclass':
+            # Navigate to the dataclass section in the form
+            field_name = data.get('field_name')
+            if field_name and hasattr(self.form_manager, 'scroll_to_section'):
+                self.form_manager.scroll_to_section(field_name)
+                logger.debug(f"Navigating to section: {field_name}")
+            else:
+                logger.debug(f"Clicked on root dataclass: {data.get('class', {}).get('__name__', 'Unknown')}")
+
+        elif item_type == 'inheritance_link':
+            # Find and navigate to the target class in the tree
+            target_class = data.get('target_class')
+            if target_class:
+                self._navigate_to_class_in_tree(target_class)
+                logger.debug(f"Navigating to inherited class: {target_class.__name__}")
+
+    def _navigate_to_class_in_tree(self, target_class):
+        """Find and highlight a class in the tree."""
+        # Search through all items in the tree to find the target class
+        root = self.tree_widget.invisibleRootItem()
+        self._search_and_highlight_class(root, target_class)
+
+    def _search_and_highlight_class(self, parent_item, target_class):
+        """Recursively search for and highlight a class in the tree."""
+        for i in range(parent_item.childCount()):
+            child = parent_item.child(i)
+            data = child.data(0, Qt.ItemDataRole.UserRole)
+
+            if data and data.get('type') == 'dataclass':
+                if data.get('class') == target_class:
+                    # Found the target - select and scroll to it
+                    self.tree_widget.setCurrentItem(child)
+                    self.tree_widget.scrollToItem(child)
+                    return True
+
+            # Recursively search children
+            if self._search_and_highlight_class(child, target_class):
+                return True
+
+        return False
 
 
 
