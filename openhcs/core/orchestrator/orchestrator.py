@@ -671,6 +671,16 @@ class PipelineOrchestrator(ContextProvider):
         Returns:
             A dictionary mapping well IDs to their execution status (success/error and details).
         """
+
+        # CRITICAL FIX: Use resolved pipeline definition from compilation if available
+        # For subprocess runner, use the parameter directly since it receives pre-compiled contexts
+        resolved_pipeline = getattr(self, '_resolved_pipeline_definition', None)
+        if resolved_pipeline is not None:
+            logger.info(f"🔥 EXECUTION: Using resolved pipeline definition with {len(resolved_pipeline)} steps (from compilation)")
+            pipeline_definition = resolved_pipeline
+        else:
+            logger.info(f"🔥 EXECUTION: Using parameter pipeline definition with {len(pipeline_definition)} steps (subprocess mode)")
+            # In subprocess mode, the pipeline_definition parameter should already be resolved
         if not self.is_initialized():
              raise RuntimeError("Orchestrator must be initialized before executing.")
         if not pipeline_definition:
