@@ -215,8 +215,8 @@ class ConfigWindow(QDialog):
 
     def _populate_inheritance_tree(self, tree: QTreeWidget):
         """Populate the inheritance tree with configuration hierarchy."""
-        # For now, just show the current config type
-        config_name = self.config_type.__name__ if self.config_type else "Configuration"
+        # For now, just show the current config class
+        config_name = self.config_class.__name__ if self.config_class else "Configuration"
         root_item = QTreeWidgetItem([config_name])
         tree.addTopLevelItem(root_item)
 
