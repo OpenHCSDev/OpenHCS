@@ -43,9 +43,17 @@ Exclude specific wells from analysis (e.g., due to contamination or imaging defe
 
 .. code-block:: text
 
-   Exclude Wells       A01  B03  C12  H05
+   Exclude Wells       A01  B03  E01  F01  A05  B05  E05  F05  A09  B09  E09  F09
+   Plate Group         1    1    1    1    2    2    2    2    3    3    3    3
+   Group N             1    1    1    1    2    2    2    2    3    3    3    3
 
-**Note**: Wells listed in the ``Exclude Wells`` row will be completely removed from all analysis steps, including normalization calculations. This is useful for handling contaminated wells, imaging artifacts, or other experimental issues.
+**Field Definitions:**
+
+- **Exclude Wells**: Well positions to exclude from analysis
+- **Plate Group**: Physical plate identifier for each excluded well
+- **Group N**: Biological replicate assignment (1=N1, 2=N2, 3=N3, etc.)
+
+**Note**: Wells listed in the exclusion block will be completely removed from all analysis steps for their specific biological replicate and plate group, including normalization calculations. This provides precise control over which wells to exclude from which replicates and plates.
 
 **Field Definitions:**
 
