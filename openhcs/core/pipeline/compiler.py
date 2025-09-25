@@ -108,12 +108,9 @@ def _get_fresh_function(func):
                 break
 
         if func_metadata:
-            # Use the registry to get the library object and extract the fresh function
-            registry = func_metadata.registry
-            if hasattr(registry, 'get_library_object'):
-                library_obj = registry.get_library_object()
-                if library_obj and hasattr(library_obj, func.__name__):
-                    return getattr(library_obj, func.__name__)
+            # Return the decorated function from the registry (preserves memory type attributes)
+            # This ensures we get the properly wrapped function with all decorations intact
+            return func_metadata.func
 
             # Fallback: try importing using the original module from metadata
             if func_metadata.module:
