@@ -183,18 +183,24 @@ class ConfigWindow(QDialog):
         tree.setMaximumWidth(350)
         tree.setMinimumWidth(250)
 
-        # Style the tree
+        # Make tree more compact
+        tree.setIndentation(15)  # Reduce indentation
+        tree.setRootIsDecorated(True)  # Show expand/collapse icons
+        tree.setUniformRowHeights(True)  # Consistent row heights
+
+        # Style the tree - compact and minimal
         tree.setStyleSheet(f"""
             QTreeWidget {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
+                border: none;
                 color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
                 font-size: 12px;
+                outline: none;
             }}
             QTreeWidget::item {{
-                padding: 4px;
-                border-bottom: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
+                padding: 2px 4px;
+                border: none;
+                height: 20px;
             }}
             QTreeWidget::item:selected {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
@@ -202,6 +208,9 @@ class ConfigWindow(QDialog):
             }}
             QTreeWidget::item:hover {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
+            }}
+            QTreeWidget::branch {{
+                background: transparent;
             }}
         """)
 
