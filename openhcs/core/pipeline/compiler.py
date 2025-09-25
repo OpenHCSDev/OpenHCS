@@ -40,11 +40,12 @@ from openhcs.core.pipeline.gpu_memory_validator import \
     GPUMemoryTypeValidator
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.steps.function_step import FunctionStep # Used for isinstance check
-
+from dataclasses import dataclass
+from typing import Callable
 logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass(frozen=True)
 class FunctionReference:
     """
     A picklable reference to a function in the registry.
@@ -58,8 +59,18 @@ class FunctionReference:
 
     def resolve(self) -> Callable:
         """Resolve this reference to the actual decorated function from registry."""
-        from openhcs.processing.func_registry import get_function_by_name
-        return get_function_by_name(self.function_name, self.registry_name)
+        if self.registry_name == "openhcs":
+            # For OpenHCS functions, use RegistryService directly with composite key
+            from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+            all_functions = RegistryService.get_all_functions_with_metadata()
+            if self.composite_key in all_functions:
+                return all_functions[self.composite_key].func
+            else:
+                raise RuntimeError(f"OpenHCS function {self.composite_key} not found in registry")
+        else:
+            # For external library functions, use the standard memory type lookup
+            from openhcs.processing.func_registry import get_function_by_name
+            return get_function_by_name(self.function_name, self.registry_name)
 
 
 def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) -> None:
