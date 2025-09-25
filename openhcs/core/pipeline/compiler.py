@@ -60,9 +60,9 @@ def _refresh_function_object(func_value):
     try:
         if callable(func_value) and hasattr(func_value, '__module__'):
             # Single function - recreate by importing fresh
-            import importlib
-            module = importlib.import_module(func_value.__module__)
-            return getattr(module, func_value.__name__)
+            fresh_func = _get_fresh_function(func_value)
+            if fresh_func is not None:
+                return fresh_func
 
         elif isinstance(func_value, tuple) and len(func_value) == 2:
             # Function with parameters tuple
@@ -79,6 +79,52 @@ def _refresh_function_object(func_value):
         pass  # Use original if refresh fails
 
     return func_value
+
+
+def _get_fresh_function(func):
+    """Get a fresh function object by importing from the original module."""
+    import importlib
+
+    # First try direct import from the function's module
+    try:
+        module = importlib.import_module(func.__module__)
+        return getattr(module, func.__name__)
+    except (ImportError, AttributeError):
+        pass
+
+    # For external registry functions, try known library mappings
+    func_name = func.__name__
+    module_name = func.__module__
+
+    # Handle pyclesperanto functions
+    if module_name == 'pyclesperanto' or module_name.startswith('openhcs.pyclesperanto'):
+        try:
+            import pyclesperanto as cle
+            if hasattr(cle, func_name):
+                return getattr(cle, func_name)
+        except ImportError:
+            pass
+
+    # Handle skimage functions (should work with direct import)
+    if module_name.startswith('skimage') or module_name.startswith('openhcs.skimage'):
+        # Extract the real skimage module path
+        real_module = module_name.replace('openhcs.', '') if module_name.startswith('openhcs.') else module_name
+        try:
+            module = importlib.import_module(real_module)
+            return getattr(module, func_name)
+        except (ImportError, AttributeError):
+            pass
+
+    # Handle cupy/cucim functions
+    if module_name.startswith('cucim') or module_name.startswith('openhcs.cucim'):
+        real_module = module_name.replace('openhcs.', '') if module_name.startswith('openhcs.') else module_name
+        try:
+            module = importlib.import_module(real_module)
+            return getattr(module, func_name)
+        except (ImportError, AttributeError):
+            pass
+
+    return None
 
 
 def _normalize_step_attributes(pipeline_definition: List[AbstractStep]) -> None:
