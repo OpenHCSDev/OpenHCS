@@ -215,13 +215,65 @@ class ConfigWindow(QDialog):
 
     def _populate_inheritance_tree(self, tree: QTreeWidget):
         """Populate the inheritance tree with configuration hierarchy."""
-        # For now, just show the current config class
+        import dataclasses
+        from typing import get_origin, get_args
+
+        # Create root item for the main config class
         config_name = self.config_class.__name__ if self.config_class else "Configuration"
         root_item = QTreeWidgetItem([config_name])
         tree.addTopLevelItem(root_item)
 
+        # If this is a dataclass, show its fields and nested dataclasses
+        if dataclasses.is_dataclass(self.config_class):
+            self._add_dataclass_fields_to_tree(root_item, self.config_class)
+
         # Expand the tree
         tree.expandAll()
+
+    def _add_dataclass_fields_to_tree(self, parent_item: QTreeWidgetItem, dataclass_type):
+        """Recursively add dataclass fields to the tree, showing inheritance."""
+        import dataclasses
+        from typing import get_origin, get_args
+
+        # Get all fields from this dataclass
+        fields = dataclasses.fields(dataclass_type)
+
+        for field in fields:
+            field_name = field.name
+            field_type = field.type
+
+            # Check if this field is a dataclass (nested config)
+            if dataclasses.is_dataclass(field_type):
+                # Create a child item for this nested dataclass
+                field_item = QTreeWidgetItem([f"{field_name} ({field_type.__name__})"])
+                parent_item.addChild(field_item)
+
+                # Show inheritance hierarchy for this dataclass
+                self._add_inheritance_info(field_item, field_type)
+
+                # Recursively add fields from the nested dataclass
+                self._add_dataclass_fields_to_tree(field_item, field_type)
+            else:
+                # Regular field - just show the name and type
+                type_name = getattr(field_type, '__name__', str(field_type))
+                field_item = QTreeWidgetItem([f"{field_name}: {type_name}"])
+                parent_item.addChild(field_item)
+
+    def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
+        """Add inheritance information for a dataclass."""
+        # Get the Method Resolution Order (MRO) to show inheritance chain
+        mro = dataclass_type.__mro__[1:]  # Skip the class itself
+
+        # Filter out object and other non-config base classes
+        config_bases = [cls for cls in mro if cls.__name__ != 'object' and hasattr(cls, '__dataclass_fields__')]
+
+        if config_bases:
+            inheritance_item = QTreeWidgetItem(["Inherits from:"])
+            parent_item.addChild(inheritance_item)
+
+            for base_class in config_bases:
+                base_item = QTreeWidgetItem([base_class.__name__])
+                inheritance_item.addChild(base_item)
 
     def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
         """Handle tree item clicks for navigation."""
