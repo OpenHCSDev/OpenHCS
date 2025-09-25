@@ -1,4 +1,39 @@
 from typing import List, Dict
+
+
+def _resolve_function_references(func_value):
+    """
+    Recursively resolve FunctionReference objects to actual functions.
+
+    This handles all function pattern formats and resolves any FunctionReference
+    objects back to their actual decorated functions from the registry.
+    """
+    # Import here to avoid circular imports
+    try:
+        from openhcs.core.pipeline.compiler import FunctionReference
+    except ImportError:
+        # If FunctionReference doesn't exist, just return the original value
+        return func_value
+
+    if isinstance(func_value, FunctionReference):
+        # Resolve FunctionReference to actual function
+        return func_value.resolve()
+    elif isinstance(func_value, tuple) and len(func_value) == 2:
+        # Tuple: (function_or_ref, kwargs) → (resolved_function, kwargs)
+        func_or_ref, kwargs = func_value
+        resolved_func = _resolve_function_references(func_or_ref)
+        return (resolved_func, kwargs)
+    elif isinstance(func_value, list):
+        # List of functions/tuples → List of resolved functions/tuples
+        return [_resolve_function_references(item) for item in func_value]
+    elif isinstance(func_value, dict):
+        # Dict of functions/tuples → Dict of resolved functions/tuples
+        return {key: _resolve_function_references(value) for key, value in func_value.items()}
+    else:
+        # Not a function pattern or already a callable, return as-is
+        return func_value
+
+
 def prepare_patterns_and_functions(patterns, processing_funcs, component='default'):
     """
     Prepare patterns, processing functions, and processing args for processing.
@@ -31,6 +66,11 @@ def prepare_patterns_and_functions(patterns, processing_funcs, component='defaul
     logger.debug(f"🔍 PATTERN DEBUG: processing_funcs type: {type(processing_funcs)}")
     logger.debug(f"🔍 PATTERN DEBUG: processing_funcs keys: {list(processing_funcs.keys()) if isinstance(processing_funcs, dict) else 'Not a dict'}")
     logger.debug(f"🔍 PATTERN DEBUG: component: {component}")
+
+    # CRITICAL: Resolve any FunctionReference objects to actual functions
+    # This ensures worker processes get properly decorated functions from their registry
+    processing_funcs = _resolve_function_references(processing_funcs)
+    logger.debug(f"🔧 FUNCTION RESOLUTION: Resolved FunctionReference objects in processing_funcs")
 
     # Ensure patterns are in a dictionary format
     # If already a dict, use as is; otherwise wrap the list in a dictionary

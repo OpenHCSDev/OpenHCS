@@ -23,8 +23,9 @@ Doctrinal Clauses:
 import inspect
 import logging
 import json
+import dataclasses
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union # Callable removed
+from typing import Any, Callable, Dict, List, Optional, Union
 from collections import OrderedDict # For special_outputs and special_inputs order (used by PathPlanner)
 
 from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES, READ_BACKEND, WRITE_BACKEND, Backend
@@ -43,6 +44,24 @@ from openhcs.core.steps.function_step import FunctionStep # Used for isinstance 
 logger = logging.getLogger(__name__)
 
 
+@dataclasses.dataclass(frozen=True)
+class FunctionReference:
+    """
+    A picklable reference to a function in the registry.
+
+    This replaces raw function objects in compiled step definitions to ensure
+    picklability while allowing workers to resolve functions from their registry.
+    """
+    function_name: str
+    registry_name: str
+    composite_key: str  # The full registry key (e.g., "pyclesperanto:gaussian_blur")
+
+    def resolve(self) -> Callable:
+        """Resolve this reference to the actual decorated function from registry."""
+        from openhcs.processing.func_registry import get_function_by_name
+        return get_function_by_name(self.function_name, self.registry_name)
+
+
 def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) -> None:
     """
     Refresh all function objects in pipeline steps to ensure they're picklable.
@@ -56,43 +75,39 @@ def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) 
 
 
 def _refresh_function_object(func_value):
-    """Refresh a single function object or function pattern."""
+    """Convert function objects to picklable FunctionReference objects."""
     try:
         if callable(func_value) and hasattr(func_value, '__module__'):
-            # Single function - recreate by importing fresh
-            fresh_func = _get_fresh_function(func_value)
-            if fresh_func is not None:
-                return fresh_func
+            # Single function → FunctionReference
+            return _get_function_reference(func_value)
 
         elif isinstance(func_value, tuple) and len(func_value) == 2:
-            # Function with parameters tuple
+            # Function with parameters tuple → (FunctionReference, params)
             func, params = func_value
             if callable(func):
-                fresh_func = _refresh_function_object(func)
-                return (fresh_func, params)
+                func_ref = _refresh_function_object(func)
+                return (func_ref, params)
 
         elif isinstance(func_value, list):
-            # List of functions - refresh each one
+            # List of functions → List of FunctionReferences
             return [_refresh_function_object(item) for item in func_value]
 
-    except Exception:
-        pass  # Use original if refresh fails
+        elif isinstance(func_value, dict):
+            # Dict of functions → Dict of FunctionReferences
+            return {key: _refresh_function_object(value) for key, value in func_value.items()}
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to create function reference for {func_value}: {e}")
+        # If we can't create a reference, return original (may fail later)
+        return func_value
 
     return func_value
 
 
-def _get_fresh_function(func):
-    """Get a fresh function object using registry metadata for proper library mapping."""
-    import importlib
-
-    # First try direct import from the function's module
-    try:
-        module = importlib.import_module(func.__module__)
-        return getattr(module, func.__name__)
-    except (ImportError, AttributeError):
-        pass
-
-    # For registry functions, use the registry system to get the proper library object
+def _get_function_reference(func):
+    """Convert a function to a picklable FunctionReference."""
     try:
         from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 
@@ -100,26 +115,41 @@ def _get_fresh_function(func):
         all_functions = RegistryService.get_all_functions_with_metadata()
 
         # Find the metadata for this function by matching name and module
-        func_metadata = None
         for composite_key, metadata in all_functions.items():
             if (metadata.func.__name__ == func.__name__ and
                 metadata.func.__module__ == func.__module__):
-                func_metadata = metadata
-                break
-
-        if func_metadata:
-            # Return the decorated function from the registry (preserves memory type attributes)
-            # This ensures we get the properly wrapped function with all decorations intact
-            return func_metadata.func
+                # Create a picklable reference instead of the function object
+                return FunctionReference(
+                    function_name=func.__name__,
+                    registry_name=metadata.registry.library_name,
+                    composite_key=composite_key
+                )
 
     except Exception as e:
-        # Registry lookup failed - this should not happen since all functions are in registry
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"Failed to refresh function {func.__name__} from registry: {e}")
+        logger.warning(f"Failed to create function reference for {func.__name__}: {e}")
 
-    # If we reach here, something is wrong - all functions should be in registry
-    raise RuntimeError(f"Function {func.__name__} not found in registry during refresh. This should not happen.")
+    # If we can't create a reference, this function isn't in the registry
+    # This should not happen for properly registered functions
+    raise RuntimeError(f"Function {func.__name__} not found in registry - cannot create reference")
+=======
+                # Create a picklable reference instead of the function object
+                return FunctionReference(
+                    function_name=func.__name__,
+                    registry_name=metadata.registry.library_name,
+                    composite_key=composite_key
+                )
+
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to create function reference for {func.__name__}: {e}")
+
+    # If we can't create a reference, this function isn't in the registry
+    # This should not happen for properly registered functions
+    raise RuntimeError(f"Function {func.__name__} not found in registry - cannot create reference")
+>>>>>>> 80da50e (fix: Implement FunctionReference system for picklable function compilation)
 
 
 def _normalize_step_attributes(pipeline_definition: List[AbstractStep]) -> None:
