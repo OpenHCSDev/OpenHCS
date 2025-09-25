@@ -236,15 +236,22 @@ class ConfigWindow(QDialog):
         """Add only dataclasses that are visible in the UI form."""
         import dataclasses
 
+        logger.debug(f"=== TREE POPULATION: Processing dataclass {dataclass_type.__name__} ===")
+
         # Get all fields from this dataclass
         fields = dataclasses.fields(dataclass_type)
+        logger.debug(f"Found {len(fields)} fields: {[f.name for f in fields]}")
 
         for field in fields:
             field_name = field.name
             field_type = field.type
 
+            logger.debug(f"Processing field: {field_name} of type {field_type}")
+
             # Only show dataclass fields (these appear as sections in the UI)
             if dataclasses.is_dataclass(field_type):
+                logger.debug(f"✓ Adding dataclass field: {field_name} ({field_type.__name__})")
+
                 # Create a child item for this nested dataclass
                 field_item = QTreeWidgetItem([f"{field_name} ({field_type.__name__})"])
                 field_item.setData(0, Qt.ItemDataRole.UserRole, {
@@ -254,21 +261,41 @@ class ConfigWindow(QDialog):
                 })
                 parent_item.addChild(field_item)
 
+                logger.debug(f"Stored field_name in tree data: '{field_name}'")
+
                 # Show inheritance hierarchy for this dataclass
                 self._add_inheritance_info(field_item, field_type)
 
                 # Recursively add nested dataclasses
                 self._add_ui_visible_dataclasses_to_tree(field_item, field_type)
+            else:
+                logger.debug(f"Skipping non-dataclass field: {field_name}")
 
     def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
         """Add inheritance information for a dataclass with proper hierarchy, skipping lazy classes."""
-        # Get direct base classes, skipping lazy versions
+        # Debug: Log the class being processed
+        logger.debug(f"Processing inheritance for: {dataclass_type.__name__}")
+        logger.debug(f"Base classes: {[cls.__name__ for cls in dataclass_type.__bases__]}")
+
+        # Get direct base classes, skipping lazy versions and object
         direct_bases = []
         for cls in dataclass_type.__bases__:
-            if (cls.__name__ != 'object' and
-                hasattr(cls, '__dataclass_fields__') and
-                not cls.__name__.startswith('Lazy')):  # Skip lazy dataclass wrappers
-                direct_bases.append(cls)
+            class_name = cls.__name__
+            logger.debug(f"Checking base class: {class_name}")
+
+            # Skip object, non-dataclasses, and lazy wrappers
+            if (class_name == 'object' or
+                not hasattr(cls, '__dataclass_fields__')):
+                logger.debug(f"Skipping {class_name}: not a dataclass or is object")
+                continue
+
+            # Better lazy detection: check if this is a lazy wrapper
+            if self._is_lazy_wrapper(cls):
+                logger.debug(f"Skipping {class_name}: identified as lazy wrapper")
+                continue
+
+            direct_bases.append(cls)
+            logger.debug(f"Adding {class_name} to inheritance tree")
 
         # Add base classes directly as children (no "Inherits from:" label)
         for base_class in direct_bases:
@@ -282,31 +309,59 @@ class ConfigWindow(QDialog):
             # Recursively add inheritance for this base class
             self._add_inheritance_info(base_item, base_class)
 
+    def _is_lazy_wrapper(self, cls):
+        """Check if a class is a lazy wrapper that should be skipped."""
+        class_name = cls.__name__
+
+        # Check for Lazy prefix
+        if class_name.startswith('Lazy'):
+            return True
+
+        # Check if this class has a corresponding non-lazy version
+        # by looking for a class with the same name minus 'Lazy'
+        if hasattr(cls, '__module__'):
+            module = __import__(cls.__module__, fromlist=[class_name])
+            non_lazy_name = class_name.replace('Lazy', '', 1)
+            if hasattr(module, non_lazy_name):
+                return True
+
+        return False
+
     def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
         """Handle tree item double-clicks for navigation."""
+        logger.debug(f"Double-clicked tree item: {item.text(0)}")
+
         data = item.data(0, Qt.ItemDataRole.UserRole)
+        logger.debug(f"Item data: {data}")
+
         if not data:
+            logger.debug("No data found for tree item")
             return
 
         item_type = data.get('type')
+        logger.debug(f"Item type: {item_type}")
 
         if item_type == 'dataclass':
             # Navigate to the dataclass section in the form
             field_name = data.get('field_name')
+            logger.debug(f"Field name from data: {field_name}")
+
             if field_name:
+                logger.debug(f"Attempting to navigate to section: {field_name}")
                 self._scroll_to_section(field_name)
-                logger.debug(f"Navigating to section: {field_name}")
             else:
                 class_obj = data.get('class')
                 class_name = getattr(class_obj, '__name__', 'Unknown') if class_obj else 'Unknown'
-                logger.debug(f"Double-clicked on root dataclass: {class_name}")
+                logger.debug(f"Double-clicked on root dataclass: {class_name} (no field_name)")
 
         elif item_type == 'inheritance_link':
             # Find and navigate to the target class in the tree
             target_class = data.get('target_class')
             if target_class:
-                self._navigate_to_class_in_tree(target_class)
                 logger.debug(f"Navigating to inherited class: {target_class.__name__}")
+                self._navigate_to_class_in_tree(target_class)
+            else:
+                logger.debug("No target_class found for inheritance link")
 
     def _navigate_to_class_in_tree(self, target_class):
         """Find and highlight a class in the tree."""
@@ -335,59 +390,101 @@ class ConfigWindow(QDialog):
 
     def _scroll_to_section(self, field_name: str):
         """Scroll to a specific section in the form."""
+        logger.debug(f"=== SCROLL DEBUG: Attempting to scroll to section: '{field_name}' ===")
+
         try:
             # Check if we have a scroll area
+            logger.debug(f"Has scroll_area: {hasattr(self, 'scroll_area')}")
             if hasattr(self, 'scroll_area') and self.scroll_area:
+                logger.debug("Scroll area found, getting form widget")
+
                 # Find the group box for this field name
                 form_widget = self.scroll_area.widget()
+                logger.debug(f"Form widget: {form_widget}")
+
                 if form_widget:
+                    logger.debug("Searching for group box...")
                     group_box = self._find_group_box_by_name(form_widget, field_name)
                     if group_box:
                         # Scroll to the group box with small margins for better visibility
+                        logger.debug(f"Found group box: {group_box.title() if hasattr(group_box, 'title') else str(group_box)}")
                         self.scroll_area.ensureWidgetVisible(group_box, 20, 20)
-                        logger.debug(f"Scrolled to section: {field_name}")
+                        logger.debug(f"Successfully scrolled to section: {field_name}")
                         return
+                    else:
+                        logger.debug("Group box not found, trying fallback...")
 
             # Fallback: try to scroll to form manager directly if no scroll area
-            if hasattr(self.form_manager, 'nested_managers') and field_name in self.form_manager.nested_managers:
-                nested_manager = self.form_manager.nested_managers[field_name]
-                if hasattr(self, 'scroll_area') and self.scroll_area:
-                    self.scroll_area.ensureWidgetVisible(nested_manager, 20, 20)
-                    logger.debug(f"Scrolled to nested manager: {field_name}")
-                    return
+            logger.debug(f"Has form_manager: {hasattr(self, 'form_manager')}")
+            if hasattr(self.form_manager, 'nested_managers'):
+                logger.debug(f"Available nested managers: {list(self.form_manager.nested_managers.keys())}")
 
-            logger.debug(f"Could not find section to scroll to: {field_name}")
+                if field_name in self.form_manager.nested_managers:
+                    nested_manager = self.form_manager.nested_managers[field_name]
+                    logger.debug(f"Found nested manager: {nested_manager}")
+
+                    if hasattr(self, 'scroll_area') and self.scroll_area:
+                        self.scroll_area.ensureWidgetVisible(nested_manager, 20, 20)
+                        logger.debug(f"Scrolled to nested manager: {field_name}")
+                        return
+                else:
+                    logger.debug(f"Field '{field_name}' not found in nested_managers")
+            else:
+                logger.debug("No nested_managers attribute found")
+
+            logger.warning(f"Could not find section to scroll to: {field_name}")
         except Exception as e:
-            logger.warning(f"Error scrolling to section {field_name}: {e}")
+            logger.error(f"Error scrolling to section {field_name}: {e}", exc_info=True)
 
     def _find_group_box_by_name(self, parent_widget, field_name: str):
         """Recursively find a group box by field name."""
         from PyQt6.QtWidgets import QGroupBox
 
+        logger.debug(f"=== GROUP BOX SEARCH: Looking for field '{field_name}' ===")
+
         # Look for QGroupBox widgets with matching titles
         group_boxes = parent_widget.findChildren(QGroupBox)
+        logger.debug(f"Found {len(group_boxes)} group boxes total")
 
-        for group_box in group_boxes:
-            title = group_box.title()
-            # Check if field name matches the title (case insensitive)
-            if (field_name.lower() in title.lower() or
-                title.lower().replace(' ', '_') == field_name.lower() or
-                field_name.lower().replace('_', ' ') in title.lower()):
-                logger.debug(f"Found matching group box: '{title}' for field '{field_name}'")
-                return group_box
-
-        # Also check object names as fallback
-        for child in parent_widget.findChildren(QWidget):
-            if hasattr(child, 'objectName') and child.objectName():
-                if field_name.lower() in child.objectName().lower():
-                    logger.debug(f"Found matching widget by object name: '{child.objectName()}' for field '{field_name}'")
-                    return child
-
-        logger.debug(f"No matching section found for field: {field_name}")
-        # Debug: print all group box titles to help troubleshoot
+        # Debug: print all group box titles first
         all_titles = [gb.title() for gb in group_boxes]
         logger.debug(f"Available group box titles: {all_titles}")
 
+        for i, group_box in enumerate(group_boxes):
+            title = group_box.title()
+            logger.debug(f"Checking group box {i}: '{title}'")
+
+            # Multiple matching strategies
+            matches = [
+                field_name.lower() in title.lower(),
+                title.lower().replace(' ', '_') == field_name.lower(),
+                field_name.lower().replace('_', ' ') in title.lower(),
+                title.lower() == field_name.lower(),
+                # Try exact match without case conversion
+                field_name == title,
+                # Try matching the class name part if field contains it
+                any(part in title.lower() for part in field_name.lower().split('_') if len(part) > 3)
+            ]
+
+            logger.debug(f"Match results for '{title}': {matches}")
+
+            if any(matches):
+                logger.debug(f"✓ Found matching group box: '{title}' for field '{field_name}'")
+                return group_box
+
+        # Also check object names as fallback
+        logger.debug("No title match found, checking object names...")
+        all_widgets = parent_widget.findChildren(QWidget)
+        logger.debug(f"Checking {len(all_widgets)} widgets for object name matches")
+
+        for child in all_widgets:
+            if hasattr(child, 'objectName') and child.objectName():
+                obj_name = child.objectName()
+                if field_name.lower() in obj_name.lower():
+                    logger.debug(f"✓ Found matching widget by object name: '{obj_name}' for field '{field_name}'")
+                    return child
+
+        logger.warning(f"✗ No matching section found for field: {field_name}")
         return None
 
 
