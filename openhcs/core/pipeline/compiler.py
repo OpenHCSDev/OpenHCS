@@ -748,7 +748,10 @@ class PipelineCompiler:
 
             if not axis_values_to_process:
                 logger.warning("No axis values found to process based on filter.")
-                return {}
+                return {
+                    'pipeline_definition': pipeline_definition,
+                    'compiled_contexts': {}
+                }
 
             logger.info(f"Starting compilation for axis values: {', '.join(axis_values_to_process)}")
 
@@ -844,7 +847,12 @@ class PipelineCompiler:
             logger.info(f"⚙️  EXECUTION CONFIG: {effective_config.num_workers} workers configured for pipeline execution")
 
             logger.info(f"🏁 COMPILATION COMPLETE: {len(compiled_contexts)} wells compiled successfully")
-            return compiled_contexts
+
+            # Return expected structure with both pipeline_definition and compiled_contexts
+            return {
+                'pipeline_definition': pipeline_definition,
+                'compiled_contexts': compiled_contexts
+            }
         except Exception as e:
             orchestrator._state = OrchestratorState.COMPILE_FAILED
             logger.error(f"Failed to compile pipelines: {e}")
