@@ -197,11 +197,11 @@ class ConfigWindow(QDialog):
                 border-bottom: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
             }}
             QTreeWidget::item:selected {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.accent_color)};
+                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
                 color: white;
             }}
             QTreeWidget::item:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.hover_color)};
+                background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
             }}
         """)
 
@@ -213,8 +213,23 @@ class ConfigWindow(QDialog):
 
         return tree
 
+    def _populate_inheritance_tree(self, tree: QTreeWidget):
+        """Populate the inheritance tree with configuration hierarchy."""
+        # For now, just show the current config type
+        config_name = self.config_type.__name__ if self.config_type else "Configuration"
+        root_item = QTreeWidgetItem([config_name])
+        tree.addTopLevelItem(root_item)
 
-    
+        # Expand the tree
+        tree.expandAll()
+
+    def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
+        """Handle tree item clicks for navigation."""
+        # For now, just log the selection
+        logger.debug(f"Tree item clicked: {item.text(0)}")
+
+
+
 
     
 
