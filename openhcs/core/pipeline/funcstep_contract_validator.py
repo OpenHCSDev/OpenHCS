@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from openhcs.constants.constants import VALID_MEMORY_TYPES, get_openhcs_config
 from openhcs.core.steps.function_step import FunctionStep
+from openhcs.core.pipeline.compiler import FunctionReference
 
 from openhcs.core.components.validation import GenericValidator
 
@@ -425,6 +426,22 @@ class FuncStepContractValidator:
         return FuncStepContractValidator._extract_functions_from_pattern(func, step_name)
 
     @staticmethod
+    def _is_function_reference(obj):
+        """Check if an object is a FunctionReference."""
+        try:
+            from openhcs.core.pipeline.compiler import FunctionReference
+            return isinstance(obj, FunctionReference)
+        except ImportError:
+            return False
+
+    @staticmethod
+    def _resolve_function_reference(func_or_ref):
+        """Resolve a FunctionReference to an actual function, or return the original."""
+        if isinstance(func_or_ref, FunctionReference):
+            return func_or_ref.resolve()
+        return func_or_ref
+
+    @staticmethod
     def _extract_functions_from_pattern(
         func: Any,
         step_name: str
@@ -434,7 +451,8 @@ class FuncStepContractValidator:
 
         Supports nested patterns of arbitrary depth, including:
         - Direct callable
-        - Tuple of (callable, kwargs)
+        - FunctionReference objects
+        - Tuple of (callable/FunctionReference, kwargs)
         - List of callables or patterns
         - Dict of keyed callables or patterns
 
@@ -450,24 +468,36 @@ class FuncStepContractValidator:
         """
         functions = []
 
-        # Case 1: Direct callable
+        # Case 1: Direct FunctionReference
+        if isinstance(func, FunctionReference):
+            resolved_func = func.resolve()
+            functions.append(resolved_func)
+            return functions
+
+        # Case 2: Direct callable
         if callable(func) and not isinstance(func, type):
             functions.append(func)
             return functions
 
-        # Case 2: Tuple of (callable, kwargs)
-        if (isinstance(func, tuple) and len(func) == 2 and
-                callable(func[0]) and isinstance(func[1], dict)):
-            # The kwargs dict is optional - if provided, it will be used during execution
-            # No need to validate required args here as the execution logic handles this gracefully
-            functions.append(func[0])
-            return functions
+        # Case 3: Tuple of (callable/FunctionReference, kwargs)
+        if isinstance(func, tuple) and len(func) == 2 and isinstance(func[1], dict):
+            # Resolve the first element if it's a FunctionReference
+            resolved_first = FuncStepContractValidator._resolve_function_reference(func[0])
+            if callable(resolved_first) and not isinstance(resolved_first, type):
+                # The kwargs dict is optional - if provided, it will be used during execution
+                # No need to validate required args here as the execution logic handles this gracefully
+                functions.append(resolved_first)
+                return functions
 
-        # Case 3: List of patterns
+        # Case 4: List of patterns
         if isinstance(func, list):
             for i, f in enumerate(func):
-                # Recursively extract functions from nested patterns
-                if isinstance(f, (list, dict, tuple)) or (callable(f) and not isinstance(f, type)):
+                # Check if it's a valid pattern (including FunctionReference)
+                is_valid_pattern = (
+                    isinstance(f, (list, dict, tuple, FunctionReference)) or
+                    (callable(f) and not isinstance(f, type))
+                )
+                if is_valid_pattern:
                     nested_functions = FuncStepContractValidator._extract_functions_from_pattern(
                         f, step_name)
                     functions.extend(nested_functions)
@@ -475,11 +505,15 @@ class FuncStepContractValidator:
                     raise ValueError(invalid_function_error(f"list at index {i}", f))
             return functions
 
-        # Case 4: Dict of keyed patterns
+        # Case 5: Dict of keyed patterns
         if isinstance(func, dict):
             for key, f in func.items():
-                # Recursively extract functions from nested patterns
-                if isinstance(f, (list, dict, tuple)) or (callable(f) and not isinstance(f, type)):
+                # Check if it's a valid pattern (including FunctionReference)
+                is_valid_pattern = (
+                    isinstance(f, (list, dict, tuple, FunctionReference)) or
+                    (callable(f) and not isinstance(f, type))
+                )
+                if is_valid_pattern:
                     nested_functions = FuncStepContractValidator._extract_functions_from_pattern(
                         f, step_name)
                     functions.extend(nested_functions)
