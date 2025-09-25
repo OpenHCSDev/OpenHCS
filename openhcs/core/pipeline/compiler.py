@@ -43,6 +43,44 @@ from openhcs.core.steps.function_step import FunctionStep # Used for isinstance 
 logger = logging.getLogger(__name__)
 
 
+def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) -> None:
+    """
+    Refresh all function objects in pipeline steps to ensure they're picklable.
+
+    This recreates function objects by importing them fresh from their original modules,
+    similar to how code mode works, which avoids unpicklable closures from registry wrapping.
+    """
+    for step in pipeline_definition:
+        if hasattr(step, 'func') and step.func is not None:
+            step.func = _refresh_function_object(step.func)
+
+
+def _refresh_function_object(func_value):
+    """Refresh a single function object or function pattern."""
+    try:
+        if callable(func_value) and hasattr(func_value, '__module__'):
+            # Single function - recreate by importing fresh
+            import importlib
+            module = importlib.import_module(func_value.__module__)
+            return getattr(module, func_value.__name__)
+
+        elif isinstance(func_value, tuple) and len(func_value) == 2:
+            # Function with parameters tuple
+            func, params = func_value
+            if callable(func):
+                fresh_func = _refresh_function_object(func)
+                return (fresh_func, params)
+
+        elif isinstance(func_value, list):
+            # List of functions - refresh each one
+            return [_refresh_function_object(item) for item in func_value]
+
+    except Exception:
+        pass  # Use original if refresh fails
+
+    return func_value
+
+
 def _normalize_step_attributes(pipeline_definition: List[AbstractStep]) -> None:
     """Backwards compatibility: Set missing step attributes to constructor defaults."""
     sig = inspect.signature(AbstractStep.__init__)
@@ -177,6 +215,12 @@ class PipelineCompiler:
             context,
             steps_definition
         )
+
+        # === FUNCTION OBJECT REFRESH ===
+        # CRITICAL FIX: Refresh all function objects to ensure they're picklable
+        # This prevents multiprocessing pickling errors by ensuring clean function objects
+        logger.debug("🔧 FUNCTION REFRESH: Refreshing all function objects for picklability...")
+        _refresh_function_objects_in_steps(steps_definition)
 
         # === LAZY CONFIG RESOLUTION ===
         # Resolve ALL lazy configs AFTER path planning (which includes metadata injection)
