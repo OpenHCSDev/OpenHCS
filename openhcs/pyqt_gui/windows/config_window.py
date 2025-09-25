@@ -182,8 +182,8 @@ class ConfigWindow(QDialog):
         """Create tree widget showing inheritance hierarchy for navigation."""
         tree = QTreeWidget()
         tree.setHeaderLabel("Configuration Hierarchy")
-        tree.setMaximumWidth(350)
-        tree.setMinimumWidth(250)
+        # Remove width restrictions to allow horizontal dragging
+        tree.setMinimumWidth(200)
 
         # Style the tree with original appearance
         tree.setStyleSheet(f"""
@@ -210,8 +210,8 @@ class ConfigWindow(QDialog):
         # Build inheritance hierarchy
         self._populate_inheritance_tree(tree)
 
-        # Connect selection to navigation
-        tree.itemClicked.connect(self._on_tree_item_clicked)
+        # Connect double-click to navigation
+        tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
 
         return tree
 
@@ -261,29 +261,29 @@ class ConfigWindow(QDialog):
                 self._add_ui_visible_dataclasses_to_tree(field_item, field_type)
 
     def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
-        """Add inheritance information for a dataclass with proper hierarchy."""
-        # Get direct base classes (not full MRO) for proper hierarchy
-        direct_bases = [cls for cls in dataclass_type.__bases__
-                       if cls.__name__ != 'object' and hasattr(cls, '__dataclass_fields__')]
+        """Add inheritance information for a dataclass with proper hierarchy, skipping lazy classes."""
+        # Get direct base classes, skipping lazy versions
+        direct_bases = []
+        for cls in dataclass_type.__bases__:
+            if (cls.__name__ != 'object' and
+                hasattr(cls, '__dataclass_fields__') and
+                not cls.__name__.startswith('Lazy')):  # Skip lazy dataclass wrappers
+                direct_bases.append(cls)
 
-        if direct_bases:
-            inheritance_item = QTreeWidgetItem(["Inherits from:"])
-            inheritance_item.setData(0, Qt.ItemDataRole.UserRole, {'type': 'inheritance_header'})
-            parent_item.addChild(inheritance_item)
+        # Add base classes directly as children (no "Inherits from:" label)
+        for base_class in direct_bases:
+            base_item = QTreeWidgetItem([base_class.__name__])
+            base_item.setData(0, Qt.ItemDataRole.UserRole, {
+                'type': 'inheritance_link',
+                'target_class': base_class
+            })
+            parent_item.addChild(base_item)
 
-            for base_class in direct_bases:
-                base_item = QTreeWidgetItem([base_class.__name__])
-                base_item.setData(0, Qt.ItemDataRole.UserRole, {
-                    'type': 'inheritance_link',
-                    'target_class': base_class
-                })
-                inheritance_item.addChild(base_item)
+            # Recursively add inheritance for this base class
+            self._add_inheritance_info(base_item, base_class)
 
-                # Recursively add inheritance for this base class
-                self._add_inheritance_info(base_item, base_class)
-
-    def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
-        """Handle tree item clicks for navigation."""
+    def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
+        """Handle tree item double-clicks for navigation."""
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if not data:
             return
@@ -299,7 +299,7 @@ class ConfigWindow(QDialog):
             else:
                 class_obj = data.get('class')
                 class_name = getattr(class_obj, '__name__', 'Unknown') if class_obj else 'Unknown'
-                logger.debug(f"Clicked on root dataclass: {class_name}")
+                logger.debug(f"Double-clicked on root dataclass: {class_name}")
 
         elif item_type == 'inheritance_link':
             # Find and navigate to the target class in the tree
@@ -343,10 +343,18 @@ class ConfigWindow(QDialog):
                 if form_widget:
                     group_box = self._find_group_box_by_name(form_widget, field_name)
                     if group_box:
-                        # Scroll to the group box
-                        self.scroll_area.ensureWidgetVisible(group_box)
+                        # Scroll to the group box with small margins for better visibility
+                        self.scroll_area.ensureWidgetVisible(group_box, 20, 20)
                         logger.debug(f"Scrolled to section: {field_name}")
                         return
+
+            # Fallback: try to scroll to form manager directly if no scroll area
+            if hasattr(self.form_manager, 'nested_managers') and field_name in self.form_manager.nested_managers:
+                nested_manager = self.form_manager.nested_managers[field_name]
+                if hasattr(self, 'scroll_area') and self.scroll_area:
+                    self.scroll_area.ensureWidgetVisible(nested_manager, 20, 20)
+                    logger.debug(f"Scrolled to nested manager: {field_name}")
+                    return
 
             logger.debug(f"Could not find section to scroll to: {field_name}")
         except Exception as e:
