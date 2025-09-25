@@ -112,20 +112,14 @@ def _get_fresh_function(func):
             # This ensures we get the properly wrapped function with all decorations intact
             return func_metadata.func
 
-            # Fallback: try importing using the original module from metadata
-            if func_metadata.module:
-                try:
-                    # Remove openhcs prefix if present (virtual modules)
-                    real_module = func_metadata.module.replace('openhcs.', '') if func_metadata.module.startswith('openhcs.') else func_metadata.module
-                    module = importlib.import_module(real_module)
-                    return getattr(module, func_metadata.original_name or func.__name__)
-                except (ImportError, AttributeError):
-                    pass
+    except Exception as e:
+        # Registry lookup failed - this should not happen since all functions are in registry
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to refresh function {func.__name__} from registry: {e}")
 
-    except Exception:
-        pass  # Fall back to original if registry lookup fails
-
-    return None
+    # If we reach here, something is wrong - all functions should be in registry
+    raise RuntimeError(f"Function {func.__name__} not found in registry during refresh. This should not happen.")
 
 
 def _normalize_step_attributes(pipeline_definition: List[AbstractStep]) -> None:
