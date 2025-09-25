@@ -261,25 +261,26 @@ class ConfigWindow(QDialog):
                 self._add_ui_visible_dataclasses_to_tree(field_item, field_type)
 
     def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
-        """Add inheritance information for a dataclass."""
-        # Get the Method Resolution Order (MRO) to show inheritance chain
-        mro = dataclass_type.__mro__[1:]  # Skip the class itself
+        """Add inheritance information for a dataclass with proper hierarchy."""
+        # Get direct base classes (not full MRO) for proper hierarchy
+        direct_bases = [cls for cls in dataclass_type.__bases__
+                       if cls.__name__ != 'object' and hasattr(cls, '__dataclass_fields__')]
 
-        # Filter out object and other non-config base classes
-        config_bases = [cls for cls in mro if cls.__name__ != 'object' and hasattr(cls, '__dataclass_fields__')]
-
-        if config_bases:
+        if direct_bases:
             inheritance_item = QTreeWidgetItem(["Inherits from:"])
             inheritance_item.setData(0, Qt.ItemDataRole.UserRole, {'type': 'inheritance_header'})
             parent_item.addChild(inheritance_item)
 
-            for base_class in config_bases:
+            for base_class in direct_bases:
                 base_item = QTreeWidgetItem([base_class.__name__])
                 base_item.setData(0, Qt.ItemDataRole.UserRole, {
                     'type': 'inheritance_link',
                     'target_class': base_class
                 })
                 inheritance_item.addChild(base_item)
+
+                # Recursively add inheritance for this base class
+                self._add_inheritance_info(base_item, base_class)
 
     def _on_tree_item_clicked(self, item: QTreeWidgetItem, column: int):
         """Handle tree item clicks for navigation."""
@@ -353,17 +354,31 @@ class ConfigWindow(QDialog):
 
     def _find_group_box_by_name(self, parent_widget, field_name: str):
         """Recursively find a group box by field name."""
-        # Look for group boxes with matching titles or object names
+        from PyQt6.QtWidgets import QGroupBox
+
+        # Look for QGroupBox widgets with matching titles
+        group_boxes = parent_widget.findChildren(QGroupBox)
+
+        for group_box in group_boxes:
+            title = group_box.title()
+            # Check if field name matches the title (case insensitive)
+            if (field_name.lower() in title.lower() or
+                title.lower().replace(' ', '_') == field_name.lower() or
+                field_name.lower().replace('_', ' ') in title.lower()):
+                logger.debug(f"Found matching group box: '{title}' for field '{field_name}'")
+                return group_box
+
+        # Also check object names as fallback
         for child in parent_widget.findChildren(QWidget):
-            if hasattr(child, 'title') and callable(child.title):
-                # QGroupBox has title() method
-                title = child.title()
-                if field_name.lower() in title.lower() or title.lower() in field_name.lower():
-                    return child
-            elif hasattr(child, 'objectName') and child.objectName():
-                # Check object name
+            if hasattr(child, 'objectName') and child.objectName():
                 if field_name.lower() in child.objectName().lower():
+                    logger.debug(f"Found matching widget by object name: '{child.objectName()}' for field '{field_name}'")
                     return child
+
+        logger.debug(f"No matching section found for field: {field_name}")
+        # Debug: print all group box titles to help troubleshoot
+        all_titles = [gb.title() for gb in group_boxes]
+        logger.debug(f"Available group box titles: {all_titles}")
 
         return None
 
