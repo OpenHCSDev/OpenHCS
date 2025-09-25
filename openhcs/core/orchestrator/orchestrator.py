@@ -270,24 +270,10 @@ def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
         worker_logger = logging.getLogger("openhcs.worker")
         worker_logger.info("🔥 WORKER: No log file base provided, using basic logging")
 
-    # Initialize function registry for this worker process
-    try:
-        worker_logger.info("🔥 WORKER: Initializing function registry for worker process")
-
-        # Import and initialize function registry (will auto-discover all libraries)
-        import openhcs.processing.func_registry as func_registry_module
-
-        # Force initialization if not already done (workers need full registry)
-        with func_registry_module._registry_lock:
-            if not func_registry_module._registry_initialized:
-                func_registry_module._auto_initialize_registry()
-
-        worker_logger.info("🔥 WORKER: Function registry initialized successfully")
-
-    except Exception as e:
-        worker_logger.error(f"🔥 WORKER: Failed to initialize function registry: {e}")
-        # Don't raise - let worker continue, registry will auto-init on first function call
-        worker_logger.warning("🔥 WORKER: Function registry will auto-initialize on first function call")
+    # CRITICAL FIX: Do NOT initialize function registry in worker processes
+    # Workers should use the function objects that were already compiled and sent from the UI
+    # Initializing a new registry creates new wrapped functions with unpicklable closures
+    worker_logger.info("🔥 WORKER: Skipping function registry initialization - using pre-compiled functions from UI")
 
     # Initialize GPU registry for this worker process
     try:
