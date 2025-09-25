@@ -118,6 +118,16 @@ class FunctionListEditorWidget(QWidget):
 
     def _normalize_function_list(self, func_list):
         """Normalize function list using PatternDataManager."""
+        # Handle single tuple (function, kwargs) case - wrap in list
+        if isinstance(func_list, tuple) and len(func_list) == 2 and callable(func_list[0]) and isinstance(func_list[1], dict):
+            func_list = [func_list]
+        # Handle single callable case - wrap in list with empty kwargs
+        elif callable(func_list):
+            func_list = [(func_list, {})]
+        # Handle empty or None case
+        elif not func_list:
+            return []
+
         normalized = []
         for item in func_list:
             func, kwargs = self.data_manager.extract_func_and_kwargs(item)
@@ -360,7 +370,9 @@ class FunctionListEditorWidget(QWidget):
         # Use complete function pattern code generation from pickle_to_python
         from openhcs.debug.pickle_to_python import generate_complete_function_pattern_code
 
-        return generate_complete_function_pattern_code(self.pattern_data, clean_mode=True)
+        # Disable clean_mode to preserve all parameters when same function appears multiple times
+        # This prevents parsing issues when the same function has different parameter sets
+        return generate_complete_function_pattern_code(self.pattern_data, clean_mode=False)
 
     def _handle_edited_pattern(self, edited_code: str) -> None:
         """Handle the edited pattern code from code editor."""
