@@ -55,6 +55,7 @@ class FunctionReference:
     """
     function_name: str
     registry_name: str
+    memory_type: str  # The memory type for get_function_by_name() (e.g., "numpy", "pyclesperanto")
     composite_key: str  # The full registry key (e.g., "pyclesperanto:gaussian_blur")
 
     def resolve(self) -> Callable:
@@ -68,9 +69,9 @@ class FunctionReference:
             else:
                 raise RuntimeError(f"OpenHCS function {self.composite_key} not found in registry")
         else:
-            # For external library functions, use the standard memory type lookup
+            # For external library functions, use the memory type for lookup
             from openhcs.processing.func_registry import get_function_by_name
-            return get_function_by_name(self.function_name, self.registry_name)
+            return get_function_by_name(self.function_name, self.memory_type)
 
 
 def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) -> None:
@@ -133,6 +134,7 @@ def _get_function_reference(func):
                 return FunctionReference(
                     function_name=func.__name__,
                     registry_name=metadata.registry.library_name,
+                    memory_type=metadata.registry.MEMORY_TYPE,
                     composite_key=composite_key
                 )
 
