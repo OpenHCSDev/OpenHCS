@@ -208,6 +208,16 @@ class DualEditorWindow(QDialog):
         """Handle function pattern changes from function editor."""
         # Update step func from function editor - use current_pattern to get full pattern data
         current_pattern = self.func_editor.current_pattern
+
+        # CRITICAL FIX: Use fresh imports to avoid unpicklable registry wrappers
+        if callable(current_pattern) and hasattr(current_pattern, '__module__'):
+            try:
+                import importlib
+                module = importlib.import_module(current_pattern.__module__)
+                current_pattern = getattr(module, current_pattern.__name__)
+            except Exception:
+                pass  # Use original if refresh fails
+
         self.editing_step.func = current_pattern
         self.detect_changes()
         logger.debug(f"Function pattern changed: {current_pattern}")
@@ -555,6 +565,15 @@ class DualEditorWindow(QDialog):
     
     def on_form_parameter_changed(self, param_name: str, value):
         """Handle form parameter changes directly from form manager."""
+        # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
+        if param_name == 'func' and callable(value) and hasattr(value, '__module__'):
+            try:
+                import importlib
+                module = importlib.import_module(value.__module__)
+                value = getattr(module, value.__name__)
+            except Exception:
+                pass  # Use original if refresh fails
+
         setattr(self.editing_step, param_name, value)
 
         if param_name in ('group_by', 'variable_components'):

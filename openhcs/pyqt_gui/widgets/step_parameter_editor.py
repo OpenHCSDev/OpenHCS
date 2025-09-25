@@ -292,6 +292,15 @@ class StepParameterEditorWidget(QWidget):
                         raw_value = object.__getattribute__(final_value, field_obj.name)
                         print(f"DEBUG: Field {field_obj.name} = {raw_value}")
 
+            # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
+            if param_name == 'func' and callable(final_value) and hasattr(final_value, '__module__'):
+                try:
+                    import importlib
+                    module = importlib.import_module(final_value.__module__)
+                    final_value = getattr(module, final_value.__name__)
+                except Exception:
+                    pass  # Use original if refresh fails
+
             # Update step attribute
             setattr(self.step, param_name, final_value)
             logger.debug(f"Updated step parameter {param_name}={final_value}")
