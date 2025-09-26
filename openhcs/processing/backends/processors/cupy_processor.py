@@ -165,8 +165,9 @@ def percentile_normalize(
     image: "cp.ndarray",
     low_percentile: float = 1.0,
     high_percentile: float = 99.0,
-    target_min: float = 0.0,
-    target_max: float = 65535.0
+    target_min: float = None,
+    target_max: float = None,
+    preserve_dtype: bool = True
 ) -> "cp.ndarray":
     """
     Normalize a 3D image using percentile-based contrast stretching.
@@ -179,43 +180,43 @@ def percentile_normalize(
         image: 3D CuPy array of shape (Z, Y, X)
         low_percentile: Lower percentile (0-100)
         high_percentile: Upper percentile (0-100)
-        target_min: Target minimum value
-        target_max: Target maximum value
+        target_min: Target minimum value (auto-detected from dtype if None)
+        target_max: Target maximum value (auto-detected from dtype if None)
+        preserve_dtype: If True, output same dtype as input. If False, use target range.
 
     Returns:
-        Normalized 3D CuPy array of shape (Z, Y, X)
+        Normalized 3D CuPy array of shape (Z, Y, X) with same or specified dtype
     """
     _validate_3d_array(image)
 
-    # Process each Z-slice independently - MATCH NUMPY EXACTLY
-    # NOTE: For loop is ALGORITHMICALLY NECESSARY here because each slice needs
-    # different percentile values. Cannot be vectorized without changing the algorithm.
-    result = cp.zeros_like(image, dtype=cp.float32)  # Use float32 like NumPy
+    # Import shared utilities
+    from .percentile_utils import resolve_target_range, slice_percentile_normalize_core
 
-    for z in range(image.shape[0]):
-        # Get percentile values for this slice - MATCH NUMPY EXACTLY
-        p_low, p_high = cp.percentile(image[z], (low_percentile, high_percentile))
+    # Auto-detect target range based on input dtype if not specified
+    target_min, target_max = resolve_target_range(image.dtype, target_min, target_max)
 
-        # Avoid division by zero - MATCH NUMPY EXACTLY
-        if p_high == p_low:
-            result[z] = cp.ones_like(image[z]) * target_min
-            continue
-
-        # Clip and normalize to target range - MATCH NUMPY EXACTLY
-        clipped = cp.clip(image[z], p_low, p_high)
-        normalized = (clipped - p_low) * (target_max - target_min) / (p_high - p_low) + target_min
-        result[z] = normalized
-
-    # Convert to uint16 - MATCH NUMPY EXACTLY
-    return result.astype(cp.uint16)
+    # Use shared core logic with CuPy-specific functions
+    return slice_percentile_normalize_core(
+        image=image,
+        low_percentile=low_percentile,
+        high_percentile=high_percentile,
+        target_min=target_min,
+        target_max=target_max,
+        percentile_func=cp.percentile,
+        clip_func=cp.clip,
+        ones_like_func=cp.ones_like,
+        zeros_like_func=lambda arr, dtype=None: cp.zeros_like(arr, dtype=dtype or cp.float32),
+        preserve_dtype=preserve_dtype
+    )
 
 @cupy_func
 def stack_percentile_normalize(
     stack: "cp.ndarray",
     low_percentile: float = 1.0,
     high_percentile: float = 99.0,
-    target_min: float = 0.0,
-    target_max: float = 65535.0
+    target_min: float = None,
+    target_max: float = None,
+    preserve_dtype: bool = True
 ) -> "cp.ndarray":
     """
     Normalize a stack using global percentile-based contrast stretching.
@@ -227,28 +228,33 @@ def stack_percentile_normalize(
         stack: 3D CuPy array of shape (Z, Y, X)
         low_percentile: Lower percentile (0-100)
         high_percentile: Upper percentile (0-100)
-        target_min: Target minimum value
-        target_max: Target maximum value
+        target_min: Target minimum value (auto-detected from dtype if None)
+        target_max: Target maximum value (auto-detected from dtype if None)
+        preserve_dtype: If True, output same dtype as input. If False, use target range.
 
     Returns:
-        Normalized 3D CuPy array of shape (Z, Y, X)
+        Normalized 3D CuPy array of shape (Z, Y, X) with same or specified dtype
     """
     _validate_3d_array(stack)
 
-    # Calculate global percentiles across the entire stack
-    p_low = cp.percentile(stack, low_percentile)
-    p_high = cp.percentile(stack, high_percentile)
+    # Import shared utilities
+    from .percentile_utils import resolve_target_range, percentile_normalize_core
 
-    # Avoid division by zero
-    if p_high == p_low:
-        return cp.ones_like(stack) * target_min
+    # Auto-detect target range based on input dtype if not specified
+    target_min, target_max = resolve_target_range(stack.dtype, target_min, target_max)
 
-    # Clip and normalize to target range (match NumPy implementation exactly)
-    clipped = cp.clip(stack, p_low, p_high)
-    normalized = (clipped - p_low) * (target_max - target_min) / (p_high - p_low) + target_min
-    normalized = normalized.astype(cp.uint16)
-
-    return normalized
+    # Use shared core logic with CuPy-specific functions
+    return percentile_normalize_core(
+        stack=stack,
+        low_percentile=low_percentile,
+        high_percentile=high_percentile,
+        target_min=target_min,
+        target_max=target_max,
+        percentile_func=lambda arr, pct: cp.percentile(arr, pct),
+        clip_func=cp.clip,
+        ones_like_func=cp.ones_like,
+        preserve_dtype=preserve_dtype
+    )
 
 @cupy_func
 def create_composite(

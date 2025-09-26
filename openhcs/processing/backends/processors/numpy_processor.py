@@ -145,25 +145,25 @@ def percentile_normalize(image: np.ndarray,
     """
     _validate_3d_array(image)
 
-    # Process each Z-slice independently
-    result = np.zeros_like(image, dtype=np.float32)
+    # Import shared utilities
+    from .percentile_utils import resolve_target_range, slice_percentile_normalize_core
 
-    for z in range(image.shape[0]):
-        # Get percentile values for this slice
-        p_low, p_high = np.percentile(image[z], (low_percentile, high_percentile))
+    # Auto-detect target range based on input dtype if not specified
+    target_min, target_max = resolve_target_range(image.dtype, target_min, target_max)
 
-        # Avoid division by zero
-        if p_high == p_low:
-            result[z] = np.ones_like(image[z]) * target_min
-            continue
-
-        # Clip and normalize to target range
-        clipped = np.clip(image[z], p_low, p_high)
-        normalized = (clipped - p_low) * (target_max - target_min) / (p_high - p_low) + target_min
-        result[z] = normalized
-
-    # Convert to uint16
-    return result.astype(np.uint16)
+    # Use shared core logic with NumPy-specific functions
+    return slice_percentile_normalize_core(
+        image=image,
+        low_percentile=low_percentile,
+        high_percentile=high_percentile,
+        target_min=target_min,
+        target_max=target_max,
+        percentile_func=np.percentile,
+        clip_func=np.clip,
+        ones_like_func=np.ones_like,
+        zeros_like_func=lambda arr, dtype=None: np.zeros_like(arr, dtype=dtype or np.float32),
+        preserve_dtype=preserve_dtype
+    )
 
 @numpy_func
 def stack_percentile_normalize(stack: np.ndarray,
@@ -189,20 +189,24 @@ def stack_percentile_normalize(stack: np.ndarray,
     """
     _validate_3d_array(stack)
 
-    # Calculate global percentiles across the entire stack
-    p_low = np.percentile(stack, low_percentile, axis=None)
-    p_high = np.percentile(stack, high_percentile, axis=None)
+    # Import shared utilities
+    from .percentile_utils import resolve_target_range, percentile_normalize_core
 
-    # Avoid division by zero
-    if p_high == p_low:
-        return np.ones_like(stack) * target_min
+    # Auto-detect target range based on input dtype if not specified
+    target_min, target_max = resolve_target_range(stack.dtype, target_min, target_max)
 
-    # Clip and normalize to target range
-    clipped = np.clip(stack, p_low, p_high)
-    normalized = (clipped - p_low) * (target_max - target_min) / (p_high - p_low) + target_min
-    normalized = normalized.astype(np.uint16)
-
-    return normalized
+    # Use shared core logic with NumPy-specific functions
+    return percentile_normalize_core(
+        stack=stack,
+        low_percentile=low_percentile,
+        high_percentile=high_percentile,
+        target_min=target_min,
+        target_max=target_max,
+        percentile_func=lambda arr, pct: np.percentile(arr, pct, axis=None),
+        clip_func=np.clip,
+        ones_like_func=np.ones_like,
+        preserve_dtype=preserve_dtype
+    )
 
 @numpy_func
 def create_composite(
