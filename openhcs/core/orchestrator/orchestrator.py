@@ -859,19 +859,21 @@ class PipelineOrchestrator(ContextProvider):
             shared_context = get_current_global_config(GlobalPipelineConfig)
             if shared_context.analysis_consolidation_config.enabled:
                 try:
-                    # Get results directory from compiled contexts (Option 2: use existing paths)
+                    # Get results directory using same logic as path planner (single source of truth)
                     results_dir = None
                     for axis_id, context in compiled_contexts.items():
-                        # Look for any step that has an output_dir - this is where materialization happens
-                        for step_index, step_plan in context.step_plans.items():
-                            if 'output_dir' in step_plan:
-                                # Found an output directory, check if it has a results subdirectory
-                                potential_results_dir = Path(step_plan['output_dir']) / shared_context.materialization_results_path
-                                if potential_results_dir.exists():
-                                    results_dir = potential_results_dir
-                                    logger.info(f"🔍 CONSOLIDATION: Found results directory from step {step_index}: {results_dir}")
-                                    break
-                        if results_dir:
+                        # Use the same logic as PathPlanner._get_results_path()
+                        plate_path = Path(context.plate_path)
+                        materialization_path = shared_context.materialization_results_path
+
+                        if Path(materialization_path).is_absolute():
+                            potential_results_dir = Path(materialization_path)
+                        else:
+                            potential_results_dir = plate_path / materialization_path
+
+                        if potential_results_dir.exists():
+                            results_dir = potential_results_dir
+                            logger.info(f"🔍 CONSOLIDATION: Found results directory: {results_dir}")
                             break
 
                     if results_dir and results_dir.exists():
@@ -885,9 +887,9 @@ class PipelineOrchestrator(ContextProvider):
 
                             consolidate_analysis_results(
                                 results_directory=str(results_dir),
-                                axis_ids=axis_ids,
-                                consolidation_config=shared_context.analysis_consolidation,
-                                plate_metadata_config=shared_context.plate_metadata
+                                well_ids=axis_ids,
+                                consolidation_config=shared_context.analysis_consolidation_config,
+                                plate_metadata_config=shared_context.plate_metadata_config
                             )
                             logger.info("✅ CONSOLIDATION: Completed successfully")
                         else:
