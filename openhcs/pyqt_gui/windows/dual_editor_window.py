@@ -655,7 +655,46 @@ class DualEditorWindow(QDialog):
             logger.error(f"Failed to save step: {e}")
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Save Error", f"Failed to save step:\n{e}")
-    
+
+    def _apply_changes_to_original(self):
+        """Apply all changes from editing_step to original_step_reference."""
+        if self.original_step_reference is None:
+            return
+
+        # Copy all attributes from editing_step to original_step_reference
+        from dataclasses import fields, is_dataclass
+
+        if is_dataclass(self.editing_step):
+            # For dataclass steps, copy all field values
+            for field in fields(self.editing_step):
+                value = getattr(self.editing_step, field.name)
+                setattr(self.original_step_reference, field.name, value)
+        else:
+            # CRITICAL FIX: Use reflection to copy ALL attributes, not just hardcoded list
+            # This ensures optional dataclass attributes like step_materialization_config are copied
+            for attr_name in dir(self.editing_step):
+                # Skip private/magic attributes and methods
+                if not attr_name.startswith('_') and not callable(getattr(self.editing_step, attr_name, None)):
+                    if hasattr(self.editing_step, attr_name) and hasattr(self.original_step_reference, attr_name):
+                        value = getattr(self.editing_step, attr_name)
+                        setattr(self.original_step_reference, attr_name, value)
+                        logger.debug(f"Copied attribute {attr_name}: {value}")
+
+        logger.debug("Applied changes to original step object")
+
+    def _clone_step(self, step):
+        """Clone a step object using deep copy."""
+        import copy
+        return copy.deepcopy(step)
+
+    def _create_new_step(self):
+        """Create a new empty step."""
+        from openhcs.core.steps.function_step import FunctionStep
+        return FunctionStep(
+            func=[],  # Start with empty function list
+            name="New_Step"
+        )
+
     def cancel_edit(self):
         """Cancel editing and close dialog."""
         if self.has_changes:
