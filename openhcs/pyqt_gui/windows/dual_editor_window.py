@@ -67,14 +67,17 @@ class DualEditorWindow(QDialog):
         
         # Pattern management (extracted from Textual version)
         self.pattern_manager = PatternDataManager()
-        
-        if step_data:
-            self.editing_step = step_data
-        else:
-            self.editing_step = self.pattern_manager.create_new_step()
 
-        # Store original for change detection - will be set by caller within proper context
-        self.original_step = None
+        # Store original step reference (never modified)
+        self.original_step_reference = step_data
+
+        if step_data:
+            # CRITICAL FIX: Work on a copy to prevent immediate modification of original
+            self.editing_step = self._clone_step(step_data)
+            self.original_step = self._clone_step(step_data)
+        else:
+            self.editing_step = self._create_new_step()
+            self.original_step = None
         
         # Change tracking
         self.has_changes = False
@@ -93,7 +96,9 @@ class DualEditorWindow(QDialog):
 
     def set_original_step_for_change_detection(self):
         """Set the original step for change detection. Must be called within proper context."""
-        self.original_step = self.pattern_manager.clone_pattern(self.editing_step)
+        # Original step is already set in __init__ when working on a copy
+        # This method is kept for compatibility but no longer needed
+        pass
 
     def setup_ui(self):
         """Setup the user interface."""
@@ -642,14 +647,24 @@ class DualEditorWindow(QDialog):
                 QMessageBox.warning(self, "Validation Error", "Step name cannot be empty.")
                 return
 
+            # CRITICAL FIX: For existing steps, apply changes to original step object
+            # This ensures the pipeline gets the updated step with the same object identity
+            if self.original_step_reference is not None:
+                # Copy all attributes from editing_step to original_step_reference
+                self._apply_changes_to_original()
+                step_to_save = self.original_step_reference
+            else:
+                # For new steps, use the editing_step directly
+                step_to_save = self.editing_step
+
             # Emit signals and call callback
-            self.step_saved.emit(self.editing_step)
+            self.step_saved.emit(step_to_save)
 
             if self.on_save_callback:
-                self.on_save_callback(self.editing_step)
+                self.on_save_callback(step_to_save)
 
             self.accept()
-            logger.debug(f"Step saved: {getattr(self.editing_step, 'name', 'Unknown')}")
+            logger.debug(f"Step saved: {getattr(step_to_save, 'name', 'Unknown')}")
 
         except Exception as e:
             logger.error(f"Failed to save step: {e}")
@@ -670,6 +685,7 @@ class DualEditorWindow(QDialog):
                 value = getattr(self.editing_step, field.name)
                 setattr(self.original_step_reference, field.name, value)
         else:
+<<<<<<< HEAD
             # CRITICAL FIX: Use reflection to copy ALL attributes, not just hardcoded list
             # This ensures optional dataclass attributes like step_materialization_config are copied
             for attr_name in dir(self.editing_step):
