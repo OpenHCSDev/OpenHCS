@@ -166,7 +166,8 @@ class DualEditorWindow(QDialog):
                 self.step_editor = StepParameterEditorWidget(
                     self.editing_step,
                     service_adapter=None,
-                    color_scheme=self.color_scheme
+                    color_scheme=self.color_scheme,
+                    pipeline_config=self.orchestrator.pipeline_config
                 )
 
         # Connect parameter changes - use form manager signal for immediate response

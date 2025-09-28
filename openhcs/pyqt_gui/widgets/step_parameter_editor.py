@@ -41,7 +41,7 @@ class StepParameterEditorWidget(QWidget):
     step_parameter_changed = pyqtSignal()
     
     def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None,
-                 gui_config: Optional[PyQtGUIConfig] = None, parent=None):
+                 gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None):
         super().__init__(parent)
 
         # Initialize color scheme and GUI config
@@ -50,6 +50,7 @@ class StepParameterEditorWidget(QWidget):
 
         self.step = step
         self.service_adapter = service_adapter
+        self.pipeline_config = pipeline_config  # Store pipeline config for context hierarchy
 
         # Live placeholder updates not yet ready - disable for now
         self._step_editor_coordinator = None
@@ -102,7 +103,8 @@ class StepParameterEditorWidget(QWidget):
             param_defaults=param_defaults,
             global_config_type=GlobalPipelineConfig,  # Enable dual-axis resolution
             context_event_coordinator=self._step_editor_coordinator,  # Enable live updates if configured
-            context_obj=self.step  # Pass step as context for nested resolution
+            context_obj=self.step,  # Pass step as context for nested resolution
+            parent_context_obj=self.pipeline_config  # Pass pipeline config for full context hierarchy
         )
         
         self.setup_ui()

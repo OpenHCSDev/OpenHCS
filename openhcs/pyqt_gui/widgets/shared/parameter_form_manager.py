@@ -125,7 +125,8 @@ class ParameterFormManager(QWidget):
                  use_scroll_area: bool = True, function_target=None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, placeholder_prefix: str = None,
                  param_defaults: Dict[str, Any] = None, global_config_type: Optional[Type] = None,
-                 context_event_coordinator=None, context_obj=None, is_concrete_instance: bool = None):
+                 context_event_coordinator=None, context_obj=None, is_concrete_instance: bool = None,
+                 parent_context_obj=None):
         """
         Initialize PyQt parameter form manager with dual-axis resolution.
 
@@ -152,6 +153,7 @@ class ParameterFormManager(QWidget):
         self.global_config_type = global_config_type  # Store for nested manager inheritance
         self.placeholder_prefix = placeholder_prefix or CONSTANTS.DEFAULT_PLACEHOLDER_PREFIX
         self.context_obj = context_obj  # Store generic context object for placeholder resolution
+        self.parent_context_obj = parent_context_obj  # Store parent context for full hierarchy
 
         # Convert old API to new config object internally
         if color_scheme is None:
@@ -266,7 +268,7 @@ class ParameterFormManager(QWidget):
     def _get_placeholder_text(self, param_name: str) -> Optional[str]:
         """Get placeholder text using simplified contextvars system with live updates."""
         if self.config.is_lazy_dataclass:
-            # Use live context with current form values for dynamic placeholders
+            # Always use live context with current form values for dynamic placeholders
             temporary_context = self._build_temporary_context_with_current_values()
             return self._get_placeholder_text_with_context(param_name, temporary_context)
         return None
@@ -349,8 +351,19 @@ class ParameterFormManager(QWidget):
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
         from openhcs.core.context.contextvars_context import config_context
 
-        # Use explicit context for placeholder resolution
-        if temporary_context:
+        # Establish full nested context hierarchy for proper inheritance
+        if self.parent_context_obj and temporary_context:
+            # Full hierarchy: parent context -> temporary context
+            with config_context(self.parent_context_obj):  # Pipeline level
+                with config_context(temporary_context):    # Step level with current values
+                    return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                        self.dataclass_type,
+                        param_name,
+                        placeholder_prefix=self.placeholder_prefix,
+                        context_obj=temporary_context
+                    )
+        elif temporary_context:
+            # Single level context
             with config_context(temporary_context):
                 return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                     self.dataclass_type,
@@ -1009,9 +1022,10 @@ class ParameterFormManager(QWidget):
 
             # Apply placeholder only if reset value is None (lazy behavior)
             if reset_value is None:
-                # Use simplified placeholder resolution after reset
+                # Use standard placeholder resolution after reset
                 placeholder_text = self._get_placeholder_text(param_name)
                 if placeholder_text:
+                    from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
         # Emit parameter change to notify other components
