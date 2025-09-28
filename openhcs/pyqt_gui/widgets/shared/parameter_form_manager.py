@@ -266,65 +266,62 @@ class ParameterFormManager(QWidget):
         return widget
 
     def _get_placeholder_text(self, param_name: str) -> Optional[str]:
-        """Get placeholder text using simplified contextvars system with live updates."""
-        if self.config.is_lazy_dataclass:
-            # Always use live context with current form values for dynamic placeholders
-            temporary_context = self._build_temporary_context_with_current_values()
+        """SINGLE SOURCE OF TRUTH: All placeholder resolution goes through this method."""
+        if not self.config.is_lazy_dataclass:
+            return None
 
-            # Debug: Check what context we're using
-            from openhcs.core.context.contextvars_context import get_current_temp_global
-            current_active = get_current_temp_global()
-            logger.debug(f"_get_placeholder_text({param_name}): active_context={current_active is not None}, "
-                        f"parent_context={self.parent_context_obj is not None}, "
-                        f"temp_context={temporary_context is not None}")
+        # CONSOLIDATED: Always use the same resolution logic regardless of caller
+        return self._resolve_placeholder_with_full_context(param_name)
 
-            return self._get_placeholder_text_with_context(param_name, temporary_context)
-        return None
+    def _build_inheritance_friendly_context(self) -> Any:
+        """Build context that preserves inheritance by using None for fields that should inherit.
 
-    def _build_temporary_context_with_current_values(self) -> Any:
-        """Build temporary context object with current form values for live placeholder updates."""
+        CRITICAL: This method ensures consistent inheritance behavior regardless of when it's called.
+        Fields are set to None (for inheritance) unless the user has explicitly set a concrete value.
+        """
         if not self.context_obj:
             return None
 
         try:
+            import dataclasses
+            if not dataclasses.is_dataclass(self.context_obj):
+                return self.context_obj
+
+            # Start with original context structure
+            context_dict = dataclasses.asdict(self.context_obj)
+
             # Get current form values
             current_values = self.get_current_values()
 
-            # Create a copy of the context object with current values
-            import dataclasses
-            if dataclasses.is_dataclass(self.context_obj):
-                # For dataclass context objects, create a copy with updated values
-                context_dict = dataclasses.asdict(self.context_obj)
+            # INHERITANCE-FRIENDLY: Only update fields that have explicit user values
+            # Leave other fields as None to enable inheritance from parent contexts
+            for param_name, current_value in current_values.items():
+                if current_value is not None:
+                    # User has set an explicit value - use it
+                    context_dict[param_name] = current_value
+                else:
+                    # User hasn't set a value - ensure it's None for inheritance
+                    context_dict[param_name] = None
 
-                # Update with current form values (only non-None values)
-                for param_name, current_value in current_values.items():
-                    if current_value is not None:
-                        context_dict[param_name] = current_value
-
-                # Create new instance with updated values
-                return type(self.context_obj)(**context_dict)
-            else:
-                # For non-dataclass objects, return original context
-                return self.context_obj
+            # Create new instance with inheritance-friendly values
+            return type(self.context_obj)(**context_dict)
 
         except Exception as e:
-            # Fallback to original context if building temporary context fails
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.debug(f"Failed to build temporary context: {e}")
+            # Fallback to original context if building fails
+            logger.debug(f"Failed to build inheritance-friendly context: {e}")
             return self.context_obj
 
     def refresh_placeholders(self, changed_param_name: str = None):
-        """Refresh all placeholders with current form values for live updates."""
+        """CONSOLIDATED: Refresh placeholders using single resolution path."""
         if not self.config.is_lazy_dataclass:
             return
 
-        # Update placeholders for all widgets except the one that just changed
+        # SINGLE PATH: Update placeholders for all widgets except the one that just changed
         for param_name, widget in self.widgets.items():
             if param_name == changed_param_name:
                 continue  # Skip the widget that just changed to avoid interference
 
-            # Get updated placeholder text with current form values
+            # SINGLE SOURCE OF TRUTH: Always use the same resolution method
             placeholder_text = self._get_placeholder_text(param_name)
             if placeholder_text:
                 from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
@@ -351,15 +348,20 @@ class ParameterFormManager(QWidget):
 
         return False
 
-    def _get_placeholder_text_with_context(self, param_name: str, temporary_context: Any) -> Optional[str]:
-        """Get placeholder text using a specific temporary context for live updates."""
-        if not self.config.is_lazy_dataclass:
-            return None
+    def _resolve_placeholder_with_full_context(self, param_name: str) -> Optional[str]:
+        """SINGLE SOURCE OF TRUTH: The only method that actually resolves placeholders.
 
+        All other placeholder methods must call this method to ensure consistency.
+        This method always establishes the proper context hierarchy regardless of caller.
+        """
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
         from openhcs.core.context.contextvars_context import config_context
 
-        # Establish full nested context hierarchy for proper inheritance
+        # Build temporary context with current form values for live updates
+        # Always use None for fields that should inherit (never use static defaults)
+        temporary_context = self._build_inheritance_friendly_context()
+
+        # ALWAYS establish full nested context hierarchy for consistent inheritance
         if self.parent_context_obj and temporary_context:
             # Full hierarchy: parent context -> temporary context
             with config_context(self.parent_context_obj):  # Pipeline level
@@ -370,8 +372,17 @@ class ParameterFormManager(QWidget):
                         placeholder_prefix=self.placeholder_prefix,
                         context_obj=temporary_context
                     )
+        elif self.parent_context_obj:
+            # Parent context only
+            with config_context(self.parent_context_obj):
+                return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type,
+                    param_name,
+                    placeholder_prefix=self.placeholder_prefix,
+                    context_obj=None
+                )
         elif temporary_context:
-            # Single level context
+            # Temporary context only
             with config_context(temporary_context):
                 return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                     self.dataclass_type,
@@ -380,12 +391,12 @@ class ParameterFormManager(QWidget):
                     context_obj=temporary_context
                 )
         else:
-            # Fallback without context
+            # No context - fallback to global config only
             return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                 self.dataclass_type,
                 param_name,
                 placeholder_prefix=self.placeholder_prefix,
-                context_obj=temporary_context
+                context_obj=None
             )
 
     @classmethod
@@ -789,12 +800,12 @@ class ParameterFormManager(QWidget):
 
 
     def _apply_placeholder_with_lazy_context(self, widget: QWidget, param_name: str, current_value: Any, masked_fields: Optional[set] = None) -> None:
-        """Apply placeholder using current form state, not saved thread-local state."""
+        """CONSOLIDATED: Apply placeholder using single resolution path."""
         # Only apply placeholder if value is None
         if current_value is not None:
             return
 
-        # SIMPLIFIED: Use dual-axis resolution for all placeholder text
+        # SINGLE SOURCE OF TRUTH: Always use the same resolution method
         placeholder_text = self._get_placeholder_text(param_name)
         if placeholder_text:
             PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
@@ -809,16 +820,16 @@ class ParameterFormManager(QWidget):
 
 
     def _refresh_all_placeholders_with_current_context(self) -> None:
-        """Refresh all placeholders using simplified contextvars system."""
+        """CONSOLIDATED: Refresh all placeholders using single resolution path."""
         if not self.config.is_lazy_dataclass:
             return
 
-        # Apply placeholders using simplified system
+        # SINGLE PATH: All placeholders go through _get_placeholder_text()
         for param_name, widget in self.widgets.items():
             current_value = self.parameters.get(param_name)
 
             if current_value is None:
-                # Use simplified placeholder resolution
+                # SINGLE SOURCE OF TRUTH: Always use the same resolution method
                 placeholder_text = self._get_placeholder_text(param_name)
                 if placeholder_text:
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
@@ -906,12 +917,12 @@ class ParameterFormManager(QWidget):
         widget.blockSignals(False)
 
     def _apply_context_behavior(self, widget: QWidget, value: Any, param_name: str, exclude_field: str = None) -> None:
-        """Apply lazy placeholder context behavior - pure function of inputs."""
+        """CONSOLIDATED: Apply placeholder behavior using single resolution path."""
         if not param_name or not self.dataclass_type:
             return
 
         if value is None and self.config.is_lazy_dataclass:
-            # SIMPLIFIED: Use dual-axis resolution for placeholder text
+            # SINGLE SOURCE OF TRUTH: Always use the same resolution method
             placeholder_text = self._get_placeholder_text(param_name)
             if placeholder_text:
                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
@@ -1240,7 +1251,7 @@ class ParameterFormManager(QWidget):
 
 
     def refresh_placeholder_text(self) -> None:
-        """SIMPLIFIED: Refresh placeholder text using dual-axis resolution."""
+        """CONSOLIDATED: Refresh placeholder text using single resolution path."""
         if not self.dataclass_type:
             return
 
@@ -1248,28 +1259,19 @@ class ParameterFormManager(QWidget):
         if not is_lazy_dataclass:
             return
 
-        # SIMPLIFIED: Use dual-axis resolution directly
+        # SINGLE PATH: All placeholder refresh goes through the same method
         self._refresh_all_placeholders_with_current_context()
 
         # Recursively refresh nested managers
         self._apply_to_nested_managers(lambda name, manager: manager.refresh_placeholder_text())
 
     def refresh_placeholder_text_with_context(self, updated_context: Any, changed_dataclass_type: type = None) -> None:
-        """Refresh placeholder text using temporary context from current form values.
+        """CONSOLIDATED: Refresh placeholder text using single resolution path.
 
-        This enables live placeholder updates by using a temporary copy of the dataclass
-        with current field values, allowing placeholders to update as the user types
-        without saving the actual values.
+        Legacy method maintained for backward compatibility - delegates to single source of truth.
         """
-        if not self.dataclass_type:
-            return
-
-        is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(self.dataclass_type)
-        if not is_lazy_dataclass:
-            return
-
-        # Use the updated context (temporary copy with current form values) for placeholder resolution
-        self._refresh_all_placeholders_with_temporary_context(updated_context)
+        # SINGLE PATH: All placeholder refresh goes through the same method
+        self.refresh_placeholder_text()
 
     def _rebuild_nested_dataclass_instance(self, nested_values: Dict[str, Any],
                                          nested_type: Type, param_name: str) -> Any:
