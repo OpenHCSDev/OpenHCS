@@ -94,11 +94,11 @@ The LazyDataclassFactory generates runtime dataclasses with dual-axis field reso
 
 The factory works by creating a new class dynamically at runtime that has the same fields and interface as the original dataclass, but replaces simple field access with property methods that delegate to the dual-axis resolver. This allows existing code to continue using familiar dataclass patterns while gaining sophisticated inheritance capabilities.
 
-The :pyobject:`openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy` method creates lazy configurations with dual-axis resolution. These lazy configs resolve field values through context hierarchy and class inheritance patterns, enabling sophisticated configuration inheritance while maintaining the familiar dataclass interface.
+The :pyobject:`openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_simple` method creates lazy configurations with contextvars-based resolution. These lazy configs resolve field values through the new simplified context system and class inheritance patterns, enabling sophisticated configuration inheritance while maintaining the familiar dataclass interface.
 
 This example shows the factory creating a lazy version of ``StepMaterializationConfig``. The ``base_class`` parameter specifies the original dataclass to wrap, while ``global_config_type`` indicates what type of global configuration this should resolve against. The ``field_path`` tells the system where to find instances of this config type within the global configuration structure. When ``config.well_filter`` is accessed, it triggers the dual-axis resolution process instead of returning a simple field value.
 
-The :pyobject:`openhcs.core.lazy_config.LazyDataclassFactory` creates these runtime classes by examining the original dataclass structure and generating property methods that delegate to the dual-axis resolver. The :pyobject:`openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy` method is the primary entry point, automatically discovering field relationships and creating appropriate resolution logic.
+The :pyobject:`openhcs.core.lazy_config.LazyDataclassFactory` creates these runtime classes by examining the original dataclass structure and generating property methods that delegate to the dual-axis resolver. The :pyobject:`openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_simple` method is the primary entry point, using the new simplified contextvars system for field resolution.
 
 This enables sophisticated inheritance patterns where fields can inherit from sibling configurations at the same hierarchy level, while maintaining the familiar dataclass interface that consuming code expects.
 
@@ -165,8 +165,8 @@ Troubleshooting Resolution Issues
 
 **Context Discovery Failures**: When lazy configs resolve to static defaults instead of inheriting from context, check that context injection is happening properly and context variables follow the naming pattern ``__*_context__``.
 
-**Inheritance Chain Issues**: When fields don't inherit from sibling configurations, verify that :pyobject:`openhcs.core.field_path_detection.FieldPathDetector` is finding the correct inheritance relationships.
+**Inheritance Chain Issues**: When fields don't inherit from sibling configurations, verify that the dual-axis resolver is properly resolving cross-dataclass inheritance using the new contextvars system.
 
-**Static Override Problems**: When static overrides don't take precedence, ensure that :pyobject:`openhcs.core.dual_axis_resolver_recursive.RecursiveContextualResolver._check_static_override` is detecting field-level differences correctly.
+**Static Override Problems**: When static overrides don't take precedence, ensure that :pyobject:`openhcs.core.dual_axis_resolver_recursive._has_concrete_field_override` is detecting field-level differences correctly.
 
 The dual-axis resolution system provides comprehensive debugging capabilities through its resolver methods to help identify and resolve inheritance behavior issues.

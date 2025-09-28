@@ -9,7 +9,7 @@ Lazy Configuration System
 Overview
 --------
 
-Traditional configuration systems suffer from the "lost edits" problem - user modifications get overwritten by defaults when switching contexts. OpenHCS solves this through lazy dataclasses that use a sophisticated dual-axis resolution system combining context hierarchy (X-axis) with class inheritance (Y-axis).
+Traditional configuration systems suffer from the "lost edits" problem - user modifications get overwritten by defaults when switching contexts. OpenHCS solves this through lazy dataclasses that use a simplified contextvars-based resolution system combining context hierarchy with class inheritance patterns.
 
 .. code-block:: python
 
@@ -20,12 +20,12 @@ Traditional configuration systems suffer from the "lost edits" problem - user mo
    lazy_config = LazyStepMaterializationConfig()
    value = lazy_config.well_filter  # Resolves through dual-axis algorithm
 
-The system generates runtime dataclasses with dual-axis resolution logic that preserves user edits while providing sophisticated inheritance patterns. This enables hierarchical configuration flow (Step → Pipeline/Orchestrator → Global) with sibling inheritance and static override detection.
+The system generates runtime dataclasses with simplified contextvars-based resolution logic that preserves user edits while providing sophisticated inheritance patterns. This enables hierarchical configuration flow (Step → Pipeline/Orchestrator → Global) with cross-dataclass inheritance and static override detection.
 
 LazyDataclassFactory
 --------------------
 
-The LazyDataclassFactory generates runtime dataclasses with dual-axis resolution logic. It takes a regular dataclass and creates a new class with the same interface but sophisticated field resolution behavior.
+The LazyDataclassFactory generates runtime dataclasses with simplified contextvars-based resolution logic. It takes a regular dataclass and creates a new class with the same interface but sophisticated field resolution behavior using the new contextvars system.
 
 .. code-block:: python
 
@@ -43,10 +43,10 @@ The LazyDataclassFactory generates runtime dataclasses with dual-axis resolution
 
 The factory pattern enables sophisticated resolution strategies while preserving the original dataclass interface.
 
-Dual-Axis Resolution Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Simplified Contextvars Integration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The primary factory method integrates with the dual-axis resolver for sophisticated inheritance. The factory creates property methods that delegate field access to the dual-axis resolver, enabling sophisticated inheritance patterns while maintaining the familiar dataclass interface.
+The primary factory method integrates with the new contextvars-based resolver for sophisticated inheritance. The factory creates property methods that delegate field access to the simplified resolver, enabling sophisticated inheritance patterns while maintaining the familiar dataclass interface.
 
 .. code-block:: python
 

@@ -72,9 +72,8 @@ Logical Method Decomposition with Implementation Context
    Auto-Discovery Phase
    ~~~~~~~~~~~~~~~~~~~~
 
-   :py:class:`~openhcs.core.field_path_detection.FieldPathDetector` examines the global config structure
-   to automatically discover where each config type should live in the hierarchy. It builds a map of
-   which field paths correspond to which config types, eliminating hardcoded assumptions about config structure.
+   The simplified contextvars system uses explicit context management to determine configuration
+   hierarchy, eliminating the need for complex field path detection and auto-discovery mechanisms.
 
    Context Detection Phase
    ~~~~~~~~~~~~~~~~~~~~~~~
@@ -328,20 +327,14 @@ Logical Method Decomposition with Implementation Context
    Complex Provider Function
    ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-   :py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory._create_field_level_hierarchy_provider`
-   performs four distinct logical operations:
+   :py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_simple`
+   creates lazy dataclasses using the simplified contextvars system:
 
-   **Phase 1: Auto-Discovery**
+   **Simplified Approach**
 
-   :py:class:`~openhcs.core.field_path_detection.FieldPathDetector` examines the global config
-   structure to automatically discover where each config type should live in the hierarchy.
-
-   **Phase 2: Context Detection**
-
-   :py:func:`~openhcs.core.lazy_config._get_current_config` checks if we're running in a PyQt
-   application context where thread-local storage should be available.
-
-   **Phase 3: Hierarchy Construction**
+   The new system uses explicit context management through Python's contextvars module,
+   eliminating complex auto-discovery and context detection mechanisms while maintaining
+   full inheritance functionality.
 
    The system constructs a resolution hierarchy by combining the current field path with
    discovered parent relationships using :py:func:`~openhcs.core.lazy_config._create_hierarchy_chain`.
@@ -528,12 +521,9 @@ Example Quality Standard
 
 .. code-block:: rst
 
-   The service uses :py:func:`~openhcs.core.lazy_placeholder._resolve_field_with_composition_awareness`
-   to find field values. This function first checks if the field exists directly on the dataclass
-   (like `num_workers` on `PipelineConfig`). If not found, it recursively searches through nested
-   dataclasses (like looking for `output_dir_suffix` inside `materialization_defaults`). This unified
-   approach handles both inheritance patterns (field exists on current class) and composition patterns
-   (field exists in nested class).
+   The simplified placeholder service uses the new contextvars-based resolution system
+   to find field values. The system uses explicit context management and cross-dataclass inheritance
+   through the dual-axis resolver, eliminating the need for complex composition awareness mechanisms.
 
 **Benefits**: Validated reference + clear implementation context + architectural rationale + concrete examples.
 

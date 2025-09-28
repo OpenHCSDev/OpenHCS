@@ -57,7 +57,7 @@ This enables the mathematical hierarchy: **Global → Pipeline → Step**, where
 How Lazy Resolution Works
 -------------------------
 
-:py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy` creates dataclasses with custom field resolution behavior. Instead of storing static values, fields resolve dynamically based on the current context.
+:py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_simple` creates dataclasses with custom field resolution behavior using the new simplified contextvars system. Instead of storing static values, fields resolve dynamically based on the current context.
 
 **Resolution Chain**:
 
@@ -65,10 +65,19 @@ How Lazy Resolution Works
 2. **Thread-local context**: Check current pipeline/global configuration  
 3. **Static defaults**: Fall back to base class defaults
 
-.. literalinclude:: ../../../openhcs/core/lazy_config.py
-   :language: python
-   :lines: 357-380
-   :caption: Field-level auto-hierarchy creation with context awareness
+.. code-block:: python
+   :caption: Simplified lazy factory with contextvars
+
+   # New simplified factory method
+   lazy_class = LazyDataclassFactory.make_lazy_simple(
+       base_class=StepMaterializationConfig,
+       lazy_class_name="LazyStepMaterializationConfig"
+   )
+
+   # Use within explicit context
+   with config_context(pipeline_config):
+       lazy_instance = lazy_class()
+       # Fields resolve through contextvars system
 
 **Mathematical Foundation**: This implements a **context-dependent function** where the same field can resolve to different values based on the current mathematical environment (thread-local context).
 
