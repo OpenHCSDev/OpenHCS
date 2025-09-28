@@ -238,18 +238,7 @@ class ParameterFormManager(QWidget):
         self._widget_creator = create_pyqt6_registry()
 
 
-        # DISABLED: Live placeholder updates
-        # if self.global_config_type and context_event_coordinator:
-        #     self._context_event_coordinator = context_event_coordinator
-        #     self._context_event_coordinator.register_listener(self, self.global_config_type)
-        #     def handle_parameter_change(param_name, value):
-        #         try:
-        #             self._context_event_coordinator.emit_context_change(self.global_config_type)
-        #         except Exception as e:
-        #             import traceback
-        #             traceback.print_exc()
-        #     self.parameter_changed.connect(handle_parameter_change)
-        # else:
+        # ContextEventCoordinator removed - new context system handles updates automatically
         self._context_event_coordinator = None
 
         # Set up UI
@@ -648,7 +637,7 @@ class ParameterFormManager(QWidget):
                 parent=group_box, use_scroll_area=False,
                 color_scheme=self.config.color_scheme,
                 global_config_type=self.global_config_type,  # CRITICAL FIX: Pass global_config_type to nested managers
-                context_event_coordinator=getattr(self, '_context_event_coordinator', None),  # CRITICAL FIX: Pass coordinator to nested forms
+                context_event_coordinator=None,  # ContextEventCoordinator removed - new context system handles updates
                 orchestrator=self.orchestrator  # CRITICAL FIX: Pass orchestrator for compiler-grade placeholder resolution
             )
 

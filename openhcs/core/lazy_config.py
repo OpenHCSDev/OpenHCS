@@ -29,123 +29,7 @@ _lazy_type_registry: Dict[Type, Type] = {}
 _lazy_class_cache: Dict[str, Type] = {}
 
 
-class ContextEventCoordinator:
-    """Generic event coordinator for any global config type changes."""
-
-    def __init__(self):
-        # Type-specific listeners: Dict[Type, List[weakref]]
-        self._listeners: Dict[Type, List] = {}
-
-    def register_listener(self, form_manager, config_type: Type) -> None:
-        """Register form manager for specific config type events."""
-        if config_type not in self._listeners:
-            self._listeners[config_type] = []
-        self._listeners[config_type].append(weakref.ref(form_manager))
-
-    def emit_context_change(self, config_type: Type) -> None:
-        """Emit context change event for specific config type with shared temporary context."""
-        if config_type not in self._listeners:
-            return
-
-        # Get all active form managers for this config type
-        active_managers = []
-        for weak_ref in list(self._listeners[config_type]):
-            if (form_manager := weak_ref()) is not None:
-                active_managers.append(form_manager)
-
-        if not active_managers:
-            return
-
-        # Build shared temporary context from all form managers
-        shared_context = self._build_shared_temporary_context(config_type, active_managers)
-
-        # Refresh all forms with the shared context
-        for form_manager in active_managers:
-            form_manager.refresh_placeholder_text_with_context(shared_context)
-
-    def _build_shared_temporary_context(self, global_config_type, form_managers):
-        """Build shared temporary context from all form managers in the same config window."""
-        print(f"🔍 BUILD SHARED CONTEXT: Starting with global_config_type={global_config_type}")
-
-        # CRITICAL FIX: Use current form context that respects shared reset state
-        # Find a form manager that can build context from current form values
-        base_context = None
-        for manager in form_managers:
-            if hasattr(manager, '_build_context_from_current_form_values'):
-                base_context = manager._build_context_from_current_form_values()
-                print(f"🔍 BUILD SHARED CONTEXT: Using current form context (respects shared reset state)")
-                break
-
-        # Fallback to orchestrator context if no form context available
-        if not base_context:
-            for manager in form_managers:
-                if hasattr(manager, 'context_provider') and manager.context_provider:
-                    base_context = manager.context_provider()
-                    print(f"🔍 BUILD SHARED CONTEXT: Using orchestrator context as fallback")
-                    break
-
-        # Final fallback to recursive resolver context discovery
-        if not base_context:
-            from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
-            resolver = get_recursive_resolver()
-            # The recursive resolver will discover context internally
-            print(f"🔍 BUILD SHARED CONTEXT: Using recursive resolver as final fallback")
-
-        print(f"🔍 BUILD SHARED CONTEXT: base_context={base_context}")
-        if not base_context:
-            print(f"🔍 BUILD SHARED CONTEXT: No base context, returning None")
-            return None
-
-        # Simple approach: collect current form values and build basic context updates
-        context_updates = {}
-        print(f"🔍 BUILD SHARED CONTEXT: Processing {len(form_managers)} form managers")
-
-        for i, manager in enumerate(form_managers):
-            print(f"🔍 BUILD SHARED CONTEXT: Manager {i}: field_id={getattr(manager, 'field_id', 'MISSING')}, dataclass_type={getattr(manager, 'dataclass_type', 'MISSING')}")
-
-            if hasattr(manager, 'field_id') and hasattr(manager, 'get_current_values'):
-                # Skip root config manager (field_id matches class name)
-                if hasattr(manager, 'dataclass_type') and manager.dataclass_type and manager.field_id == manager.dataclass_type.__name__:
-                    print(f"🔍 BUILD SHARED CONTEXT: Skipping root config {manager.field_id}")
-                    continue
-
-                # Get current form values
-                current_values = manager.get_current_values()
-                print(f"🔍 BUILD SHARED CONTEXT: {manager.field_id} current_values={current_values}")
-
-                if current_values and hasattr(manager, 'dataclass_type') and manager.dataclass_type:
-                    # Filter out None values to allow lazy resolution to work
-                    filtered_values = {k: v for k, v in current_values.items() if v is not None}
-                    print(f"🔍 BUILD SHARED CONTEXT: {manager.field_id} filtered_values={filtered_values}")
-
-                    if filtered_values:  # Only create instance if there are non-None values
-                        # Check if the dataclass type is abstract and can't be instantiated
-                        import inspect
-                        if inspect.isabstract(manager.dataclass_type):
-                            print(f"🔍 BUILD SHARED CONTEXT: Skipping {manager.field_id} - abstract class {manager.dataclass_type.__name__}")
-                        else:
-                            # Build dataclass instance with only non-None values (allows lazy resolution for None fields)
-                            current_instance = manager.dataclass_type(**filtered_values)
-                            context_updates[manager.field_id] = current_instance
-                            print(f"🔍 BUILD SHARED CONTEXT: Added {manager.field_id}={current_instance}")
-                    else:
-                        print(f"🔍 BUILD SHARED CONTEXT: Skipping {manager.field_id} - no non-None values")
-                else:
-                    print(f"🔍 BUILD SHARED CONTEXT: Skipping {manager.field_id} - no current values or dataclass type")
-            else:
-                print(f"🔍 BUILD SHARED CONTEXT: Skipping manager {i} - missing field_id or get_current_values")
-
-        print(f"🔍 BUILD SHARED CONTEXT: context_updates={context_updates}")
-
-        # Build final shared context with current form values
-        if context_updates:
-            from dataclasses import replace
-            result = replace(base_context, **context_updates)
-            print(f"🔍 BUILD SHARED CONTEXT: Returning updated context: {result}")
-            return result
-
-        print(f"🔍 BUILD SHARED CONTEXT: No context updates, returning base context")
-        return base_context
+# ContextEventCoordinator removed - replaced with contextvars-based context system
 
 
 
@@ -181,17 +65,7 @@ LAZY_FIELD_DEBUG_TEMPLATE = "LAZY FIELD CREATION: {field_name} - original={origi
 
 LAZY_CLASS_NAME_PREFIX = "Lazy"
 
-# Core helper functions to eliminate duplication
-def _get_current_config(config_type):
-    """Get current config using recursive resolver context discovery."""
-    from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
-    # The recursive resolver handles context discovery internally
-    # For now, return None and let the resolver handle it
-    return None
-
-# Helper functions removed - dual-axis resolver handles all resolution
-
-# ResolutionConfig system removed - dual-axis resolver handles all resolution
+# Legacy helper functions removed - new context system handles all resolution
 
 
 # Functional fallback strategies
@@ -224,20 +98,31 @@ class LazyMethodBindings:
 
     @staticmethod
     def create_resolver() -> Callable[[Any, str], Any]:
-        """Create field resolver method using recursive dual-axis resolution."""
-        from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+        """Create field resolver method using new pure function interface."""
+        from openhcs.core.dual_axis_resolver_recursive import resolve_field_inheritance
+        from openhcs.core.context.contextvars_context import current_temp_global, extract_all_configs
 
         def _resolve_field_value(self, field_name: str) -> Any:
-            # Use recursive dual-axis resolver - handles all resolution
-            resolver = get_recursive_resolver()
-            return resolver.resolve_field(self, field_name)
+            # Get current context from contextvars
+            try:
+                current_context = current_temp_global.get()
+                # Extract available configs from current context
+                available_configs = extract_all_configs(current_context)
+
+                # Use pure function for resolution
+                return resolve_field_inheritance(self, field_name, available_configs)
+            except LookupError:
+                # No context available - return None (fail-loud approach)
+                logger.debug(f"No context available for resolving {type(self).__name__}.{field_name}")
+                return None
 
         return _resolve_field_value
 
     @staticmethod
     def create_getattribute() -> Callable[[Any, str], Any]:
-        """Create lazy __getattribute__ method using recursive dual-axis resolution."""
-        from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
+        """Create lazy __getattribute__ method using new context system."""
+        from openhcs.core.dual_axis_resolver_recursive import resolve_field_inheritance
+        from openhcs.core.context.contextvars_context import current_temp_global, extract_all_configs
         from openhcs.core.lazy_placeholder import _has_concrete_field_override
 
         def _find_mro_concrete_value(base_class, name):
@@ -246,75 +131,58 @@ class LazyMethodBindings:
                         if _has_concrete_field_override(cls, name)), None)
 
         def _try_global_context_value(self, base_class, name):
-            """Extract global context resolution logic using recursive dual-axis resolution."""
+            """Extract global context resolution logic using new pure function interface."""
             if not hasattr(self, '_global_config_type'):
                 return None
 
-            # Use recursive dual-axis resolver
-            resolver = get_recursive_resolver()
-            resolved_value = resolver.resolve_field(self, name)
+            # Get current context from contextvars
+            try:
+                current_context = current_temp_global.get()
+                # Extract available configs from current context
+                available_configs = extract_all_configs(current_context)
 
-            if resolved_value is not None:
-                return resolved_value
+                # Use pure function for resolution
+                resolved_value = resolve_field_inheritance(self, name, available_configs)
+                if resolved_value is not None:
+                    return resolved_value
+            except LookupError:
+                # No context available - fall back to MRO
+                pass
 
-            return None
+            # Fallback to MRO concrete value
+            return _find_mro_concrete_value(base_class, name)
 
         def __getattribute__(self: Any, name: str) -> Any:
+            """
+            Simple two-stage resolution using new context system.
+
+            Stage 1: Check instance value
+            Stage 2: Use pure function resolution with current context
+            """
+            # Stage 1: Get instance value
             value = object.__getattribute__(self, name)
             if value is not None or name not in {f.name for f in fields(self.__class__)}:
                 return value
 
-            base_class = get_base_type_for_lazy(self.__class__)
-            if not base_class:
-                # No base class - fall through to normal lazy resolution
-                pass
-            elif not any(_has_concrete_field_override(cls, name) for cls in base_class.__mro__):
-                # No concrete overrides in MRO - fall through to normal lazy resolution
-                pass
-            else:
-                # Has concrete overrides - apply inheritance fix
-                recursion_key = f"_inheritance_resolving_{id(self)}_{name}"
-                if hasattr(self, recursion_key):
-                    return _find_mro_concrete_value(base_class, name)
-
-                object.__setattr__(self, recursion_key, True)
-                try:
-                    # Try global context first, then MRO fallback
-                    return (_try_global_context_value(self, base_class, name) or
-                           _find_mro_concrete_value(base_class, name))
-                finally:
-                    if hasattr(self, recursion_key):
-                        object.__delattr__(self, recursion_key)
-
-            # Fallback to recursive dual-axis resolution if no inheritance fix needed
+            # Stage 2: Use pure function resolution
             try:
-                # Check if this is a nested config field first
-                field_obj = next((f for f in fields(self.__class__) if f.name == name), None)
-                if field_obj and is_dataclass(field_obj.type):
-                    # CRITICAL FIX: For nested config fields, always return lazy instance
-                    # This preserves None raw values for placeholder behavior while still
-                    # allowing the lazy instance to resolve through dual-axis resolution
-                    return field_obj.type()
+                current_context = current_temp_global.get()
+                available_configs = extract_all_configs(current_context)
+                resolved_value = resolve_field_inheritance(self, name, available_configs)
 
-                # For scalar fields, use recursive dual-axis resolver
-                resolver = get_recursive_resolver()
-                resolved_value = resolver.resolve_field(self, name)
                 if resolved_value is not None:
                     return resolved_value
 
-                # If no context found, try the old resolve method as final fallback
-                resolve_method = object.__getattribute__(self, '_resolve_field_value')
-                return resolve_method(name)
-            except AttributeError:
-                # If attribute doesn't exist on lazy class, try to get it from base class
-                try:
-                    base_class = object.__getattribute__(self, '_base_class')
-                    if hasattr(base_class, name):
-                        base_instance = self.to_base_config()
-                        return getattr(base_instance, name)
-                except AttributeError:
-                    pass
-                raise
+                # For nested dataclass fields, return lazy instance
+                field_obj = next((f for f in fields(self.__class__) if f.name == name), None)
+                if field_obj and is_dataclass(field_obj.type):
+                    return field_obj.type()
+
+                return None
+
+            except LookupError:
+                # No context available - fallback to MRO concrete values
+                return _find_mro_concrete_value(get_base_type_for_lazy(self.__class__), name)
         return __getattribute__
 
     @staticmethod
@@ -681,49 +549,7 @@ def _detect_context_type(obj: Any) -> Optional[str]:
     return None
 
 
-# Generic context injection utilities
-class ContextInjector:
-    """Generic context injection for dual-axis resolution."""
-
-    @staticmethod
-    def inject_context(context_obj: Any, context_type: str = "step") -> None:
-        """
-        Inject context into call stack for dual-axis resolution.
-
-        Args:
-            context_obj: The context object to inject
-            context_type: Type of context (step, pipeline, orchestrator, etc.)
-        """
-        import inspect
-        frame = inspect.currentframe().f_back  # Get caller's frame
-        context_var_name = f"__{context_type}_context__"
-        frame.f_locals[context_var_name] = context_obj
-
-    @staticmethod
-    def with_context(context_obj: Any, context_type: str = "step"):
-        """
-        Context manager for temporary context injection.
-
-        Usage:
-            with ContextInjector.with_context(step_obj, "step"):
-                # Lazy resolution will find step_obj as context
-                lazy_config.some_field  # Uses step_obj for resolution
-        """
-        import inspect
-        from contextlib import contextmanager
-
-        @contextmanager
-        def _context_manager():
-            frame = inspect.currentframe().f_back.f_back  # Get caller's caller frame
-            context_var_name = f"__{context_type}_context__"
-            frame.f_locals[context_var_name] = context_obj
-            try:
-                yield
-            finally:
-                if context_var_name in frame.f_locals:
-                    del frame.f_locals[context_var_name]
-
-        return _context_manager()
+# ContextInjector removed - replaced with contextvars-based context system
 
 
 
@@ -743,7 +569,7 @@ def resolve_lazy_configurations_for_serialization(data: Any) -> Any:
         frame = inspect.currentframe()
         context_var_name = f"__{step_context_type}_context__"
         frame.f_locals[context_var_name] = resolved_data
-        print(f"🔍 CONTEXT_INJECTION DEBUG: Injected {context_var_name} = {type(resolved_data).__name__}")
+        logger.debug(f"Injected {context_var_name} = {type(resolved_data).__name__}")
 
         try:
             # Process step attributes recursively
@@ -754,7 +580,7 @@ def resolve_lazy_configurations_for_serialization(data: Any) -> Any:
                 try:
                     attr_value = getattr(resolved_data, attr_name)
                     if not callable(attr_value):  # Skip methods
-                        print(f"🔍 STEP_ATTR_DEBUG: Resolving {type(resolved_data).__name__}.{attr_name} = {type(attr_value).__name__}")
+                        logger.debug(f"Resolving {type(resolved_data).__name__}.{attr_name} = {type(attr_value).__name__}")
                         resolved_attrs[attr_name] = resolve_lazy_configurations_for_serialization(attr_value)
                 except (AttributeError, Exception):
                     continue
@@ -791,16 +617,16 @@ def resolve_lazy_configurations_for_serialization(data: Any) -> Any:
         frame = inspect.currentframe()
         context_var_name = f"__{context_type}_context__"
         frame.f_locals[context_var_name] = resolved_data
-        print(f"🔍 CONTEXT_INJECTION DEBUG: Injected {context_var_name} = {type(resolved_data).__name__}")
+        logger.debug(f"Injected {context_var_name} = {type(resolved_data).__name__}")
 
         # Add debug to see which fields are being resolved
-        print(f"🔍 FIELD_RESOLUTION DEBUG: Resolving fields for {type(resolved_data).__name__}: {[f.name for f in fields(resolved_data)]}")
+        logger.debug(f"Resolving fields for {type(resolved_data).__name__}: {[f.name for f in fields(resolved_data)]}")
 
         try:
             resolved_fields = {}
             for f in fields(resolved_data):
                 field_value = getattr(resolved_data, f.name)
-                print(f"🔍 FIELD_DEBUG: Resolving {type(resolved_data).__name__}.{f.name} = {type(field_value).__name__}")
+                logger.debug(f"Resolving {type(resolved_data).__name__}.{f.name} = {type(field_value).__name__}")
                 resolved_fields[f.name] = resolve_lazy_configurations_for_serialization(field_value)
             return type(resolved_data)(**resolved_fields)
         finally:

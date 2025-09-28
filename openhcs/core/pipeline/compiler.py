@@ -252,10 +252,13 @@ class PipelineCompiler:
                     logger.debug(f"Input conversion to zarr enabled for first step: {first_step.name}")
 
         # The axis_id and base_input_dir are available from the context object.
-        PipelinePathPlanner.prepare_pipeline_paths(
-            context,
-            steps_definition
-        )
+        # CRITICAL FIX: Wrap path planning in context so lazy configs resolve properly
+        from openhcs.core.context.contextvars_context import config_context
+        with config_context(orchestrator.pipeline_config):
+            PipelinePathPlanner.prepare_pipeline_paths(
+                context,
+                steps_definition
+            )
 
         # === FUNCTION OBJECT REFRESH ===
         # CRITICAL FIX: Refresh all function objects to ensure they're picklable
@@ -268,7 +271,8 @@ class PipelineCompiler:
         # This ensures metadata injection happens first, then lazy configs are resolved
         logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving all lazy configs after path planning...")
         from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-        with orchestrator.config_context(for_serialization=True):
+        from openhcs.core.context.contextvars_context import config_context
+        with config_context(orchestrator.pipeline_config):
             steps_definition = resolve_lazy_configurations_for_serialization(steps_definition)
 
         # Loop to supplement step_plans with non-I/O, non-path attributes
@@ -314,11 +318,11 @@ class PipelineCompiler:
 
             # DEBUG: Check what the resolved napari config actually has
             if hasattr(resolved_step, 'napari_streaming_config') and resolved_step.napari_streaming_config:
-                print(f"🔍 COMPILER DEBUG: resolved_step.napari_streaming_config.well_filter = {resolved_step.napari_streaming_config.well_filter}")
+                logger.debug(f"resolved_step.napari_streaming_config.well_filter = {resolved_step.napari_streaming_config.well_filter}")
             if hasattr(resolved_step, 'step_well_filter_config') and resolved_step.step_well_filter_config:
-                print(f"🔍 COMPILER DEBUG: resolved_step.step_well_filter_config.well_filter = {resolved_step.step_well_filter_config.well_filter}")
+                logger.debug(f"resolved_step.step_well_filter_config.well_filter = {resolved_step.step_well_filter_config.well_filter}")
             if hasattr(resolved_step, 'step_materialization_config') and resolved_step.step_materialization_config:
-                print(f"🔍 COMPILER DEBUG: resolved_step.step_materialization_config.sub_dir = '{resolved_step.step_materialization_config.sub_dir}' (type: {type(resolved_step.step_materialization_config).__name__})")
+                logger.debug(f"resolved_step.step_materialization_config.sub_dir = '{resolved_step.step_materialization_config.sub_dir}' (type: {type(resolved_step.step_materialization_config).__name__})")
 
             # Store WellFilterConfig instances only if they match the current axis
             from openhcs.core.config import WellFilterConfig, StreamingConfig, WellFilterMode
@@ -333,9 +337,9 @@ class PipelineCompiler:
             # Get step axis filters for this step
             step_axis_filters = getattr(context, 'step_axis_filters', {}).get(step_index, {})
 
-            print(f"🔍 STEP DEBUG: Processing step '{step.name}' with attributes: {[attr for attr in dir(resolved_step) if not attr.startswith('_') and 'config' in attr]}")
+            logger.debug(f"Processing step '{step.name}' with attributes: {[attr for attr in dir(resolved_step) if not attr.startswith('_') and 'config' in attr]}")
             if step.name == "Image Enhancement Processing":
-                print(f"🔍 ATTR DEBUG: All attributes for {step.name}: {[attr for attr in dir(resolved_step) if not attr.startswith('_')]}")
+                logger.debug(f"All attributes for {step.name}: {[attr for attr in dir(resolved_step) if not attr.startswith('_')]}")
 
             for attr_name in dir(resolved_step):
                 if not attr_name.startswith('_'):
@@ -652,10 +656,11 @@ class PipelineCompiler:
         from openhcs.core.config import GlobalPipelineConfig
         from openhcs.core.context.global_config import set_current_global_config
 
-        # CRITICAL FIX: Use orchestrator's context manager instead of contaminating thread-local
+        # CRITICAL FIX: Use universal context manager instead of contaminating thread-local
         # This ensures compilation resolves the same values as UI placeholders without
         # permanently contaminating the global thread-local context
-        with orchestrator.config_context(for_serialization=True):
+        from openhcs.core.context.contextvars_context import config_context
+        with config_context(orchestrator.pipeline_config):
             # Resolve the entire context recursively to catch all lazy dataclass instances
             # This ensures that any lazy configs in any part of the context are resolved
             resolved_context_dict = resolve_lazy_configurations_for_serialization(vars(context))
@@ -718,17 +723,18 @@ class PipelineCompiler:
             # Resolve axis filters once for all axis values to ensure step-level inheritance works
             logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs for axis filter resolution...")
             from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-            with orchestrator.config_context(for_serialization=True):
+            from openhcs.core.context.contextvars_context import config_context
+            with config_context(orchestrator.pipeline_config):
                 resolved_steps_for_filters = resolve_lazy_configurations_for_serialization(pipeline_definition)
 
             logger.debug("🎯 AXIS FILTER RESOLUTION: Resolving step axis filters...")
             # Create a temporary context to store the global axis filters
             temp_context = orchestrator.create_context("temp")
 
-            # CRITICAL FIX: Inject orchestrator context during axis filter resolution
-            # This ensures that lazy config resolution finds the orchestrator context instead of step context
-            from openhcs.core.lazy_config import ContextInjector
-            with ContextInjector.with_context(orchestrator, "orchestrator"):
+            # Use orchestrator context during axis filter resolution
+            # This ensures that lazy config resolution uses the orchestrator context
+            from openhcs.core.context.contextvars_context import config_context
+            with config_context(orchestrator.pipeline_config):
                 _resolve_step_axis_filters(resolved_steps_for_filters, temp_context, orchestrator)
             global_step_axis_filters = getattr(temp_context, 'step_axis_filters', {})
 
@@ -858,7 +864,7 @@ def _resolve_step_axis_filters(resolved_steps: List[AbstractStep], context, orch
                             'original_filter': config.well_filter
                         }
 
-                        print(f"🔍 AXIS_FILTER DEBUG: Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
+                        logger.debug(f"Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
                                    f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
                         logger.debug(f"Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
                                    f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")

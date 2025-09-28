@@ -83,14 +83,14 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
     Follows OpenHCS stateless architecture principles - no side effects, explicit dependencies.
     Extracted from apply_pipeline_config to eliminate code duplication.
     """
-    print(f"🔍 MERGE DEBUG: Starting merge with pipeline_config={type(pipeline_config)} and global_config={type(global_config)}")
+    logger.debug(f"Starting merge with pipeline_config={type(pipeline_config)} and global_config={type(global_config)}")
 
     # DEBUG: Check what the global_config looks like
     if hasattr(global_config, 'step_well_filter_config'):
         step_config = getattr(global_config, 'step_well_filter_config')
         if hasattr(step_config, 'well_filter'):
             well_filter_value = getattr(step_config, 'well_filter')
-            print(f"🔍 MERGE DEBUG: global_config has step_well_filter_config.well_filter = {well_filter_value}")
+            logger.debug(f"global_config has step_well_filter_config.well_filter = {well_filter_value}")
 
     merged_config_values = {}
     for field in fields(GlobalPipelineConfig):
@@ -98,7 +98,7 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
         pipeline_value = getattr(pipeline_config, field.name)
 
         if field.name == 'step_well_filter_config':
-            print(f"🔍 MERGE DEBUG: Processing step_well_filter_config: pipeline_value = {pipeline_value}")
+            logger.debug(f"Processing step_well_filter_config: pipeline_value = {pipeline_value}")
 
         if pipeline_value is not None:
             # CRITICAL FIX: Convert lazy configs to base configs with resolved values
@@ -109,12 +109,12 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
                 converted_value = pipeline_value.to_base_config()
                 merged_config_values[field.name] = converted_value
                 if field.name == 'step_well_filter_config':
-                    print(f"🔍 MERGE DEBUG: Converted lazy config to base: {converted_value}")
+                    logger.debug(f"Converted lazy config to base: {converted_value}")
             else:
                 # Regular value - use as-is
                 merged_config_values[field.name] = pipeline_value
                 if field.name == 'step_well_filter_config':
-                    print(f"🔍 MERGE DEBUG: Using pipeline value as-is: {pipeline_value}")
+                    logger.debug(f"Using pipeline value as-is: {pipeline_value}")
         else:
             global_value = getattr(global_config, field.name)
             merged_config_values[field.name] = global_value
@@ -352,11 +352,7 @@ class PipelineOrchestrator(ContextProvider):
         self._pipeline_config = None
         self._auto_sync_enabled = True
 
-        # CRITICAL FIX: Create orchestrator-specific context event coordinator
-        # This prevents cross-orchestrator contamination in the enhanced decorator events system
-        from openhcs.core.lazy_config import ContextEventCoordinator
-        self._context_event_coordinator = ContextEventCoordinator()
-        print(f"🔍 ORCHESTRATOR: Created orchestrator-specific context event coordinator")
+        # Context management now handled by contextvars-based system
 
         # Initialize per-orchestrator configuration
         # DUAL-AXIS FIX: Always create a PipelineConfig instance to make orchestrator detectable as context provider
@@ -1138,7 +1134,7 @@ class PipelineOrchestrator(ContextProvider):
                 step_config = getattr(result, 'step_well_filter_config')
                 if hasattr(step_config, 'well_filter'):
                     well_filter_value = getattr(step_config, 'well_filter')
-                    print(f"🔍 ORCHESTRATOR DEBUG: Serialization result has step_well_filter_config.well_filter = {well_filter_value}")
+                    logger.debug(f"Serialization result has step_well_filter_config.well_filter = {well_filter_value}")
 
             return result
         else:
@@ -1152,7 +1148,7 @@ class PipelineOrchestrator(ContextProvider):
                 step_config = getattr(shared_context, 'step_well_filter_config')
                 if hasattr(step_config, 'well_filter'):
                     well_filter_value = getattr(step_config, 'well_filter')
-                    print(f"🔍 ORCHESTRATOR DEBUG: Shared context before merge has step_well_filter_config.well_filter = {well_filter_value}")
+                    logger.debug(f"Shared context before merge has step_well_filter_config.well_filter = {well_filter_value}")
 
             result = _create_merged_config(self.pipeline_config, shared_context)
 
@@ -1161,46 +1157,11 @@ class PipelineOrchestrator(ContextProvider):
                 step_config = getattr(result, 'step_well_filter_config')
                 if hasattr(step_config, 'well_filter'):
                     well_filter_value = getattr(step_config, 'well_filter')
-                    print(f"🔍 ORCHESTRATOR DEBUG: Merged result has step_well_filter_config.well_filter = {well_filter_value}")
+                    logger.debug(f"Merged result has step_well_filter_config.well_filter = {well_filter_value}")
 
             return result
 
-    @contextlib.contextmanager
-    def config_context(self, *, for_serialization: bool = False):
-        """Context manager for operations requiring orchestrator config context.
 
-        With dual-axis resolution, this ensures the orchestrator is in the call stack
-        for context discovery during config resolution.
-        """
-        # CRITICAL FIX: Use direct frame injection to make orchestrator discoverable by context discovery
-        # This ensures placeholders and compiler use the same context discovery mechanism
-        import inspect
-
-        # Inject into multiple frames to ensure discovery
-        frames_to_inject = []
-        current_frame = inspect.currentframe()
-        frame_count = 0
-
-        # Walk up the call stack and inject into multiple frames
-        while current_frame and frame_count < 5:
-            if current_frame.f_back:  # Don't inject into the current frame
-                frames_to_inject.append(current_frame.f_back)
-            current_frame = current_frame.f_back
-            frame_count += 1
-
-        context_var_name = "__orchestrator_context__"
-
-        # Inject into all frames
-        for frame in frames_to_inject:
-            frame.f_locals[context_var_name] = self
-
-        try:
-            yield self
-        finally:
-            # Clean up from all frames
-            for frame in frames_to_inject:
-                if context_var_name in frame.f_locals:
-                    del frame.f_locals[context_var_name]
 
     def clear_pipeline_config(self) -> None:
         """Clear per-orchestrator configuration."""
