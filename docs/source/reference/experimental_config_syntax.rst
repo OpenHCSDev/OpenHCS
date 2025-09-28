@@ -21,11 +21,21 @@ These parameters must appear at the top of the sheet:
 
    N                    3                    # Number of biological replicates
    Scope               EDDU_metaxpress       # Microscope format
+   Per Well Datapoints False                # Treat each well as individual datapoint (optional)
 
 **Supported Scopes:**
 
 - ``EDDU_CX5``: ThermoFisher CX5 format
 - ``EDDU_metaxpress``: MetaXpress format
+
+**Per Well Datapoints (Optional):**
+
+When set to ``True``, each well is treated as an individual datapoint in the analysis output instead of averaging technical replicates. This is useful for analyzing variability within biological replicates using statistics rather than having technical replicates automatically aggregated.
+
+- ``True``: Each well appears as a separate column in results (e.g., "Condition_N1_A01_P1", "Condition_N1_B02_P1")
+- ``False`` (default): Technical replicates are averaged together (e.g., "Condition_N1")
+
+**Accepted values:** ``True``, ``False``, ``1``, ``0``, ``Yes``, ``No``, ``On``, ``Off``, ``Enabled``, ``Disabled``
 
 ### Control Definition Block (Optional)
 

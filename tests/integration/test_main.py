@@ -32,6 +32,8 @@ from openhcs.processing.backends.pos_gen.ashlar_main_cpu import ashlar_compute_t
 from openhcs.processing.backends.processors.numpy_processor import (
     create_composite, create_projection, stack_percentile_normalize
 )
+from openhcs.processing.backends.analysis.cell_counting_cpu import count_cells_single_channel, DetectionMethod
+from openhcs.core.memory.decorators import DtypeConversion
 
 # Test utilities and fixtures
 from tests.integration.helpers.fixture_utils import (
@@ -195,7 +197,27 @@ def create_test_pipeline() -> Pipeline:
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
                 input_source=InputSource.PIPELINE_START,
             ),
-            Step(name="CPU Assembly", func=assemble_stack_cpu)
+            Step(name="CPU Assembly", func=assemble_stack_cpu),
+            Step(
+                name="Z-Stack Flattening",
+                func=(create_projection, {'method': 'max_projection'}),
+                variable_components=[VariableComponents.Z_INDEX],
+            ),
+            Step(name="Cell Counting",
+                func=({'1':
+                    (
+                    count_cells_single_channel, {
+                        'min_cell_area': 40,
+                        'max_cell_area': 200,
+                        'enable_preprocessing': False,
+                        'detection_method': DetectionMethod.WATERSHED,
+                        'dtype_conversion': DtypeConversion.UINT8
+                        }
+                    )
+                    }
+                ),
+                napari_streaming_config=streaming_cfg
+            ),
         ],
         name=f"Multi-Subdirectory Test Pipeline{' (CPU-Only)' if cpu_only_mode else ''}",
     )

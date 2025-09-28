@@ -68,7 +68,7 @@ def get_features(raw_df,scope=None):
         sys.exit()
 
 def is_N_row(row_name):
-    row_name = row_name.lower()
+    row_name = str(row_name).lower()
     is_N = False
     if row_name == "n" or row_name=="ns":
         is_N = True
@@ -78,11 +78,11 @@ def is_N_row(row_name):
 
 
 def is_well_all_replicates_row(row_name):
-    row_name = row_name.lower()
+    row_name = str(row_name).lower()
     return row_name == "well" or row_name == "wells"
 
 def is_well_specific_replicate_row(row_name):
-    row_name = row_name.lower()
+    row_name = str(row_name).lower()
     if 'well' in row_name:
         return row_name[-1].isdigit()
     else: return False
@@ -99,6 +99,7 @@ def read_plate_layout(config_path):
     N = None
     specific_N = None
     scope = None
+    per_well_datapoints = False
     conditions=[]
     ctrl_wells=None
     ctrl_wells_aligned=None
@@ -112,26 +113,53 @@ def read_plate_layout(config_path):
     excluded_positions=None
 
     def sanitize_compare(string1,string2):
-        string1 = string1.lower()
-        string2 = string2.lower()
+        string1 = str(string1).lower()
+        string2 = str(string2).lower()
         string1 = string1.replace('_','')
         string1 = string1.replace(' ','')
         string2 = string2.replace('_','')
         string2 = string2.replace(' ','')
-        if not string1[-1] == 's': string1 +='s'
-        if not string2[-1] == 's': string2 +='s'
+        if len(string1) > 0 and not string1[-1] == 's': string1 +='s'
+        if len(string2) > 0 and not string2[-1] == 's': string2 +='s'
         return string1 == string2
 
     for i,row in df.iterrows():
         #check max number of replicates
         row_content = str(row.iloc[0]) if pd.notna(row.iloc[0]) else ''
-        if is_N_row(row_content):
-            N = int(row.iloc[1])  # The number is in the second column, not first
-            for i in range(N):
-                layout["N"+str(i+1)]={}
+        row_name = str(i) if pd.notna(i) else ''
+
+        # Check both row_content and row_name for N parameter (for compatibility)
+        if is_N_row(row_content) or is_N_row(row_name):
+            if is_N_row(row_name):
+                N = int(row.iloc[0])  # Value is in first column when N is in index
+            else:
+                N = int(row.iloc[1])  # Value is in second column when N is in content
+            for j in range(N):
+                layout["N"+str(j+1)]={}
         #load microscope
-        if sanitize_compare(row_content,'scope') or sanitize_compare(row_content,'microscope'):
-            scope = row.iloc[1]  # The value is in the second column
+        if sanitize_compare(row_content,'scope') or sanitize_compare(row_content,'microscope') or sanitize_compare(row_name,'scope') or sanitize_compare(row_name,'microscope'):
+            if sanitize_compare(row_name,'scope') or sanitize_compare(row_name,'microscope'):
+                scope = row.iloc[0]  # Value is in first column when scope is in index
+            else:
+                scope = row.iloc[1]  # Value is in second column when scope is in content
+
+        #load per-well datapoints flag
+        if (sanitize_compare(row_content,'per well datapoints') or
+            sanitize_compare(row_content,'per well datapoint') or
+            sanitize_compare(row_content,'individual wells') or
+            sanitize_compare(row_content,'individual well') or
+            sanitize_compare(row_name,'per well datapoints') or
+            sanitize_compare(row_name,'per well datapoint') or
+            sanitize_compare(row_name,'individual wells') or
+            sanitize_compare(row_name,'individual well')):
+            if (sanitize_compare(row_name,'per well datapoints') or
+                sanitize_compare(row_name,'per well datapoint') or
+                sanitize_compare(row_name,'individual wells') or
+                sanitize_compare(row_name,'individual well')):
+                value = str(row.iloc[0]).lower().strip()  # Value in first column when parameter is in index
+            else:
+                value = str(row.iloc[1]).lower().strip()  # Value in second column when parameter is in content
+            per_well_datapoints = value in ['true', '1', 'yes', 'on', 'enabled']
 
         #finished reading controls
         if sanitize_compare(row.name,'plate group') and not ctrl_wells is None:
@@ -261,14 +289,20 @@ def read_plate_layout(config_path):
                         #add to all Ns
                         if not doses[y] in layout["N"+str(i+1)][condition].keys():
                             layout["N"+str(i+1)][condition][doses[y]]=[]
-                        layout["N"+str(i+1)][condition][doses[y]].append((wells[y],plate_groups[y]))
+                        # Add ALL wells for this dose, not just wells[y]
+                        for well_idx, well in enumerate(wells):
+                            if well_idx < len(plate_groups):
+                                layout["N"+str(i+1)][condition][doses[y]].append((well, plate_groups[well_idx]))
             else:
                 for y in range(len(doses)):
                     #add to specific N
                     if not doses[y] in layout["N"+str(specific_N)][condition].keys():
                         layout["N"+str(specific_N)][condition][doses[y]]=[]
-                    layout["N"+str(specific_N)][condition][doses[y]].append((wells[y],plate_groups[y]))
-    return scope, layout, conditions, ctrl_positions, excluded_positions
+                    # Add ALL wells for this dose, not just wells[y]
+                    for well_idx, well in enumerate(wells):
+                        if well_idx < len(plate_groups):
+                            layout["N"+str(specific_N)][condition][doses[y]].append((well, plate_groups[well_idx]))
+    return scope, layout, conditions, ctrl_positions, excluded_positions, per_well_datapoints
 
 def get_features_EDDU_CX5(raw_df):
     return raw_df.iloc[:,raw_df.columns.str.find("Replicate").argmax()+1:-1].columns
@@ -648,30 +682,88 @@ def normalize_all_plates(plates_dict,reference_wells,raw_df,ctrl_avg_name):
 
 def create_table_for_feature(feature,experiment_dict_values):
     conditions = list(experiment_dict_values.keys())
-    replicates = list(list(experiment_dict_values.values())[0].keys())
 
-    # Create a single row with all condition-replicate combinations
-    col_names=[]
-    values=[]
+    # Create hierarchical column structure: (condition, replicate)
+    col_tuples = []
+    values = []
 
     for condition in conditions:
-        for replicate in replicates:
-            col_names.append(str(condition)+"_"+str(replicate))
+        # Get replicates for this specific condition (they may differ in per-well mode)
+        condition_replicates = list(experiment_dict_values[condition].keys())
+
+        for replicate in condition_replicates:
             # Get the value from any available dose for this condition-replicate
-            condition_value = None
             for dose in experiment_dict_values[condition][replicate].keys():
                 try:
-                    condition_value = experiment_dict_values[condition][replicate][dose][feature]
+                    feature_data = experiment_dict_values[condition][replicate][dose][feature]
+                    if isinstance(feature_data, dict):
+                        # Handle both averaged and per-well dictionary formats
+                        if "averaged" in feature_data:
+                            # Averaged mode - single value
+                            col_tuples.append((condition, replicate))
+                            values.append(feature_data["averaged"])
+                        else:
+                            # Per-well mode - multiple values (each well becomes a separate column)
+                            for well_id, value in feature_data.items():
+                                col_tuples.append((condition, replicate))
+                                values.append(value)
+                    else:
+                        # Fallback for old format (shouldn't happen now)
+                        col_tuples.append((condition, replicate))
+                        values.append(feature_data)
                     break  # Use the first available dose
                 except:
                     continue
-            values.append(condition_value)
 
-    # Create single-row DataFrame
-    feature_table = pd.DataFrame([values], columns=col_names)
-    feature_table.columns = pd.MultiIndex.from_tuples([(c.split("_")) for c in feature_table.columns])
-    feature_table.index = ['Comparison']
+    # Create DataFrame in GraphPad Prism format: N as y-axis (rows), conditions as x-axis (columns)
+    # Group values by condition
+    condition_data = {}
+    for i, (condition, replicate) in enumerate(col_tuples):
+        if condition not in condition_data:
+            condition_data[condition] = []
+        condition_data[condition].append(values[i])
+
+    # Create DataFrame with conditions as columns and N as rows
+    max_n = max(len(vals) for vals in condition_data.values())
+    data_matrix = []
+    for n in range(max_n):
+        row = []
+        for condition in sorted(condition_data.keys()):
+            if n < len(condition_data[condition]):
+                row.append(condition_data[condition][n])
+            else:
+                row.append(None)  # Fill missing values with None
+        data_matrix.append(row)
+
+    feature_table = pd.DataFrame(data_matrix,
+                               columns=sorted(condition_data.keys()),
+                               index=[f'N{i+1}' for i in range(max_n)])
+
     return feature_table
+
+def create_table_for_feature_per_well(feature,experiment_dict_values):
+    """Create feature table with individual wells as columns."""
+    conditions = list(experiment_dict_values.keys())
+    replicates = list(list(experiment_dict_values.values())[0].keys())
+
+    col_names = []
+    values = []
+
+    for condition in conditions:
+        for replicate in replicates:
+            # Get the value from any available dose for this condition-replicate
+            for dose in experiment_dict_values[condition][replicate].keys():
+                feature_data = experiment_dict_values[condition][replicate][dose][feature]
+                if isinstance(feature_data, dict):  # Per-well mode
+                    for well_id, value in feature_data.items():
+                        col_names.append(f"{condition}_{replicate}_{well_id}")
+                        values.append(value)
+                else:  # Regular averaged mode (fallback)
+                    col_names.append(f"{condition}_{replicate}")
+                    values.append(feature_data)
+                break  # Use first available dose
+
+    return pd.DataFrame([values], columns=col_names)
 
 def create_feature_results_table(feature,experiment_dict):
     replicates = list(experiment_dict_values.keys())
@@ -691,7 +783,8 @@ def create_feature_results_table(feature,experiment_dict):
     feature_table.index = replicates
     return feature_table
 
-def create_all_feature_tables(experiment_dict_values,features):
+def create_all_feature_tables(experiment_dict_values,features,per_well_datapoints=False):
+    """Create feature tables. Both modes now use the same function since data is in dict format."""
     feature_tables={feature:None for feature in features}
     for feature in features:
         feature_tables[feature]=create_table_for_feature(feature,experiment_dict_values)
@@ -702,10 +795,14 @@ def feature_tables_to_excel(feature_tables,outpath):
         inval_chars=['[',']',':','*','?','/','\\']
         for char in inval_chars:
             name=name.replace(char,"")
-        return name
-    with pd.ExcelWriter(outpath) as writer:
+        # Modern Excel supports up to 255 characters for sheet names
+        return name[:255]
+    with pd.ExcelWriter(outpath, engine='openpyxl') as writer:
         for feature in feature_tables.keys():
-            feature_tables[feature].to_excel(writer, sheet_name=remove_inval_chars(feature[:31]))
+            table = feature_tables[feature]
+            if table is not None:
+                # Write with merge_cells=False to avoid Excel merge conflicts
+                table.to_excel(writer, sheet_name=remove_inval_chars(feature), merge_cells=False)
 
 def create_duplicate_wells():
     rows=[string.ascii_uppercase[i] for i in range(0,8,2)]
@@ -724,20 +821,77 @@ def make_experiment_dict_locations(plate_groups,plate_layout,conditions):
             experiment_dict[condition][replicate] = {dose:locations for dose,locations in doses.items()}
     return experiment_dict
 
-def make_experiment_dict_values(plates,experiment_dict_locations,features,plate_groups):
-    experiment_dict_values=copy.deepcopy(experiment_dict_locations)
-    for condition,replicates in experiment_dict_locations.items():
-        for replicate, doses in replicates.items():
-            for dose,locations in doses.items():
-                feature_value_dict = {feature:average_wells(locations,replicate,feature,plates,plate_groups) for feature in features}
-                experiment_dict_values[condition][replicate][dose]= feature_value_dict
+def make_experiment_dict_values(plates,experiment_dict_locations,features,plate_groups,per_well_datapoints=False):
+    if per_well_datapoints:
+        # In per-well mode, restructure data so each well becomes a separate "replicate"
+        experiment_dict_values = {}
+
+        for condition, replicates in experiment_dict_locations.items():
+            experiment_dict_values[condition] = {}
+            well_counter = 1  # Counter for creating unique replicate names
+
+            for replicate, doses in replicates.items():
+                for dose, locations in doses.items():
+                    # Each well becomes a separate "replicate"
+                    for location in locations:
+                        well, plate_group = location
+                        plate_name = str(plate_groups[replicate][str(plate_group)])
+
+                        # Create unique replicate name for this well
+                        well_replicate_name = f"N{well_counter}"
+                        well_counter += 1
+
+                        # Get individual well values
+                        feature_value_dict = {}
+                        for feature in features:
+                            value = plates[plate_name][well][feature]
+                            try:
+                                well_value = float(value) if value is not None else 0.0
+                            except (ValueError, TypeError):
+                                well_value = 0.0
+                            # Store as single-well dictionary to maintain format consistency
+                            well_id = f"{well}_P{plate_group}"
+                            feature_value_dict[feature] = {well_id: well_value}
+
+                        # Store this well as its own replicate
+                        experiment_dict_values[condition][well_replicate_name] = {dose: feature_value_dict}
+    else:
+        # Original averaging mode
+        experiment_dict_values = copy.deepcopy(experiment_dict_locations)
+        for condition, replicates in experiment_dict_locations.items():
+            for replicate, doses in replicates.items():
+                for dose, locations in doses.items():
+                    feature_value_dict = {feature: average_wells(locations, replicate, feature, plates, plate_groups) for feature in features}
+                    experiment_dict_values[condition][replicate][dose] = feature_value_dict
+
     return experiment_dict_values
 
 def average_wells(locations,replicate,feature,plates,plate_groups):
+    """Return dict with averaged value to match per-well format."""
+    if len(locations) == 0:
+        return {"averaged": 0.0}
+
     average=0
     for location in locations:
         average+=location_to_value(location,replicate,feature,plates,plate_groups)
-    return average/float(len(locations))
+    averaged_value = average/float(len(locations))
+    # Return as dictionary to match per-well format
+    return {"averaged": averaged_value}
+
+def individual_wells(locations,replicate,feature,plates,plate_groups):
+    """Return dict of individual well values instead of averaging."""
+    well_values = {}
+    for location in locations:
+        well, plate_group = location
+        plate_name = str(plate_groups[replicate][str(plate_group)])
+        value = plates[plate_name][well][feature]
+        # Create unique well identifier including plate group
+        well_id = f"{well}_P{plate_group}"
+        try:
+            well_values[well_id] = float(value) if value is not None else 0.0
+        except (ValueError, TypeError):
+            well_values[well_id] = 0.0
+    return well_values
 
 def location_to_value(location,replicate,feature,plates,plate_groups):
     well, plate_group = location
@@ -751,19 +905,43 @@ def location_to_value(location,replicate,feature,plates,plate_groups):
 
 def normalize_experiment(experiment_dict_values,ctrl_positions,features,plates,plate_groups):
     experiment_dict_values_normalized=copy.deepcopy(experiment_dict_values)
+
+    # In per-well mode, use the original replicate (N1) for control positions
+    # since all per-well replicates (N1, N2, N3...) come from the same original biological replicate
+    original_replicate = list(ctrl_positions.keys())[0] if ctrl_positions else None
+
     for condition,replicates in experiment_dict_values.items():
         for replicate, doses in replicates.items():
-            ctrl_positions_replicate = ctrl_positions[replicate]
-            feature_control_vals={feature:average_wells(ctrl_positions_replicate,replicate,feature,plates,plate_groups) for feature in features}
-            for dose,values in doses.items():
-                feature_value_dict = {}
-                for feature in features:
-                    ctrl_value = feature_control_vals[feature]
-                    if ctrl_value == 0:
-                        ctrl_value = 1
-                    condition_value=experiment_dict_values[condition][replicate][dose][feature]
-                    feature_value_dict[feature]=condition_value/ctrl_value
-                    experiment_dict_values_normalized[condition][replicate][dose]= feature_value_dict
+            # Use original replicate for control positions (handles per-well mode)
+            ctrl_replicate = replicate if replicate in ctrl_positions else original_replicate
+            if ctrl_replicate and ctrl_replicate in ctrl_positions:
+                ctrl_positions_replicate = ctrl_positions[ctrl_replicate]
+                feature_control_vals={feature:average_wells(ctrl_positions_replicate,ctrl_replicate,feature,plates,plate_groups) for feature in features}
+
+                for dose,values in doses.items():
+                    feature_value_dict = {}
+                    for feature in features:
+                        ctrl_dict = feature_control_vals[feature]
+                        ctrl_value = ctrl_dict["averaged"] if isinstance(ctrl_dict, dict) else ctrl_dict
+                        if ctrl_value == 0:
+                            ctrl_value = 1
+
+                        condition_value_dict = experiment_dict_values[condition][replicate][dose][feature]
+                        if isinstance(condition_value_dict, dict):
+                            # Handle dictionary format (both averaged and per-well)
+                            normalized_dict = {}
+                            for key, value in condition_value_dict.items():
+                                normalized_dict[key] = value / ctrl_value
+                            feature_value_dict[feature] = normalized_dict
+                        else:
+                            # Fallback for old format
+                            feature_value_dict[feature] = condition_value_dict / ctrl_value
+
+                    experiment_dict_values_normalized[condition][replicate][dose] = feature_value_dict
+            else:
+                # No normalization if no control positions available
+                experiment_dict_values_normalized[condition][replicate] = experiment_dict_values[condition][replicate]
+
     return experiment_dict_values_normalized
 
 def write_values_heat_map(plates_dict,features,outpath):
@@ -831,7 +1009,7 @@ def run_experimental_analysis(
         stacklevel=2
     )
     # Parse experimental configuration
-    scope, plate_layout, conditions, ctrl_positions, excluded_positions = read_plate_layout(config_file)
+    scope, plate_layout, conditions, ctrl_positions, excluded_positions, per_well_datapoints = read_plate_layout(config_file)
     plate_groups = load_plate_groups(config_file)
     experiment_dict_locations = make_experiment_dict_locations(plate_groups, plate_layout, conditions)
 
@@ -869,10 +1047,10 @@ def run_experimental_analysis(
                             experiment_dict_locations[condition][replicate][dose] = filtered_wells
 
     # Create experiment data structure
-    experiment_dict_values_raw = make_experiment_dict_values(plates_dict, experiment_dict_locations, features, plate_groups)
+    experiment_dict_values_raw = make_experiment_dict_values(plates_dict, experiment_dict_locations, features, plate_groups, per_well_datapoints)
 
     # Generate raw (non-normalized) results
-    feature_tables_raw = create_all_feature_tables(experiment_dict_values_raw, features)
+    feature_tables_raw = create_all_feature_tables(experiment_dict_values_raw, features, per_well_datapoints)
     raw_results_path = compiled_results_path.replace('.xlsx', '_raw.xlsx')
     feature_tables_to_excel(feature_tables_raw, raw_results_path)
 
@@ -880,7 +1058,7 @@ def run_experimental_analysis(
     if ctrl_positions is not None:
         experiment_dict_values_normalized = normalize_experiment(experiment_dict_values_raw, ctrl_positions, features, plates_dict, plate_groups)
         # Generate normalized results
-        feature_tables_normalized = create_all_feature_tables(experiment_dict_values_normalized, features)
+        feature_tables_normalized = create_all_feature_tables(experiment_dict_values_normalized, features, per_well_datapoints)
         feature_tables_to_excel(feature_tables_normalized, compiled_results_path)
         # Return normalized for backward compatibility
         experiment_dict_values = experiment_dict_values_normalized

@@ -207,7 +207,7 @@ Here's a complete configuration for a drug dose-response experiment:
    )
 
    # Parse experimental configuration
-   scope, plate_layout, conditions, ctrl_positions = read_plate_layout("config.xlsx")
+   scope, plate_layout, conditions, ctrl_positions, excluded_positions, per_well_datapoints = read_plate_layout("config.xlsx")
    plate_groups = load_plate_groups("config.xlsx")
    experiment_dict_locations = make_experiment_dict_locations(
        plate_groups, plate_layout, conditions

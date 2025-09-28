@@ -83,7 +83,8 @@ class ExperimentalAnalysisEngine:
                 processed_data['plates_dict'],
                 experiment_dict_locations,
                 processed_data['features'],
-                experiment_config['plate_groups']
+                experiment_config['plate_groups'],
+                experiment_config['per_well_datapoints']
             )
             
             # Step 7: Apply normalization if controls are defined
@@ -101,7 +102,8 @@ class ExperimentalAnalysisEngine:
             # Step 8: Generate results tables
             feature_tables = self._create_all_feature_tables(
                 experiment_dict_values_normalized,
-                processed_data['features']
+                processed_data['features'],
+                experiment_config['per_well_datapoints']
             )
             
             # Step 9: Export results
@@ -112,7 +114,8 @@ class ExperimentalAnalysisEngine:
                 raw_results_path = compiled_results_path.replace('.xlsx', '_raw.xlsx')
                 feature_tables_raw = self._create_all_feature_tables(
                     experiment_dict_values,
-                    processed_data['features']
+                    processed_data['features'],
+                    experiment_config['per_well_datapoints']
                 )
                 self._export_results(feature_tables_raw, raw_results_path)
             
@@ -179,7 +182,7 @@ class ExperimentalAnalysisEngine:
         
         try:
             # Parse experimental design
-            scope, plate_layout, conditions, ctrl_positions = self._read_plate_layout(config_file)
+            scope, plate_layout, conditions, ctrl_positions, excluded_positions, per_well_datapoints = self._read_plate_layout(config_file)
             
             # Parse plate groups
             plate_groups = self._load_plate_groups(config_file)
@@ -189,24 +192,26 @@ class ExperimentalAnalysisEngine:
                 'plate_layout': plate_layout,
                 'conditions': conditions,
                 'ctrl_positions': ctrl_positions,
+                'excluded_positions': excluded_positions,
+                'per_well_datapoints': per_well_datapoints,
                 'plate_groups': plate_groups
             }
             
         except Exception as e:
             raise ValueError(f"Failed to parse configuration file {config_file}: {e}")
     
-    def _read_plate_layout(self, config_path: str) -> Tuple[str, Dict, List, Optional[Dict]]:
+    def _read_plate_layout(self, config_path: str) -> Tuple[str, Dict, List, Optional[Dict], Optional[Dict], bool]:
         """
         Read plate layout from configuration file.
-        
+
         This method maintains compatibility with existing configuration format
         while using the new architecture.
-        
+
         Args:
             config_path: Path to configuration file
-            
+
         Returns:
-            Tuple of (scope, plate_layout, conditions, ctrl_positions)
+            Tuple of (scope, plate_layout, conditions, ctrl_positions, excluded_positions, per_well_datapoints)
         """
         # Import the existing function to maintain compatibility
         # This will be gradually refactored to use the new architecture
@@ -232,20 +237,20 @@ class ExperimentalAnalysisEngine:
         from openhcs.formats.experimental_analysis import make_experiment_dict_locations
         return make_experiment_dict_locations(plate_groups, plate_layout, conditions)
     
-    def _make_experiment_dict_values(self, plates_dict: Dict, experiment_dict_locations: Dict, features: List, plate_groups: Dict) -> Dict:
+    def _make_experiment_dict_values(self, plates_dict: Dict, experiment_dict_locations: Dict, features: List, plate_groups: Dict, per_well_datapoints: bool = False) -> Dict:
         """Map experimental design to measured values."""
         from openhcs.formats.experimental_analysis import make_experiment_dict_values
-        return make_experiment_dict_values(plates_dict, experiment_dict_locations, features, plate_groups)
+        return make_experiment_dict_values(plates_dict, experiment_dict_locations, features, plate_groups, per_well_datapoints)
     
     def _normalize_experiment(self, experiment_dict_values: Dict, ctrl_positions: Dict, features: List, plates_dict: Dict, plate_groups: Dict) -> Dict:
         """Apply normalization using control wells."""
         from openhcs.formats.experimental_analysis import normalize_experiment
         return normalize_experiment(experiment_dict_values, ctrl_positions, features, plates_dict, plate_groups)
     
-    def _create_all_feature_tables(self, experiment_dict_values: Dict, features: List) -> Dict:
+    def _create_all_feature_tables(self, experiment_dict_values: Dict, features: List, per_well_datapoints: bool = False) -> Dict:
         """Create feature tables for export."""
         from openhcs.formats.experimental_analysis import create_all_feature_tables
-        return create_all_feature_tables(experiment_dict_values, features)
+        return create_all_feature_tables(experiment_dict_values, features, per_well_datapoints)
     
     def _export_results(self, feature_tables: Dict, output_path: str):
         """Export results to Excel file."""
