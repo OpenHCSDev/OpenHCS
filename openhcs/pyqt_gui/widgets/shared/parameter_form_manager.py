@@ -317,7 +317,7 @@ class ParameterFormManager(QWidget):
             # Get updated placeholder text with current form values
             placeholder_text = self._get_placeholder_text(param_name)
             if placeholder_text:
-                from openhcs.pyqt_gui.widgets.shared.pyqt6_widget_enhancer import PyQt6WidgetEnhancer
+                from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
     @classmethod
