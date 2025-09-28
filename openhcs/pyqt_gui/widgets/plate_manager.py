@@ -571,10 +571,11 @@ class PlateManagerWidget(QWidget):
         """
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
 
-        # CRITICAL FIX: Use orchestrator's config context for proper placeholder resolution
-        # This ensures the config window uses the correct orchestrator context for inheritance
-        if orchestrator and hasattr(orchestrator, 'config_context'):
-            with orchestrator.config_context(for_serialization=False):
+        # CRITICAL FIX: Use pipeline_config context for proper placeholder resolution
+        # This ensures the config window uses the correct pipeline config context for inheritance
+        if orchestrator and hasattr(orchestrator, 'pipeline_config'):
+            from openhcs.core.context.contextvars_context import config_context
+            with config_context(orchestrator.pipeline_config):
                 config_window = ConfigWindow(
                     config_class,           # config_class
                     current_config,         # current_config

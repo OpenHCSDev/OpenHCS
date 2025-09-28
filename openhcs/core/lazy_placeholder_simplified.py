@@ -50,13 +50,13 @@ class LazyDefaultPlaceholderService:
     ) -> Optional[str]:
         """
         Get placeholder text using the new contextvars system.
-        
+
         Args:
             dataclass_type: The dataclass type to resolve for
             field_name: Name of the field to resolve
             placeholder_prefix: Optional prefix for placeholder text
-            context_obj: Optional context object (orchestrator, step, etc.)
-        
+            context_obj: Optional context object (orchestrator, step, dataclass instance, etc.) - unused since context should be set externally
+
         Returns:
             Formatted placeholder text or None if no resolution possible
         """
@@ -76,12 +76,17 @@ class LazyDefaultPlaceholderService:
                     dataclass_type, field_name, prefix
                 )
         
-        # Use new contextvars system for resolution
-        resolved_value = LazyDefaultPlaceholderService._resolve_with_context(
-            dataclass_type, field_name, context_obj
-        )
-        
-        return LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
+        # Simple approach: Create new instance and let lazy system handle context resolution
+        # The context_obj parameter is unused since context should be set externally via config_context()
+        try:
+            instance = dataclass_type()
+            resolved_value = getattr(instance, field_name)
+            return LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
+        except Exception as e:
+            logger.debug(f"Failed to resolve {dataclass_type.__name__}.{field_name}: {e}")
+            # Fallback to class default
+            class_default = LazyDefaultPlaceholderService._get_class_default_value(dataclass_type, field_name)
+            return LazyDefaultPlaceholderService._format_placeholder_text(class_default, prefix)
 
     @staticmethod
     def _get_lazy_type_for_base(base_type: type) -> Optional[type]:
@@ -93,63 +98,7 @@ class LazyDefaultPlaceholderService:
                 return lazy_type
         return None
 
-    @staticmethod
-    def _resolve_with_context(dataclass_type: type, field_name: str, context_obj: Optional[Any]) -> Any:
-        """
-        Resolve field value using new contextvars system.
 
-        This uses the same resolution mechanism as the compiler for consistency.
-        Handles different types of context objects generically.
-        """
-        try:
-            from openhcs.core.dual_axis_resolver_recursive import resolve_field_inheritance
-            from openhcs.core.context.contextvars_context import config_context, extract_all_configs, current_temp_global
-
-            # Create dummy instance for resolution
-            dummy_instance = dataclass_type()
-
-            if context_obj:
-                # Handle different types of context objects generically
-                if hasattr(context_obj, 'config') and hasattr(context_obj.config, '__class__'):
-                    # Orchestrator-like object - use config_context
-                    with config_context(context_obj):
-                        current_context = current_temp_global.get()
-                        available_configs = extract_all_configs(current_context)
-                        return resolve_field_inheritance(dummy_instance, field_name, available_configs)
-                elif hasattr(context_obj, '__dataclass_fields__'):
-                    # Direct config object - create temporary context
-                    from openhcs.core.context.contextvars_context import ensure_global_config_context
-                    ensure_global_config_context(type(context_obj), context_obj)
-                    try:
-                        current_context = current_temp_global.get()
-                        available_configs = extract_all_configs(current_context)
-                        return resolve_field_inheritance(dummy_instance, field_name, available_configs)
-                    except LookupError:
-                        pass
-                else:
-                    # Unknown context object type - try using it directly with config_context
-                    try:
-                        with config_context(context_obj):
-                            current_context = current_temp_global.get()
-                            available_configs = extract_all_configs(current_context)
-                            return resolve_field_inheritance(dummy_instance, field_name, available_configs)
-                    except Exception:
-                        pass
-
-            # Fallback: Use current context if available
-            try:
-                current_context = current_temp_global.get()
-                available_configs = extract_all_configs(current_context)
-                return resolve_field_inheritance(dummy_instance, field_name, available_configs)
-            except LookupError:
-                pass
-
-            # Final fallback: Use class defaults
-            return LazyDefaultPlaceholderService._get_class_default_value(dataclass_type, field_name)
-
-        except Exception as e:
-            logger.debug(f"Failed to resolve {dataclass_type.__name__}.{field_name}: {e}")
-            return None
 
     @staticmethod
     def _get_class_default_placeholder(dataclass_type: type, field_name: str, prefix: str) -> Optional[str]:

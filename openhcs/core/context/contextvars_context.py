@@ -226,15 +226,23 @@ def merge_configs(base, overrides: Dict[str, Any]):
 def get_base_global_config():
     """
     Get the base global config (fallback when no context set).
-    
-    This provides the default global config when no context is active.
-    Used as the base for merging operations.
-    
+
+    This provides the global config that was set up with ensure_global_config_context(),
+    or a default if none was set. Used as the base for merging operations.
+
     Returns:
-        Default GlobalPipelineConfig instance
+        Current global config instance or default GlobalPipelineConfig
     """
     try:
         from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.core.context.global_config import get_current_global_config
+
+        # First try to get the global config that was set up
+        current_global = get_current_global_config(GlobalPipelineConfig)
+        if current_global is not None:
+            return current_global
+
+        # Fallback to default if none was set
         return GlobalPipelineConfig()
     except ImportError:
         logger.warning("Could not import GlobalPipelineConfig")

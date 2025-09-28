@@ -264,14 +264,25 @@ class ParameterFormManager(QWidget):
         """Get placeholder text using simplified contextvars system."""
         if self.config.is_lazy_dataclass:
             from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+            from openhcs.core.context.contextvars_context import config_context
 
-            # Use simplified placeholder service with stored generic context object
-            return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                self.dataclass_type,
-                param_name,
-                placeholder_prefix=self.placeholder_prefix,
-                context_obj=self.context_obj  # Use stored generic context object
-            )
+            # Re-establish context for placeholder resolution
+            if self.context_obj:
+                with config_context(self.context_obj):
+                    return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                        self.dataclass_type,
+                        param_name,
+                        placeholder_prefix=self.placeholder_prefix,
+                        context_obj=self.context_obj
+                    )
+            else:
+                # Fallback without context
+                return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type,
+                    param_name,
+                    placeholder_prefix=self.placeholder_prefix,
+                    context_obj=self.context_obj
+                )
         return None
 
 
@@ -305,14 +316,25 @@ class ParameterFormManager(QWidget):
             return None
 
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+        from openhcs.core.context.contextvars_context import config_context
 
-        # Use simplified placeholder service with explicit context
-        return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-            self.dataclass_type,
-            param_name,
-            placeholder_prefix=self.placeholder_prefix,
-            context_obj=temporary_context
-        )
+        # Use explicit context for placeholder resolution
+        if temporary_context:
+            with config_context(temporary_context):
+                return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    self.dataclass_type,
+                    param_name,
+                    placeholder_prefix=self.placeholder_prefix,
+                    context_obj=temporary_context
+                )
+        else:
+            # Fallback without context
+            return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                self.dataclass_type,
+                param_name,
+                placeholder_prefix=self.placeholder_prefix,
+                context_obj=temporary_context
+            )
 
     @classmethod
     def from_dataclass_instance(cls, dataclass_instance: Any, field_id: str,

@@ -86,9 +86,9 @@ class ConfigWindow(QDialog):
 
         # Use new context system instead of ContextEventCoordinator
 
-        # Create form manager within orchestrator context if available
-        if orchestrator:
-            with config_context(orchestrator):
+        # Create form manager within pipeline config context if available
+        if orchestrator and hasattr(orchestrator, 'pipeline_config'):
+            with config_context(orchestrator.pipeline_config):
                 self.form_manager = ParameterFormManager.from_dataclass_instance(
                     dataclass_instance=current_config,
                     field_id=root_field_id,
@@ -97,7 +97,7 @@ class ConfigWindow(QDialog):
                     use_scroll_area=True,
                     global_config_type=global_config_type,
                     context_event_coordinator=None,  # No longer needed with new context system
-                    context_obj=orchestrator  # Pass orchestrator as generic context object
+                    context_obj=orchestrator.pipeline_config  # Pass pipeline_config as context object
                 )
         else:
             self.form_manager = ParameterFormManager.from_dataclass_instance(
