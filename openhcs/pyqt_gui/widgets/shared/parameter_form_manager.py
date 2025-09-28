@@ -270,6 +270,14 @@ class ParameterFormManager(QWidget):
         if self.config.is_lazy_dataclass:
             # Always use live context with current form values for dynamic placeholders
             temporary_context = self._build_temporary_context_with_current_values()
+
+            # Debug: Check what context we're using
+            from openhcs.core.context.contextvars_context import get_current_temp_global
+            current_active = get_current_temp_global()
+            logger.debug(f"_get_placeholder_text({param_name}): active_context={current_active is not None}, "
+                        f"parent_context={self.parent_context_obj is not None}, "
+                        f"temp_context={temporary_context is not None}")
+
             return self._get_placeholder_text_with_context(param_name, temporary_context)
         return None
 
