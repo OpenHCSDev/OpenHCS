@@ -53,7 +53,7 @@ from .layout_constants import CURRENT_LAYOUT
 
 # Import OpenHCS core components
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 # Old field path detection removed - using simple field name matching
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
@@ -261,65 +261,22 @@ class ParameterFormManager(QWidget):
         return widget
 
     def _get_placeholder_text(self, param_name: str) -> Optional[str]:
-        """Get placeholder text using dual-axis resolution."""
+        """Get placeholder text using simplified contextvars system."""
         if self.config.is_lazy_dataclass:
-            # GENERIC FIX: Find context provider in parent hierarchy and ensure it's in call stack
-            context_provider = self._find_context_provider_in_hierarchy()
+            from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
-            if context_provider:
-                # Call placeholder service from within context provider so it's in the call stack
-                result = self._get_placeholder_with_context_in_stack(param_name, context_provider)
-                return result
-            else:
-                # No context provider found in hierarchy - use dual-axis resolver stack introspection
-                # This handles both: 1) global config editing (no context), 2) widget not in hierarchy yet
-
-                # Use dual-axis resolver stack introspection for placeholder resolution
-                result = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    self.dataclass_type, param_name,
-                    placeholder_prefix=self.placeholder_prefix,
-                    orchestrator=self.orchestrator  # Pass orchestrator for compiler-grade resolution
-                )
-                return result
+            # Use simplified placeholder service with explicit context
+            return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                self.dataclass_type,
+                param_name,
+                placeholder_prefix=self.placeholder_prefix,
+                context_obj=getattr(self, 'context_obj', None)  # Use context if provided
+            )
         return None
 
-    def _find_context_provider_in_hierarchy(self) -> Optional[Any]:
-        """
-        Find context provider in parent widget hierarchy using dual-axis resolver logic.
 
-        Uses the same generic detection as ContextDiscovery._is_context_provider:
-        looks for any object that has dataclass instance attributes.
-        """
-        from openhcs.core.dual_axis_resolver_recursive import ContextDiscovery
 
-        # Walk up the parent hierarchy (parent() can be None during widget construction)
-        parent = self.parent()
-        while parent:
-            # Use the same generic logic as dual-axis resolver
-            if ContextDiscovery._is_context_provider(parent):
-                return parent
-            parent = parent.parent()
 
-        # No context provider found - this is expected for global config editing
-        return None
-
-    def _get_placeholder_with_context_in_stack(self, param_name: str, context_provider: Any) -> Optional[str]:
-        """
-        Get placeholder text with context provider in the call stack.
-
-        This ensures the dual-axis resolver can find the context provider
-        through stack introspection during placeholder resolution.
-        """
-        # GENERIC SOLUTION: Put context provider in local scope so dual-axis resolver finds it
-        # The resolver walks the call stack looking for objects with dataclass attributes
-        # By having the context_provider as a local variable, it will be found
-        active_context = context_provider  # This puts context in the call stack frame
-
-        return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-            self.dataclass_type, param_name,
-            placeholder_prefix=self.placeholder_prefix,
-            orchestrator=self.orchestrator  # Pass orchestrator for compiler-grade resolution
-        )
 
     @classmethod
     def _should_field_show_as_placeholder(cls, dataclass_instance: Any, field_name: str, raw_value: Any) -> bool:
@@ -347,12 +304,15 @@ class ParameterFormManager(QWidget):
         if not self.config.is_lazy_dataclass:
             return None
 
-        # Use the temporary context to resolve placeholder
-        result = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder_with_context(
-            self.dataclass_type, param_name, temporary_context,
-            placeholder_prefix=self.placeholder_prefix
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+        # Use simplified placeholder service with explicit context
+        return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+            self.dataclass_type,
+            param_name,
+            placeholder_prefix=self.placeholder_prefix,
+            context_obj=temporary_context
         )
-        return result
 
     @classmethod
     def from_dataclass_instance(cls, dataclass_instance: Any, field_id: str,
@@ -769,71 +729,23 @@ class ParameterFormManager(QWidget):
 
 
 
-    def _build_context_from_current_form_values(self):
-        """Build temporary context from current form values for live placeholder updates.
 
-        Creates a temporary copy of the dataclass with current field values.
-        This allows placeholders to update live as the user types without saving values.
-        """
-        if not self.config.is_lazy_dataclass:
-            return None
-
-        try:
-            # Get the base dataclass type (not the lazy version)
-            from openhcs.core.lazy_config import get_base_type_for_lazy
-            base_type = get_base_type_for_lazy(self.dataclass_type)
-            if not base_type:
-                return None
-
-            # Start with current context as base (thread-local or orchestrator)
-            from openhcs.core.dual_axis_resolver_recursive import ContextDiscovery
-            base_context = ContextDiscovery.discover_context(base_type)
-            if not base_context:
-                return None
-
-            # Create a copy of the base context with current form values
-            # Use dataclasses.replace to handle frozen dataclasses properly
-            from dataclasses import replace, fields
-
-            # Build replacement kwargs from current form values
-            replacement_kwargs = {}
-            for param_name, current_value in self.parameters.items():
-                if current_value is not None and hasattr(base_context, param_name):
-                    replacement_kwargs[param_name] = current_value
-
-            # Create new instance with updated values
-            if replacement_kwargs:
-                temp_context = replace(base_context, **replacement_kwargs)
-            else:
-                temp_context = base_context
-
-            return temp_context
-
-        except Exception as e:
-            # If anything goes wrong, fall back to original context
-            print(f"Warning: Failed to build context from form values: {e}")
-            return None
 
 
 
 
     def _refresh_all_placeholders_with_current_context(self) -> None:
-        """Refresh all placeholders using dual-axis resolution."""
+        """Refresh all placeholders using simplified contextvars system."""
         if not self.config.is_lazy_dataclass:
             return
 
-        # Apply placeholders using dual-axis resolution
+        # Apply placeholders using simplified system
         for param_name, widget in self.widgets.items():
             current_value = self.parameters.get(param_name)
 
             if current_value is None:
-                # CRITICAL FIX: Use direct placeholder resolution like reset does
-                # This bypasses hierarchy search issues during initial form creation
-                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    self.dataclass_type, param_name,
-                    placeholder_prefix=self.placeholder_prefix,
-                    orchestrator=self.orchestrator
-                )
+                # Use simplified placeholder resolution
+                placeholder_text = self._get_placeholder_text(param_name)
                 if placeholder_text:
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
             else:
@@ -841,28 +753,9 @@ class ParameterFormManager(QWidget):
                 PyQt6WidgetEnhancer._clear_placeholder_state(widget)
 
     def _refresh_all_placeholders_with_temporary_context(self, temporary_context: Any) -> None:
-        """Refresh all placeholders using temporary context for live updates.
-
-        This method uses a temporary context (copy of dataclass with current form values)
-        to show how placeholders would change with the current field values.
-        """
-        if not self.config.is_lazy_dataclass or not temporary_context:
-            # Fall back to normal placeholder resolution if no temporary context
-            self._refresh_all_placeholders_with_current_context()
-            return
-
-        # Apply placeholders using temporary context
-        for param_name, widget in self.widgets.items():
-            current_value = self.parameters.get(param_name)
-
-            if current_value is None:
-                # Get placeholder using temporary context
-                placeholder_text = self._get_placeholder_text_with_context(param_name, temporary_context)
-                if placeholder_text:
-                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
-            else:
-                # Clear placeholder state for non-None values
-                PyQt6WidgetEnhancer._clear_placeholder_state(widget)
+        """Refresh all placeholders - simplified to use regular placeholder resolution."""
+        # Just use regular placeholder resolution - the simplified system doesn't need complex temporary contexts
+        self._refresh_all_placeholders_with_current_context()
 
     def _emit_parameter_change(self, param_name: str, value: Any) -> None:
         """Handle parameter change from widget and update parameter data model."""
@@ -1063,12 +956,8 @@ class ParameterFormManager(QWidget):
 
             # Apply placeholder only if reset value is None (lazy behavior)
             if reset_value is None:
-                # CRITICAL FIX: Force fresh placeholder resolution after reset
-                # Don't use cached context that might have stale values
-                placeholder_text = LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    self.dataclass_type, param_name,
-                    placeholder_prefix=self.placeholder_prefix
-                )
+                # Use simplified placeholder resolution after reset
+                placeholder_text = self._get_placeholder_text(param_name)
                 if placeholder_text:
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
