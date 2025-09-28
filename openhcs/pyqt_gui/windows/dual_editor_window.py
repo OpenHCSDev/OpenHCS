@@ -157,15 +157,18 @@ class DualEditorWindow(QDialog):
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""
         from openhcs.pyqt_gui.widgets.step_parameter_editor import StepParameterEditorWidget
+        from openhcs.core.context.contextvars_context import config_context
 
-        # Create step parameter editor widget (mirrors Textual TUI)
-        # Pass orchestrator for proper inheritance context
-        self.step_editor = StepParameterEditorWidget(
-            self.editing_step,
-            service_adapter=None,
-            color_scheme=self.color_scheme,
-            orchestrator=self.orchestrator
-        )
+        # Create step parameter editor widget with proper nested context
+        # Step must be nested: GlobalPipelineConfig -> PipelineConfig -> Step
+        with config_context(self.orchestrator.pipeline_config):  # Pipeline level
+            with config_context(self.editing_step):              # Step level
+                self.step_editor = StepParameterEditorWidget(
+                    self.editing_step,
+                    service_adapter=None,
+                    color_scheme=self.color_scheme,
+                    orchestrator=self.orchestrator
+                )
 
         # Connect parameter changes - use form manager signal for immediate response
         self.step_editor.form_manager.parameter_changed.connect(self.on_form_parameter_changed)

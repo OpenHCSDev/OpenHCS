@@ -50,7 +50,9 @@ def config_context(obj):
         with config_context(step):  # Step-level context
             # ...
     """
-    base_config = get_base_global_config()
+    # Get current context as base for nested contexts, or fall back to base global config
+    current_context = get_current_temp_global()
+    base_config = current_context if current_context is not None else get_base_global_config()
 
     # Find matching fields between obj and GlobalPipelineConfig
     overrides = {}

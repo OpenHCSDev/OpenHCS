@@ -103,7 +103,7 @@ class StepParameterEditorWidget(QWidget):
             param_defaults=param_defaults,
             global_config_type=GlobalPipelineConfig,  # Enable dual-axis resolution
             context_event_coordinator=self._step_editor_coordinator,  # Enable live updates if configured
-            context_obj=self.orchestrator  # Pass orchestrator for context
+            context_obj=self.step  # Pass step as context for nested resolution
         )
         
         self.setup_ui()
