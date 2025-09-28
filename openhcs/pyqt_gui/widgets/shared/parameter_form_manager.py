@@ -244,6 +244,9 @@ class ParameterFormManager(QWidget):
         # Set up UI
         self.setup_ui()
 
+        # Connect parameter changes to live placeholder updates
+        self.parameter_changed.connect(self.refresh_placeholders)
+
         # NOTE: Placeholder refresh moved to from_dataclass_instance after user-set detection
 
     def create_widget(self, param_name: str, param_type: Type, current_value: Any,
@@ -261,33 +264,61 @@ class ParameterFormManager(QWidget):
         return widget
 
     def _get_placeholder_text(self, param_name: str) -> Optional[str]:
-        """Get placeholder text using simplified contextvars system."""
+        """Get placeholder text using simplified contextvars system with live updates."""
         if self.config.is_lazy_dataclass:
-            from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-            from openhcs.core.context.contextvars_context import config_context
-
-            # Re-establish context for placeholder resolution
-            if self.context_obj:
-                with config_context(self.context_obj):
-                    return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                        self.dataclass_type,
-                        param_name,
-                        placeholder_prefix=self.placeholder_prefix,
-                        context_obj=self.context_obj
-                    )
-            else:
-                # Fallback without context
-                return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    self.dataclass_type,
-                    param_name,
-                    placeholder_prefix=self.placeholder_prefix,
-                    context_obj=self.context_obj
-                )
+            # Use live context with current form values for dynamic placeholders
+            temporary_context = self._build_temporary_context_with_current_values()
+            return self._get_placeholder_text_with_context(param_name, temporary_context)
         return None
 
+    def _build_temporary_context_with_current_values(self) -> Any:
+        """Build temporary context object with current form values for live placeholder updates."""
+        if not self.context_obj:
+            return None
 
+        try:
+            # Get current form values
+            current_values = self.get_current_values()
 
+            # Create a copy of the context object with current values
+            import dataclasses
+            if dataclasses.is_dataclass(self.context_obj):
+                # For dataclass context objects, create a copy with updated values
+                context_dict = dataclasses.asdict(self.context_obj)
 
+                # Update with current form values (only non-None values)
+                for param_name, current_value in current_values.items():
+                    if current_value is not None:
+                        context_dict[param_name] = current_value
+
+                # Create new instance with updated values
+                return type(self.context_obj)(**context_dict)
+            else:
+                # For non-dataclass objects, return original context
+                return self.context_obj
+
+        except Exception as e:
+            # Fallback to original context if building temporary context fails
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Failed to build temporary context: {e}")
+            return self.context_obj
+
+    def refresh_placeholders(self, changed_param_name: str = None):
+        """Refresh all placeholders with current form values for live updates."""
+        if not self.config.is_lazy_dataclass:
+            return
+
+        # Update placeholders for all widgets except the one that just changed
+        for param_name, widget in self.widgets.items():
+            if param_name == changed_param_name:
+                continue  # Skip the widget that just changed to avoid interference
+
+            # Get updated placeholder text with current form values
+            placeholder_text = self._get_placeholder_text(param_name)
+            if placeholder_text:
+                from openhcs.pyqt_gui.widgets.shared.pyqt6_widget_enhancer import PyQt6WidgetEnhancer
+                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
     @classmethod
     def _should_field_show_as_placeholder(cls, dataclass_instance: Any, field_name: str, raw_value: Any) -> bool:
