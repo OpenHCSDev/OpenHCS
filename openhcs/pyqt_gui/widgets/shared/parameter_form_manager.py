@@ -54,7 +54,7 @@ from .layout_constants import CURRENT_LAYOUT
 # Import OpenHCS core components
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-from openhcs.core.field_path_detection import FieldPathDetector
+# Old field path detection removed - using simple field name matching
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
 

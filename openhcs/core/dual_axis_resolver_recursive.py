@@ -14,6 +14,24 @@ from dataclasses import is_dataclass
 logger = logging.getLogger(__name__)
 
 
+def _has_concrete_field_override(source_class, field_name: str) -> bool:
+    """
+    Check if a class has a concrete field override (not None).
+
+    This determines inheritance design based on static class definition:
+    - Concrete default (not None) = never inherits
+    - None default = always inherits (inherit_as_none design)
+    """
+    # CRITICAL FIX: Check class attribute directly, not dataclass field default
+    # The @global_pipeline_config decorator modifies field defaults to None
+    # but the class attribute retains the original concrete value
+    if hasattr(source_class, field_name):
+        class_attr_value = getattr(source_class, field_name)
+        has_override = class_attr_value is not None
+        return has_override
+    return False
+
+
 def resolve_field_inheritance(
     obj, 
     field_name: str, 

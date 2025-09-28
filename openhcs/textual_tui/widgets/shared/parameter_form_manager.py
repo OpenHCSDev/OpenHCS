@@ -15,7 +15,7 @@ from openhcs.ui.shared.parameter_form_base import ParameterFormManagerBase, Para
 from openhcs.ui.shared.parameter_form_service import ParameterFormService
 from openhcs.ui.shared.parameter_form_config_factory import textual_config
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
-from openhcs.core.field_path_detection import FieldPathDetector
+# Old field path detection removed - using simple field name matching
 
 # Import Textual-specific components
 from .typed_widget_factory import TypedWidgetFactory

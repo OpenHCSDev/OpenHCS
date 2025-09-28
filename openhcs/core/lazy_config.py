@@ -18,7 +18,6 @@ from openhcs.core.context.global_config import (
     get_current_global_config,
     set_current_global_config,
 )
-from openhcs.core.field_path_detection import FieldPathDetector
 # Note: dual_axis_resolver_recursive and lazy_placeholder imports kept inline to avoid circular imports
 
 
@@ -121,9 +120,8 @@ class LazyMethodBindings:
     @staticmethod
     def create_getattribute() -> Callable[[Any, str], Any]:
         """Create lazy __getattribute__ method using new context system."""
-        from openhcs.core.dual_axis_resolver_recursive import resolve_field_inheritance
+        from openhcs.core.dual_axis_resolver_recursive import resolve_field_inheritance, _has_concrete_field_override
         from openhcs.core.context.contextvars_context import current_temp_global, extract_all_configs
-        from openhcs.core.lazy_placeholder import _has_concrete_field_override
 
         def _find_mro_concrete_value(base_class, name):
             """Extract common MRO traversal pattern."""
@@ -233,15 +231,11 @@ class LazyDataclassFactory:
 
             # Check if field type is a dataclass that should be made lazy
             field_type = field.type
-            if is_dataclass(field.type) and global_config_type is not None:
-                # Create lazy version with automatic inheritance detection and context propagation - inline single-use method
-                full_field_path = f"{parent_field_path}.{field.name}" if parent_field_path else field.name
-                lazy_nested_type = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+            if is_dataclass(field.type):
+                # SIMPLIFIED: Create lazy version using simple factory
+                lazy_nested_type = LazyDataclassFactory.make_lazy_simple(
                     base_class=field.type,
-                    global_config_type=global_config_type,
-                    field_path=full_field_path,
-                    lazy_class_name=f"Lazy{field.type.__name__}",
-                    context_provider=lambda: parent_instance_provider() if parent_instance_provider else _get_current_config(global_config_type)
+                    lazy_class_name=f"Lazy{field.type.__name__}"
                 )
                 field_type = lazy_nested_type
                 logger.debug(f"Created lazy class for {field.name}: {field.type} -> {lazy_nested_type}")
@@ -370,133 +364,44 @@ class LazyDataclassFactory:
 
 
     @staticmethod
-    def make_lazy_with_field_level_auto_hierarchy(
+    def make_lazy_simple(
         base_class: Type,
-        global_config_type: Type,
-        field_path: str = None,
-        lazy_class_name: str = None,
-        context_provider: Optional[Callable[[], Any]] = None
+        lazy_class_name: str = None
     ) -> Type:
         """
-        Create lazy dataclass with automatically discovered field-level hierarchy resolution.
+        Create lazy dataclass using new contextvars system.
 
-        Preserves sophisticated field-level inheritance while using automatic type introspection
-        to discover hierarchy relationships, eliminating the need for manual configuration.
-        Now supports context-aware resolution for sibling inheritance within instances.
+        SIMPLIFIED: No complex hierarchy providers or field path detection needed.
+        Uses new contextvars system for all resolution.
 
         Args:
-            base_class: The dataclass type to make lazy
-            global_config_type: The global config type for thread-local resolution
-            field_path: Optional field path for the current instance
-            lazy_class_name: Optional name for the generated lazy class
-            context_provider: Optional function that provides the resolution context.
-                             If None, uses global config. If provided, uses the returned instance.
+            base_class: Base dataclass to make lazy
+            lazy_class_name: Optional name for the lazy class
 
         Returns:
-            Generated lazy dataclass with field-level auto-hierarchy resolution
+            Generated lazy dataclass with contextvars-based resolution
         """
         # Generate class name if not provided
         lazy_class_name = lazy_class_name or f"Lazy{base_class.__name__}"
 
-        # Create field-level hierarchy provider with context support
-        field_level_provider = _create_field_level_hierarchy_provider(
-            base_class=base_class,
-            global_config_type=global_config_type,
-            current_field_path=field_path,
-            context_provider=context_provider
-        )
-
-        # Use field-level provider with optional static defaults fallback
-        # Static fallbacks should only be used in specific contexts (tests, serialization, etc.)
-        # In normal app operation, thread-local storage should always be available
-        def context_aware_static_fallback(field_name: str) -> Any:
-            """Static fallback that warns when used in contexts where thread-local storage should exist."""
-            # Check if we're in a context where stack introspection should find context
-            current_context = _get_current_config(global_config_type)
-
-            if current_context is None and HAS_PYQT:
-                # Check if we're in a PyQt app context where this shouldn't happen
-                app_instance = QApplication.instance()
-                if app_instance and hasattr(app_instance, 'global_config'):
-                    logger.warning(
-                        f"🚨 ARCHITECTURE WARNING: Static fallback used for {base_class.__name__}.{field_name} "
-                        f"in PyQt app context where stack introspection should find context. "
-                        f"This indicates a context discovery bug."
-                    )
-
-            # Use static default
-            static_instance = base_class()
-            static_value = _get_raw_field_value(static_instance, field_name)
-            return static_value
-
-        fallback_chain = [context_aware_static_fallback]
+        # Simple provider that uses new contextvars system
+        def simple_provider():
+            """Simple provider using new contextvars system."""
+            return base_class()  # Lazy __getattribute__ handles resolution
 
         return LazyDataclassFactory._create_lazy_dataclass_unified(
             base_class=base_class,
-            instance_provider=field_level_provider,
+            instance_provider=simple_provider,
             lazy_class_name=lazy_class_name,
-            debug_template=f"Field-level auto-hierarchy resolution for {base_class.__name__}",
+            debug_template=f"Simple contextvars resolution for {base_class.__name__}",
             use_recursive_resolution=False,
-            fallback_chain=fallback_chain,
-            global_config_type=global_config_type,
-            parent_field_path=field_path,
-            parent_instance_provider=lambda: context_provider() if context_provider else None
+            fallback_chain=[],
+            global_config_type=None,
+            parent_field_path=None,
+            parent_instance_provider=None
         )
 
-    # Deprecated methods removed - use make_lazy_with_field_level_auto_hierarchy() for all use cases
-
-
-def _create_field_level_hierarchy_provider(base_class: Type, global_config_type: Type, current_field_path: str = None, context_provider: Optional[Callable[[], Any]] = None):
-    """
-    Create field-level hierarchy provider with simplified logic.
-
-    Complex function that auto-discovers inheritance relationships, builds hierarchy paths,
-    and creates a provider that resolves each field through multiple config sources.
-    Handles PyQt app context detection and inheritance-aware validation.
-    """
-    import dataclasses
-    # Auto-discover unified hierarchy paths (inheritance + composition)
-    all_field_paths = FieldPathDetector.find_all_field_paths_unified(global_config_type, base_class)
-    parent_types = FieldPathDetector.find_all_relationships(base_class)
-    sibling_paths = [path for parent_type in parent_types for path in FieldPathDetector.find_all_field_paths_unified(global_config_type, parent_type)]
-
-    # Determine field classifications - FIXED: Use ALL parent types, not just the first one
-    if parent_types:
-        # Collect fields from ALL parent types (inheritance + composition)
-        parent_fields = frozenset()
-        for parent_type in parent_types:
-            parent_fields |= frozenset(f.name for f in fields(parent_type))
-        child_fields = frozenset(f.name for f in fields(base_class))
-        # CRITICAL FIX: For composition, we want ALL parent fields to be resolvable, not just intersection
-        inherited_fields, own_fields = parent_fields, child_fields
-
-        # Debug removed - parent field collection working correctly
-    else:
-        inherited_fields, own_fields = frozenset(), frozenset(f.name for f in fields(base_class))
-
-    def field_level_provider():
-        """Simplified provider that delegates to dual-axis resolver."""
-        from openhcs.core.dual_axis_resolver_recursive import get_recursive_resolver
-
-        # Create a dummy instance to use with the dual-axis resolver
-        dummy_instance = base_class()
-        resolver = get_recursive_resolver()
-
-        # Get all fields that need resolution
-        global_config_fields = {f.name for f in fields(global_config_type)} if global_config_type else set()
-        all_resolvable_fields = inherited_fields | own_fields | global_config_fields
-
-        # Create config instance with dual-axis resolved fields
-        config_instance = type('FieldLevelInheritanceConfig', (), {})()
-
-        for field_name in all_resolvable_fields:
-            # Use dual-axis resolver for all field resolution
-            resolved_value = resolver.resolve_field(dummy_instance, field_name)
-            setattr(config_instance, field_name, resolved_value)
-
-        return config_instance
-
-    return field_level_provider
+    # All legacy methods removed - use make_lazy_simple() for all use cases
 
 
 # Generic utility functions for clean thread-local storage management
@@ -902,10 +807,8 @@ def create_global_default_decorator(target_config_class: Type):
             # Immediately create lazy version of this config (not dependent on injection)
 
 
-            lazy_class = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+            lazy_class = LazyDataclassFactory.make_lazy_simple(
                 base_class=actual_cls,
-                global_config_type=target_config_class,
-                field_path=field_name,
                 lazy_class_name=lazy_class_name
             )
 
@@ -1038,10 +941,8 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
 
     # Create lazy classes and recreate PipelineConfig inline
     for config in configs:
-        lazy_class = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+        lazy_class = LazyDataclassFactory.make_lazy_simple(
             base_class=config['config_class'],
-            global_config_type=new_class,
-            field_path=config['field_name'],
             lazy_class_name=config['lazy_class_name']
         )
         _register_lazy_class(lazy_class, config['lazy_class_name'], config['config_class'].__module__)
@@ -1054,10 +955,8 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
     # Remove global prefix (GlobalPipelineConfig → PipelineConfig)
     lazy_global_class_name = target_class.__name__[len(GLOBAL_CONFIG_PREFIX):]
 
-    lazy_global_class = LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy(
+    lazy_global_class = LazyDataclassFactory.make_lazy_simple(
         base_class=new_class,
-        global_config_type=new_class,
-        field_path=None,
         lazy_class_name=lazy_global_class_name
     )
 
