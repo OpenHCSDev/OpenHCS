@@ -125,7 +125,7 @@ class ParameterFormManager(QWidget):
                  use_scroll_area: bool = True, function_target=None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, placeholder_prefix: str = None,
                  param_defaults: Dict[str, Any] = None, global_config_type: Optional[Type] = None,
-                 context_event_coordinator=None, orchestrator=None, is_concrete_instance: bool = None):
+                 context_event_coordinator=None, context_obj=None, is_concrete_instance: bool = None):
         """
         Initialize PyQt parameter form manager with dual-axis resolution.
 
@@ -151,7 +151,7 @@ class ParameterFormManager(QWidget):
         self.dataclass_type = dataclass_type
         self.global_config_type = global_config_type  # Store for nested manager inheritance
         self.placeholder_prefix = placeholder_prefix or CONSTANTS.DEFAULT_PLACEHOLDER_PREFIX
-        self.orchestrator = orchestrator  # Store orchestrator for compiler-grade placeholder resolution
+        self.context_obj = context_obj  # Store generic context object for placeholder resolution
 
         # Convert old API to new config object internally
         if color_scheme is None:
@@ -265,12 +265,12 @@ class ParameterFormManager(QWidget):
         if self.config.is_lazy_dataclass:
             from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
-            # Use simplified placeholder service with stored orchestrator context
+            # Use simplified placeholder service with stored generic context object
             return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                 self.dataclass_type,
                 param_name,
                 placeholder_prefix=self.placeholder_prefix,
-                context_obj=self.orchestrator  # Use stored orchestrator for context
+                context_obj=self.context_obj  # Use stored generic context object
             )
         return None
 
@@ -321,7 +321,7 @@ class ParameterFormManager(QWidget):
                               function_target=None, color_scheme=None,
                               force_show_all_fields: bool = False,
                               global_config_type: Optional[Type] = None,
-                              context_event_coordinator=None, orchestrator=None):
+                              context_event_coordinator=None, context_obj=None):
         """
         Create ParameterFormManager for editing entire dataclass instance.
 
@@ -392,7 +392,7 @@ class ParameterFormManager(QWidget):
             param_defaults=None,
             global_config_type=global_config_type,  # CRITICAL FIX: Pass global_config_type through
             context_event_coordinator=context_event_coordinator,  # CRITICAL FIX: Pass orchestrator-specific coordinator
-            orchestrator=orchestrator,  # CRITICAL FIX: Pass orchestrator for compiler-grade placeholder resolution
+            context_obj=context_obj,  # CRITICAL FIX: Pass generic context object for placeholder resolution
             is_concrete_instance=is_concrete_instance  # CRITICAL FIX: Pass instance type for correct reset behavior
         )
 
@@ -598,7 +598,7 @@ class ParameterFormManager(QWidget):
                 color_scheme=self.config.color_scheme,
                 global_config_type=self.global_config_type,  # CRITICAL FIX: Pass global_config_type to nested managers
                 context_event_coordinator=None,  # ContextEventCoordinator removed - new context system handles updates
-                orchestrator=self.orchestrator  # CRITICAL FIX: Pass orchestrator for compiler-grade placeholder resolution
+                context_obj=self.context_obj  # CRITICAL FIX: Pass context object for placeholder resolution
             )
 
             # Unified manager setup
@@ -703,7 +703,7 @@ class ParameterFormManager(QWidget):
             None,  # param_defaults
             self.global_config_type,  # CRITICAL FIX: Pass global_config_type to nested managers
             getattr(self, '_context_event_coordinator', None),  # CRITICAL FIX: Pass coordinator to nested forms
-            self.orchestrator,  # CRITICAL FIX: Pass orchestrator for compiler-grade placeholder resolution
+            self.context_obj,  # CRITICAL FIX: Pass context object for placeholder resolution
             is_concrete_instance  # CRITICAL FIX: Pass instance type for correct reset behavior
         )
 

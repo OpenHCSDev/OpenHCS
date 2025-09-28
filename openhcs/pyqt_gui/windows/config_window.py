@@ -97,7 +97,7 @@ class ConfigWindow(QDialog):
                     use_scroll_area=True,
                     global_config_type=global_config_type,
                     context_event_coordinator=None,  # No longer needed with new context system
-                    orchestrator=orchestrator  # Pass orchestrator for placeholder resolution
+                    context_obj=orchestrator  # Pass orchestrator as generic context object
                 )
         else:
             self.form_manager = ParameterFormManager.from_dataclass_instance(
@@ -534,7 +534,7 @@ class ConfigWindow(QDialog):
                         use_scroll_area=True,
                         global_config_type=GlobalPipelineConfig,  # FIXED: Always use GlobalPipelineConfig for dual-axis resolution
                         context_event_coordinator=None,  # No longer needed with new context system
-                        orchestrator=self.orchestrator  # Pass orchestrator for placeholder resolution
+                        context_obj=self.orchestrator  # Pass orchestrator as generic context object
                     )
             else:
                 new_form_manager = ParameterFormManager.from_dataclass_instance(
