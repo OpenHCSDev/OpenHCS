@@ -97,32 +97,56 @@ class LazyDefaultPlaceholderService:
     def _resolve_with_context(dataclass_type: type, field_name: str, context_obj: Optional[Any]) -> Any:
         """
         Resolve field value using new contextvars system.
-        
+
         This uses the same resolution mechanism as the compiler for consistency.
+        Handles different types of context objects generically.
         """
         try:
             from openhcs.core.dual_axis_resolver_recursive import resolve_field_inheritance
             from openhcs.core.context.contextvars_context import config_context, extract_all_configs, current_temp_global
-            
+
             # Create dummy instance for resolution
             dummy_instance = dataclass_type()
-            
+
             if context_obj:
-                # Use provided context
-                with config_context(context_obj):
-                    current_context = current_temp_global.get()
-                    available_configs = extract_all_configs(current_context)
-                    return resolve_field_inheritance(dummy_instance, field_name, available_configs)
-            else:
-                # Use current context if available
-                try:
-                    current_context = current_temp_global.get()
-                    available_configs = extract_all_configs(current_context)
-                    return resolve_field_inheritance(dummy_instance, field_name, available_configs)
-                except LookupError:
-                    # No context available - fall back to class defaults
-                    return LazyDefaultPlaceholderService._get_class_default_value(dataclass_type, field_name)
-                    
+                # Handle different types of context objects generically
+                if hasattr(context_obj, 'config') and hasattr(context_obj.config, '__class__'):
+                    # Orchestrator-like object - use config_context
+                    with config_context(context_obj):
+                        current_context = current_temp_global.get()
+                        available_configs = extract_all_configs(current_context)
+                        return resolve_field_inheritance(dummy_instance, field_name, available_configs)
+                elif hasattr(context_obj, '__dataclass_fields__'):
+                    # Direct config object - create temporary context
+                    from openhcs.core.context.contextvars_context import ensure_global_config_context
+                    ensure_global_config_context(type(context_obj), context_obj)
+                    try:
+                        current_context = current_temp_global.get()
+                        available_configs = extract_all_configs(current_context)
+                        return resolve_field_inheritance(dummy_instance, field_name, available_configs)
+                    except LookupError:
+                        pass
+                else:
+                    # Unknown context object type - try using it directly with config_context
+                    try:
+                        with config_context(context_obj):
+                            current_context = current_temp_global.get()
+                            available_configs = extract_all_configs(current_context)
+                            return resolve_field_inheritance(dummy_instance, field_name, available_configs)
+                    except Exception:
+                        pass
+
+            # Fallback: Use current context if available
+            try:
+                current_context = current_temp_global.get()
+                available_configs = extract_all_configs(current_context)
+                return resolve_field_inheritance(dummy_instance, field_name, available_configs)
+            except LookupError:
+                pass
+
+            # Final fallback: Use class defaults
+            return LazyDefaultPlaceholderService._get_class_default_value(dataclass_type, field_name)
+
         except Exception as e:
             logger.debug(f"Failed to resolve {dataclass_type.__name__}.{field_name}: {e}")
             return None

@@ -23,7 +23,8 @@ from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.core.config import GlobalPipelineConfig
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
-from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+from openhcs.core.context.contextvars_context import config_context
 
 
 
@@ -84,7 +85,6 @@ class ConfigWindow(QDialog):
         global_config_type = GlobalPipelineConfig  # Always use GlobalPipelineConfig for dual-axis resolution
 
         # Use new context system instead of ContextEventCoordinator
-        from openhcs.core.context.contextvars_context import config_context
 
         # Create form manager within orchestrator context if available
         if orchestrator:
@@ -96,7 +96,8 @@ class ConfigWindow(QDialog):
                     color_scheme=self.color_scheme,
                     use_scroll_area=True,
                     global_config_type=global_config_type,
-                    context_event_coordinator=None  # No longer needed with new context system
+                    context_event_coordinator=None,  # No longer needed with new context system
+                    orchestrator=orchestrator  # Pass orchestrator for placeholder resolution
                 )
         else:
             self.form_manager = ParameterFormManager.from_dataclass_instance(
@@ -532,7 +533,8 @@ class ConfigWindow(QDialog):
                         color_scheme=self.color_scheme,
                         use_scroll_area=True,
                         global_config_type=GlobalPipelineConfig,  # FIXED: Always use GlobalPipelineConfig for dual-axis resolution
-                        context_event_coordinator=None  # No longer needed with new context system
+                        context_event_coordinator=None,  # No longer needed with new context system
+                        orchestrator=self.orchestrator  # Pass orchestrator for placeholder resolution
                     )
             else:
                 new_form_manager = ParameterFormManager.from_dataclass_instance(

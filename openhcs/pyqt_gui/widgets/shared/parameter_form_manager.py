@@ -265,12 +265,12 @@ class ParameterFormManager(QWidget):
         if self.config.is_lazy_dataclass:
             from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
-            # Use simplified placeholder service with explicit context
+            # Use simplified placeholder service with stored orchestrator context
             return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
                 self.dataclass_type,
                 param_name,
                 placeholder_prefix=self.placeholder_prefix,
-                context_obj=getattr(self, 'context_obj', None)  # Use context if provided
+                context_obj=self.orchestrator  # Use stored orchestrator for context
             )
         return None
 
