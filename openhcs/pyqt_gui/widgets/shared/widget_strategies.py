@@ -59,6 +59,65 @@ def _create_none_aware_int_widget():
     return NoneAwareIntEdit()
 
 
+def _create_none_aware_checkbox():
+    """Factory function for NoneAwareCheckBox widgets."""
+    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import NoneAwareCheckBox
+    return NoneAwareCheckBox()
+
+
+def convert_widget_value_to_type(value: Any, param_type: Type) -> Any:
+    """
+    PyQt-specific type conversions for widget values.
+
+    Handles conversions that are specific to how PyQt widgets represent values
+    (e.g., Path widgets return strings, tuple/list fields are edited as string literals).
+
+    Args:
+        value: The raw value from the widget
+        param_type: The target parameter type
+
+    Returns:
+        The converted value ready for the service layer
+    """
+    # Handle Path widgets - they return strings that need conversion
+    try:
+        if param_type is Path and isinstance(value, str):
+            return Path(value) if value else None
+    except Exception:
+        pass
+
+    # Handle tuple/list typed configs written as strings in UI
+    try:
+        from typing import get_origin, get_args
+        import ast
+        origin = get_origin(param_type)
+        args = get_args(param_type)
+        if origin in (tuple, list) and isinstance(value, str):
+            # Safely parse string literal into Python object
+            try:
+                parsed = ast.literal_eval(value)
+            except Exception:
+                return value  # Return original if parse fails
+            if parsed is not None:
+                # Coerce to the annotated container type
+                if origin is tuple:
+                    parsed = tuple(parsed if isinstance(parsed, (list, tuple)) else [parsed])
+                elif origin is list and not isinstance(parsed, list):
+                    parsed = [parsed]
+                # Optionally enforce inner type if annotated
+                if args:
+                    inner = args[0]
+                    try:
+                        parsed = tuple(inner(x) for x in parsed) if origin is tuple else [inner(x) for x in parsed]
+                    except Exception:
+                        pass
+                return parsed
+    except Exception:
+        pass
+
+    return value
+
+
 def register_openhcs_widgets():
     """Register OpenHCS custom widgets with magicgui type system."""
     # Register using string widget types that magicgui recognizes
@@ -72,9 +131,10 @@ def register_openhcs_widgets():
 
 # Functional widget replacement registry
 WIDGET_REPLACEMENT_REGISTRY: Dict[Type, callable] = {
+    str: lambda current_value, **kwargs: create_string_fallback_widget(current_value=current_value),
     bool: lambda current_value, **kwargs: (
-        lambda w: w.setChecked(bool(current_value)) or w
-    )(QCheckBox()),
+        lambda w: (w.set_value(current_value), w)[1]
+    )(_create_none_aware_checkbox()),
     int: lambda current_value, **kwargs: (
         lambda w: (w.set_value(current_value), w)[1]
     )(_create_none_aware_int_widget()),

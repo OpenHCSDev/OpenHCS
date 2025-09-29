@@ -219,15 +219,15 @@ class EnhancedPathWidget(QWidget):
                 text = str(value)
                 self.path_input.setText(text)
             else:
-                # For None values, don't set empty text - let placeholder system handle it
-                # This allows lazy placeholder text to be visible instead of hardcoded placeholder
-                pass
+                # For None values, clear the text to show placeholder
+                self.path_input.clear()
         finally:
             self.path_input.blockSignals(False)
 
-    def get_path(self) -> str:
-        """Get current path value."""
-        return self.path_input.text()
+    def get_path(self):
+        """Get current path value, returning None for empty strings."""
+        text = self.path_input.text().strip()
+        return None if text == "" else text
 
     def _open_dialog(self):
         """Open appropriate Qt dialog based on behavior."""

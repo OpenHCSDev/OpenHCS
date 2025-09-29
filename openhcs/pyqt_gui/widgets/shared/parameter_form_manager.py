@@ -19,9 +19,8 @@ from openhcs.core.config import GlobalPipelineConfig
 WIDGET_UPDATE_DISPATCH = [
     (QComboBox, 'update_combo_box'),
     ('get_selected_values', 'update_checkbox_group'),
-    ('setChecked', lambda w, v: w.setChecked(bool(v))),
+    ('set_value', lambda w, v: w.set_value(v)),  # Handles NoneAwareCheckBox, NoneAwareIntEdit, etc.
     ('setValue', lambda w, v: w.setValue(v if v is not None else w.minimum())),  # CRITICAL FIX: Set to minimum for None values to enable placeholder
-    ('set_value', lambda w, v: w.set_value(v)),
     ('setText', lambda w, v: v is not None and w.setText(str(v)) or (v is None and w.clear())),  # CRITICAL FIX: Handle None values by clearing
     ('set_path', lambda w, v: w.set_path(v)),  # EnhancedPathWidget support
 ]
@@ -29,8 +28,7 @@ WIDGET_UPDATE_DISPATCH = [
 WIDGET_GET_DISPATCH = [
     (QComboBox, lambda w: w.itemData(w.currentIndex()) if w.currentIndex() >= 0 else None),
     ('get_selected_values', lambda w: w.get_selected_values()),
-    ('get_value', lambda w: w.get_value()),
-    ('isChecked', lambda w: w.isChecked()),
+    ('get_value', lambda w: w.get_value()),  # Handles NoneAwareCheckBox, NoneAwareIntEdit, etc.
     ('value', lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
     ('get_path', lambda w: w.get_path()),  # EnhancedPathWidget support
     ('text', lambda w: w.text())
@@ -100,6 +98,43 @@ class NoneAwareIntEdit(QLineEdit):
             self.setText("")
         else:
             self.setText(str(value))
+
+
+class NoneAwareCheckBox(QCheckBox):
+    """
+    QCheckBox that supports None state for lazy dataclass contexts.
+
+    Uses tri-state checkbox where:
+    - Unchecked (Qt.Unchecked) = False
+    - Checked (Qt.Checked) = True
+    - PartiallyChecked (Qt.PartiallyChecked) = None (placeholder/inherited)
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # Enable tri-state to support None
+        self.setTristate(True)
+
+    def get_value(self):
+        """Get value, returning None for PartiallyChecked state."""
+        from PyQt6.QtCore import Qt
+        state = self.checkState()
+        if state == Qt.CheckState.PartiallyChecked:
+            return None
+        elif state == Qt.CheckState.Checked:
+            return True
+        else:  # Qt.CheckState.Unchecked
+            return False
+
+    def set_value(self, value):
+        """Set value, handling None as PartiallyChecked."""
+        from PyQt6.QtCore import Qt
+        if value is None:
+            self.setCheckState(Qt.CheckState.PartiallyChecked)
+        elif value:
+            self.setCheckState(Qt.CheckState.Checked)
+        else:
+            self.setCheckState(Qt.CheckState.Unchecked)
 
 
 class ParameterFormManager(QWidget):
@@ -667,8 +702,15 @@ class ParameterFormManager(QWidget):
 
     def _emit_parameter_change(self, param_name: str, value: Any) -> None:
         """Handle parameter change from widget and update parameter data model."""
-        # Convert value using service layer
-        converted_value = self.service.convert_value_to_type(value, self.parameter_types.get(param_name, type(value)), param_name, self.dataclass_type)
+        from openhcs.pyqt_gui.widgets.shared.widget_strategies import convert_widget_value_to_type
+
+        param_type = self.parameter_types.get(param_name, type(value))
+
+        # PyQt-specific type conversions before service layer
+        converted_value = convert_widget_value_to_type(value, param_type)
+
+        # Then apply service layer conversion (enums, basic types, etc.)
+        converted_value = self.service.convert_value_to_type(converted_value, param_type, param_name, self.dataclass_type)
 
         # Update parameter in data model
         self.parameters[param_name] = converted_value
@@ -954,6 +996,8 @@ class ParameterFormManager(QWidget):
         This fixes the lazy default materialization override saving issue by ensuring
         that lazy dataclasses maintain their structure when values are retrieved.
         """
+        from openhcs.pyqt_gui.widgets.shared.widget_strategies import convert_widget_value_to_type
+
         # CRITICAL FIX: Read actual current values from widgets, not initial parameters
         current_values = {}
 
@@ -961,7 +1005,13 @@ class ParameterFormManager(QWidget):
         for param_name in self.parameters.keys():
             widget = self.widgets.get(param_name)
             if widget:
-                current_values[param_name] = self.get_widget_value(widget)
+                raw_value = self.get_widget_value(widget)
+                # Apply type conversion (Path, tuple/list parsing, etc.)
+                param_type = self.parameter_types.get(param_name, type(raw_value))
+                converted_value = convert_widget_value_to_type(raw_value, param_type)
+                # Then apply service layer conversion (enums, basic types, etc.)
+                converted_value = self.service.convert_value_to_type(converted_value, param_type, param_name, self.dataclass_type)
+                current_values[param_name] = converted_value
             else:
                 # Fallback to initial parameter value if no widget
                 current_values[param_name] = self.parameters.get(param_name)

@@ -174,42 +174,31 @@ class ParameterFormService:
             if enum_type:
                 return [enum_type(value)]
 
-        # Handle Path
-        try:
-            from pathlib import Path as _Path
-            if param_type is _Path and isinstance(value, str):
-                return _Path(value)
-        except Exception:
-            pass
+        # Handle Union types (e.g., Union[List[str], str, int])
+        # Try to convert to the most specific type that matches
+        from typing import get_origin, get_args, Union
+        if get_origin(param_type) is Union:
+            union_args = get_args(param_type)
+            # Filter out NoneType
+            non_none_types = [t for t in union_args if t is not type(None)]
 
-        # Handle tuple/list typed configs written as strings in UI
-        try:
-            from typing import get_origin, get_args
-            import ast
-            origin = get_origin(param_type)
-            args = get_args(param_type)
-            if origin in (tuple, list) and isinstance(value, str):
-                # Safely parse string literal into Python object
-                try:
-                    parsed = ast.literal_eval(value)
-                except Exception:
-                    parsed = None
-                if parsed is not None:
-                    # Coerce to the annotated container type
-                    if origin is tuple:
-                        parsed = tuple(parsed if isinstance(parsed, (list, tuple)) else [parsed])
-                    elif origin is list and not isinstance(parsed, list):
-                        parsed = [parsed]
-                    # Optionally enforce inner type to str if annotated
-                    if args:
-                        inner = args[0]
-                        try:
-                            parsed = tuple(inner(x) for x in parsed) if origin is tuple else [inner(x) for x in parsed]
-                        except Exception:
-                            pass
-                    return parsed
-        except Exception:
-            pass
+            # If value is a string, try to convert to int first, then keep as str
+            if isinstance(value, str) and value != CONSTANTS.EMPTY_STRING:
+                # Try int conversion first
+                if int in non_none_types:
+                    try:
+                        return int(value)
+                    except (ValueError, TypeError):
+                        pass
+                # Try float conversion
+                if float in non_none_types:
+                    try:
+                        return float(value)
+                    except (ValueError, TypeError):
+                        pass
+                # Keep as string if str is in the union
+                if str in non_none_types:
+                    return value
 
         # Handle basic types
         if param_type == bool and isinstance(value, str):
