@@ -23,7 +23,7 @@ WIDGET_UPDATE_DISPATCH = [
     ('setValue', lambda w, v: w.setValue(v if v is not None else w.minimum())),  # CRITICAL FIX: Set to minimum for None values to enable placeholder
     ('set_value', lambda w, v: w.set_value(v)),
     ('setText', lambda w, v: v is not None and w.setText(str(v)) or (v is None and w.clear())),  # CRITICAL FIX: Handle None values by clearing
-    # REMOVED: ('clear', lambda w, v: v is None and w.clear()) - Redundant with setText fix above
+    ('set_path', lambda w, v: w.set_path(v)),  # EnhancedPathWidget support
 ]
 
 WIDGET_GET_DISPATCH = [
@@ -32,6 +32,7 @@ WIDGET_GET_DISPATCH = [
     ('get_value', lambda w: w.get_value()),
     ('isChecked', lambda w: w.isChecked()),
     ('value', lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
+    ('get_path', lambda w: w.get_path()),  # EnhancedPathWidget support
     ('text', lambda w: w.text())
 ]
 
@@ -419,12 +420,13 @@ class ParameterFormManager(QWidget):
         # DELEGATE TO SERVICE LAYER: Use analyzed form structure
         for param_info in self.form_structure.parameters:
             if param_info.is_optional and param_info.is_nested:
+                # Optional[Dataclass]: show checkbox
                 widget = self._create_optional_dataclass_widget(param_info)
-            elif param_info.is_optional:
-                widget = self._create_optional_regular_widget(param_info)
             elif param_info.is_nested:
+                # Direct dataclass (non-optional): nested group without checkbox
                 widget = self._create_nested_dataclass_widget(param_info)
             else:
+                # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
                 widget = self._create_regular_parameter_widget(param_info)
             content_layout.addWidget(widget)
 

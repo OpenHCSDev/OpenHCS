@@ -153,18 +153,18 @@ class ParameterFormService:
             The converted value
         """
         debug_param("convert_value", f"param={param_name}, input_type={type(value).__name__}, target_type={param_type.__name__ if hasattr(param_type, '__name__') else str(param_type)}")
-        
+
         if value is None:
             return None
-        
+
         # Handle string "None" literal
         if isinstance(value, str) and value == CONSTANTS.NONE_STRING_LITERAL:
             return None
-        
+
         # Handle enum types
         if self._type_utils.is_enum_type(param_type):
             return param_type(value)
-        
+
         # Handle list of enums
         if self._type_utils.is_list_of_enums(param_type):
             # If value is already a list (from checkbox group widget), return as-is
@@ -173,7 +173,44 @@ class ParameterFormService:
             enum_type = self._type_utils.get_enum_from_list_type(param_type)
             if enum_type:
                 return [enum_type(value)]
-        
+
+        # Handle Path
+        try:
+            from pathlib import Path as _Path
+            if param_type is _Path and isinstance(value, str):
+                return _Path(value)
+        except Exception:
+            pass
+
+        # Handle tuple/list typed configs written as strings in UI
+        try:
+            from typing import get_origin, get_args
+            import ast
+            origin = get_origin(param_type)
+            args = get_args(param_type)
+            if origin in (tuple, list) and isinstance(value, str):
+                # Safely parse string literal into Python object
+                try:
+                    parsed = ast.literal_eval(value)
+                except Exception:
+                    parsed = None
+                if parsed is not None:
+                    # Coerce to the annotated container type
+                    if origin is tuple:
+                        parsed = tuple(parsed if isinstance(parsed, (list, tuple)) else [parsed])
+                    elif origin is list and not isinstance(parsed, list):
+                        parsed = [parsed]
+                    # Optionally enforce inner type to str if annotated
+                    if args:
+                        inner = args[0]
+                        try:
+                            parsed = tuple(inner(x) for x in parsed) if origin is tuple else [inner(x) for x in parsed]
+                        except Exception:
+                            pass
+                    return parsed
+        except Exception:
+            pass
+
         # Handle basic types
         if param_type == bool and isinstance(value, str):
             return self._type_utils.convert_string_to_bool(value)
@@ -188,10 +225,6 @@ class ParameterFormService:
         # Handle empty strings in lazy context - convert to None for all parameter types
         # This is critical for lazy dataclass behavior where None triggers placeholder resolution
         if isinstance(value, str) and value == CONSTANTS.EMPTY_STRING:
-            # Check if we're in a lazy context by examining if this is being called
-            # during a reset operation or widget clearing in a lazy dataclass context
-            # For now, always convert empty strings to None - this preserves lazy behavior
-            # and concrete contexts should not be passing empty strings for non-string types
             return None
 
         # Handle string types - also convert empty strings to None for consistency
@@ -205,7 +238,7 @@ class ParameterFormService:
                 return None
 
         return value
-    
+
     def get_parameter_display_info(self, param_name: str, param_type: Type,
                                  description: Optional[str] = None) -> Dict[str, str]:
         """
