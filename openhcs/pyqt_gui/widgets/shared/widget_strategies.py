@@ -423,28 +423,40 @@ def _apply_path_widget_placeholder(widget: Any, placeholder_text: str) -> None:
 
 
 def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> None:
-    """Apply placeholder to combobox with visual preview using signal blocking like checkboxes."""
+    """Apply placeholder to combobox while preserving None (no concrete selection).
+
+    Strategy:
+    - Insert or update a non-selecting placeholder item at index 0 with userData=None,
+      displaying the inherited/default enum text (no 'Pipeline default:' prefix).
+    - Set currentIndex to 0 so the user sees the value, but saving returns None
+      via WIDGET_GET_DISPATCH (itemData(None) -> None) until the user explicitly selects.
+    """
     try:
         default_value = _extract_default_value(placeholder_text)
 
-        # Find matching item using robust enum matching
+        # Find matching item using robust enum matching to get display text
         matching_index = next(
             (i for i in range(widget.count())
              if _item_matches_value(widget, i, default_value)),
             -1
         )
+        placeholder_display = (
+            widget.itemText(matching_index) if matching_index >= 0 else default_value
+        )
 
-        # CRITICAL FIX: Block signals to prevent placeholder from being treated as user selection
-        # This is the same approach used by checkboxes - show the placeholder visually
-        # but don't trigger parameter change events
+        # Block signals so this visual change doesn't emit change events
         widget.blockSignals(True)
         try:
-            if matching_index >= 0:
-                widget.setCurrentIndex(matching_index)
+            # Ensure a placeholder item exists at index 0 with userData=None
+            if widget.count() > 0 and widget.itemData(0) is None:
+                # Update text to current placeholder display
+                widget.setItemText(0, placeholder_display)
             else:
-                widget.setCurrentIndex(-1)
+                widget.insertItem(0, placeholder_display, None)
+
+            # Select the placeholder item visually, but it still represents None
+            widget.setCurrentIndex(0)
         finally:
-            # Always restore signal connections
             widget.blockSignals(False)
 
         # Apply placeholder styling to indicate this is a placeholder value

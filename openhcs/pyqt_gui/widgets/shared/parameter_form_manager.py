@@ -122,7 +122,7 @@ class ParameterFormManager(QWidget):
     parameter_changed = pyqtSignal(str, object)  # param_name, value
 
     # Class constants for UI preferences (moved from constructor parameters)
-    DEFAULT_USE_SCROLL_AREA = True
+    DEFAULT_USE_SCROLL_AREA = False
     DEFAULT_PLACEHOLDER_PREFIX = "Default"
     DEFAULT_COLOR_SCHEME = None
 
