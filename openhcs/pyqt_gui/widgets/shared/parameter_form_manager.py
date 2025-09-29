@@ -843,7 +843,65 @@ class ParameterFormManager(QWidget):
             self.parameter_changed.emit(param_name, reset_value)
             return
 
-        # Config form - use context-aware reset value
+        # Special handling for dataclass fields
+        try:
+            import dataclasses as _dc
+            from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+            param_type = self.parameter_types.get(param_name)
+
+            # If this is an Optional[Dataclass], sync container UI and reset nested manager
+            if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
+                # Determine reset (lazy -> None)
+                reset_value = self._get_reset_value(param_name)
+                self.parameters[param_name] = reset_value
+
+                if param_name in self.widgets:
+                    container = self.widgets[param_name]
+                    # Toggle the optional checkbox to match reset_value (None -> unchecked)
+                    from PyQt6.QtWidgets import QCheckBox
+                    ids = self.service.generate_field_ids_direct(self.config.field_id, param_name)
+                    checkbox = container.findChild(QCheckBox, ids['optional_checkbox_id'])
+                    if checkbox:
+                        checkbox.blockSignals(True)
+                        checkbox.setChecked(reset_value is not None)
+                        checkbox.blockSignals(False)
+
+                # Reset nested manager contents too
+                nested_manager = self.nested_managers.get(param_name)
+                if nested_manager and hasattr(nested_manager, 'reset_all_parameters'):
+                    nested_manager.reset_all_parameters()
+
+                # Enable/disable the nested group visually without relying on signals
+                try:
+                    from .clickable_help_components import GroupBoxWithHelp
+                    group = container.findChild(GroupBoxWithHelp) if param_name in self.widgets else None
+                    if group:
+                        group.setEnabled(reset_value is not None)
+                except Exception:
+                    pass
+
+                # Emit parameter change and return (handled)
+                self.parameter_changed.emit(param_name, reset_value)
+                return
+
+            # If this is a direct dataclass field (non-optional), do NOT replace the instance.
+            # Instead, keep the container value and recursively reset the nested manager.
+            if param_type and _dc.is_dataclass(param_type):
+                nested_manager = self.nested_managers.get(param_name)
+                if nested_manager and hasattr(nested_manager, 'reset_all_parameters'):
+                    nested_manager.reset_all_parameters()
+                # Do not modify self.parameters[param_name] (keep current dataclass instance)
+                # Refresh placeholder on the group container if it has a widget
+                if param_name in self.widgets:
+                    self._apply_context_behavior(self.widgets[param_name], None, param_name)
+                # Emit parameter change with unchanged container value
+                self.parameter_changed.emit(param_name, self.parameters.get(param_name))
+                return
+        except Exception:
+            # Fall through to generic handling if type checks fail
+            pass
+
+        # Generic config field reset - use context-aware reset value
         reset_value = self._get_reset_value(param_name)
         self.parameters[param_name] = reset_value
 
@@ -871,36 +929,6 @@ class ParameterFormManager(QWidget):
                 if placeholder_text:
                     from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
-
-        # Optional dataclass UI sync: toggle checkbox and reset nested manager/widgets
-        try:
-            from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-            param_type = self.parameter_types.get(param_name)
-            if param_type and ParameterTypeUtils.is_optional_dataclass(param_type) and param_name in self.widgets:
-                container = self.widgets[param_name]
-                # Toggle the optional checkbox to match reset_value (None -> unchecked)
-                from PyQt6.QtWidgets import QCheckBox
-                ids = self.service.generate_field_ids_direct(self.config.field_id, param_name)
-                checkbox = container.findChild(QCheckBox, ids['optional_checkbox_id'])
-                if checkbox:
-                    checkbox.blockSignals(True)
-                    checkbox.setChecked(reset_value is not None)
-                    checkbox.blockSignals(False)
-                # Reset nested manager contents too
-                nested_manager = self.nested_managers.get(param_name)
-                if nested_manager and hasattr(nested_manager, 'reset_all_parameters'):
-                    nested_manager.reset_all_parameters()
-                # Enable/disable the nested group visually without relying on signals
-                try:
-                    from .clickable_help_components import GroupBoxWithHelp
-                    group = container.findChild(GroupBoxWithHelp)
-                    if group:
-                        group.setEnabled(reset_value is not None)
-                except Exception:
-                    pass
-        except Exception:
-            # Fail loud elsewhere; do not block reset on UI sync issues
-            pass
 
         # Emit parameter change to notify other components
         self.parameter_changed.emit(param_name, reset_value)
