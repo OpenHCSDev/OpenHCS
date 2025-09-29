@@ -646,6 +646,13 @@ class ParameterFormManager(QWidget):
             parent=self,
             context_obj=self.context_obj
         )
+        # Inherit lazy/global editing context from parent so resets behave correctly in nested forms
+        try:
+            nested_manager.config.is_lazy_dataclass = self.config.is_lazy_dataclass
+            nested_manager.config.is_global_config_editing = not self.config.is_lazy_dataclass
+        except Exception:
+            pass
+
 
         # Store nested manager
         self.nested_managers[param_name] = nested_manager
@@ -762,6 +769,9 @@ class ParameterFormManager(QWidget):
             param_names = list(self.parameters.keys())
             for param_name in param_names:
                 self.reset_parameter(param_name)
+
+            # Also refresh placeholders in nested managers after recursive resets
+            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
             # Handle nested managers once at the end
             if self.dataclass_type and self.nested_managers:
