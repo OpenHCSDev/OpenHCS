@@ -698,19 +698,29 @@ class ParameterFormManager(QWidget):
 
 
 
+    def _convert_widget_value(self, value: Any, param_name: str) -> Any:
+        """
+        Convert widget value to proper type.
 
-
-    def _emit_parameter_change(self, param_name: str, value: Any) -> None:
-        """Handle parameter change from widget and update parameter data model."""
+        Applies both PyQt-specific conversions (Path, tuple/list parsing) and
+        service layer conversions (enums, basic types, Union handling).
+        """
         from openhcs.pyqt_gui.widgets.shared.widget_strategies import convert_widget_value_to_type
 
         param_type = self.parameter_types.get(param_name, type(value))
 
-        # PyQt-specific type conversions before service layer
+        # PyQt-specific type conversions first
         converted_value = convert_widget_value_to_type(value, param_type)
 
-        # Then apply service layer conversion (enums, basic types, etc.)
+        # Then apply service layer conversion (enums, basic types, Union handling, etc.)
         converted_value = self.service.convert_value_to_type(converted_value, param_type, param_name, self.dataclass_type)
+
+        return converted_value
+
+    def _emit_parameter_change(self, param_name: str, value: Any) -> None:
+        """Handle parameter change from widget and update parameter data model."""
+        # Convert value using unified conversion method
+        converted_value = self._convert_widget_value(value, param_name)
 
         # Update parameter in data model
         self.parameters[param_name] = converted_value
@@ -996,8 +1006,6 @@ class ParameterFormManager(QWidget):
         This fixes the lazy default materialization override saving issue by ensuring
         that lazy dataclasses maintain their structure when values are retrieved.
         """
-        from openhcs.pyqt_gui.widgets.shared.widget_strategies import convert_widget_value_to_type
-
         # CRITICAL FIX: Read actual current values from widgets, not initial parameters
         current_values = {}
 
@@ -1006,12 +1014,8 @@ class ParameterFormManager(QWidget):
             widget = self.widgets.get(param_name)
             if widget:
                 raw_value = self.get_widget_value(widget)
-                # Apply type conversion (Path, tuple/list parsing, etc.)
-                param_type = self.parameter_types.get(param_name, type(raw_value))
-                converted_value = convert_widget_value_to_type(raw_value, param_type)
-                # Then apply service layer conversion (enums, basic types, etc.)
-                converted_value = self.service.convert_value_to_type(converted_value, param_type, param_name, self.dataclass_type)
-                current_values[param_name] = converted_value
+                # Apply unified type conversion
+                current_values[param_name] = self._convert_widget_value(raw_value, param_name)
             else:
                 # Fallback to initial parameter value if no widget
                 current_values[param_name] = self.parameters.get(param_name)
