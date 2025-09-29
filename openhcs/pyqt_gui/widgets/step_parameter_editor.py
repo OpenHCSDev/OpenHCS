@@ -344,20 +344,37 @@ class StepParameterEditorWidget(QWidget):
     def _load_step_settings_from_file(self, file_path: Path):
         """Load step settings from file."""
         try:
-            # TODO: Implement step settings loading
-            logger.debug(f"Load step settings from {file_path} - TODO: implement")
-            
+            import dill as pickle
+            with open(file_path, 'rb') as f:
+                step_data = pickle.load(f)
+
+            # Update form manager with loaded values
+            for param_name, value in step_data.items():
+                if hasattr(self.form_manager, 'update_parameter'):
+                    self.form_manager.update_parameter(param_name, value)
+                    # Also update the step object
+                    if hasattr(self.step, param_name):
+                        setattr(self.step, param_name, value)
+
+            # Refresh the form to show loaded values
+            self.form_manager._refresh_all_placeholders()
+            logger.debug(f"Loaded {len(step_data)} parameters from {file_path.name}")
+
         except Exception as e:
             logger.error(f"Failed to load step settings from {file_path}: {e}")
             if self.service_adapter:
                 self.service_adapter.show_error_dialog(f"Failed to load step settings: {e}")
-    
+
     def _save_step_settings_to_file(self, file_path: Path):
         """Save step settings to file."""
         try:
-            # TODO: Implement step settings saving
-            logger.debug(f"Save step settings to {file_path} - TODO: implement")
-            
+            import dill as pickle
+            # Get current values from form manager
+            step_data = self.form_manager.get_current_values()
+            with open(file_path, 'wb') as f:
+                pickle.dump(step_data, f)
+            logger.debug(f"Saved {len(step_data)} parameters to {file_path.name}")
+
         except Exception as e:
             logger.error(f"Failed to save step settings to {file_path}: {e}")
             if self.service_adapter:

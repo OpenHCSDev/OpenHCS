@@ -109,35 +109,16 @@ class UnifiedParameterAnalyzer:
     
     @staticmethod
     def _analyze_dataclass_type(dataclass_type: Type) -> Dict[str, UnifiedParameterInfo]:
-        """Analyze a dataclass type."""
-        # Extract docstring information
-        docstring_info = DocstringExtractor.extract(dataclass_type)
+        """Analyze a dataclass type using existing SignatureAnalyzer infrastructure."""
+        # CRITICAL FIX: Use existing SignatureAnalyzer._analyze_dataclass method
+        # which already handles all the docstring extraction properly
+        param_info_dict = SignatureAnalyzer._analyze_dataclass(dataclass_type)
 
-        # Get field information
-        fields = dataclasses.fields(dataclass_type)
+        # Convert to unified format
         unified_params = {}
-
-        for field in fields:
-            # Get field description from docstring
-            field_description = docstring_info.parameters.get(field.name)
-
-            # Determine if field is required
-            is_required = field.default == dataclasses.MISSING and field.default_factory == dataclasses.MISSING
-
-            # Get default value
-            if field.default != dataclasses.MISSING:
-                default_value = field.default
-            elif field.default_factory != dataclasses.MISSING:
-                default_value = field.default_factory()
-            else:
-                default_value = None
-
-            unified_params[field.name] = UnifiedParameterInfo(
-                name=field.name,
-                param_type=field.type,
-                default_value=default_value,
-                is_required=is_required,
-                description=field_description,
+        for name, param_info in param_info_dict.items():
+            unified_params[name] = UnifiedParameterInfo.from_parameter_info(
+                param_info,
                 source_type="dataclass"
             )
 
@@ -185,6 +166,7 @@ class UnifiedParameterAnalyzer:
                             param_type=param_info.param_type,
                             default_value=current_value,
                             is_required=param_info.is_required,
+                            description=param_info.description,  # CRITICAL FIX: Include description
                             source_type="object_instance"
                         )
 

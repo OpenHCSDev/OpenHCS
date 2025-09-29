@@ -274,17 +274,12 @@ class FunctionPaneWidget(QWidget):
             # Import the enhanced PyQt6 ParameterFormManager
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager as PyQtParameterFormManager
 
-            # Create enhanced parameter form manager with help and reset buttons
+            # FIXED: Use new simplified constructor
             enhanced_form_manager = PyQtParameterFormManager(
-                parameters=self.form_manager.parameters,
-                parameter_types=self.form_manager.parameter_types,
-                field_id=f"func_{self.index}",
-                dataclass_type=None,  # Function parameters, not dataclass fields
-                parameter_info=self.form_manager.parameter_info,
-                use_scroll_area=False,  # Don't use scroll area in function panes
-                function_target=self.func,  # Pass function for docstring fallback
-                color_scheme=self.color_scheme,
-                param_defaults=getattr(self, 'param_defaults', {})  # CRITICAL FIX: Pass function signature defaults
+                object_instance=self.func,       # Pass function as the object to build form for
+                field_id=f"func_{self.index}",   # Use function index as field identifier
+                parent=self,                     # Pass self as parent widget
+                context_obj=None                 # Functions don't need context for placeholder resolution
             )
 
             # Connect parameter changes

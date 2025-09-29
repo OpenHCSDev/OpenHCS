@@ -128,18 +128,10 @@ class ParameterFormManager(ParameterFormManagerBase):
         with Horizontal() as row:
             row.styles.height = CONSTANTS.AUTO_SIZE
             
-            # ENHANCEMENT: Extract field documentation dynamically if description is missing
-            description = display_info['description']
-            if not description or description == "No description available":
-                from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
-                # Try to extract from global_config_type if available
-                if self.global_config_type:
-                    description = SignatureAnalyzer.extract_field_documentation(self.global_config_type, param_info.name)
-
-            # Parameter label with help
+            # Parameter label with help - use description from parameter analysis
             label = ClickableParameterLabel(
                 param_info.name,
-                description,
+                display_info['description'],
                 param_info.type,
                 classes=CONSTANTS.PARAM_LABEL_CLASS
             )

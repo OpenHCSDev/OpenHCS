@@ -150,8 +150,10 @@ class ParameterFormManager(QWidget):
         self.parameters, self.parameter_types, self.dataclass_type = self._extract_parameters_from_object(object_instance)
 
         # DELEGATE TO SERVICE LAYER: Analyze form structure using service
+        # Use UnifiedParameterAnalyzer-derived descriptions as the single source of truth
+        parameter_info = getattr(self, '_parameter_descriptions', {})
         self.form_structure = self.service.analyze_parameters(
-            self.parameters, self.parameter_types, field_id, None, self.dataclass_type
+            self.parameters, self.parameter_types, field_id, parameter_info, self.dataclass_type
         )
 
         # Auto-detect configuration settings
@@ -166,7 +168,8 @@ class ParameterFormManager(QWidget):
             function_target=object_instance,  # Use object_instance as function_target
             use_scroll_area=self.DEFAULT_USE_SCROLL_AREA
         )
-        config.parameter_info = self._auto_extract_parameter_info()
+        # IMPORTANT: Keep parameter_info consistent with the analyzer output to avoid losing descriptions
+        config.parameter_info = parameter_info
         config.dataclass_type = self.dataclass_type
         config.global_config_type = self.global_config_type
         config.placeholder_prefix = self.placeholder_prefix
@@ -202,10 +205,7 @@ class ParameterFormManager(QWidget):
         self.function_target = config.function_target
         self.color_scheme = config.color_scheme
 
-        # Analyze form structure once using service layer
-        self.form_structure = self.service.analyze_parameters(
-            self.parameters, self.parameter_types, config.field_id, config.parameter_info, self.dataclass_type
-        )
+        # Form structure already analyzed above using UnifiedParameterAnalyzer descriptions
 
         # Get widget creator from registry
         self._widget_creator = create_pyqt6_registry()
@@ -236,11 +236,18 @@ class ParameterFormManager(QWidget):
         parameters = {}
         parameter_types = {}
 
+        # CRITICAL FIX: Store parameter descriptions for docstring display
+        self._parameter_descriptions = {}
+
         for name, param_info in param_info_dict.items():
             # Use the values already extracted by UnifiedParameterAnalyzer
             # This preserves lazy config behavior (None values for unset fields)
             parameters[name] = param_info.default_value
             parameter_types[name] = param_info.param_type
+
+            # CRITICAL FIX: Preserve parameter descriptions for help display
+            if param_info.description:
+                self._parameter_descriptions[name] = param_info.description
 
         return parameters, parameter_types, type(obj)
 
@@ -251,10 +258,6 @@ class ParameterFormManager(QWidget):
         from openhcs.core.config import GlobalPipelineConfig
         return getattr(self.context_obj, 'global_config_type', GlobalPipelineConfig)
 
-    def _auto_extract_parameter_info(self) -> Dict[str, Any]:
-        """Auto-extract parameter information from object docstrings and metadata."""
-        from openhcs.textual_tui.widgets.shared.signature_analyzer import DocstringExtractor
-        return DocstringExtractor.extract(self.object_instance).parameters or {}
 
     def _extract_parameter_defaults(self) -> Dict[str, Any]:
         """Extract parameter defaults - already handled in parameter extraction."""
@@ -279,13 +282,6 @@ class ParameterFormManager(QWidget):
             widget = QLabel(f"ERROR: Widget creation failed for {param_name}")
 
         return widget
-
-
-
-
-
-
-
 
 
 
@@ -541,12 +537,20 @@ class ParameterFormManager(QWidget):
         """Create widget for nested dataclass - DELEGATE TO SERVICE LAYER."""
         display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
 
+        # Always use the inner dataclass type for Optional[T] when wiring help/paths
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+        unwrapped_type = (
+            ParameterTypeUtils.get_optional_inner_type(param_info.type)
+            if ParameterTypeUtils.is_optional_dataclass(param_info.type)
+            else param_info.type
+        )
+
         group_box = GroupBoxWithHelp(
-            title=display_info['field_label'], help_target=param_info.type,
+            title=display_info['field_label'], help_target=unwrapped_type,
             color_scheme=self.config.color_scheme or PyQt6ColorScheme()
         )
         current_value = self.parameters.get(param_info.name)
-        nested_manager = self._create_nested_form_inline(param_info.name, param_info.type, current_value)
+        nested_manager = self._create_nested_form_inline(param_info.name, unwrapped_type, current_value)
 
         nested_form = nested_manager.build_form()
 
@@ -947,24 +951,41 @@ class ParameterFormManager(QWidget):
 
     def _process_nested_values_if_checkbox_enabled(self, name: str, manager: Any, current_values: Dict[str, Any]) -> None:
         """Process nested values if checkbox is enabled - convert dict back to dataclass."""
-        if hasattr(manager, 'get_current_values'):
-            nested_values = manager.get_current_values()
-            if nested_values:
-                # Convert dictionary back to dataclass instance
-                param_type = self.parameter_types.get(name)
-                if param_type and hasattr(param_type, '__dataclass_fields__'):
-                    # Direct dataclass type
-                    current_values[name] = param_type(**nested_values)
-                elif param_type:
-                    # Check if it's Optional[DataclassType]
-                    from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-                    if ParameterTypeUtils.is_optional_dataclass(param_type):
-                        inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
-                        current_values[name] = inner_type(**nested_values)
-                    else:
-                        # Fallback to dictionary if type conversion fails
-                        current_values[name] = nested_values
-                else:
-                    # Fallback to dictionary if no type info
-                    current_values[name] = nested_values
+        if not hasattr(manager, 'get_current_values'):
+            return
+
+        # Check if this is an Optional dataclass with a checkbox
+        param_type = self.parameter_types.get(name)
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+
+        if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
+            # For Optional dataclasses, check if checkbox is enabled
+            checkbox_widget = self.widgets.get(name)
+            if checkbox_widget and hasattr(checkbox_widget, 'findChild'):
+                from PyQt6.QtWidgets import QCheckBox
+                checkbox = checkbox_widget.findChild(QCheckBox)
+                if checkbox and not checkbox.isChecked():
+                    # Checkbox is unchecked, set to None
+                    current_values[name] = None
+                    return
+
+        # Get nested values from the nested form
+        nested_values = manager.get_current_values()
+        if nested_values:
+            # Convert dictionary back to dataclass instance
+            if param_type and hasattr(param_type, '__dataclass_fields__'):
+                # Direct dataclass type
+                current_values[name] = param_type(**nested_values)
+            elif param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
+                # Optional dataclass type
+                inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
+                current_values[name] = inner_type(**nested_values)
+            else:
+                # Fallback to dictionary if type conversion fails
+                current_values[name] = nested_values
+        else:
+            # No nested values, but checkbox might be checked - create empty instance
+            if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
+                inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
+                current_values[name] = inner_type()  # Create with defaults
 

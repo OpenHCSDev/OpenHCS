@@ -359,7 +359,13 @@ class ParameterFormService:
         description = None
         if parameter_info and param_name in parameter_info:
             info_obj = parameter_info[param_name]
-            description = getattr(info_obj, 'description', None)
+            # CRITICAL FIX: Handle both object-style and string-style parameter info
+            if isinstance(info_obj, str):
+                # Simple string description
+                description = info_obj
+            else:
+                # Object with description attribute
+                description = getattr(info_obj, 'description', None)
         
         return ParameterInfo(
             name=param_name,
@@ -384,8 +390,24 @@ class ParameterFormService:
             current_value, dataclass_type, parent_dataclass_type
         )
 
-        # Recursively analyze nested structure
-        return self.analyze_parameters(nested_params, nested_types, nested_field_id)
+        # Recursively analyze nested structure with proper descriptions for nested fields
+        try:
+            # Use existing infrastructure to extract field descriptions for the nested dataclass
+            from openhcs.textual_tui.widgets.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
+            # Prefer instance-based analysis when available so we respect lazy vs concrete values
+            analysis_source = current_value if current_value is not None else dataclass_type
+            nested_param_info = UnifiedParameterAnalyzer.analyze(analysis_source)
+        except Exception:
+            # Fail loud where it matters; but if analysis fails, keep the UI usable
+            nested_param_info = None
+
+        return self.analyze_parameters(
+            nested_params,
+            nested_types,
+            nested_field_id,
+            parameter_info=nested_param_info,
+            parent_dataclass_type=dataclass_type,
+        )
 
     def get_placeholder_text(self, param_name: str, dataclass_type: Type,
                            placeholder_prefix: str = "Pipeline default", context_obj: Any = None) -> Optional[str]:
