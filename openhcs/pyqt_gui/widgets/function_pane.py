@@ -77,14 +77,12 @@ class FunctionPaneWidget(QWidget):
             self.param_defaults = {name: info.default_value for name, info in param_info.items()}
             print(f"🔍 FUNCTION PANE DEBUG: param_defaults = {self.param_defaults}")
 
+            # SIMPLIFIED: Use new generic constructor with function as object_instance
             self.form_manager = ParameterFormManager(
-                parameters=parameters,
-                parameter_types=parameter_types,
-                field_id=f"func_{index}",
-                dataclass_type=None,  # Function parameters, not dataclass
-                parameter_info=param_info,
-                parent=self,
-                param_defaults=self.param_defaults  # CRITICAL FIX: Pass function signature defaults
+                object_instance=self.func,    # Pass function as the object to build form for
+                field_id=f"func_{index}",     # Use function index as field identifier
+                parent=self,                  # Pass self as parent widget
+                context_obj=None              # Functions don't need context for placeholder resolution
             )
         else:
             self.form_manager = None
@@ -502,15 +500,12 @@ class FunctionPaneWidget(QWidget):
             # Store function signature defaults
             self.param_defaults = {name: info.default_value for name, info in param_info.items()}
 
+            # SIMPLIFIED: Use new generic constructor with function as object_instance
             self.form_manager = ParameterFormManager(
-                parameters=parameters,
-                parameter_types=parameter_types,
-                field_id=f"func_{self.index}",
-                dataclass_type=None,  # Function parameters, not dataclass
-                context_provider=None,  # Function forms don't need context provider
-                parameter_info=param_info,
-                parent=self,
-                param_defaults=self.param_defaults  # CRITICAL FIX: Pass function signature defaults
+                object_instance=self.func,       # Pass function as the object to build form for
+                field_id=f"func_{self.index}",   # Use function index as field identifier
+                parent=self,                     # Pass self as parent widget
+                context_obj=None                 # Functions don't need context for placeholder resolution
             )
         else:
             self.form_manager = None

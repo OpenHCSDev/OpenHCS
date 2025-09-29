@@ -18,6 +18,7 @@ from openhcs.core.context.global_config import (
     get_current_global_config,
     set_current_global_config,
 )
+from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 # Note: dual_axis_resolver_recursive and lazy_placeholder imports kept inline to avoid circular imports
 
 
@@ -152,17 +153,38 @@ class LazyMethodBindings:
 
         def __getattribute__(self: Any, name: str) -> Any:
             """
-            Simple two-stage resolution using new context system.
+            Three-stage resolution using new context system.
 
             Stage 1: Check instance value
-            Stage 2: Use pure function resolution with current context
+            Stage 2: Simple field path lookup in current scope's merged config
+            Stage 3: Inheritance resolution using same merged context
             """
             # Stage 1: Get instance value
             value = object.__getattribute__(self, name)
             if value is not None or name not in {f.name for f in fields(self.__class__)}:
                 return value
 
-            # Stage 2: Use pure function resolution
+            # Stage 2: Simple field path lookup in current scope's merged global
+            try:
+                current_context = current_temp_global.get()
+                if current_context is not None:
+                    # Get the config type name for this lazy class
+                    config_field_name = getattr(self, '_config_field_name', None)
+                    if config_field_name:
+                        try:
+                            config_instance = getattr(current_context, config_field_name)
+                            if config_instance is not None:
+                                resolved_value = getattr(config_instance, name)
+                                if resolved_value is not None:
+                                    return resolved_value
+                        except AttributeError:
+                            # Field doesn't exist in merged config, continue to inheritance
+                            pass
+            except LookupError:
+                # No context available, continue to inheritance
+                pass
+
+            # Stage 3: Inheritance resolution using same merged context
             try:
                 current_context = current_temp_global.get()
                 available_configs = extract_all_configs(current_context)
@@ -337,6 +359,13 @@ class LazyDataclassFactory:
             object.__setattr__(self, '_explicitly_set_fields', set(kwargs.keys()))
             # Store the global config type for inheritance resolution
             object.__setattr__(self, '_global_config_type', global_config_type)
+            # Store the config field name for simple field path lookup
+            import re
+            def _camel_to_snake_local(name: str) -> str:
+                s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
+                return re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+            config_field_name = _camel_to_snake_local(base_class.__name__)
+            object.__setattr__(self, '_config_field_name', config_field_name)
             original_init(self, **kwargs)
 
         lazy_class.__init__ = __init_with_tracking__
@@ -619,10 +648,38 @@ def rebuild_lazy_config_with_new_global_reference(
     # Extract current field values without triggering lazy resolution - inline field processing pattern
     def process_field_value(field_obj):
         raw_value = object.__getattribute__(existing_lazy_config, field_obj.name)
+
         if raw_value is not None and hasattr(raw_value, '__dataclass_fields__'):
             try:
-                return rebuild_lazy_config_with_new_global_reference(raw_value, new_global_config, global_config_type)
-            except Exception:
+                # Check if this is a concrete dataclass that should be converted to lazy
+                is_lazy = LazyDefaultPlaceholderService.has_lazy_resolution(type(raw_value))
+
+                if not is_lazy:
+                    lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(type(raw_value))
+
+                    if lazy_type:
+                        # Convert concrete dataclass to lazy version while preserving ONLY non-default field values
+                        # This allows fields that match class defaults to inherit from context
+                        concrete_field_values = {}
+                        for f in fields(raw_value):
+                            field_value = object.__getattribute__(raw_value, f.name)
+
+                            # Get the class default for this field
+                            class_default = getattr(type(raw_value), f.name, None)
+
+                            # Only preserve values that differ from class defaults
+                            # This allows default values to be inherited from context
+                            if field_value != class_default:
+                                concrete_field_values[f.name] = field_value
+
+                        logger.debug(f"Converting concrete {type(raw_value).__name__} to lazy version {lazy_type.__name__} for placeholder resolution")
+                        return lazy_type(**concrete_field_values)
+
+                # If already lazy or no lazy version available, rebuild recursively
+                nested_result = rebuild_lazy_config_with_new_global_reference(raw_value, new_global_config, global_config_type)
+                return nested_result
+            except Exception as e:
+                logger.debug(f"Failed to rebuild nested config {field_obj.name}: {e}")
                 return raw_value
         return raw_value
 

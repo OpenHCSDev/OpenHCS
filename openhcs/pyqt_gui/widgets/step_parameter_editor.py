@@ -94,17 +94,12 @@ class StepParameterEditorWidget(QWidget):
         # SIMPLIFIED: Create parameter form manager using dual-axis resolution
         from openhcs.core.config import GlobalPipelineConfig
 
+        # OBJECT-CENTRIC: Pass step instance - ParameterFormManager will analyze constructor signature
         self.form_manager = ParameterFormManager(
-            parameters, parameter_types, "step", AbstractStep,
-            param_info,
-            parent=self,  # Pass self as parent so form manager can access _step_level_configs
-            color_scheme=self.color_scheme,
-            placeholder_prefix="Pipeline default",
-            param_defaults=param_defaults,
-            global_config_type=GlobalPipelineConfig,  # Enable dual-axis resolution
-            context_event_coordinator=self._step_editor_coordinator,  # Enable live updates if configured
-            context_obj=self.step,  # Pass step as context for nested resolution
-            parent_context_obj=self.pipeline_config  # Pass pipeline config for full context hierarchy
+            object_instance=self.step,  # Pass step instance - constructor signature will be analyzed
+            field_id="step",             # Use "step" as field identifier
+            parent=self,                 # Pass self as parent widget
+            context_obj=self.step        # Pass step instance as context for placeholder resolution
         )
         
         self.setup_ui()

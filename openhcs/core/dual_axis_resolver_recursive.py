@@ -8,7 +8,7 @@ Phase 2.1 Complete: Cleaned up dual-axis resolver to pure function interface.
 """
 
 import logging
-from typing import Any, Dict, Type, Optional
+from typing import Any, Dict, Type, Optional, List
 from dataclasses import is_dataclass
 
 logger = logging.getLogger(__name__)
@@ -32,9 +32,66 @@ def _has_concrete_field_override(source_class, field_name: str) -> bool:
     return False
 
 
-def resolve_field_inheritance(
-    obj, 
-    field_name: str, 
+def _get_config_priority(config_type: Type) -> int:
+    """
+    Get priority level for config types to ensure proper inheritance order.
+
+    Lower numbers = higher priority (processed first in inheritance resolution).
+
+    Priority levels:
+    1. Step-level configs (highest priority)
+    2. Pipeline-level configs (medium priority)
+    3. Global-level configs (lowest priority)
+
+    Within each level, more derived classes get higher priority than base classes.
+    """
+    config_name = config_type.__name__
+
+    # Step-level configs (highest priority)
+    if 'Step' in config_name:
+        if 'Materialization' in config_name:
+            return 1  # StepMaterializationConfig - most specific
+        elif 'WellFilter' in config_name:
+            return 2  # StepWellFilterConfig
+        else:
+            return 3  # Other step configs
+
+    # Pipeline-level configs (medium priority)
+    elif config_name in ['PathPlanningConfig', 'WellFilterConfig', 'ZarrConfig', 'VFSConfig',
+                        'NapariDisplayConfig', 'AnalysisConsolidationConfig', 'PlateMetadataConfig',
+                        'ExperimentalAnalysisConfig', 'FunctionRegistryConfig', 'VisualizerConfig']:
+        if 'PathPlanning' in config_name:
+            return 10  # PathPlanningConfig - more specific than WellFilterConfig
+        elif 'WellFilter' in config_name:
+            return 11  # WellFilterConfig - base class
+        else:
+            return 12  # Other pipeline configs
+
+    # Global-level configs (lowest priority)
+    elif 'Global' in config_name:
+        return 20
+
+    # Default for unknown configs
+    return 15
+
+
+def _sort_configs_by_priority(available_configs: Dict[str, Any]) -> List[tuple]:
+    """
+    Sort available configs by priority to ensure proper inheritance order.
+
+    Returns list of (config_name, config_instance) tuples sorted by priority.
+    """
+    config_items = list(available_configs.items())
+
+    # Sort by priority (lower number = higher priority)
+    sorted_items = sorted(config_items, key=lambda item: _get_config_priority(type(item[1])))
+
+    return sorted_items
+
+
+def resolve_field_inheritance_old(
+    obj,
+    field_name: str,
     available_configs: Dict[str, Any]
 ) -> Any:
     """
@@ -58,24 +115,56 @@ def resolve_field_inheritance(
     4. Return class defaults as final fallback
     """
     obj_type = type(obj)
-    
-    # Step 1: Check concrete value on obj itself
+
+    # Step 1: Check concrete value in merged context for obj's type (HIGHEST PRIORITY)
+    # CRITICAL: Context values take absolute precedence over inheritance blocking
+    # The config_context() manager merges concrete values into available_configs
+    for config_name, config_instance in available_configs.items():
+        if type(config_instance) == obj_type:
+            try:
+                # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
+                value = object.__getattribute__(config_instance, field_name)
+                if value is not None:
+                    if field_name == 'well_filter':
+                        logger.debug(f"🔍 CONTEXT: Found concrete value in merged context {obj_type.__name__}.{field_name}: {value}")
+                    return value
+            except AttributeError:
+                # Field doesn't exist on this config type
+                continue
+
+    # Step 1b: Check concrete value on obj instance itself (fallback)
     # Use object.__getattribute__ to avoid recursion with lazy __getattribute__
     try:
         value = object.__getattribute__(obj, field_name)
         if value is not None:
-            logger.debug(f"Found concrete value on {obj_type.__name__}.{field_name}: {value}")
+            if field_name == 'well_filter':
+                logger.debug(f"🔍 INSTANCE: Found concrete value on instance {obj_type.__name__}.{field_name}: {value}")
             return value
     except AttributeError:
         # Field doesn't exist on the object
         pass
 
+    # Step 2: FIELD-SPECIFIC INHERITANCE BLOCKING
+    # Check if this specific field has a concrete value in the exact same type
+    # Only block inheritance if the EXACT same type has a non-None value
+    for config_name, config_instance in available_configs.items():
+        if type(config_instance) == obj_type:
+            try:
+                field_value = object.__getattribute__(config_instance, field_name)
+                if field_value is not None:
+                    # This exact type has a concrete value - use it, don't inherit
+                    if field_name == 'well_filter':
+                        logger.debug(f"🔍 FIELD-SPECIFIC BLOCKING: {obj_type.__name__}.{field_name} = {field_value} (concrete) - blocking inheritance")
+                    return field_value
+            except AttributeError:
+                continue
+
     # DEBUG: Log what we're trying to resolve
-    if field_name in ['output_dir_suffix', 'sub_dir']:
+    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
         logger.debug(f"🔍 RESOLVING {obj_type.__name__}.{field_name} - checking context and inheritance")
         logger.debug(f"🔍 AVAILABLE CONFIGS: {list(available_configs.keys())}")
-    
-    # Step 2: Y-axis inheritance within obj's MRO
+
+    # Step 3: Y-axis inheritance within obj's MRO
     blocking_class = _find_blocking_class_in_mro(obj_type, field_name)
     
     for parent_type in obj_type.__mro__[1:]:
@@ -110,36 +199,60 @@ def resolve_field_inheritance(
                 try:
                     # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
                     value = object.__getattribute__(config_instance, field_name)
-                    if field_name in ['output_dir_suffix', 'sub_dir']:
+                    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
                         logger.debug(f"🔍 Y-AXIS INHERITANCE: {parent_type.__name__}.{field_name} = {value}")
                     if value is not None:
-                        if field_name in ['output_dir_suffix', 'sub_dir']:
+                        if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
                             logger.debug(f"🔍 Y-AXIS INHERITANCE: FOUND {parent_type.__name__}.{field_name}: {value} (returning)")
                         logger.debug(f"Inherited from {parent_type.__name__}: {value}")
                         return value
                 except AttributeError:
                     # Field doesn't exist on this config type
                     continue
-    
-    # Step 3: Cross-dataclass inheritance from related config types
-    for config_name, config_instance in available_configs.items():
+
+    # Step 4: Cross-dataclass inheritance from related config types (PRIORITY-ORDERED)
+    # NOTE: Inheritance blocking was already applied in Step 2, so this only runs for types without concrete overrides
+    # CRITICAL FIX: Process configs in priority order to ensure proper inheritance hierarchy
+    sorted_configs = _sort_configs_by_priority(available_configs)
+
+    for config_name, config_instance in sorted_configs:
         config_type = type(config_instance)
-        if field_name in ['output_dir_suffix', 'sub_dir']:
-            logger.debug(f"🔍 CROSS-DATACLASS: Checking {config_type.__name__} for {field_name}")
+        if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
+            priority = _get_config_priority(config_type)
+            logger.debug(f"🔍 CROSS-DATACLASS: Checking {config_type.__name__} (priority {priority}) for {field_name}")
+
         if _is_related_config_type(obj_type, config_type):
+            # Skip if this is the same type as the requesting object (avoid self-inheritance)
+            if config_type == obj_type:
+                if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
+                    logger.debug(f"🔍 CROSS-DATACLASS: Skipping self-inheritance from {config_type.__name__}")
+                continue
+
+            # CRITICAL FIX: Prevent lower-priority configs from inheriting from higher-priority configs
+            # Base classes (higher priority numbers) should NOT inherit from derived classes (lower priority numbers)
+            obj_priority = _get_config_priority(obj_type)
+            config_priority = _get_config_priority(config_type)
+
+            if obj_priority > config_priority:
+                # Requesting object has LOWER priority (higher number) than the config - skip inheritance
+                # Example: WellFilterConfig (priority 11) should NOT inherit from StepWellFilterConfig (priority 2)
+                if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
+                    logger.debug(f"🔍 CROSS-DATACLASS: Skipping inheritance from higher-priority {config_type.__name__} (priority {config_priority}) to lower-priority {obj_type.__name__} (priority {obj_priority})")
+                continue
+
             try:
                 # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
                 value = object.__getattribute__(config_instance, field_name)
-                if field_name in ['output_dir_suffix', 'sub_dir']:
+                if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
                     logger.debug(f"🔍 CROSS-DATACLASS: {config_type.__name__}.{field_name} = {value} (related config)")
                 if value is not None:
-                    if field_name in ['output_dir_suffix', 'sub_dir']:
-                        logger.debug(f"🔍 CROSS-DATACLASS: FOUND {config_type.__name__}.{field_name}: {value}")
+                    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
+                        logger.debug(f"🔍 CROSS-DATACLASS: FOUND {config_type.__name__}.{field_name}: {value} (priority {priority})")
                     logger.debug(f"Cross-dataclass inheritance from {config_type.__name__}: {value}")
                     return value
             except AttributeError:
                 # Field doesn't exist on this config type
-                if field_name in ['output_dir_suffix', 'sub_dir']:
+                if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
                     logger.debug(f"🔍 CROSS-DATACLASS: {config_type.__name__} has no field {field_name}")
                 continue
         else:
@@ -166,27 +279,108 @@ def _is_related_config_type(obj_type: Type, config_type: Type) -> bool:
     """
     Check if config_type is related to obj_type for cross-dataclass inheritance.
 
-    Related types are those that:
-    1. Have inheritance relationships (obj_type inherits from config_type or vice versa)
-    2. Share common field names and are part of the same configuration domain
+    CRITICAL FIX: Only allow inheritance from parent classes or sibling classes at the same level,
+    NOT from child classes. This prevents WellFilterConfig from inheriting from StepWellFilterConfig.
+
+    Args:
+        obj_type: The type requesting field resolution
+        config_type: The type being checked for relationship
+
+    Returns:
+        True if config_type should be considered for cross-dataclass inheritance
     """
-
-
-    # Check direct inheritance relationships first
-    if issubclass(obj_type, config_type) or issubclass(config_type, obj_type):
+    # CRITICAL: Only allow inheritance from parent classes (obj_type inherits from config_type)
+    # This prevents base classes from inheriting from their derived classes
+    if issubclass(obj_type, config_type):
         return True
 
-    # Check if they share common dataclass fields
-    if is_dataclass(obj_type) and is_dataclass(config_type):
-        from dataclasses import fields
-        obj_fields = {f.name for f in fields(obj_type)}
-        config_fields = {f.name for f in fields(config_type)}
-        shared_fields = obj_fields & config_fields
-        # If they share more than 2 fields, consider them related
-        if len(shared_fields) > 2:
+    # Allow sibling inheritance only if they share a common parent but neither inherits from the other
+    # This allows StepMaterializationConfig to inherit from both StepWellFilterConfig and PathPlanningConfig
+    if not issubclass(config_type, obj_type):  # config_type is NOT a child of obj_type
+        # Check if they share a common dataclass ancestor (excluding themselves)
+        obj_ancestors = set(cls for cls in obj_type.__mro__[1:] if is_dataclass(cls))  # Skip obj_type itself
+        config_ancestors = set(cls for cls in config_type.__mro__[1:] if is_dataclass(cls))  # Skip config_type itself
+
+        shared_ancestors = obj_ancestors & config_ancestors
+        if shared_ancestors:
             return True
 
     return False
+
+
+def resolve_field_inheritance(
+    obj,
+    field_name: str,
+    available_configs: Dict[str, Any]
+) -> Any:
+    """
+    Simplified MRO-based inheritance resolution.
+
+    ALGORITHM:
+    1. Check if obj has concrete value for field_name in context
+    2. Traverse obj's MRO from most to least specific
+    3. For each MRO class, check if there's a config instance in context with concrete (non-None) value
+    4. Return first concrete value found
+
+    Args:
+        obj: The object requesting field resolution
+        field_name: Name of the field to resolve
+        available_configs: Dict mapping config type names to config instances
+
+    Returns:
+        Resolved field value or None if not found
+    """
+    obj_type = type(obj)
+
+    # Step 1: Check if exact same type has concrete value in context
+    for config_name, config_instance in available_configs.items():
+        if type(config_instance) == obj_type:
+            try:
+                field_value = object.__getattribute__(config_instance, field_name)
+                if field_value is not None:
+                    if field_name == 'well_filter':
+                        logger.debug(f"🔍 CONCRETE VALUE: {obj_type.__name__}.{field_name} = {field_value}")
+                    return field_value
+            except AttributeError:
+                continue
+
+    # Step 2: MRO-based inheritance - traverse MRO from most to least specific
+    # For each class in the MRO, check if there's a config instance in context with concrete value
+    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
+        logger.debug(f"🔍 MRO-INHERITANCE: Resolving {obj_type.__name__}.{field_name}")
+        logger.debug(f"🔍 MRO-INHERITANCE: MRO = {[cls.__name__ for cls in obj_type.__mro__]}")
+
+    for mro_class in obj_type.__mro__:
+        if not is_dataclass(mro_class):
+            continue
+
+        # Look for a config instance of this MRO class type in the available configs
+        for config_name, config_instance in available_configs.items():
+            if type(config_instance) == mro_class:
+                try:
+                    value = object.__getattribute__(config_instance, field_name)
+                    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
+                        logger.debug(f"🔍 MRO-INHERITANCE: {mro_class.__name__}.{field_name} = {value}")
+                    if value is not None:
+                        if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
+                            logger.debug(f"🔍 MRO-INHERITANCE: FOUND {mro_class.__name__}.{field_name}: {value} (returning)")
+                        return value
+                except AttributeError:
+                    continue
+
+    # Step 3: Class defaults as final fallback
+    try:
+        class_default = object.__getattribute__(obj_type, field_name)
+        if class_default is not None:
+            if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
+                logger.debug(f"🔍 CLASS-DEFAULT: {obj_type.__name__}.{field_name} = {class_default}")
+            return class_default
+    except AttributeError:
+        pass
+
+    if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
+        logger.debug(f"🔍 NO-RESOLUTION: {obj_type.__name__}.{field_name} = None")
+    return None
 
 
 # Utility functions for inheritance detection (kept from original resolver)
@@ -196,13 +390,22 @@ def _has_concrete_field_override(config_class: Type, field_name: str) -> bool:
     Check if a class has a concrete field override (not None).
 
     This determines class-level inheritance blocking behavior based on static class definition.
+    Now checks the entire MRO chain to handle inherited fields properly.
     """
     try:
-        # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
-        class_attr_value = object.__getattribute__(config_class, field_name)
-        has_override = class_attr_value is not None
-        logger.debug(f"Class override check {config_class.__name__}.{field_name}: value={class_attr_value}, has_override={has_override}")
-        return has_override
+        # Check the entire MRO chain for concrete field values
+        for cls in config_class.__mro__:
+            if hasattr(cls, field_name):
+                # Use object.__getattribute__ to avoid triggering lazy __getattribute__ recursion
+                class_attr_value = object.__getattribute__(cls, field_name)
+                if class_attr_value is not None:
+                    has_override = True
+                    logger.debug(f"Class override check {config_class.__name__}.{field_name}: found concrete value {class_attr_value} in {cls.__name__}, has_override={has_override}")
+                    return has_override
+
+        # No concrete value found in any class in the MRO
+        logger.debug(f"Class override check {config_class.__name__}.{field_name}: no concrete value in MRO, has_override=False")
+        return False
     except AttributeError:
         # Field doesn't exist on class
         return False

@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 class DualEditorWindow(QDialog):
     """
-    PyQt6 Dual Editor Window.
-    
-    Step and function editing dialog with tabbed interface for comprehensive editing.
-    Preserves all business logic from Textual version with clean PyQt6 UI.
+    PyQt6 Multi-Tab Parameter Editor Window.
+
+    Generic parameter editing dialog with inheritance hierarchy-based tabbed interface.
+    Creates one tab per class in the inheritance hierarchy, showing parameters specific
+    to each class level. Preserves all business logic from Textual version with clean PyQt6 UI.
     """
     
     # Signals
@@ -81,8 +82,8 @@ class DualEditorWindow(QDialog):
         
         # UI components
         self.tab_widget: Optional[QTabWidget] = None
-        self.step_editor: Optional[QWidget] = None
-        self.func_editor: Optional[QWidget] = None
+        self.parameter_editors: Dict[str, QWidget] = {}  # Map tab titles to editor widgets
+        self.class_hierarchy: List = []  # Store inheritance hierarchy info
         
         # Setup UI
         self.setup_ui()

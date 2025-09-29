@@ -28,7 +28,7 @@ from openhcs.constants.constants import (DEFAULT_IMAGE_EXTENSION,
                                              MemoryType, VariableComponents, GroupBy)
 from openhcs.constants.input_source import InputSource
 from openhcs.core.context.processing_context import ProcessingContext
-from openhcs.core.steps.abstract import AbstractStep, get_step_id
+from openhcs.core.steps.abstract import AbstractStep
 from openhcs.formats.func_arg_prep import prepare_patterns_and_functions
 from openhcs.core.memory.stack_utils import stack_slices, unstack_slices
 # OpenHCS imports moved to local imports to avoid circular dependencies

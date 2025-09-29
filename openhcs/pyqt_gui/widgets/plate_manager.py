@@ -571,29 +571,16 @@ class PlateManagerWidget(QWidget):
         """
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
 
-        # CRITICAL FIX: Use pipeline_config context for proper placeholder resolution
-        # This ensures the config window uses the correct pipeline config context for inheritance
-        if orchestrator and hasattr(orchestrator, 'pipeline_config'):
-            from openhcs.core.context.contextvars_context import config_context
-            with config_context(orchestrator.pipeline_config):
-                config_window = ConfigWindow(
-                    config_class,           # config_class
-                    current_config,         # current_config
-                    on_save_callback,       # on_save_callback
-                    self.color_scheme,      # color_scheme
-                    self,                   # parent
-                    orchestrator=orchestrator  # Pass orchestrator for context persistence
-                )
-        else:
-            # Fallback for global config or when no orchestrator is provided
-            config_window = ConfigWindow(
-                config_class,           # config_class
-                current_config,         # current_config
-                on_save_callback,       # on_save_callback
-                self.color_scheme,      # color_scheme
-                self,                   # parent
-                orchestrator=orchestrator  # Pass orchestrator for context persistence
-            )
+        # SIMPLIFIED: ConfigWindow now uses the dataclass instance directly for context
+        # No need for external context management - the form manager handles it automatically
+        config_window = ConfigWindow(
+            config_class,           # config_class
+            current_config,         # current_config
+            on_save_callback,       # on_save_callback
+            self.color_scheme,      # color_scheme
+            self,                   # parent
+            orchestrator=orchestrator  # Pass orchestrator for reference (not context)
+        )
 
         # CRITICAL: Connect to orchestrator config changes for automatic refresh
         # This ensures the config window stays in sync when tier 3 edits change the underlying config

@@ -347,8 +347,8 @@ class ParameterFormService:
     def _create_parameter_info(self, param_name: str, param_type: Type, current_value: Any,
                              parameter_info: Optional[Dict] = None) -> ParameterInfo:
         """Create parameter information object."""
-        # Check if it's an optional dataclass
-        is_optional = self._type_utils.is_optional_dataclass(param_type)
+        # Check if it's any optional type
+        is_optional = self._type_utils.is_optional(param_type)
         if is_optional:
             inner_type = self._type_utils.get_optional_inner_type(param_type)
             is_nested = dataclasses.is_dataclass(inner_type)
@@ -388,21 +388,35 @@ class ParameterFormService:
         return self.analyze_parameters(nested_params, nested_types, nested_field_id)
 
     def get_placeholder_text(self, param_name: str, dataclass_type: Type,
-                           placeholder_prefix: str = "Pipeline default") -> Optional[str]:
+                           placeholder_prefix: str = "Pipeline default", context_obj: Any = None) -> Optional[str]:
         """
-        Get placeholder text using existing OpenHCS infrastructure.
+        Get placeholder text using existing OpenHCS infrastructure with proper context.
 
         Args:
             param_name: Name of the parameter to get placeholder for
             dataclass_type: The specific dataclass type (GlobalPipelineConfig or PipelineConfig)
             placeholder_prefix: Prefix for the placeholder text
+            context_obj: Context object for placeholder resolution (orchestrator, pipeline_config, etc.)
 
         The editing mode is automatically derived from the dataclass type's lazy resolution capabilities:
         - Has lazy resolution (PipelineConfig) → orchestrator config editing
         - No lazy resolution (GlobalPipelineConfig) → global config editing
         """
-        # Automatically derive editing mode from dataclass type capabilities
-        is_global_config_editing = not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
+        # Use the simplified placeholder service with proper context
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+        from openhcs.core.context.contextvars_context import config_context
+
+        # If context_obj is provided, use it to set the proper context for placeholder resolution
+        if context_obj is not None:
+            with config_context(context_obj):
+                return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                    dataclass_type, param_name, placeholder_prefix
+                )
+        else:
+            # Fallback to no context (will use static defaults)
+            return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+                dataclass_type, param_name, placeholder_prefix
+            )
 
     def reset_nested_managers(self, nested_managers: Dict[str, Any],
                             dataclass_type: Type, current_config: Any) -> None:

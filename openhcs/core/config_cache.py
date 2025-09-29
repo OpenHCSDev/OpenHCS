@@ -87,7 +87,15 @@ def _sync_load_config(cache_file: Path) -> Optional[GlobalPipelineConfig]:
 
         if hasattr(cached_config, '__dataclass_fields__'):
             logger.debug(f"Loaded cached config from: {cache_file}")
-            return _migrate_dataclass(cached_config, GlobalPipelineConfig)
+            migrated_config = _migrate_dataclass(cached_config, GlobalPipelineConfig)
+
+            # CRITICAL FIX: Establish global config context after loading for proper placeholder resolution
+            # This ensures that nested dataclass placeholders can resolve from the loaded GlobalPipelineConfig
+            from openhcs.core.lazy_config import ensure_global_config_context
+            ensure_global_config_context(GlobalPipelineConfig, migrated_config)
+            logger.debug("Established global config context for loaded cached config")
+
+            return migrated_config
         else:
             logger.warning(f"Invalid config type in cache: {type(cached_config)}")
             return None
@@ -169,10 +177,10 @@ def get_global_config_cache(strategy: Optional[CacheExecutionStrategy] = None) -
 async def load_cached_global_config(strategy: Optional[CacheExecutionStrategy] = None) -> GlobalPipelineConfig:
     """
     Load global config with cache fallback.
-    
+
     Args:
         strategy: Optional execution strategy (defaults to async)
-    
+
     Returns:
         GlobalPipelineConfig (cached or default)
     """
@@ -181,13 +189,26 @@ async def load_cached_global_config(strategy: Optional[CacheExecutionStrategy] =
         cached_config = await cache.load_cached_config()
         if cached_config is not None:
             logger.info("Using cached global configuration")
+
+            # CRITICAL FIX: Establish global config context after loading for proper placeholder resolution
+            # This ensures that nested dataclass placeholders can resolve from the loaded GlobalPipelineConfig
+            from openhcs.core.lazy_config import ensure_global_config_context
+            ensure_global_config_context(GlobalPipelineConfig, cached_config)
+            logger.debug("Established global config context for loaded cached config")
+
             return cached_config
     except Exception as e:
         logger.warning(f"Failed to load cached config, using defaults: {e}")
-    
+
     # Fallback to default config
     logger.info("Using default global configuration")
-    return GlobalPipelineConfig()
+    default_config = GlobalPipelineConfig()
+
+    # CRITICAL FIX: Also establish context for default config
+    from openhcs.core.lazy_config import ensure_global_config_context
+    ensure_global_config_context(GlobalPipelineConfig, default_config)
+
+    return default_config
 
 
 def load_cached_global_config_sync() -> GlobalPipelineConfig:
@@ -203,10 +224,17 @@ def load_cached_global_config_sync() -> GlobalPipelineConfig:
         cached_config = _sync_load_config(cache_file)
         if cached_config is not None:
             logger.info("Using cached global configuration")
+            # Note: _sync_load_config already establishes context for cached configs
             return cached_config
     except Exception as e:
         logger.warning(f"Failed to load cached config, using defaults: {e}")
 
     # Fallback to default config
     logger.info("Using default global configuration")
-    return GlobalPipelineConfig()
+    default_config = GlobalPipelineConfig()
+
+    # CRITICAL FIX: Also establish context for default config
+    from openhcs.core.lazy_config import ensure_global_config_context
+    ensure_global_config_context(GlobalPipelineConfig, default_config)
+
+    return default_config

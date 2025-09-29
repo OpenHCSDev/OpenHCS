@@ -1085,7 +1085,7 @@ class PipelineEditorWidget(QWidget):
         # CRITICAL FIX: Refresh all placeholders when global config changes
         # This ensures pipeline config editor shows updated inherited values
         if hasattr(self, 'form_manager') and self.form_manager:
-            self.form_manager.refresh_placeholder_text()
+            self.form_manager._refresh_all_placeholders()
             logger.info("Refreshed pipeline config placeholders after global config change")
 
 

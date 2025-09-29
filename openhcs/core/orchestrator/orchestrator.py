@@ -31,7 +31,7 @@ from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
-from openhcs.core.steps.abstract import AbstractStep, get_step_id
+from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.io.filemanager import FileManager
 # Zarr backend is CPU-only; always import it (even in subprocess/no-GPU mode)

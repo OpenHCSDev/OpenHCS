@@ -84,31 +84,20 @@ class ConfigWindow(QDialog):
         root_field_id = type(current_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
         global_config_type = GlobalPipelineConfig  # Always use GlobalPipelineConfig for dual-axis resolution
 
-        # Use new context system instead of ContextEventCoordinator
+        # CORRECT: Use the full config as context for inheritance
+        # current_config is the full PipelineConfig or GlobalPipelineConfig that contains all nested configs
+        # This allows inheritance: path_planning_config.well_filter can inherit from well_filter_config.well_filter
+        context_for_inheritance = current_config  # Full config with all nested configs
 
-        # Create form manager within pipeline config context if available
-        if orchestrator and hasattr(orchestrator, 'pipeline_config'):
-            with config_context(orchestrator.pipeline_config):
-                self.form_manager = ParameterFormManager.from_dataclass_instance(
-                    dataclass_instance=current_config,
-                    field_id=root_field_id,
-                    placeholder_prefix=placeholder_prefix,
-                    color_scheme=self.color_scheme,
-                    use_scroll_area=True,
-                    global_config_type=global_config_type,
-                    context_event_coordinator=None,  # No longer needed with new context system
-                    context_obj=orchestrator.pipeline_config  # Pass pipeline_config as context object
-                )
-        else:
-            self.form_manager = ParameterFormManager.from_dataclass_instance(
-                dataclass_instance=current_config,
-                field_id=root_field_id,
-                placeholder_prefix=placeholder_prefix,
-                color_scheme=self.color_scheme,
-                use_scroll_area=True,
-                global_config_type=global_config_type,
-                context_event_coordinator=None  # No longer needed with new context system
-            )
+        self.form_manager = ParameterFormManager.from_dataclass_instance(
+            dataclass_instance=current_config,
+            field_id=root_field_id,
+            placeholder_prefix=placeholder_prefix,
+            color_scheme=self.color_scheme,
+            use_scroll_area=True,
+            global_config_type=global_config_type,
+            context_obj=context_for_inheritance  # Pass the full context for inheritance
+        )
 
         # No config_editor needed - everything goes through form_manager
         self.config_editor = None
@@ -496,7 +485,7 @@ class ConfigWindow(QDialog):
         self.form_manager.reset_all_parameters()
 
         # Refresh placeholder text to ensure UI shows correct defaults
-        self.form_manager.refresh_placeholder_text()
+        self.form_manager._refresh_all_placeholders()
 
         logger.debug("Reset all parameters using enhanced ParameterFormManager service")
 
@@ -523,29 +512,15 @@ class ConfigWindow(QDialog):
             # SIMPLIFIED: Create new form manager with dual-axis resolution
             root_field_id = type(new_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
 
-            # Use new context system instead of ContextEventCoordinator
-            if self.orchestrator:
-                with config_context(self.orchestrator):
-                    new_form_manager = ParameterFormManager.from_dataclass_instance(
-                        dataclass_instance=new_config,
-                        field_id=root_field_id,
-                        placeholder_prefix=placeholder_prefix,
-                        color_scheme=self.color_scheme,
-                        use_scroll_area=True,
-                        global_config_type=GlobalPipelineConfig,  # FIXED: Always use GlobalPipelineConfig for dual-axis resolution
-                        context_event_coordinator=None,  # No longer needed with new context system
-                        context_obj=self.orchestrator  # Pass orchestrator as generic context object
-                    )
-            else:
-                new_form_manager = ParameterFormManager.from_dataclass_instance(
-                    dataclass_instance=new_config,
-                    field_id=root_field_id,
-                    placeholder_prefix=placeholder_prefix,
-                    color_scheme=self.color_scheme,
-                    use_scroll_area=True,
-                    global_config_type=GlobalPipelineConfig,  # FIXED: Always use GlobalPipelineConfig for dual-axis resolution
-                    context_event_coordinator=None  # No longer needed with new context system
-                )
+            # FIXED: Use the dataclass instance itself for context consistently
+            new_form_manager = ParameterFormManager.from_dataclass_instance(
+                dataclass_instance=new_config,
+                field_id=root_field_id,
+                placeholder_prefix=placeholder_prefix,
+                color_scheme=self.color_scheme,
+                use_scroll_area=True,
+                global_config_type=GlobalPipelineConfig
+            )
 
             # Find and replace the form widget in the layout
             # Layout structure: [0] header, [1] form/scroll_area, [2] buttons

@@ -109,10 +109,13 @@ class TypedWidgetFactory:
         """
         try:
             # Handle complex types first (Optional, Union, List)
-            resolved_type = self._resolve_complex_type(param_type)
-            if resolved_type != param_type:
-                # Recursively handle the resolved type
-                return self.create_widget(param_name, resolved_type, current_value)
+            # NOTE: Don't resolve Optional types here - they should be handled by ParameterFormManager
+            # with checkbox controls. Only resolve other complex types.
+            if not self._is_optional_type(param_type):
+                resolved_type = self._resolve_complex_type(param_type)
+                if resolved_type != param_type:
+                    # Recursively handle the resolved type
+                    return self.create_widget(param_name, resolved_type, current_value)
 
             # Special case: if current_value is None for basic types, use placeholder widget
             if current_value is None and resolved_type in [int, float, bool]:
@@ -182,6 +185,19 @@ class TypedWidgetFactory:
         except Exception:
             # If anything goes wrong, return original type
             return param_type
+
+    def _is_optional_type(self, param_type):
+        """Check if type is Optional[T] (Union[T, None])."""
+        try:
+            origin = get_origin(param_type)
+            args = get_args(param_type)
+
+            # Handle Optional[T] (which is Union[T, None])
+            if origin is Union:
+                return len(args) == 2 and type(None) in args
+            return False
+        except Exception:
+            return False
 
     def _is_list_of_enums(self, param_type) -> bool:
         """Check if parameter type is List[Enum]."""
