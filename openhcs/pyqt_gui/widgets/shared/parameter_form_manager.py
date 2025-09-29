@@ -862,6 +862,36 @@ class ParameterFormManager(QWidget):
                     from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
                     PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
+        # Optional dataclass UI sync: toggle checkbox and reset nested manager/widgets
+        try:
+            from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+            param_type = self.parameter_types.get(param_name)
+            if param_type and ParameterTypeUtils.is_optional_dataclass(param_type) and param_name in self.widgets:
+                container = self.widgets[param_name]
+                # Toggle the optional checkbox to match reset_value (None -> unchecked)
+                from PyQt6.QtWidgets import QCheckBox
+                ids = self.service.generate_field_ids_direct(self.config.field_id, param_name)
+                checkbox = container.findChild(QCheckBox, ids['optional_checkbox_id'])
+                if checkbox:
+                    checkbox.blockSignals(True)
+                    checkbox.setChecked(reset_value is not None)
+                    checkbox.blockSignals(False)
+                # Reset nested manager contents too
+                nested_manager = self.nested_managers.get(param_name)
+                if nested_manager and hasattr(nested_manager, 'reset_all_parameters'):
+                    nested_manager.reset_all_parameters()
+                # Enable/disable the nested group visually without relying on signals
+                try:
+                    from .clickable_help_components import GroupBoxWithHelp
+                    group = container.findChild(GroupBoxWithHelp)
+                    if group:
+                        group.setEnabled(reset_value is not None)
+                except Exception:
+                    pass
+        except Exception:
+            # Fail loud elsewhere; do not block reset on UI sync issues
+            pass
+
         # Emit parameter change to notify other components
         self.parameter_changed.emit(param_name, reset_value)
 
