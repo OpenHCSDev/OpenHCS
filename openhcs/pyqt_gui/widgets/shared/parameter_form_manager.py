@@ -215,9 +215,7 @@ class ParameterFormManager(QWidget):
         # Set up UI
         self.setup_ui()
 
-        # Connect parameter changes to live placeholder updates
-        # When any field changes, refresh all placeholders using current form state
-        self.parameter_changed.connect(self._on_parameter_changed_refresh_placeholders)
+        # Parameter changes are handled by the context system automatically
 
         # NOTE: Placeholder refresh moved to from_dataclass_instance after user-set detection
 
@@ -655,9 +653,6 @@ class ParameterFormManager(QWidget):
             parent=self,
             context_obj=self.context_obj
         )
-        # Store parent manager reference for placeholder resolution (avoid QWidget.parent() method)
-        nested_manager._parent_manager = self
-
         # Inherit lazy/global editing context from parent so resets behave correctly in nested forms
         try:
             nested_manager.config.is_lazy_dataclass = self.config.is_lazy_dataclass
@@ -665,9 +660,6 @@ class ParameterFormManager(QWidget):
         except Exception:
             pass
 
-        # CRITICAL: Connect nested manager's parameter_changed signal to parent's refresh handler
-        # This ensures changes in nested forms trigger placeholder updates in parent and siblings
-        nested_manager.parameter_changed.connect(self._on_nested_parameter_changed)
 
         # Store nested manager
         self.nested_managers[param_name] = nested_manager
@@ -960,16 +952,20 @@ class ParameterFormManager(QWidget):
             widget = self.widgets[param_name]
             self.update_widget_value(widget, reset_value, param_name)
 
+            # Apply placeholder only if reset value is None (lazy behavior)
+            if reset_value is None:
+                # Build overlay from current form state
+                overlay = self.get_current_values()
+
+                # Build context stack: parent context + overlay
+                with self._build_context_stack(overlay):
+                    placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
+                    if placeholder_text:
+                        from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
+                        PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+
         # Emit parameter change to notify other components
         self.parameter_changed.emit(param_name, reset_value)
-
-        # CRITICAL FIX: Refresh placeholders AFTER emitting parameter change
-        # This ensures the overlay used for placeholder resolution includes the reset value (None)
-        # and matches the behavior of reset_all_parameters() which refreshes at the end
-        if reset_value is None:
-            # Use _refresh_all_placeholders() which properly builds context with current form state
-            # This ensures placeholders resolve through GlobalPipelineConfig correctly
-            self._refresh_all_placeholders()
 
     def _get_reset_value(self, param_name: str) -> Any:
         """Get reset value using context dispatch."""
@@ -1037,24 +1033,22 @@ class ParameterFormManager(QWidget):
 
         return user_modified
 
-    def _build_context_stack(self, overlay, parent_overlay=None):
+    def _build_context_stack(self, overlay):
         """Build nested config_context() calls for placeholder resolution.
 
         Context stack order:
         1. Thread-local GlobalPipelineConfig (automatic base)
         2. Parent context(s) from self.context_obj (if provided)
-        3. Parent's current form values (from parent_overlay parameter)
-        4. Overlay from current form values (always applied last)
+        3. Overlay from current form values (always applied last)
 
         Args:
             overlay: Current form values (from get_current_values()) - dict or dataclass instance
-            parent_overlay: Optional parent form's current values to include in context
 
         Returns:
             ExitStack with nested contexts
         """
         from contextlib import ExitStack
-        from openhcs.core.context.contextvars_context import config_context, get_current_temp_global, get_base_global_config
+        from openhcs.core.context.contextvars_context import config_context
 
         stack = ExitStack()
 
@@ -1067,23 +1061,6 @@ class ParameterFormManager(QWidget):
             else:
                 # Single parent context (Step Editor: pipeline_config)
                 stack.enter_context(config_context(self.context_obj))
-
-        # CRITICAL: If parent_overlay is provided, use it to create context with sibling values
-        # This ensures sibling dataclass values are visible during placeholder resolution
-        if parent_overlay is not None:
-            try:
-                logger.info(f"🔍 Building context for {self.field_id}, parent_overlay: {parent_overlay}")
-                # Get parent manager - check if it's a ParameterFormManager instance
-                parent_manager = getattr(self, '_parent_manager', None)
-                if parent_manager and hasattr(parent_manager, 'dataclass_type') and parent_manager.dataclass_type:
-                    parent_overlay_instance = parent_manager.dataclass_type(**parent_overlay)
-                    logger.info(f"🔍 Created parent overlay instance: {parent_overlay_instance}")
-                    stack.enter_context(config_context(parent_overlay_instance))
-                else:
-                    logger.info(f"⚠️ No parent manager or dataclass_type found, skipping parent overlay")
-            except Exception as e:
-                # If parent context fails, continue without it
-                logger.warning(f"Failed to build parent context from overlay: {e}")
 
         # Convert overlay dict to dataclass instance for config_context()
         # config_context() expects an object with attributes, not a dict
@@ -1106,55 +1083,8 @@ class ParameterFormManager(QWidget):
 
         return stack
 
-    def _on_parameter_changed_refresh_placeholders(self, param_name: str, value: Any) -> None:
-        """
-        Handle parameter changes by refreshing all placeholders with current form state.
-
-        This enables live placeholder updates - when you change a field, all other fields
-        with None values see their placeholders update to reflect the current form state.
-        """
-        logger.info(f"🔄 Parameter changed in {self.field_id}: {param_name}={value}, refreshing placeholders")
-
-        # CRITICAL FIX: If this is a nested form, get parent_overlay from parent manager
-        # This ensures nested forms always resolve placeholders with sibling context
-        parent_overlay = None
-        parent_manager = getattr(self, '_parent_manager', None)
-        if parent_manager and hasattr(parent_manager, 'get_current_values'):
-            parent_overlay = parent_manager.get_current_values()
-            logger.info(f"🔄 Got parent overlay for {self.field_id}: {parent_overlay}")
-
-        # Refresh all placeholders using current form values + parent overlay
-        self._refresh_all_placeholders(parent_overlay=parent_overlay)
-
-        # Also refresh placeholders in nested managers, passing parent overlay
-        current_overlay = self.get_current_values()
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(parent_overlay=current_overlay))
-
-    def _on_nested_parameter_changed(self, param_name: str, value: Any) -> None:
-        """
-        Handle parameter changes from nested forms.
-
-        When a nested form's field changes, we need to:
-        1. Refresh parent form's placeholders (in case they inherit from nested values)
-        2. Refresh all sibling nested forms' placeholders
-        3. The nested form that changed already refreshed its own placeholders
-        """
-        logger.info(f"🔄 Nested parameter changed in {self.field_id}: {param_name}={value}, refreshing parent and siblings")
-
-        # Refresh parent form's placeholders
-        self._refresh_all_placeholders()
-
-        # Refresh all nested managers' placeholders (including siblings), passing parent overlay
-        parent_overlay = self.get_current_values()
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(parent_overlay=parent_overlay))
-
-    def _refresh_all_placeholders(self, parent_overlay=None) -> None:
-        """
-        Refresh placeholder text for all widgets in this form.
-
-        Args:
-            parent_overlay: Optional parent form's current values to include in context
-        """
+    def _refresh_all_placeholders(self) -> None:
+        """Refresh placeholder text for all widgets in this form."""
         # Allow placeholder refresh for nested forms even if they're not detected as lazy dataclasses
         # The placeholder service will determine if placeholders are available
         if not self.dataclass_type:
@@ -1162,23 +1092,16 @@ class ParameterFormManager(QWidget):
 
         # Build overlay from current form state
         overlay = self.get_current_values()
-        logger.info(f"🔍 Refreshing placeholders for {self.field_id}, overlay: {overlay}, parent_overlay: {parent_overlay}")
 
-        # Build context stack: parent context + parent overlay + own overlay
-        with self._build_context_stack(overlay, parent_overlay=parent_overlay):
+        # Build context stack: parent context + overlay
+        with self._build_context_stack(overlay):
             for param_name, widget in self.widgets.items():
-                # CRITICAL: Check current value from overlay (live form state), not stale self.parameters
-                current_value = overlay.get(param_name) if isinstance(overlay, dict) else getattr(overlay, param_name, None)
+                current_value = self.parameters.get(param_name)
                 if current_value is None:
                     placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                     if placeholder_text:
-                        logger.info(f"  ✅ Updating placeholder for {param_name}: {placeholder_text}")
                         from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
                         PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
-                    else:
-                        logger.info(f"  ⚠️ No placeholder text for {param_name}")
-                else:
-                    logger.info(f"  ⏭️ Skipping {param_name} (has value: {current_value})")
 
     def _apply_to_nested_managers(self, operation_func: callable) -> None:
         """Apply operation to all nested managers."""
