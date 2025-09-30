@@ -186,7 +186,9 @@ class UnifiedParameterAnalyzer:
 
         # Check if this specific instance is a lazy config - if so, use raw field values
         from openhcs.core.lazy_config import get_base_type_for_lazy, _get_raw_field_value
-        is_lazy_config = get_base_type_for_lazy(dataclass_type) is not None and dataclass_type.__name__.startswith('Lazy')
+        # CRITICAL FIX: Don't check class name - PipelineConfig is lazy but doesn't start with "Lazy"
+        # get_base_type_for_lazy() is the authoritative check for lazy dataclasses
+        is_lazy_config = get_base_type_for_lazy(dataclass_type) is not None
 
         # Update default values with current instance values
         for name, param_info in unified_params.items():
