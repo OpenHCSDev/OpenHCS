@@ -432,35 +432,33 @@ class ParameterFormService:
         )
 
     def get_placeholder_text(self, param_name: str, dataclass_type: Type,
-                           placeholder_prefix: str = "Pipeline default", context_obj: Any = None) -> Optional[str]:
+                           placeholder_prefix: str = "Pipeline default") -> Optional[str]:
         """
-        Get placeholder text using existing OpenHCS infrastructure with proper context.
+        Get placeholder text using existing OpenHCS infrastructure.
+
+        Context must be established by the caller using config_context() before calling this method.
+        This allows the caller to build proper context stacks (parent + overlay) for accurate
+        placeholder resolution.
 
         Args:
             param_name: Name of the parameter to get placeholder for
             dataclass_type: The specific dataclass type (GlobalPipelineConfig or PipelineConfig)
             placeholder_prefix: Prefix for the placeholder text
-            context_obj: Context object for placeholder resolution (orchestrator, pipeline_config, etc.)
+
+        Returns:
+            Formatted placeholder text or None if no resolution possible
 
         The editing mode is automatically derived from the dataclass type's lazy resolution capabilities:
         - Has lazy resolution (PipelineConfig) → orchestrator config editing
         - No lazy resolution (GlobalPipelineConfig) → global config editing
         """
-        # Use the simplified placeholder service with proper context
+        # Use the simplified placeholder service - caller manages context
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-        from openhcs.core.context.contextvars_context import config_context
 
-        # If context_obj is provided, use it to set the proper context for placeholder resolution
-        if context_obj is not None:
-            with config_context(context_obj):
-                return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                    dataclass_type, param_name, placeholder_prefix
-                )
-        else:
-            # Fallback to no context (will use static defaults)
-            return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
-                dataclass_type, param_name, placeholder_prefix
-            )
+        # Service just resolves placeholders, caller manages context
+        return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+            dataclass_type, param_name, placeholder_prefix
+        )
 
     def reset_nested_managers(self, nested_managers: Dict[str, Any],
                             dataclass_type: Type, current_config: Any) -> None:

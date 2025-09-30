@@ -48,8 +48,7 @@ class ConfigWindow(QDialog):
 
     def __init__(self, config_class: Type, current_config: Any,
                  on_save_callback: Optional[Callable] = None,
-                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,
-                 orchestrator=None):
+                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,):
         """
         Initialize the configuration window.
 
@@ -67,7 +66,7 @@ class ConfigWindow(QDialog):
         self.config_class = config_class
         self.current_config = current_config
         self.on_save_callback = on_save_callback
-        self.orchestrator = orchestrator  # Store orchestrator reference for context persistence
+
 
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
@@ -84,10 +83,10 @@ class ConfigWindow(QDialog):
         root_field_id = type(current_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
         global_config_type = GlobalPipelineConfig  # Always use GlobalPipelineConfig for dual-axis resolution
 
-        # CORRECT: Use the full config as context for inheritance
-        # current_config is the full PipelineConfig or GlobalPipelineConfig that contains all nested configs
-        # This allows inheritance: path_planning_config.well_filter can inherit from well_filter_config.well_filter
-        context_for_inheritance = current_config  # Full config with all nested configs
+        # CRITICAL FIX: Pipeline Config Editor should NOT use itself as parent context
+        # context_obj=None means inherit from thread-local GlobalPipelineConfig only
+        # The overlay (current form state) will be built by ParameterFormManager
+        # This fixes the circular context bug where reset showed old values instead of global defaults
 
         self.form_manager = ParameterFormManager.from_dataclass_instance(
             dataclass_instance=current_config,
@@ -96,7 +95,7 @@ class ConfigWindow(QDialog):
             color_scheme=self.color_scheme,
             use_scroll_area=True,
             global_config_type=global_config_type,
-            context_obj=context_for_inheritance  # Pass the full context for inheritance
+            context_obj=None  # Inherit from thread-local GlobalPipelineConfig only
         )
 
         # No config_editor needed - everything goes through form_manager

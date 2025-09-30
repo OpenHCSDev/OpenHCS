@@ -31,6 +31,51 @@ logger = logging.getLogger(__name__)
 current_temp_global = contextvars.ContextVar('current_temp_global')
 
 
+def _merge_nested_dataclass(base, override):
+    """
+    Recursively merge nested dataclass fields.
+
+    For each field in override:
+    - If value is None: skip (don't override base)
+    - If value is dataclass: recursively merge with base's value
+    - Otherwise: use override value
+
+    Args:
+        base: Base dataclass instance
+        override: Override dataclass instance
+
+    Returns:
+        Merged dataclass instance
+    """
+    if not is_dataclass(base) or not is_dataclass(override):
+        return override
+
+    merge_values = {}
+    for field_info in fields(override):
+        field_name = field_info.name
+        override_value = object.__getattribute__(override, field_name)
+
+        if override_value is None:
+            # None means "don't override" - keep base value
+            continue
+        elif is_dataclass(override_value):
+            # Recursively merge nested dataclass
+            base_value = getattr(base, field_name, None)
+            if base_value is not None and is_dataclass(base_value):
+                merge_values[field_name] = _merge_nested_dataclass(base_value, override_value)
+            else:
+                merge_values[field_name] = override_value
+        else:
+            # Concrete value - use override
+            merge_values[field_name] = override_value
+
+    # Merge with base
+    if merge_values:
+        return dataclasses.replace(base, **merge_values)
+    else:
+        return base
+
+
 @contextmanager
 def config_context(obj):
     """
@@ -73,8 +118,22 @@ def config_context(obj):
                         if _is_compatible_config_type(value, expected_type):
                             # Convert lazy configs to base configs for context
                             if hasattr(value, 'to_base_config'):
-                                overrides[field_name] = value.to_base_config()
+                                value = value.to_base_config()
+
+                            # CRITICAL FIX: Recursively merge nested dataclass fields
+                            # If this is a dataclass field, merge it with the base config's value
+                            # instead of replacing wholesale
+                            if is_dataclass(value):
+                                base_value = getattr(base_config, field_name, None)
+                                if base_value is not None and is_dataclass(base_value):
+                                    # Merge nested dataclass: base + overrides
+                                    merged_nested = _merge_nested_dataclass(base_value, value)
+                                    overrides[field_name] = merged_nested
+                                else:
+                                    # No base value to merge with, use override as-is
+                                    overrides[field_name] = value
                             else:
+                                # Non-dataclass field, use override as-is
                                 overrides[field_name] = value
             except AttributeError:
                 continue
