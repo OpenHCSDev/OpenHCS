@@ -209,8 +209,10 @@ class LazyMethodBindings:
     def create_to_base_config(base_class: Type) -> Callable[[Any], Any]:
         """Create base config converter method."""
         def to_base_config(self):
-            # Mathematical simplification: Convert loop to comprehension
-            field_values = {f.name: getattr(self, f.name) for f in fields(self)}
+            # CRITICAL FIX: Use object.__getattribute__ to preserve raw None values
+            # getattr() triggers lazy resolution, converting None to static defaults
+            # None values must be preserved for dual-axis inheritance to work correctly
+            field_values = {f.name: object.__getattribute__(self, f.name) for f in fields(self)}
             return base_class(**field_values)
         return to_base_config
 
@@ -797,8 +799,6 @@ def create_global_default_decorator(target_config_class: Type):
             ui_hidden: Whether to hide from UI (apply decorator but don't inject into global config) (default: False)
         """
         def decorator(actual_cls):
-            print(f"🔧 DECORATOR: Processing {actual_cls.__name__} with inherit_as_none={inherit_as_none}")
-
             # Apply inherit_as_none by modifying class BEFORE @dataclass (multiprocessing-safe)
             if inherit_as_none:
                 # Mark the class for inherit_as_none processing
@@ -858,8 +858,6 @@ def create_global_default_decorator(target_config_class: Type):
                     'optional': optional,  # Store the optional flag
                     'inherit_as_none': inherit_as_none  # Store the inherit_as_none flag
                 })
-            else:
-                print(f"🔧 DECORATOR: Hiding {actual_cls.__name__} from UI (ui_hidden=True)")
 
             # Immediately create lazy version of this config (not dependent on injection)
 

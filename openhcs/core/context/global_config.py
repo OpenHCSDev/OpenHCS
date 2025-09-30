@@ -31,10 +31,6 @@ def set_current_global_config(config_type: Type, config_instance: Any, *, caller
     caller_function = frame.f_code.co_name
     caller_line = frame.f_lineno
 
-    # Log all thread-local modifications for monitoring
-    context_desc = caller_context or f"{caller_file}:{caller_function}:{caller_line}"
-    print(f"🔧 THREAD-LOCAL MODIFICATION: {config_type.__name__} from {context_desc}")
-
     # Set thread-local context
     if config_type not in _global_config_contexts:
         _global_config_contexts[config_type] = threading.local()

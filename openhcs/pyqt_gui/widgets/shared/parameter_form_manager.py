@@ -359,25 +359,13 @@ class ParameterFormManager(QWidget):
         dataclass_type_name = type(dataclass_instance).__name__
         is_lazy = hasattr(dataclass_instance, '_is_lazy_dataclass') or 'Lazy' in dataclass_type_name
 
-        print(f"🔍 USER-SET DETECTION: Checking {dataclass_type_name}, is_lazy={is_lazy}")
-
         # Apply user-set detection to BOTH lazy and non-lazy dataclasses
-        print(f"🔍 USER-SET DETECTION: Starting detection for {dataclass_type_name}")
-
         # CORRECT APPROACH: Check the extracted parameters (which contain raw values)
         # These were extracted using object.__getattribute__ during form creation
         for field_name, raw_value in parameters.items():
-            # Get resolved value for logging (this may trigger resolution)
-            resolved_value = getattr(dataclass_instance, field_name)
-
             # SIMPLE RULE: Raw non-None = user-set, Raw None = inherited
             if raw_value is not None:
                 form_manager._user_set_fields.add(field_name)
-                print(f"🔍 USER-SET DETECTION: {field_name} raw={raw_value} resolved={resolved_value} -> marked as user-set")
-            else:
-                print(f"🔍 USER-SET DETECTION: {field_name} raw={raw_value} resolved={resolved_value} -> not user-set")
-
-        print(f"🔍 USER-SET DETECTION: Final user_set_fields = {form_manager._user_set_fields}")
 
         # CRITICAL FIX: Refresh placeholders AFTER user-set detection to show correct concrete/placeholder state
         form_manager._refresh_all_placeholders()
@@ -740,8 +728,6 @@ class ParameterFormManager(QWidget):
             # For custom widgets, try to call clear() if available
             if hasattr(widget, 'clear'):
                 widget.clear()
-            else:
-                print(f"⚠️ WARNING: Don't know how to clear {type(widget).__name__}")
 
     def _update_combo_box(self, widget: QComboBox, value: Any) -> None:
         """Update combo box with value matching."""

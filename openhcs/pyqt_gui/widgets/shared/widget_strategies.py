@@ -197,9 +197,7 @@ class MagicGuiWidgetFactory:
     def create_widget(self, param_name: str, param_type: Type, current_value: Any,
                      widget_id: str, parameter_info: Any = None) -> Any:
         """Create widget using functional registry dispatch."""
-        print(f"🔍 FACTORY DEBUG: Creating widget for {param_name}, type={param_type}, value={current_value}")
         resolved_type = resolve_optional(param_type)
-        print(f"🔍 FACTORY DEBUG: Resolved type: {resolved_type}")
 
         # Handle direct List[Enum] types - create multi-selection checkbox group
         if is_list_of_enums(resolved_type):
@@ -216,15 +214,12 @@ class MagicGuiWidgetFactory:
 
         # Check for OpenHCS custom widget replacements
         replacement_factory = WIDGET_REPLACEMENT_REGISTRY.get(resolved_type)
-        print(f"🔍 FACTORY DEBUG: Replacement factory for {resolved_type}: {replacement_factory}")
         if replacement_factory:
-            print(f"🔍 FACTORY DEBUG: Using replacement factory with extracted_value={extracted_value}")
             widget = replacement_factory(
                 current_value=extracted_value,
                 param_name=param_name,
                 parameter_info=parameter_info
             )
-            print(f"🔍 FACTORY DEBUG: Replacement factory returned: {widget} (type: {type(widget)})")
         else:
             # For string types, use our NoneAwareLineEdit instead of magicgui
             if resolved_type == str:
@@ -279,10 +274,8 @@ class MagicGuiWidgetFactory:
 
         # Functional configuration dispatch
         configurator = CONFIGURATION_REGISTRY.get(resolved_type, lambda w: w)
-        print(f"🔍 FACTORY DEBUG: Configurator for {resolved_type}: {configurator}")
         configurator(widget)
 
-        print(f"🔍 FACTORY DEBUG: Final widget: {widget} (type: {type(widget)})")
         return widget
 
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
@@ -470,8 +463,6 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
         from PyQt6.QtCore import Qt
         default_value = _extract_default_value(placeholder_text).lower() == 'true'
 
-        print(f"🔍 CHECKBOX PLACEHOLDER: widget={widget}, placeholder_text={placeholder_text}, default_value={default_value}")
-
         # Block signals to prevent checkbox state changes from triggering parameter updates
         widget.blockSignals(True)
         try:
@@ -481,8 +472,6 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
             # Mark as placeholder state for NoneAwareCheckBox
             if hasattr(widget, '_is_placeholder'):
                 widget._is_placeholder = True
-
-            print(f"🔍 CHECKBOX PLACEHOLDER: Set checkbox to {default_value}, _is_placeholder={getattr(widget, '_is_placeholder', 'N/A')}")
         finally:
             widget.blockSignals(False)
 
@@ -493,9 +482,6 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
         # Trigger repaint to show gray styling
         widget.update()
     except Exception as e:
-        print(f"🔍 CHECKBOX PLACEHOLDER ERROR: {e}")
-        import traceback
-        traceback.print_exc()
         widget.setToolTip(placeholder_text)
 
 
