@@ -100,43 +100,6 @@ class NoneAwareIntEdit(QLineEdit):
             self.setText(str(value))
 
 
-class NoneAwareCheckBox(QCheckBox):
-    """
-    QCheckBox that supports None state for lazy dataclass contexts.
-
-    Uses tri-state checkbox where:
-    - Unchecked (Qt.Unchecked) = False
-    - Checked (Qt.Checked) = True
-    - PartiallyChecked (Qt.PartiallyChecked) = None (placeholder/inherited)
-    """
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        # Enable tri-state to support None
-        self.setTristate(True)
-
-    def get_value(self):
-        """Get value, returning None for PartiallyChecked state."""
-        from PyQt6.QtCore import Qt
-        state = self.checkState()
-        if state == Qt.CheckState.PartiallyChecked:
-            return None
-        elif state == Qt.CheckState.Checked:
-            return True
-        else:  # Qt.CheckState.Unchecked
-            return False
-
-    def set_value(self, value):
-        """Set value, handling None as PartiallyChecked."""
-        from PyQt6.QtCore import Qt
-        if value is None:
-            self.setCheckState(Qt.CheckState.PartiallyChecked)
-        elif value:
-            self.setCheckState(Qt.CheckState.Checked)
-        else:
-            self.setCheckState(Qt.CheckState.Unchecked)
-
-
 class ParameterFormManager(QWidget):
     """
     PyQt6 parameter form manager with simplified implementation using generic object introspection.
@@ -516,8 +479,10 @@ class ParameterFormManager(QWidget):
         container = QWidget()
         layout = QVBoxLayout(container)
 
-        # Checkbox
-        checkbox = QCheckBox(display_info['checkbox_label'])
+        # Checkbox (using NoneAwareCheckBox for consistency)
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+        checkbox = NoneAwareCheckBox()
+        checkbox.setText(display_info['checkbox_label'])
         checkbox.setObjectName(field_ids['optional_checkbox_id'])
         current_value = self.parameters.get(param_info.name)
         checkbox.setChecked(current_value is not None)
@@ -605,8 +570,10 @@ class ParameterFormManager(QWidget):
         container = QWidget()
         layout = QVBoxLayout(container)
 
-        # Checkbox
-        checkbox = QCheckBox(display_info['checkbox_label'])
+        # Checkbox (using NoneAwareCheckBox for consistency)
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+        checkbox = NoneAwareCheckBox()
+        checkbox.setText(display_info['checkbox_label'])
         checkbox.setObjectName(field_ids['optional_checkbox_id'])
         current_value = self.parameters.get(param_info.name)
         checkbox.setChecked(current_value is not None)

@@ -61,7 +61,7 @@ def _create_none_aware_int_widget():
 
 def _create_none_aware_checkbox():
     """Factory function for NoneAwareCheckBox widgets."""
-    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import NoneAwareCheckBox
+    from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
     return NoneAwareCheckBox()
 
 
@@ -162,6 +162,8 @@ def create_enum_widget_unified(enum_type: Type, current_value: Any, **kwargs) ->
     from openhcs.ui.shared.ui_utils import format_enum_display
 
     widget = NoScrollComboBox()
+
+    # Add all enum items
     for enum_value in enum_type:
         display_text = format_enum_display(enum_value)
         widget.addItem(display_text, enum_value)
@@ -285,7 +287,8 @@ class MagicGuiWidgetFactory:
 
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
         """Create multi-selection checkbox group for List[Enum] parameters."""
-        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout, QCheckBox
+        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
 
         enum_type = get_enum_from_list(param_type)
         widget = QGroupBox(param_name.replace('_', ' ').title())
@@ -295,7 +298,8 @@ class MagicGuiWidgetFactory:
         widget._checkboxes = {}
 
         for enum_value in enum_type:
-            checkbox = QCheckBox(enum_value.value)
+            checkbox = NoneAwareCheckBox()
+            checkbox.setText(enum_value.value)
             checkbox.setObjectName(f"{param_name}_{enum_value.value}")
             widget._checkboxes[enum_value] = checkbox
             layout.addWidget(checkbox)
@@ -390,15 +394,25 @@ def _apply_placeholder_styling(widget: Any, interaction_hint: str, placeholder_t
     # Get widget-specific styling that's strong enough to override application theme
     widget_type = type(widget).__name__
 
-    if widget_type == "QComboBox":
-        # Strong combobox-specific styling
-        style = """
-            QComboBox {
-                color: #888888 !important;
-                font-style: italic !important;
-                opacity: 0.7;
-            }
-        """
+    if widget_type == "QComboBox" or widget_type == "NoScrollComboBox":
+        # For editable comboboxes, style the line edit to show placeholder styling
+        # The native placeholder text will automatically appear gray/italic
+        if widget.isEditable():
+            style = """
+                QComboBox QLineEdit {
+                    color: #888888 !important;
+                    font-style: italic !important;
+                }
+            """
+        else:
+            # Fallback for non-editable comboboxes (shouldn't happen with new approach)
+            style = """
+                QComboBox {
+                    color: #888888 !important;
+                    font-style: italic !important;
+                    opacity: 0.7;
+                }
+            """
     elif widget_type == "QCheckBox":
         # Strong checkbox-specific styling
         style = """
@@ -447,21 +461,41 @@ def _apply_spinbox_placeholder(widget: Any, text: str) -> None:
 
 
 def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> None:
-    """Apply placeholder to checkbox with visual preview without triggering signals."""
+    """Apply placeholder to checkbox showing preview of inherited value.
+
+    Shows the actual inherited boolean value (checked/unchecked) with gray/translucent styling.
+    This gives users a visual preview of what the value will be if they don't override it.
+    """
     try:
+        from PyQt6.QtCore import Qt
         default_value = _extract_default_value(placeholder_text).lower() == 'true'
+
+        print(f"🔍 CHECKBOX PLACEHOLDER: widget={widget}, placeholder_text={placeholder_text}, default_value={default_value}")
+
         # Block signals to prevent checkbox state changes from triggering parameter updates
         widget.blockSignals(True)
         try:
+            # Set the checkbox to show the inherited value
             widget.setChecked(default_value)
+
+            # Mark as placeholder state for NoneAwareCheckBox
+            if hasattr(widget, '_is_placeholder'):
+                widget._is_placeholder = True
+
+            print(f"🔍 CHECKBOX PLACEHOLDER: Set checkbox to {default_value}, _is_placeholder={getattr(widget, '_is_placeholder', 'N/A')}")
         finally:
             widget.blockSignals(False)
-        _apply_placeholder_styling(
-            widget,
-            PlaceholderConfig.INTERACTION_HINTS['checkbox'],
-            placeholder_text
-        )
-    except Exception:
+
+        # Set tooltip and property to indicate this is a placeholder state
+        widget.setToolTip(f"{placeholder_text} ({PlaceholderConfig.INTERACTION_HINTS['checkbox']})")
+        widget.setProperty("is_placeholder_state", True)
+
+        # Trigger repaint to show gray styling
+        widget.update()
+    except Exception as e:
+        print(f"🔍 CHECKBOX PLACEHOLDER ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         widget.setToolTip(placeholder_text)
 
 
@@ -486,10 +520,10 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
     """Apply placeholder to combobox while preserving None (no concrete selection).
 
     Strategy:
-    - Insert or update a non-selecting placeholder item at index 0 with userData=None,
-      displaying the inherited/default enum text (no 'Pipeline default:' prefix).
-    - Set currentIndex to 0 so the user sees the value, but saving returns None
-      via WIDGET_GET_DISPATCH (itemData(None) -> None) until the user explicitly selects.
+    - Set currentIndex to -1 (no selection) to represent None
+    - Use NoScrollComboBox's custom paintEvent to show placeholder
+    - Display only the inherited enum value (no 'Pipeline default:' prefix)
+    - Dropdown shows only real enum items (no duplicate placeholder item)
     """
     try:
         default_value = _extract_default_value(placeholder_text)
@@ -507,24 +541,22 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
         # Block signals so this visual change doesn't emit change events
         widget.blockSignals(True)
         try:
-            # Ensure a placeholder item exists at index 0 with userData=None
-            if widget.count() > 0 and widget.itemData(0) is None:
-                # Update text to current placeholder display
-                widget.setItemText(0, placeholder_display)
-            else:
-                widget.insertItem(0, placeholder_display, None)
+            # Set to no selection (index -1) to represent None
+            widget.setCurrentIndex(-1)
 
-            # Select the placeholder item visually, but it still represents None
-            widget.setCurrentIndex(0)
+            # Use our custom setPlaceholder method for NoScrollComboBox
+            if hasattr(widget, 'setPlaceholder'):
+                widget.setPlaceholder(placeholder_display)
+            # Fallback for editable comboboxes
+            elif widget.isEditable():
+                widget.lineEdit().setPlaceholderText(placeholder_display)
         finally:
             widget.blockSignals(False)
 
-        # Apply placeholder styling to indicate this is a placeholder value
-        _apply_placeholder_styling(
-            widget,
-            PlaceholderConfig.INTERACTION_HINTS['combobox'],
-            placeholder_text
-        )
+        # Don't apply placeholder styling - our paintEvent handles the gray/italic styling
+        # Just set the tooltip
+        widget.setToolTip(f"{placeholder_text} ({PlaceholderConfig.INTERACTION_HINTS['combobox']})")
+        widget.setProperty("is_placeholder_state", True)
     except Exception:
         widget.setToolTip(placeholder_text)
 
@@ -581,9 +613,18 @@ def _register_none_aware_lineedit_strategy():
     except ImportError:
         pass  # NoneAwareLineEdit not available
 
+def _register_none_aware_checkbox_strategy():
+    """Register NoneAwareCheckBox strategy dynamically to avoid circular imports."""
+    try:
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+        WIDGET_PLACEHOLDER_STRATEGIES[NoneAwareCheckBox] = _apply_checkbox_placeholder
+    except ImportError:
+        pass  # NoneAwareCheckBox not available
+
 # Register widget strategies
 _register_path_widget_strategy()
 _register_none_aware_lineedit_strategy()
+_register_none_aware_checkbox_strategy()
 
 # Functional signal connection registry
 SIGNAL_CONNECTION_REGISTRY: Dict[str, callable] = {
@@ -594,8 +635,8 @@ SIGNAL_CONNECTION_REGISTRY: Dict[str, callable] = {
             widget.get_value() if hasattr(widget, 'get_value') else v)),
     'valueChanged': lambda widget, param_name, callback:
         widget.valueChanged.connect(lambda v: callback(param_name, v)),
-    'currentTextChanged': lambda widget, param_name, callback:
-        widget.currentTextChanged.connect(lambda: callback(param_name,
+    'currentIndexChanged': lambda widget, param_name, callback:
+        widget.currentIndexChanged.connect(lambda: callback(param_name,
             widget.currentData() if hasattr(widget, 'currentData') else widget.currentText())),
     'path_changed': lambda widget, param_name, callback:
         widget.path_changed.connect(lambda v: callback(param_name, v)),

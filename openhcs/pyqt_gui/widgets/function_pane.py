@@ -296,36 +296,26 @@ class FunctionPaneWidget(QWidget):
     
     def create_parameter_widget(self, param_name: str, param_type: type, current_value: Any) -> Optional[QWidget]:
         """
-        Create parameter widget based on type (simplified TypedWidgetFactory).
-        
+        Create parameter widget based on type.
+
         Args:
             param_name: Parameter name
             param_type: Parameter type
             current_value: Current parameter value
-            
+
         Returns:
             Widget for parameter editing or None
         """
-        from PyQt6.QtWidgets import QLineEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QComboBox
-        from PyQt6.QtGui import QWheelEvent
+        from PyQt6.QtWidgets import QLineEdit, QCheckBox, QComboBox
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import (
+            NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
+        )
 
-        # No-scroll widget classes to prevent accidental value changes
-        class NoScrollSpinBox(QSpinBox):
-            def wheelEvent(self, event: QWheelEvent):
-                event.ignore()
-
-        class NoScrollDoubleSpinBox(QDoubleSpinBox):
-            def wheelEvent(self, event: QWheelEvent):
-                event.ignore()
-
-        class NoScrollComboBox(QComboBox):
-            def wheelEvent(self, event: QWheelEvent):
-                event.ignore()
-        
         # Boolean parameters
         if param_type == bool:
-            widget = QCheckBox()
-            widget.setChecked(bool(current_value))
+            from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+            widget = NoneAwareCheckBox()
+            widget.set_value(current_value)  # Use set_value to handle None properly
             widget.toggled.connect(lambda checked: self.handle_parameter_change(param_name, checked))
             return widget
 
@@ -348,16 +338,10 @@ class FunctionPaneWidget(QWidget):
 
         # Enum parameters
         elif any(base.__name__ == 'Enum' for base in param_type.__bases__):
-            widget = NoScrollComboBox()
-            for enum_value in param_type:
-                widget.addItem(str(enum_value.value), enum_value)
+            from openhcs.pyqt_gui.widgets.shared.widget_strategies import create_enum_widget_unified
 
-            # Set current value
-            if current_value is not None:
-                for i in range(widget.count()):
-                    if widget.itemData(i) == current_value:
-                        widget.setCurrentIndex(i)
-                        break
+            # Use the single source of truth for enum widget creation
+            widget = create_enum_widget_unified(param_type, current_value)
 
             widget.currentIndexChanged.connect(
                 lambda index: self.handle_parameter_change(param_name, widget.itemData(index))
@@ -440,8 +424,10 @@ class FunctionPaneWidget(QWidget):
             value: New value
         """
         from PyQt6.QtWidgets import QLineEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QComboBox
-        # Import the no-scroll classes from the same module scope
-        from openhcs.pyqt_gui.shared.typed_widget_factory import NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
+        # Import the no-scroll classes from single source of truth
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import (
+            NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
+        )
         
         # Temporarily block signals to avoid recursion
         widget.blockSignals(True)
