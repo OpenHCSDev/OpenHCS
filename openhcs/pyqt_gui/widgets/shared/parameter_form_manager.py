@@ -12,6 +12,9 @@ from dataclasses import replace
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton, QLineEdit, QCheckBox, QComboBox, QGroupBox
 from PyQt6.QtCore import Qt, pyqtSignal
 
+# Performance monitoring
+from openhcs.utils.performance_monitor import timer, get_monitor
+
 # SIMPLIFIED: Removed thread-local imports - dual-axis resolver handles context automatically
 # Mathematical simplification: Shared dispatch tables to eliminate duplication
 WIDGET_UPDATE_DISPATCH = [
@@ -132,124 +135,136 @@ class ParameterFormManager(QWidget):
             parent: Optional parent widget
             context_obj: Context object for placeholder resolution (orchestrator, pipeline_config, etc.)
         """
-        QWidget.__init__(self, parent)
+        with timer(f"ParameterFormManager.__init__ ({field_id})", threshold_ms=5.0):
+            QWidget.__init__(self, parent)
 
-        # Store core configuration
-        self.object_instance = object_instance
-        self.field_id = field_id
-        self.context_obj = context_obj
+            # Store core configuration
+            self.object_instance = object_instance
+            self.field_id = field_id
+            self.context_obj = context_obj
 
-        # Initialize service layer first (needed for parameter extraction)
-        self.service = ParameterFormService()
+            # Initialize service layer first (needed for parameter extraction)
+            with timer("  Service initialization", threshold_ms=1.0):
+                self.service = ParameterFormService()
 
-        # Auto-extract parameters and types using generic introspection
-        self.parameters, self.parameter_types, self.dataclass_type = self._extract_parameters_from_object(object_instance)
+            # Auto-extract parameters and types using generic introspection
+            with timer("  Extract parameters from object", threshold_ms=2.0):
+                self.parameters, self.parameter_types, self.dataclass_type = self._extract_parameters_from_object(object_instance)
 
-        # DELEGATE TO SERVICE LAYER: Analyze form structure using service
-        # Use UnifiedParameterAnalyzer-derived descriptions as the single source of truth
-        parameter_info = getattr(self, '_parameter_descriptions', {})
-        self.form_structure = self.service.analyze_parameters(
-            self.parameters, self.parameter_types, field_id, parameter_info, self.dataclass_type
-        )
+            # DELEGATE TO SERVICE LAYER: Analyze form structure using service
+            # Use UnifiedParameterAnalyzer-derived descriptions as the single source of truth
+            with timer("  Analyze form structure", threshold_ms=5.0):
+                parameter_info = getattr(self, '_parameter_descriptions', {})
+                self.form_structure = self.service.analyze_parameters(
+                    self.parameters, self.parameter_types, field_id, parameter_info, self.dataclass_type
+                )
 
-        # Auto-detect configuration settings
-        self.global_config_type = self._auto_detect_global_config_type()
-        self.placeholder_prefix = self.DEFAULT_PLACEHOLDER_PREFIX
+            # Auto-detect configuration settings
+            with timer("  Auto-detect config settings", threshold_ms=1.0):
+                self.global_config_type = self._auto_detect_global_config_type()
+                self.placeholder_prefix = self.DEFAULT_PLACEHOLDER_PREFIX
 
-        # Create configuration object with auto-detected settings
-        color_scheme = self.DEFAULT_COLOR_SCHEME or PyQt6ColorScheme()
-        config = pyqt_config(
-            field_id=field_id,
-            color_scheme=color_scheme,
-            function_target=object_instance,  # Use object_instance as function_target
-            use_scroll_area=self.DEFAULT_USE_SCROLL_AREA
-        )
-        # IMPORTANT: Keep parameter_info consistent with the analyzer output to avoid losing descriptions
-        config.parameter_info = parameter_info
-        config.dataclass_type = self.dataclass_type
-        config.global_config_type = self.global_config_type
-        config.placeholder_prefix = self.placeholder_prefix
+            # Create configuration object with auto-detected settings
+            with timer("  Create config object", threshold_ms=1.0):
+                color_scheme = self.DEFAULT_COLOR_SCHEME or PyQt6ColorScheme()
+                config = pyqt_config(
+                    field_id=field_id,
+                    color_scheme=color_scheme,
+                    function_target=object_instance,  # Use object_instance as function_target
+                    use_scroll_area=self.DEFAULT_USE_SCROLL_AREA
+                )
+                # IMPORTANT: Keep parameter_info consistent with the analyzer output to avoid losing descriptions
+                config.parameter_info = parameter_info
+                config.dataclass_type = self.dataclass_type
+                config.global_config_type = self.global_config_type
+                config.placeholder_prefix = self.placeholder_prefix
 
-        # Auto-determine editing mode based on object type analysis
-        config.is_lazy_dataclass = self._is_lazy_dataclass()
-        config.is_global_config_editing = not config.is_lazy_dataclass
+                # Auto-determine editing mode based on object type analysis
+                config.is_lazy_dataclass = self._is_lazy_dataclass()
+                config.is_global_config_editing = not config.is_lazy_dataclass
 
-        # Initialize core attributes
-        self.config = config
-        self.param_defaults = self._extract_parameter_defaults()
+            # Initialize core attributes
+            with timer("  Initialize core attributes", threshold_ms=1.0):
+                self.config = config
+                self.param_defaults = self._extract_parameter_defaults()
 
-        # Initialize tracking attributes
-        self.widgets = {}
-        self.reset_buttons = {}  # Track reset buttons for API compatibility
-        self.nested_managers = {}
-        self.reset_fields = set()  # Track fields that have been explicitly reset to show inheritance
+            # Initialize tracking attributes
+            self.widgets = {}
+            self.reset_buttons = {}  # Track reset buttons for API compatibility
+            self.nested_managers = {}
+            self.reset_fields = set()  # Track fields that have been explicitly reset to show inheritance
 
-        # Track which fields have been explicitly set by users
-        self._user_set_fields: set = set()
+            # Track which fields have been explicitly set by users
+            self._user_set_fields: set = set()
 
-        # Track if initial form load is complete (disable live updates during initial load)
-        self._initial_load_complete = False
+            # Track if initial form load is complete (disable live updates during initial load)
+            self._initial_load_complete = False
 
-        # SHARED RESET STATE: Track reset fields across all nested managers within this form
-        if hasattr(parent, 'shared_reset_fields'):
-            # Nested manager: use parent's shared reset state
-            self.shared_reset_fields = parent.shared_reset_fields
-        else:
-            # Root manager: create new shared reset state
-            self.shared_reset_fields = set()
+            # SHARED RESET STATE: Track reset fields across all nested managers within this form
+            if hasattr(parent, 'shared_reset_fields'):
+                # Nested manager: use parent's shared reset state
+                self.shared_reset_fields = parent.shared_reset_fields
+            else:
+                # Root manager: create new shared reset state
+                self.shared_reset_fields = set()
 
-        # Store backward compatibility attributes
-        self.parameter_info = config.parameter_info
-        self.use_scroll_area = config.use_scroll_area
-        self.function_target = config.function_target
-        self.color_scheme = config.color_scheme
+            # Store backward compatibility attributes
+            self.parameter_info = config.parameter_info
+            self.use_scroll_area = config.use_scroll_area
+            self.function_target = config.function_target
+            self.color_scheme = config.color_scheme
 
-        # Form structure already analyzed above using UnifiedParameterAnalyzer descriptions
+            # Form structure already analyzed above using UnifiedParameterAnalyzer descriptions
 
-        # Get widget creator from registry
-        self._widget_creator = create_pyqt6_registry()
+            # Get widget creator from registry
+            self._widget_creator = create_pyqt6_registry()
 
-        # Context system handles updates automatically
-        self._context_event_coordinator = None
+            # Context system handles updates automatically
+            self._context_event_coordinator = None
 
-        # Set up UI
-        self.setup_ui()
+            # Set up UI
+            with timer("  Setup UI (widget creation)", threshold_ms=10.0):
+                self.setup_ui()
 
-        # Connect parameter changes to live placeholder updates
-        # When any field changes, refresh all placeholders using current form state
-        # CRITICAL: Don't refresh during reset operations - reset handles placeholders itself
-        self.parameter_changed.connect(lambda param_name, value: self._refresh_all_placeholders() if not getattr(self, '_in_reset', False) else None)
+            # Connect parameter changes to live placeholder updates
+            # When any field changes, refresh all placeholders using current form state
+            # CRITICAL: Don't refresh during reset operations - reset handles placeholders itself
+            self.parameter_changed.connect(lambda param_name, value: self._refresh_all_placeholders() if not getattr(self, '_in_reset', False) else None)
 
-        # CRITICAL: Detect user-set fields for lazy dataclasses
-        # Check which parameters were explicitly set (raw non-None values)
-        from dataclasses import is_dataclass
-        if is_dataclass(object_instance):
-            for field_name, raw_value in self.parameters.items():
-                # SIMPLE RULE: Raw non-None = user-set, Raw None = inherited
-                if raw_value is not None:
-                    self._user_set_fields.add(field_name)
+            # CRITICAL: Detect user-set fields for lazy dataclasses
+            # Check which parameters were explicitly set (raw non-None values)
+            with timer("  Detect user-set fields", threshold_ms=1.0):
+                from dataclasses import is_dataclass
+                if is_dataclass(object_instance):
+                    for field_name, raw_value in self.parameters.items():
+                        # SIMPLE RULE: Raw non-None = user-set, Raw None = inherited
+                        if raw_value is not None:
+                            self._user_set_fields.add(field_name)
 
-        # CRITICAL FIX: Refresh placeholders AFTER user-set detection to show correct concrete/placeholder state
-        self._refresh_all_placeholders()
+            # CRITICAL FIX: Refresh placeholders AFTER user-set detection to show correct concrete/placeholder state
+            with timer("  Initial placeholder refresh", threshold_ms=10.0):
+                self._refresh_all_placeholders()
 
-        # CRITICAL FIX: Ensure nested managers also get their placeholders refreshed after full hierarchy is built
-        # This fixes the issue where nested dataclass placeholders don't load properly on initial form creation
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+            # CRITICAL FIX: Ensure nested managers also get their placeholders refreshed after full hierarchy is built
+            # This fixes the issue where nested dataclass placeholders don't load properly on initial form creation
+            with timer("  Nested placeholder refresh", threshold_ms=5.0):
+                self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
-        # Mark initial load as complete - enable live placeholder updates from now on
-        self._initial_load_complete = True
-        self._apply_to_nested_managers(lambda name, manager: setattr(manager, '_initial_load_complete', True))
+            # Mark initial load as complete - enable live placeholder updates from now on
+            self._initial_load_complete = True
+            self._apply_to_nested_managers(lambda name, manager: setattr(manager, '_initial_load_complete', True))
 
-        # CRITICAL: For root GlobalPipelineConfig, refresh placeholders AGAIN after initial load
-        # This enables sibling inheritance using the loaded form values as overlay
-        # The first refresh (line 233) uses static defaults only
-        # This second refresh uses static defaults + loaded form values for sibling inheritance
-        is_root_global_config = (self.config.is_global_config_editing and
-                                 self.global_config_type is not None and
-                                 self.context_obj is None)
-        if is_root_global_config:
-            self._refresh_all_placeholders()
-            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+            # CRITICAL: For root GlobalPipelineConfig, refresh placeholders AGAIN after initial load
+            # This enables sibling inheritance using the loaded form values as overlay
+            # The first refresh (line 233) uses static defaults only
+            # This second refresh uses static defaults + loaded form values for sibling inheritance
+            is_root_global_config = (self.config.is_global_config_editing and
+                                     self.global_config_type is not None and
+                                     self.context_obj is None)
+            if is_root_global_config:
+                with timer("  Root global config sibling inheritance refresh", threshold_ms=10.0):
+                    self._refresh_all_placeholders()
+                    self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
     # ==================== GENERIC OBJECT INTROSPECTION METHODS ====================
 
@@ -1080,31 +1095,32 @@ class ParameterFormManager(QWidget):
         This fixes the lazy default materialization override saving issue by ensuring
         that lazy dataclasses maintain their structure when values are retrieved.
         """
-        # CRITICAL FIX: Read actual current values from widgets, not initial parameters
-        current_values = {}
+        with timer(f"get_current_values ({self.field_id})", threshold_ms=2.0):
+            # CRITICAL FIX: Read actual current values from widgets, not initial parameters
+            current_values = {}
 
-        # Read current values from widgets
-        for param_name in self.parameters.keys():
-            widget = self.widgets.get(param_name)
-            if widget:
-                raw_value = self.get_widget_value(widget)
-                # Apply unified type conversion
-                current_values[param_name] = self._convert_widget_value(raw_value, param_name)
-            else:
-                # Fallback to initial parameter value if no widget
-                current_values[param_name] = self.parameters.get(param_name)
+            # Read current values from widgets
+            for param_name in self.parameters.keys():
+                widget = self.widgets.get(param_name)
+                if widget:
+                    raw_value = self.get_widget_value(widget)
+                    # Apply unified type conversion
+                    current_values[param_name] = self._convert_widget_value(raw_value, param_name)
+                else:
+                    # Fallback to initial parameter value if no widget
+                    current_values[param_name] = self.parameters.get(param_name)
 
-        # Checkbox validation is handled in widget creation
+            # Checkbox validation is handled in widget creation
 
-        # Collect values from nested managers, respecting optional dataclass checkbox states
-        self._apply_to_nested_managers(
-            lambda name, manager: self._process_nested_values_if_checkbox_enabled(
-                name, manager, current_values
+            # Collect values from nested managers, respecting optional dataclass checkbox states
+            self._apply_to_nested_managers(
+                lambda name, manager: self._process_nested_values_if_checkbox_enabled(
+                    name, manager, current_values
+                )
             )
-        )
 
-        # Lazy dataclasses are now handled by LazyDataclassEditor, so no structure preservation needed
-        return current_values
+            # Lazy dataclasses are now handled by LazyDataclassEditor, so no structure preservation needed
+            return current_values
 
     def get_user_modified_values(self) -> Dict[str, Any]:
         """
@@ -1268,24 +1284,28 @@ class ParameterFormManager(QWidget):
 
     def _refresh_all_placeholders(self) -> None:
         """Refresh placeholder text for all widgets in this form."""
-        # Allow placeholder refresh for nested forms even if they're not detected as lazy dataclasses
-        # The placeholder service will determine if placeholders are available
-        if not self.dataclass_type:
-            return
+        with timer(f"_refresh_all_placeholders ({self.field_id})", threshold_ms=5.0):
+            # Allow placeholder refresh for nested forms even if they're not detected as lazy dataclasses
+            # The placeholder service will determine if placeholders are available
+            if not self.dataclass_type:
+                return
 
-        # Build overlay from current form state
-        overlay = self.get_current_values()
+            # Build overlay from current form state
+            with timer("  get_current_values", threshold_ms=2.0):
+                overlay = self.get_current_values()
 
-        # Build context stack: parent context + overlay
-        with self._build_context_stack(overlay):
-            for param_name, widget in self.widgets.items():
-                # CRITICAL: Check current value from overlay (live form state), not stale self.parameters
-                current_value = overlay.get(param_name) if isinstance(overlay, dict) else getattr(overlay, param_name, None)
-                if current_value is None:
-                    placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
-                    if placeholder_text:
-                        from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-                        PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+            # Build context stack: parent context + overlay
+            with self._build_context_stack(overlay):
+                monitor = get_monitor("Placeholder resolution per field")
+                for param_name, widget in self.widgets.items():
+                    # CRITICAL: Check current value from overlay (live form state), not stale self.parameters
+                    current_value = overlay.get(param_name) if isinstance(overlay, dict) else getattr(overlay, param_name, None)
+                    if current_value is None:
+                        with monitor.measure():
+                            placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
+                            if placeholder_text:
+                                from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
+                                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
     def _apply_to_nested_managers(self, operation_func: callable) -> None:
         """Apply operation to all nested managers."""
