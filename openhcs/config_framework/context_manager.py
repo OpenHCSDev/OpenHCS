@@ -32,18 +32,20 @@ logger = logging.getLogger(__name__)
 current_temp_global = contextvars.ContextVar('current_temp_global')
 
 
-def _merge_nested_dataclass(base, override):
+def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
     """
     Recursively merge nested dataclass fields.
 
     For each field in override:
-    - If value is None: skip (don't override base)
+    - If value is None and mask_with_none=False: skip (don't override base)
+    - If value is None and mask_with_none=True: override with None (mask base)
     - If value is dataclass: recursively merge with base's value
     - Otherwise: use override value
 
     Args:
         base: Base dataclass instance
         override: Override dataclass instance
+        mask_with_none: If True, None values override base values
 
     Returns:
         Merged dataclass instance
@@ -57,13 +59,17 @@ def _merge_nested_dataclass(base, override):
         override_value = object.__getattribute__(override, field_name)
 
         if override_value is None:
-            # None means "don't override" - keep base value
-            continue
+            if mask_with_none:
+                # None overrides base value (masking mode)
+                merge_values[field_name] = None
+            else:
+                # None means "don't override" - keep base value
+                continue
         elif is_dataclass(override_value):
             # Recursively merge nested dataclass
             base_value = getattr(base, field_name, None)
             if base_value is not None and is_dataclass(base_value):
-                merge_values[field_name] = _merge_nested_dataclass(base_value, override_value)
+                merge_values[field_name] = _merge_nested_dataclass(base_value, override_value, mask_with_none)
             else:
                 merge_values[field_name] = override_value
         else:
@@ -127,7 +133,16 @@ def config_context(obj, mask_with_none: bool = False):
                     if value is not None or mask_with_none:
                         # When masking with None, always include the value (even if None)
                         if mask_with_none:
-                            overrides[field_name] = value
+                            # For nested dataclasses, merge with mask_with_none=True
+                            if is_dataclass(value):
+                                base_value = getattr(base_config, field_name, None)
+                                if base_value is not None and is_dataclass(base_value):
+                                    merged_nested = _merge_nested_dataclass(base_value, value, mask_with_none=True)
+                                    overrides[field_name] = merged_nested
+                                else:
+                                    overrides[field_name] = value
+                            else:
+                                overrides[field_name] = value
                         # Normal mode: only include non-None values
                         elif value is not None:
                             # Check if value is compatible (handles lazy-to-base type mapping)
@@ -143,7 +158,8 @@ def config_context(obj, mask_with_none: bool = False):
                                     base_value = getattr(base_config, field_name, None)
                                     if base_value is not None and is_dataclass(base_value):
                                         # Merge nested dataclass: base + overrides
-                                        merged_nested = _merge_nested_dataclass(base_value, value)
+                                        # Pass mask_with_none to recursive merge
+                                        merged_nested = _merge_nested_dataclass(base_value, value, mask_with_none=False)
                                         overrides[field_name] = merged_nested
                                     else:
                                         # No base value to merge with, use override as-is

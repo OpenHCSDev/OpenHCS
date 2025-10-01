@@ -217,7 +217,8 @@ class ParameterFormManager(QWidget):
 
         # Connect parameter changes to live placeholder updates
         # When any field changes, refresh all placeholders using current form state
-        self.parameter_changed.connect(lambda param_name, value: self._refresh_all_placeholders())
+        # CRITICAL: Don't refresh during reset operations - reset handles placeholders itself
+        self.parameter_changed.connect(lambda param_name, value: self._refresh_all_placeholders() if not getattr(self, '_in_reset', False) else None)
 
         # CRITICAL: Detect user-set fields for lazy dataclasses
         # Check which parameters were explicitly set (raw non-None values)
@@ -239,6 +240,18 @@ class ParameterFormManager(QWidget):
         self._initial_load_complete = True
         print(f"✅ INITIAL LOAD COMPLETE for {self.field_id}: {self._initial_load_complete}")
         self._apply_to_nested_managers(lambda name, manager: setattr(manager, '_initial_load_complete', True))
+
+        # CRITICAL: For root GlobalPipelineConfig, refresh placeholders AGAIN after initial load
+        # This enables sibling inheritance using the loaded form values as overlay
+        # The first refresh (line 233) uses static defaults only
+        # This second refresh uses static defaults + loaded form values for sibling inheritance
+        is_root_global_config = (self.config.is_global_config_editing and
+                                 self.global_config_type is not None and
+                                 self.context_obj is None)
+        if is_root_global_config:
+            print(f"🔄 ROOT GLOBAL CONFIG: Refreshing placeholders with loaded form values for sibling inheritance")
+            self._refresh_all_placeholders()
+            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
     # ==================== GENERIC OBJECT INTROSPECTION METHODS ====================
 
@@ -935,6 +948,15 @@ class ParameterFormManager(QWidget):
         if param_name not in self.parameters:
             return
 
+        # Set flag to prevent _refresh_all_placeholders during reset
+        self._in_reset = True
+        try:
+            return self._reset_parameter_impl(param_name, default_value)
+        finally:
+            self._in_reset = False
+
+    def _reset_parameter_impl(self, param_name: str, default_value: Any = None) -> None:
+        """Internal reset implementation."""
         # Function parameters reset to static defaults from param_defaults
         if self._is_function_parameter(param_name):
             reset_value = self.param_defaults.get(param_name) if hasattr(self, 'param_defaults') else None
@@ -1030,20 +1052,8 @@ class ParameterFormManager(QWidget):
                 # Build overlay from current form state
                 overlay = self.get_current_values()
 
-                # CRITICAL: When editing GlobalPipelineConfig and resetting to None,
-                # use static defaults context to mask thread-local loaded instance
-                from contextlib import ExitStack
-                from openhcs.config_framework.context_manager import config_context
-
-                with ExitStack() as stack:
-                    # Apply static defaults masking context for GlobalPipelineConfig editing
-                    if self.config.is_global_config_editing and self.global_config_type is not None:
-                        static_defaults = self.global_config_type()
-                        stack.enter_context(config_context(static_defaults, mask_with_none=True))
-
-                    # Build normal context stack on top
-                    stack.enter_context(self._build_context_stack(overlay))
-
+                # Build context stack (handles static defaults for global config editing)
+                with self._build_context_stack(overlay):
                     placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                     if placeholder_text:
                         from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
@@ -1166,17 +1176,24 @@ class ParameterFormManager(QWidget):
 
         return user_modified
 
-    def _build_context_stack(self, overlay):
+    def _build_context_stack(self, overlay, skip_parent_overlay: bool = False):
         """Build nested config_context() calls for placeholder resolution.
 
-        Context stack order:
-        1. Thread-local global config (automatic base)
-        2. Static defaults context (if editing GlobalPipelineConfig) - masks thread-local
-        3. Parent context(s) from self.context_obj (if provided)
+        Context stack order for PipelineConfig (lazy):
+        1. Thread-local global config (automatic base - loaded instance)
+        2. Parent context(s) from self.context_obj (if provided)
+        3. Parent overlay (if nested form)
         4. Overlay from current form values (always applied last)
+
+        Context stack order for GlobalPipelineConfig (non-lazy):
+        1. Thread-local global config (automatic base - loaded instance)
+        2. Static defaults (masks thread-local with fresh GlobalPipelineConfig())
+        3. Overlay from current form values (always applied last)
 
         Args:
             overlay: Current form values (from get_current_values()) - dict or dataclass instance
+            skip_parent_overlay: If True, skip applying parent's user-modified values.
+                                Used during reset to prevent parent from re-introducing old values.
 
         Returns:
             ExitStack with nested contexts
@@ -1185,6 +1202,38 @@ class ParameterFormManager(QWidget):
         from openhcs.config_framework.context_manager import config_context
 
         stack = ExitStack()
+
+        # CRITICAL: For GlobalPipelineConfig editing (root form only), apply static defaults as base context
+        # This masks the thread-local loaded instance with class defaults
+        # Only do this for the ROOT GlobalPipelineConfig form, not nested configs or step editor
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔍 _build_context_stack check:")
+        logger.info(f"   is_global_config_editing: {self.config.is_global_config_editing}")
+        logger.info(f"   global_config_type: {self.global_config_type}")
+        logger.info(f"   context_obj: {self.context_obj}")
+
+        is_root_global_config = (self.config.is_global_config_editing and
+                                 self.global_config_type is not None and
+                                 self.context_obj is None)  # No parent context = root form
+
+        logger.info(f"   is_root_global_config: {is_root_global_config}")
+
+        if is_root_global_config:
+            import logging
+            logger = logging.getLogger(__name__)
+            static_defaults = self.global_config_type()
+            logger.info(f"🔧 ROOT GLOBAL CONFIG: Applying static defaults")
+            logger.info(f"   static_defaults type: {type(static_defaults).__name__}")
+            if hasattr(static_defaults, 'step_materialization_config'):
+                logger.info(f"   static_defaults.step_materialization_config: {static_defaults.step_materialization_config}")
+            stack.enter_context(config_context(static_defaults, mask_with_none=True))
+
+            # Log context after static defaults
+            from openhcs.config_framework.context_manager import get_current_temp_global
+            ctx = get_current_temp_global()
+            if ctx and hasattr(ctx, 'step_materialization_config'):
+                logger.info(f"   Context after static defaults: {ctx.step_materialization_config}")
 
         # Apply parent context(s) if provided
         if self.context_obj is not None:
@@ -1199,8 +1248,10 @@ class ParameterFormManager(QWidget):
         # CRITICAL: For nested forms, include parent's USER-MODIFIED values for sibling inheritance
         # This allows live placeholder updates when sibling fields change
         # ONLY enable this AFTER initial form load to avoid polluting placeholders with initial widget values
+        # SKIP if skip_parent_overlay=True (used during reset to prevent re-introducing old values)
         parent_manager = getattr(self, '_parent_manager', None)
-        if (parent_manager and
+        if (not skip_parent_overlay and
+            parent_manager and
             hasattr(parent_manager, 'get_user_modified_values') and
             hasattr(parent_manager, 'dataclass_type') and
             parent_manager._initial_load_complete):  # Check PARENT's initial load flag
@@ -1213,16 +1264,29 @@ class ParameterFormManager(QWidget):
             print(f"   Parent user values: {list(parent_user_values.keys()) if parent_user_values else 'None'}")
 
             if parent_user_values and parent_manager.dataclass_type:
-                # Use lazy version of parent type to enable sibling inheritance
-                from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-                parent_type = parent_manager.dataclass_type
-                lazy_parent_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(parent_type)
-                if lazy_parent_type:
-                    parent_type = lazy_parent_type
+                # CRITICAL: Exclude the current nested config from parent overlay
+                # This prevents the parent from re-introducing old values when resetting fields in nested form
+                # Example: When resetting well_filter in StepMaterializationConfig, don't include
+                # step_materialization_config from parent's user-modified values
+                filtered_parent_values = {k: v for k, v in parent_user_values.items() if k != self.field_id}
 
-                # Create parent overlay with only user-modified values
-                parent_overlay_instance = parent_type(**parent_user_values)
-                stack.enter_context(config_context(parent_overlay_instance))
+                print(f"   Filtered parent values (excluded {self.field_id}): {list(filtered_parent_values.keys())}")
+
+                if filtered_parent_values:
+                    # Use lazy version of parent type to enable sibling inheritance
+                    from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+                    parent_type = parent_manager.dataclass_type
+                    lazy_parent_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(parent_type)
+                    if lazy_parent_type:
+                        parent_type = lazy_parent_type
+
+                    # Create parent overlay with only user-modified values (excluding current nested config)
+                    # For global config editing (root form only), use mask_with_none=True to preserve None overrides
+                    parent_overlay_instance = parent_type(**filtered_parent_values)
+                    if is_root_global_config:
+                        stack.enter_context(config_context(parent_overlay_instance, mask_with_none=True))
+                    else:
+                        stack.enter_context(config_context(parent_overlay_instance))
 
         # Convert overlay dict to object instance for config_context()
         # config_context() expects an object with attributes, not a dict
