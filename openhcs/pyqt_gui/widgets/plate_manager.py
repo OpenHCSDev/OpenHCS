@@ -139,33 +139,62 @@ class PlateManagerWidget(QWidget):
         # Plate list
         self.plate_list = QListWidget()
         self.plate_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        # Apply centralized styling to plate list
+        # Apply explicit styling to plate list for consistent background
+        self.plate_list.setStyleSheet(f"""
+            QListWidget {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
+                color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
+                border: none;
+                padding: 5px;
+            }}
+            QListWidget::item {{
+                padding: 8px;
+                border: none;
+                border-radius: 3px;
+                margin: 2px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
+                color: {self.color_scheme.to_hex(self.color_scheme.selection_text)};
+            }}
+            QListWidget::item:hover {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
+            }}
+        """)
+        # Apply centralized styling to main widget
         self.setStyleSheet(self.style_generator.generate_plate_manager_style())
         splitter.addWidget(self.plate_list)
-        
+
         # Button panel
         button_panel = self.create_button_panel()
         splitter.addWidget(button_panel)
-        
+
         # Status section
         status_frame = self.create_status_section()
         layout.addWidget(status_frame)
-        
-        # Set splitter proportions
-        splitter.setSizes([300, 150])
+
+        # Set splitter proportions - make button panel much smaller
+        splitter.setSizes([400, 80])
     
     def create_button_panel(self) -> QWidget:
         """
         Create the button panel with all plate management actions.
-        
+
         Returns:
             Widget containing action buttons
         """
         panel = QWidget()
-        # Frame styling is handled by the main widget stylesheet
+        # Set consistent background
+        panel.setStyleSheet(f"""
+            QWidget {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
+                border: none;
+                padding: 0px;
+            }}
+        """)
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         
         # Button configurations (extracted from Textual version)
@@ -183,37 +212,50 @@ class PlateManagerWidget(QWidget):
         # Create buttons in rows
         for i in range(0, len(button_configs), 4):
             row_layout = QHBoxLayout()
-            
+            row_layout.setContentsMargins(2, 2, 2, 2)
+            row_layout.setSpacing(2)
+
             for j in range(4):
                 if i + j < len(button_configs):
                     name, action, tooltip = button_configs[i + j]
-                    
+
                     button = QPushButton(name)
                     button.setToolTip(tooltip)
                     button.setMinimumHeight(30)
-                    # Button styling is handled by the main widget stylesheet
-                    
+                    # Apply explicit button styling to ensure it works
+                    button.setStyleSheet(self.style_generator.generate_button_style())
+
                     # Connect button to action
                     button.clicked.connect(lambda checked, a=action: self.handle_button_action(a))
-                    
+
                     self.buttons[action] = button
                     row_layout.addWidget(button)
                 else:
                     row_layout.addStretch()
-            
+
             layout.addLayout(row_layout)
-        
+
+        # Set maximum height to constrain the button panel
+        panel.setMaximumHeight(80)
+
         return panel
     
     def create_status_section(self) -> QWidget:
         """
         Create the status section with progress bar and status label.
-        
+
         Returns:
             Widget containing status information
         """
         frame = QWidget()
-        # Frame styling is handled by the main widget stylesheet
+        # Set consistent background
+        frame.setStyleSheet(f"""
+            QWidget {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
+                border: none;
+                padding: 2px;
+            }}
+        """)
 
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(2, 2, 2, 2)
