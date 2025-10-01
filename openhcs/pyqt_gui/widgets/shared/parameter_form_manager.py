@@ -576,16 +576,13 @@ class ParameterFormManager(QWidget):
         unwrapped_type = ParameterTypeUtils.get_optional_inner_type(param_info.type)
 
         # Create GroupBox with custom title widget that includes checkbox
-        group_box = GroupBoxWithHelp(
-            title="",  # Empty title - we'll add custom title widget
-            help_target=unwrapped_type,
-            color_scheme=self.config.color_scheme or PyQt6ColorScheme()
-        )
+        from PyQt6.QtGui import QFont
+        group_box = QGroupBox()
 
-        # Create custom title widget with checkbox inline
+        # Create custom title widget with checkbox + title + help button (all inline)
         title_widget = QWidget()
         title_layout = QHBoxLayout(title_widget)
-        title_layout.setSpacing(8)
+        title_layout.setSpacing(5)
         title_layout.setContentsMargins(10, 5, 10, 5)
 
         # Checkbox (compact, no text)
@@ -597,12 +594,22 @@ class ParameterFormManager(QWidget):
         checkbox.setMaximumWidth(20)
         title_layout.addWidget(checkbox)
 
-        # Title label (clickable to toggle checkbox)
+        # Title label (clickable to toggle checkbox, matches GroupBoxWithHelp styling)
         title_label = QLabel(display_info['checkbox_label'])
-        title_label.setStyleSheet(f"font-weight: bold; color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        title_font = QFont()
+        title_font.setBold(True)
+        title_label.setFont(title_font)
         title_label.mousePressEvent = lambda e: checkbox.toggle()
         title_label.setCursor(Qt.CursorShape.PointingHandCursor)
         title_layout.addWidget(title_label)
+
+        # Help button (matches GroupBoxWithHelp)
+        from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton
+        help_btn = HelpButton(help_target=unwrapped_type, text="?", color_scheme=self.color_scheme)
+        help_btn.setMaximumWidth(25)
+        help_btn.setMaximumHeight(20)
+        title_layout.addWidget(help_btn)
+
         title_layout.addStretch()
 
         # Set the custom title widget as the GroupBox title
@@ -624,7 +631,8 @@ class ParameterFormManager(QWidget):
             nested_form.setEnabled(checked)
             # Apply visual feedback to all input widgets
             if checked:
-                title_label.setStyleSheet(f"font-weight: bold; color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+                # Restore normal color (no explicit style needed - font is already bold)
+                title_label.setStyleSheet("")
                 # Remove dimming from all widgets
                 for widget in nested_form.findChildren(QWidget):
                     widget.setGraphicsEffect(None)
@@ -632,7 +640,8 @@ class ParameterFormManager(QWidget):
                 default_instance = unwrapped_type()
                 self.update_parameter(param_info.name, default_instance)
             else:
-                title_label.setStyleSheet(f"font-weight: bold; color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
+                # Dim title text
+                title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
                 # Dim all input widgets
                 from PyQt6.QtWidgets import QGraphicsOpacityEffect
                 for widget in nested_form.findChildren((QLineEdit, QComboBox, QPushButton)):
