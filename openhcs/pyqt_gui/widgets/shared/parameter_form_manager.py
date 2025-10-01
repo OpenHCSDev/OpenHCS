@@ -567,20 +567,26 @@ class ParameterFormManager(QWidget):
         return group_box
 
     def _create_optional_dataclass_widget(self, param_info) -> QWidget:
-        """Create widget for optional dataclass - checkbox inline with title + nested form."""
+        """Create widget for optional dataclass - checkbox integrated into GroupBox title."""
         display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
         field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
 
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setSpacing(2)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Get the unwrapped type for the GroupBox
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+        unwrapped_type = ParameterTypeUtils.get_optional_inner_type(param_info.type)
 
-        # Header row: checkbox on left, title on right (inline)
-        header_widget = QWidget()
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setSpacing(8)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        # Create GroupBox with custom title widget that includes checkbox
+        group_box = GroupBoxWithHelp(
+            title="",  # Empty title - we'll add custom title widget
+            help_target=unwrapped_type,
+            color_scheme=self.config.color_scheme or PyQt6ColorScheme()
+        )
+
+        # Create custom title widget with checkbox inline
+        title_widget = QWidget()
+        title_layout = QHBoxLayout(title_widget)
+        title_layout.setSpacing(8)
+        title_layout.setContentsMargins(10, 5, 10, 5)
 
         # Checkbox (compact, no text)
         from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
@@ -588,48 +594,58 @@ class ParameterFormManager(QWidget):
         checkbox.setObjectName(field_ids['optional_checkbox_id'])
         current_value = self.parameters.get(param_info.name)
         checkbox.setChecked(current_value is not None)
-        checkbox.setMaximumWidth(20)  # Compact checkbox
-        header_layout.addWidget(checkbox)
+        checkbox.setMaximumWidth(20)
+        title_layout.addWidget(checkbox)
 
         # Title label (clickable to toggle checkbox)
         title_label = QLabel(display_info['checkbox_label'])
         title_label.setStyleSheet(f"font-weight: bold; color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
-        title_label.mousePressEvent = lambda e: checkbox.toggle()  # Click label to toggle
+        title_label.mousePressEvent = lambda e: checkbox.toggle()
         title_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
+        title_layout.addWidget(title_label)
+        title_layout.addStretch()
 
-        layout.addWidget(header_widget)
+        # Set the custom title widget as the GroupBox title
+        group_box.setLayout(QVBoxLayout())
+        group_box.layout().setSpacing(0)
+        group_box.layout().setContentsMargins(0, 0, 0, 0)
+        group_box.layout().addWidget(title_widget)
 
-        # Always create the nested form, but enable/disable based on checkbox
-        nested_widget = self._create_nested_dataclass_widget(param_info)
-        nested_widget.setEnabled(current_value is not None)
-        layout.addWidget(nested_widget)
+        # Create nested form
+        nested_manager = self._create_nested_form_inline(param_info.name, unwrapped_type, current_value)
+        nested_form = nested_manager.build_form()
+        nested_form.setEnabled(current_value is not None)
+        group_box.layout().addWidget(nested_form)
 
-        # Connect checkbox to enable/disable the nested form with visual feedback
+        self.nested_managers[param_info.name] = nested_manager
+
+        # Connect checkbox to enable/disable with visual feedback
         def on_checkbox_changed(checked):
-            nested_widget.setEnabled(checked)
-            # Visual feedback: dim the nested widget when disabled
+            nested_form.setEnabled(checked)
+            # Apply visual feedback to all input widgets
             if checked:
-                nested_widget.setStyleSheet("")  # Clear dimming
                 title_label.setStyleSheet(f"font-weight: bold; color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
-                # Create default instance of the dataclass
-                from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-                inner_type = ParameterTypeUtils.get_optional_inner_type(param_info.type)
-                default_instance = inner_type()  # Create with defaults
+                # Remove dimming from all widgets
+                for widget in nested_form.findChildren(QWidget):
+                    widget.setGraphicsEffect(None)
+                # Create default instance
+                default_instance = unwrapped_type()
                 self.update_parameter(param_info.name, default_instance)
             else:
-                # Dim the entire nested widget when disabled
-                nested_widget.setStyleSheet("opacity: 0.4;")
                 title_label.setStyleSheet(f"font-weight: bold; color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
+                # Dim all input widgets
+                from PyQt6.QtWidgets import QGraphicsOpacityEffect
+                for widget in nested_form.findChildren((QLineEdit, QComboBox, QPushButton)):
+                    effect = QGraphicsOpacityEffect()
+                    effect.setOpacity(0.4)
+                    widget.setGraphicsEffect(effect)
                 self.update_parameter(param_info.name, None)
 
         checkbox.toggled.connect(on_checkbox_changed)
-        # Apply initial visual state
         on_checkbox_changed(checkbox.isChecked())
 
-        self.widgets[param_info.name] = container
-        return container
+        self.widgets[param_info.name] = group_box
+        return group_box
 
 
 
