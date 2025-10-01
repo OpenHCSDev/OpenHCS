@@ -41,7 +41,7 @@ class SystemMonitorTextual(Container):
     }
 
     #header {
-        width: 1fr;
+        width: auto;
         text-align: left;
         color: $accent;
         padding: 1;
@@ -50,9 +50,9 @@ class SystemMonitorTextual(Container):
     #system_info {
         width: 1fr;
         color: $text-muted;
-        text-align: right;
-        padding: 1;
-        content-align: center middle;
+        text-align: left;
+        padding: 1 2;
+        content-align: left middle;
     }
 
     #plots_grid {
@@ -268,18 +268,23 @@ class SystemMonitorTextual(Container):
             # Now get_metrics_dict() just returns cached data - no blocking calls!
             metrics = self.monitor.get_metrics_dict()
 
-            info_text = f"""
-═══════════════════════════════════════════════════════════════════════
-System Information | Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-═══════════════════════════════════════════════════════════════════════
-CPU Cores: {metrics.get('cpu_cores', 'N/A')} | CPU Frequency: {metrics.get('cpu_freq_mhz', 0):.0f} MHz
-Total RAM: {metrics.get('ram_total_gb', 0):.1f} GB | Used RAM: {metrics.get('ram_used_gb', 0):.1f} GB"""
+            info_text = f"""╔════════════════════════════════════════════════════════════════════════════════════╗
+║ System Information | Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}                              ║
+╠════════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                    ║
+║ CPU Cores: {metrics.get('cpu_cores', 'N/A'):>2} | CPU Frequency: {metrics.get('cpu_freq_mhz', 0):>4.0f} MHz                            ║
+║ Total RAM: {metrics.get('ram_total_gb', 0):>5.1f} GB | Used RAM: {metrics.get('ram_used_gb', 0):>5.1f} GB                              ║"""
 
             if GPU_AVAILABLE and 'gpu_name' in metrics:
-                info_text += f"\nGPU: {metrics.get('gpu_name', 'N/A')} | Temperature: {metrics.get('gpu_temp', 'N/A')}°C"
-                info_text += f"\nVRAM: {metrics.get('vram_used_mb', 0):.0f}/{metrics.get('vram_total_mb', 0):.0f} MB"
+                gpu_name = metrics.get('gpu_name', 'N/A')[:40]  # Truncate long GPU names
+                info_text += f"""║ GPU: {gpu_name:<40} | Temperature: {metrics.get('gpu_temp', 'N/A'):>5}°C        ║
+║ VRAM: {metrics.get('vram_used_mb', 0):>6.0f}/{metrics.get('vram_total_mb', 0):<6.0f} MB                                                ║"""
+            else:
+                info_text += """║ GPU: Not Available                                                             ║
+║ VRAM: Not Available                                                            ║"""
 
-            info_text += "\n═══════════════════════════════════════════════════════════════════════"
+            info_text += """║                                                                                    ║
+╚════════════════════════════════════════════════════════════════════════════════════╝"""
 
             info_widget = self.query_one("#system_info", Static)
             info_widget.update(info_text)
