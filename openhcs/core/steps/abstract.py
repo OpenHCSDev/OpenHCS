@@ -36,7 +36,7 @@ from openhcs.core.config import LazyStepMaterializationConfig
 from openhcs.core.config import LazyStepWellFilterConfig
 
 # Import ContextProvider for automatic step context registration
-from openhcs.core.lazy_config import ContextProvider
+from openhcs.config_framework.lazy_factory import ContextProvider
 
 # ProcessingContext is used in type hints
 if TYPE_CHECKING:

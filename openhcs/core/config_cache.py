@@ -91,7 +91,7 @@ def _sync_load_config(cache_file: Path) -> Optional[GlobalPipelineConfig]:
 
             # CRITICAL FIX: Establish global config context after loading for proper placeholder resolution
             # This ensures that nested dataclass placeholders can resolve from the loaded GlobalPipelineConfig
-            from openhcs.core.lazy_config import ensure_global_config_context
+            from openhcs.config_framework.lazy_factory import ensure_global_config_context
             ensure_global_config_context(GlobalPipelineConfig, migrated_config)
             logger.debug("Established global config context for loaded cached config")
 
@@ -192,7 +192,7 @@ async def load_cached_global_config(strategy: Optional[CacheExecutionStrategy] =
 
             # CRITICAL FIX: Establish global config context after loading for proper placeholder resolution
             # This ensures that nested dataclass placeholders can resolve from the loaded GlobalPipelineConfig
-            from openhcs.core.lazy_config import ensure_global_config_context
+            from openhcs.config_framework.lazy_factory import ensure_global_config_context
             ensure_global_config_context(GlobalPipelineConfig, cached_config)
             logger.debug("Established global config context for loaded cached config")
 
@@ -205,7 +205,7 @@ async def load_cached_global_config(strategy: Optional[CacheExecutionStrategy] =
     default_config = GlobalPipelineConfig()
 
     # CRITICAL FIX: Also establish context for default config
-    from openhcs.core.lazy_config import ensure_global_config_context
+    from openhcs.config_framework.lazy_factory import ensure_global_config_context
     ensure_global_config_context(GlobalPipelineConfig, default_config)
 
     return default_config
@@ -234,7 +234,7 @@ def load_cached_global_config_sync() -> GlobalPipelineConfig:
     default_config = GlobalPipelineConfig()
 
     # CRITICAL FIX: Also establish context for default config
-    from openhcs.core.lazy_config import ensure_global_config_context
+    from openhcs.config_framework.lazy_factory import ensure_global_config_context
     ensure_global_config_context(GlobalPipelineConfig, default_config)
 
     return default_config

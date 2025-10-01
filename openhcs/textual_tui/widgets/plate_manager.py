@@ -600,7 +600,7 @@ class PlateManagerWidget(ButtonListWidget):
             }
 
             # Resolve all lazy configurations to concrete values before pickling
-            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
             resolved_subprocess_data = resolve_lazy_configurations_for_serialization(subprocess_data)
 
             # Wrap pickle operation in executor to avoid blocking UI
@@ -1174,7 +1174,7 @@ class PlateManagerWidget(ButtonListWidget):
         """
         
         from openhcs.core.config import PipelineConfig
-        from openhcs.core.lazy_config import create_dataclass_for_editing
+        from openhcs.config_framework.lazy_factory import create_dataclass_for_editing
 
         # Get current global config from app or use default
         current_global_config = self.app.global_config or GlobalPipelineConfig()

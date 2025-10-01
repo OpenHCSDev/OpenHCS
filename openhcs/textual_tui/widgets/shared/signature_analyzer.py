@@ -6,7 +6,7 @@ import dataclasses
 import re
 from typing import Any, Dict, Callable, get_type_hints, NamedTuple, Union, Optional, Type
 from dataclasses import dataclass
-import openhcs.core.lazy_config as lazy_module
+import openhcs.config_framework.lazy_factory as lazy_module
 import openhcs.core.config as config_module
 
 

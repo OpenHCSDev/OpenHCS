@@ -373,13 +373,9 @@ class PathPlanner:
 
     def _resolve_and_update_paths(self, step: AbstractStep, position: int, original_path: Path, conflict_type: str) -> None:
         """Resolve path conflict by updating sub_dir configuration directly."""
-        # CRITICAL FIX: For lazy configs, resolve to base config first to get the correct static default
-        # before applying path collision resolution. This ensures we use "checkpoints" not "images".
+        # Lazy configs are already resolved via config_context() in the compiler
+        # No need to call to_base_config() - that's legacy code
         materialization_config = step.step_materialization_config
-        if hasattr(materialization_config, 'to_base_config'):
-            # This is a lazy config - resolve it first to get the correct static default
-            materialization_config = materialization_config.to_base_config()
-            print(f"🔍 PATH_COLLISION DEBUG: Resolved lazy config to base: {type(materialization_config).__name__}")
 
         # Generate unique sub_dir name instead of calculating from paths
         original_sub_dir = materialization_config.sub_dir

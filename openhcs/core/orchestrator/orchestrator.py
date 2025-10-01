@@ -24,7 +24,7 @@ from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, D
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.config_framework.global_config import set_current_global_config, get_current_global_config
-from openhcs.core.lazy_config import ContextProvider
+from openhcs.config_framework.lazy_factory import ContextProvider
 
 
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
@@ -38,7 +38,7 @@ from openhcs.io.filemanager import FileManager
 import os
 from openhcs.io.zarr import ZarrStorageBackend
 # PipelineConfig now imported directly above
-from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
 from openhcs.io.exceptions import StorageWriteError
 from openhcs.io.base import storage_registry
 from openhcs.microscopes import create_microscope_handler

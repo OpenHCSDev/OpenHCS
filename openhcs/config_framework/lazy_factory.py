@@ -209,10 +209,10 @@ class LazyMethodBindings:
     def create_to_base_config(base_class: Type) -> Callable[[Any], Any]:
         """Create base config converter method."""
         def to_base_config(self):
-            # CRITICAL FIX: Use object.__getattribute__ to preserve raw None values
-            # getattr() triggers lazy resolution, converting None to static defaults
-            # None values must be preserved for dual-axis inheritance to work correctly
-            field_values = {f.name: object.__getattribute__(self, f.name) for f in fields(self)}
+            # CRITICAL: Use getattr() to trigger lazy resolution
+            # This resolves None values through dual-axis inheritance
+            # before converting to base config
+            field_values = {f.name: getattr(self, f.name) for f in fields(self)}
             return base_class(**field_values)
         return to_base_config
 

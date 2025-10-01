@@ -56,7 +56,7 @@ class StepParameterEditorWidget(QWidget):
         self._step_editor_coordinator = None
         # TODO: Re-enable when live updates feature is fully implemented
         # if hasattr(self.gui_config, 'enable_live_step_parameter_updates') and self.gui_config.enable_live_step_parameter_updates:
-        #     from openhcs.core.lazy_config import ContextEventCoordinator
+        #     from openhcs.config_framework.lazy_factory import ContextEventCoordinator
         #     self._step_editor_coordinator = ContextEventCoordinator()
         #     logger.debug("🔍 STEP EDITOR: Created step-editor-specific coordinator for live step parameter updates")
         

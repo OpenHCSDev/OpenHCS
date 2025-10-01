@@ -271,7 +271,7 @@ class PipelineCompiler:
         # Resolve ALL lazy configs AFTER path planning (which includes metadata injection)
         # This ensures metadata injection happens first, then lazy configs are resolved
         logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving all lazy configs after path planning...")
-        from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
         from openhcs.config_framework.context_manager import config_context
         with config_context(orchestrator.pipeline_config):
             steps_definition = resolve_lazy_configurations_for_serialization(steps_definition)
@@ -345,21 +345,18 @@ class PipelineCompiler:
             for attr_name in dir(resolved_step):
                 if not attr_name.startswith('_'):
                     config = getattr(resolved_step, attr_name, None)
-                    # CRITICAL FIX: Handle lazy configs by converting to base config first
-                    # Lazy configs don't inherit from base classes, so isinstance() fails
-                    actual_config = config
-                    if config is not None and hasattr(config, 'to_base_config'):
-                        actual_config = config.to_base_config()
+                    # Configs are already resolved to base configs at line 277
+                    # No need to call to_base_config() again - that's legacy code
 
                     # Unified handling: compute inclusion for any WellFilterConfig (StreamingConfig subclasses it)
-                    is_streaming = actual_config is not None and isinstance(actual_config, StreamingConfig)
-                    is_wellfilter = actual_config is not None and isinstance(actual_config, WellFilterConfig)
+                    is_streaming = config is not None and isinstance(config, StreamingConfig)
+                    is_wellfilter = config is not None and isinstance(config, WellFilterConfig)
 
                     include_config = False
                     if is_wellfilter:
                         # Check if this config has a well filter and if current axis matches
                         should_include_config = True
-                        if actual_config.well_filter is not None:
+                        if config.well_filter is not None:
                             config_filter = step_axis_filters.get(attr_name)
                             if config_filter:
                                 # Apply axis filter logic
@@ -372,7 +369,7 @@ class PipelineCompiler:
                             include_config = True
 
                     # Only add the config to the plan if it's included (or not a WellFilterConfig)
-                    if include_config or (not is_wellfilter and actual_config is not None):
+                    if include_config or (not is_wellfilter and config is not None):
                         current_plan[attr_name] = config
 
                     # Streaming extras only apply if the streaming config is included
@@ -380,13 +377,13 @@ class PipelineCompiler:
                         # Validate that the visualizer can actually be created
                         try:
                             # Only validate configs that actually have a backend (real streaming configs)
-                            if not hasattr(actual_config, 'backend'):
+                            if not hasattr(config, 'backend'):
                                 continue
 
                             # Test visualizer creation without actually creating it
-                            if hasattr(actual_config, 'create_visualizer'):
+                            if hasattr(config, 'create_visualizer'):
                                 # For napari, check if napari is available and environment supports GUI
-                                if actual_config.backend.name == 'NAPARI_STREAM':
+                                if config.backend.name == 'NAPARI_STREAM':
                                     from openhcs.utils.import_utils import optional_import
                                     import os
 
@@ -407,10 +404,10 @@ class PipelineCompiler:
                                         continue  # Skip this streaming config
 
                             has_streaming = True
-                            # Collect visualizer info - use actual_config for backend access
+                            # Collect visualizer info
                             visualizer_info = {
-                                'backend': actual_config.backend.name,
-                                'config': actual_config
+                                'backend': config.backend.name,
+                                'config': config
                             }
                             if visualizer_info not in required_visualizers:
                                 required_visualizers.append(visualizer_info)
@@ -655,7 +652,7 @@ class PipelineCompiler:
             context: ProcessingContext to process
             orchestrator: PipelineOrchestrator to get current effective config from
         """
-        from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
         from openhcs.core.config import GlobalPipelineConfig
         from openhcs.config_framework.global_config import set_current_global_config
 
@@ -725,7 +722,7 @@ class PipelineCompiler:
             # === GLOBAL AXIS FILTER RESOLUTION ===
             # Resolve axis filters once for all axis values to ensure step-level inheritance works
             logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs for axis filter resolution...")
-            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
             from openhcs.config_framework.context_manager import config_context
             with config_context(orchestrator.pipeline_config):
                 resolved_steps_for_filters = resolve_lazy_configurations_for_serialization(pipeline_definition)

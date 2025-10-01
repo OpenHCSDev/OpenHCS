@@ -296,11 +296,11 @@ class PlateManagerWidget(QWidget):
 
     def _update_orchestrator_global_config(self, orchestrator, new_global_config):
         """Update orchestrator's global config reference and rebuild pipeline config if needed."""
-        from openhcs.core.lazy_config import rebuild_lazy_config_with_new_global_reference
+        from openhcs.config_framework.lazy_factory import rebuild_lazy_config_with_new_global_reference
         from openhcs.core.config import GlobalPipelineConfig
 
         # SIMPLIFIED: Update shared global context (dual-axis resolver handles context)
-        from openhcs.core.lazy_config import ensure_global_config_context
+        from openhcs.config_framework.lazy_factory import ensure_global_config_context
         ensure_global_config_context(GlobalPipelineConfig, new_global_config)
 
         # Rebuild orchestrator-specific config if it exists
@@ -414,7 +414,7 @@ class PlateManagerWidget(QWidget):
         # CRITICAL: Set up global context in worker thread
         # The service adapter runs this entire function in a worker thread,
         # so we need to establish the global context here
-        from openhcs.core.lazy_config import ensure_global_config_context
+        from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.config import GlobalPipelineConfig
         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
 
@@ -436,7 +436,7 @@ class PlateManagerWidget(QWidget):
             # Only run heavy initialization in worker thread
             # Need to set up context in worker thread too since initialize() runs there
             def initialize_with_context():
-                from openhcs.core.lazy_config import ensure_global_config_context
+                from openhcs.config_framework.lazy_factory import ensure_global_config_context
                 from openhcs.core.config import GlobalPipelineConfig
                 ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                 return orchestrator.initialize()
@@ -500,7 +500,7 @@ class PlateManagerWidget(QWidget):
         # CRITICAL FIX: Create PipelineConfig that preserves user-set values but shows placeholders for inherited fields
         # The orchestrator's pipeline_config has concrete values filled in from global config inheritance,
         # but we need to distinguish between user-set values (keep concrete) and inherited values (show as placeholders)
-        from openhcs.core.lazy_config import create_dataclass_for_editing
+        from openhcs.config_framework.lazy_factory import create_dataclass_for_editing
         from dataclasses import fields
 
         # CRITICAL FIX: Create config for editing that preserves user values while showing placeholders for inherited fields
@@ -689,7 +689,7 @@ class PlateManagerWidget(QWidget):
         # CRITICAL: Set up global context in worker thread
         # The service adapter runs this entire function in a worker thread,
         # so we need to establish the global context here
-        from openhcs.core.lazy_config import ensure_global_config_context
+        from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.config import GlobalPipelineConfig
         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
 
@@ -713,7 +713,7 @@ class PlateManagerWidget(QWidget):
                         # Only run heavy initialization in worker thread
                         # Need to set up context in worker thread too since initialize() runs there
                         def initialize_with_context():
-                            from openhcs.core.lazy_config import ensure_global_config_context
+                            from openhcs.config_framework.lazy_factory import ensure_global_config_context
                             from openhcs.core.config import GlobalPipelineConfig
                             ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                             return orchestrator.initialize()
@@ -730,7 +730,7 @@ class PlateManagerWidget(QWidget):
                     # Only run heavy initialization in worker thread
                     # Need to set up context in worker thread too since initialize() runs there
                     def initialize_with_context():
-                        from openhcs.core.lazy_config import ensure_global_config_context
+                        from openhcs.config_framework.lazy_factory import ensure_global_config_context
                         from openhcs.core.config import GlobalPipelineConfig
                         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                         return orchestrator.initialize()
@@ -769,7 +769,7 @@ class PlateManagerWidget(QWidget):
 
                 # Wrap compilation with context setup for worker thread
                 def compile_with_context():
-                    from openhcs.core.lazy_config import ensure_global_config_context
+                    from openhcs.config_framework.lazy_factory import ensure_global_config_context
                     from openhcs.core.config import GlobalPipelineConfig
                     ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                     return orchestrator.compile_pipelines(pipeline_obj.steps, wells)
@@ -871,7 +871,7 @@ class PlateManagerWidget(QWidget):
             }
 
             # Resolve all lazy configurations to concrete values before pickling
-            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
             resolved_subprocess_data = resolve_lazy_configurations_for_serialization(subprocess_data)
 
             # Write pickle data
