@@ -6,7 +6,7 @@ import dataclasses
 import re
 from typing import Any, Dict, Callable, get_type_hints, NamedTuple, Union, Optional, Type
 from dataclasses import dataclass
-import openhcs.core.lazy_config as lazy_module
+import openhcs.config_framework.lazy_factory as lazy_module
 import openhcs.core.config as config_module
 
 
@@ -579,8 +579,11 @@ class SignatureAnalyzer:
                 elif field.name in field_type_docs:
                     field_description = field_type_docs[field.name]
                 # 4. Docstring parameters (fallback)
-                else:
+                elif docstring_info.parameters and field.name in docstring_info.parameters:
                     field_description = docstring_info.parameters.get(field.name)
+                # 5. CRITICAL FIX: Use inheritance-aware field documentation extraction
+                else:
+                    field_description = SignatureAnalyzer.extract_field_documentation(dataclass_type, field.name)
 
                 parameters[field.name] = ParameterInfo(
                     name=field.name,

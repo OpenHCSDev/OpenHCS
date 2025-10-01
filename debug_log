@@ -1,0 +1,258 @@
+2025-09-30 23:53:32,624 - openhcs.pyqt_gui - INFO - OpenHCS PyQt6 GUI logging started - Level: INFO
+2025-09-30 23:53:32,624 - openhcs.pyqt_gui - INFO - Log file: /home/ts/.local/share/openhcs/logs/openhcs_unified_20250930_235332.log
+2025-09-30 23:53:32,624 - root - INFO - Starting OpenHCS PyQt6 GUI...
+2025-09-30 23:53:32,624 - root - INFO - Python version: 3.12.3 (main, May 22 2025, 14:39:13) [GCC 14.2.1 20250207]
+2025-09-30 23:53:32,624 - root - INFO - Platform: linux
+2025-09-30 23:53:32,701 - OpenGL.acceleratesupport - INFO - No OpenGL_accelerate module loaded: No module named 'OpenGL_accelerate'
+2025-09-30 23:53:32,795 - openhcs.core.config_cache - INFO - Using cached global configuration
+2025-09-30 23:53:32,795 - root - INFO - Initializing PyQt6 application...
+2025-09-30 23:53:32,856 - openhcs.core.orchestrator.gpu_scheduler - INFO - Detected GPUs: [0]
+2025-09-30 23:53:32,857 - openhcs.core.orchestrator.gpu_scheduler - INFO - GPU registry initialized with 1 GPUs. Maximum 16 pipelines per GPU.
+2025-09-30 23:53:32,857 - openhcs.core.orchestrator.gpu_scheduler - INFO - Global GPU registry setup complete via setup_global_gpu_registry.
+2025-09-30 23:53:32,857 - openhcs.pyqt_gui.app - INFO - GPU registry setup completed
+2025-09-30 23:53:32,857 - openhcs.pyqt_gui.app - INFO - Global configuration context established for lazy dataclass resolution
+2025-09-30 23:53:32,857 - openhcs.pyqt_gui.app - INFO - OpenHCS PyQt6 application initialized
+2025-09-30 23:53:32,857 - root - INFO - Starting application event loop...
+2025-09-30 23:53:32,859 - openhcs.pyqt_gui.shared.palette_manager - INFO - Applied new color scheme to application
+2025-09-30 23:53:33,372 - openhcs.pyqt_gui.main - INFO - OpenHCS PyQt6 main window initialized
+2025-09-30 23:53:38,382 - openhcs.core.orchestrator.orchestrator - INFO - PipelineOrchestrator initialized with PipelineConfig for context discovery.
+2025-09-30 23:53:38,384 - openhcs.core.orchestrator.orchestrator - INFO - 🔒 PLATE_PATH FROZEN: /home/ts/code/projects/openhcs/tests/integration/tests_data/imagexpress_pipeline/test_main[ImageXpress]/zstack_plate_outputs is now immutable
+2025-09-30 23:53:38,384 - openhcs.core.orchestrator.orchestrator - INFO - PipelineOrchestrator using provided StorageRegistry instance.
+2025-09-30 23:53:38,384 - openhcs.core.orchestrator.orchestrator - INFO - Orchestrator zarr backend configured with zstd compression
+2025-09-30 23:53:38,384 - openhcs.core.orchestrator.orchestrator - INFO - Initializing microscope handler using input directory: None...
+2025-09-30 23:53:38,384 - openhcs.microscopes.microscope_base - INFO - Using provided FileManager for microscope handler.
+2025-09-30 23:53:38,391 - openhcs.microscopes.microscope_base - INFO - Auto-detected openhcsdata microscope type
+2025-09-30 23:53:38,391 - openhcs.microscopes.microscope_base - INFO - Auto-detected microscope type: openhcsdata
+2025-09-30 23:53:38,391 - openhcs.microscopes.microscope_base - INFO - Creating OpenHCSMicroscopeHandler
+2025-09-30 23:53:38,392 - openhcs.microscopes.microscope_base - INFO - Set plate_folder for OpenHCSMicroscopeHandler: /home/ts/code/projects/openhcs/tests/integration/tests_data/imagexpress_pipeline/test_main[ImageXpress]/zstack_plate_outputs
+2025-09-30 23:53:38,392 - openhcs.core.orchestrator.orchestrator - INFO - Initialized microscope handler: OpenHCSMicroscopeHandler
+2025-09-30 23:53:38,392 - openhcs.core.orchestrator.orchestrator - INFO - Initializing workspace with microscope handler...
+2025-09-30 23:53:38,392 - openhcs.microscopes.openhcs - INFO - OpenHCS format: Determining input subdirectory from metadata in /home/ts/code/projects/openhcs/tests/integration/tests_data/imagexpress_pipeline/test_main[ImageXpress]/zstack_plate_outputs
+2025-09-30 23:53:38,392 - openhcs.microscopes.openhcs - INFO - OpenHCS input directory determined: /home/ts/code/projects/openhcs/tests/integration/tests_data/imagexpress_pipeline/test_main[ImageXpress]/zstack_plate_outputs/images (subdirectory: images)
+2025-09-30 23:53:38,392 - openhcs.core.orchestrator.orchestrator - INFO - Set input directory to: /home/ts/code/projects/openhcs/tests/integration/tests_data/imagexpress_pipeline/test_main[ImageXpress]/zstack_plate_outputs/images
+2025-09-30 23:53:38,392 - openhcs.core.orchestrator.orchestrator - INFO - Caching component keys and metadata...
+2025-09-30 23:53:38,392 - openhcs.core.orchestrator.orchestrator - INFO - Caching component keys for: ['site', 'z_index', 'well', 'channel']
+2025-09-30 23:53:38,394 - openhcs.microscopes.openhcs - INFO - OpenHCSHandler for plate /home/ts/code/projects/openhcs/tests/integration/tests_data/imagexpress_pipeline/test_main[ImageXpress]/zstack_plate_outputs loaded source filename parser: ImageXpressFilenameParser with filemanager and pattern_format.
+2025-09-30 23:53:38,394 - openhcs.core.orchestrator.orchestrator - INFO - Component key caching complete. Cached 4 component types in single pass.
+2025-09-30 23:53:38,394 - openhcs.core.orchestrator.orchestrator - INFO - PipelineOrchestrator fully initialized with cached component keys and metadata.
+2025-09-30 23:53:39,821 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:39,824 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:39,903 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - magicgui returned basic QWidget for file_extensions (tuple[str, ...]), using fallback
+2025-09-30 23:53:39,904 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - magicgui returned basic QWidget for exclude_patterns (tuple[str, ...]), using fallback
+2025-09-30 23:53:39,908 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - magicgui returned basic QWidget for file_extensions (tuple[str, ...]), using fallback
+2025-09-30 23:53:39,908 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - magicgui returned basic QWidget for exclude_patterns (tuple[str, ...]), using fallback
+2025-09-30 23:53:39,994 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:39,998 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:40,024 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:40,026 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:40,048 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:40,054 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:40,162 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:40,170 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:40,194 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+2025-09-30 23:53:40,198 - openhcs.pyqt_gui.widgets.shared.widget_strategies - WARNING - Widget creation failed for well_filter (typing.Union[typing.List[str], str, int, NoneType]): No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+Traceback (most recent call last):
+  File "/home/ts/code/projects/openhcs/openhcs/pyqt_gui/widgets/shared/widget_strategies.py", line 247, in create_widget
+    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/widgets/bases/_create_widget.py", line 97, in create_widget
+    return TypeMap.global_instance().create_widget(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 497, in create_widget
+    wdg_class, opts = self.get_widget_class(
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 373, in get_widget_class
+    widget_type, options_ = self._pick_widget_type(
+                            ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/magicgui/type_map/_type_map.py", line 974, in _pick_widget_type
+    raise ValueError(
+ValueError: No widget found for type typing.Union[typing.List[str], str, int, NoneType] and annotation typing.Union[typing.List[str], str, int, NoneType]
+🔔 NESTED PARAM CHANGED: colormap = NapariColormap.RED in parent PipelineConfig
+   Parent initial_load_complete: False
+🔔 NESTED PARAM CHANGED: well_filter = 2 in parent PipelineConfig
+   Parent initial_load_complete: False
+🔔 NESTED PARAM CHANGED: well_filter = 23 in parent PipelineConfig
+   Parent initial_load_complete: False
+2025-09-30 23:53:55,491 - openhcs.pyqt_gui.main - INFO - Starting application shutdown...
+2025-09-30 23:53:55,491 - openhcs.pyqt_gui.main - INFO - Stopping system monitor...
+2025-09-30 23:53:55,873 - openhcs.core.orchestrator.orchestrator - INFO - Cleared per-orchestrator config for plate: /home/ts/code/projects/openhcs/tests/integration/tests_data/imagexpress_pipeline/test_main[ImageXpress]/zstack_plate_outputs
+2025-09-30 23:53:55,874 - openhcs.pyqt_gui.main - INFO - OpenHCS PyQt6 application closed
+2025-09-30 23:53:55,892 - openhcs.pyqt_gui.app - INFO - Starting application cleanup...
+2025-09-30 23:53:56,213 - openhcs.pyqt_gui.app - INFO - Application cleanup completed
+2025-09-30 23:53:56,214 - root - INFO - Application exited with code: 0

@@ -19,7 +19,7 @@ from openhcs.constants import Microscope
 from openhcs.constants.constants import Backend
 
 # Import decorator for automatic decorator creation
-from openhcs.core.lazy_config import auto_create_decorator
+from openhcs.config_framework import auto_create_decorator
 
 # Import TilingLayout for TUI configuration
 try:
@@ -680,6 +680,21 @@ class TUIConfig:
 
 
 # Inject all accumulated fields at the end of module loading
-from openhcs.core.lazy_config import _inject_all_pending_fields
+from openhcs.config_framework.lazy_factory import _inject_all_pending_fields
 _inject_all_pending_fields()
 
+
+# ============================================================================
+# Configuration Framework Initialization
+# ============================================================================
+
+# Initialize configuration framework with OpenHCS types
+from openhcs.config_framework import set_base_config_type
+
+set_base_config_type(GlobalPipelineConfig)
+
+# Note: We use the framework's default MRO-based priority function.
+# More derived classes automatically get higher priority through MRO depth.
+# No custom priority function needed - the framework handles it generically.
+
+logger.debug("Configuration framework initialized with OpenHCS types")

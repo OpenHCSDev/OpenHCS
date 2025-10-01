@@ -72,9 +72,16 @@ class OpenHCSPyQtApp(QApplication):
 
         # CRITICAL FIX: Establish global config context for lazy dataclass resolution
         # This was missing and caused placeholder resolution to fall back to static defaults
-        from openhcs.core.context.global_config import set_global_config_for_editing
+        from openhcs.config_framework.global_config import set_global_config_for_editing
+        from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.config import GlobalPipelineConfig
+
+        # Set for editing (UI placeholders)
         set_global_config_for_editing(GlobalPipelineConfig, self.global_config)
+
+        # ALSO ensure context for orchestrator creation (required by orchestrator.__init__)
+        ensure_global_config_context(GlobalPipelineConfig, self.global_config)
+
         logger.info("Global configuration context established for lazy dataclass resolution")
 
         # Set application icon (if available)

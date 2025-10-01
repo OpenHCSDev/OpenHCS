@@ -185,7 +185,7 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
 
         # NUCLEAR WRAP: Set up global config context (required before orchestrator creation)
         def setup_global_context():
-            from openhcs.core.lazy_config import ensure_global_config_context
+            from openhcs.config_framework.lazy_factory import ensure_global_config_context
             from openhcs.core.config import GlobalPipelineConfig
             ensure_global_config_context(GlobalPipelineConfig, global_config)
         force_error_detection("setup_global_context", setup_global_context)

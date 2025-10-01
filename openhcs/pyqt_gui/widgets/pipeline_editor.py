@@ -23,7 +23,7 @@ from PyQt6.QtGui import QFont, QDrag, QPainter, QColor, QPen, QFontMetrics
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+from openhcs.config_framework.global_config import set_current_global_config, get_current_global_config
 from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.pyqt_gui.widgets.mixins import (
@@ -1085,7 +1085,7 @@ class PipelineEditorWidget(QWidget):
         # CRITICAL FIX: Refresh all placeholders when global config changes
         # This ensures pipeline config editor shows updated inherited values
         if hasattr(self, 'form_manager') and self.form_manager:
-            self.form_manager.refresh_placeholder_text()
+            self.form_manager._refresh_all_placeholders()
             logger.info("Refreshed pipeline config placeholders after global config change")
 
 

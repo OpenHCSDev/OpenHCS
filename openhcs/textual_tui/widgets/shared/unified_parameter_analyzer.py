@@ -88,94 +88,130 @@ class UnifiedParameterAnalyzer:
             if callable(target):
                 return UnifiedParameterAnalyzer._analyze_callable(target)
             else:
-                return {}
+                # For regular object instances (like step instances), analyze their class constructor
+                return UnifiedParameterAnalyzer._analyze_object_instance(target)
     
     @staticmethod
     def _analyze_callable(callable_obj: Callable) -> Dict[str, UnifiedParameterInfo]:
         """Analyze a callable (function, method, etc.)."""
-        try:
-            # Use existing SignatureAnalyzer for callables
-            param_info_dict = SignatureAnalyzer.analyze(callable_obj)
-            
-            # Convert to unified format
-            unified_params = {}
-            for name, param_info in param_info_dict.items():
-                unified_params[name] = UnifiedParameterInfo.from_parameter_info(
-                    param_info, 
-                    source_type="function"
-                )
-            
-            return unified_params
-            
-        except Exception:
-            return {}
+        # Use existing SignatureAnalyzer for callables
+        param_info_dict = SignatureAnalyzer.analyze(callable_obj)
+
+        # Convert to unified format
+        unified_params = {}
+        for name, param_info in param_info_dict.items():
+            unified_params[name] = UnifiedParameterInfo.from_parameter_info(
+                param_info,
+                source_type="function"
+            )
+
+        return unified_params
     
     @staticmethod
     def _analyze_dataclass_type(dataclass_type: Type) -> Dict[str, UnifiedParameterInfo]:
-        """Analyze a dataclass type."""
-        try:
-            # Extract docstring information
-            docstring_info = DocstringExtractor.extract(dataclass_type)
-            
-            # Get field information
-            fields = dataclasses.fields(dataclass_type)
-            unified_params = {}
-            
-            for field in fields:
-                # Get field description from docstring
-                field_description = docstring_info.parameters.get(field.name)
-                
-                # Determine if field is required
-                is_required = field.default == dataclasses.MISSING and field.default_factory == dataclasses.MISSING
-                
-                # Get default value
-                if field.default != dataclasses.MISSING:
-                    default_value = field.default
-                elif field.default_factory != dataclasses.MISSING:
-                    default_value = field.default_factory()
-                else:
-                    default_value = None
-                
-                unified_params[field.name] = UnifiedParameterInfo(
-                    name=field.name,
-                    param_type=field.type,
-                    default_value=default_value,
-                    is_required=is_required,
-                    description=field_description,
-                    source_type="dataclass"
-                )
-            
-            return unified_params
-            
-        except Exception:
-            return {}
-    
+        """Analyze a dataclass type using existing SignatureAnalyzer infrastructure."""
+        # CRITICAL FIX: Use existing SignatureAnalyzer._analyze_dataclass method
+        # which already handles all the docstring extraction properly
+        param_info_dict = SignatureAnalyzer._analyze_dataclass(dataclass_type)
+
+        # Convert to unified format
+        unified_params = {}
+        for name, param_info in param_info_dict.items():
+            unified_params[name] = UnifiedParameterInfo.from_parameter_info(
+                param_info,
+                source_type="dataclass"
+            )
+
+        return unified_params
+
+    @staticmethod
+    def _analyze_object_instance(instance: object) -> Dict[str, UnifiedParameterInfo]:
+        """Analyze a regular object instance by examining its full inheritance hierarchy."""
+        # Use MRO to get all constructor parameters from the inheritance chain
+        instance_class = type(instance)
+        all_params = {}
+
+        # Traverse MRO from most specific to most general (like dual-axis resolver)
+        for cls in instance_class.__mro__:
+            if cls == object:
+                continue
+
+            # Skip classes without custom __init__
+            if not hasattr(cls, '__init__') or cls.__init__ == object.__init__:
+                continue
+
+            try:
+                # Analyze this class's constructor
+                class_params = UnifiedParameterAnalyzer._analyze_callable(cls.__init__)
+
+                # Remove 'self' parameter
+                if 'self' in class_params:
+                    del class_params['self']
+
+                # Special handling for **kwargs - if we see 'kwargs', skip this class
+                # and let parent classes provide the actual parameters
+                if 'kwargs' in class_params and len(class_params) <= 2:
+                    # This class uses **kwargs, skip it and let parent classes define parameters
+                    continue
+
+                # Add parameters that haven't been seen yet (most specific wins)
+                for param_name, param_info in class_params.items():
+                    if param_name not in all_params and param_name != 'kwargs':
+                        # Get current value from instance if it exists
+                        current_value = getattr(instance, param_name, param_info.default_value)
+
+                        # Create parameter info with current value
+                        all_params[param_name] = UnifiedParameterInfo(
+                            name=param_name,
+                            param_type=param_info.param_type,
+                            default_value=current_value,
+                            is_required=param_info.is_required,
+                            description=param_info.description,  # CRITICAL FIX: Include description
+                            source_type="object_instance"
+                        )
+
+            except Exception:
+                # Skip classes that can't be analyzed - this is legitimate since some classes
+                # in MRO might not have analyzable constructors (e.g., ABC, object)
+                continue
+
+        return all_params
+
     @staticmethod
     def _analyze_dataclass_instance(instance: object) -> Dict[str, UnifiedParameterInfo]:
         """Analyze a dataclass instance."""
-        try:
-            # Get the type and analyze it
-            dataclass_type = type(instance)
-            unified_params = UnifiedParameterAnalyzer._analyze_dataclass_type(dataclass_type)
-            
-            # Update default values with current instance values
-            for name, param_info in unified_params.items():
-                if hasattr(instance, name):
+        # Get the type and analyze it
+        dataclass_type = type(instance)
+        unified_params = UnifiedParameterAnalyzer._analyze_dataclass_type(dataclass_type)
+
+        # Check if this specific instance is a lazy config - if so, use raw field values
+        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+        # CRITICAL FIX: Don't check class name - PipelineConfig is lazy but doesn't start with "Lazy"
+        # get_base_type_for_lazy() is the authoritative check for lazy dataclasses
+        is_lazy_config = get_base_type_for_lazy(dataclass_type) is not None
+
+        # Update default values with current instance values
+        for name, param_info in unified_params.items():
+            if hasattr(instance, name):
+                if is_lazy_config:
+                    # For lazy configs, get raw field value to avoid triggering resolution
+                    # Use object.__getattribute__() to bypass lazy property getters
+                    current_value = object.__getattribute__(instance, name)
+                else:
+                    # For regular dataclasses, use normal getattr
                     current_value = getattr(instance, name)
-                    # Create new UnifiedParameterInfo with current value as default
-                    unified_params[name] = UnifiedParameterInfo(
-                        name=param_info.name,
-                        param_type=param_info.param_type,
-                        default_value=current_value,
-                        is_required=param_info.is_required,
-                        description=param_info.description,
-                        source_type="dataclass_instance"
-                    )
-            
-            return unified_params
-            
-        except Exception:
-            return {}
+
+                # Create new UnifiedParameterInfo with current value as default
+                unified_params[name] = UnifiedParameterInfo(
+                    name=param_info.name,
+                    param_type=param_info.param_type,
+                    default_value=current_value,
+                    is_required=param_info.is_required,
+                    description=param_info.description,
+                    source_type="dataclass_instance"
+                )
+
+        return unified_params
     
     @staticmethod
     def analyze_nested(target: Union[Callable, Type, object], parent_info: Dict[str, UnifiedParameterInfo] = None) -> Dict[str, UnifiedParameterInfo]:

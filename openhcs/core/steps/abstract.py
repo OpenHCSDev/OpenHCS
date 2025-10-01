@@ -33,9 +33,10 @@ from openhcs.core.config import PathPlanningConfig
 
 # Import LazyStepMaterializationConfig for type hints
 from openhcs.core.config import LazyStepMaterializationConfig
+from openhcs.core.config import LazyStepWellFilterConfig
 
 # Import ContextProvider for automatic step context registration
-from openhcs.core.lazy_config import ContextProvider
+from openhcs.config_framework.lazy_factory import ContextProvider
 
 # ProcessingContext is used in type hints
 if TYPE_CHECKING:
@@ -43,25 +44,25 @@ if TYPE_CHECKING:
 # StepResult is no longer returned by process()
 
 
-def get_step_id(step: 'AbstractStep') -> str:
-    """
-    Generate a stable step ID from a step object reference.
-
-    This function provides a deterministic way to derive a step's ID
-    from its object reference, enabling stateless execution where
-    step objects don't need to store their own IDs as attributes.
-
-    Args:
-        step: The step object to generate an ID for
-
-    Returns:
-        A stable string ID based on the step object's identity
-
-    Note:
-        This uses the same algorithm as step.__init__() to ensure
-        consistency between compilation and execution phases.
-    """
-    return str(id(step))
+#def get_step_id(step: 'AbstractStep') -> str:
+#    """
+#    Generate a stable step ID from a step object reference.
+#
+#    This function provides a deterministic way to derive a step's ID
+#    from its object reference, enabling stateless execution where
+#    step objects don't need to store their own IDs as attributes.
+#
+#    Args:
+#        step: The step object to generate an ID for
+#
+#    Returns:
+#        A stable string ID based on the step object's identity
+#
+#    Note:
+#        This uses the same algorithm as step.__init__() to ensure
+#        consistency between compilation and execution phases.
+#    """
+#    return str(id(step))
 
 
 class AbstractStep(abc.ABC, ContextProvider):
@@ -124,7 +125,7 @@ class AbstractStep(abc.ABC, ContextProvider):
         variable_components: List[VariableComponents] = get_default_variable_components(),
         group_by: Optional[GroupBy] = get_default_group_by(),
         input_source: InputSource = InputSource.PREVIOUS_STEP,
-        step_well_filter_config: 'LazyStepWellFilterConfig' = None,
+        step_well_filter_config: 'LazyStepWellFilterConfig' = LazyStepWellFilterConfig(),
         step_materialization_config: Optional['LazyStepMaterializationConfig'] = None,
         napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
         fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
@@ -166,10 +167,10 @@ class AbstractStep(abc.ABC, ContextProvider):
 
         # Generate a stable step_id based on object id at instantiation.
         # This ID is used to link the step object to its plan in the context.
-        self.step_id = str(id(self))
+#        self.step_id = str(id(self))
 
         logger_instance = logging.getLogger(__name__)
-        logger_instance.debug(f"Created step '{self.name}' (type: {self.__class__.__name__}) with ID {self.step_id}")
+        #logger_instance.debug(f"Created step '{self.name}' (type: {self.__class__.__name__}) with ID {self.step_id}")
 
     @abc.abstractmethod
     def process(self, context: 'ProcessingContext', step_index: int) -> None:

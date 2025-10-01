@@ -1,17 +1,17 @@
 Placeholder Inheritance Debugging Guide
 =======================================
 
-**Systematic debugging approaches for the OpenHCS placeholder inheritance system.**
+**Systematic debugging approaches for the simplified OpenHCS placeholder inheritance system.**
 
-*Status: STABLE*
+*Status: STABLE - Simplified Implementation*
 *Module: openhcs.pyqt_gui.widgets.shared.parameter_form_manager*
 
 Overview
 --------
 
-The placeholder inheritance system enables configuration fields to inherit values from parent configurations through lazy dataclass resolution. When users click reset buttons on inherited fields, the system must exclude the target field from context building to allow proper inheritance resolution. This guide provides systematic debugging approaches for inheritance chain failures.
+The simplified placeholder inheritance system enables configuration fields to inherit values from parent configurations through contextvars-based lazy dataclass resolution. When users click reset buttons on inherited fields, the system uses explicit context management to allow proper inheritance resolution. This guide provides systematic debugging approaches for inheritance chain failures.
 
-The core challenge is that form managers must build context from current UI state while selectively excluding fields during reset operations. The system involves complex interactions between nested form managers, context building, widget value reading, and lazy dataclass resolution.
+The system now uses explicit contextvars-based context management, eliminating complex context discovery and frame injection mechanisms while maintaining full inheritance functionality.
 
 Understanding the inheritance flow is essential for debugging: child fields with ``None`` values trigger lazy resolution, which checks thread-local context for parent field values, then generates placeholder text showing inherited values like "Pipeline default: {inherited_value}".
 

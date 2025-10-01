@@ -77,14 +77,12 @@ class FunctionPaneWidget(QWidget):
             self.param_defaults = {name: info.default_value for name, info in param_info.items()}
             print(f"🔍 FUNCTION PANE DEBUG: param_defaults = {self.param_defaults}")
 
+            # SIMPLIFIED: Use new generic constructor with function as object_instance
             self.form_manager = ParameterFormManager(
-                parameters=parameters,
-                parameter_types=parameter_types,
-                field_id=f"func_{index}",
-                dataclass_type=None,  # Function parameters, not dataclass
-                parameter_info=param_info,
-                parent=self,
-                param_defaults=self.param_defaults  # CRITICAL FIX: Pass function signature defaults
+                object_instance=self.func,    # Pass function as the object to build form for
+                field_id=f"func_{index}",     # Use function index as field identifier
+                parent=self,                  # Pass self as parent widget
+                context_obj=None              # Functions don't need context for placeholder resolution
             )
         else:
             self.form_manager = None
@@ -276,17 +274,12 @@ class FunctionPaneWidget(QWidget):
             # Import the enhanced PyQt6 ParameterFormManager
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager as PyQtParameterFormManager
 
-            # Create enhanced parameter form manager with help and reset buttons
+            # FIXED: Use new simplified constructor
             enhanced_form_manager = PyQtParameterFormManager(
-                parameters=self.form_manager.parameters,
-                parameter_types=self.form_manager.parameter_types,
-                field_id=f"func_{self.index}",
-                dataclass_type=None,  # Function parameters, not dataclass fields
-                parameter_info=self.form_manager.parameter_info,
-                use_scroll_area=False,  # Don't use scroll area in function panes
-                function_target=self.func,  # Pass function for docstring fallback
-                color_scheme=self.color_scheme,
-                param_defaults=getattr(self, 'param_defaults', {})  # CRITICAL FIX: Pass function signature defaults
+                object_instance=self.func,       # Pass function as the object to build form for
+                field_id=f"func_{self.index}",   # Use function index as field identifier
+                parent=self,                     # Pass self as parent widget
+                context_obj=None                 # Functions don't need context for placeholder resolution
             )
 
             # Connect parameter changes
@@ -303,36 +296,26 @@ class FunctionPaneWidget(QWidget):
     
     def create_parameter_widget(self, param_name: str, param_type: type, current_value: Any) -> Optional[QWidget]:
         """
-        Create parameter widget based on type (simplified TypedWidgetFactory).
-        
+        Create parameter widget based on type.
+
         Args:
             param_name: Parameter name
             param_type: Parameter type
             current_value: Current parameter value
-            
+
         Returns:
             Widget for parameter editing or None
         """
-        from PyQt6.QtWidgets import QLineEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QComboBox
-        from PyQt6.QtGui import QWheelEvent
+        from PyQt6.QtWidgets import QLineEdit, QCheckBox, QComboBox
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import (
+            NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
+        )
 
-        # No-scroll widget classes to prevent accidental value changes
-        class NoScrollSpinBox(QSpinBox):
-            def wheelEvent(self, event: QWheelEvent):
-                event.ignore()
-
-        class NoScrollDoubleSpinBox(QDoubleSpinBox):
-            def wheelEvent(self, event: QWheelEvent):
-                event.ignore()
-
-        class NoScrollComboBox(QComboBox):
-            def wheelEvent(self, event: QWheelEvent):
-                event.ignore()
-        
         # Boolean parameters
         if param_type == bool:
-            widget = QCheckBox()
-            widget.setChecked(bool(current_value))
+            from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+            widget = NoneAwareCheckBox()
+            widget.set_value(current_value)  # Use set_value to handle None properly
             widget.toggled.connect(lambda checked: self.handle_parameter_change(param_name, checked))
             return widget
 
@@ -355,16 +338,10 @@ class FunctionPaneWidget(QWidget):
 
         # Enum parameters
         elif any(base.__name__ == 'Enum' for base in param_type.__bases__):
-            widget = NoScrollComboBox()
-            for enum_value in param_type:
-                widget.addItem(str(enum_value.value), enum_value)
+            from openhcs.pyqt_gui.widgets.shared.widget_strategies import create_enum_widget_unified
 
-            # Set current value
-            if current_value is not None:
-                for i in range(widget.count()):
-                    if widget.itemData(i) == current_value:
-                        widget.setCurrentIndex(i)
-                        break
+            # Use the single source of truth for enum widget creation
+            widget = create_enum_widget_unified(param_type, current_value)
 
             widget.currentIndexChanged.connect(
                 lambda index: self.handle_parameter_change(param_name, widget.itemData(index))
@@ -447,8 +424,10 @@ class FunctionPaneWidget(QWidget):
             value: New value
         """
         from PyQt6.QtWidgets import QLineEdit, QCheckBox, QSpinBox, QDoubleSpinBox, QComboBox
-        # Import the no-scroll classes from the same module scope
-        from openhcs.pyqt_gui.shared.typed_widget_factory import NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
+        # Import the no-scroll classes from single source of truth
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import (
+            NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
+        )
         
         # Temporarily block signals to avoid recursion
         widget.blockSignals(True)
@@ -502,15 +481,12 @@ class FunctionPaneWidget(QWidget):
             # Store function signature defaults
             self.param_defaults = {name: info.default_value for name, info in param_info.items()}
 
+            # SIMPLIFIED: Use new generic constructor with function as object_instance
             self.form_manager = ParameterFormManager(
-                parameters=parameters,
-                parameter_types=parameter_types,
-                field_id=f"func_{self.index}",
-                dataclass_type=None,  # Function parameters, not dataclass
-                context_provider=None,  # Function forms don't need context provider
-                parameter_info=param_info,
-                parent=self,
-                param_defaults=self.param_defaults  # CRITICAL FIX: Pass function signature defaults
+                object_instance=self.func,       # Pass function as the object to build form for
+                field_id=f"func_{self.index}",   # Use function index as field identifier
+                parent=self,                     # Pass self as parent widget
+                context_obj=None                 # Functions don't need context for placeholder resolution
             )
         else:
             self.form_manager = None

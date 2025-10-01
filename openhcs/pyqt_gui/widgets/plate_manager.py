@@ -296,11 +296,11 @@ class PlateManagerWidget(QWidget):
 
     def _update_orchestrator_global_config(self, orchestrator, new_global_config):
         """Update orchestrator's global config reference and rebuild pipeline config if needed."""
-        from openhcs.core.lazy_config import rebuild_lazy_config_with_new_global_reference
+        from openhcs.config_framework.lazy_factory import rebuild_lazy_config_with_new_global_reference
         from openhcs.core.config import GlobalPipelineConfig
 
         # SIMPLIFIED: Update shared global context (dual-axis resolver handles context)
-        from openhcs.core.lazy_config import ensure_global_config_context
+        from openhcs.config_framework.lazy_factory import ensure_global_config_context
         ensure_global_config_context(GlobalPipelineConfig, new_global_config)
 
         # Rebuild orchestrator-specific config if it exists
@@ -414,7 +414,7 @@ class PlateManagerWidget(QWidget):
         # CRITICAL: Set up global context in worker thread
         # The service adapter runs this entire function in a worker thread,
         # so we need to establish the global context here
-        from openhcs.core.lazy_config import ensure_global_config_context
+        from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.config import GlobalPipelineConfig
         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
 
@@ -436,7 +436,7 @@ class PlateManagerWidget(QWidget):
             # Only run heavy initialization in worker thread
             # Need to set up context in worker thread too since initialize() runs there
             def initialize_with_context():
-                from openhcs.core.lazy_config import ensure_global_config_context
+                from openhcs.config_framework.lazy_factory import ensure_global_config_context
                 from openhcs.core.config import GlobalPipelineConfig
                 ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                 return orchestrator.initialize()
@@ -500,7 +500,7 @@ class PlateManagerWidget(QWidget):
         # CRITICAL FIX: Create PipelineConfig that preserves user-set values but shows placeholders for inherited fields
         # The orchestrator's pipeline_config has concrete values filled in from global config inheritance,
         # but we need to distinguish between user-set values (keep concrete) and inherited values (show as placeholders)
-        from openhcs.core.lazy_config import create_dataclass_for_editing
+        from openhcs.config_framework.lazy_factory import create_dataclass_for_editing
         from dataclasses import fields
 
         # CRITICAL FIX: Create config for editing that preserves user values while showing placeholders for inherited fields
@@ -570,52 +570,42 @@ class PlateManagerWidget(QWidget):
             orchestrator: Optional orchestrator reference for context persistence
         """
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
+        from openhcs.config_framework.context_manager import config_context
 
-        # CRITICAL FIX: Use orchestrator's config context for proper placeholder resolution
-        # This ensures the config window uses the correct orchestrator context for inheritance
-        if orchestrator and hasattr(orchestrator, 'config_context'):
-            with orchestrator.config_context(for_serialization=False):
-                config_window = ConfigWindow(
-                    config_class,           # config_class
-                    current_config,         # current_config
-                    on_save_callback,       # on_save_callback
-                    self.color_scheme,      # color_scheme
-                    self,                   # parent
-                    orchestrator=orchestrator  # Pass orchestrator for context persistence
-                )
-        else:
-            # Fallback for global config or when no orchestrator is provided
+
+        # SIMPLIFIED: ConfigWindow now uses the dataclass instance directly for context
+        # No need for external context management - the form manager handles it automatically
+        with config_context(orchestrator.pipeline_config):
             config_window = ConfigWindow(
                 config_class,           # config_class
                 current_config,         # current_config
                 on_save_callback,       # on_save_callback
                 self.color_scheme,      # color_scheme
                 self,                   # parent
-                orchestrator=orchestrator  # Pass orchestrator for context persistence
             )
 
-        # CRITICAL: Connect to orchestrator config changes for automatic refresh
-        # This ensures the config window stays in sync when tier 3 edits change the underlying config
-        if orchestrator and hasattr(config_window, 'refresh_config'):
-            def handle_orchestrator_config_change(plate_path: str, effective_config):
-                # Only refresh if this is for the same orchestrator
-                if plate_path == str(orchestrator.plate_path):
-                    # Get the updated pipeline config from the orchestrator
-                    updated_pipeline_config = orchestrator.pipeline_config
-                    if updated_pipeline_config:
-                        config_window.refresh_config(updated_pipeline_config)
-                        logger.debug(f"Auto-refreshed config window for orchestrator: {plate_path}")
+            # CRITICAL: Connect to orchestrator config changes for automatic refresh
+            # This ensures the config window stays in sync when tier 3 edits change the underlying config
+            if orchestrator and hasattr(config_window, 'refresh_config'):
+                def handle_orchestrator_config_change(plate_path: str, effective_config):
+                    # Only refresh if this is for the same orchestrator
+                    if plate_path == str(orchestrator.plate_path):
+                        # Get the updated pipeline config from the orchestrator
+                        updated_pipeline_config = orchestrator.pipeline_config
+                        if updated_pipeline_config:
+                            config_window.refresh_config(updated_pipeline_config)
+                            logger.debug(f"Auto-refreshed config window for orchestrator: {plate_path}")
 
-            # Connect the signal
-            self.orchestrator_config_changed.connect(handle_orchestrator_config_change)
+                # Connect the signal
+                self.orchestrator_config_changed.connect(handle_orchestrator_config_change)
 
-            # Store the connection so we can disconnect it when the window closes
-            config_window._orchestrator_signal_connection = handle_orchestrator_config_change
+                # Store the connection so we can disconnect it when the window closes
+                config_window._orchestrator_signal_connection = handle_orchestrator_config_change
 
-        # Show as non-modal window (like main window configuration)
-        config_window.show()
-        config_window.raise_()
-        config_window.activateWindow()
+            # Show as non-modal window (like main window configuration)
+            config_window.show()
+            config_window.raise_()
+            config_window.activateWindow()
 
     def action_edit_global_config(self):
         """
@@ -634,7 +624,7 @@ class PlateManagerWidget(QWidget):
 
             # Update thread-local storage for MaterializationPathConfig defaults
             from openhcs.core.config import GlobalPipelineConfig
-            from openhcs.core.context.global_config import set_global_config_for_editing
+            from openhcs.config_framework.global_config import set_global_config_for_editing
             set_global_config_for_editing(GlobalPipelineConfig, new_config)
 
             # Save to cache for persistence between sessions
@@ -699,7 +689,7 @@ class PlateManagerWidget(QWidget):
         # CRITICAL: Set up global context in worker thread
         # The service adapter runs this entire function in a worker thread,
         # so we need to establish the global context here
-        from openhcs.core.lazy_config import ensure_global_config_context
+        from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.config import GlobalPipelineConfig
         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
 
@@ -723,7 +713,7 @@ class PlateManagerWidget(QWidget):
                         # Only run heavy initialization in worker thread
                         # Need to set up context in worker thread too since initialize() runs there
                         def initialize_with_context():
-                            from openhcs.core.lazy_config import ensure_global_config_context
+                            from openhcs.config_framework.lazy_factory import ensure_global_config_context
                             from openhcs.core.config import GlobalPipelineConfig
                             ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                             return orchestrator.initialize()
@@ -740,7 +730,7 @@ class PlateManagerWidget(QWidget):
                     # Only run heavy initialization in worker thread
                     # Need to set up context in worker thread too since initialize() runs there
                     def initialize_with_context():
-                        from openhcs.core.lazy_config import ensure_global_config_context
+                        from openhcs.config_framework.lazy_factory import ensure_global_config_context
                         from openhcs.core.config import GlobalPipelineConfig
                         ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                         return orchestrator.initialize()
@@ -779,7 +769,7 @@ class PlateManagerWidget(QWidget):
 
                 # Wrap compilation with context setup for worker thread
                 def compile_with_context():
-                    from openhcs.core.lazy_config import ensure_global_config_context
+                    from openhcs.config_framework.lazy_factory import ensure_global_config_context
                     from openhcs.core.config import GlobalPipelineConfig
                     ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                     return orchestrator.compile_pipelines(pipeline_obj.steps, wells)
@@ -881,7 +871,7 @@ class PlateManagerWidget(QWidget):
             }
 
             # Resolve all lazy configurations to concrete values before pickling
-            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
+            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
             resolved_subprocess_data = resolve_lazy_configurations_for_serialization(subprocess_data)
 
             # Write pickle data

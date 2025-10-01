@@ -41,7 +41,7 @@ class StepParameterEditorWidget(QWidget):
     step_parameter_changed = pyqtSignal()
     
     def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None,
-                 orchestrator=None, gui_config: Optional[PyQtGUIConfig] = None, parent=None):
+                 gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None):
         super().__init__(parent)
 
         # Initialize color scheme and GUI config
@@ -50,13 +50,13 @@ class StepParameterEditorWidget(QWidget):
 
         self.step = step
         self.service_adapter = service_adapter
-        self.orchestrator = orchestrator  # Store orchestrator reference for context management
+        self.pipeline_config = pipeline_config  # Store pipeline config for context hierarchy
 
         # Live placeholder updates not yet ready - disable for now
         self._step_editor_coordinator = None
         # TODO: Re-enable when live updates feature is fully implemented
         # if hasattr(self.gui_config, 'enable_live_step_parameter_updates') and self.gui_config.enable_live_step_parameter_updates:
-        #     from openhcs.core.lazy_config import ContextEventCoordinator
+        #     from openhcs.config_framework.lazy_factory import ContextEventCoordinator
         #     self._step_editor_coordinator = ContextEventCoordinator()
         #     logger.debug("🔍 STEP EDITOR: Created step-editor-specific coordinator for live step parameter updates")
         
@@ -94,16 +94,14 @@ class StepParameterEditorWidget(QWidget):
         # SIMPLIFIED: Create parameter form manager using dual-axis resolution
         from openhcs.core.config import GlobalPipelineConfig
 
+        # CRITICAL FIX: Use pipeline_config as context_obj (parent for inheritance)
+        # The step is the overlay (what's being edited), not the parent context
+        # Context hierarchy: GlobalPipelineConfig (thread-local) -> PipelineConfig (context_obj) -> Step (overlay)
         self.form_manager = ParameterFormManager(
-            parameters, parameter_types, "step", AbstractStep,
-            param_info,
-            parent=self,  # Pass self as parent so form manager can access _step_level_configs
-            color_scheme=self.color_scheme,
-            placeholder_prefix="Pipeline default",
-            param_defaults=param_defaults,
-            global_config_type=GlobalPipelineConfig,  # Enable dual-axis resolution
-            context_event_coordinator=self._step_editor_coordinator,  # Enable live updates if configured
-            orchestrator=self.orchestrator  # Pass orchestrator for compiler-grade placeholder resolution
+            object_instance=self.step,           # Step instance being edited (overlay)
+            field_id="step",                     # Use "step" as field identifier
+            parent=self,                         # Pass self as parent widget
+            context_obj=self.pipeline_config     # Pipeline config as parent context for inheritance
         )
         
         self.setup_ui()
@@ -348,20 +346,37 @@ class StepParameterEditorWidget(QWidget):
     def _load_step_settings_from_file(self, file_path: Path):
         """Load step settings from file."""
         try:
-            # TODO: Implement step settings loading
-            logger.debug(f"Load step settings from {file_path} - TODO: implement")
-            
+            import dill as pickle
+            with open(file_path, 'rb') as f:
+                step_data = pickle.load(f)
+
+            # Update form manager with loaded values
+            for param_name, value in step_data.items():
+                if hasattr(self.form_manager, 'update_parameter'):
+                    self.form_manager.update_parameter(param_name, value)
+                    # Also update the step object
+                    if hasattr(self.step, param_name):
+                        setattr(self.step, param_name, value)
+
+            # Refresh the form to show loaded values
+            self.form_manager._refresh_all_placeholders()
+            logger.debug(f"Loaded {len(step_data)} parameters from {file_path.name}")
+
         except Exception as e:
             logger.error(f"Failed to load step settings from {file_path}: {e}")
             if self.service_adapter:
                 self.service_adapter.show_error_dialog(f"Failed to load step settings: {e}")
-    
+
     def _save_step_settings_to_file(self, file_path: Path):
         """Save step settings to file."""
         try:
-            # TODO: Implement step settings saving
-            logger.debug(f"Save step settings to {file_path} - TODO: implement")
-            
+            import dill as pickle
+            # Get current values from form manager
+            step_data = self.form_manager.get_current_values()
+            with open(file_path, 'wb') as f:
+                pickle.dump(step_data, f)
+            logger.debug(f"Saved {len(step_data)} parameters to {file_path.name}")
+
         except Exception as e:
             logger.error(f"Failed to save step settings to {file_path}: {e}")
             if self.service_adapter:

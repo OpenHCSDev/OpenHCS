@@ -59,6 +59,65 @@ def _create_none_aware_int_widget():
     return NoneAwareIntEdit()
 
 
+def _create_none_aware_checkbox():
+    """Factory function for NoneAwareCheckBox widgets."""
+    from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+    return NoneAwareCheckBox()
+
+
+def convert_widget_value_to_type(value: Any, param_type: Type) -> Any:
+    """
+    PyQt-specific type conversions for widget values.
+
+    Handles conversions that are specific to how PyQt widgets represent values
+    (e.g., Path widgets return strings, tuple/list fields are edited as string literals).
+
+    Args:
+        value: The raw value from the widget
+        param_type: The target parameter type
+
+    Returns:
+        The converted value ready for the service layer
+    """
+    # Handle Path widgets - they return strings that need conversion
+    try:
+        if param_type is Path and isinstance(value, str):
+            return Path(value) if value else None
+    except Exception:
+        pass
+
+    # Handle tuple/list typed configs written as strings in UI
+    try:
+        from typing import get_origin, get_args
+        import ast
+        origin = get_origin(param_type)
+        args = get_args(param_type)
+        if origin in (tuple, list) and isinstance(value, str):
+            # Safely parse string literal into Python object
+            try:
+                parsed = ast.literal_eval(value)
+            except Exception:
+                return value  # Return original if parse fails
+            if parsed is not None:
+                # Coerce to the annotated container type
+                if origin is tuple:
+                    parsed = tuple(parsed if isinstance(parsed, (list, tuple)) else [parsed])
+                elif origin is list and not isinstance(parsed, list):
+                    parsed = [parsed]
+                # Optionally enforce inner type if annotated
+                if args:
+                    inner = args[0]
+                    try:
+                        parsed = tuple(inner(x) for x in parsed) if origin is tuple else [inner(x) for x in parsed]
+                    except Exception:
+                        pass
+                return parsed
+    except Exception:
+        pass
+
+    return value
+
+
 def register_openhcs_widgets():
     """Register OpenHCS custom widgets with magicgui type system."""
     # Register using string widget types that magicgui recognizes
@@ -72,9 +131,10 @@ def register_openhcs_widgets():
 
 # Functional widget replacement registry
 WIDGET_REPLACEMENT_REGISTRY: Dict[Type, callable] = {
+    str: lambda current_value, **kwargs: create_string_fallback_widget(current_value=current_value),
     bool: lambda current_value, **kwargs: (
-        lambda w: w.setChecked(bool(current_value)) or w
-    )(QCheckBox()),
+        lambda w: (w.set_value(current_value), w)[1]
+    )(_create_none_aware_checkbox()),
     int: lambda current_value, **kwargs: (
         lambda w: (w.set_value(current_value), w)[1]
     )(_create_none_aware_int_widget()),
@@ -102,6 +162,8 @@ def create_enum_widget_unified(enum_type: Type, current_value: Any, **kwargs) ->
     from openhcs.ui.shared.ui_utils import format_enum_display
 
     widget = NoScrollComboBox()
+
+    # Add all enum items
     for enum_value in enum_type:
         display_text = format_enum_display(enum_value)
         widget.addItem(display_text, enum_value)
@@ -135,9 +197,7 @@ class MagicGuiWidgetFactory:
     def create_widget(self, param_name: str, param_type: Type, current_value: Any,
                      widget_id: str, parameter_info: Any = None) -> Any:
         """Create widget using functional registry dispatch."""
-        print(f"🔍 FACTORY DEBUG: Creating widget for {param_name}, type={param_type}, value={current_value}")
         resolved_type = resolve_optional(param_type)
-        print(f"🔍 FACTORY DEBUG: Resolved type: {resolved_type}")
 
         # Handle direct List[Enum] types - create multi-selection checkbox group
         if is_list_of_enums(resolved_type):
@@ -154,15 +214,12 @@ class MagicGuiWidgetFactory:
 
         # Check for OpenHCS custom widget replacements
         replacement_factory = WIDGET_REPLACEMENT_REGISTRY.get(resolved_type)
-        print(f"🔍 FACTORY DEBUG: Replacement factory for {resolved_type}: {replacement_factory}")
         if replacement_factory:
-            print(f"🔍 FACTORY DEBUG: Using replacement factory with extracted_value={extracted_value}")
             widget = replacement_factory(
                 current_value=extracted_value,
                 param_name=param_name,
                 parameter_info=parameter_info
             )
-            print(f"🔍 FACTORY DEBUG: Replacement factory returned: {widget} (type: {type(widget)})")
         else:
             # For string types, use our NoneAwareLineEdit instead of magicgui
             if resolved_type == str:
@@ -217,15 +274,14 @@ class MagicGuiWidgetFactory:
 
         # Functional configuration dispatch
         configurator = CONFIGURATION_REGISTRY.get(resolved_type, lambda w: w)
-        print(f"🔍 FACTORY DEBUG: Configurator for {resolved_type}: {configurator}")
         configurator(widget)
 
-        print(f"🔍 FACTORY DEBUG: Final widget: {widget} (type: {type(widget)})")
         return widget
 
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
         """Create multi-selection checkbox group for List[Enum] parameters."""
-        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout, QCheckBox
+        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
 
         enum_type = get_enum_from_list(param_type)
         widget = QGroupBox(param_name.replace('_', ' ').title())
@@ -235,7 +291,8 @@ class MagicGuiWidgetFactory:
         widget._checkboxes = {}
 
         for enum_value in enum_type:
-            checkbox = QCheckBox(enum_value.value)
+            checkbox = NoneAwareCheckBox()
+            checkbox.setText(enum_value.value)
             checkbox.setObjectName(f"{param_name}_{enum_value.value}")
             widget._checkboxes[enum_value] = checkbox
             layout.addWidget(checkbox)
@@ -330,15 +387,25 @@ def _apply_placeholder_styling(widget: Any, interaction_hint: str, placeholder_t
     # Get widget-specific styling that's strong enough to override application theme
     widget_type = type(widget).__name__
 
-    if widget_type == "QComboBox":
-        # Strong combobox-specific styling
-        style = """
-            QComboBox {
-                color: #888888 !important;
-                font-style: italic !important;
-                opacity: 0.7;
-            }
-        """
+    if widget_type == "QComboBox" or widget_type == "NoScrollComboBox":
+        # For editable comboboxes, style the line edit to show placeholder styling
+        # The native placeholder text will automatically appear gray/italic
+        if widget.isEditable():
+            style = """
+                QComboBox QLineEdit {
+                    color: #888888 !important;
+                    font-style: italic !important;
+                }
+            """
+        else:
+            # Fallback for non-editable comboboxes (shouldn't happen with new approach)
+            style = """
+                QComboBox {
+                    color: #888888 !important;
+                    font-style: italic !important;
+                    opacity: 0.7;
+                }
+            """
     elif widget_type == "QCheckBox":
         # Strong checkbox-specific styling
         style = """
@@ -387,21 +454,34 @@ def _apply_spinbox_placeholder(widget: Any, text: str) -> None:
 
 
 def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> None:
-    """Apply placeholder to checkbox with visual preview without triggering signals."""
+    """Apply placeholder to checkbox showing preview of inherited value.
+
+    Shows the actual inherited boolean value (checked/unchecked) with gray/translucent styling.
+    This gives users a visual preview of what the value will be if they don't override it.
+    """
     try:
+        from PyQt6.QtCore import Qt
         default_value = _extract_default_value(placeholder_text).lower() == 'true'
+
         # Block signals to prevent checkbox state changes from triggering parameter updates
         widget.blockSignals(True)
         try:
+            # Set the checkbox to show the inherited value
             widget.setChecked(default_value)
+
+            # Mark as placeholder state for NoneAwareCheckBox
+            if hasattr(widget, '_is_placeholder'):
+                widget._is_placeholder = True
         finally:
             widget.blockSignals(False)
-        _apply_placeholder_styling(
-            widget,
-            PlaceholderConfig.INTERACTION_HINTS['checkbox'],
-            placeholder_text
-        )
-    except Exception:
+
+        # Set tooltip and property to indicate this is a placeholder state
+        widget.setToolTip(f"{placeholder_text} ({PlaceholderConfig.INTERACTION_HINTS['checkbox']})")
+        widget.setProperty("is_placeholder_state", True)
+
+        # Trigger repaint to show gray styling
+        widget.update()
+    except Exception as e:
         widget.setToolTip(placeholder_text)
 
 
@@ -423,36 +503,46 @@ def _apply_path_widget_placeholder(widget: Any, placeholder_text: str) -> None:
 
 
 def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> None:
-    """Apply placeholder to combobox with visual preview using signal blocking like checkboxes."""
+    """Apply placeholder to combobox while preserving None (no concrete selection).
+
+    Strategy:
+    - Set currentIndex to -1 (no selection) to represent None
+    - Use NoScrollComboBox's custom paintEvent to show placeholder
+    - Display only the inherited enum value (no 'Pipeline default:' prefix)
+    - Dropdown shows only real enum items (no duplicate placeholder item)
+    """
     try:
         default_value = _extract_default_value(placeholder_text)
 
-        # Find matching item using robust enum matching
+        # Find matching item using robust enum matching to get display text
         matching_index = next(
             (i for i in range(widget.count())
              if _item_matches_value(widget, i, default_value)),
             -1
         )
+        placeholder_display = (
+            widget.itemText(matching_index) if matching_index >= 0 else default_value
+        )
 
-        # CRITICAL FIX: Block signals to prevent placeholder from being treated as user selection
-        # This is the same approach used by checkboxes - show the placeholder visually
-        # but don't trigger parameter change events
+        # Block signals so this visual change doesn't emit change events
         widget.blockSignals(True)
         try:
-            if matching_index >= 0:
-                widget.setCurrentIndex(matching_index)
-            else:
-                widget.setCurrentIndex(-1)
+            # Set to no selection (index -1) to represent None
+            widget.setCurrentIndex(-1)
+
+            # Use our custom setPlaceholder method for NoScrollComboBox
+            if hasattr(widget, 'setPlaceholder'):
+                widget.setPlaceholder(placeholder_display)
+            # Fallback for editable comboboxes
+            elif widget.isEditable():
+                widget.lineEdit().setPlaceholderText(placeholder_display)
         finally:
-            # Always restore signal connections
             widget.blockSignals(False)
 
-        # Apply placeholder styling to indicate this is a placeholder value
-        _apply_placeholder_styling(
-            widget,
-            PlaceholderConfig.INTERACTION_HINTS['combobox'],
-            placeholder_text
-        )
+        # Don't apply placeholder styling - our paintEvent handles the gray/italic styling
+        # Just set the tooltip
+        widget.setToolTip(f"{placeholder_text} ({PlaceholderConfig.INTERACTION_HINTS['combobox']})")
+        widget.setProperty("is_placeholder_state", True)
     except Exception:
         widget.setToolTip(placeholder_text)
 
@@ -509,9 +599,18 @@ def _register_none_aware_lineedit_strategy():
     except ImportError:
         pass  # NoneAwareLineEdit not available
 
+def _register_none_aware_checkbox_strategy():
+    """Register NoneAwareCheckBox strategy dynamically to avoid circular imports."""
+    try:
+        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+        WIDGET_PLACEHOLDER_STRATEGIES[NoneAwareCheckBox] = _apply_checkbox_placeholder
+    except ImportError:
+        pass  # NoneAwareCheckBox not available
+
 # Register widget strategies
 _register_path_widget_strategy()
 _register_none_aware_lineedit_strategy()
+_register_none_aware_checkbox_strategy()
 
 # Functional signal connection registry
 SIGNAL_CONNECTION_REGISTRY: Dict[str, callable] = {
@@ -522,8 +621,8 @@ SIGNAL_CONNECTION_REGISTRY: Dict[str, callable] = {
             widget.get_value() if hasattr(widget, 'get_value') else v)),
     'valueChanged': lambda widget, param_name, callback:
         widget.valueChanged.connect(lambda v: callback(param_name, v)),
-    'currentTextChanged': lambda widget, param_name, callback:
-        widget.currentTextChanged.connect(lambda: callback(param_name,
+    'currentIndexChanged': lambda widget, param_name, callback:
+        widget.currentIndexChanged.connect(lambda: callback(param_name,
             widget.currentData() if hasattr(widget, 'currentData') else widget.currentText())),
     'path_changed': lambda widget, param_name, callback:
         widget.path_changed.connect(lambda v: callback(param_name, v)),

@@ -22,6 +22,33 @@ class ParameterTypeUtils:
     """
     
     @staticmethod
+    def is_optional(param_type: Type) -> bool:
+        """
+        Check if parameter type is Optional[T] (Union[T, None]).
+
+        This method determines whether a type annotation represents an optional
+        parameter of any type.
+
+        Args:
+            param_type: The type to check
+
+        Returns:
+            True if the type is Optional[T], False otherwise
+
+        Example:
+            >>> from typing import Optional
+            >>> ParameterTypeUtils.is_optional(Optional[str])
+            True
+            >>> ParameterTypeUtils.is_optional(str)
+            False
+        """
+        if get_origin(param_type) is Union:
+            args = get_args(param_type)
+            # Check if it's Optional (Union with None)
+            return len(args) == 2 and type(None) in args
+        return False
+
+    @staticmethod
     def is_optional_dataclass(param_type: Type) -> bool:
         """
         Check if parameter type is Optional[dataclass].

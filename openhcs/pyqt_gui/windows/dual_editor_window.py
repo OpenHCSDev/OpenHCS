@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 class DualEditorWindow(QDialog):
     """
-    PyQt6 Dual Editor Window.
-    
-    Step and function editing dialog with tabbed interface for comprehensive editing.
-    Preserves all business logic from Textual version with clean PyQt6 UI.
+    PyQt6 Multi-Tab Parameter Editor Window.
+
+    Generic parameter editing dialog with inheritance hierarchy-based tabbed interface.
+    Creates one tab per class in the inheritance hierarchy, showing parameters specific
+    to each class level. Preserves all business logic from Textual version with clean PyQt6 UI.
     """
     
     # Signals
@@ -81,8 +82,8 @@ class DualEditorWindow(QDialog):
         
         # UI components
         self.tab_widget: Optional[QTabWidget] = None
-        self.step_editor: Optional[QWidget] = None
-        self.func_editor: Optional[QWidget] = None
+        self.parameter_editors: Dict[str, QWidget] = {}  # Map tab titles to editor widgets
+        self.class_hierarchy: List = []  # Store inheritance hierarchy info
         
         # Setup UI
         self.setup_ui()
@@ -157,15 +158,18 @@ class DualEditorWindow(QDialog):
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""
         from openhcs.pyqt_gui.widgets.step_parameter_editor import StepParameterEditorWidget
+        from openhcs.config_framework.context_manager import config_context
 
-        # Create step parameter editor widget (mirrors Textual TUI)
-        # Pass orchestrator for proper inheritance context
-        self.step_editor = StepParameterEditorWidget(
-            self.editing_step,
-            service_adapter=None,
-            color_scheme=self.color_scheme,
-            orchestrator=self.orchestrator
-        )
+        # Create step parameter editor widget with proper nested context
+        # Step must be nested: GlobalPipelineConfig -> PipelineConfig -> Step
+        with config_context(self.orchestrator.pipeline_config):  # Pipeline level
+            with config_context(self.editing_step):              # Step level
+                self.step_editor = StepParameterEditorWidget(
+                    self.editing_step,
+                    service_adapter=None,
+                    color_scheme=self.color_scheme,
+                    pipeline_config=self.orchestrator.pipeline_config
+                )
 
         # Connect parameter changes - use form manager signal for immediate response
         self.step_editor.form_manager.parameter_changed.connect(self.on_form_parameter_changed)
@@ -617,22 +621,36 @@ class DualEditorWindow(QDialog):
     def save_step(self):
         """Save the edited step."""
         try:
+            # CRITICAL FIX: Collect current values from all form managers before saving
+            # This ensures nested dataclass field values are properly saved to the step object
+            for tab_index in range(self.tab_widget.count()):
+                tab_widget = self.tab_widget.widget(tab_index)
+                if hasattr(tab_widget, 'form_manager'):
+                    # Get current values from this tab's form manager
+                    current_values = tab_widget.form_manager.get_current_values()
+
+                    # Apply values to the editing step
+                    for param_name, value in current_values.items():
+                        if hasattr(self.editing_step, param_name):
+                            setattr(self.editing_step, param_name, value)
+                            logger.debug(f"Applied {param_name}={value} to editing step")
+
             # Validate step
             step_name = getattr(self.editing_step, 'name', None)
             if not step_name or not step_name.strip():
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Validation Error", "Step name cannot be empty.")
                 return
-            
+
             # Emit signals and call callback
             self.step_saved.emit(self.editing_step)
-            
+
             if self.on_save_callback:
                 self.on_save_callback(self.editing_step)
-            
+
             self.accept()
             logger.debug(f"Step saved: {getattr(self.editing_step, 'name', 'Unknown')}")
-            
+
         except Exception as e:
             logger.error(f"Failed to save step: {e}")
             from PyQt6.QtWidgets import QMessageBox

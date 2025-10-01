@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, Type, Optional, List, Tuple
 
 from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-from openhcs.core.field_path_detection import FieldPathDetector
+# Old field path detection removed - using simple field name matching
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 from openhcs.ui.shared.ui_utils import debug_param, format_field_id, format_param_name, format_reset_button_id
@@ -153,18 +153,18 @@ class ParameterFormService:
             The converted value
         """
         debug_param("convert_value", f"param={param_name}, input_type={type(value).__name__}, target_type={param_type.__name__ if hasattr(param_type, '__name__') else str(param_type)}")
-        
+
         if value is None:
             return None
-        
+
         # Handle string "None" literal
         if isinstance(value, str) and value == CONSTANTS.NONE_STRING_LITERAL:
             return None
-        
+
         # Handle enum types
         if self._type_utils.is_enum_type(param_type):
             return param_type(value)
-        
+
         # Handle list of enums
         if self._type_utils.is_list_of_enums(param_type):
             # If value is already a list (from checkbox group widget), return as-is
@@ -173,7 +173,33 @@ class ParameterFormService:
             enum_type = self._type_utils.get_enum_from_list_type(param_type)
             if enum_type:
                 return [enum_type(value)]
-        
+
+        # Handle Union types (e.g., Union[List[str], str, int])
+        # Try to convert to the most specific type that matches
+        from typing import get_origin, get_args, Union
+        if get_origin(param_type) is Union:
+            union_args = get_args(param_type)
+            # Filter out NoneType
+            non_none_types = [t for t in union_args if t is not type(None)]
+
+            # If value is a string, try to convert to int first, then keep as str
+            if isinstance(value, str) and value != CONSTANTS.EMPTY_STRING:
+                # Try int conversion first
+                if int in non_none_types:
+                    try:
+                        return int(value)
+                    except (ValueError, TypeError):
+                        pass
+                # Try float conversion
+                if float in non_none_types:
+                    try:
+                        return float(value)
+                    except (ValueError, TypeError):
+                        pass
+                # Keep as string if str is in the union
+                if str in non_none_types:
+                    return value
+
         # Handle basic types
         if param_type == bool and isinstance(value, str):
             return self._type_utils.convert_string_to_bool(value)
@@ -188,10 +214,6 @@ class ParameterFormService:
         # Handle empty strings in lazy context - convert to None for all parameter types
         # This is critical for lazy dataclass behavior where None triggers placeholder resolution
         if isinstance(value, str) and value == CONSTANTS.EMPTY_STRING:
-            # Check if we're in a lazy context by examining if this is being called
-            # during a reset operation or widget clearing in a lazy dataclass context
-            # For now, always convert empty strings to None - this preserves lazy behavior
-            # and concrete contexts should not be passing empty strings for non-string types
             return None
 
         # Handle string types - also convert empty strings to None for consistency
@@ -205,7 +227,7 @@ class ParameterFormService:
                 return None
 
         return value
-    
+
     def get_parameter_display_info(self, param_name: str, param_type: Type,
                                  description: Optional[str] = None) -> Dict[str, str]:
         """
@@ -233,12 +255,18 @@ class ParameterFormService:
         return f"{field_path}_{param_name}"
 
     def get_field_path_with_fail_loud(self, parent_type: Type, param_type: Type) -> str:
-        """Get field path using FieldPathDetector with fail-loud behavior."""
-        field_path = FieldPathDetector.find_field_path_for_type(parent_type, param_type)
-        if not field_path:
-            raise ValueError(f"FieldPathDetector could not find field path for type {param_type} in {parent_type}. "
-                            f"This indicates the dataclass is not properly registered or the type is incorrect.")
-        return field_path
+        """Get field path using simple field name matching."""
+        import dataclasses
+
+        # Simple approach: find field by type matching
+        if dataclasses.is_dataclass(parent_type):
+            for field in dataclasses.fields(parent_type):
+                if field.type == param_type:
+                    return field.name
+
+        # Fallback: use class name as field name (common pattern)
+        field_name = param_type.__name__.lower().replace('config', '')
+        return field_name
 
     def generate_field_ids_direct(self, base_field_id: str, param_name: str) -> Dict[str, str]:
         """Generate field IDs directly without artificial complexity."""
@@ -341,8 +369,8 @@ class ParameterFormService:
     def _create_parameter_info(self, param_name: str, param_type: Type, current_value: Any,
                              parameter_info: Optional[Dict] = None) -> ParameterInfo:
         """Create parameter information object."""
-        # Check if it's an optional dataclass
-        is_optional = self._type_utils.is_optional_dataclass(param_type)
+        # Check if it's any optional type
+        is_optional = self._type_utils.is_optional(param_type)
         if is_optional:
             inner_type = self._type_utils.get_optional_inner_type(param_type)
             is_nested = dataclasses.is_dataclass(inner_type)
@@ -353,7 +381,13 @@ class ParameterFormService:
         description = None
         if parameter_info and param_name in parameter_info:
             info_obj = parameter_info[param_name]
-            description = getattr(info_obj, 'description', None)
+            # CRITICAL FIX: Handle both object-style and string-style parameter info
+            if isinstance(info_obj, str):
+                # Simple string description
+                description = info_obj
+            else:
+                # Object with description attribute
+                description = getattr(info_obj, 'description', None)
         
         return ParameterInfo(
             name=param_name,
@@ -378,25 +412,53 @@ class ParameterFormService:
             current_value, dataclass_type, parent_dataclass_type
         )
 
-        # Recursively analyze nested structure
-        return self.analyze_parameters(nested_params, nested_types, nested_field_id)
+        # Recursively analyze nested structure with proper descriptions for nested fields
+        try:
+            # Use existing infrastructure to extract field descriptions for the nested dataclass
+            from openhcs.textual_tui.widgets.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
+            # Prefer instance-based analysis when available so we respect lazy vs concrete values
+            analysis_source = current_value if current_value is not None else dataclass_type
+            nested_param_info = UnifiedParameterAnalyzer.analyze(analysis_source)
+        except Exception:
+            # Fail loud where it matters; but if analysis fails, keep the UI usable
+            nested_param_info = None
+
+        return self.analyze_parameters(
+            nested_params,
+            nested_types,
+            nested_field_id,
+            parameter_info=nested_param_info,
+            parent_dataclass_type=dataclass_type,
+        )
 
     def get_placeholder_text(self, param_name: str, dataclass_type: Type,
                            placeholder_prefix: str = "Pipeline default") -> Optional[str]:
         """
         Get placeholder text using existing OpenHCS infrastructure.
 
+        Context must be established by the caller using config_context() before calling this method.
+        This allows the caller to build proper context stacks (parent + overlay) for accurate
+        placeholder resolution.
+
         Args:
             param_name: Name of the parameter to get placeholder for
             dataclass_type: The specific dataclass type (GlobalPipelineConfig or PipelineConfig)
             placeholder_prefix: Prefix for the placeholder text
 
+        Returns:
+            Formatted placeholder text or None if no resolution possible
+
         The editing mode is automatically derived from the dataclass type's lazy resolution capabilities:
         - Has lazy resolution (PipelineConfig) → orchestrator config editing
         - No lazy resolution (GlobalPipelineConfig) → global config editing
         """
-        # Automatically derive editing mode from dataclass type capabilities
-        is_global_config_editing = not LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
+        # Use the simplified placeholder service - caller manages context
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+        # Service just resolves placeholders, caller manages context
+        return LazyDefaultPlaceholderService.get_lazy_resolved_placeholder(
+            dataclass_type, param_name, placeholder_prefix
+        )
 
     def reset_nested_managers(self, nested_managers: Dict[str, Any],
                             dataclass_type: Type, current_config: Any) -> None:

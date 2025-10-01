@@ -15,7 +15,7 @@ from openhcs.ui.shared.parameter_form_base import ParameterFormManagerBase, Para
 from openhcs.ui.shared.parameter_form_service import ParameterFormService
 from openhcs.ui.shared.parameter_form_config_factory import textual_config
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
-from openhcs.core.field_path_detection import FieldPathDetector
+# Old field path detection removed - using simple field name matching
 
 # Import Textual-specific components
 from .typed_widget_factory import TypedWidgetFactory
@@ -107,6 +107,8 @@ class ParameterFormManager(ParameterFormManagerBase):
             for param_info in self.form_structure.parameters:
                 if param_info.is_optional and param_info.is_nested:
                     yield from self._create_optional_dataclass_widget(param_info)
+                elif param_info.is_optional:
+                    yield from self._create_optional_regular_widget(param_info)
                 elif param_info.is_nested:
                     yield from self._create_nested_dataclass_widget(param_info)
                 else:
@@ -126,18 +128,10 @@ class ParameterFormManager(ParameterFormManagerBase):
         with Horizontal() as row:
             row.styles.height = CONSTANTS.AUTO_SIZE
             
-            # ENHANCEMENT: Extract field documentation dynamically if description is missing
-            description = display_info['description']
-            if not description or description == "No description available":
-                from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
-                # Try to extract from global_config_type if available
-                if self.global_config_type:
-                    description = SignatureAnalyzer.extract_field_documentation(self.global_config_type, param_info.name)
-
-            # Parameter label with help
+            # Parameter label with help - use description from parameter analysis
             label = ClickableParameterLabel(
                 param_info.name,
-                description,
+                display_info['description'],
                 param_info.type,
                 classes=CONSTANTS.PARAM_LABEL_CLASS
             )
@@ -208,10 +202,10 @@ class ParameterFormManager(ParameterFormManagerBase):
         display_info = self.service.get_parameter_display_info(
             param_info.name, param_info.type, param_info.description
         )
-        
+
         # Direct field ID generation - no artificial complexity
         field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
-        
+
         # Create checkbox
         from textual.widgets import Checkbox
         checkbox = Checkbox(
@@ -221,11 +215,40 @@ class ParameterFormManager(ParameterFormManagerBase):
             compact=CONSTANTS.COMPACT_WIDGET
         )
         yield checkbox
-        
-        # Create nested form if enabled
-        if param_info.current_value is not None:
-            yield from self._create_nested_dataclass_widget(param_info)
-    
+
+        # Always create nested form, but disable if None
+        # Note: In Textual, we'll need to handle the enable/disable logic in the event handler
+        yield from self._create_nested_dataclass_widget(param_info)
+
+    def _create_optional_regular_widget(self, param_info) -> ComposeResult:
+        """Create widget for Optional[regular_type] parameter with checkbox."""
+        # Get display information
+        display_info = self.service.get_parameter_display_info(
+            param_info.name, param_info.type, param_info.description
+        )
+
+        # Direct field ID generation
+        field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
+
+        # Create checkbox
+        from textual.widgets import Checkbox
+        checkbox = Checkbox(
+            value=param_info.current_value is not None,
+            label=display_info['checkbox_label'],
+            id=field_ids['optional_checkbox_id'],
+            compact=CONSTANTS.COMPACT_WIDGET
+        )
+        yield checkbox
+
+        # Get inner type and create widget for it
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+        inner_type = ParameterTypeUtils.get_optional_inner_type(param_info.type)
+
+        # Create the actual widget for the inner type
+        inner_widget = TypedWidgetFactory.create_widget(inner_type, param_info.current_value, field_ids['widget_id'])
+        inner_widget.disabled = param_info.current_value is None  # Disable if None
+        yield inner_widget
+
     # Abstract method implementations (dramatically simplified)
     
     def create_parameter_widget(self, param_name: str, param_type: Type, current_value: Any) -> Any:

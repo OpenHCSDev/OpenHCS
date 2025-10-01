@@ -179,32 +179,18 @@ class PipelineCompiler:
             metadata_writer: If True, this well is responsible for creating OpenHCS metadata files
             plate_path: Path to plate root for zarr conversion detection
         """
+        # NOTE: This method is called within config_context() wrapper in compile_pipelines()
         if context.is_frozen():
             raise AttributeError("Cannot initialize step plans in a frozen ProcessingContext.")
 
         if not hasattr(context, 'step_plans') or context.step_plans is None:
             context.step_plans = {} # Ensure step_plans dict exists
 
-        # === THREAD-LOCAL CONTEXT SETUP ===
-        # CRITICAL: Use the same merged config pattern as orchestrator.apply_pipeline_config()
-        # to preserve None values needed for sibling inheritance (materialization_defaults → path_planning)
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
-        from dataclasses import fields
-
-        # Check if orchestrator has already set up the context
-        current_context = get_current_global_config(GlobalPipelineConfig)
-        if current_context is None and orchestrator.pipeline_config:
-            # If no context exists, apply the orchestrator's pipeline config to establish context
-            # This uses the same merged config pattern that preserves None values for sibling inheritance
-            orchestrator.apply_pipeline_config(orchestrator.pipeline_config)
-            logger.debug(f"🔧 THREAD-LOCAL: Applied orchestrator pipeline config to establish context for sibling inheritance")
-        else:
-            logger.debug(f"🔧 THREAD-LOCAL: Using existing context set by orchestrator (preserves None values for sibling inheritance)")
-
-        # Add visualizer config to context for orchestrator access
-        current_config = get_current_global_config(GlobalPipelineConfig)
-        context.visualizer_config = current_config.visualizer_config
+        # === VISUALIZER CONFIG EXTRACTION ===
+        # Extract visualizer config from orchestrator.pipeline_config
+        # The caller has already set up config_context(orchestrator.pipeline_config)
+        # so we can just access the field directly - lazy resolution happens automatically
+        context.visualizer_config = orchestrator.pipeline_config.visualizer_config
 
         # === BACKWARDS COMPATIBILITY PREPROCESSING ===
         # Ensure all steps have complete attribute sets based on AbstractStep constructor
@@ -228,7 +214,8 @@ class PipelineCompiler:
         # Check if first step needs zarr conversion
         if steps_definition and plate_path:
             first_step = steps_definition[0]
-            vfs_config = context.get_vfs_config()
+            # Access config directly from orchestrator.pipeline_config (lazy resolution via config_context)
+            vfs_config = orchestrator.pipeline_config.vfs_config
 
             # Only convert if default materialization backend is ZARR
             wants_zarr_conversion = (
@@ -242,7 +229,7 @@ class PipelineCompiler:
 
                 if not already_zarr:
                     # Inject input conversion config using existing PathPlanningConfig pattern
-                    path_config = context.get_path_planning_config()
+                    path_config = orchestrator.pipeline_config.path_planning_config
                     conversion_config = PathPlanningConfig(
                         output_dir_suffix="",  # No suffix - write to plate root
                         global_output_folder=plate_path.parent,  # Parent of plate
@@ -252,9 +239,11 @@ class PipelineCompiler:
                     logger.debug(f"Input conversion to zarr enabled for first step: {first_step.name}")
 
         # The axis_id and base_input_dir are available from the context object.
+        # Path planning now gets config directly from orchestrator.pipeline_config parameter
         PipelinePathPlanner.prepare_pipeline_paths(
             context,
-            steps_definition
+            steps_definition,
+            orchestrator.pipeline_config
         )
 
         # === FUNCTION OBJECT REFRESH ===
@@ -264,12 +253,22 @@ class PipelineCompiler:
         _refresh_function_objects_in_steps(steps_definition)
 
         # === LAZY CONFIG RESOLUTION ===
-        # Resolve ALL lazy configs AFTER path planning (which includes metadata injection)
-        # This ensures metadata injection happens first, then lazy configs are resolved
-        logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving all lazy configs after path planning...")
-        from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-        with orchestrator.config_context(for_serialization=True):
-            steps_definition = resolve_lazy_configurations_for_serialization(steps_definition)
+        # Resolve each step's lazy configs with proper nested context
+        # This ensures step-level configs inherit from pipeline-level configs
+        # Architecture: GlobalPipelineConfig -> PipelineConfig -> Step (same as UI)
+        logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs with nested step contexts...")
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
+        from openhcs.config_framework.context_manager import config_context
+
+        # Resolve each step individually with nested context (pipeline -> step)
+        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config)
+        # We add step-level context on top for each step
+        resolved_steps = []
+        for step in steps_definition:
+            with config_context(step):  # Step-level context on top of pipeline context
+                resolved_step = resolve_lazy_configurations_for_serialization(step)
+                resolved_steps.append(resolved_step)
+        steps_definition = resolved_steps
 
         # Loop to supplement step_plans with non-I/O, non-path attributes
         # after PipelinePathPlanner has fully populated them with I/O info.
@@ -314,11 +313,11 @@ class PipelineCompiler:
 
             # DEBUG: Check what the resolved napari config actually has
             if hasattr(resolved_step, 'napari_streaming_config') and resolved_step.napari_streaming_config:
-                print(f"🔍 COMPILER DEBUG: resolved_step.napari_streaming_config.well_filter = {resolved_step.napari_streaming_config.well_filter}")
+                logger.debug(f"resolved_step.napari_streaming_config.well_filter = {resolved_step.napari_streaming_config.well_filter}")
             if hasattr(resolved_step, 'step_well_filter_config') and resolved_step.step_well_filter_config:
-                print(f"🔍 COMPILER DEBUG: resolved_step.step_well_filter_config.well_filter = {resolved_step.step_well_filter_config.well_filter}")
+                logger.debug(f"resolved_step.step_well_filter_config.well_filter = {resolved_step.step_well_filter_config.well_filter}")
             if hasattr(resolved_step, 'step_materialization_config') and resolved_step.step_materialization_config:
-                print(f"🔍 COMPILER DEBUG: resolved_step.step_materialization_config.sub_dir = '{resolved_step.step_materialization_config.sub_dir}' (type: {type(resolved_step.step_materialization_config).__name__})")
+                logger.debug(f"resolved_step.step_materialization_config.sub_dir = '{resolved_step.step_materialization_config.sub_dir}' (type: {type(resolved_step.step_materialization_config).__name__})")
 
             # Store WellFilterConfig instances only if they match the current axis
             from openhcs.core.config import WellFilterConfig, StreamingConfig, WellFilterMode
@@ -333,28 +332,25 @@ class PipelineCompiler:
             # Get step axis filters for this step
             step_axis_filters = getattr(context, 'step_axis_filters', {}).get(step_index, {})
 
-            print(f"🔍 STEP DEBUG: Processing step '{step.name}' with attributes: {[attr for attr in dir(resolved_step) if not attr.startswith('_') and 'config' in attr]}")
+            logger.debug(f"Processing step '{step.name}' with attributes: {[attr for attr in dir(resolved_step) if not attr.startswith('_') and 'config' in attr]}")
             if step.name == "Image Enhancement Processing":
-                print(f"🔍 ATTR DEBUG: All attributes for {step.name}: {[attr for attr in dir(resolved_step) if not attr.startswith('_')]}")
+                logger.debug(f"All attributes for {step.name}: {[attr for attr in dir(resolved_step) if not attr.startswith('_')]}")
 
             for attr_name in dir(resolved_step):
                 if not attr_name.startswith('_'):
                     config = getattr(resolved_step, attr_name, None)
-                    # CRITICAL FIX: Handle lazy configs by converting to base config first
-                    # Lazy configs don't inherit from base classes, so isinstance() fails
-                    actual_config = config
-                    if config is not None and hasattr(config, 'to_base_config'):
-                        actual_config = config.to_base_config()
+                    # Configs are already resolved to base configs at line 277
+                    # No need to call to_base_config() again - that's legacy code
 
                     # Unified handling: compute inclusion for any WellFilterConfig (StreamingConfig subclasses it)
-                    is_streaming = actual_config is not None and isinstance(actual_config, StreamingConfig)
-                    is_wellfilter = actual_config is not None and isinstance(actual_config, WellFilterConfig)
+                    is_streaming = config is not None and isinstance(config, StreamingConfig)
+                    is_wellfilter = config is not None and isinstance(config, WellFilterConfig)
 
                     include_config = False
                     if is_wellfilter:
                         # Check if this config has a well filter and if current axis matches
                         should_include_config = True
-                        if actual_config.well_filter is not None:
+                        if config.well_filter is not None:
                             config_filter = step_axis_filters.get(attr_name)
                             if config_filter:
                                 # Apply axis filter logic
@@ -367,7 +363,7 @@ class PipelineCompiler:
                             include_config = True
 
                     # Only add the config to the plan if it's included (or not a WellFilterConfig)
-                    if include_config or (not is_wellfilter and actual_config is not None):
+                    if include_config or (not is_wellfilter and config is not None):
                         current_plan[attr_name] = config
 
                     # Streaming extras only apply if the streaming config is included
@@ -375,13 +371,13 @@ class PipelineCompiler:
                         # Validate that the visualizer can actually be created
                         try:
                             # Only validate configs that actually have a backend (real streaming configs)
-                            if not hasattr(actual_config, 'backend'):
+                            if not hasattr(config, 'backend'):
                                 continue
 
                             # Test visualizer creation without actually creating it
-                            if hasattr(actual_config, 'create_visualizer'):
+                            if hasattr(config, 'create_visualizer'):
                                 # For napari, check if napari is available and environment supports GUI
-                                if actual_config.backend.name == 'NAPARI_STREAM':
+                                if config.backend.name == 'NAPARI_STREAM':
                                     from openhcs.utils.import_utils import optional_import
                                     import os
 
@@ -402,10 +398,10 @@ class PipelineCompiler:
                                         continue  # Skip this streaming config
 
                             has_streaming = True
-                            # Collect visualizer info - use actual_config for backend access
+                            # Collect visualizer info
                             visualizer_info = {
-                                'backend': actual_config.backend.name,
-                                'config': actual_config
+                                'backend': config.backend.name,
+                                'config': config
                             }
                             if visualizer_info not in required_visualizers:
                                 required_visualizers.append(visualizer_info)
@@ -468,7 +464,8 @@ class PipelineCompiler:
 
         all_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
 
-        vfs_config = context.get_vfs_config()
+        # Access config directly from orchestrator.pipeline_config (lazy resolution via config_context)
+        vfs_config = orchestrator.pipeline_config.vfs_config
 
         for step_index, step in enumerate(steps_definition):
             step_plan = context.step_plans[step_index]
@@ -508,7 +505,8 @@ class PipelineCompiler:
         MaterializationFlagPlanner.prepare_pipeline_flags(
             context,
             steps_definition,
-            orchestrator.plate_path
+            orchestrator.plate_path,
+            orchestrator.pipeline_config
         )
 
         # Post-check (optional, but good for ensuring contracts are met by the planner)
@@ -644,26 +642,23 @@ class PipelineCompiler:
         This method should be called after all compilation phases but before context
         freezing to ensure step plans are safe for pickling in multiprocessing contexts.
 
+        NOTE: The caller MUST have already set up config_context(orchestrator.pipeline_config)
+        before calling this method. We rely on that context for lazy resolution.
+
         Args:
             context: ProcessingContext to process
-            orchestrator: PipelineOrchestrator to get current effective config from
+            orchestrator: PipelineOrchestrator (unused - kept for API compatibility)
         """
-        from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.core.context.global_config import set_current_global_config
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
 
-        # CRITICAL FIX: Use orchestrator's context manager instead of contaminating thread-local
-        # This ensures compilation resolves the same values as UI placeholders without
-        # permanently contaminating the global thread-local context
-        with orchestrator.config_context(for_serialization=True):
-            # Resolve the entire context recursively to catch all lazy dataclass instances
-            # This ensures that any lazy configs in any part of the context are resolved
-            resolved_context_dict = resolve_lazy_configurations_for_serialization(vars(context))
+        # Resolve the entire context recursively to catch all lazy dataclass instances
+        # The caller has already set up config_context(), so lazy resolution happens automatically
+        resolved_context_dict = resolve_lazy_configurations_for_serialization(vars(context))
 
-            # Update context attributes with resolved values
-            for attr_name, resolved_value in resolved_context_dict.items():
-                if not attr_name.startswith('_'):  # Skip private attributes
-                    setattr(context, attr_name, resolved_value)
+        # Update context attributes with resolved values
+        for attr_name, resolved_value in resolved_context_dict.items():
+            if not attr_name.startswith('_'):  # Skip private attributes
+                setattr(context, attr_name, resolved_value)
 
     @staticmethod
     def compile_pipelines(
@@ -717,18 +712,26 @@ class PipelineCompiler:
             # === GLOBAL AXIS FILTER RESOLUTION ===
             # Resolve axis filters once for all axis values to ensure step-level inheritance works
             logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs for axis filter resolution...")
-            from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-            with orchestrator.config_context(for_serialization=True):
-                resolved_steps_for_filters = resolve_lazy_configurations_for_serialization(pipeline_definition)
+            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
+            from openhcs.config_framework.context_manager import config_context
+
+            # Resolve each step with nested context (same as initialize_step_plans_for_context)
+            # This ensures step-level configs inherit from pipeline-level configs
+            resolved_steps_for_filters = []
+            with config_context(orchestrator.pipeline_config):
+                for step in pipeline_definition:
+                    with config_context(step):  # Step-level context on top of pipeline context
+                        resolved_step = resolve_lazy_configurations_for_serialization(step)
+                        resolved_steps_for_filters.append(resolved_step)
 
             logger.debug("🎯 AXIS FILTER RESOLUTION: Resolving step axis filters...")
             # Create a temporary context to store the global axis filters
             temp_context = orchestrator.create_context("temp")
 
-            # CRITICAL FIX: Inject orchestrator context during axis filter resolution
-            # This ensures that lazy config resolution finds the orchestrator context instead of step context
-            from openhcs.core.lazy_config import ContextInjector
-            with ContextInjector.with_context(orchestrator, "orchestrator"):
+            # Use orchestrator context during axis filter resolution
+            # This ensures that lazy config resolution uses the orchestrator context
+            from openhcs.config_framework.context_manager import config_context
+            with config_context(orchestrator.pipeline_config):
                 _resolve_step_axis_filters(resolved_steps_for_filters, temp_context, orchestrator)
             global_step_axis_filters = getattr(temp_context, 'step_axis_filters', {})
 
@@ -747,17 +750,20 @@ class PipelineCompiler:
                 is_responsible = (axis_id == responsible_axis_value)
                 logger.debug(f"Axis {axis_id} metadata responsibility: {is_responsible}")
 
-                PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
-                PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, orchestrator)
-                PipelineCompiler.plan_materialization_flags_for_context(context, pipeline_definition, orchestrator)
-                PipelineCompiler.validate_memory_contracts_for_context(context, pipeline_definition, orchestrator)
-                PipelineCompiler.assign_gpu_resources_for_context(context)
+                # CRITICAL: Wrap all compilation steps in config_context() for lazy resolution
+                from openhcs.config_framework.context_manager import config_context
+                with config_context(orchestrator.pipeline_config):
+                    PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
+                    PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, orchestrator)
+                    PipelineCompiler.plan_materialization_flags_for_context(context, pipeline_definition, orchestrator)
+                    PipelineCompiler.validate_memory_contracts_for_context(context, pipeline_definition, orchestrator)
+                    PipelineCompiler.assign_gpu_resources_for_context(context)
 
-                if enable_visualizer_override:
-                    PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
+                    if enable_visualizer_override:
+                        PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
 
-                # Resolve all lazy dataclasses before freezing to ensure multiprocessing compatibility
-                PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
+                    # Resolve all lazy dataclasses before freezing to ensure multiprocessing compatibility
+                    PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
 
 
 
@@ -858,7 +864,7 @@ def _resolve_step_axis_filters(resolved_steps: List[AbstractStep], context, orch
                             'original_filter': config.well_filter
                         }
 
-                        print(f"🔍 AXIS_FILTER DEBUG: Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
+                        logger.debug(f"Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
                                    f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
                         logger.debug(f"Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
                                    f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")

@@ -20,7 +20,7 @@ from openhcs.core.config import (
     GlobalPipelineConfig, MaterializationBackend,
     PathPlanningConfig, StepWellFilterConfig, VFSConfig, ZarrConfig
 )
-from openhcs.core.lazy_config import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig
+from openhcs.config_framework.lazy_factory import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.pipeline import Pipeline
@@ -39,7 +39,7 @@ from tests.integration.helpers.fixture_utils import (
     microscope_config, plate_dir, test_params, print_thread_activity_report
 )
 
-from openhcs.core.lazy_config import ensure_global_config_context
+from openhcs.config_framework.lazy_factory import ensure_global_config_context
 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 
 
@@ -59,8 +59,8 @@ class TestConstants:
     DEFAULT_SUB_DIR: str = "images"
     OUTPUT_SUFFIX: str = "_outputs"
     ZARR_STORE_NAME: str = "images.zarr"
-    STEP_WELL_FILTER_TEST: int = 2
-    PIPELINE_STEP_WELL_FILTER_TEST: int = None
+    STEP_WELL_FILTER_TEST: int = 4
+    PIPELINE_STEP_WELL_FILTER_TEST: int = 2
     GLOBAL_STEP_WELL_FILTER_TEST: int = 3
 
     # Metadata validation
@@ -167,7 +167,7 @@ def create_test_pipeline() -> Pipeline:
             position_func = ashlar_compute_tile_positions_cpu
 
     # Suppress visualizer configs entirely when headless
-    streaming_cfg = None if _headless_mode() else LazyNapariStreamingConfig(well_filter=2)
+    streaming_cfg = None if _headless_mode() else LazyNapariStreamingConfig()
 
     return Pipeline(
         steps=[
@@ -303,8 +303,7 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
         path_planning_config=LazyPathPlanningConfig(
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
-        #step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
-        #step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+        step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
     )
 
     orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
