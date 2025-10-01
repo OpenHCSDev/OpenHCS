@@ -253,13 +253,22 @@ class PipelineCompiler:
         _refresh_function_objects_in_steps(steps_definition)
 
         # === LAZY CONFIG RESOLUTION ===
-        # Resolve ALL lazy configs AFTER path planning (which includes metadata injection)
-        # This ensures metadata injection happens first, then lazy configs are resolved
-        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config)
-        # so we can just resolve directly - no need for redundant context nesting
-        logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving all lazy configs after path planning...")
+        # Resolve each step's lazy configs with proper nested context
+        # This ensures step-level configs inherit from pipeline-level configs
+        # Architecture: GlobalPipelineConfig -> PipelineConfig -> Step (same as UI)
+        logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs with nested step contexts...")
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-        steps_definition = resolve_lazy_configurations_for_serialization(steps_definition)
+        from openhcs.config_framework.context_manager import config_context
+
+        # Resolve each step individually with nested context (pipeline -> step)
+        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config)
+        # We add step-level context on top for each step
+        resolved_steps = []
+        for step in steps_definition:
+            with config_context(step):  # Step-level context on top of pipeline context
+                resolved_step = resolve_lazy_configurations_for_serialization(step)
+                resolved_steps.append(resolved_step)
+        steps_definition = resolved_steps
 
         # Loop to supplement step_plans with non-I/O, non-path attributes
         # after PipelinePathPlanner has fully populated them with I/O info.
