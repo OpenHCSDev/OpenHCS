@@ -61,10 +61,21 @@ class LazyDefaultPlaceholderService:
             Formatted placeholder text or None if no resolution possible
         """
         prefix = placeholder_prefix or LazyDefaultPlaceholderService.PLACEHOLDER_PREFIX
-        
+
+        # PERFORMANCE: Check cache first
+        # Note: We get current context to include in cache key for proper invalidation
+        from openhcs.ui.shared.parameter_form_cache import get_placeholder_resolution_cache
+        from openhcs.config_framework.context_manager import get_current_temp_global
+
+        cache = get_placeholder_resolution_cache()
+        current_context = get_current_temp_global()
+        cached_result = cache.get(dataclass_type, field_name, current_context)
+        if cached_result is not None:
+            return cached_result
+
         # Check if this is a lazy dataclass
         is_lazy = LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type)
-        
+
         # If not lazy, try to find the lazy version
         if not is_lazy:
             lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(dataclass_type)
@@ -72,29 +83,44 @@ class LazyDefaultPlaceholderService:
                 dataclass_type = lazy_type
             else:
                 # Use direct class default for non-lazy types
-                return LazyDefaultPlaceholderService._get_class_default_placeholder(
+                result = LazyDefaultPlaceholderService._get_class_default_placeholder(
                     dataclass_type, field_name, prefix
                 )
-        
+                cache.set(dataclass_type, field_name, current_context, result)
+                return result
+
         # Simple approach: Create new instance and let lazy system handle context resolution
         # The context_obj parameter is unused since context should be set externally via config_context()
         try:
             instance = dataclass_type()
             resolved_value = getattr(instance, field_name)
-            return LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
+            result = LazyDefaultPlaceholderService._format_placeholder_text(resolved_value, prefix)
         except Exception as e:
             logger.debug(f"Failed to resolve {dataclass_type.__name__}.{field_name}: {e}")
             # Fallback to class default
             class_default = LazyDefaultPlaceholderService._get_class_default_value(dataclass_type, field_name)
-            return LazyDefaultPlaceholderService._format_placeholder_text(class_default, prefix)
+            result = LazyDefaultPlaceholderService._format_placeholder_text(class_default, prefix)
+
+        # Cache the result before returning
+        cache.set(dataclass_type, field_name, current_context, result)
+        return result
 
     @staticmethod
     def _get_lazy_type_for_base(base_type: type) -> Optional[type]:
         """Get the lazy type for a base dataclass type (reverse lookup)."""
+        # PERFORMANCE: Check cache first
+        from openhcs.ui.shared.parameter_form_cache import get_type_analysis_cache
+        cache = get_type_analysis_cache()
+        cached_lazy_type = cache.get_lazy_type(base_type)
+        if cached_lazy_type is not None:
+            return cached_lazy_type
+
         from openhcs.config_framework.lazy_factory import _lazy_type_registry
-        
+
         for lazy_type, registered_base_type in _lazy_type_registry.items():
             if registered_base_type == base_type:
+                # Cache the mapping for future lookups
+                cache.register_lazy_type_pair(base_type, lazy_type)
                 return lazy_type
         return None
 

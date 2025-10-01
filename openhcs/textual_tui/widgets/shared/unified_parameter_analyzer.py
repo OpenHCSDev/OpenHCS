@@ -51,45 +51,56 @@ class UnifiedParameterAnalyzer:
     @staticmethod
     def analyze(target: Union[Callable, Type, object]) -> Dict[str, UnifiedParameterInfo]:
         """Analyze parameters from any source.
-        
+
         Args:
             target: Function, method, dataclass type, or instance to analyze
-            
+
         Returns:
             Dictionary mapping parameter names to UnifiedParameterInfo objects
-            
+
         Examples:
             # Function analysis
             param_info = UnifiedParameterAnalyzer.analyze(my_function)
-            
+
             # Dataclass analysis
             param_info = UnifiedParameterAnalyzer.analyze(MyDataclass)
-            
+
             # Instance analysis
             param_info = UnifiedParameterAnalyzer.analyze(my_instance)
         """
         if target is None:
             return {}
-            
+
+        # PERFORMANCE: Check cache first
+        from openhcs.ui.shared.parameter_form_cache import get_parameter_analysis_cache
+        cache = get_parameter_analysis_cache()
+        cached_result = cache.get(target)
+        if cached_result is not None:
+            return cached_result
+
         # Determine the type of target and route to appropriate analyzer
         if inspect.isfunction(target) or inspect.ismethod(target):
-            return UnifiedParameterAnalyzer._analyze_callable(target)
+            result = UnifiedParameterAnalyzer._analyze_callable(target)
         elif inspect.isclass(target):
             if dataclasses.is_dataclass(target):
-                return UnifiedParameterAnalyzer._analyze_dataclass_type(target)
+                result = UnifiedParameterAnalyzer._analyze_dataclass_type(target)
             else:
                 # Try to analyze constructor
-                return UnifiedParameterAnalyzer._analyze_callable(target.__init__)
+                result = UnifiedParameterAnalyzer._analyze_callable(target.__init__)
         elif dataclasses.is_dataclass(target):
             # Instance of dataclass
-            return UnifiedParameterAnalyzer._analyze_dataclass_instance(target)
+            result = UnifiedParameterAnalyzer._analyze_dataclass_instance(target)
         else:
             # Try to analyze as callable
             if callable(target):
-                return UnifiedParameterAnalyzer._analyze_callable(target)
+                result = UnifiedParameterAnalyzer._analyze_callable(target)
             else:
                 # For regular object instances (like step instances), analyze their class constructor
-                return UnifiedParameterAnalyzer._analyze_object_instance(target)
+                result = UnifiedParameterAnalyzer._analyze_object_instance(target)
+
+        # Cache the result before returning
+        cache.set(target, result)
+        return result
     
     @staticmethod
     def _analyze_callable(callable_obj: Callable) -> Dict[str, UnifiedParameterInfo]:
