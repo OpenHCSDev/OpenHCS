@@ -685,7 +685,6 @@ class DualEditorWindow(QDialog):
                 value = getattr(self.editing_step, field.name)
                 setattr(self.original_step_reference, field.name, value)
         else:
-<<<<<<< HEAD
             # CRITICAL FIX: Use reflection to copy ALL attributes, not just hardcoded list
             # This ensures optional dataclass attributes like step_materialization_config are copied
             for attr_name in dir(self.editing_step):
