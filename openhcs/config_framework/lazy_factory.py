@@ -497,11 +497,39 @@ def _detect_context_type(obj: Any) -> Optional[str]:
 
 
 def resolve_lazy_configurations_for_serialization(data: Any) -> Any:
-    """Recursively resolve lazy dataclass instances to concrete values for serialization."""
-    # Resolve the object itself if it's a lazy dataclass
-    resolved_data = (data.to_base_config()
-                    if get_base_type_for_lazy(type(data)) is not None
-                    else data)
+    """
+    Recursively resolve lazy dataclass instances to concrete values for serialization.
+
+    CRITICAL: This function must be called WITHIN a config_context() block!
+    The context provides the hierarchy for lazy resolution.
+
+    How it works:
+    1. For lazy dataclasses: Access fields with getattr() to trigger resolution
+    2. The lazy __getattribute__ uses the active config_context() to resolve None values
+    3. Convert resolved values to base config for pickling
+
+    Example (from README.md):
+        with config_context(orchestrator.pipeline_config):
+            # Lazy resolution happens here via context
+            resolved_steps = resolve_lazy_configurations_for_serialization(steps)
+    """
+    # Check if this is a lazy dataclass
+    base_type = get_base_type_for_lazy(type(data))
+    if base_type is not None:
+        # This is a lazy dataclass - resolve fields using getattr() within the active context
+        # getattr() triggers lazy __getattribute__ which uses config_context() for resolution
+        resolved_fields = {}
+        for f in fields(data):
+            # CRITICAL: Use getattr() to trigger lazy resolution via context
+            # The active config_context() provides the hierarchy for resolution
+            resolved_value = getattr(data, f.name)
+            resolved_fields[f.name] = resolved_value
+
+        # Create base config instance with resolved values
+        resolved_data = base_type(**resolved_fields)
+    else:
+        # Not a lazy dataclass
+        resolved_data = data
 
     # CRITICAL FIX: Handle step objects (non-dataclass objects with dataclass attributes)
     step_context_type = _detect_context_type(resolved_data)
