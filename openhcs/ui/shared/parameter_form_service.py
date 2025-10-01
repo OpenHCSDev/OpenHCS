@@ -539,18 +539,21 @@ class ParameterFormService:
             if param_name not in dataclass_fields:
                 return None  # Dynamic property, not a dataclass field
 
-        field_info = dataclass_fields[param_name]
+            field_info = dataclass_fields[param_name]
 
-        # Handle field(default_factory=...) case
-        if field_info.default_factory is not MISSING:
-            try:
-                return field_info.default_factory()
-            except Exception as e:
-                raise ValueError(f"Failed to call default_factory for field '{param_name}': {e}") from e
+            # Handle field(default_factory=...) case
+            if field_info.default_factory is not MISSING:
+                try:
+                    return field_info.default_factory()
+                except Exception as e:
+                    raise ValueError(f"Failed to call default_factory for field '{param_name}': {e}") from e
 
-        # Handle field with explicit default
-        if field_info.default is not MISSING:
-            return field_info.default
+            # Handle field with explicit default
+            if field_info.default is not MISSING:
+                return field_info.default
 
-        # Field has no default (should not happen in practice)
-        raise ValueError(f"Field '{param_name}' has no default value or default_factory")
+            # Field has no default (should not happen in practice)
+            return None
+
+        # For non-dataclass types: return None (dynamic property)
+        return None

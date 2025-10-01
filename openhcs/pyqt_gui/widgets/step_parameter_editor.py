@@ -223,15 +223,7 @@ class StepParameterEditorWidget(QWidget):
        # Parameter form (using shared form manager)
         # ParameterFormManager automatically routes lazy dataclass parameters to LazyDataclassEditor
         form_frame = QFrame()
-        form_frame.setFrameStyle(QFrame.Shape.Box)
-        form_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 5px;
-                padding: 10px;
-            }}
-        """)
+        # Use centralized styling - no custom frame styling
 
         # Set size policy to allow form frame to expand
         form_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
