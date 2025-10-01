@@ -507,30 +507,37 @@ class ParameterFormService:
 
     def _get_actual_dataclass_field_default(self, param_name: str, dataclass_type: Type) -> Any:
         """
-        Get the actual default value for a dataclass field.
+        Get the actual default value for a parameter.
 
-        Handles both direct assignment and field(default_factory=...) cases:
-        - Direct assignment: num_workers: int = 1 → return class attribute
-        - field(default_factory): use_threading: bool = field(default_factory=lambda: ...) → call default_factory
+        Works uniformly for dataclasses, functions, and any other object type.
+        Always returns None for non-existent fields (fail-soft for dynamic properties).
 
         Returns:
         - If class attribute is None → return None (show placeholder)
         - If class attribute has concrete value → return that value
         - If field(default_factory) → call default_factory and return result
-
-        Raises:
-            ValueError: If field doesn't exist
+        - If field doesn't exist → return None (dynamic property)
         """
-        from dataclasses import fields, MISSING
+        from dataclasses import fields, MISSING, is_dataclass
+        import inspect
 
-        # First check if it's a direct class attribute (most common case)
+        # For pure functions: get default from signature
+        if callable(dataclass_type) and not is_dataclass(dataclass_type) and not hasattr(dataclass_type, '__mro__'):
+            sig = inspect.signature(dataclass_type)
+            if param_name in sig.parameters:
+                default = sig.parameters[param_name].default
+                return None if default is inspect.Parameter.empty else default
+            return None  # Dynamic property, not in signature
+
+        # For all other types (dataclasses, ABCs, classes): check class attribute first
         if hasattr(dataclass_type, param_name):
             return getattr(dataclass_type, param_name)
 
-        # If not a class attribute, check if it's a field(default_factory=...) field
-        dataclass_fields = {f.name: f for f in fields(dataclass_type)}
-        if param_name not in dataclass_fields:
-            raise ValueError(f"Field '{param_name}' not found in dataclass {dataclass_type.__name__}")
+        # For dataclasses: check if it's a field(default_factory=...) field
+        if is_dataclass(dataclass_type):
+            dataclass_fields = {f.name: f for f in fields(dataclass_type)}
+            if param_name not in dataclass_fields:
+                return None  # Dynamic property, not a dataclass field
 
         field_info = dataclass_fields[param_name]
 

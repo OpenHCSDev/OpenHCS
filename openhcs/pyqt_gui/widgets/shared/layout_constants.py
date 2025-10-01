@@ -59,4 +59,4 @@ ULTRA_COMPACT_LAYOUT = ParameterFormLayoutConfig(
 )
 
 # Current active configuration - change this to switch layouts globally
-CURRENT_LAYOUT = ULTRA_COMPACT_LAYOUT
+CURRENT_LAYOUT = COMPACT_LAYOUT
