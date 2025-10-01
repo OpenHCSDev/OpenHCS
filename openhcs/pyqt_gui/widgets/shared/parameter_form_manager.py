@@ -441,6 +441,8 @@ class ParameterFormManager(QWidget):
 
     def build_form(self) -> QWidget:
         """Build form UI by delegating to service layer analysis."""
+        from openhcs.utils.performance_monitor import timer
+
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
         content_layout.setSpacing(CURRENT_LAYOUT.content_layout_spacing)
@@ -448,16 +450,17 @@ class ParameterFormManager(QWidget):
 
         # DELEGATE TO SERVICE LAYER: Use analyzed form structure
         for param_info in self.form_structure.parameters:
-            if param_info.is_optional and param_info.is_nested:
-                # Optional[Dataclass]: show checkbox
-                widget = self._create_optional_dataclass_widget(param_info)
-            elif param_info.is_nested:
-                # Direct dataclass (non-optional): nested group without checkbox
-                widget = self._create_nested_dataclass_widget(param_info)
-            else:
-                # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
-                widget = self._create_regular_parameter_widget(param_info)
-            content_layout.addWidget(widget)
+            with timer(f"    Create widget for {param_info.name}", threshold_ms=5.0):
+                if param_info.is_optional and param_info.is_nested:
+                    # Optional[Dataclass]: show checkbox
+                    widget = self._create_optional_dataclass_widget(param_info)
+                elif param_info.is_nested:
+                    # Direct dataclass (non-optional): nested group without checkbox
+                    widget = self._create_nested_dataclass_widget(param_info)
+                else:
+                    # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
+                    widget = self._create_regular_parameter_widget(param_info)
+                content_layout.addWidget(widget)
 
         return content_widget
 
