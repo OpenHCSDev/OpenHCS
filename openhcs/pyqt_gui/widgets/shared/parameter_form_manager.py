@@ -394,8 +394,8 @@ class ParameterFormManager(QWidget):
         layout.setContentsMargins(*CURRENT_LAYOUT.main_layout_margins)
 
         # Apply centralized widget styling for uniform appearance (same as config_window.py)
-        from openhcs.pyqt_gui.shared.style_generator import PyQt6StyleGenerator
-        style_gen = PyQt6StyleGenerator(self.color_scheme)
+        from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+        style_gen = StyleSheetGenerator(self.color_scheme)
         self.setStyleSheet(style_gen.generate_config_window_style())
 
         # Build form content
