@@ -393,6 +393,9 @@ class ParameterFormManager(QWidget):
         layout.setSpacing(CURRENT_LAYOUT.main_layout_spacing)
         layout.setContentsMargins(*CURRENT_LAYOUT.main_layout_margins)
 
+        # Apply centralized widget styling for uniform appearance
+        self.setStyleSheet(CURRENT_LAYOUT.get_widget_stylesheet(self.color_scheme))
+
         # Build form content
         form_widget = self.build_form()
 
