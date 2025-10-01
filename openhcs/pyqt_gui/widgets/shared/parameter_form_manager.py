@@ -280,8 +280,20 @@ class ParameterFormManager(QWidget):
 
 
     def _extract_parameter_defaults(self) -> Dict[str, Any]:
-        """Extract parameter defaults - already handled in parameter extraction."""
-        return {}
+        """
+        Extract parameter defaults from the object.
+
+        For reset functionality: returns the initial values used to load widgets.
+        - For functions: signature defaults
+        - For dataclasses: field defaults
+        - For any object: constructor parameter defaults
+        """
+        from openhcs.textual_tui.widgets.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
+
+        # Use unified analyzer to get defaults
+        param_info_dict = UnifiedParameterAnalyzer.analyze(self.object_instance)
+
+        return {name: info.default_value for name, info in param_info_dict.items()}
 
     def _is_lazy_dataclass(self) -> bool:
         """Check if the object represents a lazy dataclass."""
@@ -956,14 +968,13 @@ class ParameterFormManager(QWidget):
         self.parameter_changed.emit(param_name, reset_value)
 
     def _get_reset_value(self, param_name: str) -> Any:
-        """Get reset value using context dispatch."""
-        if self.dataclass_type:
-            reset_value = self.service.get_reset_value_for_parameter(
-                param_name, self.parameter_types.get(param_name), self.dataclass_type, not self.config.is_lazy_dataclass)
-            return reset_value
-        else:
-            # Function parameter reset: use param_defaults directly
-            return self.param_defaults.get(param_name)
+        """
+        Get reset value - simple and uniform for all object types.
+
+        Just use the initial value that was used to load the widget.
+        This works for functions, dataclasses, ABCs, anything.
+        """
+        return self.param_defaults.get(param_name)
 
 
 
