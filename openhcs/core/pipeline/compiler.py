@@ -714,8 +714,15 @@ class PipelineCompiler:
             logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs for axis filter resolution...")
             from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
             from openhcs.config_framework.context_manager import config_context
+
+            # Resolve each step with nested context (same as initialize_step_plans_for_context)
+            # This ensures step-level configs inherit from pipeline-level configs
+            resolved_steps_for_filters = []
             with config_context(orchestrator.pipeline_config):
-                resolved_steps_for_filters = resolve_lazy_configurations_for_serialization(pipeline_definition)
+                for step in pipeline_definition:
+                    with config_context(step):  # Step-level context on top of pipeline context
+                        resolved_step = resolve_lazy_configurations_for_serialization(step)
+                        resolved_steps_for_filters.append(resolved_step)
 
             logger.debug("🎯 AXIS FILTER RESOLUTION: Resolving step axis filters...")
             # Create a temporary context to store the global axis filters
