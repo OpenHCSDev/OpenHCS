@@ -71,13 +71,6 @@ class UnifiedParameterAnalyzer:
         if target is None:
             return {}
 
-        # PERFORMANCE: Check cache first
-        from openhcs.ui.shared.parameter_form_cache import get_parameter_analysis_cache
-        cache = get_parameter_analysis_cache()
-        cached_result = cache.get(target)
-        if cached_result is not None:
-            return cached_result
-
         # Determine the type of target and route to appropriate analyzer
         if inspect.isfunction(target) or inspect.ismethod(target):
             result = UnifiedParameterAnalyzer._analyze_callable(target)
@@ -98,8 +91,6 @@ class UnifiedParameterAnalyzer:
                 # For regular object instances (like step instances), analyze their class constructor
                 result = UnifiedParameterAnalyzer._analyze_object_instance(target)
 
-        # Cache the result before returning
-        cache.set(target, result)
         return result
     
     @staticmethod

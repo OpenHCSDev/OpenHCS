@@ -441,8 +441,6 @@ class ParameterFormManager(QWidget):
 
     def build_form(self) -> QWidget:
         """Build form UI by delegating to service layer analysis."""
-        from openhcs.utils.performance_monitor import timer
-
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
         content_layout.setSpacing(CURRENT_LAYOUT.content_layout_spacing)
@@ -450,69 +448,57 @@ class ParameterFormManager(QWidget):
 
         # DELEGATE TO SERVICE LAYER: Use analyzed form structure
         for param_info in self.form_structure.parameters:
-            with timer(f"    Create widget for {param_info.name}", threshold_ms=5.0):
-                if param_info.is_optional and param_info.is_nested:
-                    # Optional[Dataclass]: show checkbox
-                    widget = self._create_optional_dataclass_widget(param_info)
-                elif param_info.is_nested:
-                    # Direct dataclass (non-optional): nested group without checkbox
-                    widget = self._create_nested_dataclass_widget(param_info)
-                else:
-                    # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
-                    widget = self._create_regular_parameter_widget(param_info)
-                content_layout.addWidget(widget)
+            if param_info.is_optional and param_info.is_nested:
+                # Optional[Dataclass]: show checkbox
+                widget = self._create_optional_dataclass_widget(param_info)
+            elif param_info.is_nested:
+                # Direct dataclass (non-optional): nested group without checkbox
+                widget = self._create_nested_dataclass_widget(param_info)
+            else:
+                # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
+                widget = self._create_regular_parameter_widget(param_info)
+            content_layout.addWidget(widget)
 
         return content_widget
 
     def _create_regular_parameter_widget(self, param_info) -> QWidget:
         """Create widget for regular parameter - DELEGATE TO SERVICE LAYER."""
-        from openhcs.utils.performance_monitor import timer
+        display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
+        field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
 
-        with timer(f"      get_parameter_display_info({param_info.name})", threshold_ms=2.0):
-            display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
-
-        with timer(f"      generate_field_ids({param_info.name})", threshold_ms=2.0):
-            field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
-
-        with timer(f"      create container/layout({param_info.name})", threshold_ms=2.0):
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
-            layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
+        layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
 
         # Label
-        with timer(f"      create LabelWithHelp({param_info.name})", threshold_ms=2.0):
-            label = LabelWithHelp(
-                text=display_info['field_label'], param_name=param_info.name,
-                param_description=display_info['description'], param_type=param_info.type,
-                color_scheme=self.config.color_scheme or PyQt6ColorScheme()
-            )
-            layout.addWidget(label)
+        label = LabelWithHelp(
+            text=display_info['field_label'], param_name=param_info.name,
+            param_description=display_info['description'], param_type=param_info.type,
+            color_scheme=self.config.color_scheme or PyQt6ColorScheme()
+        )
+        layout.addWidget(label)
 
         # Widget
-        with timer(f"      create_widget({param_info.name})", threshold_ms=2.0):
-            current_value = self.parameters.get(param_info.name)
-            widget = self.create_widget(param_info.name, param_info.type, current_value, field_ids['widget_id'])
-            widget.setObjectName(field_ids['widget_id'])
-            layout.addWidget(widget, 1)
+        current_value = self.parameters.get(param_info.name)
+        widget = self.create_widget(param_info.name, param_info.type, current_value, field_ids['widget_id'])
+        widget.setObjectName(field_ids['widget_id'])
+        layout.addWidget(widget, 1)
 
         # Reset button
-        with timer(f"      create reset button({param_info.name})", threshold_ms=2.0):
-            reset_button = QPushButton(CONSTANTS.RESET_BUTTON_TEXT)
-            reset_button.setObjectName(field_ids['reset_button_id'])
-            reset_button.setMaximumWidth(CURRENT_LAYOUT.reset_button_width)
-            reset_button.clicked.connect(lambda: self.reset_parameter(param_info.name))
-            layout.addWidget(reset_button)
+        reset_button = QPushButton(CONSTANTS.RESET_BUTTON_TEXT)
+        reset_button.setObjectName(field_ids['reset_button_id'])
+        reset_button.setMaximumWidth(CURRENT_LAYOUT.reset_button_width)
+        reset_button.clicked.connect(lambda: self.reset_parameter(param_info.name))
+        layout.addWidget(reset_button)
 
         # Store widgets and connect signals
-        with timer(f"      connect signals({param_info.name})", threshold_ms=2.0):
-            self.widgets[param_info.name] = widget
-            PyQt6WidgetEnhancer.connect_change_signal(widget, param_info.name, self._emit_parameter_change)
+        self.widgets[param_info.name] = widget
+        PyQt6WidgetEnhancer.connect_change_signal(widget, param_info.name, self._emit_parameter_change)
 
         # CRITICAL FIX: Apply placeholder behavior after widget creation
-        with timer(f"      apply_context_behavior({param_info.name})", threshold_ms=2.0):
-            current_value = self.parameters.get(param_info.name)
-            self._apply_context_behavior(widget, current_value, param_info.name)
+        current_value = self.parameters.get(param_info.name)
+        self._apply_context_behavior(widget, current_value, param_info.name)
 
         return container
 
