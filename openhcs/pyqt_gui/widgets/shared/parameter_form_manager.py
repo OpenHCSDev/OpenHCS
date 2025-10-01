@@ -274,7 +274,7 @@ class ParameterFormManager(QWidget):
 
         Uses the existing UnifiedParameterAnalyzer for consistent handling of all object types.
         """
-        from openhcs.textual_tui.widgets.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
+        from openhcs.ui.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
 
         # Use unified analyzer for all object types
         param_info_dict = UnifiedParameterAnalyzer.analyze(obj)
