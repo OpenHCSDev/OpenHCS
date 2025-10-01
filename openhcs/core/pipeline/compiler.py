@@ -146,23 +146,6 @@ def _get_function_reference(func):
     # If we can't create a reference, this function isn't in the registry
     # This should not happen for properly registered functions
     raise RuntimeError(f"Function {func.__name__} not found in registry - cannot create reference")
-=======
-                # Create a picklable reference instead of the function object
-                return FunctionReference(
-                    function_name=func.__name__,
-                    registry_name=metadata.registry.library_name,
-                    composite_key=composite_key
-                )
-
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.warning(f"Failed to create function reference for {func.__name__}: {e}")
-
-    # If we can't create a reference, this function isn't in the registry
-    # This should not happen for properly registered functions
-    raise RuntimeError(f"Function {func.__name__} not found in registry - cannot create reference")
->>>>>>> 80da50e (fix: Implement FunctionReference system for picklable function compilation)
 
 
 def _normalize_step_attributes(pipeline_definition: List[AbstractStep]) -> None:

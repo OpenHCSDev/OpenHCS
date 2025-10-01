@@ -749,7 +749,7 @@ class PipelineOrchestrator(ContextProvider):
                 logger.info("🔥 PRODUCTION MODE: Using ProcessPoolExecutor for true parallelism")
                 # CRITICAL FIX: Use _configure_worker_with_gpu to ensure workers have function registry
                 # Workers need the function registry to access decorated functions with memory types
-                from openhcs.core.context.global_config import get_current_global_config
+                from openhcs.config_framework.global_config import get_current_global_config
                 global_config = get_current_global_config(GlobalPipelineConfig)
                 global_config_dict = global_config.__dict__ if global_config else {}
 

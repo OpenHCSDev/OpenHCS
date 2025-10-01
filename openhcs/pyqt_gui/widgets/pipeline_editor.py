@@ -23,7 +23,7 @@ from PyQt6.QtGui import QFont, QDrag, QPainter, QColor, QPen, QFontMetrics
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+from openhcs.config_framework.global_config import set_current_global_config, get_current_global_config
 from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.pyqt_gui.widgets.mixins import (
