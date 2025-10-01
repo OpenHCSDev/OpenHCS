@@ -300,7 +300,7 @@ class ParameterFormManager(QWidget):
         - For dataclasses: field defaults
         - For any object: constructor parameter defaults
         """
-        from openhcs.textual_tui.widgets.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
+        from openhcs.ui.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
 
         # Use unified analyzer to get defaults
         param_info_dict = UnifiedParameterAnalyzer.analyze(self.object_instance)
