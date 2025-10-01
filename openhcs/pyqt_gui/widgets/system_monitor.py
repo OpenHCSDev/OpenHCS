@@ -12,9 +12,9 @@ from datetime import datetime
 from collections import deque
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout, QSizePolicy
 )
-from PyQt6.QtCore import QTimer, pyqtSignal, QThread
+from PyQt6.QtCore import QTimer, pyqtSignal, QThread, Qt
 from PyQt6.QtGui import QFont
 
 # Import PyQtGraph for high-performance plotting
@@ -135,27 +135,30 @@ class SystemMonitorWidget(QWidget):
     def create_header_section(self) -> QHBoxLayout:
         """
         Create the header section with title and system info.
-        
+
         Returns:
             Header layout
         """
         header_layout = QHBoxLayout()
-        
-        # ASCII header (left side)
+
+        # ASCII header (left side) - only takes space it needs
         self.header_label = QLabel(self.get_ascii_header())
         self.header_label.setObjectName("header_label")
         font = QFont("Courier", 10)
         font.setBold(True)
         self.header_label.setFont(font)
+        self.header_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         header_layout.addWidget(self.header_label)
-        
-        # System info (right side)
+
+        # System info (right side) - fills remaining space
         self.info_label = QLabel("")
         self.info_label.setObjectName("info_label")
-        self.info_label.setFont(QFont("Courier", 8))
+        self.info_label.setFont(QFont("Courier", 10))  # Larger font (was 8)
         self.info_label.setWordWrap(True)
-        header_layout.addWidget(self.info_label)
-        
+        self.info_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.info_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        header_layout.addWidget(self.info_label, 1)  # Stretch factor = 1 to fill space
+
         return header_layout
     
     def create_pyqtgraph_section(self) -> QWidget:
@@ -433,27 +436,37 @@ class SystemMonitorWidget(QWidget):
     def update_system_info(self, metrics: dict):
         """
         Update system information display.
-        
+
         Args:
             metrics: Dictionary of system metrics
         """
         try:
-            info_text = f"""
-═══════════════════════════════════════════════════════════════════════
-System Information | Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-═══════════════════════════════════════════════════════════════════════
-CPU Cores: {metrics.get('cpu_cores', 'N/A')} | CPU Frequency: {metrics.get('cpu_freq_mhz', 0):.0f} MHz
-Total RAM: {metrics.get('ram_total_gb', 0):.1f} GB | Used RAM: {metrics.get('ram_used_gb', 0):.1f} GB"""
-            
+            # Truncate GPU name if too long
+            gpu_name = metrics.get('gpu_name', 'N/A')
+            if len(gpu_name) > 40:
+                gpu_name = gpu_name[:37] + '...'
+
+            # Build info box with larger, clearer formatting
+            info_text = f"""╔════════════════════════════════════════════════════════════════════════════════════╗
+║ System Information | Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}                              ║
+╠════════════════════════════════════════════════════════════════════════════════════╣
+║                                                                                    ║
+║ CPU Cores: {metrics.get('cpu_cores', 'N/A'):>2} | CPU Frequency: {metrics.get('cpu_freq_mhz', 0):>4.0f} MHz                            ║
+║ Total RAM: {metrics.get('ram_total_gb', 0):>5.1f} GB | Used RAM: {metrics.get('ram_used_gb', 0):>5.1f} GB                              ║"""
+
             # Add GPU info if available
             if 'gpu_name' in metrics:
-                info_text += f"\nGPU: {metrics.get('gpu_name', 'N/A')} | Temperature: {metrics.get('gpu_temp', 'N/A')}°C"
-                info_text += f"\nVRAM: {metrics.get('vram_used_mb', 0):.0f}/{metrics.get('vram_total_mb', 0):.0f} MB"
-            
-            info_text += "\n═══════════════════════════════════════════════════════════════════════"
-            
+                info_text += f"""
+║                                                                                    ║
+║ GPU: {gpu_name:<40} | Temp: {metrics.get('gpu_temp', 'N/A'):>4}°C                  ║
+║ VRAM: {metrics.get('vram_used_mb', 0):>5.0f}/{metrics.get('vram_total_mb', 0):>5.0f} MB                                                      ║"""
+
+            info_text += """
+║                                                                                    ║
+╚════════════════════════════════════════════════════════════════════════════════════╝"""
+
             self.info_label.setText(info_text)
-            
+
         except Exception as e:
             logger.warning(f"Failed to update system info: {e}")
     
