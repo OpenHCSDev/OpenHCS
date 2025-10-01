@@ -1097,18 +1097,17 @@ class ParameterFormManager(QWidget):
                 parent_overlay_instance = parent_type(**parent_user_values)
                 stack.enter_context(config_context(parent_overlay_instance))
 
-        # Convert overlay dict to dataclass instance for config_context()
+        # Convert overlay dict to object instance for config_context()
         # config_context() expects an object with attributes, not a dict
         if isinstance(overlay, dict) and self.dataclass_type:
-            # CRITICAL: Do NOT filter None values here!
-            # None values should be passed to config_context() which will filter them (line 71)
-            # If we filter here and create instance without those fields, the instance will use
-            # class defaults instead of inheriting from parent context
-            #
-            # Example: If global has well_filter_mode=EXCLUDE and step has None,
-            # we need to pass None to config_context() so it filters it and inherits EXCLUDE.
-            # If we filter here, StepWellFilterConfig() uses class default INCLUDE instead!
-            overlay_instance = self.dataclass_type(**overlay)
+            # For functions and non-dataclass objects: use SimpleNamespace to hold parameters
+            # For dataclasses: instantiate normally
+            try:
+                overlay_instance = self.dataclass_type(**overlay)
+            except TypeError:
+                # Function or other non-instantiable type: use SimpleNamespace
+                from types import SimpleNamespace
+                overlay_instance = SimpleNamespace(**overlay)
         else:
             overlay_instance = overlay
 
