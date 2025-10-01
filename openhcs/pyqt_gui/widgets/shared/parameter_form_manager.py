@@ -190,6 +190,9 @@ class ParameterFormManager(QWidget):
         # Track which fields have been explicitly set by users
         self._user_set_fields: set = set()
 
+        # Track if initial form load is complete (disable live updates during initial load)
+        self._initial_load_complete = False
+
         # SHARED RESET STATE: Track reset fields across all nested managers within this form
         if hasattr(parent, 'shared_reset_fields'):
             # Nested manager: use parent's shared reset state
@@ -215,9 +218,30 @@ class ParameterFormManager(QWidget):
         # Set up UI
         self.setup_ui()
 
-        # Parameter changes are handled by the context system automatically
+        # Connect parameter changes to live placeholder updates
+        # When any field changes, refresh all placeholders using current form state
+        self.parameter_changed.connect(lambda param_name, value: self._refresh_all_placeholders())
 
-        # NOTE: Placeholder refresh moved to from_dataclass_instance after user-set detection
+        # CRITICAL: Detect user-set fields for lazy dataclasses
+        # Check which parameters were explicitly set (raw non-None values)
+        from dataclasses import is_dataclass
+        if is_dataclass(object_instance):
+            for field_name, raw_value in self.parameters.items():
+                # SIMPLE RULE: Raw non-None = user-set, Raw None = inherited
+                if raw_value is not None:
+                    self._user_set_fields.add(field_name)
+
+        # CRITICAL FIX: Refresh placeholders AFTER user-set detection to show correct concrete/placeholder state
+        self._refresh_all_placeholders()
+
+        # CRITICAL FIX: Ensure nested managers also get their placeholders refreshed after full hierarchy is built
+        # This fixes the issue where nested dataclass placeholders don't load properly on initial form creation
+        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+
+        # Mark initial load as complete - enable live placeholder updates from now on
+        self._initial_load_complete = True
+        print(f"✅ INITIAL LOAD COMPLETE for {self.field_id}: {self._initial_load_complete}")
+        self._apply_to_nested_managers(lambda name, manager: setattr(manager, '_initial_load_complete', True))
 
     # ==================== GENERIC OBJECT INTROSPECTION METHODS ====================
 
@@ -350,31 +374,6 @@ class ParameterFormManager(QWidget):
             parent=parent,
             context_obj=context_obj
         )
-
-        # Store the original dataclass instance for reset operations
-        form_manager._current_config_instance = dataclass_instance
-
-        # CRITICAL FIX: Check which parameters were explicitly set for ALL dataclasses
-        # This uses the extracted parameters that were already processed during form creation
-        dataclass_type_name = type(dataclass_instance).__name__
-        is_lazy = hasattr(dataclass_instance, '_is_lazy_dataclass') or 'Lazy' in dataclass_type_name
-
-        # Apply user-set detection to BOTH lazy and non-lazy dataclasses
-        # CORRECT APPROACH: Check the extracted parameters (which contain raw values)
-        # These were extracted using object.__getattribute__ during form creation
-        for field_name, raw_value in parameters.items():
-            # SIMPLE RULE: Raw non-None = user-set, Raw None = inherited
-            if raw_value is not None:
-                form_manager._user_set_fields.add(field_name)
-
-        # CRITICAL FIX: Refresh placeholders AFTER user-set detection to show correct concrete/placeholder state
-        form_manager._refresh_all_placeholders()
-
-        # CRITICAL FIX: Ensure nested managers also get their placeholders refreshed after full hierarchy is built
-        # This fixes the issue where nested dataclass placeholders don't load properly on initial form creation
-        form_manager._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
-
-        return form_manager
 
 
 
@@ -648,6 +647,12 @@ class ParameterFormManager(QWidget):
         except Exception:
             pass
 
+        # Store parent manager reference for placeholder resolution
+        nested_manager._parent_manager = self
+
+        # Connect nested manager's parameter_changed signal to parent's refresh handler
+        # This ensures changes in nested forms trigger placeholder updates in parent and siblings
+        nested_manager.parameter_changed.connect(self._on_nested_parameter_changed)
 
         # Store nested manager
         self.nested_managers[param_name] = nested_manager
@@ -1004,6 +1009,8 @@ class ParameterFormManager(QWidget):
 
         For lazy dataclasses, this preserves lazy resolution for unmodified fields
         by only returning fields where the raw value is not None.
+
+        For nested dataclasses, only include them if they have user-modified fields inside.
         """
         if not hasattr(self.config, '_resolve_field_value'):
             # For non-lazy dataclasses, return all current values
@@ -1015,7 +1022,24 @@ class ParameterFormManager(QWidget):
         # Only include fields where the raw value is not None
         for field_name, value in current_values.items():
             if value is not None:
-                user_modified[field_name] = value
+                # CRITICAL: For nested dataclasses, extract raw values to prevent resolution pollution
+                # We need to rebuild the nested dataclass with only raw non-None values
+                from dataclasses import is_dataclass, fields as dataclass_fields
+                if is_dataclass(value) and not isinstance(value, type):
+                    # Extract raw field values from nested dataclass
+                    nested_raw_values = {}
+                    for field in dataclass_fields(value):
+                        raw_value = object.__getattribute__(value, field.name)
+                        if raw_value is not None:
+                            nested_raw_values[field.name] = raw_value
+
+                    # Only include if nested dataclass has user-modified fields
+                    # Recreate the instance with only raw values
+                    if nested_raw_values:
+                        user_modified[field_name] = type(value)(**nested_raw_values)
+                else:
+                    # Non-dataclass field, include if not None
+                    user_modified[field_name] = value
 
         return user_modified
 
@@ -1048,6 +1072,34 @@ class ParameterFormManager(QWidget):
                 # Single parent context (Step Editor: pipeline_config)
                 stack.enter_context(config_context(self.context_obj))
 
+        # CRITICAL: For nested forms, include parent's USER-MODIFIED values for sibling inheritance
+        # This allows live placeholder updates when sibling fields change
+        # ONLY enable this AFTER initial form load to avoid polluting placeholders with initial widget values
+        parent_manager = getattr(self, '_parent_manager', None)
+        if (parent_manager and
+            hasattr(parent_manager, 'get_user_modified_values') and
+            hasattr(parent_manager, 'dataclass_type') and
+            parent_manager._initial_load_complete):  # Check PARENT's initial load flag
+
+            # Get only user-modified values from parent (not all values)
+            # This prevents polluting context with stale/default values
+            parent_user_values = parent_manager.get_user_modified_values()
+
+            print(f"🔍 PARENT OVERLAY for {self.field_id}:")
+            print(f"   Parent user values: {list(parent_user_values.keys()) if parent_user_values else 'None'}")
+
+            if parent_user_values and parent_manager.dataclass_type:
+                # Use lazy version of parent type to enable sibling inheritance
+                from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+                parent_type = parent_manager.dataclass_type
+                lazy_parent_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(parent_type)
+                if lazy_parent_type:
+                    parent_type = lazy_parent_type
+
+                # Create parent overlay with only user-modified values
+                parent_overlay_instance = parent_type(**parent_user_values)
+                stack.enter_context(config_context(parent_overlay_instance))
+
         # Convert overlay dict to dataclass instance for config_context()
         # config_context() expects an object with attributes, not a dict
         if isinstance(overlay, dict) and self.dataclass_type:
@@ -1069,6 +1121,23 @@ class ParameterFormManager(QWidget):
 
         return stack
 
+    def _on_nested_parameter_changed(self, param_name: str, value: Any) -> None:
+        """
+        Handle parameter changes from nested forms.
+
+        When a nested form's field changes:
+        1. Refresh parent form's placeholders (in case they inherit from nested values)
+        2. Refresh all sibling nested forms' placeholders
+        """
+        print(f"🔔 NESTED PARAM CHANGED: {param_name} = {value} in parent {self.field_id}")
+        print(f"   Parent initial_load_complete: {self._initial_load_complete}")
+
+        # Refresh parent form's placeholders
+        self._refresh_all_placeholders()
+
+        # Refresh all nested managers' placeholders (including siblings)
+        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+
     def _refresh_all_placeholders(self) -> None:
         """Refresh placeholder text for all widgets in this form."""
         # Allow placeholder refresh for nested forms even if they're not detected as lazy dataclasses
@@ -1082,7 +1151,8 @@ class ParameterFormManager(QWidget):
         # Build context stack: parent context + overlay
         with self._build_context_stack(overlay):
             for param_name, widget in self.widgets.items():
-                current_value = self.parameters.get(param_name)
+                # CRITICAL: Check current value from overlay (live form state), not stale self.parameters
+                current_value = overlay.get(param_name) if isinstance(overlay, dict) else getattr(overlay, param_name, None)
                 if current_value is None:
                     placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                     if placeholder_text:
