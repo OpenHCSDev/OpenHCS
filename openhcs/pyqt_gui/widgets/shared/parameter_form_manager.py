@@ -567,40 +567,67 @@ class ParameterFormManager(QWidget):
         return group_box
 
     def _create_optional_dataclass_widget(self, param_info) -> QWidget:
-        """Create widget for optional dataclass - checkbox + nested form."""
+        """Create widget for optional dataclass - checkbox inline with title + nested form."""
         display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
         field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
 
         container = QWidget()
         layout = QVBoxLayout(container)
+        layout.setSpacing(2)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        # Checkbox (using NoneAwareCheckBox for consistency)
+        # Header row: checkbox on left, title on right (inline)
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setSpacing(8)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Checkbox (compact, no text)
         from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
         checkbox = NoneAwareCheckBox()
-        checkbox.setText(display_info['checkbox_label'])
         checkbox.setObjectName(field_ids['optional_checkbox_id'])
         current_value = self.parameters.get(param_info.name)
         checkbox.setChecked(current_value is not None)
-        layout.addWidget(checkbox)
+        checkbox.setMaximumWidth(20)  # Compact checkbox
+        header_layout.addWidget(checkbox)
+
+        # Title label (clickable to toggle checkbox)
+        title_label = QLabel(display_info['checkbox_label'])
+        title_label.setStyleSheet(f"font-weight: bold; color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        title_label.mousePressEvent = lambda e: checkbox.toggle()  # Click label to toggle
+        title_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+
+        layout.addWidget(header_widget)
 
         # Always create the nested form, but enable/disable based on checkbox
         nested_widget = self._create_nested_dataclass_widget(param_info)
         nested_widget.setEnabled(current_value is not None)
         layout.addWidget(nested_widget)
 
-        # Connect checkbox to enable/disable the nested form
+        # Connect checkbox to enable/disable the nested form with visual feedback
         def on_checkbox_changed(checked):
             nested_widget.setEnabled(checked)
+            # Visual feedback: dim the nested widget when disabled
             if checked:
+                nested_widget.setStyleSheet("")  # Clear dimming
+                title_label.setStyleSheet(f"font-weight: bold; color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
                 # Create default instance of the dataclass
                 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
                 inner_type = ParameterTypeUtils.get_optional_inner_type(param_info.type)
                 default_instance = inner_type()  # Create with defaults
                 self.update_parameter(param_info.name, default_instance)
             else:
+                # Dim the entire nested widget when disabled
+                nested_widget.setStyleSheet("opacity: 0.4;")
+                title_label.setStyleSheet(f"font-weight: bold; color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
                 self.update_parameter(param_info.name, None)
 
         checkbox.toggled.connect(on_checkbox_changed)
+        # Apply initial visual state
+        on_checkbox_changed(checkbox.isChecked())
+
         self.widgets[param_info.name] = container
         return container
 

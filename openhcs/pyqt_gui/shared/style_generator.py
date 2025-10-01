@@ -298,6 +298,23 @@ class StyleSheetGenerator:
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
                 border: 1px solid {cs.to_hex(cs.input_focus_border)};
             }}
+            QPushButton {{
+                background-color: {cs.to_hex(cs.button_normal_bg)};
+                color: {cs.to_hex(cs.button_text)};
+                border: none;
+                border-radius: 3px;
+                padding: 5px;
+            }}
+            QPushButton:hover {{
+                background-color: {cs.to_hex(cs.button_hover_bg)};
+            }}
+            QPushButton:pressed {{
+                background-color: {cs.to_hex(cs.button_pressed_bg)};
+            }}
+            QPushButton:disabled {{
+                background-color: {cs.to_hex(cs.button_disabled_bg)};
+                color: {cs.to_hex(cs.button_disabled_text)};
+            }}
             QCheckBox {{
                 color: {cs.to_hex(cs.text_primary)};
             }}
