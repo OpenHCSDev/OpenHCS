@@ -150,16 +150,87 @@ class SystemMonitorWidget(QWidget):
         self.header_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         header_layout.addWidget(self.header_label)
 
-        # System info (right side) - fills remaining space
-        self.info_label = QLabel("")
-        self.info_label.setObjectName("info_label")
-        self.info_label.setFont(QFont("Courier", 10))  # Larger font (was 8)
-        self.info_label.setWordWrap(True)
-        self.info_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        self.info_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        header_layout.addWidget(self.info_label, 1)  # Stretch factor = 1 to fill space
+        # System info panel (right side) - styled widget instead of plain text
+        self.info_widget = self.create_info_panel()
+        header_layout.addWidget(self.info_widget, 1)  # Stretch factor = 1 to fill space
 
         return header_layout
+
+    def create_info_panel(self) -> QWidget:
+        """Create a styled system information panel."""
+        panel = QFrame()
+        panel.setObjectName("info_panel")
+        panel.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
+
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(8)
+
+        # Title with timestamp
+        self.info_title = QLabel("System Information")
+        self.info_title.setObjectName("info_title")
+        title_font = QFont("Arial", 11)
+        title_font.setBold(True)
+        self.info_title.setFont(title_font)
+        layout.addWidget(self.info_title)
+
+        # Separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(separator)
+
+        # Info grid
+        info_grid = QGridLayout()
+        info_grid.setSpacing(8)
+        info_grid.setColumnStretch(1, 1)  # Value column stretches
+
+        # CPU info
+        self.cpu_cores_label = self.create_info_row("CPU Cores:", "—")
+        self.cpu_freq_label = self.create_info_row("CPU Frequency:", "—")
+        info_grid.addWidget(self.cpu_cores_label[0], 0, 0)
+        info_grid.addWidget(self.cpu_cores_label[1], 0, 1)
+        info_grid.addWidget(self.cpu_freq_label[0], 1, 0)
+        info_grid.addWidget(self.cpu_freq_label[1], 1, 1)
+
+        # RAM info
+        self.ram_total_label = self.create_info_row("Total RAM:", "—")
+        self.ram_used_label = self.create_info_row("Used RAM:", "—")
+        info_grid.addWidget(self.ram_total_label[0], 2, 0)
+        info_grid.addWidget(self.ram_total_label[1], 2, 1)
+        info_grid.addWidget(self.ram_used_label[0], 3, 0)
+        info_grid.addWidget(self.ram_used_label[1], 3, 1)
+
+        # GPU info (will be hidden if no GPU)
+        self.gpu_name_label = self.create_info_row("GPU:", "—")
+        self.gpu_temp_label = self.create_info_row("Temperature:", "—")
+        self.vram_label = self.create_info_row("VRAM:", "—")
+        info_grid.addWidget(self.gpu_name_label[0], 4, 0)
+        info_grid.addWidget(self.gpu_name_label[1], 4, 1)
+        info_grid.addWidget(self.gpu_temp_label[0], 5, 0)
+        info_grid.addWidget(self.gpu_temp_label[1], 5, 1)
+        info_grid.addWidget(self.vram_label[0], 6, 0)
+        info_grid.addWidget(self.vram_label[1], 6, 1)
+
+        layout.addLayout(info_grid)
+        layout.addStretch()
+
+        return panel
+
+    def create_info_row(self, label_text: str, value_text: str) -> tuple:
+        """Create a label-value pair for the info panel."""
+        label = QLabel(label_text)
+        label.setObjectName("info_label_key")
+        label_font = QFont("Arial", 9)
+        label.setFont(label_font)
+
+        value = QLabel(value_text)
+        value.setObjectName("info_label_value")
+        value_font = QFont("Arial", 9)
+        value_font.setBold(True)
+        value.setFont(value_font)
+
+        return (label, value)
     
     def create_pyqtgraph_section(self) -> QWidget:
         """
@@ -441,31 +512,44 @@ class SystemMonitorWidget(QWidget):
             metrics: Dictionary of system metrics
         """
         try:
-            # Truncate GPU name if too long
-            gpu_name = metrics.get('gpu_name', 'N/A')
-            if len(gpu_name) > 40:
-                gpu_name = gpu_name[:37] + '...'
+            # Update title with timestamp
+            self.info_title.setText(f"System Information — {datetime.now().strftime('%H:%M:%S')}")
 
-            # Build info box with larger, clearer formatting
-            info_text = f"""╔════════════════════════════════════════════════════════════════════════════════════╗
-║ System Information | Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}                              ║
-╠════════════════════════════════════════════════════════════════════════════════════╣
-║                                                                                    ║
-║ CPU Cores: {metrics.get('cpu_cores', 'N/A'):>2} | CPU Frequency: {metrics.get('cpu_freq_mhz', 0):>4.0f} MHz                            ║
-║ Total RAM: {metrics.get('ram_total_gb', 0):>5.1f} GB | Used RAM: {metrics.get('ram_used_gb', 0):>5.1f} GB                              ║"""
+            # Update CPU info
+            self.cpu_cores_label[1].setText(str(metrics.get('cpu_cores', 'N/A')))
+            self.cpu_freq_label[1].setText(f"{metrics.get('cpu_freq_mhz', 0):.0f} MHz")
 
-            # Add GPU info if available
+            # Update RAM info
+            self.ram_total_label[1].setText(f"{metrics.get('ram_total_gb', 0):.1f} GB")
+            self.ram_used_label[1].setText(f"{metrics.get('ram_used_gb', 0):.1f} GB")
+
+            # Update GPU info if available
             if 'gpu_name' in metrics:
-                info_text += f"""
-║                                                                                    ║
-║ GPU: {gpu_name:<40} | Temp: {metrics.get('gpu_temp', 'N/A'):>4}°C                  ║
-║ VRAM: {metrics.get('vram_used_mb', 0):>5.0f}/{metrics.get('vram_total_mb', 0):>5.0f} MB                                                      ║"""
+                gpu_name = metrics.get('gpu_name', 'N/A')
+                if len(gpu_name) > 35:
+                    gpu_name = gpu_name[:32] + '...'
 
-            info_text += """
-║                                                                                    ║
-╚════════════════════════════════════════════════════════════════════════════════════╝"""
+                self.gpu_name_label[1].setText(gpu_name)
+                self.gpu_temp_label[1].setText(f"{metrics.get('gpu_temp', 'N/A')}°C")
+                self.vram_label[1].setText(
+                    f"{metrics.get('vram_used_mb', 0):.0f} / {metrics.get('vram_total_mb', 0):.0f} MB"
+                )
 
-            self.info_label.setText(info_text)
+                # Show GPU labels
+                self.gpu_name_label[0].show()
+                self.gpu_name_label[1].show()
+                self.gpu_temp_label[0].show()
+                self.gpu_temp_label[1].show()
+                self.vram_label[0].show()
+                self.vram_label[1].show()
+            else:
+                # Hide GPU labels if no GPU
+                self.gpu_name_label[0].hide()
+                self.gpu_name_label[1].hide()
+                self.gpu_temp_label[0].hide()
+                self.gpu_temp_label[1].hide()
+                self.vram_label[0].hide()
+                self.vram_label[1].hide()
 
         except Exception as e:
             logger.warning(f"Failed to update system info: {e}")

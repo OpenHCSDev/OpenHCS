@@ -214,7 +214,7 @@ class StyleSheetGenerator:
     def generate_system_monitor_style(self) -> str:
         """
         Generate QStyleSheet for system monitor widget.
-        
+
         Returns:
             str: Complete QStyleSheet for system monitor styling
         """
@@ -234,9 +234,26 @@ class StyleSheetGenerator:
                 font-weight: bold;
                 font-size: 14px;
             }}
-            #info_label {{
+            #info_panel {{
+                background-color: {cs.to_hex(cs.panel_bg)};
+                border: 2px solid {cs.to_hex(cs.border_color)};
+                border-radius: 8px;
+                padding: 5px;
+            }}
+            #info_title {{
+                color: {cs.to_hex(cs.text_accent)};
+                font-weight: bold;
+                font-size: 11px;
+                padding-bottom: 5px;
+            }}
+            #info_label_key {{
                 color: {cs.to_hex(cs.text_secondary)};
-                font-size: 10px;
+                font-size: 9px;
+            }}
+            #info_label_value {{
+                color: {cs.to_hex(cs.text_primary)};
+                font-size: 9px;
+                font-weight: bold;
             }}
         """
     
