@@ -186,26 +186,11 @@ class PipelineCompiler:
         if not hasattr(context, 'step_plans') or context.step_plans is None:
             context.step_plans = {} # Ensure step_plans dict exists
 
-        # === THREAD-LOCAL CONTEXT SETUP ===
-        # CRITICAL: Use the same merged config pattern as orchestrator.apply_pipeline_config()
-        # to preserve None values needed for sibling inheritance (materialization_defaults → path_planning)
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.config_framework.global_config import get_current_global_config, set_current_global_config
-        from dataclasses import fields
-
-        # Check if orchestrator has already set up the context
-        current_context = get_current_global_config(GlobalPipelineConfig)
-        if current_context is None and orchestrator.pipeline_config:
-            # If no context exists, apply the orchestrator's pipeline config to establish context
-            # This uses the same merged config pattern that preserves None values for sibling inheritance
-            orchestrator.apply_pipeline_config(orchestrator.pipeline_config)
-            logger.debug(f"🔧 THREAD-LOCAL: Applied orchestrator pipeline config to establish context for sibling inheritance")
-        else:
-            logger.debug(f"🔧 THREAD-LOCAL: Using existing context set by orchestrator (preserves None values for sibling inheritance)")
-
-        # Add visualizer config to context for orchestrator access
-        current_config = get_current_global_config(GlobalPipelineConfig)
-        context.visualizer_config = current_config.visualizer_config
+        # === VISUALIZER CONFIG EXTRACTION ===
+        # Extract visualizer config from orchestrator.pipeline_config
+        # The caller has already set up config_context(orchestrator.pipeline_config)
+        # so we can just access the field directly - lazy resolution happens automatically
+        context.visualizer_config = orchestrator.pipeline_config.visualizer_config
 
         # === BACKWARDS COMPATIBILITY PREPROCESSING ===
         # Ensure all steps have complete attribute sets based on AbstractStep constructor
@@ -270,11 +255,11 @@ class PipelineCompiler:
         # === LAZY CONFIG RESOLUTION ===
         # Resolve ALL lazy configs AFTER path planning (which includes metadata injection)
         # This ensures metadata injection happens first, then lazy configs are resolved
+        # NOTE: The caller has already set up config_context(orchestrator.pipeline_config)
+        # so we can just resolve directly - no need for redundant context nesting
         logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving all lazy configs after path planning...")
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-        from openhcs.config_framework.context_manager import config_context
-        with config_context(orchestrator.pipeline_config):
-            steps_definition = resolve_lazy_configurations_for_serialization(steps_definition)
+        steps_definition = resolve_lazy_configurations_for_serialization(steps_definition)
 
         # Loop to supplement step_plans with non-I/O, non-path attributes
         # after PipelinePathPlanner has fully populated them with I/O info.
@@ -648,27 +633,23 @@ class PipelineCompiler:
         This method should be called after all compilation phases but before context
         freezing to ensure step plans are safe for pickling in multiprocessing contexts.
 
+        NOTE: The caller MUST have already set up config_context(orchestrator.pipeline_config)
+        before calling this method. We rely on that context for lazy resolution.
+
         Args:
             context: ProcessingContext to process
-            orchestrator: PipelineOrchestrator to get current effective config from
+            orchestrator: PipelineOrchestrator (unused - kept for API compatibility)
         """
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.config_framework.global_config import set_current_global_config
 
-        # CRITICAL FIX: Use universal context manager instead of contaminating thread-local
-        # This ensures compilation resolves the same values as UI placeholders without
-        # permanently contaminating the global thread-local context
-        from openhcs.config_framework.context_manager import config_context
-        with config_context(orchestrator.pipeline_config):
-            # Resolve the entire context recursively to catch all lazy dataclass instances
-            # This ensures that any lazy configs in any part of the context are resolved
-            resolved_context_dict = resolve_lazy_configurations_for_serialization(vars(context))
+        # Resolve the entire context recursively to catch all lazy dataclass instances
+        # The caller has already set up config_context(), so lazy resolution happens automatically
+        resolved_context_dict = resolve_lazy_configurations_for_serialization(vars(context))
 
-            # Update context attributes with resolved values
-            for attr_name, resolved_value in resolved_context_dict.items():
-                if not attr_name.startswith('_'):  # Skip private attributes
-                    setattr(context, attr_name, resolved_value)
+        # Update context attributes with resolved values
+        for attr_name, resolved_value in resolved_context_dict.items():
+            if not attr_name.startswith('_'):  # Skip private attributes
+                setattr(context, attr_name, resolved_value)
 
     @staticmethod
     def compile_pipelines(
