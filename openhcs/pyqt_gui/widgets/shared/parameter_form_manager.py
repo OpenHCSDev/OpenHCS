@@ -633,6 +633,7 @@ class ParameterFormManager(QWidget):
             if checked:
                 # Restore normal color (no explicit style needed - font is already bold)
                 title_label.setStyleSheet("")
+                help_btn.setEnabled(True)
                 # Remove dimming from all widgets
                 for widget in nested_form.findChildren(QWidget):
                     widget.setGraphicsEffect(None)
@@ -640,8 +641,9 @@ class ParameterFormManager(QWidget):
                 default_instance = unwrapped_type()
                 self.update_parameter(param_info.name, default_instance)
             else:
-                # Dim title text
+                # Dim title text but keep help button enabled
                 title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
+                help_btn.setEnabled(True)  # Keep help button clickable even when disabled
                 # Dim all input widgets
                 from PyQt6.QtWidgets import QGraphicsOpacityEffect
                 for widget in nested_form.findChildren((QLineEdit, QComboBox, QPushButton)):
