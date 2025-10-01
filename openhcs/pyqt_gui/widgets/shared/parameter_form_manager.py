@@ -628,28 +628,42 @@ class ParameterFormManager(QWidget):
 
         # Connect checkbox to enable/disable with visual feedback
         def on_checkbox_changed(checked):
-            nested_form.setEnabled(checked)
-            # Apply visual feedback to all input widgets
+            # Don't disable the entire form - only disable input widgets
+            # This keeps help buttons clickable
             if checked:
                 # Restore normal color (no explicit style needed - font is already bold)
                 title_label.setStyleSheet("")
                 help_btn.setEnabled(True)
-                # Remove dimming from all widgets
+                # Remove dimming and enable all input widgets
                 for widget in nested_form.findChildren(QWidget):
                     widget.setGraphicsEffect(None)
+                    # Re-enable input widgets
+                    if isinstance(widget, (QLineEdit, QComboBox, QPushButton)):
+                        # Only enable if it's not a help button
+                        from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton, HelpIndicator
+                        if not isinstance(widget, (HelpButton, HelpIndicator)):
+                            widget.setEnabled(True)
                 # Create default instance
                 default_instance = unwrapped_type()
                 self.update_parameter(param_info.name, default_instance)
             else:
-                # Dim title text but keep help button enabled
+                # Dim title text but keep help buttons enabled
                 title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
                 help_btn.setEnabled(True)  # Keep help button clickable even when disabled
-                # Dim all input widgets
+                # Dim and disable input widgets, but keep help buttons enabled
                 from PyQt6.QtWidgets import QGraphicsOpacityEffect
-                for widget in nested_form.findChildren((QLineEdit, QComboBox, QPushButton)):
-                    effect = QGraphicsOpacityEffect()
-                    effect.setOpacity(0.4)
-                    widget.setGraphicsEffect(effect)
+                from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton, HelpIndicator
+                for widget in nested_form.findChildren(QWidget):
+                    # Keep all help buttons enabled
+                    if isinstance(widget, (HelpButton, HelpIndicator)):
+                        widget.setEnabled(True)
+                        widget.setGraphicsEffect(None)  # No dimming for help buttons
+                    # Dim and disable input widgets
+                    elif isinstance(widget, (QLineEdit, QComboBox, QPushButton)):
+                        widget.setEnabled(False)
+                        effect = QGraphicsOpacityEffect()
+                        effect.setOpacity(0.4)
+                        widget.setGraphicsEffect(effect)
                 self.update_parameter(param_info.name, None)
 
         checkbox.toggled.connect(on_checkbox_changed)
