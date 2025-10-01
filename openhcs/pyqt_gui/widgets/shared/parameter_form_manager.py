@@ -907,16 +907,27 @@ class ParameterFormManager(QWidget):
         This prevents the critical bug where step editor tries to reset
         function parameters like 'group_by' against the global config type.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"🔍 _is_function_parameter({param_name}):")
+        logger.info(f"   function_target: {self.function_target}")
+        logger.info(f"   dataclass_type: {self.dataclass_type}")
+
         if not self.function_target or not self.dataclass_type:
+            logger.info(f"   → False (no function_target or dataclass_type)")
             return False
 
         # Check if parameter exists in dataclass fields
         import dataclasses
         if dataclasses.is_dataclass(self.dataclass_type):
             field_names = {field.name for field in dataclasses.fields(self.dataclass_type)}
-            # If parameter is NOT in dataclass fields, it's a function parameter
-            return param_name not in field_names
+            is_function_param = param_name not in field_names
+            logger.info(f"   field_names: {field_names}")
+            logger.info(f"   → {is_function_param} (param {'NOT' if is_function_param else 'IS'} in dataclass fields)")
+            return is_function_param
 
+        logger.info(f"   → False (not a dataclass)")
         return False
 
     def reset_parameter(self, param_name: str, default_value: Any = None) -> None:
@@ -924,10 +935,9 @@ class ParameterFormManager(QWidget):
         if param_name not in self.parameters:
             return
 
-        # SIMPLIFIED: Handle function forms vs config forms
-        if hasattr(self, 'param_defaults') and self.param_defaults and param_name in self.param_defaults:
-            # Function form - reset to static defaults
-            reset_value = self.param_defaults[param_name]
+        # Function parameters reset to static defaults from param_defaults
+        if self._is_function_parameter(param_name):
+            reset_value = self.param_defaults.get(param_name) if hasattr(self, 'param_defaults') else None
             self.parameters[param_name] = reset_value
 
             if param_name in self.widgets:
@@ -945,7 +955,6 @@ class ParameterFormManager(QWidget):
 
             # If this is an Optional[Dataclass], sync container UI and reset nested manager
             if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
-                # Determine reset (lazy -> None)
                 reset_value = self._get_reset_value(param_name)
                 self.parameters[param_name] = reset_value
 
@@ -1021,8 +1030,20 @@ class ParameterFormManager(QWidget):
                 # Build overlay from current form state
                 overlay = self.get_current_values()
 
-                # Build context stack: parent context + overlay
-                with self._build_context_stack(overlay):
+                # CRITICAL: When editing GlobalPipelineConfig and resetting to None,
+                # use static defaults context to mask thread-local loaded instance
+                from contextlib import ExitStack
+                from openhcs.config_framework.context_manager import config_context
+
+                with ExitStack() as stack:
+                    # Apply static defaults masking context for GlobalPipelineConfig editing
+                    if self.config.is_global_config_editing and self.global_config_type is not None:
+                        static_defaults = self.global_config_type()
+                        stack.enter_context(config_context(static_defaults, mask_with_none=True))
+
+                    # Build normal context stack on top
+                    stack.enter_context(self._build_context_stack(overlay))
+
                     placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                     if placeholder_text:
                         from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
@@ -1033,12 +1054,42 @@ class ParameterFormManager(QWidget):
 
     def _get_reset_value(self, param_name: str) -> Any:
         """
-        Get reset value - simple and uniform for all object types.
+        Get reset value - context-aware for different editing modes.
 
-        Just use the initial value that was used to load the widget.
-        This works for functions, dataclasses, ABCs, anything.
+        - For lazy configs (PipelineConfig, StepConfig): Use None for lazy resolution
+        - For GlobalPipelineConfig editing (root + nested configs): Use instance defaults from fresh dataclass
+        - For functions: Use signature defaults
         """
-        return self.param_defaults.get(param_name)
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"🔄 _get_reset_value({param_name}):")
+        logger.info(f"   is_lazy_dataclass: {self._is_lazy_dataclass()}")
+        logger.info(f"   is_global_config_editing: {self.config.is_global_config_editing if hasattr(self.config, 'is_global_config_editing') else 'N/A'}")
+        logger.info(f"   dataclass_type: {self.dataclass_type}")
+
+        # Lazy configs always reset to None for lazy resolution from context
+        if self._is_lazy_dataclass():
+            logger.info(f"   → None (lazy dataclass)")
+            return None
+
+        # Non-lazy configs in global editing mode: use fresh instance defaults
+        # This prevents reset from using loaded instance values
+        # CRITICAL: Only do this for actual dataclasses, not functions
+        import dataclasses
+        if (self.config.is_global_config_editing and
+            self.dataclass_type is not None and
+            dataclasses.is_dataclass(self.dataclass_type)):
+            logger.info(f"   Creating fresh instance of {self.dataclass_type.__name__}")
+            fresh_instance = self.dataclass_type()
+            reset_value = getattr(fresh_instance, param_name, None)
+            logger.info(f"   → {reset_value} (fresh instance)")
+            return reset_value
+
+        # All other cases: use param_defaults (functions, non-global editing)
+        fallback = self.param_defaults.get(param_name)
+        logger.info(f"   → {fallback} (param_defaults)")
+        return fallback
 
 
 
@@ -1120,8 +1171,9 @@ class ParameterFormManager(QWidget):
 
         Context stack order:
         1. Thread-local global config (automatic base)
-        2. Parent context(s) from self.context_obj (if provided)
-        3. Overlay from current form values (always applied last)
+        2. Static defaults context (if editing GlobalPipelineConfig) - masks thread-local
+        3. Parent context(s) from self.context_obj (if provided)
+        4. Overlay from current form values (always applied last)
 
         Args:
             overlay: Current form values (from get_current_values()) - dict or dataclass instance

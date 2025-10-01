@@ -78,7 +78,7 @@ def _merge_nested_dataclass(base, override):
 
 
 @contextmanager
-def config_context(obj):
+def config_context(obj, mask_with_none: bool = False):
     """
     Create new context scope with obj's matching fields merged into base config.
 
@@ -89,11 +89,17 @@ def config_context(obj):
 
     Args:
         obj: Object with config fields (pipeline_config, step, etc.)
+        mask_with_none: If True, None values override/mask base config values.
+                       If False (default), None values are ignored (normal inheritance).
+                       Use True when editing GlobalPipelineConfig to mask thread-local
+                       loaded instance with static class defaults.
 
     Usage:
         with config_context(orchestrator.pipeline_config):  # Pipeline-level context
             # ...
         with config_context(step):  # Step-level context
+            # ...
+        with config_context(GlobalPipelineConfig(), mask_with_none=True):  # Static defaults
             # ...
     """
     # Get current context as base for nested contexts, or fall back to base global config
@@ -116,28 +122,35 @@ def config_context(obj):
                 # Use object.__getattribute__ to avoid triggering lazy resolution
                 if hasattr(obj, field_name):
                     value = object.__getattribute__(obj, field_name)
-                    if value is not None:
-                        # Check if value is compatible (handles lazy-to-base type mapping)
-                        if _is_compatible_config_type(value, expected_type):
-                            # Convert lazy configs to base configs for context
-                            if hasattr(value, 'to_base_config'):
-                                value = value.to_base_config()
+                    # CRITICAL: When mask_with_none=True, None values override base config
+                    # This allows static defaults to mask loaded instance values
+                    if value is not None or mask_with_none:
+                        # When masking with None, always include the value (even if None)
+                        if mask_with_none:
+                            overrides[field_name] = value
+                        # Normal mode: only include non-None values
+                        elif value is not None:
+                            # Check if value is compatible (handles lazy-to-base type mapping)
+                            if _is_compatible_config_type(value, expected_type):
+                                # Convert lazy configs to base configs for context
+                                if hasattr(value, 'to_base_config'):
+                                    value = value.to_base_config()
 
-                            # CRITICAL FIX: Recursively merge nested dataclass fields
-                            # If this is a dataclass field, merge it with the base config's value
-                            # instead of replacing wholesale
-                            if is_dataclass(value):
-                                base_value = getattr(base_config, field_name, None)
-                                if base_value is not None and is_dataclass(base_value):
-                                    # Merge nested dataclass: base + overrides
-                                    merged_nested = _merge_nested_dataclass(base_value, value)
-                                    overrides[field_name] = merged_nested
+                                # CRITICAL FIX: Recursively merge nested dataclass fields
+                                # If this is a dataclass field, merge it with the base config's value
+                                # instead of replacing wholesale
+                                if is_dataclass(value):
+                                    base_value = getattr(base_config, field_name, None)
+                                    if base_value is not None and is_dataclass(base_value):
+                                        # Merge nested dataclass: base + overrides
+                                        merged_nested = _merge_nested_dataclass(base_value, value)
+                                        overrides[field_name] = merged_nested
+                                    else:
+                                        # No base value to merge with, use override as-is
+                                        overrides[field_name] = value
                                 else:
-                                    # No base value to merge with, use override as-is
+                                    # Non-dataclass field, use override as-is
                                     overrides[field_name] = value
-                            else:
-                                # Non-dataclass field, use override as-is
-                                overrides[field_name] = value
             except AttributeError:
                 continue
 
