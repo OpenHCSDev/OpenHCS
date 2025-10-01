@@ -9,7 +9,7 @@ import dataclasses
 import logging
 from typing import Any, Dict, Type, Optional, Callable, Tuple
 from dataclasses import replace
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton, QLineEdit, QCheckBox, QComboBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton, QLineEdit, QCheckBox, QComboBox, QGroupBox
 from PyQt6.QtCore import Qt, pyqtSignal
 
 # SIMPLIFIED: Removed thread-local imports - dual-axis resolver handles context automatically
