@@ -238,7 +238,6 @@ class ParameterFormManager(QWidget):
 
         # Mark initial load as complete - enable live placeholder updates from now on
         self._initial_load_complete = True
-        print(f"✅ INITIAL LOAD COMPLETE for {self.field_id}: {self._initial_load_complete}")
         self._apply_to_nested_managers(lambda name, manager: setattr(manager, '_initial_load_complete', True))
 
         # CRITICAL: For root GlobalPipelineConfig, refresh placeholders AGAIN after initial load
@@ -249,7 +248,6 @@ class ParameterFormManager(QWidget):
                                  self.global_config_type is not None and
                                  self.context_obj is None)
         if is_root_global_config:
-            print(f"🔄 ROOT GLOBAL CONFIG: Refreshing placeholders with loaded form values for sibling inheritance")
             self._refresh_all_placeholders()
             self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
@@ -279,10 +277,6 @@ class ParameterFormManager(QWidget):
             parameter_types[name] = param_info.param_type
 
             # LOG PARAMETER TYPES
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"🔍 PARAM FORM: {name} → type={param_info.param_type}, default={param_info.default_value}")
-
             # CRITICAL FIX: Preserve parameter descriptions for help display
             if param_info.description:
                 self._parameter_descriptions[name] = param_info.description
@@ -920,15 +914,7 @@ class ParameterFormManager(QWidget):
         This prevents the critical bug where step editor tries to reset
         function parameters like 'group_by' against the global config type.
         """
-        import logging
-        logger = logging.getLogger(__name__)
-
-        logger.info(f"🔍 _is_function_parameter({param_name}):")
-        logger.info(f"   function_target: {self.function_target}")
-        logger.info(f"   dataclass_type: {self.dataclass_type}")
-
         if not self.function_target or not self.dataclass_type:
-            logger.info(f"   → False (no function_target or dataclass_type)")
             return False
 
         # Check if parameter exists in dataclass fields
@@ -936,11 +922,8 @@ class ParameterFormManager(QWidget):
         if dataclasses.is_dataclass(self.dataclass_type):
             field_names = {field.name for field in dataclasses.fields(self.dataclass_type)}
             is_function_param = param_name not in field_names
-            logger.info(f"   field_names: {field_names}")
-            logger.info(f"   → {is_function_param} (param {'NOT' if is_function_param else 'IS'} in dataclass fields)")
             return is_function_param
 
-        logger.info(f"   → False (not a dataclass)")
         return False
 
     def reset_parameter(self, param_name: str, default_value: Any = None) -> None:
@@ -1070,17 +1053,8 @@ class ParameterFormManager(QWidget):
         - For GlobalPipelineConfig editing (root + nested configs): Use instance defaults from fresh dataclass
         - For functions: Use signature defaults
         """
-        import logging
-        logger = logging.getLogger(__name__)
-
-        logger.info(f"🔄 _get_reset_value({param_name}):")
-        logger.info(f"   is_lazy_dataclass: {self._is_lazy_dataclass()}")
-        logger.info(f"   is_global_config_editing: {self.config.is_global_config_editing if hasattr(self.config, 'is_global_config_editing') else 'N/A'}")
-        logger.info(f"   dataclass_type: {self.dataclass_type}")
-
         # Lazy configs always reset to None for lazy resolution from context
         if self._is_lazy_dataclass():
-            logger.info(f"   → None (lazy dataclass)")
             return None
 
         # Non-lazy configs in global editing mode: use fresh instance defaults
@@ -1090,16 +1064,12 @@ class ParameterFormManager(QWidget):
         if (self.config.is_global_config_editing and
             self.dataclass_type is not None and
             dataclasses.is_dataclass(self.dataclass_type)):
-            logger.info(f"   Creating fresh instance of {self.dataclass_type.__name__}")
             fresh_instance = self.dataclass_type()
             reset_value = getattr(fresh_instance, param_name, None)
-            logger.info(f"   → {reset_value} (fresh instance)")
             return reset_value
 
         # All other cases: use param_defaults (functions, non-global editing)
-        fallback = self.param_defaults.get(param_name)
-        logger.info(f"   → {fallback} (param_defaults)")
-        return fallback
+        return self.param_defaults.get(param_name)
 
 
 
@@ -1206,34 +1176,13 @@ class ParameterFormManager(QWidget):
         # CRITICAL: For GlobalPipelineConfig editing (root form only), apply static defaults as base context
         # This masks the thread-local loaded instance with class defaults
         # Only do this for the ROOT GlobalPipelineConfig form, not nested configs or step editor
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"🔍 _build_context_stack check:")
-        logger.info(f"   is_global_config_editing: {self.config.is_global_config_editing}")
-        logger.info(f"   global_config_type: {self.global_config_type}")
-        logger.info(f"   context_obj: {self.context_obj}")
-
         is_root_global_config = (self.config.is_global_config_editing and
                                  self.global_config_type is not None and
                                  self.context_obj is None)  # No parent context = root form
 
-        logger.info(f"   is_root_global_config: {is_root_global_config}")
-
         if is_root_global_config:
-            import logging
-            logger = logging.getLogger(__name__)
             static_defaults = self.global_config_type()
-            logger.info(f"🔧 ROOT GLOBAL CONFIG: Applying static defaults")
-            logger.info(f"   static_defaults type: {type(static_defaults).__name__}")
-            if hasattr(static_defaults, 'step_materialization_config'):
-                logger.info(f"   static_defaults.step_materialization_config: {static_defaults.step_materialization_config}")
             stack.enter_context(config_context(static_defaults, mask_with_none=True))
-
-            # Log context after static defaults
-            from openhcs.config_framework.context_manager import get_current_temp_global
-            ctx = get_current_temp_global()
-            if ctx and hasattr(ctx, 'step_materialization_config'):
-                logger.info(f"   Context after static defaults: {ctx.step_materialization_config}")
 
         # Apply parent context(s) if provided
         if self.context_obj is not None:
@@ -1260,17 +1209,12 @@ class ParameterFormManager(QWidget):
             # This prevents polluting context with stale/default values
             parent_user_values = parent_manager.get_user_modified_values()
 
-            print(f"🔍 PARENT OVERLAY for {self.field_id}:")
-            print(f"   Parent user values: {list(parent_user_values.keys()) if parent_user_values else 'None'}")
-
             if parent_user_values and parent_manager.dataclass_type:
                 # CRITICAL: Exclude the current nested config from parent overlay
                 # This prevents the parent from re-introducing old values when resetting fields in nested form
                 # Example: When resetting well_filter in StepMaterializationConfig, don't include
                 # step_materialization_config from parent's user-modified values
                 filtered_parent_values = {k: v for k, v in parent_user_values.items() if k != self.field_id}
-
-                print(f"   Filtered parent values (excluded {self.field_id}): {list(filtered_parent_values.keys())}")
 
                 if filtered_parent_values:
                     # Use lazy version of parent type to enable sibling inheritance
@@ -1316,9 +1260,6 @@ class ParameterFormManager(QWidget):
         1. Refresh parent form's placeholders (in case they inherit from nested values)
         2. Refresh all sibling nested forms' placeholders
         """
-        print(f"🔔 NESTED PARAM CHANGED: {param_name} = {value} in parent {self.field_id}")
-        print(f"   Parent initial_load_complete: {self._initial_load_complete}")
-
         # Refresh parent form's placeholders
         self._refresh_all_placeholders()
 
