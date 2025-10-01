@@ -9,7 +9,7 @@ import dataclasses
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
 from openhcs.textual_tui.widgets.config_form import ConfigFormWidget
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
+from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
 
 
 class MultiOrchestratorConfigWindow(BaseOpenHCSWindow):

@@ -51,7 +51,7 @@ from openhcs.constants.constants import GroupBy, Backend, VariableComponents, Or
 from openhcs.textual_tui.services.file_browser_service import SelectionMode
 from openhcs.textual_tui.services.window_service import WindowService
 from openhcs.core.path_cache import get_cached_browser_path, PathCacheKey, get_path_cache
-from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
+from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
 
 logger = logging.getLogger(__name__)
 

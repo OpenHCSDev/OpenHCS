@@ -378,18 +378,28 @@ class SignatureAnalyzer:
             except Exception:
                 pass  # Fall back to original globalns
 
+        import logging
+        logger = logging.getLogger(__name__)
+
         try:
             type_hints = get_type_hints(callable_obj, globalns=globalns)
+            logger.info(f"🔍 SIG ANALYZER: get_type_hints succeeded for {callable_obj.__name__}: {type_hints}")
         except (NameError, AttributeError) as e:
             # If type hint resolution fails, try with just the function's original globals
             try:
                 type_hints = get_type_hints(callable_obj, globalns=getattr(callable_obj, '__globals__', {}))
+                logger.info(f"🔍 SIG ANALYZER: get_type_hints with __globals__ succeeded for {callable_obj.__name__}: {type_hints}")
             except:
-                # If that still fails, return empty type hints
-                type_hints = {}
-        except Exception:
-            # For any other type hint resolution errors, return empty type hints
-            type_hints = {}
+                # If that still fails, fall back to __annotations__ directly
+                # This is critical for functions where type hints were added via docstring parsing
+                # (e.g., cucim functions where _enhance_annotations_from_docstring added types)
+                type_hints = getattr(callable_obj, '__annotations__', {})
+                logger.info(f"🔍 SIG ANALYZER: Fell back to __annotations__ for {callable_obj.__name__}: {type_hints}")
+        except Exception as ex:
+            # For any other type hint resolution errors, fall back to __annotations__
+            # This ensures we don't lose type information that was added programmatically
+            type_hints = getattr(callable_obj, '__annotations__', {})
+            logger.info(f"🔍 SIG ANALYZER: Exception {ex}, fell back to __annotations__ for {callable_obj.__name__}: {type_hints}")
 
 
 
@@ -538,7 +548,12 @@ class SignatureAnalyzer:
     def _analyze_dataclass(dataclass_type: type) -> Dict[str, ParameterInfo]:
         """Extract parameter information from dataclass fields."""
         try:
-            type_hints = get_type_hints(dataclass_type)
+            # Try to get type hints, fall back to __annotations__ if resolution fails
+            try:
+                type_hints = get_type_hints(dataclass_type)
+            except Exception:
+                # Fall back to __annotations__ for robustness
+                type_hints = getattr(dataclass_type, '__annotations__', {})
 
             # Extract docstring information from dataclass
             docstring_info = DocstringExtractor.extract(dataclass_type)

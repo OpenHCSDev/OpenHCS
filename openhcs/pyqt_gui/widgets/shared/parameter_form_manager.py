@@ -265,6 +265,11 @@ class ParameterFormManager(QWidget):
             parameters[name] = param_info.default_value
             parameter_types[name] = param_info.param_type
 
+            # LOG PARAMETER TYPES
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"🔍 PARAM FORM: {name} → type={param_info.param_type}, default={param_info.default_value}")
+
             # CRITICAL FIX: Preserve parameter descriptions for help display
             if param_info.description:
                 self._parameter_descriptions[name] = param_info.description

@@ -342,6 +342,8 @@ class LibraryRegistryBase(ABC):
     # ===== CACHING METHODS =====
     def _load_or_discover_functions(self) -> Dict[str, FunctionMetadata]:
         """Load functions from cache or discover them if cache is invalid."""
+        logger.info(f"🔄 _load_or_discover_functions called for {self.library_name}")
+
         cached_functions = self._load_from_cache()
         if cached_functions is not None:
             logger.info(f"✅ Loaded {len(cached_functions)} {self.library_name} functions from cache")
@@ -354,7 +356,10 @@ class LibraryRegistryBase(ABC):
 
     def _load_from_cache(self) -> Optional[Dict[str, FunctionMetadata]]:
         """Load function metadata from cache with validation."""
+        logger.info(f"📂 LOAD FROM CACHE: Checking cache for {self.library_name}")
+
         if not self._cache_path.exists():
+            logger.info(f"📂 LOAD FROM CACHE: No cache file exists at {self._cache_path}")
             return None
 
         try:
@@ -380,6 +385,8 @@ class LibraryRegistryBase(ABC):
             logger.info(f"Cache is {cache_age_days:.1f} days old - rebuilding")
             return None
 
+        logger.info(f"📂 LOAD FROM CACHE: Loading {len(cache_data['functions'])} functions for {self.library_name}")
+
         functions = {}
         for func_name, cached_data in cache_data['functions'].items():
             original_name = cached_data.get('original_name', func_name)
@@ -387,7 +394,10 @@ class LibraryRegistryBase(ABC):
             contract = ProcessingContract[cached_data['contract']]
 
             # Apply the same wrappers as during discovery
-            if hasattr(self, 'create_library_adapter'):
+            has_adapter = hasattr(self, 'create_library_adapter')
+            logger.info(f"📂 LOAD FROM CACHE: {func_name} - hasattr(create_library_adapter)={has_adapter}")
+
+            if has_adapter:
                 # External library - apply library adapter + contract wrapper + param injection
                 adapted_func = self.create_library_adapter(func, contract)
                 contract_wrapped_func = self.apply_contract_wrapper(adapted_func, contract)
@@ -568,6 +578,8 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         import inspect
         func_name = getattr(original_func, '__name__', 'unknown')
 
+        logger.info(f"🔧 CREATE LIBRARY ADAPTER: {func_name} from {getattr(original_func, '__module__', 'unknown')}")
+
         # Get original signature to preserve it
         original_sig = inspect.signature(original_func)
 
@@ -601,8 +613,11 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
     def _enhance_annotations_from_docstring(self, wrapped_func: Callable, original_func: Callable):
         """Extract type hints from docstring using mathematical simplification approach."""
         try:
-            from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
+            # Import from shared UI utilities (no circular dependency)
+            from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
             import numpy as np
+
+            logger.info(f"🔍 ENHANCE ANNOTATIONS: {original_func.__name__} from {original_func.__module__}")
 
             # Unified type extraction with compatibility validation (mathematical simplification)
             TYPE_PATTERNS = {'ndarray': np.ndarray, 'array': np.ndarray, 'array_like': np.ndarray,
@@ -616,20 +631,34 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
             param_info = SignatureAnalyzer.analyze(original_func, skip_first_param=False)
 
             # Inline type extraction and validation (single-use function inlining rule)
+            enhanced_count = 0
             for param_name, info in param_info.items():
                 if param_name not in wrapped_func.__annotations__ and info.description:
-                    # Inline type extraction with priority patterns
-                    desc = info.description.lower().replace(', optional', '').replace(' optional', '').split(' or ')[0].strip()
-                    python_type = (str if desc.startswith('{') and '}' in desc
-                                 else list if any(p in desc for p in ['sequence', 'iterable', 'array of', 'list of'])
-                                 else next((t for pattern, t in TYPE_PATTERNS.items() if pattern in desc), None))
+                    # Extract first line of description (NumPy/SciPy convention: type is always on first line)
+                    # This avoids false matches from type keywords appearing later in the description
+                    first_line = info.description.split('\n')[0].strip().lower()
+                    # Remove optional markers and split on 'or' for union types
+                    first_line = first_line.replace(', optional', '').replace(' optional', '').split(' or ')[0].strip()
+
+                    # Type extraction with priority patterns
+                    python_type = (str if first_line.startswith('{') and '}' in first_line
+                                 else list if any(p in first_line for p in ['sequence', 'iterable', 'array of', 'list of'])
+                                 else next((t for pattern, t in TYPE_PATTERNS.items() if pattern in first_line), None))
 
                     # Inline compatibility check (single-use function inlining rule)
                     if python_type and (info.default_value is None or
                                       type(info.default_value) in COMPATIBLE_DEFAULTS.get(python_type, (python_type,))):
+                        logger.info(f"  ✓ Enhanced {param_name}: {python_type} (from first_line='{first_line[:50]}')")
                         wrapped_func.__annotations__[param_name] = python_type
-        except Exception:
-            pass
+                        enhanced_count += 1
+                    elif info.description:
+                        logger.info(f"  ✗ Could not enhance {param_name}: first_line='{first_line[:50]}', extracted_type={python_type}")
+
+            if enhanced_count > 0:
+                logger.info(f"  📝 Enhanced {enhanced_count} annotations for {original_func.__name__}")
+                logger.info(f"  Final annotations: {wrapped_func.__annotations__}")
+        except Exception as e:
+            logger.error(f"  ❌ Error enhancing annotations for {original_func.__name__}: {e}", exc_info=True)
 
     @abstractmethod
     def _preprocess_input(self, image, func_name: str):

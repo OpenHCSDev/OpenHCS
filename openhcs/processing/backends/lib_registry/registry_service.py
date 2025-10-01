@@ -29,9 +29,10 @@ class RegistryService:
     def get_all_functions_with_metadata(cls) -> Dict[str, FunctionMetadata]:
         """Get unified metadata for all functions from all registries."""
         if cls._metadata_cache is not None:
+            logger.info(f"🎯 REGISTRY SERVICE: Using cached metadata ({len(cls._metadata_cache)} functions)")
             return cls._metadata_cache
 
-        logger.info("Discovering functions from all registries...")
+        logger.info("🎯 REGISTRY SERVICE: Discovering functions from all registries...")
         all_functions = {}
 
         # Discover all registry classes automatically
@@ -48,8 +49,9 @@ class RegistryService:
                     continue
 
                 # Get functions from this registry (with caching)
+                logger.info(f"🎯 REGISTRY SERVICE: Calling _load_or_discover_functions for {registry_instance.library_name}")
                 functions = registry_instance._load_or_discover_functions()
-                logger.info(f"Retrieved {len(functions)} {registry_instance.library_name} functions")
+                logger.info(f"🎯 REGISTRY SERVICE: Retrieved {len(functions)} {registry_instance.library_name} functions")
 
                 # Use composite keys to prevent function name collisions between backends
                 # Format: "backend:function_name" (e.g., "torch:stack_percentile_normalize")

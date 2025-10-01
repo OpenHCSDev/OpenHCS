@@ -18,7 +18,7 @@ from PyQt6.QtGui import QFont
 
 from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-from openhcs.textual_tui.widgets.shared.signature_analyzer import SignatureAnalyzer
+from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
 
 # Import PyQt6 help components (using same pattern as Textual TUI)
 from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpIndicator

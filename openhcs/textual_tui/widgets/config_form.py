@@ -8,7 +8,7 @@ from textual.reactive import reactive
 
 
 from .shared.parameter_form_manager import ParameterFormManager
-from .shared.signature_analyzer import SignatureAnalyzer
+from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
 
 
 class ConfigFormWidget(ScrollableContainer):

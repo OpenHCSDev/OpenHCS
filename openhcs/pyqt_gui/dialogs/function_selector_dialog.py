@@ -98,6 +98,12 @@ class FunctionSelectorDialog(QDialog):
     # Class-level cache for expensive metadata discovery
     _metadata_cache: Optional[Dict[str, FunctionMetadata]] = None
 
+    @classmethod
+    def clear_cache(cls):
+        """Clear the function metadata cache. Call this when function registry is reloaded."""
+        cls._metadata_cache = None
+        logger.debug("Function selector dialog cache cleared")
+
     # UI Constants (RST principle: eliminate magic numbers)
     DEFAULT_WIDTH = 1200
     DEFAULT_HEIGHT = 700
