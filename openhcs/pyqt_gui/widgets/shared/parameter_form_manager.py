@@ -13,8 +13,6 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLab
 from PyQt6.QtCore import Qt, pyqtSignal
 
 # SIMPLIFIED: Removed thread-local imports - dual-axis resolver handles context automatically
-from openhcs.core.config import GlobalPipelineConfig
-
 # Mathematical simplification: Shared dispatch tables to eliminate duplication
 WIDGET_UPDATE_DISPATCH = [
     (QComboBox, 'update_combo_box'),
@@ -51,7 +49,6 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from .layout_constants import CURRENT_LAYOUT
 
 # Import OpenHCS core components
-from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 # Old field path detection removed - using simple field name matching
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
@@ -278,8 +275,8 @@ class ParameterFormManager(QWidget):
 
     def _auto_detect_global_config_type(self) -> Optional[Type]:
         """Auto-detect global config type from context."""
-        from openhcs.core.config import GlobalPipelineConfig
-        return getattr(self.context_obj, 'global_config_type', GlobalPipelineConfig)
+        from openhcs.config_framework import get_base_config_type
+        return getattr(self.context_obj, 'global_config_type', get_base_config_type())
 
 
     def _extract_parameter_defaults(self) -> Dict[str, Any]:
@@ -832,7 +829,7 @@ class ParameterFormManager(QWidget):
 
         Function parameters should not be reset against dataclass types.
         This prevents the critical bug where step editor tries to reset
-        function parameters like 'group_by' against GlobalPipelineConfig.
+        function parameters like 'group_by' against the global config type.
         """
         if not self.function_target or not self.dataclass_type:
             return False
@@ -1047,7 +1044,7 @@ class ParameterFormManager(QWidget):
         """Build nested config_context() calls for placeholder resolution.
 
         Context stack order:
-        1. Thread-local GlobalPipelineConfig (automatic base)
+        1. Thread-local global config (automatic base)
         2. Parent context(s) from self.context_obj (if provided)
         3. Overlay from current form values (always applied last)
 
@@ -1058,7 +1055,7 @@ class ParameterFormManager(QWidget):
             ExitStack with nested contexts
         """
         from contextlib import ExitStack
-        from openhcs.core.context.contextvars_context import config_context
+        from openhcs.config_framework.context_manager import config_context
 
         stack = ExitStack()
 

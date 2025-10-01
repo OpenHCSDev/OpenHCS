@@ -124,11 +124,12 @@ class ProcessingContext:
     # update_from_step_result method is removed as per plan.
 
     # --- Config Getters ---
+    # NOTE: These are only used outside compilation (e.g., in workers after context is frozen)
+    # During compilation, code should access orchestrator.pipeline_config directly
 
     def get_vfs_config(self) -> VFSConfig:
         """Returns the VFSConfig part of the global configuration."""
         if not hasattr(self, 'global_config') or self.global_config is None:
-            # This case should ideally not happen if Orchestrator always sets it.
             raise RuntimeError("GlobalPipelineConfig not set on ProcessingContext.")
         return self.global_config.vfs_config
 

@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Union, Set
 from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.context.global_config import set_current_global_config, get_current_global_config
+from openhcs.config_framework.global_config import set_current_global_config, get_current_global_config
 from openhcs.core.lazy_config import ContextProvider
 
 
@@ -169,7 +169,10 @@ def _execute_single_axis_static(
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
-        step.process(frozen_context, step_index)
+        # CRITICAL: Wrap step processing in config_context(step) for lazy config resolution
+        from openhcs.config_framework.context_manager import config_context
+        with config_context(step):
+            step.process(frozen_context, step_index)
         logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
 
         # Handle visualization if requested
@@ -341,7 +344,6 @@ class PipelineOrchestrator(ContextProvider):
         # Lock removed - was orphaned code never used
 
         # Validate shared global context exists
-        from openhcs.core.context.global_config import get_current_global_config
         if get_current_global_config(GlobalPipelineConfig) is None:
             raise RuntimeError(
                 "No global configuration context found. "
@@ -612,7 +614,10 @@ class PipelineOrchestrator(ContextProvider):
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
 
-            step.process(frozen_context, step_index)
+            # CRITICAL: Wrap step processing in config_context(step) for lazy config resolution
+            from openhcs.config_framework.context_manager import config_context
+            with config_context(step):
+                step.process(frozen_context, step_index)
             logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
 
     #        except Exception as step_error:
@@ -734,7 +739,7 @@ class PipelineOrchestrator(ContextProvider):
                 logger.info("🔥 PRODUCTION MODE: Using ProcessPoolExecutor for true parallelism")
 
                 # Get global config for worker GPU registry initialization
-                from openhcs.core.context.global_config import get_current_global_config
+                from openhcs.config_framework.global_config import get_current_global_config
                 from openhcs.core.config import GlobalPipelineConfig
                 global_config = get_current_global_config(GlobalPipelineConfig)
 

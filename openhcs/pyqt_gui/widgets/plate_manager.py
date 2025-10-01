@@ -570,7 +570,7 @@ class PlateManagerWidget(QWidget):
             orchestrator: Optional orchestrator reference for context persistence
         """
         from openhcs.pyqt_gui.windows.config_window import ConfigWindow
-        from openhcs.core.context.contextvars_context import config_context
+        from openhcs.config_framework.context_manager import config_context
 
 
         # SIMPLIFIED: ConfigWindow now uses the dataclass instance directly for context
@@ -624,7 +624,7 @@ class PlateManagerWidget(QWidget):
 
             # Update thread-local storage for MaterializationPathConfig defaults
             from openhcs.core.config import GlobalPipelineConfig
-            from openhcs.core.context.global_config import set_global_config_for_editing
+            from openhcs.config_framework.global_config import set_global_config_for_editing
             set_global_config_for_editing(GlobalPipelineConfig, new_config)
 
             # Save to cache for persistence between sessions

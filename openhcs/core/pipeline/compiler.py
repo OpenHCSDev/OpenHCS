@@ -179,6 +179,7 @@ class PipelineCompiler:
             metadata_writer: If True, this well is responsible for creating OpenHCS metadata files
             plate_path: Path to plate root for zarr conversion detection
         """
+        # NOTE: This method is called within config_context() wrapper in compile_pipelines()
         if context.is_frozen():
             raise AttributeError("Cannot initialize step plans in a frozen ProcessingContext.")
 
@@ -189,7 +190,7 @@ class PipelineCompiler:
         # CRITICAL: Use the same merged config pattern as orchestrator.apply_pipeline_config()
         # to preserve None values needed for sibling inheritance (materialization_defaults → path_planning)
         from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.core.context.global_config import get_current_global_config, set_current_global_config
+        from openhcs.config_framework.global_config import get_current_global_config, set_current_global_config
         from dataclasses import fields
 
         # Check if orchestrator has already set up the context
@@ -228,7 +229,8 @@ class PipelineCompiler:
         # Check if first step needs zarr conversion
         if steps_definition and plate_path:
             first_step = steps_definition[0]
-            vfs_config = context.get_vfs_config()
+            # Access config directly from orchestrator.pipeline_config (lazy resolution via config_context)
+            vfs_config = orchestrator.pipeline_config.vfs_config
 
             # Only convert if default materialization backend is ZARR
             wants_zarr_conversion = (
@@ -242,7 +244,7 @@ class PipelineCompiler:
 
                 if not already_zarr:
                     # Inject input conversion config using existing PathPlanningConfig pattern
-                    path_config = context.get_path_planning_config()
+                    path_config = orchestrator.pipeline_config.path_planning_config
                     conversion_config = PathPlanningConfig(
                         output_dir_suffix="",  # No suffix - write to plate root
                         global_output_folder=plate_path.parent,  # Parent of plate
@@ -252,13 +254,12 @@ class PipelineCompiler:
                     logger.debug(f"Input conversion to zarr enabled for first step: {first_step.name}")
 
         # The axis_id and base_input_dir are available from the context object.
-        # CRITICAL FIX: Wrap path planning in context so lazy configs resolve properly
-        from openhcs.core.context.contextvars_context import config_context
-        with config_context(orchestrator.pipeline_config):
-            PipelinePathPlanner.prepare_pipeline_paths(
-                context,
-                steps_definition
-            )
+        # Path planning now gets config directly from orchestrator.pipeline_config parameter
+        PipelinePathPlanner.prepare_pipeline_paths(
+            context,
+            steps_definition,
+            orchestrator.pipeline_config
+        )
 
         # === FUNCTION OBJECT REFRESH ===
         # CRITICAL FIX: Refresh all function objects to ensure they're picklable
@@ -271,7 +272,7 @@ class PipelineCompiler:
         # This ensures metadata injection happens first, then lazy configs are resolved
         logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving all lazy configs after path planning...")
         from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-        from openhcs.core.context.contextvars_context import config_context
+        from openhcs.config_framework.context_manager import config_context
         with config_context(orchestrator.pipeline_config):
             steps_definition = resolve_lazy_configurations_for_serialization(steps_definition)
 
@@ -472,7 +473,8 @@ class PipelineCompiler:
 
         all_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
 
-        vfs_config = context.get_vfs_config()
+        # Access config directly from orchestrator.pipeline_config (lazy resolution via config_context)
+        vfs_config = orchestrator.pipeline_config.vfs_config
 
         for step_index, step in enumerate(steps_definition):
             step_plan = context.step_plans[step_index]
@@ -512,7 +514,8 @@ class PipelineCompiler:
         MaterializationFlagPlanner.prepare_pipeline_flags(
             context,
             steps_definition,
-            orchestrator.plate_path
+            orchestrator.plate_path,
+            orchestrator.pipeline_config
         )
 
         # Post-check (optional, but good for ensuring contracts are met by the planner)
@@ -654,12 +657,12 @@ class PipelineCompiler:
         """
         from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
         from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.core.context.global_config import set_current_global_config
+        from openhcs.config_framework.global_config import set_current_global_config
 
         # CRITICAL FIX: Use universal context manager instead of contaminating thread-local
         # This ensures compilation resolves the same values as UI placeholders without
         # permanently contaminating the global thread-local context
-        from openhcs.core.context.contextvars_context import config_context
+        from openhcs.config_framework.context_manager import config_context
         with config_context(orchestrator.pipeline_config):
             # Resolve the entire context recursively to catch all lazy dataclass instances
             # This ensures that any lazy configs in any part of the context are resolved
@@ -723,7 +726,7 @@ class PipelineCompiler:
             # Resolve axis filters once for all axis values to ensure step-level inheritance works
             logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs for axis filter resolution...")
             from openhcs.core.lazy_config import resolve_lazy_configurations_for_serialization
-            from openhcs.core.context.contextvars_context import config_context
+            from openhcs.config_framework.context_manager import config_context
             with config_context(orchestrator.pipeline_config):
                 resolved_steps_for_filters = resolve_lazy_configurations_for_serialization(pipeline_definition)
 
@@ -733,7 +736,7 @@ class PipelineCompiler:
 
             # Use orchestrator context during axis filter resolution
             # This ensures that lazy config resolution uses the orchestrator context
-            from openhcs.core.context.contextvars_context import config_context
+            from openhcs.config_framework.context_manager import config_context
             with config_context(orchestrator.pipeline_config):
                 _resolve_step_axis_filters(resolved_steps_for_filters, temp_context, orchestrator)
             global_step_axis_filters = getattr(temp_context, 'step_axis_filters', {})
@@ -753,17 +756,20 @@ class PipelineCompiler:
                 is_responsible = (axis_id == responsible_axis_value)
                 logger.debug(f"Axis {axis_id} metadata responsibility: {is_responsible}")
 
-                PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
-                PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, orchestrator)
-                PipelineCompiler.plan_materialization_flags_for_context(context, pipeline_definition, orchestrator)
-                PipelineCompiler.validate_memory_contracts_for_context(context, pipeline_definition, orchestrator)
-                PipelineCompiler.assign_gpu_resources_for_context(context)
+                # CRITICAL: Wrap all compilation steps in config_context() for lazy resolution
+                from openhcs.config_framework.context_manager import config_context
+                with config_context(orchestrator.pipeline_config):
+                    PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
+                    PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, orchestrator)
+                    PipelineCompiler.plan_materialization_flags_for_context(context, pipeline_definition, orchestrator)
+                    PipelineCompiler.validate_memory_contracts_for_context(context, pipeline_definition, orchestrator)
+                    PipelineCompiler.assign_gpu_resources_for_context(context)
 
-                if enable_visualizer_override:
-                    PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
+                    if enable_visualizer_override:
+                        PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
 
-                # Resolve all lazy dataclasses before freezing to ensure multiprocessing compatibility
-                PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
+                    # Resolve all lazy dataclasses before freezing to ensure multiprocessing compatibility
+                    PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
 
 
 

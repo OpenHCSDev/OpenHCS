@@ -1,11 +1,12 @@
 """
-Contextvars-based context management system for OpenHCS lazy configuration.
+Generic contextvars-based context management system for lazy configuration.
 
-This module provides explicit context scoping using Python's contextvars to replace
-the complex thread-local storage and stack introspection systems. It enables:
+This module provides explicit context scoping using Python's contextvars to enable
+hierarchical configuration resolution without explicit parameter passing.
 
+Key features:
 1. Explicit context scoping with config_context() manager
-2. Config extraction from functions, dataclasses, and objects  
+2. Config extraction from functions, dataclasses, and objects
 3. Config merging for context hierarchy
 4. Clean separation between UI windows and contexts
 
@@ -79,11 +80,11 @@ def _merge_nested_dataclass(base, override):
 @contextmanager
 def config_context(obj):
     """
-    Create new context scope with obj's matching fields merged into GlobalPipelineConfig.
+    Create new context scope with obj's matching fields merged into base config.
 
     This is the universal context manager for all config context needs. It works by:
-    1. Finding fields that exist on both obj and GlobalPipelineConfig
-    2. Using matching field values to create a temporary merged GlobalPipelineConfig
+    1. Finding fields that exist on both obj and the base config type
+    2. Using matching field values to create a temporary merged config
     3. Setting that as the current context
 
     Args:
@@ -99,12 +100,14 @@ def config_context(obj):
     current_context = get_current_temp_global()
     base_config = current_context if current_context is not None else get_base_global_config()
 
-    # Find matching fields between obj and GlobalPipelineConfig
+    # Find matching fields between obj and base config type
     overrides = {}
     if obj is not None:
-        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.config_framework.config import get_base_config_type
 
-        for field_info in fields(GlobalPipelineConfig):
+        base_config_type = get_base_config_type()
+
+        for field_info in fields(base_config_type):
             field_name = field_info.name
             expected_type = field_info.type
 
@@ -257,7 +260,7 @@ def merge_configs(base, overrides: Dict[str, Any]):
     preserving immutability of the original base config.
     
     Args:
-        base: Base config instance (GlobalPipelineConfig or similar)
+        base: Base config instance (base config type)
         overrides: Dict of field_name -> value to override
         
     Returns:
@@ -292,21 +295,23 @@ def get_base_global_config():
     or a default if none was set. Used as the base for merging operations.
 
     Returns:
-        Current global config instance or default GlobalPipelineConfig
+        Current global config instance or default instance of base config type
     """
     try:
-        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.config_framework.config import get_base_config_type
         from openhcs.config_framework.global_config import get_current_global_config
 
+        base_config_type = get_base_config_type()
+
         # First try to get the global config that was set up
-        current_global = get_current_global_config(GlobalPipelineConfig)
+        current_global = get_current_global_config(base_config_type)
         if current_global is not None:
             return current_global
 
         # Fallback to default if none was set
-        return GlobalPipelineConfig()
+        return base_config_type()
     except ImportError:
-        logger.warning("Could not import GlobalPipelineConfig")
+        logger.warning("Could not get base config type")
         return None
 
 
@@ -451,7 +456,7 @@ def _unwrap_optional_type(field_type):
     """
     Unwrap Optional[T] and Union[T, None] types to get the actual type T.
 
-    This handles type annotations like Optional[GlobalPipelineConfig] -> GlobalPipelineConfig
+    This handles type annotations like Optional[ConfigType] -> ConfigType
     """
     # Handle typing.Optional and typing.Union
     if hasattr(field_type, '__origin__'):

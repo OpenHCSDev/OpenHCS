@@ -36,12 +36,14 @@ class MaterializationFlagPlanner:
     def prepare_pipeline_flags(
         context: ProcessingContext,
         pipeline_definition: List[AbstractStep],
-        plate_path: Path
+        plate_path: Path,
+        pipeline_config
     ) -> None:
         """Set read/write backends for pipeline steps."""
 
         # === SETUP ===
-        vfs_config = context.get_vfs_config()
+        # Access config directly from pipeline_config (lazy resolution via config_context)
+        vfs_config = pipeline_config.vfs_config
         step_plans = context.step_plans
 
         # === PROCESS EACH STEP ===
@@ -50,7 +52,7 @@ class MaterializationFlagPlanner:
 
             # === READ BACKEND SELECTION ===
             if i == 0:  # First step - read from plate format
-                read_backend = MaterializationFlagPlanner._get_first_step_read_backend(context)
+                read_backend = MaterializationFlagPlanner._get_first_step_read_backend(context, vfs_config)
                 step_plan[READ_BACKEND] = read_backend
 
                 # Zarr conversion flag is already set by path planner if needed
@@ -78,9 +80,8 @@ class MaterializationFlagPlanner:
                 step_plan["materialized_backend"] = materialization_backend
 
     @staticmethod
-    def _get_first_step_read_backend(context: ProcessingContext) -> str:
+    def _get_first_step_read_backend(context: ProcessingContext, vfs_config) -> str:
         """Get read backend for first step based on VFS config and metadata-based auto-detection."""
-        vfs_config = context.get_vfs_config()
 
         # Check if user explicitly configured a read backend
         if vfs_config.read_backend != Backend.AUTO:

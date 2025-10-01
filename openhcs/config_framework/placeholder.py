@@ -1,8 +1,8 @@
 """
-Simplified lazy placeholder service using new contextvars system.
+Generic lazy placeholder service for UI integration.
 
 Provides placeholder text resolution for lazy configuration dataclasses
-using the new contextvars-based context management.
+using contextvars-based context management.
 """
 
 from typing import Any, Optional, Type

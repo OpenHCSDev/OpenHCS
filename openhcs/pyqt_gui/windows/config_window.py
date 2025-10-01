@@ -24,7 +24,7 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.core.config import GlobalPipelineConfig
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-from openhcs.core.context.contextvars_context import config_context
+from openhcs.config_framework.context_manager import config_context
 
 
 

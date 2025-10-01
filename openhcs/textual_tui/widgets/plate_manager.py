@@ -959,7 +959,7 @@ class PlateManagerWidget(ButtonListWidget):
 
                 # Create export-specific config with ZARR materialization
                 from openhcs.core.config import GlobalPipelineConfig
-                from openhcs.core.context.global_config import get_current_global_config
+                from openhcs.config_framework.global_config import get_current_global_config
                 export_config = get_current_global_config(GlobalPipelineConfig)
                 export_vfs_config = VFSConfig(
                     intermediate_backend=export_config.vfs_config.intermediate_backend,
