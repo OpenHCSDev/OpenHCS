@@ -1082,50 +1082,16 @@ class PlateManagerWidget(QWidget):
                     if orchestrator.pipeline_config:
                         per_plate_configs[plate_path] = orchestrator.pipeline_config
 
-            # Generate complete orchestrator code using existing function
-            # Note: generate_complete_orchestrator_code only supports a single pipeline_config
-            # We'll use the first plate's config as the base, then manually add per-plate configs
+            # Generate complete orchestrator code using new per_plate_configs parameter
             from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
-
-            # Use first plate's config as representative (or None if no configs)
-            representative_config = per_plate_configs.get(plate_paths[0]) if plate_paths and plate_paths[0] in per_plate_configs else None
 
             python_code = generate_complete_orchestrator_code(
                 plate_paths=plate_paths,
                 pipeline_data=pipeline_data,
                 global_config=self.global_config,
-                pipeline_config=representative_config,
+                per_plate_configs=per_plate_configs if per_plate_configs else None,
                 clean_mode=True  # Default to clean mode - only show non-default values
             )
-
-            # If we have per-plate configs that differ, add them to the generated code
-            if len(per_plate_configs) > 1 or (len(per_plate_configs) == 1 and plate_paths[0] not in per_plate_configs):
-                # Generate per-plate config section
-                from openhcs.debug.pickle_to_python import generate_clean_dataclass_repr
-                from collections import defaultdict
-
-                per_plate_code_lines = [
-                    "",
-                    "# Per-plate pipeline configurations",
-                    "per_plate_configs = {}"
-                ]
-
-                for plate_path, config in per_plate_configs.items():
-                    config_imports = defaultdict(set)
-                    config_repr = generate_clean_dataclass_repr(
-                        config,
-                        indent_level=0,
-                        clean_mode=True,
-                        required_imports=config_imports
-                    )
-                    per_plate_code_lines.append(f'per_plate_configs["{plate_path}"] = PipelineConfig(\n{config_repr}\n)')
-
-                # Insert per-plate configs after the main pipeline_config definition
-                # Find the line with "# Pipeline steps" and insert before it
-                code_lines = python_code.split('\n')
-                insert_index = next((i for i, line in enumerate(code_lines) if line.startswith("# Pipeline steps")), len(code_lines))
-                code_lines[insert_index:insert_index] = per_plate_code_lines
-                python_code = '\n'.join(code_lines)
 
             # Create simple code editor service (same pattern as tiers 1 & 2)
             from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
@@ -1135,12 +1101,23 @@ class PlateManagerWidget(QWidget):
             import os
             use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
 
+            # Prepare code data for clean mode toggle
+            code_data = {
+                'clean_mode': True,
+                'plate_paths': plate_paths,
+                'pipeline_data': pipeline_data,
+                'global_config': self.global_config,
+                'per_plate_configs': per_plate_configs
+            }
+
             # Launch editor with callback
             editor_service.edit_code(
                 initial_content=python_code,
                 title="Edit Orchestrator Configuration",
                 callback=self._handle_edited_orchestrator_code,
-                use_external=use_external
+                use_external=use_external,
+                code_type='orchestrator',
+                code_data=code_data
             )
 
         except Exception as e:
@@ -1225,8 +1202,32 @@ class PlateManagerWidget(QWidget):
 
                     self.global_config_changed.emit()
 
-                # Update pipeline config if present (CRITICAL: This was missing!)
-                if 'pipeline_config' in namespace:
+                # Handle per-plate configs (preferred) or single pipeline_config (legacy)
+                if 'per_plate_configs' in namespace:
+                    # New per-plate config system
+                    per_plate_configs = namespace['per_plate_configs']
+
+                    # CRITICAL FIX: Match string keys to actual plate path objects
+                    # The keys in per_plate_configs are strings, but orchestrators dict uses Path/str objects
+                    for plate_path_str, new_pipeline_config in per_plate_configs.items():
+                        # Find matching orchestrator by comparing string representations
+                        matched_orchestrator = None
+                        for orch_key, orchestrator in self.orchestrators.items():
+                            if str(orch_key) == str(plate_path_str):
+                                matched_orchestrator = orchestrator
+                                matched_key = orch_key
+                                break
+
+                        if matched_orchestrator:
+                            matched_orchestrator.apply_pipeline_config(new_pipeline_config)
+                            # Emit signal for UI components to refresh (including config windows)
+                            effective_config = matched_orchestrator.get_effective_config()
+                            self.orchestrator_config_changed.emit(str(matched_key), effective_config)
+                            logger.debug(f"Applied per-plate pipeline config to orchestrator: {matched_key}")
+                        else:
+                            logger.warning(f"No orchestrator found for plate path: {plate_path_str}")
+                elif 'pipeline_config' in namespace:
+                    # Legacy single pipeline_config for all plates
                     new_pipeline_config = namespace['pipeline_config']
                     # Apply the new pipeline config to all affected orchestrators
                     for plate_path in new_plate_paths:

@@ -695,17 +695,47 @@ class PipelineOrchestrator(ContextProvider):
             actual_max_workers = 1
 
         # 🔬 AUTOMATIC VISUALIZER CREATION: Create visualizers if compiler detected streaming
+        # Support multiple napari instances based on unique ports
+        visualizers = []
         if visualizer is None:
+            # Collect all unique napari ports across all compiled contexts
+            unique_napari_ports = set()
+            for ctx in compiled_contexts.values():
+                for visualizer_info in ctx.required_visualizers:
+                    config = visualizer_info['config']
+                    # Check if this is a napari streaming config with a port
+                    if hasattr(config, 'napari_port'):
+                        unique_napari_ports.add(config.napari_port)
+
+            logger.info(f"🔬 ORCHESTRATOR: Found {len(unique_napari_ports)} unique napari ports: {unique_napari_ports}")
+
+            # Create a visualizer for each unique port
             context = next(iter(compiled_contexts.values()))
-            logger.info(f"🔬 ORCHESTRATOR: Checking for required visualizers: {len(context.required_visualizers)} found")
             for visualizer_info in context.required_visualizers:
                 config = visualizer_info['config']
-                logger.info(f"🔬 ORCHESTRATOR: Creating visualizer with config: {config}")
-                visualizer = config.create_visualizer(self.filemanager, context.visualizer_config)
-                logger.info(f"🔬 ORCHESTRATOR: Starting visualizer: {visualizer}")
-                visualizer.start_viewer()
-                logger.info(f"🔬 ORCHESTRATOR: Visualizer started, is_running: {visualizer.is_running}")
-                break
+
+                # For napari configs, create one visualizer per unique port
+                if hasattr(config, 'napari_port'):
+                    port = config.napari_port
+                    # Check if we already created a visualizer for this port
+                    if not any(hasattr(v, 'napari_port') and v.napari_port == port for v in visualizers):
+                        logger.info(f"🔬 ORCHESTRATOR: Creating napari visualizer for port {port}")
+                        vis = config.create_visualizer(self.filemanager, context.visualizer_config)
+                        logger.info(f"🔬 ORCHESTRATOR: Starting napari visualizer on port {port}")
+                        vis.start_viewer()
+                        logger.info(f"🔬 ORCHESTRATOR: Napari visualizer started on port {port}, is_running: {vis.is_running}")
+                        visualizers.append(vis)
+                else:
+                    # Non-napari visualizers (e.g., Fiji) - create once
+                    logger.info(f"🔬 ORCHESTRATOR: Creating visualizer with config: {config}")
+                    vis = config.create_visualizer(self.filemanager, context.visualizer_config)
+                    logger.info(f"🔬 ORCHESTRATOR: Starting visualizer: {vis}")
+                    vis.start_viewer()
+                    logger.info(f"🔬 ORCHESTRATOR: Visualizer started, is_running: {vis.is_running}")
+                    visualizers.append(vis)
+
+            # For backwards compatibility, set visualizer to the first one
+            visualizer = visualizers[0] if visualizers else None
 
         self._state = OrchestratorState.EXECUTING
         logger.info(f"Starting execution for {len(compiled_contexts)} axis values with max_workers={actual_max_workers}.")
@@ -905,18 +935,19 @@ class PipelineOrchestrator(ContextProvider):
             else:
                 self._state = OrchestratorState.EXEC_FAILED
 
-            # 🔬 VISUALIZER CLEANUP: Stop napari visualizer if it was auto-created and not persistent
-            if visualizer is not None:
+            # 🔬 VISUALIZER CLEANUP: Stop all visualizers if they were auto-created and not persistent
+            for vis in visualizers:
                 try:
-                    if not visualizer.persistent:
-                        visualizer.stop_viewer()
-                        logger.info("🔬 ORCHESTRATOR: Stopped non-persistent napari visualizer")
+                    if not vis.persistent:
+                        vis.stop_viewer()
+                        logger.info(f"🔬 ORCHESTRATOR: Stopped non-persistent visualizer")
                     else:
-                        logger.info("🔬 ORCHESTRATOR: Keeping persistent napari visualizer alive")
+                        logger.info(f"🔬 ORCHESTRATOR: Keeping persistent visualizer alive")
                         # Just cleanup ZMQ connection, leave process running
-                        visualizer._cleanup_zmq()
+                        if hasattr(vis, '_cleanup_zmq'):
+                            vis._cleanup_zmq()
                 except Exception as e:
-                    logger.warning(f"🔬 ORCHESTRATOR: Failed to cleanup napari visualizer: {e}")
+                    logger.warning(f"🔬 ORCHESTRATOR: Failed to cleanup visualizer: {e}")
 
             logger.info(f"🔥 ORCHESTRATOR: Plate execution finished. Results: {execution_results}")
 

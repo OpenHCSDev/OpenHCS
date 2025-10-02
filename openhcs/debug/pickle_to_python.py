@@ -598,8 +598,18 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     return "\n".join(code_lines)
 
 
-def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_config, clean_mode=False, pipeline_config=None):
-    """Generate complete Python code for orchestrator config with imports."""
+def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_config, clean_mode=False, pipeline_config=None, per_plate_configs=None):
+    """
+    Generate complete Python code for orchestrator config with imports.
+
+    Args:
+        plate_paths: List of plate paths
+        pipeline_data: Dict mapping plate_path to list of steps
+        global_config: GlobalPipelineConfig instance
+        clean_mode: If True, only show non-default values
+        pipeline_config: Single PipelineConfig to apply to all plates (legacy, deprecated)
+        per_plate_configs: Dict mapping plate_path to PipelineConfig (preferred)
+    """
     # Build complete code (extract exact logic from lines 150-200)
     code_lines = ["# Edit this orchestrator configuration and save to apply changes", ""]
 
@@ -662,9 +672,28 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
     for module, names in config_repr_imports.items():
         all_function_imports[module].update(names)
 
+    # Generate readable plate path variables
+    plate_path_vars = {}
+    for i, plate_path in enumerate(plate_paths, 1):
+        # Extract a readable name from the path
+        path_str = str(plate_path)
+        plate_name = path_str.split('/')[-1] if '/' in path_str else path_str
+        var_name = f"plate_{i}_{plate_name.replace('-', '_').replace('.', '_')}"
+        plate_path_vars[plate_path] = var_name
+
     code_lines.extend([
         "# Plate paths",
-        f"plate_paths = {repr(plate_paths)}",
+        ""
+    ])
+
+    # Generate individual plate path variables for readability
+    for plate_path, var_name in plate_path_vars.items():
+        code_lines.append(f'{var_name} = "{plate_path}"')
+
+    code_lines.extend([
+        "",
+        "# Collect all plate paths",
+        f"plate_paths = [{', '.join(plate_path_vars.values())}]",
         "",
         "# Global configuration",
     ])
@@ -672,8 +701,71 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
     code_lines.append(f"global_config = GlobalPipelineConfig(\n{config_repr}\n)")
     code_lines.append("")
 
-    # Add PipelineConfig creation with actual values (if any)
-    if pipeline_config is not None:
+    # Handle per-plate configs (preferred) or single pipeline_config (legacy)
+    if per_plate_configs:
+        # NEW APPROACH: Group each plate's config and steps together
+        code_lines.extend([
+            "# Per-plate configurations and pipeline steps",
+            "per_plate_configs = {}",
+            "pipeline_data = {}",
+            ""
+        ])
+
+        default_step = FunctionStep(func=lambda: None)
+
+        # Iterate through plates in order, generating config + steps for each
+        for plate_path in plate_paths:
+            plate_name = str(plate_path).split('/')[-1] if '/' in str(plate_path) else str(plate_path)
+            var_name = plate_path_vars[plate_path]
+
+            code_lines.append(f"# ========== Plate: {plate_name} ==========")
+            code_lines.append("")
+
+            # Generate config for this plate
+            if plate_path in per_plate_configs:
+                config = per_plate_configs[plate_path]
+
+                # Collect imports needed for this pipeline config
+                pipeline_config_imports = defaultdict(set)
+                pipeline_config_repr = generate_clean_dataclass_repr(
+                    config,
+                    indent_level=0,
+                    clean_mode=clean_mode,
+                    required_imports=pipeline_config_imports,
+                    name_mappings=name_mappings
+                )
+
+                # Add the collected imports to the main import collection
+                for module, names in pipeline_config_imports.items():
+                    all_function_imports[module].update(names)
+
+                code_lines.append(f'# Pipeline config for {plate_name}')
+                code_lines.append(f'per_plate_configs[{var_name}] = PipelineConfig(\n{pipeline_config_repr}\n)')
+                code_lines.append("")
+
+            # Generate steps for this plate
+            if plate_path in pipeline_data:
+                steps = pipeline_data[plate_path]
+
+                code_lines.append(f'# Pipeline steps for {plate_name}')
+                code_lines.append("steps = []")
+                code_lines.append("")
+
+                for i, step in enumerate(steps):
+                    code_lines.append(f"# Step {i+1}: {step.name}")
+
+                    # Generate all FunctionStep parameters automatically using introspection with name mappings
+                    step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
+
+                    args_str = ",\n    ".join(step_args)
+                    code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
+                    code_lines.append(f"steps.append(step_{i+1})")
+                    code_lines.append("")
+
+                code_lines.append(f'pipeline_data[{var_name}] = steps')
+                code_lines.append("")
+    elif pipeline_config is not None:
+        # Legacy single pipeline_config for all plates
         # Collect imports needed for pipeline config representation
         pipeline_config_imports = defaultdict(set)
         pipeline_config_repr = generate_clean_dataclass_repr(
@@ -696,6 +788,34 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
             f"pipeline_config = PipelineConfig(\n{pipeline_config_repr}\n)",
             ""
         ])
+
+        # Generate pipeline data
+        code_lines.extend(["# Pipeline steps", "pipeline_data = {}", ""])
+
+        default_step = FunctionStep(func=lambda: None)
+        for plate_path, steps in pipeline_data.items():
+            # Extract plate name without using Path in generated code
+            plate_name = str(plate_path).split('/')[-1] if '/' in str(plate_path) else str(plate_path)
+            var_name = plate_path_vars[plate_path]
+
+            code_lines.append(f'# Steps for plate: {plate_name}')
+            code_lines.append("steps = []")
+            code_lines.append("")
+
+            for i, step in enumerate(steps):
+                code_lines.append(f"# Step {i+1}: {step.name}")
+
+                # Generate all FunctionStep parameters automatically using introspection with name mappings
+                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
+
+                args_str = ",\n    ".join(step_args)
+                code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
+                code_lines.append(f"steps.append(step_{i+1})")
+                code_lines.append("")
+
+            # Use variable name instead of full path string
+            code_lines.append(f'pipeline_data[{var_name}] = steps')
+            code_lines.append("")
     else:
         # No pipeline config overrides
         code_lines.extend([
@@ -704,43 +824,60 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
             ""
         ])
 
-    # Generate pipeline data (exact logic from lines 164-198)
-    code_lines.extend(["# Pipeline steps", "pipeline_data = {}", ""])
+        # Generate pipeline data
+        code_lines.extend(["# Pipeline steps", "pipeline_data = {}", ""])
 
-    default_step = FunctionStep(func=lambda: None)
-    for plate_path, steps in pipeline_data.items():
-        # Extract plate name without using Path in generated code
-        plate_name = str(plate_path).split('/')[-1] if '/' in str(plate_path) else str(plate_path)
-        code_lines.append(f'# Steps for plate: {plate_name}')
-        code_lines.append("steps = []")
-        code_lines.append("")
+        default_step = FunctionStep(func=lambda: None)
+        for plate_path, steps in pipeline_data.items():
+            # Extract plate name without using Path in generated code
+            plate_name = str(plate_path).split('/')[-1] if '/' in str(plate_path) else str(plate_path)
+            var_name = plate_path_vars[plate_path]
 
-        for i, step in enumerate(steps):
-            code_lines.append(f"# Step {i+1}: {step.name}")
-
-            # Generate all FunctionStep parameters automatically using introspection with name mappings
-            step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
-
-            args_str = ",\n    ".join(step_args)
-            code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
-            code_lines.append(f"steps.append(step_{i+1})")
+            code_lines.append(f'# Steps for plate: {plate_name}')
+            code_lines.append("steps = []")
             code_lines.append("")
 
-        code_lines.append(f'pipeline_data["{plate_path}"] = steps')
-        code_lines.append("")
+            for i, step in enumerate(steps):
+                code_lines.append(f"# Step {i+1}: {step.name}")
 
-    # Add orchestrator creation example
-    code_lines.extend([
-        "# Example: Create orchestrators with PipelineConfig",
-        "# orchestrators = {}",
-        "# for plate_path in plate_paths:",
-        "#     orchestrator = PipelineOrchestrator(",
-        "#         plate_path=plate_path,",
-        "#         pipeline_config=pipeline_config",
-        "#     )",
-        "#     orchestrators[plate_path] = orchestrator",
-        ""
-    ])
+                # Generate all FunctionStep parameters automatically using introspection with name mappings
+                step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
+
+                args_str = ",\n    ".join(step_args)
+                code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
+                code_lines.append(f"steps.append(step_{i+1})")
+                code_lines.append("")
+
+            # Use variable name instead of full path string
+            code_lines.append(f'pipeline_data[{var_name}] = steps')
+            code_lines.append("")
+
+    # Add orchestrator creation example with per-plate configs
+    if per_plate_configs:
+        code_lines.extend([
+            "# Example: Create orchestrators with per-plate PipelineConfigs",
+            "# orchestrators = {}",
+            "# for plate_path in plate_paths:",
+            "#     config = per_plate_configs.get(plate_path, PipelineConfig())",
+            "#     orchestrator = PipelineOrchestrator(",
+            "#         plate_path=plate_path,",
+            "#         pipeline_config=config",
+            "#     )",
+            "#     orchestrators[plate_path] = orchestrator",
+            ""
+        ])
+    else:
+        code_lines.extend([
+            "# Example: Create orchestrators with PipelineConfig",
+            "# orchestrators = {}",
+            "# for plate_path in plate_paths:",
+            "#     orchestrator = PipelineOrchestrator(",
+            "#         plate_path=plate_path,",
+            "#         pipeline_config=pipeline_config",
+            "#     )",
+            "#     orchestrators[plate_path] = orchestrator",
+            ""
+        ])
 
     # Final pass: Generate all imports and prepend to code
     final_import_lines, final_name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)

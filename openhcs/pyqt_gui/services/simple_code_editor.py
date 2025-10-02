@@ -42,36 +42,43 @@ class SimpleCodeEditorService:
     def __init__(self, parent_widget):
         """
         Initialize the code editor service.
-        
+
         Args:
             parent_widget: Parent widget for dialogs
         """
         self.parent = parent_widget
-    
-    def edit_code(self, initial_content: str, title: str = "Edit Code", 
+
+    def edit_code(self, initial_content: str, title: str = "Edit Code",
                   callback: Optional[Callable[[str], None]] = None,
-                  use_external: bool = False) -> None:
+                  use_external: bool = False,
+                  code_type: str = None,
+                  code_data: dict = None) -> None:
         """
         Edit code using either Qt native editor or external program.
-        
+
         Args:
             initial_content: Initial code content
             title: Editor window title
             callback: Callback function called with edited content
             use_external: If True, use external editor; if False, use Qt native
+            code_type: Type of code being edited ('orchestrator', 'pipeline', 'function', None)
+            code_data: Data needed to regenerate code (for clean mode toggle)
         """
         if use_external:
             self._edit_with_external_program(initial_content, callback)
         else:
-            self._edit_with_qt_native(initial_content, title, callback)
+            self._edit_with_qt_native(initial_content, title, callback, code_type, code_data)
     
     def _edit_with_qt_native(self, initial_content: str, title: str,
-                           callback: Optional[Callable[[str], None]]) -> None:
+                           callback: Optional[Callable[[str], None]],
+                           code_type: str = None,
+                           code_data: dict = None) -> None:
         """Edit code using Qt native text editor dialog (QScintilla preferred)."""
         try:
             if QSCINTILLA_AVAILABLE:
                 logger.debug("Using QScintilla editor for code editing")
-                dialog = QScintillaCodeEditorDialog(self.parent, initial_content, title)
+                dialog = QScintillaCodeEditorDialog(self.parent, initial_content, title,
+                                                   code_type=code_type, code_data=code_data)
             else:
                 logger.debug("QScintilla not available, using QTextEdit fallback")
                 dialog = CodeEditorDialog(self.parent, initial_content, title)
@@ -136,13 +143,30 @@ class QScintillaCodeEditorDialog(QDialog):
 
     Provides Python syntax highlighting, code folding, line numbers, and more.
     Integrates with PyQt6ColorScheme for consistent theming.
+    Supports clean mode toggle for orchestrator/pipeline/function code.
     """
 
-    def __init__(self, parent, initial_content: str, title: str):
+    def __init__(self, parent, initial_content: str, title: str,
+                 code_type: str = None, code_data: dict = None):
+        """
+        Initialize code editor dialog.
+
+        Args:
+            parent: Parent widget
+            initial_content: Initial code content
+            title: Window title
+            code_type: Type of code being edited ('orchestrator', 'pipeline', 'function', None)
+            code_data: Data needed to regenerate code (for clean mode toggle)
+        """
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setModal(True)
         self.resize(900, 700)
+
+        # Store code generation context for clean mode toggle
+        self.code_type = code_type
+        self.code_data = code_data or {}
+        self.clean_mode = self.code_data.get('clean_mode', True)  # Default to clean mode
 
         # Get color scheme from parent
         from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
@@ -295,6 +319,17 @@ class QScintillaCodeEditorDialog(QDialog):
         toggle_folding.setChecked(True)
         toggle_folding.triggered.connect(self._toggle_code_folding)
         view_menu.addAction(toggle_folding)
+
+        # Add separator before clean mode toggle
+        view_menu.addSeparator()
+
+        # Toggle clean mode (only if code_type is supported)
+        if self.code_type in ('orchestrator', 'pipeline', 'function'):
+            toggle_clean_mode = QAction("Toggle &Clean Mode", self)
+            toggle_clean_mode.setCheckable(True)
+            toggle_clean_mode.setChecked(self.clean_mode)
+            toggle_clean_mode.triggered.connect(self._toggle_clean_mode)
+            view_menu.addAction(toggle_clean_mode)
 
     def _configure_editor(self):
         """Configure QScintilla editor with professional features."""
@@ -514,6 +549,103 @@ class QScintillaCodeEditorDialog(QDialog):
             self.editor.setFolding(QsciScintilla.FoldStyle.BoxedTreeFoldStyle)
         else:
             self.editor.setFolding(QsciScintilla.FoldStyle.NoFoldStyle)
+
+    def _toggle_clean_mode(self, checked):
+        """Toggle between clean mode (minimal) and explicit mode (full)."""
+        try:
+            # Parse current code to extract data
+            current_code = self.editor.text()
+            namespace = {}
+            exec(current_code, namespace)
+
+            # Toggle clean mode
+            self.clean_mode = checked
+            self.code_data['clean_mode'] = self.clean_mode
+
+            # Regenerate code based on type
+            from openhcs.debug.pickle_to_python import (
+                generate_complete_orchestrator_code,
+                generate_complete_pipeline_steps_code,
+                generate_complete_function_pattern_code
+            )
+
+            if self.code_type == 'orchestrator':
+                # Extract orchestrator data from namespace
+                plate_paths = namespace.get('plate_paths', [])
+                pipeline_data = namespace.get('pipeline_data', {})
+                global_config = namespace.get('global_config')
+                per_plate_configs = namespace.get('per_plate_configs')
+                pipeline_config = namespace.get('pipeline_config')
+
+                new_code = generate_complete_orchestrator_code(
+                    plate_paths=plate_paths,
+                    pipeline_data=pipeline_data,
+                    global_config=global_config,
+                    per_plate_configs=per_plate_configs,
+                    pipeline_config=pipeline_config,
+                    clean_mode=self.clean_mode
+                )
+            elif self.code_type == 'pipeline':
+                # Extract pipeline data from namespace
+                pipeline_steps = namespace.get('pipeline_steps', [])
+
+                new_code = generate_complete_pipeline_steps_code(
+                    pipeline_steps=pipeline_steps,
+                    clean_mode=self.clean_mode
+                )
+            elif self.code_type == 'function':
+                # Extract function pattern from namespace
+                func_obj = namespace.get('func_obj')
+
+                new_code = generate_complete_function_pattern_code(
+                    func_obj=func_obj,
+                    clean_mode=self.clean_mode
+                )
+            elif self.code_type == 'config':
+                # Extract config from namespace
+                config = namespace.get('config')
+                config_class = self.code_data.get('config_class')
+
+                if not config or not config_class:
+                    raise ValueError("Missing config or config_class in code_data")
+
+                from openhcs.debug.pickle_to_python import generate_clean_dataclass_repr
+                from collections import defaultdict
+
+                # Generate config representation
+                required_imports = defaultdict(set)
+                config_repr = generate_clean_dataclass_repr(
+                    config,
+                    indent_level=0,
+                    clean_mode=self.clean_mode,
+                    required_imports=required_imports
+                )
+
+                # Build complete code with imports
+                code_lines = ["# Configuration Code", ""]
+
+                # Add imports
+                for module, names in sorted(required_imports.items()):
+                    names_str = ", ".join(sorted(names))
+                    code_lines.append(f"from {module} import {names_str}")
+
+                code_lines.extend(["", f"config = {config_class.__name__}(", config_repr, ")"])
+
+                new_code = "\n".join(code_lines)
+            else:
+                # Unsupported code type
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.warning(self, "Clean Mode Toggle",
+                                  "Clean mode toggle is not supported for this code type.")
+                return
+
+            # Update editor with new code
+            self.editor.setText(new_code)
+
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Clean Mode Toggle Error",
+                               f"Failed to toggle clean mode: {str(e)}")
 
     def get_content(self) -> str:
         """Get the edited content."""

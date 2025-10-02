@@ -420,31 +420,40 @@ class ConfigWindow(QDialog):
         
         layout = QHBoxLayout(panel)
         layout.addStretch()
-        
+
+        # View Code button (left side)
+        view_code_button = QPushButton("View Code")
+        view_code_button.setMinimumWidth(100)
+        view_code_button.clicked.connect(self._view_code)
+        button_styles = self.style_generator.generate_config_button_styles()
+        view_code_button.setStyleSheet(button_styles["reset"])  # Use reset style for now
+        layout.addWidget(view_code_button)
+
+        layout.addStretch()
+
         # Reset button
         reset_button = QPushButton("Reset to Defaults")
         reset_button.setMinimumWidth(120)
         reset_button.clicked.connect(self.reset_to_defaults)
-        button_styles = self.style_generator.generate_config_button_styles()
         reset_button.setStyleSheet(button_styles["reset"])
         layout.addWidget(reset_button)
-        
+
         layout.addSpacing(10)
-        
+
         # Cancel button
         cancel_button = QPushButton("Cancel")
         cancel_button.setMinimumWidth(80)
         cancel_button.clicked.connect(self.reject)
         cancel_button.setStyleSheet(button_styles["cancel"])
         layout.addWidget(cancel_button)
-        
+
         # Save button
         save_button = QPushButton("Save")
         save_button.setMinimumWidth(80)
         save_button.clicked.connect(self.save_config)
         save_button.setStyleSheet(button_styles["save"])
         layout.addWidget(save_button)
-        
+
         return panel
     
 
@@ -620,6 +629,94 @@ class ConfigWindow(QDialog):
     
 
     
+    def _view_code(self):
+        """Open code editor to view/edit the configuration as Python code."""
+        try:
+            from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
+            from openhcs.debug.pickle_to_python import generate_clean_dataclass_repr
+            from collections import defaultdict
+            import os
+
+            # Get current config values from the form
+            current_values = self.form_manager.get_current_values()
+            current_config = self.config_class(**current_values)
+
+            # Generate Python code representation
+            required_imports = defaultdict(set)
+            config_repr = generate_clean_dataclass_repr(
+                current_config,
+                indent_level=0,
+                clean_mode=True,
+                required_imports=required_imports
+            )
+
+            # Build complete code with imports
+            code_lines = ["# Configuration Code", ""]
+
+            # Add imports
+            for module, names in sorted(required_imports.items()):
+                names_str = ", ".join(sorted(names))
+                code_lines.append(f"from {module} import {names_str}")
+
+            code_lines.extend(["", f"config = {self.config_class.__name__}(", config_repr, ")"])
+
+            python_code = "\n".join(code_lines)
+
+            # Prepare code_data for clean mode toggle
+            code_data = {
+                'config_class': self.config_class,
+                'current_config': current_config,
+                'clean_mode': True
+            }
+
+            # Create editor service
+            editor_service = SimpleCodeEditorService(self)
+
+            # Check if user wants external editor
+            use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
+
+            # Launch editor with callback
+            editor_service.edit_code(
+                initial_content=python_code,
+                title=f"View/Edit {self.config_class.__name__}",
+                callback=self._handle_edited_config_code,
+                use_external=use_external,
+                code_type='config',
+                code_data=code_data
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to view config code: {e}")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "View Code Error", f"Failed to view code:\n{e}")
+
+    def _handle_edited_config_code(self, edited_code: str):
+        """Handle edited configuration code from the code editor."""
+        try:
+            # Execute the code to get the config object
+            namespace = {}
+            exec(edited_code, namespace)
+
+            # Find the config object in the namespace
+            if 'config' in namespace:
+                new_config = namespace['config']
+
+                # Verify it's the right type
+                if not isinstance(new_config, self.config_class):
+                    raise ValueError(f"Expected {self.config_class.__name__}, got {type(new_config).__name__}")
+
+                # Update the form with the new config values
+                self.form_manager.update_from_dataclass(new_config)
+
+                logger.info(f"Updated config from edited code")
+            else:
+                raise ValueError("No 'config' variable found in edited code")
+
+        except Exception as e:
+            logger.error(f"Failed to apply edited config code: {e}")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
+
     def reject(self):
         """Handle dialog rejection (Cancel button)."""
         self.config_cancelled.emit()
