@@ -1268,15 +1268,14 @@ class PlateManagerWidget(QWidget):
                 self.service_adapter.show_info_dialog("Orchestrator configuration updated successfully")
 
             else:
-                self.service_adapter.show_error_dialog("No valid assignments found in edited code")
+                raise ValueError("No valid assignments found in edited code")
 
-        except SyntaxError as e:
-            self.service_adapter.show_error_dialog(f"Invalid Python syntax: {e}")
-        except Exception as e:
+        except (SyntaxError, Exception) as e:
             import traceback
             full_traceback = traceback.format_exc()
             logger.error(f"Failed to parse edited orchestrator code: {e}\nFull traceback:\n{full_traceback}")
-            self.service_adapter.show_error_dialog(f"Failed to parse orchestrator code: {str(e)}\n\nFull traceback:\n{full_traceback}")
+            # Re-raise so the code editor can handle it (keep dialog open, move cursor to error line)
+            raise
 
     def _invalidate_orchestrator_compilation_state(self, plate_path: str):
         """Invalidate compilation state for an orchestrator when its pipeline changes.
