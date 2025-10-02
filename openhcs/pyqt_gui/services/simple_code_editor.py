@@ -366,6 +366,80 @@ class QScintillaCodeEditorDialog(QDialog):
         # Enable UTF-8
         self.editor.setUtf8(True)
 
+        # Configure autocomplete
+        self._configure_autocomplete()
+
+    def _configure_autocomplete(self):
+        """Configure autocomplete for Python code."""
+        # Enable autocomplete from document words and API
+        self.editor.setAutoCompletionSource(QsciScintilla.AutoCompletionSource.AcsAll)
+
+        # Show autocomplete after typing 2 characters
+        self.editor.setAutoCompletionThreshold(2)
+
+        # Case-insensitive matching
+        self.editor.setAutoCompletionCaseSensitivity(False)
+
+        # Replace word when selecting from autocomplete
+        self.editor.setAutoCompletionReplaceWord(True)
+
+        # Show single item automatically
+        self.editor.setAutoCompletionUseSingle(QsciScintilla.AutoCompletionUseSingle.AcusNever)
+
+        # Setup API for Python keywords and common libraries
+        self._setup_python_api()
+
+    def _setup_python_api(self):
+        """Setup API autocomplete with Python keywords and common OpenHCS imports."""
+        try:
+            from PyQt6.Qsci import QsciAPIs
+
+            # Create API object for Python lexer
+            self.api = QsciAPIs(self.lexer)
+
+            # Python keywords
+            python_keywords = [
+                'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
+                'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
+                'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
+                'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return',
+                'try', 'while', 'with', 'yield'
+            ]
+
+            # Common Python builtins
+            python_builtins = [
+                'abs', 'all', 'any', 'bin', 'bool', 'bytes', 'callable', 'chr',
+                'classmethod', 'compile', 'complex', 'delattr', 'dict', 'dir',
+                'divmod', 'enumerate', 'eval', 'exec', 'filter', 'float', 'format',
+                'frozenset', 'getattr', 'globals', 'hasattr', 'hash', 'help', 'hex',
+                'id', 'input', 'int', 'isinstance', 'issubclass', 'iter', 'len',
+                'list', 'locals', 'map', 'max', 'memoryview', 'min', 'next', 'object',
+                'oct', 'open', 'ord', 'pow', 'print', 'property', 'range', 'repr',
+                'reversed', 'round', 'set', 'setattr', 'slice', 'sorted', 'staticmethod',
+                'str', 'sum', 'super', 'tuple', 'type', 'vars', 'zip'
+            ]
+
+            # Common OpenHCS imports
+            openhcs_common = [
+                'FunctionStep', 'PipelineConfig', 'GlobalPipelineConfig',
+                'GroupBy', 'VariableComponents', 'Backend', 'FileManager',
+                'Orchestrator', 'LazyNapariStreamingConfig', 'LazyFijiStreamingConfig',
+                'StepMaterializationConfig', 'np', 'torch', 'Path', 'List', 'Dict',
+                'Optional', 'Union', 'Tuple', 'Any', 'Callable'
+            ]
+
+            # Add all keywords to API
+            for keyword in python_keywords + python_builtins + openhcs_common:
+                self.api.add(keyword)
+
+            # Prepare the API (required for autocomplete to work)
+            self.api.prepare()
+
+            logger.debug("Python API autocomplete configured")
+
+        except Exception as e:
+            logger.warning(f"Failed to setup Python API autocomplete: {e}")
+
     def _apply_theme(self):
         """Apply PyQt6ColorScheme theming to QScintilla editor."""
         cs = self.color_scheme
