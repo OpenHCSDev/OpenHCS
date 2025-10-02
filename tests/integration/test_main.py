@@ -178,12 +178,12 @@ def create_test_pipeline() -> Pipeline:
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
                 step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
                 step_materialization_config=LazyStepMaterializationConfig(),
-                napari_streaming_config=streaming_cfg
+                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5555)
             ),
             Step(
                 func=create_composite,
                 variable_components=[VariableComponents.CHANNEL],
-                napari_streaming_config=streaming_cfg
+                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5556)
             ),
             Step(
                 name="Z-Stack Flattening",
@@ -336,6 +336,8 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
 def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipeline) -> Dict:
     """Execute compilation and execution phases of the pipeline."""
     from openhcs.constants import MULTIPROCESSING_AXIS
+    import logging
+    logger = logging.getLogger(__name__)
 
     wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
     if not wells:
@@ -352,6 +354,19 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
 
     if len(compiled_contexts) != len(wells):
         raise RuntimeError(f"Compilation failed: expected {len(wells)} contexts, got {len(compiled_contexts)}")
+
+    # DEBUG: Log Napari streaming configs
+    logger.info("=" * 80)
+    logger.info("DEBUG: Checking Napari streaming configurations")
+    for well_id, ctx in compiled_contexts.items():
+        logger.info(f"Well {well_id}: {len(ctx.required_visualizers)} visualizers")
+        for i, vis_info in enumerate(ctx.required_visualizers):
+            config = vis_info['config']
+            if hasattr(config, 'napari_port'):
+                logger.info(f"  Visualizer {i}: Napari port {config.napari_port}")
+            else:
+                logger.info(f"  Visualizer {i}: {type(config).__name__}")
+    logger.info("=" * 80)
 
     # Execution phase
     results = orchestrator.execute_compiled_plate(

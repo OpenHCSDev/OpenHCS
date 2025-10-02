@@ -38,29 +38,32 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
     def __init__(self):
         """Initialize the napari streaming backend."""
-        self._publisher = None
+        self._publishers = {}  # Dictionary of publishers keyed by port
         self._context = None
         self._shared_memory_blocks = {}
 
     def _get_publisher(self, napari_port: int):
-        """Lazy initialization of ZeroMQ publisher."""
-        if self._publisher is None:
+        """Lazy initialization of ZeroMQ publisher for the given port."""
+        if napari_port not in self._publishers:
             try:
                 import zmq
-                self._context = zmq.Context()
-                self._publisher = self._context.socket(zmq.PUB)
+                if self._context is None:
+                    self._context = zmq.Context()
 
-                self._publisher.connect(f"tcp://localhost:{napari_port}")
+                publisher = self._context.socket(zmq.PUB)
+                publisher.connect(f"tcp://localhost:{napari_port}")
                 logger.info(f"Napari streaming publisher connected to viewer on port {napari_port}")
 
                 # Small delay to ensure socket is ready
                 time.sleep(0.1)
 
+                self._publishers[napari_port] = publisher
+
             except ImportError:
                 logger.error("ZeroMQ not available - napari streaming disabled")
                 raise RuntimeError("ZeroMQ required for napari streaming")
 
-        return self._publisher
+        return self._publishers[napari_port]
 
 
 
@@ -155,10 +158,15 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
     def cleanup_connections(self) -> None:
         """Clean up ZeroMQ connections without affecting shared memory or napari window."""
-        # Close publisher and context
-        if self._publisher is not None:
-            self._publisher.close()
-            self._publisher = None
+        # Close all publishers
+        for port, publisher in self._publishers.items():
+            try:
+                publisher.close()
+                logger.debug(f"Closed publisher for port {port}")
+            except Exception as e:
+                logger.warning(f"Failed to close publisher for port {port}: {e}")
+
+        self._publishers.clear()
 
         if self._context is not None:
             self._context.term()
