@@ -155,18 +155,26 @@ def generate_complete_function_pattern_code(func_obj, indent=0, clean_mode=False
     for module, names in enum_imports.items():
         additional_enum_imports[module].update(names)
 
-    # Generate name mappings first (before repr generation)
-    import_lines, name_mappings = format_imports_as_strings(additional_function_imports, additional_enum_imports)
-
-    # Generate pattern representation, collecting additional imports as defaults are expanded
+    # First pass: Generate pattern representation to collect all imports (including from expanded defaults)
+    # Use temporary name mappings for this pass
+    temp_import_lines, temp_name_mappings = format_imports_as_strings(additional_function_imports, additional_enum_imports)
     pattern_repr = generate_readable_function_repr(
-        func_obj, indent, clean_mode, name_mappings,
+        func_obj, indent, clean_mode, temp_name_mappings,
         required_function_imports=additional_function_imports,
         required_enum_imports=additional_enum_imports
     )
 
-    # Regenerate import lines with all collected imports (including those from expanded defaults)
-    import_lines, name_mappings = format_imports_as_strings(additional_function_imports, additional_enum_imports)
+    # Second pass: Now that we have ALL imports (including from expanded defaults),
+    # regenerate name mappings to handle any new collisions, then regenerate pattern repr
+    import_lines, final_name_mappings = format_imports_as_strings(additional_function_imports, additional_enum_imports)
+
+    # If name mappings changed (new collisions detected), regenerate pattern repr with correct aliases
+    if final_name_mappings != temp_name_mappings:
+        pattern_repr = generate_readable_function_repr(
+            func_obj, indent, clean_mode, final_name_mappings,
+            required_function_imports=additional_function_imports,
+            required_enum_imports=additional_enum_imports
+        )
 
     # Build complete code
     code_lines = ["# Edit this function pattern and save to apply changes", ""]
@@ -614,10 +622,10 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     # Virtual modules are now automatically created during OpenHCS import
     # No need to generate runtime virtual module creation code
 
-    # Format and add all collected imports (initial pass)
-    import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
+    # First pass: Generate step code to collect all imports (including from expanded defaults)
+    # Use temporary name mappings for this pass
+    temp_import_lines, temp_name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
 
-    # Generate pipeline steps code, collecting additional imports from expanded defaults
     step_code_lines = []
     step_code_lines.append("# Pipeline steps")
     step_code_lines.append("pipeline_steps = []")
@@ -629,7 +637,7 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
 
         # Generate all FunctionStep parameters automatically using introspection
         # Pass import containers to collect additional imports from expanded defaults
-        step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings,
+        step_args = _generate_step_parameters(step, default_step, clean_mode, temp_name_mappings,
                                              all_function_imports, all_enum_imports)
 
         args_str = ",\n    ".join(step_args)
@@ -637,8 +645,27 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
         step_code_lines.append(f"pipeline_steps.append(step_{i+1})")
         step_code_lines.append("")
 
-    # Regenerate import lines with all collected imports (including those from expanded defaults)
-    import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
+    # Second pass: Now that we have ALL imports (including from expanded defaults),
+    # regenerate name mappings to handle any new collisions, then regenerate step code if needed
+    import_lines, final_name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
+
+    # If name mappings changed (new collisions detected), regenerate step code with correct aliases
+    if final_name_mappings != temp_name_mappings:
+        step_code_lines = []
+        step_code_lines.append("# Pipeline steps")
+        step_code_lines.append("pipeline_steps = []")
+        step_code_lines.append("")
+
+        for i, step in enumerate(pipeline_steps):
+            step_code_lines.append(f"# Step {i+1}: {step.name}")
+            step_args = _generate_step_parameters(step, default_step, clean_mode, final_name_mappings,
+                                                 all_function_imports, all_enum_imports)
+            args_str = ",\n    ".join(step_args)
+            step_code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
+            step_code_lines.append(f"pipeline_steps.append(step_{i+1})")
+            step_code_lines.append("")
+
+    # Add imports to output
     if import_lines:
         code_lines.append("# Automatically collected imports")
         code_lines.extend(import_lines)
