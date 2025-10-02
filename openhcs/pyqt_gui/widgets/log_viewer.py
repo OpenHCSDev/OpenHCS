@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QToolBar, QLineEdit, QCheckBox, QPushButton, QDialog
 )
 from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument
-from PyQt6.QtCore import QObject, QTimer, QFileSystemWatcher, pyqtSignal, Qt, QRegularExpression
+from PyQt6.QtCore import QObject, QTimer, QFileSystemWatcher, pyqtSignal, Qt, QRegularExpression, QThread
 from PyQt6.QtGui import QTextCharFormat, QColor, QAction, QFont, QTextCursor
 
 from openhcs.io.filemanager import FileManager
@@ -622,6 +622,27 @@ class LogHighlighter(QSyntaxHighlighter):
             logger.debug(f"Error in Pygments highlighting: {e}")
 
 
+class LogFileLoader(QThread):
+    """Background thread for loading large log files without blocking UI."""
+
+    # Signals
+    content_loaded = pyqtSignal(str)  # Emits file content when loaded
+    load_failed = pyqtSignal(str)     # Emits error message on failure
+
+    def __init__(self, log_path: Path):
+        super().__init__()
+        self.log_path = log_path
+
+    def run(self):
+        """Load file content in background thread."""
+        try:
+            with open(self.log_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            self.content_loaded.emit(content)
+        except Exception as e:
+            self.load_failed.emit(str(e))
+
+
 class LogViewerWindow(QMainWindow):
     """Main log viewer window with dropdown, search, and real-time tailing."""
     
@@ -649,6 +670,7 @@ class LogViewerWindow(QMainWindow):
         self.file_detector: LogFileDetector = None
         self.tail_timer: QTimer = None
         self.highlighter: LogHighlighter = None
+        self.file_loader: Optional[LogFileLoader] = None  # Async file loader
 
         self.setup_ui()
         self.setup_connections()
@@ -883,39 +905,72 @@ class LogViewerWindow(QMainWindow):
             if self.tail_timer and self.tail_timer.isActive():
                 self.tail_timer.stop()
 
+            # Stop any existing file loader
+            if self.file_loader and self.file_loader.isRunning():
+                self.file_loader.wait()
+
             # Validate file exists
             if not log_path.exists():
                 self.log_display.setText(f"Log file not found: {log_path}")
                 return
 
-            # Load log file content
-            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                content = f.read()
-
-            # PERFORMANCE FIX: Disable highlighter for large files to prevent blocking
-            # Highlighting will be applied incrementally as new content arrives
-            file_size = len(content)
-            if file_size > 100000:  # 100KB threshold
-                logger.debug(f"Large log file ({file_size} bytes), temporarily disabling highlighter")
-                self.highlighter.setDocument(None)
-                self.log_display.setText(content)
-                # Re-enable highlighter after content is loaded
-                self.highlighter.setDocument(self.log_display.document())
-            else:
-                self.log_display.setText(content)
-
+            # Store path for later use
             self.current_log_path = log_path
+
+            # Check file size to decide loading strategy
+            file_size = log_path.stat().st_size
+
+            if file_size > 100000:  # 100KB threshold - use async loading
+                logger.debug(f"Large log file ({file_size} bytes), loading asynchronously")
+                self.log_display.setText(f"Loading large log file ({file_size // 1024} KB)...")
+
+                # Temporarily disable highlighter to prevent blocking during setText
+                self.highlighter.setDocument(None)
+
+                # Create and start async loader
+                self.file_loader = LogFileLoader(log_path)
+                self.file_loader.content_loaded.connect(self._on_file_loaded)
+                self.file_loader.load_failed.connect(self._on_file_load_failed)
+                self.file_loader.start()
+            else:
+                # Small file - load synchronously
+                with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                self._on_file_loaded(content)
+
+        except Exception as e:
+            logger.error(f"Error switching to log {log_path}: {e}")
+            raise
+
+    def _on_file_loaded(self, content: str) -> None:
+        """Handle file content loaded (either sync or async)."""
+        try:
+            # Set content
+            self.log_display.setText(content)
+
+            # Re-enable highlighter
+            self.highlighter.setDocument(self.log_display.document())
+
+            # Update file position
             self.current_file_position = len(content.encode('utf-8'))
 
             # Start tailing if not paused
-            if not self.tailing_paused:
-                self.start_log_tailing(log_path)
+            if not self.tailing_paused and self.current_log_path:
+                self.start_log_tailing(self.current_log_path)
 
             # Scroll to bottom if auto-scroll enabled
             if self.auto_scroll_enabled:
                 self.scroll_to_bottom()
 
-            logger.info(f"Switched to log file: {log_path}")
+            logger.info(f"Loaded log file: {self.current_log_path}")
+
+        except Exception as e:
+            logger.error(f"Error displaying loaded content: {e}")
+
+    def _on_file_load_failed(self, error_msg: str) -> None:
+        """Handle file load failure."""
+        self.log_display.setText(f"Failed to load log file: {error_msg}")
+        logger.error(f"Failed to load log file: {error_msg}")
 
         except Exception as e:
             logger.error(f"Error switching to log {log_path}: {e}")
