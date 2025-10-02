@@ -53,7 +53,29 @@ Integrated napari viewers provide immediate visualization of processing results.
 
 ## Installation
 
-OpenHCS is currently available for development installation. The platform requires Python 3.12+ and supports optional GPU acceleration with CUDA 12.x.
+OpenHCS is available on PyPI and requires Python 3.12+ with optional GPU acceleration support for CUDA 12.x.
+
+### PyPI Installation (Recommended)
+
+```bash
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate
+
+# Install required fork dependencies (not available on PyPI)
+pip install git+https://github.com/trissim/BaSiCPy.git
+
+# Install OpenHCS from PyPI
+pip install openhcs[gui]  # Desktop GUI interface
+
+# Optional: Install with GPU acceleration
+pip install openhcs[gui,gpu]
+
+# Optional: Install torbi for GPU-accelerated Viterbi decoding
+pip install git+https://github.com/trissim/torbi.git
+```
+
+**Note**: BaSiCPy and torbi are custom forks with OpenHCS-specific patches and must be installed separately before installing OpenHCS.
 
 ### Development Installation
 
@@ -66,16 +88,14 @@ cd openhcs
 python -m venv .venv
 source .venv/bin/activate
 
-# Install BaSiCPy fork (required dependency)
+# Install required fork dependencies
 pip install git+https://github.com/trissim/BaSiCPy.git
 
 # Install with all features for development
 pip install -e ".[all]"
 
-# Alternative: Install specific feature sets
-pip install -e ".[gui]"     # Desktop GUI only
-pip install -e ".[gpu]"     # GPU acceleration only
-pip install -e ".[gui,gpu]" # GUI + GPU acceleration
+# Optional: Install torbi for GPU-accelerated Viterbi decoding
+pip install git+https://github.com/trissim/torbi.git
 ```
 
 ### GPU Requirements
@@ -93,14 +113,17 @@ pip install -e ".[gui]"
 After installation, launch the desktop interface:
 
 ```bash
-# Desktop GUI application
+# Desktop GUI application (PyPI installation)
+openhcs
+
+# Or explicitly
+openhcs-gui
+
+# Development installation
 python -m openhcs.pyqt_gui
 
-# Alternative: Direct module execution
-python -m openhcs.pyqt_gui.launch
-
 # With debug logging
-python -m openhcs.pyqt_gui.launch --log-level DEBUG
+openhcs --log-level DEBUG
 ```
 
 ## Basic Usage
