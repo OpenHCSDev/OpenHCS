@@ -12,6 +12,7 @@ from PyQt6.QtGui import QFont
 # REUSE the actual working Textual TUI help components
 from openhcs.ui.shared.signature_analyzer import DocstringExtractor, SignatureAnalyzer
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -22,15 +23,19 @@ class BaseHelpWindow(QDialog):
     def __init__(self, title: str = "Help", color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
         super().__init__(parent)
 
-        # Initialize color scheme
+        # Initialize color scheme and style generator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.style_generator = StyleSheetGenerator(self.color_scheme)
 
         self.setWindowTitle(title)
         self.setModal(False)  # Allow interaction with main window
         self.resize(600, 400)
-        
+
         # Setup UI
         self.setup_ui()
+
+        # Apply centralized styling
+        self.setStyleSheet(self.style_generator.generate_dialog_style())
         
     def setup_ui(self):
         """Setup the base help window UI."""
@@ -75,83 +80,87 @@ class DocstringHelpWindow(BaseHelpWindow):
         self.populate_content()
         
     def populate_content(self):
-        """Populate the help content using Textual TUI docstring info."""
+        """Populate the help content with minimal styling."""
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
         # Function/class summary
         if self.docstring_info.summary:
             summary_label = QLabel(self.docstring_info.summary)
             summary_label.setWordWrap(True)
-            summary_font = QFont()
-            summary_font.setBold(True)
-            summary_font.setPointSize(12)
-            summary_label.setFont(summary_font)
+            summary_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            summary_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};")
             layout.addWidget(summary_label)
-            
+
         # Full description
         if self.docstring_info.description:
-            desc_text = QTextEdit()
-            desc_text.setPlainText(self.docstring_info.description)
-            desc_text.setReadOnly(True)
-            desc_text.setMaximumHeight(200)
-            layout.addWidget(desc_text)
+            desc_label = QLabel(self.docstring_info.description)
+            desc_label.setWordWrap(True)
+            desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};")
+            layout.addWidget(desc_label)
             
         # Parameters section
         if self.docstring_info.parameters:
             params_label = QLabel("Parameters:")
-            params_font = QFont()
-            params_font.setBold(True)
-            params_label.setFont(params_font)
+            params_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            params_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; margin-top: 10px;")
             layout.addWidget(params_label)
-            
+
             for param_name, param_desc in self.docstring_info.parameters.items():
-                param_widget = QWidget()
-                param_layout = QVBoxLayout(param_widget)
-                param_layout.setContentsMargins(20, 5, 5, 5)
-                
                 # Parameter name
                 name_label = QLabel(f"• {param_name}")
-                name_font = QFont()
-                name_font.setBold(True)
-                name_label.setFont(name_font)
-                param_layout.addWidget(name_label)
-                
+                name_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+                name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; margin-left: 10px;")
+                layout.addWidget(name_label)
+
                 # Parameter description
                 if param_desc:
                     desc_label = QLabel(param_desc)
                     desc_label.setWordWrap(True)
-                    desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)}; margin-left: 10px;")
-                    param_layout.addWidget(desc_label)
-                    
-                layout.addWidget(param_widget)
+                    desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+                    desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; margin-left: 30px;")
+                    layout.addWidget(desc_label)
                 
         # Returns section
         if self.docstring_info.returns:
             returns_label = QLabel("Returns:")
-            returns_font = QFont()
-            returns_font.setBold(True)
-            returns_label.setFont(returns_font)
+            returns_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            returns_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; margin-top: 10px;")
             layout.addWidget(returns_label)
-            
+
             returns_desc = QLabel(self.docstring_info.returns)
             returns_desc.setWordWrap(True)
-            returns_desc.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)}; margin-left: 20px;")
+            returns_desc.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            returns_desc.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; margin-left: 10px;")
             layout.addWidget(returns_desc)
             
         # Examples section
         if self.docstring_info.examples:
             examples_label = QLabel("Examples:")
-            examples_font = QFont()
-            examples_font.setBold(True)
-            examples_label.setFont(examples_font)
+            examples_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            examples_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; margin-top: 10px;")
             layout.addWidget(examples_label)
-            
+
             examples_text = QTextEdit()
             examples_text.setPlainText(self.docstring_info.examples)
             examples_text.setReadOnly(True)
             examples_text.setMaximumHeight(150)
-            examples_text.setStyleSheet(f"background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)}; font-family: monospace;")
+            examples_text.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            examples_text.setStyleSheet(f"""
+                QTextEdit {{
+                    background-color: transparent;
+                    color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
+                    border: none;
+                    font-family: monospace;
+                    font-size: 9pt;
+                }}
+                QTextEdit:hover {{
+                    background-color: transparent;
+                }}
+            """)
             layout.addWidget(examples_text)
             
         layout.addStretch()
@@ -172,34 +181,36 @@ class ParameterHelpWindow(BaseHelpWindow):
         self.populate_content()
         
     def populate_content(self):
-        """Populate parameter help content."""
+        """Populate parameter help content with minimal styling."""
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
         # Parameter name and type
-        header_text = self.param_name
+        header_text = f"• {self.param_name}"
         if self.param_type:
             type_name = getattr(self.param_type, '__name__', str(self.param_type))
             header_text += f" ({type_name})"
-            
+
         header_label = QLabel(header_text)
-        header_font = QFont()
-        header_font.setBold(True)
-        header_font.setPointSize(14)
-        header_label.setFont(header_font)
+        header_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};")
         layout.addWidget(header_label)
-        
+
         # Parameter description
         if self.param_description:
-            desc_text = QTextEdit()
-            desc_text.setPlainText(self.param_description)
-            desc_text.setReadOnly(True)
-            layout.addWidget(desc_text)
+            desc_label = QLabel(self.param_description)
+            desc_label.setWordWrap(True)
+            desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; margin-left: 20px;")
+            layout.addWidget(desc_label)
         else:
             no_desc_label = QLabel("No description available")
-            no_desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)}; font-style: italic;")
+            no_desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+            no_desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)}; font-style: italic; margin-left: 20px;")
             layout.addWidget(no_desc_label)
-            
+
         layout.addStretch()
         self.content_area.setWidget(content_widget)
 

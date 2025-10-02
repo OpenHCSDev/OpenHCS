@@ -164,15 +164,14 @@ def _execute_single_axis_static(
 
         logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
+        # Verify step has process method (should always be true for AbstractStep subclasses)
         if not hasattr(step, 'process'):
             error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} missing process method for axis {axis_id}"
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
-        # CRITICAL: Wrap step processing in config_context(step) for lazy config resolution
-        from openhcs.config_framework.context_manager import config_context
-        with config_context(step):
-            step.process(frozen_context, step_index)
+        # Call process method on step instance
+        step.process(frozen_context, step_index)
         logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
 
         # Handle visualization if requested
@@ -609,15 +608,14 @@ class PipelineOrchestrator(ContextProvider):
 
             logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
+            # Verify step has process method (should always be true for AbstractStep subclasses)
             if not hasattr(step, 'process'):
                 error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} missing process method for axis {axis_id}"
                 logger.error(error_msg)
                 raise RuntimeError(error_msg)
 
-            # CRITICAL: Wrap step processing in config_context(step) for lazy config resolution
-            from openhcs.config_framework.context_manager import config_context
-            with config_context(step):
-                step.process(frozen_context, step_index)
+            # Call process method on step instance
+            step.process(frozen_context, step_index)
             logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
 
     #        except Exception as step_error:

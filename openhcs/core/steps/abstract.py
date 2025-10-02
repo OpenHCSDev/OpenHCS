@@ -172,21 +172,23 @@ class AbstractStep(abc.ABC, ContextProvider):
         logger_instance = logging.getLogger(__name__)
         #logger_instance.debug(f"Created step '{self.name}' (type: {self.__class__.__name__}) with ID {self.step_id}")
 
+    @staticmethod
     @abc.abstractmethod
-    def process(self, context: 'ProcessingContext', step_index: int) -> None:
+    def process(context: 'ProcessingContext', step_index: int) -> None:
         """
         Process the step with the given context and step index.
 
-        This method must be implemented by all step subclasses.
-        During execution, the step instance is stateless. All necessary
-        configuration and paths are retrieved from context.step_plans[self.step_id].
+        This method must be implemented by all step subclasses as a static method.
+        During execution, steps are stateless shells with all attributes stripped.
+        All necessary configuration and paths are retrieved from context.step_plans[step_index].
         The context itself is frozen and must not be modified.
-        Outputs are written to VFS via context.filemanager based on the steps plan.
+        Outputs are written to VFS via context.filemanager based on the step plan.
         This method returns None.
 
         Args:
             context: The frozen ProcessingContext containing all required fields,
                      including step_plans and filemanager.
+            step_index: Index of the step in the pipeline (used to access step_plans).
         """
         # Clause 246 — Statelessness Mandate
         # Clause 21 — Context Immunity (Context is read-only for steps)
