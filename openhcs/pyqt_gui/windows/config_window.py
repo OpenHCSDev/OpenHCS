@@ -674,12 +674,19 @@ class ConfigWindow(QDialog):
             if not isinstance(new_config, self.config_class):
                 raise ValueError(f"Expected {self.config_class.__name__}, got {type(new_config).__name__}")
 
-            # Update the current config and refresh the form
-            # This preserves lazy behavior by recreating the form with the new config
+            # Update the current config
             self.current_config = new_config
+
+            # Rebuild the form with the new config
+            # This properly preserves None vs concrete values
             self.refresh_config(new_config)
 
-            logger.info(f"Updated config from edited code")
+            # CRITICAL: Refresh placeholders using current form values after rebuild
+            # This ensures placeholders reflect the new values for sibling inheritance
+            self.form_manager._refresh_all_placeholders()
+            self.form_manager._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+
+            logger.info(f"Updated config from edited code and refreshed placeholders")
 
         except Exception as e:
             logger.error(f"Failed to apply edited config code: {e}")
