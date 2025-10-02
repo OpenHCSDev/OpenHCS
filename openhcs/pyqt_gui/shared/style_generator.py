@@ -243,16 +243,13 @@ class StyleSheetGenerator:
             #info_title {{
                 color: {cs.to_hex(cs.text_accent)};
                 font-weight: bold;
-                font-size: 11px;
                 padding-bottom: 5px;
             }}
             #info_label_key {{
                 color: {cs.to_hex(cs.text_secondary)};
-                font-size: 9px;
             }}
             #info_label_value {{
                 color: {cs.to_hex(cs.text_primary)};
-                font-size: 9px;
                 font-weight: bold;
             }}
         """

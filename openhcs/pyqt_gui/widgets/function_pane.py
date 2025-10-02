@@ -105,20 +105,16 @@ class FunctionPaneWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
-        
-        # Function header
-        header_frame = self.create_function_header()
+
+        # Combined header with title and buttons on same row
+        header_frame = self.create_combined_header()
         layout.addWidget(header_frame)
-        
-        # Control buttons
-        button_frame = self.create_button_panel()
-        layout.addWidget(button_frame)
-        
+
         # Parameter form (if function exists and parameters shown)
         if self.func and self.show_parameters and self.form_manager:
             parameter_frame = self.create_parameter_form()
             layout.addWidget(parameter_frame)
-        
+
         # Set styling
         self.setStyleSheet(f"""
             FunctionPaneWidget {{
@@ -129,12 +125,12 @@ class FunctionPaneWidget(QWidget):
             }}
         """)
     
-    def create_function_header(self) -> QWidget:
+    def create_combined_header(self) -> QWidget:
         """
-        Create the function header with name and info.
-        
+        Create combined header with title and buttons on the same row.
+
         Returns:
-            Widget containing function header
+            Widget containing title and control buttons
         """
         frame = QFrame()
         frame.setFrameStyle(QFrame.Shape.Box)
@@ -146,10 +142,11 @@ class FunctionPaneWidget(QWidget):
                 padding: 5px;
             }}
         """)
-        
+
         layout = QHBoxLayout(frame)
-        
-        # Function name with help functionality (reuses Textual TUI help logic)
+        layout.setSpacing(10)
+
+        # Function name with help functionality (left side)
         if self.func:
             func_name = self.func.__name__
             func_module = self.func.__module__
@@ -177,31 +174,13 @@ class FunctionPaneWidget(QWidget):
             layout.addWidget(name_label)
 
         layout.addStretch()
-        
-        return frame
-    
-    def create_button_panel(self) -> QWidget:
-        """
-        Create the control button panel.
-        
-        Returns:
-            Widget containing control buttons
-        """
-        frame = QFrame()
-        frame.setFrameStyle(QFrame.Shape.Box)
-        frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
-                padding: 3px;
-            }}
-        """)
-        
-        layout = QHBoxLayout(frame)
-        layout.addStretch()  # Center the buttons
-        
-        # Button configurations (extracted from Textual version)
+
+        # Control buttons (right side) - using parameter form manager style
+        from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+        style_gen = StyleSheetGenerator(self.color_scheme)
+        button_styles = style_gen.generate_config_button_styles()
+
+        # Button configurations
         button_configs = [
             ("↑", "move_up", "Move function up"),
             ("↓", "move_down", "Move function down"),
@@ -209,36 +188,20 @@ class FunctionPaneWidget(QWidget):
             ("Delete", "remove_func", "Delete this function"),
             ("Reset", "reset_all", "Reset all parameters"),
         ]
-        
+
         for name, action, tooltip in button_configs:
             button = QPushButton(name)
             button.setToolTip(tooltip)
             button.setMaximumWidth(60)
-            button.setMaximumHeight(25)
-            button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {self.color_scheme.to_hex(self.color_scheme.input_bg)};
-                    color: white;
-                    border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_light)};
-                    border-radius: 2px;
-                    padding: 2px;
-                    font-size: 10px;
-                }}
-                QPushButton:hover {{
-                    background-color: {self.color_scheme.to_hex(self.color_scheme.button_hover_bg)};
-                }}
-                QPushButton:pressed {{
-                    background-color: {self.color_scheme.to_hex(self.color_scheme.button_pressed_bg)};
-                }}
-            """)
-            
+
+            # Use reset button style for all buttons (consistent with parameter form manager)
+            button.setStyleSheet(button_styles["reset"])
+
             # Connect button to action
             button.clicked.connect(lambda checked, a=action: self.handle_button_action(a))
-            
+
             layout.addWidget(button)
-        
-        layout.addStretch()  # Center the buttons
-        
+
         return frame
     
     def create_parameter_form(self) -> QWidget:

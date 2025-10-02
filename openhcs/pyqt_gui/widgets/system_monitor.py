@@ -12,10 +12,10 @@ from datetime import datetime
 from collections import deque
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout, QSizePolicy, QPushButton
 )
-from PyQt6.QtCore import QTimer, pyqtSignal, QThread, Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QTimer, pyqtSignal, QThread, Qt, QSize
+from PyQt6.QtGui import QFont, QResizeEvent
 
 # Import PyQtGraph for high-performance plotting
 try:
@@ -79,13 +79,17 @@ class SystemMonitorWidget(QWidget):
             history_length=history_length
         )
         # No timer needed - the persistent thread handles timing
-        
-        # Setup UI
-        self.setup_ui()
-        self.setup_connections()
+
+        # Track graph layout mode (True = side-by-side, False = stacked)
+        # MUST be set before setup_ui() since create_pyqtgraph_section() uses it
+        self._graphs_side_by_side = True
 
         # Delay monitoring start until widget is shown (fixes WSL2 hanging)
         self._monitoring_started = False
+
+        # Setup UI
+        self.setup_ui()
+        self.setup_connections()
 
         logger.debug("System monitor widget initialized")
 
@@ -99,6 +103,15 @@ class SystemMonitorWidget(QWidget):
             self._monitoring_started = True
             logger.debug("System monitoring started on widget show")
 
+    def resizeEvent(self, event: QResizeEvent):
+        """Handle widget resize - adjust font sizes dynamically."""
+        super().resizeEvent(event)
+        # Defer font size update until after layout is complete
+        if hasattr(self, 'info_widget'):
+            # Use a timer to update after the layout has settled
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, self._update_font_sizes_from_panel)
+
     def closeEvent(self, event):
         """Handle widget close event - cleanup resources."""
         self.cleanup()
@@ -110,25 +123,63 @@ class SystemMonitorWidget(QWidget):
             self.cleanup()
         except:
             pass  # Ignore errors during destruction
+
+    def _update_font_sizes_from_panel(self):
+        """Update font sizes based on the actual info panel width."""
+        if not hasattr(self, 'info_widget'):
+            return
+
+        # Use the actual info panel width, not the whole widget width
+        panel_width = self.info_widget.width()
+
+        # Conservative font sizes to prevent clipping
+        # Title font: 9-12pt based on panel width
+        title_size = max(9, min(12, panel_width // 50))
+
+        # Label font: 7-10pt based on panel width
+        # Conservative sizing to ensure no clipping
+        label_size = max(7, min(10, panel_width // 60))
+
+        # Update title font
+        if hasattr(self, 'info_title'):
+            title_font = QFont("Arial", title_size)
+            title_font.setBold(True)
+            self.info_title.setFont(title_font)
+
+        # Update all label fonts
+        if hasattr(self, 'cpu_cores_label'):
+            for label_pair in [
+                self.cpu_cores_label, self.cpu_freq_label,
+                self.ram_total_label, self.ram_used_label,
+                self.gpu_name_label, self.gpu_temp_label, self.vram_label
+            ]:
+                # Update key label
+                key_font = QFont("Arial", label_size)
+                label_pair[0].setFont(key_font)
+
+                # Update value label (bold)
+                value_font = QFont("Arial", label_size)
+                value_font.setBold(True)
+                label_pair[1].setFont(value_font)
     
     def setup_ui(self):
         """Setup the user interface."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
-        
+
         # Header section
         header_layout = self.create_header_section()
         layout.addLayout(header_layout)
-        
+
         # Monitoring section
         if PYQTGRAPH_AVAILABLE:
-            monitoring_widget = self.create_pyqtgraph_section()
+            self.monitoring_widget = self.create_pyqtgraph_section()
         else:
-            monitoring_widget = self.create_fallback_section()
-        
-        layout.addWidget(monitoring_widget)
-        
+            self.monitoring_widget = self.create_fallback_section()
+
+        layout.addWidget(self.monitoring_widget, 1)  # Stretch factor = 1 to expand
+
         # Apply centralized styling
         self.setStyleSheet(self.style_generator.generate_system_monitor_style())
     
@@ -157,21 +208,18 @@ class SystemMonitorWidget(QWidget):
         return header_layout
 
     def create_info_panel(self) -> QWidget:
-        """Create a styled system information panel."""
+        """Create a styled system information panel with two-column layout."""
         panel = QFrame()
         panel.setObjectName("info_panel")
         panel.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
 
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(12)
 
-        # Title with timestamp
+        # Title with timestamp (font size set dynamically in resizeEvent)
         self.info_title = QLabel("System Information")
         self.info_title.setObjectName("info_title")
-        title_font = QFont("Arial", 11)
-        title_font.setBold(True)
-        self.info_title.setFont(title_font)
         layout.addWidget(self.info_title)
 
         # Separator line
@@ -180,55 +228,58 @@ class SystemMonitorWidget(QWidget):
         separator.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(separator)
 
-        # Info grid
+        # Two-column grid layout with compact labels
+        # Grid has 5 columns: [Label1, Value1, Spacer, Label2, Value2]
         info_grid = QGridLayout()
-        info_grid.setSpacing(8)
-        info_grid.setColumnStretch(1, 1)  # Value column stretches
+        info_grid.setHorizontalSpacing(12)
+        info_grid.setVerticalSpacing(8)
+        info_grid.setColumnStretch(1, 2)  # Left value column stretches more
+        info_grid.setColumnMinimumWidth(2, 25)  # Spacer between columns
+        info_grid.setColumnStretch(4, 2)  # Right value column stretches more
 
-        # CPU info
-        self.cpu_cores_label = self.create_info_row("CPU Cores:", "—")
-        self.cpu_freq_label = self.create_info_row("CPU Frequency:", "—")
+        # Left column - CPU and RAM info (shorter labels)
+        self.cpu_cores_label = self.create_info_row("Cores:", "—")
+        self.cpu_freq_label = self.create_info_row("Freq:", "—")
+        self.ram_total_label = self.create_info_row("RAM:", "—")
+        self.ram_used_label = self.create_info_row("Used:", "—")
+
         info_grid.addWidget(self.cpu_cores_label[0], 0, 0)
         info_grid.addWidget(self.cpu_cores_label[1], 0, 1)
         info_grid.addWidget(self.cpu_freq_label[0], 1, 0)
         info_grid.addWidget(self.cpu_freq_label[1], 1, 1)
-
-        # RAM info
-        self.ram_total_label = self.create_info_row("Total RAM:", "—")
-        self.ram_used_label = self.create_info_row("Used RAM:", "—")
         info_grid.addWidget(self.ram_total_label[0], 2, 0)
         info_grid.addWidget(self.ram_total_label[1], 2, 1)
         info_grid.addWidget(self.ram_used_label[0], 3, 0)
         info_grid.addWidget(self.ram_used_label[1], 3, 1)
 
-        # GPU info (will be hidden if no GPU)
+        # Right column - GPU info (will be hidden if no GPU)
         self.gpu_name_label = self.create_info_row("GPU:", "—")
-        self.gpu_temp_label = self.create_info_row("Temperature:", "—")
+        self.gpu_temp_label = self.create_info_row("Temp:", "—")
         self.vram_label = self.create_info_row("VRAM:", "—")
-        info_grid.addWidget(self.gpu_name_label[0], 4, 0)
-        info_grid.addWidget(self.gpu_name_label[1], 4, 1)
-        info_grid.addWidget(self.gpu_temp_label[0], 5, 0)
-        info_grid.addWidget(self.gpu_temp_label[1], 5, 1)
-        info_grid.addWidget(self.vram_label[0], 6, 0)
-        info_grid.addWidget(self.vram_label[1], 6, 1)
+
+        info_grid.addWidget(self.gpu_name_label[0], 0, 3)
+        info_grid.addWidget(self.gpu_name_label[1], 0, 4)
+        info_grid.addWidget(self.gpu_temp_label[0], 1, 3)
+        info_grid.addWidget(self.gpu_temp_label[1], 1, 4)
+        info_grid.addWidget(self.vram_label[0], 2, 3)
+        info_grid.addWidget(self.vram_label[1], 2, 4)
 
         layout.addLayout(info_grid)
         layout.addStretch()
 
+        # Schedule initial font size update after panel is shown
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, self._update_font_sizes_from_panel)
+
         return panel
 
     def create_info_row(self, label_text: str, value_text: str) -> tuple:
-        """Create a label-value pair for the info panel."""
+        """Create a label-value pair for the info panel (font size set dynamically in resizeEvent)."""
         label = QLabel(label_text)
         label.setObjectName("info_label_key")
-        label_font = QFont("Arial", 9)
-        label.setFont(label_font)
 
         value = QLabel(value_text)
         value.setObjectName("info_label_value")
-        value_font = QFont("Arial", 9)
-        value_font.setBold(True)
-        value.setFont(value_font)
 
         return (label, value)
     
@@ -240,14 +291,21 @@ class SystemMonitorWidget(QWidget):
             Widget containing consolidated PyQtGraph plots
         """
         widget = QWidget()
-        layout = QGridLayout(widget)
+        main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(5)
+
+        # Container for graphs that we can re-layout
+        self.graph_container = QWidget()
+        self.graph_layout = QGridLayout(self.graph_container)
+        self.graph_layout.setSpacing(10)
 
         # Configure PyQtGraph based on config settings
         pg.setConfigOption('background', self.color_scheme.to_hex(self.color_scheme.window_bg))
         pg.setConfigOption('foreground', 'white')
         pg.setConfigOption('antialias', self.monitor_config.antialiasing)
 
-        # Create consolidated PyQtGraph plots in 1x2 grid
+        # Create consolidated PyQtGraph plots
         self.cpu_gpu_plot = pg.PlotWidget(title="CPU/GPU Usage")
         self.ram_vram_plot = pg.PlotWidget(title="RAM/VRAM Usage")
 
@@ -272,7 +330,7 @@ class SystemMonitorWidget(QWidget):
         # Style CPU/GPU plot
         self.cpu_gpu_plot.setBackground(self.color_scheme.to_hex(self.color_scheme.panel_bg))
         self.cpu_gpu_plot.setYRange(0, 100)
-        self.cpu_gpu_plot.setXRange(0, self.monitor_config.history_duration_seconds)  # Show time range in seconds
+        self.cpu_gpu_plot.setXRange(0, self.monitor_config.history_duration_seconds)
         self.cpu_gpu_plot.setLabel('left', 'Usage (%)')
         self.cpu_gpu_plot.setLabel('bottom', 'Time (seconds)')
         self.cpu_gpu_plot.showGrid(x=self.monitor_config.show_grid, y=self.monitor_config.show_grid, alpha=0.3)
@@ -283,7 +341,7 @@ class SystemMonitorWidget(QWidget):
         # Style RAM/VRAM plot
         self.ram_vram_plot.setBackground(self.color_scheme.to_hex(self.color_scheme.panel_bg))
         self.ram_vram_plot.setYRange(0, 100)
-        self.ram_vram_plot.setXRange(0, self.monitor_config.history_duration_seconds)  # Show time range in seconds
+        self.ram_vram_plot.setXRange(0, self.monitor_config.history_duration_seconds)
         self.ram_vram_plot.setLabel('left', 'Usage (%)')
         self.ram_vram_plot.setLabel('bottom', 'Time (seconds)')
         self.ram_vram_plot.showGrid(x=self.monitor_config.show_grid, y=self.monitor_config.show_grid, alpha=0.3)
@@ -291,12 +349,62 @@ class SystemMonitorWidget(QWidget):
         self.ram_vram_plot.getAxis('bottom').setTextPen('white')
         self.ram_vram_plot.addLegend()
 
-        # Add plots to grid layout (1x2 instead of 2x2)
-        layout.addWidget(self.cpu_gpu_plot, 0, 0)
-        layout.addWidget(self.ram_vram_plot, 0, 1)
+        # Add plots to grid layout (side-by-side by default)
+        self._update_graph_layout()
+
+        main_layout.addWidget(self.graph_container, 1)  # Stretch factor = 1
 
         return widget
     
+    def create_layout_toggle_button(self) -> QPushButton:
+        """
+        Create a toggle button for switching graph layouts.
+        This button is meant to be added to the main window's status bar.
+
+        Returns:
+            QPushButton configured for layout toggling
+        """
+        self.layout_toggle_button = QPushButton("⬍ Stack")
+        self.layout_toggle_button.setMaximumWidth(80)
+        self.layout_toggle_button.setMaximumHeight(24)
+        self.layout_toggle_button.setToolTip("Toggle between side-by-side and stacked layout")
+        self.layout_toggle_button.clicked.connect(self.toggle_graph_layout)
+
+        # Style the button to match parameter form manager style
+        button_styles = self.style_generator.generate_config_button_styles()
+        self.layout_toggle_button.setStyleSheet(button_styles["reset"])
+
+        return self.layout_toggle_button
+
+    def toggle_graph_layout(self):
+        """Toggle between side-by-side and stacked graph layouts."""
+        self._graphs_side_by_side = not self._graphs_side_by_side
+        self._update_graph_layout()
+
+        # Update button text
+        if hasattr(self, 'layout_toggle_button'):
+            if self._graphs_side_by_side:
+                self.layout_toggle_button.setText("⬍ Stack")
+            else:
+                self.layout_toggle_button.setText("⬌ Side")
+
+    def _update_graph_layout(self):
+        """Update the graph layout based on current mode."""
+        # Remove all widgets from layout
+        while self.graph_layout.count():
+            item = self.graph_layout.takeAt(0)
+            if item.widget():
+                item.widget().setParent(None)
+
+        if self._graphs_side_by_side:
+            # Side-by-side: 1 row, 2 columns
+            self.graph_layout.addWidget(self.cpu_gpu_plot, 0, 0)
+            self.graph_layout.addWidget(self.ram_vram_plot, 0, 1)
+        else:
+            # Stacked: 2 rows, 1 column
+            self.graph_layout.addWidget(self.cpu_gpu_plot, 0, 0)
+            self.graph_layout.addWidget(self.ram_vram_plot, 1, 0)
+
     def create_fallback_section(self) -> QWidget:
         """
         Create fallback text-based monitoring section.

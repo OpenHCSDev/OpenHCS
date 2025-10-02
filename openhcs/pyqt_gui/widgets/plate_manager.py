@@ -206,7 +206,7 @@ class PlateManagerWidget(QWidget):
             ("Compile", "compile_plate", "Compile plate pipelines"),
             ("Run", "run_plate", "Run/Stop plate execution"),
             ("Code", "code_plate", "Generate Python code"),
-            ("Save", "save_python_script", "Save Python script"),
+            ("Meta", "view_metadata", "View plate metadata"),
         ]
         
         # Create buttons in rows
@@ -235,7 +235,7 @@ class PlateManagerWidget(QWidget):
 
             layout.addLayout(row_layout)
 
-        # Set maximum height to constrain the button panel
+        # Set maximum height to constrain the button panel (2 rows of buttons)
         panel.setMaximumHeight(80)
 
         return panel
@@ -308,7 +308,7 @@ class PlateManagerWidget(QWidget):
             "init_plate": self.action_init_plate,
             "compile_plate": self.action_compile_plate,
             "code_plate": self.action_code_plate,
-            "save_python_script": self.action_save_python_script,
+            "view_metadata": self.action_view_metadata,
         }
 
         if action in action_map:
@@ -507,7 +507,7 @@ class PlateManagerWidget(QWidget):
         self.status_message.emit(f"Initialized {len(selected_items)} plate(s)")
     
     # Additional action methods would be implemented here following the same pattern...
-    # (compile_plate, run_plate, code_plate, save_python_script, edit_config)
+    # (compile_plate, run_plate, code_plate, view_metadata, edit_config)
     
     def action_edit_config(self):
         """
@@ -1276,10 +1276,41 @@ class PlateManagerWidget(QWidget):
 
         logger.debug(f"Invalidated compilation state for orchestrator: {plate_path}")
 
-    def action_save_python_script(self):
-        """Handle Save Python Script button (placeholder)."""
-        self.service_adapter.show_info_dialog("Script saving not yet implemented in PyQt6 version.")
-    
+    def action_view_metadata(self):
+        """View plate metadata in read-only form."""
+        selected_items = self.get_selected_plates()
+
+        if not selected_items:
+            self.service_adapter.show_error_dialog("No plates selected.")
+            return
+
+        if len(selected_items) > 1:
+            self.service_adapter.show_error_dialog("Please select only one plate to view metadata.")
+            return
+
+        plate_path = selected_items[0]['path']
+
+        # Check if orchestrator is initialized
+        if plate_path not in self.orchestrators:
+            self.service_adapter.show_error_dialog("Plate must be initialized to view metadata.")
+            return
+
+        orchestrator = self.orchestrators[plate_path]
+
+        # Open metadata viewer dialog
+        from openhcs.pyqt_gui.dialogs.metadata_viewer_dialog import MetadataViewerDialog
+
+        try:
+            dialog = MetadataViewerDialog(
+                orchestrator=orchestrator,
+                color_scheme=self.color_scheme,
+                parent=self
+            )
+            dialog.exec()
+        except Exception as e:
+            logger.error(f"Failed to open metadata viewer: {e}", exc_info=True)
+            self.service_adapter.show_error_dialog(f"Failed to open metadata viewer: {str(e)}")
+
     # ========== UI Helper Methods ==========
     
     def update_plate_list(self):
@@ -1367,7 +1398,7 @@ class PlateManagerWidget(QWidget):
         self.buttons["init_plate"].setEnabled(has_selection and not is_running)
         self.buttons["compile_plate"].setEnabled(has_initialized and not is_running)
         self.buttons["code_plate"].setEnabled(has_initialized and not is_running)
-        self.buttons["save_python_script"].setEnabled(has_initialized and not is_running)
+        self.buttons["view_metadata"].setEnabled(has_initialized and not is_running)
 
         # Run button - enabled if plates are compiled or if currently running (for stop)
         if is_running:

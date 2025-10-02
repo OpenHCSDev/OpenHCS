@@ -312,7 +312,15 @@ class OpenHCSMainWindow(QMainWindow):
 
         view_menu.addSeparator()
 
-        
+        # Metadata viewer action
+        metadata_action = QAction("Plate &Metadata", self)
+        metadata_action.setShortcut("Ctrl+M")
+        metadata_action.triggered.connect(self.show_metadata_viewer)
+        view_menu.addAction(metadata_action)
+
+        view_menu.addSeparator()
+
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -327,7 +335,13 @@ class OpenHCSMainWindow(QMainWindow):
         """Setup application status bar."""
         self.status_bar = self.statusBar()
         self.status_bar.showMessage("OpenHCS PyQt6 GUI Ready")
-        
+
+        # Add graph layout toggle button to the right side of status bar
+        # Only add if system monitor widget exists and has the method
+        if hasattr(self, 'system_monitor') and hasattr(self.system_monitor, 'create_layout_toggle_button'):
+            toggle_button = self.system_monitor.create_layout_toggle_button()
+            self.status_bar.addPermanentWidget(toggle_button)
+
         # Connect status message signal
         self.status_message.connect(self.status_bar.showMessage)
     
@@ -425,6 +439,26 @@ class OpenHCSMainWindow(QMainWindow):
         config_window.show()
         config_window.raise_()
         config_window.activateWindow()
+
+    def show_metadata_viewer(self):
+        """Show metadata viewer for current plate."""
+        # Get current orchestrator from plate manager
+        if "plate_manager" not in self.floating_windows:
+            self.service_adapter.show_error_dialog("Please open Plate Manager first.")
+            return
+
+        # Get plate manager widget
+        plate_manager_window = self.floating_windows["plate_manager"]
+        # Find the PlateManagerWidget inside the dialog
+        from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+        plate_manager_widget = plate_manager_window.findChild(PlateManagerWidget)
+
+        if not plate_manager_widget or not hasattr(plate_manager_widget, 'action_view_metadata'):
+            self.service_adapter.show_error_dialog("Plate Manager not available.")
+            return
+
+        # Delegate to plate manager's action
+        plate_manager_widget.action_view_metadata()
 
     def _connect_pipeline_to_plate_manager(self, pipeline_widget):
         """Connect pipeline editor to plate manager (mirrors Textual TUI pattern)."""
