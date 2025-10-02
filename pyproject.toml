@@ -78,20 +78,9 @@ dev-gui = [
     "pytest-qt>=4.2.0",
 ]
 
-# Terminal User Interface (TUI) dependencies
-tui = [
-    "textual>=3.7.1",
-    "textual-serve>=1.1.2",
-    "textual-terminal",
-    "textual-universal-directorytree",
-    "textual-window @ git+https://github.com/trissim/textual-window.git",
-    "toolong @ git+https://github.com/trissim/toolong.git",
-    "plotext>=5.3.2",
-    "textual-plotext",
-    "pygments>=2.19.2",
-    "psutil>=7.0.0",
-    "GPUtil>=1.4.0",
-]
+# Terminal User Interface (TUI) - DEPRECATED, not available on PyPI
+# TUI has git dependencies that PyPI doesn't allow
+# Install manually if needed
 
 # PyQt6 Graphical User Interface (GUI) dependencies
 gui = [
@@ -140,21 +129,8 @@ gpu = [
     "torbi @ git+https://github.com/trissim/torbi.git",
 ]
 
-# All non-dev extras combined
+# All non-dev extras combined (TUI excluded - deprecated)
 all = [
-    # TUI
-    "textual>=3.7.1",
-    "textual-serve>=1.1.2",
-    "textual-terminal",
-    "textual-universal-directorytree",
-    "textual-window @ git+https://github.com/trissim/textual-window.git",
-    "toolong @ git+https://github.com/trissim/toolong.git",
-    "plotext>=5.3.2",
-    "textual-plotext",
-    "pygments>=2.19.2",
-    "psutil>=7.0.0",
-    "GPUtil>=1.4.0",
-    
     # GUI
     "PyQt6>=6.9.1",
     "PyQt6-QScintilla>=2.14.1",
@@ -188,7 +164,7 @@ Documentation = "https://github.com/trissim/openhcs/blob/main/README.md"
 # Main interfaces - GUI is now the default
 openhcs = "openhcs.pyqt_gui.__main__:main"
 openhcs-gui = "openhcs.pyqt_gui.__main__:main"
-openhcs-tui = "openhcs.textual_tui.__main__:main"
+# openhcs-tui = "openhcs.textual_tui.__main__:main"  # TUI deprecated, not in PyPI
 
 # Utility scripts
 openhcs-recache = "openhcs.utils.recache_function_registry:main"

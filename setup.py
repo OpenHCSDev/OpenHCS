@@ -43,20 +43,10 @@ extras_require = {
         "pytest-qt>=4.2.0",  # PyQt6 testing framework
     ],
 
-    # Terminal User Interface (TUI) dependencies
-    "tui": [
-        "textual>=3.7.1",
-        "textual-serve>=1.1.2",
-        "textual-terminal",
-        "textual-universal-directorytree",
-        "textual-window @ git+https://github.com/trissim/textual-window.git",
-        "toolong @ git+https://github.com/trissim/toolong.git",
-        "plotext>=5.3.2",
-        "textual-plotext",
-        "pygments>=2.19.2",  # For syntax highlighting in TUI error dialogs
-        "psutil>=7.0.0",  # For system monitoring (required for TUI)
-        "GPUtil>=1.4.0",  # For GPU monitoring (required for TUI)
-    ],
+    # Terminal User Interface (TUI) - DEPRECATED, not available on PyPI
+    # TUI has git dependencies that PyPI doesn't allow
+    # Install manually if needed: pip install git+https://github.com/trissim/textual-window.git
+    # "tui": [...],  # Removed from PyPI distribution
 
     # PyQt6 Graphical User Interface (GUI) dependencies
     "gui": [
@@ -192,7 +182,7 @@ setup(
             # Main interfaces - GUI is now the default
             "openhcs=openhcs.pyqt_gui.__main__:main",  # Default to GUI
             "openhcs-gui=openhcs.pyqt_gui.__main__:main",
-            "openhcs-tui=openhcs.textual_tui.__main__:main",
+            # "openhcs-tui=openhcs.textual_tui.__main__:main",  # TUI deprecated, not in PyPI
 
             # Utility scripts
             "openhcs-recache=openhcs.utils.recache_function_registry:main",
