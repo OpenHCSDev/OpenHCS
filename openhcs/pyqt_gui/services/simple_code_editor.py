@@ -784,12 +784,12 @@ class QScintillaCodeEditorDialog(QDialog):
                     pipeline_steps=pipeline_steps,
                     clean_mode=self.clean_mode
                 )
-            elif 'func_obj' in namespace:
-                # Function pattern code
-                func_obj = namespace.get('func_obj')
+            elif 'pattern' in namespace:
+                # Function pattern code (uses 'pattern' variable name)
+                pattern = namespace.get('pattern')
 
                 new_code = generate_complete_function_pattern_code(
-                    func_obj=func_obj,
+                    func_obj=pattern,
                     clean_mode=self.clean_mode
                 )
             elif 'config' in namespace:
@@ -806,7 +806,7 @@ class QScintillaCodeEditorDialog(QDialog):
                 # Unsupported code type
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Clean Mode Toggle",
-                                  "Could not detect code type. Expected one of: plate_paths, pipeline_steps, func_obj, or config variable.")
+                                  "Could not detect code type. Expected one of: plate_paths, pipeline_steps, pattern, or config variable.")
                 return
 
             # Update editor with new code

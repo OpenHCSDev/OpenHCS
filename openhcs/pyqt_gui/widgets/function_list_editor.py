@@ -321,12 +321,14 @@ class FunctionListEditorWidget(QWidget):
             # Check if user wants external editor (check environment variable)
             use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
 
-            # Launch editor with callback
+            # Launch editor with callback and code_type for clean mode toggle
             editor_service.edit_code(
                 initial_content=python_code,
                 title="Edit Function Pattern",
                 callback=self._handle_edited_pattern,
-                use_external=use_external
+                use_external=use_external,
+                code_type='function',
+                code_data={'pattern_data': self.pattern_data, 'clean_mode': False}
             )
 
         except Exception as e:
