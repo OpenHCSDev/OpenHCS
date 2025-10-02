@@ -66,6 +66,9 @@ cd openhcs
 python -m venv .venv
 source .venv/bin/activate
 
+# Install BaSiCPy fork (required dependency)
+pip install git+https://github.com/trissim/BaSiCPy.git
+
 # Install with all features for development
 pip install -e ".[all]"
 

@@ -181,8 +181,8 @@ setup(
         "setuptools",
         "watchdog>=6.0.0",  # For file system monitoring
 
-        # Custom packages
-        "BaSiCPy>=1.2.0",
+        # Note: BaSiCPy is required but must be installed separately from our fork:
+        # pip install git+https://github.com/trissim/BaSiCPy.git
     ],
     extras_require=extras_require,
 
