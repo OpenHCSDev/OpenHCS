@@ -18,7 +18,8 @@ from openhcs.constants.constants import VariableComponents
 from openhcs.constants.input_source import InputSource
 from openhcs.core.config import (
     GlobalPipelineConfig, MaterializationBackend,
-    PathPlanningConfig, StepWellFilterConfig, VFSConfig, ZarrConfig
+    PathPlanningConfig, StepWellFilterConfig, VFSConfig, ZarrConfig,
+    NapariVariableSizeHandling
 )
 from openhcs.config_framework.lazy_factory import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
@@ -128,17 +129,17 @@ def _gpu_available() -> bool:
 # Auto-enable CPU-only if no GPU is available (and not explicitly forced on)
 if os.getenv('OPENHCS_CPU_ONLY', 'false').lower() != 'true' and not _gpu_available():
     os.environ['OPENHCS_CPU_ONLY'] = 'true'
-    # Headless safety for viz paths
-    os.environ.setdefault('CI', 'true')
 
 
 
 def _headless_mode() -> bool:
-    """Treat CI/CPU-only/headless as headless for viz suppression in tests."""
+    """Detect headless environment where GUI/visualization should be suppressed.
+
+    CPU-only mode does NOT imply headless - you can run CPU mode with napari.
+    Only CI or explicit OPENHCS_HEADLESS flag triggers headless mode.
+    """
     try:
         if os.getenv('CI', '').lower() == 'true':
-            return True
-        if os.getenv('OPENHCS_CPU_ONLY', '').lower() == 'true':
             return True
         if os.getenv('OPENHCS_HEADLESS', '').lower() == 'true':
             return True
@@ -178,12 +179,12 @@ def create_test_pipeline() -> Pipeline:
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
                 step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
                 step_materialization_config=LazyStepMaterializationConfig(),
-                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5555)
+                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5555) if not _headless_mode() else None
             ),
             Step(
                 func=create_composite,
                 variable_components=[VariableComponents.CHANNEL],
-                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5556)
+                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5556) if not _headless_mode() else None
             ),
             Step(
                 name="Z-Stack Flattening",
@@ -216,7 +217,10 @@ def create_test_pipeline() -> Pipeline:
                     )
                     }
                 ),
-                napari_streaming_config=streaming_cfg
+                napari_streaming_config=LazyNapariStreamingConfig(
+                    napari_port=5555,
+                    variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX
+                ) if not _headless_mode() else None
             ),
         ],
         name=f"Multi-Subdirectory Test Pipeline{' (CPU-Only)' if cpu_only_mode else ''}",
