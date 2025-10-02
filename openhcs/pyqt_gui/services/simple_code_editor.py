@@ -371,11 +371,15 @@ class QScintillaCodeEditorDialog(QDialog):
 
     def _configure_autocomplete(self):
         """Configure autocomplete for Python code."""
+        logger.info("🔧 Configuring Jedi-powered autocomplete...")
+
         # Use custom autocomplete source (we'll populate it with Jedi)
         self.editor.setAutoCompletionSource(QsciScintilla.AutoCompletionSource.AcsAPIs)
+        logger.info("  ✓ Autocomplete source set to AcsAPIs")
 
         # Show autocomplete after typing 2 characters
         self.editor.setAutoCompletionThreshold(2)
+        logger.info("  ✓ Autocomplete threshold: 2 characters")
 
         # Case-insensitive matching
         self.editor.setAutoCompletionCaseSensitivity(False)
@@ -391,6 +395,7 @@ class QScintillaCodeEditorDialog(QDialog):
 
         # Install event filter to catch key presses for autocomplete triggering
         self.editor.installEventFilter(self)
+        logger.info("  ✓ Event filter installed for '.' trigger")
 
     def eventFilter(self, obj, event):
         """Filter events to trigger Jedi autocomplete on '.' """
@@ -401,6 +406,7 @@ class QScintillaCodeEditorDialog(QDialog):
             key_event = event
             # Trigger autocomplete when '.' is typed
             if key_event.text() == '.':
+                logger.info("🔍 Detected '.' keypress - triggering Jedi autocomplete")
                 # Let the '.' be inserted first
                 from PyQt6.QtCore import QTimer
                 QTimer.singleShot(10, self._show_jedi_completions)
@@ -414,6 +420,7 @@ class QScintillaCodeEditorDialog(QDialog):
 
             # Create API object for Python lexer
             self.api = QsciAPIs(self.lexer)
+            logger.info("  ✓ Created QsciAPIs object")
 
             # Add basic Python keywords as fallback
             python_keywords = [
@@ -431,13 +438,14 @@ class QScintillaCodeEditorDialog(QDialog):
             # Prepare the API
             self.api.prepare()
 
-            logger.debug("Jedi API autocomplete configured")
+            logger.info(f"  ✓ Added {len(python_keywords)} Python keywords to API")
 
         except Exception as e:
-            logger.warning(f"Failed to setup Jedi API autocomplete: {e}")
+            logger.error(f"❌ Failed to setup Jedi API autocomplete: {e}")
 
     def _show_jedi_completions(self):
         """Show Jedi-powered autocomplete suggestions."""
+        logger.info("🧠 _show_jedi_completions called")
         try:
             import jedi
 
@@ -445,19 +453,25 @@ class QScintillaCodeEditorDialog(QDialog):
             code = self.editor.text()
             line, col = self.editor.getCursorPosition()
 
+            logger.info(f"  📍 Cursor position: line={line}, col={col}")
+            logger.info(f"  📝 Code length: {len(code)} chars")
+
             # Jedi uses 1-based line numbers
             jedi_line = line + 1
             jedi_col = col
 
             # Create Jedi script with current code
             script = jedi.Script(code, path='<editor>')
+            logger.info(f"  ✓ Created Jedi script")
 
             # Get completions at cursor position
             completions = script.complete(jedi_line, jedi_col)
+            logger.info(f"  🔍 Jedi returned {len(completions)} completions")
 
             if completions:
                 # Clear existing API and rebuild with Jedi completions
                 self.api.clear()
+                logger.info(f"  🗑️  Cleared existing API")
 
                 # Add Jedi completions to API
                 for c in completions:
@@ -470,17 +484,19 @@ class QScintillaCodeEditorDialog(QDialog):
 
                 # Prepare the updated API
                 self.api.prepare()
+                logger.info(f"  ✓ Prepared API with {len(completions)} Jedi completions")
 
                 # Trigger autocomplete
                 self.editor.autoCompleteFromAPIs()
+                logger.info(f"  ✅ Called autoCompleteFromAPIs()")
 
-                logger.debug(f"Jedi autocomplete: {len(completions)} suggestions")
             else:
+                logger.info("  ⚠️  No Jedi completions - trying standard autocomplete")
                 # No Jedi completions, try standard autocomplete
                 self.editor.autoCompleteFromAPIs()
 
         except Exception as e:
-            logger.debug(f"Jedi autocomplete failed: {e}")
+            logger.error(f"❌ Jedi autocomplete failed: {e}", exc_info=True)
             # Fall back to standard autocomplete
             try:
                 self.editor.autoCompleteFromAPIs()
