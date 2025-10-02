@@ -972,10 +972,6 @@ class LogViewerWindow(QMainWindow):
         self.log_display.setText(f"Failed to load log file: {error_msg}")
         logger.error(f"Failed to load log file: {error_msg}")
 
-        except Exception as e:
-            logger.error(f"Error switching to log {log_path}: {e}")
-            raise
-
     # Search Functionality Methods
     def toggle_search_toolbar(self) -> None:
         """Show/hide search toolbar (Ctrl+F handler)."""
