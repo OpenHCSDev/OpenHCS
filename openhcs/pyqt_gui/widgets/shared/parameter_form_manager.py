@@ -978,19 +978,19 @@ class ParameterFormManager(QWidget):
 
         return False
 
-    def reset_parameter(self, param_name: str, default_value: Any = None) -> None:
-        """Reset parameter with predictable behavior."""
+    def reset_parameter(self, param_name: str) -> None:
+        """Reset parameter to signature default."""
         if param_name not in self.parameters:
             return
 
         # Set flag to prevent _refresh_all_placeholders during reset
         self._in_reset = True
         try:
-            return self._reset_parameter_impl(param_name, default_value)
+            return self._reset_parameter_impl(param_name)
         finally:
             self._in_reset = False
 
-    def _reset_parameter_impl(self, param_name: str, default_value: Any = None) -> None:
+    def _reset_parameter_impl(self, param_name: str) -> None:
         """Internal reset implementation."""
         import logging
         logger = logging.getLogger(__name__)
@@ -1111,12 +1111,23 @@ class ParameterFormManager(QWidget):
         self.parameter_changed.emit(param_name, reset_value)
 
     def _get_reset_value(self, param_name: str) -> Any:
-        """Get reset value - ALWAYS use signature defaults.
+        """Get reset value based on editing context.
 
-        Simplified logic: Reset always returns the signature default from param_defaults.
-        For lazy dataclass fields, the signature default is None (for inheritance).
-        For non-lazy fields, the signature default is the actual default value.
+        For global config editing: Use static class defaults (not None)
+        For lazy config editing: Use signature defaults (None for inheritance)
+        For functions: Use signature defaults
         """
+        # For global config editing, use static class defaults instead of None
+        if self.config.is_global_config_editing and self.dataclass_type:
+            # Get static default from class attribute
+            try:
+                static_default = object.__getattribute__(self.dataclass_type, param_name)
+                return static_default
+            except AttributeError:
+                # Fallback to signature default if no class attribute
+                pass
+
+        # For everything else, use signature defaults
         return self.param_defaults.get(param_name)
 
 

@@ -359,13 +359,10 @@ class FunctionPaneWidget(QWidget):
 
         logger.info(f"🔍 RESET: form_manager.parameters = {self.form_manager.parameters}")
 
-        # CRITICAL FIX: Pass param_defaults to reset so it uses function signature defaults
-        # instead of type-based defaults (which would be None for most types)
-        # This matches the Textual TUI pattern (line 287 in textual function_pane.py)
+        # Reset all parameters - form manager will use signature defaults from param_defaults
         for param_name in list(self.form_manager.parameters.keys()):
-            default_value = self.param_defaults.get(param_name)
-            logger.info(f"🔍 RESET: Resetting {param_name} to {default_value}")
-            self.form_manager.reset_parameter(param_name, default_value)
+            logger.info(f"🔍 RESET: Resetting {param_name}")
+            self.form_manager.reset_parameter(param_name)
 
         # Update internal kwargs to match the reset values
         self._internal_kwargs = self.form_manager.get_current_values()
