@@ -892,7 +892,18 @@ class LogViewerWindow(QMainWindow):
             with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
                 content = f.read()
 
-            self.log_display.setText(content)
+            # PERFORMANCE FIX: Disable highlighter for large files to prevent blocking
+            # Highlighting will be applied incrementally as new content arrives
+            file_size = len(content)
+            if file_size > 100000:  # 100KB threshold
+                logger.debug(f"Large log file ({file_size} bytes), temporarily disabling highlighter")
+                self.highlighter.setDocument(None)
+                self.log_display.setText(content)
+                # Re-enable highlighter after content is loaded
+                self.highlighter.setDocument(self.log_display.document())
+            else:
+                self.log_display.setText(content)
+
             self.current_log_path = log_path
             self.current_file_position = len(content.encode('utf-8'))
 
