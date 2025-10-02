@@ -223,9 +223,9 @@ def check_github_workflow():
 
 def main():
     """Run all checks."""
-    print("=" * 60)
-    print("OpenHCS PyPI Release Readiness Check")
-    print("=" * 60)
+    print("=" * 60, flush=True)
+    print("OpenHCS PyPI Release Readiness Check", flush=True)
+    print("=" * 60, flush=True)
     
     checks = [
         ("Version", check_version),
