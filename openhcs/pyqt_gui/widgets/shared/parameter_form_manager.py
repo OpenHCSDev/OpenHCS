@@ -156,9 +156,13 @@ class ParameterFormManager(QWidget):
 
                 # CRITICAL FIX: Override with initial_values if provided (for function kwargs)
                 if initial_values:
+                    print(f"🔍 PARAM FORM: initial_values={initial_values}")
+                    print(f"🔍 PARAM FORM: self.parameters BEFORE={self.parameters}")
                     for param_name, value in initial_values.items():
                         if param_name in self.parameters:
                             self.parameters[param_name] = value
+                            print(f"🔍 PARAM FORM: Set {param_name}={value}")
+                    print(f"🔍 PARAM FORM: self.parameters AFTER={self.parameters}")
 
             # DELEGATE TO SERVICE LAYER: Analyze form structure using service
             # Use UnifiedParameterAnalyzer-derived descriptions as the single source of truth
@@ -507,6 +511,7 @@ class ParameterFormManager(QWidget):
 
         # Widget
         current_value = self.parameters.get(param_info.name)
+        print(f"🔍 CREATE WIDGET: {param_info.name} current_value={current_value} from self.parameters")
         widget = self.create_widget(param_info.name, param_info.type, current_value, field_ids['widget_id'])
         widget.setObjectName(field_ids['widget_id'])
         layout.addWidget(widget, 1)

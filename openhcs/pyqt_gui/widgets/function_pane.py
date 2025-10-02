@@ -73,6 +73,8 @@ class FunctionPaneWidget(QWidget):
             # Store function signature defaults
             self.param_defaults = {name: info.default_value for name, info in param_info.items()}
 
+            print(f"🔍 FUNCTION PANE: func={self.func.__name__}, kwargs={self.kwargs}")
+
             # CRITICAL FIX: Pass saved kwargs as initial_values to populate form with saved values
             # ParameterFormManager will extract parameters from function signature (defaults),
             # then override with initial_values to show the saved kwargs
@@ -319,7 +321,10 @@ class FunctionPaneWidget(QWidget):
     
     def setup_connections(self):
         """Setup signal/slot connections."""
-        pass  # Connections are set up in widget creation
+        # CRITICAL FIX: Connect form manager's parameter_changed signal to handle_parameter_change
+        # This ensures that when user modifies a parameter, it updates self.functions in the parent
+        if self.form_manager:
+            self.form_manager.parameter_changed.connect(self.handle_parameter_change)
     
     def handle_button_action(self, action: str):
         """
