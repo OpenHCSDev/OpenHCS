@@ -9,7 +9,7 @@ from packaging import version
 
 
 def get_current_version():
-    with open("ezstitcher/__init__.py", "r") as f:
+    with open("openhcs/__init__.py", "r") as f:
         for line in f:
             if line.startswith("__version__"):
                 return line.split("=")[1].strip().strip('"\'')
@@ -17,7 +17,7 @@ def get_current_version():
 
 def get_pypi_version():
     try:
-        response = requests.get("https://pypi.org/pypi/ezstitcher/json")
+        response = requests.get("https://pypi.org/pypi/openhcs/json")
         if response.status_code == 200:
             return response.json()["info"]["version"]
     except:
@@ -53,7 +53,7 @@ def main():
         
         print(f"\nSuccessfully created and pushed tag v{current_version}")
         print("GitHub Actions workflow should start automatically.")
-        print("Monitor progress at: https://github.com/YOUR_USERNAME/ezstitcher/actions")
+        print("Monitor progress at: https://github.com/trissim/openhcs/actions")
     
     except subprocess.CalledProcessError as e:
         print(f"Error during release process: {e}")

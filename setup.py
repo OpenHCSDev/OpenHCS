@@ -189,12 +189,10 @@ setup(
     # Console script entry points
     entry_points={
         "console_scripts": [
-            # Main interfaces
-            "openhcs-tui=openhcs.textual_tui.__main__:main",
+            # Main interfaces - GUI is now the default
+            "openhcs=openhcs.pyqt_gui.__main__:main",  # Default to GUI
             "openhcs-gui=openhcs.pyqt_gui.__main__:main",
-
-            # Convenience aliases
-            "openhcs=openhcs.textual_tui.__main__:main",  # Default to TUI
+            "openhcs-tui=openhcs.textual_tui.__main__:main",
 
             # Utility scripts
             "openhcs-recache=openhcs.utils.recache_function_registry:main",
