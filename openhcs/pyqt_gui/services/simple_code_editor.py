@@ -323,13 +323,12 @@ class QScintillaCodeEditorDialog(QDialog):
         # Add separator before clean mode toggle
         view_menu.addSeparator()
 
-        # Toggle clean mode (only if code_type is supported)
-        if self.code_type in ('orchestrator', 'pipeline', 'function'):
-            toggle_clean_mode = QAction("Toggle &Clean Mode", self)
-            toggle_clean_mode.setCheckable(True)
-            toggle_clean_mode.setChecked(self.clean_mode)
-            toggle_clean_mode.triggered.connect(self._toggle_clean_mode)
-            view_menu.addAction(toggle_clean_mode)
+        # Toggle clean mode - always available
+        toggle_clean_mode = QAction("Toggle &Clean Mode", self)
+        toggle_clean_mode.setCheckable(True)
+        toggle_clean_mode.setChecked(self.clean_mode)
+        toggle_clean_mode.triggered.connect(self._toggle_clean_mode)
+        view_menu.addAction(toggle_clean_mode)
 
     def _configure_editor(self):
         """Configure QScintilla editor with professional features."""
@@ -562,15 +561,17 @@ class QScintillaCodeEditorDialog(QDialog):
             self.clean_mode = checked
             self.code_data['clean_mode'] = self.clean_mode
 
-            # Regenerate code based on type
+            # Auto-detect code type from namespace variables
             from openhcs.debug.pickle_to_python import (
                 generate_complete_orchestrator_code,
                 generate_complete_pipeline_steps_code,
-                generate_complete_function_pattern_code
+                generate_complete_function_pattern_code,
+                generate_config_code
             )
 
-            if self.code_type == 'orchestrator':
-                # Extract orchestrator data from namespace
+            # Check what variables exist in the namespace to determine code type
+            if 'plate_paths' in namespace or 'pipeline_data' in namespace:
+                # Orchestrator code
                 plate_paths = namespace.get('plate_paths', [])
                 pipeline_data = namespace.get('pipeline_data', {})
                 global_config = namespace.get('global_config')
@@ -585,58 +586,37 @@ class QScintillaCodeEditorDialog(QDialog):
                     pipeline_config=pipeline_config,
                     clean_mode=self.clean_mode
                 )
-            elif self.code_type == 'pipeline':
-                # Extract pipeline data from namespace
+            elif 'pipeline_steps' in namespace:
+                # Pipeline steps code
                 pipeline_steps = namespace.get('pipeline_steps', [])
 
                 new_code = generate_complete_pipeline_steps_code(
                     pipeline_steps=pipeline_steps,
                     clean_mode=self.clean_mode
                 )
-            elif self.code_type == 'function':
-                # Extract function pattern from namespace
+            elif 'func_obj' in namespace:
+                # Function pattern code
                 func_obj = namespace.get('func_obj')
 
                 new_code = generate_complete_function_pattern_code(
                     func_obj=func_obj,
                     clean_mode=self.clean_mode
                 )
-            elif self.code_type == 'config':
-                # Extract config from namespace
+            elif 'config' in namespace:
+                # Config code - auto-detect config class from the object
                 config = namespace.get('config')
-                config_class = self.code_data.get('config_class')
+                config_class = type(config)
 
-                if not config or not config_class:
-                    raise ValueError("Missing config or config_class in code_data")
-
-                from openhcs.debug.pickle_to_python import generate_clean_dataclass_repr
-                from collections import defaultdict
-
-                # Generate config representation
-                required_imports = defaultdict(set)
-                config_repr = generate_clean_dataclass_repr(
-                    config,
-                    indent_level=0,
-                    clean_mode=self.clean_mode,
-                    required_imports=required_imports
+                new_code = generate_config_code(
+                    config=config,
+                    config_class=config_class,
+                    clean_mode=self.clean_mode
                 )
-
-                # Build complete code with imports
-                code_lines = ["# Configuration Code", ""]
-
-                # Add imports
-                for module, names in sorted(required_imports.items()):
-                    names_str = ", ".join(sorted(names))
-                    code_lines.append(f"from {module} import {names_str}")
-
-                code_lines.extend(["", f"config = {config_class.__name__}(", config_repr, ")"])
-
-                new_code = "\n".join(code_lines)
             else:
                 # Unsupported code type
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Clean Mode Toggle",
-                                  "Clean mode toggle is not supported for this code type.")
+                                  "Could not detect code type. Expected one of: plate_paths, pipeline_steps, func_obj, or config variable.")
                 return
 
             # Update editor with new code

@@ -897,15 +897,52 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
         return "\n".join(code_lines)
 
 
+def generate_config_code(config, config_class, clean_mode=True):
+    """
+    Generate Python code representation of a config object.
+
+    Args:
+        config: Config instance (PipelineConfig, GlobalPipelineConfig, etc.)
+        config_class: The class of the config
+        clean_mode: If True, only show non-default values
+
+    Returns:
+        str: Complete Python code with imports
+    """
+    # Collect imports needed for config representation
+    required_imports = defaultdict(set)
+    config_repr = generate_clean_dataclass_repr(
+        config,
+        indent_level=0,
+        clean_mode=clean_mode,
+        required_imports=required_imports
+    )
+
+    # Add the config class itself to imports
+    required_imports[config_class.__module__].add(config_class.__name__)
+
+    # Build complete code with imports
+    code_lines = ["# Configuration Code", ""]
+
+    # Add imports
+    for module, names in sorted(required_imports.items()):
+        names_str = ", ".join(sorted(names))
+        code_lines.append(f"from {module} import {names_str}")
+
+    code_lines.extend(["", f"config = {config_class.__name__}(", config_repr, ")"])
+
+    return "\n".join(code_lines)
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Convert OpenHCS debug pickle files to runnable Python scripts.")
     parser.add_argument("pickle_file", help="Path to the input pickle file.")
     parser.add_argument("output_file", nargs='?', default=None, help="Path to the output Python script file (optional).")
     parser.add_argument("--clean", action="store_true", help="Generate a clean script with only non-default parameters.")
-    
+
     args = parser.parse_args()
-    
+
     convert_pickle_to_python(args.pickle_file, args.output_file, clean_mode=args.clean)
 
 if __name__ == "__main__":

@@ -633,56 +633,27 @@ class ConfigWindow(QDialog):
         """Open code editor to view/edit the configuration as Python code."""
         try:
             from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
-            from openhcs.debug.pickle_to_python import generate_clean_dataclass_repr
-            from collections import defaultdict
+            from openhcs.debug.pickle_to_python import generate_config_code
             import os
 
-            # Get current config values from the form
+            # Get current config from form
             current_values = self.form_manager.get_current_values()
             current_config = self.config_class(**current_values)
 
-            # Generate Python code representation
-            required_imports = defaultdict(set)
-            config_repr = generate_clean_dataclass_repr(
-                current_config,
-                indent_level=0,
-                clean_mode=True,
-                required_imports=required_imports
-            )
+            # Generate code using existing function
+            python_code = generate_config_code(current_config, self.config_class, clean_mode=True)
 
-            # Build complete code with imports
-            code_lines = ["# Configuration Code", ""]
-
-            # Add imports
-            for module, names in sorted(required_imports.items()):
-                names_str = ", ".join(sorted(names))
-                code_lines.append(f"from {module} import {names_str}")
-
-            code_lines.extend(["", f"config = {self.config_class.__name__}(", config_repr, ")"])
-
-            python_code = "\n".join(code_lines)
-
-            # Prepare code_data for clean mode toggle
-            code_data = {
-                'config_class': self.config_class,
-                'current_config': current_config,
-                'clean_mode': True
-            }
-
-            # Create editor service
+            # Launch editor
             editor_service = SimpleCodeEditorService(self)
-
-            # Check if user wants external editor
             use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
 
-            # Launch editor with callback
             editor_service.edit_code(
                 initial_content=python_code,
                 title=f"View/Edit {self.config_class.__name__}",
                 callback=self._handle_edited_config_code,
                 use_external=use_external,
                 code_type='config',
-                code_data=code_data
+                code_data={'config_class': self.config_class, 'clean_mode': True}
             )
 
         except Exception as e:
@@ -693,24 +664,22 @@ class ConfigWindow(QDialog):
     def _handle_edited_config_code(self, edited_code: str):
         """Handle edited configuration code from the code editor."""
         try:
-            # Execute the code to get the config object
             namespace = {}
             exec(edited_code, namespace)
 
-            # Find the config object in the namespace
-            if 'config' in namespace:
-                new_config = namespace['config']
-
-                # Verify it's the right type
-                if not isinstance(new_config, self.config_class):
-                    raise ValueError(f"Expected {self.config_class.__name__}, got {type(new_config).__name__}")
-
-                # Update the form with the new config values
-                self.form_manager.update_from_dataclass(new_config)
-
-                logger.info(f"Updated config from edited code")
-            else:
+            new_config = namespace.get('config')
+            if not new_config:
                 raise ValueError("No 'config' variable found in edited code")
+
+            if not isinstance(new_config, self.config_class):
+                raise ValueError(f"Expected {self.config_class.__name__}, got {type(new_config).__name__}")
+
+            # Update the current config and refresh the form
+            # This preserves lazy behavior by recreating the form with the new config
+            self.current_config = new_config
+            self.refresh_config(new_config)
+
+            logger.info(f"Updated config from edited code")
 
         except Exception as e:
             logger.error(f"Failed to apply edited config code: {e}")

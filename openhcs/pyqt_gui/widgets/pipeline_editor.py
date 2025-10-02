@@ -683,12 +683,14 @@ class PipelineEditorWidget(QWidget):
             import os
             use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
 
-            # Launch editor with callback
+            # Launch editor with callback and code_type for clean mode toggle
             editor_service.edit_code(
                 initial_content=python_code,
                 title="Edit Pipeline Steps",
                 callback=self._handle_edited_pipeline_code,
-                use_external=use_external
+                use_external=use_external,
+                code_type='pipeline',
+                code_data={'clean_mode': True}
             )
 
         except Exception as e:
