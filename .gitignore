@@ -127,6 +127,7 @@ tests/integration/tests_data/
 
 # Embedded repositories
 dna/
+torbi/
 
 # Development/analysis folders (local only)
 archive/
