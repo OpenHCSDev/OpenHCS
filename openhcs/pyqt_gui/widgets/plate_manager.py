@@ -1059,17 +1059,10 @@ class PlateManagerWidget(QWidget):
             return
 
         try:
-            # Collect plate paths, pipeline data, and pipeline config (same logic as Textual TUI)
+            # Collect plate paths, pipeline data, and per-plate pipeline configs
             plate_paths = []
             pipeline_data = {}
-
-            # Get pipeline config from the first selected orchestrator (they should all have the same config)
-            representative_orchestrator = None
-            for plate_data in selected_items:
-                plate_path = plate_data['path']
-                if plate_path in self.orchestrators:
-                    representative_orchestrator = self.orchestrators[plate_path]
-                    break
+            per_plate_configs = {}  # Store pipeline config for each plate
 
             for plate_data in selected_items:
                 plate_path = plate_data['path']
@@ -1083,21 +1076,56 @@ class PlateManagerWidget(QWidget):
 
                 pipeline_data[plate_path] = definition_pipeline
 
-            # Get the actual pipeline config from the orchestrator
-            actual_pipeline_config = None
-            if representative_orchestrator and representative_orchestrator.pipeline_config:
-                actual_pipeline_config = representative_orchestrator.pipeline_config
+                # Get the actual pipeline config from this plate's orchestrator
+                if plate_path in self.orchestrators:
+                    orchestrator = self.orchestrators[plate_path]
+                    if orchestrator.pipeline_config:
+                        per_plate_configs[plate_path] = orchestrator.pipeline_config
 
             # Generate complete orchestrator code using existing function
+            # Note: generate_complete_orchestrator_code only supports a single pipeline_config
+            # We'll use the first plate's config as the base, then manually add per-plate configs
             from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
+
+            # Use first plate's config as representative (or None if no configs)
+            representative_config = per_plate_configs.get(plate_paths[0]) if plate_paths and plate_paths[0] in per_plate_configs else None
 
             python_code = generate_complete_orchestrator_code(
                 plate_paths=plate_paths,
                 pipeline_data=pipeline_data,
                 global_config=self.global_config,
-                pipeline_config=actual_pipeline_config,
+                pipeline_config=representative_config,
                 clean_mode=True  # Default to clean mode - only show non-default values
             )
+
+            # If we have per-plate configs that differ, add them to the generated code
+            if len(per_plate_configs) > 1 or (len(per_plate_configs) == 1 and plate_paths[0] not in per_plate_configs):
+                # Generate per-plate config section
+                from openhcs.debug.pickle_to_python import generate_clean_dataclass_repr
+                from collections import defaultdict
+
+                per_plate_code_lines = [
+                    "",
+                    "# Per-plate pipeline configurations",
+                    "per_plate_configs = {}"
+                ]
+
+                for plate_path, config in per_plate_configs.items():
+                    config_imports = defaultdict(set)
+                    config_repr = generate_clean_dataclass_repr(
+                        config,
+                        indent_level=0,
+                        clean_mode=True,
+                        required_imports=config_imports
+                    )
+                    per_plate_code_lines.append(f'per_plate_configs["{plate_path}"] = PipelineConfig(\n{config_repr}\n)')
+
+                # Insert per-plate configs after the main pipeline_config definition
+                # Find the line with "# Pipeline steps" and insert before it
+                code_lines = python_code.split('\n')
+                insert_index = next((i for i, line in enumerate(code_lines) if line.startswith("# Pipeline steps")), len(code_lines))
+                code_lines[insert_index:insert_index] = per_plate_code_lines
+                python_code = '\n'.join(code_lines)
 
             # Create simple code editor service (same pattern as tiers 1 & 2)
             from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
@@ -1277,39 +1305,36 @@ class PlateManagerWidget(QWidget):
         logger.debug(f"Invalidated compilation state for orchestrator: {plate_path}")
 
     def action_view_metadata(self):
-        """View plate metadata in read-only form."""
+        """View plate metadata in read-only form. Opens one dialog per selected plate."""
         selected_items = self.get_selected_plates()
 
         if not selected_items:
             self.service_adapter.show_error_dialog("No plates selected.")
             return
 
-        if len(selected_items) > 1:
-            self.service_adapter.show_error_dialog("Please select only one plate to view metadata.")
-            return
-
-        plate_path = selected_items[0]['path']
-
-        # Check if orchestrator is initialized
-        if plate_path not in self.orchestrators:
-            self.service_adapter.show_error_dialog("Plate must be initialized to view metadata.")
-            return
-
-        orchestrator = self.orchestrators[plate_path]
-
-        # Open metadata viewer dialog
+        # Open metadata viewer for each selected plate
         from openhcs.pyqt_gui.dialogs.metadata_viewer_dialog import MetadataViewerDialog
 
-        try:
-            dialog = MetadataViewerDialog(
-                orchestrator=orchestrator,
-                color_scheme=self.color_scheme,
-                parent=self
-            )
-            dialog.exec()
-        except Exception as e:
-            logger.error(f"Failed to open metadata viewer: {e}", exc_info=True)
-            self.service_adapter.show_error_dialog(f"Failed to open metadata viewer: {str(e)}")
+        for item in selected_items:
+            plate_path = item['path']
+
+            # Check if orchestrator is initialized
+            if plate_path not in self.orchestrators:
+                self.service_adapter.show_error_dialog(f"Plate must be initialized to view metadata: {plate_path}")
+                continue
+
+            orchestrator = self.orchestrators[plate_path]
+
+            try:
+                dialog = MetadataViewerDialog(
+                    orchestrator=orchestrator,
+                    color_scheme=self.color_scheme,
+                    parent=self
+                )
+                dialog.show()  # Use show() instead of exec() to allow multiple windows
+            except Exception as e:
+                logger.error(f"Failed to open metadata viewer for {plate_path}: {e}", exc_info=True)
+                self.service_adapter.show_error_dialog(f"Failed to open metadata viewer: {str(e)}")
 
     # ========== UI Helper Methods ==========
     
