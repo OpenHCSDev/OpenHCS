@@ -371,14 +371,14 @@ class QScintillaCodeEditorDialog(QDialog):
 
     def _configure_autocomplete(self):
         """Configure autocomplete for Python code."""
-        # Enable autocomplete from document words and API
-        self.editor.setAutoCompletionSource(QsciScintilla.AutoCompletionSource.AcsAll)
+        # Disable built-in autocomplete - we'll use Jedi instead
+        self.editor.setAutoCompletionSource(QsciScintilla.AutoCompletionSource.AcsNone)
 
-        # Show autocomplete after typing 2 characters
-        self.editor.setAutoCompletionThreshold(2)
+        # Show autocomplete after typing 1 character (Jedi is smart enough)
+        self.editor.setAutoCompletionThreshold(1)
 
-        # Case-insensitive matching
-        self.editor.setAutoCompletionCaseSensitivity(False)
+        # Case-sensitive matching (Jedi handles this)
+        self.editor.setAutoCompletionCaseSensitivity(True)
 
         # Replace word when selecting from autocomplete
         self.editor.setAutoCompletionReplaceWord(True)
@@ -386,59 +386,105 @@ class QScintillaCodeEditorDialog(QDialog):
         # Show single item automatically
         self.editor.setAutoCompletionUseSingle(QsciScintilla.AutoCompletionUseSingle.AcusNever)
 
-        # Setup API for Python keywords and common libraries
-        self._setup_python_api()
+        # Connect text changed signal to trigger Jedi autocomplete
+        self.editor.textChanged.connect(self._on_text_changed)
 
-    def _setup_python_api(self):
-        """Setup API autocomplete with Python keywords and common OpenHCS imports."""
+        # Connect user list selection to handle autocomplete selection
+        self.editor.userListActivated.connect(self._on_autocomplete_selected)
+
+        # Track if we're currently showing autocomplete
+        self._autocomplete_active = False
+
+    def _on_text_changed(self):
+        """Handle text changes to trigger Jedi autocomplete."""
+        # Only trigger if user is actively typing (not if autocomplete is showing)
+        if self._autocomplete_active:
+            return
+
+        # Get current cursor position
+        line, col = self.editor.getCursorPosition()
+
+        # Get the character just typed
+        if col > 0:
+            text = self.editor.text(line)
+            if col <= len(text):
+                char = text[col - 1] if col > 0 else ''
+
+                # Trigger autocomplete on '.' or after typing a character
+                if char == '.' or (char.isalnum() or char == '_'):
+                    self._show_jedi_completions()
+
+    def _show_jedi_completions(self):
+        """Show Jedi-powered autocomplete suggestions."""
         try:
-            from PyQt6.Qsci import QsciAPIs
+            import jedi
 
-            # Create API object for Python lexer
-            self.api = QsciAPIs(self.lexer)
+            # Get current code and cursor position
+            code = self.editor.text()
+            line, col = self.editor.getCursorPosition()
 
-            # Python keywords
-            python_keywords = [
-                'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
-                'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
-                'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
-                'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return',
-                'try', 'while', 'with', 'yield'
-            ]
+            # Jedi uses 1-based line numbers
+            jedi_line = line + 1
+            jedi_col = col
 
-            # Common Python builtins
-            python_builtins = [
-                'abs', 'all', 'any', 'bin', 'bool', 'bytes', 'callable', 'chr',
-                'classmethod', 'compile', 'complex', 'delattr', 'dict', 'dir',
-                'divmod', 'enumerate', 'eval', 'exec', 'filter', 'float', 'format',
-                'frozenset', 'getattr', 'globals', 'hasattr', 'hash', 'help', 'hex',
-                'id', 'input', 'int', 'isinstance', 'issubclass', 'iter', 'len',
-                'list', 'locals', 'map', 'max', 'memoryview', 'min', 'next', 'object',
-                'oct', 'open', 'ord', 'pow', 'print', 'property', 'range', 'repr',
-                'reversed', 'round', 'set', 'setattr', 'slice', 'sorted', 'staticmethod',
-                'str', 'sum', 'super', 'tuple', 'type', 'vars', 'zip'
-            ]
+            # Create Jedi script with current code
+            script = jedi.Script(code, path='<editor>')
 
-            # Common OpenHCS imports
-            openhcs_common = [
-                'FunctionStep', 'PipelineConfig', 'GlobalPipelineConfig',
-                'GroupBy', 'VariableComponents', 'Backend', 'FileManager',
-                'Orchestrator', 'LazyNapariStreamingConfig', 'LazyFijiStreamingConfig',
-                'StepMaterializationConfig', 'np', 'torch', 'Path', 'List', 'Dict',
-                'Optional', 'Union', 'Tuple', 'Any', 'Callable'
-            ]
+            # Get completions at cursor position
+            completions = script.complete(jedi_line, jedi_col)
 
-            # Add all keywords to API
-            for keyword in python_keywords + python_builtins + openhcs_common:
-                self.api.add(keyword)
+            if completions:
+                # Build completion list for QScintilla
+                # Format: space-separated list with optional "?type" suffix
+                completion_list = []
+                for c in completions:
+                    # Get completion name
+                    name = c.name
 
-            # Prepare the API (required for autocomplete to work)
-            self.api.prepare()
+                    # Add type hint if available
+                    type_hint = c.type
+                    if type_hint:
+                        # Show type as suffix (function, class, module, etc.)
+                        completion_list.append(f"{name}?{type_hint}")
+                    else:
+                        completion_list.append(name)
 
-            logger.debug("Python API autocomplete configured")
+                # Join with space separator for QScintilla
+                completion_string = ' '.join(completion_list)
+
+                # Show autocomplete with Jedi suggestions
+                self._autocomplete_active = True
+                self.editor.showUserList(1, completion_string)
+                self._autocomplete_active = False
+
+                logger.debug(f"Jedi autocomplete: {len(completions)} suggestions")
 
         except Exception as e:
-            logger.warning(f"Failed to setup Python API autocomplete: {e}")
+            logger.debug(f"Jedi autocomplete failed: {e}")
+            # Fall back to no autocomplete on error
+
+    def _on_autocomplete_selected(self, list_id: int, text: str):
+        """Handle autocomplete selection from user list."""
+        # Extract just the completion text (remove type suffix if present)
+        if '?' in text:
+            completion = text.split('?')[0]
+        else:
+            completion = text
+
+        # Get current cursor position
+        line, col = self.editor.getCursorPosition()
+
+        # Get the current line text
+        line_text = self.editor.text(line)
+
+        # Find the start of the current word being completed
+        word_start = col
+        while word_start > 0 and (line_text[word_start - 1].isalnum() or line_text[word_start - 1] == '_'):
+            word_start -= 1
+
+        # Replace the partial word with the completion
+        self.editor.setSelection(line, word_start, line, col)
+        self.editor.replaceSelectedText(completion)
 
     def _apply_theme(self):
         """Apply PyQt6ColorScheme theming to QScintilla editor."""
