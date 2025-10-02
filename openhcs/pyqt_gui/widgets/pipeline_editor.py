@@ -704,8 +704,7 @@ class PipelineEditorWidget(QWidget):
             # Ensure we have a string
             if not isinstance(edited_code, str):
                 logger.error(f"Expected string, got {type(edited_code)}: {edited_code}")
-                self.service_adapter.show_error_dialog("Invalid code format received from editor")
-                return
+                raise ValueError("Invalid code format received from editor")
 
             # CRITICAL FIX: Execute code with lazy dataclass constructor patching to preserve None vs concrete distinction
             namespace = {}
@@ -721,13 +720,12 @@ class PipelineEditorWidget(QWidget):
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Pipeline updated with {len(new_pipeline_steps)} steps")
             else:
-                self.service_adapter.show_error_dialog("No 'pipeline_steps = [...]' assignment found in edited code")
+                raise ValueError("No 'pipeline_steps = [...]' assignment found in edited code")
 
-        except SyntaxError as e:
-            self.service_adapter.show_error_dialog(f"Invalid Python syntax: {e}")
-        except Exception as e:
+        except (SyntaxError, Exception) as e:
             logger.error(f"Failed to parse edited pipeline code: {e}")
-            self.service_adapter.show_error_dialog(f"Failed to parse pipeline code: {str(e)}")
+            # Re-raise so the code editor can handle it (keep dialog open, move cursor to error line)
+            raise
 
     def _patch_lazy_constructors(self):
         """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""

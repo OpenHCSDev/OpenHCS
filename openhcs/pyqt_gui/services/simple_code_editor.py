@@ -836,11 +836,11 @@ class QScintillaCodeEditorDialog(QDialog):
         Handle save button click - validate code before closing.
         Only closes dialog if callback succeeds, otherwise shows error and keeps dialog open.
         """
-        logger.debug("Save button clicked")
+        logger.info("Save button clicked")
 
         if self.callback is None:
             # No callback, just close
-            logger.debug("No callback, closing dialog")
+            logger.info("No callback, closing dialog")
             self.accept()
             return
 
@@ -848,17 +848,17 @@ class QScintillaCodeEditorDialog(QDialog):
 
         try:
             # Try to execute the callback
-            logger.debug("Executing callback...")
+            logger.info("Executing callback...")
             self.callback(edited_content)
             # Success - close the dialog
-            logger.debug("Callback succeeded, closing dialog")
+            logger.info("Callback succeeded, closing dialog")
             self.accept()
 
         except Exception as e:
             # Error - extract line number and show error
             logger.error(f"Callback failed with error: {e}")
             error_line = self._extract_error_line(e)
-            logger.debug(f"Extracted error line: {error_line}")
+            logger.info(f"Extracted error line: {error_line}")
 
             # Show error message
             error_msg = str(e)
@@ -870,10 +870,10 @@ class QScintillaCodeEditorDialog(QDialog):
 
             # Move cursor to error line
             if error_line:
-                logger.debug(f"Moving cursor to line {error_line}")
+                logger.info(f"Moving cursor to line {error_line}")
                 self._goto_line(error_line)
 
-            logger.debug("Keeping dialog open for user to fix error")
+            logger.info("Keeping dialog open for user to fix error")
             # Keep dialog open - user can fix the error or click Cancel
             # Do NOT call self.accept() or self.reject() here
 

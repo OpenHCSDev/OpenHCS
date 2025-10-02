@@ -351,9 +351,7 @@ class FunctionListEditorWidget(QWidget):
             # Ensure we have a string
             if not isinstance(edited_code, str):
                 logger.error(f"Expected string, got {type(edited_code)}: {edited_code}")
-                if self.service_adapter:
-                    self.service_adapter.show_error_dialog("Invalid code format received from editor")
-                return
+                raise ValueError("Invalid code format received from editor")
 
             # CRITICAL FIX: Execute code with lazy dataclass constructor patching to preserve None vs concrete distinction
             namespace = {}
@@ -365,16 +363,12 @@ class FunctionListEditorWidget(QWidget):
                 new_pattern = namespace['pattern']
                 self._apply_edited_pattern(new_pattern)
             else:
-                if self.service_adapter:
-                    self.service_adapter.show_error_dialog("No 'pattern = ...' assignment found in edited code")
+                raise ValueError("No 'pattern = ...' assignment found in edited code")
 
-        except SyntaxError as e:
-            if self.service_adapter:
-                self.service_adapter.show_error_dialog(f"Invalid Python syntax: {e}")
-        except Exception as e:
+        except (SyntaxError, Exception) as e:
             logger.error(f"Failed to parse edited pattern: {e}")
-            if self.service_adapter:
-                self.service_adapter.show_error_dialog(f"Failed to parse edited pattern: {str(e)}")
+            # Re-raise so the code editor can handle it (keep dialog open, move cursor to error line)
+            raise
 
     def _apply_edited_pattern(self, new_pattern):
         """Apply the edited pattern back to the UI."""
