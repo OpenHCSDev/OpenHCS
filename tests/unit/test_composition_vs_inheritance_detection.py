@@ -219,7 +219,7 @@ class TestCompositionFieldResolution:
     def test_resolution_priority_order(self, sample_global_config):
         """Test that field resolution follows correct priority order."""
         # Set up global context
-        from openhcs.core.context.global_config import set_current_global_config
+        from openhcs.config_framework.global_config import set_current_global_config
         set_current_global_config(GlobalPipelineConfig, sample_global_config)
         
         # Create composition-based lazy config
@@ -241,9 +241,9 @@ class TestCompositionFieldResolution:
     
     def test_composition_equivalent_to_inheritance(self, sample_global_config):
         """Test that composition-based resolution produces equivalent results to inheritance."""
-        from openhcs.core.context.global_config import set_current_global_config
+        from openhcs.config_framework.global_config import set_current_global_config
         from openhcs.core.config import LazyStepMaterializationConfig
-        
+
         set_current_global_config(GlobalPipelineConfig, sample_global_config)
         
         # Create both inheritance-based and composition-based lazy configs
