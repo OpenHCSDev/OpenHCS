@@ -75,6 +75,7 @@ class FunctionListEditorWidget(QWidget):
 
     def _initialize_pattern_data(self, initial_functions):
         """Initialize pattern data from various input formats (mirrors Textual TUI logic)."""
+        print(f"🔍 FUNC LIST EDITOR _initialize_pattern_data: initial_functions = {initial_functions}")
         if initial_functions is None:
             self.pattern_data = []
             self.is_dict_mode = False
@@ -90,9 +91,11 @@ class FunctionListEditorWidget(QWidget):
             self.is_dict_mode = False
             self.functions = [initial_functions]
         elif isinstance(initial_functions, list):
+            print(f"🔍 FUNC LIST EDITOR: initial_functions is a list, calling _normalize_function_list")
             self.pattern_data = initial_functions
             self.is_dict_mode = False
             self.functions = self._normalize_function_list(initial_functions)
+            print(f"🔍 FUNC LIST EDITOR: self.functions AFTER normalize = {self.functions}")
         elif isinstance(initial_functions, dict):
             # Convert any integer keys to string keys for consistency
             normalized_dict = {}
@@ -118,6 +121,7 @@ class FunctionListEditorWidget(QWidget):
 
     def _normalize_function_list(self, func_list):
         """Normalize function list using PatternDataManager."""
+        print(f"🔍 NORMALIZE: INPUT = {func_list}")
         # Handle single tuple (function, kwargs) case - wrap in list
         if isinstance(func_list, tuple) and len(func_list) == 2 and callable(func_list[0]) and isinstance(func_list[1], dict):
             func_list = [func_list]
@@ -129,10 +133,13 @@ class FunctionListEditorWidget(QWidget):
             return []
 
         normalized = []
-        for item in func_list:
+        for i, item in enumerate(func_list):
+            print(f"🔍 NORMALIZE: Processing item {i}: {item}")
             func, kwargs = self.data_manager.extract_func_and_kwargs(item)
+            print(f"🔍 NORMALIZE: Extracted func={func.__name__ if func else None}, kwargs={kwargs}")
             if func:
                 normalized.append((func, kwargs))
+        print(f"🔍 NORMALIZE: OUTPUT = {normalized}")
         return normalized
     
     def setup_ui(self):
@@ -256,14 +263,15 @@ class FunctionListEditorWidget(QWidget):
         else:
             # Create function panes
             for i, func_item in enumerate(self.functions):
+                print(f"🔍 FUNC LIST EDITOR: Creating pane {i} with func_item = {func_item}")
                 pane = FunctionPaneWidget(func_item, i, self.service_adapter, color_scheme=self.color_scheme)
-                
+
                 # Connect signals (using actual FunctionPaneWidget signal names)
                 pane.move_function.connect(self._move_function)
                 pane.add_function.connect(self._add_function_at_index)
                 pane.remove_function.connect(self._remove_function)
                 pane.parameter_changed.connect(self._on_parameter_changed)
-                
+
                 self.function_panes.append(pane)
                 self.function_layout.addWidget(pane)
     

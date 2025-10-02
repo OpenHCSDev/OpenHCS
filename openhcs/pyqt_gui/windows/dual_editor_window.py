@@ -420,7 +420,9 @@ class DualEditorWindow(QDialog):
             return []
 
         # Return the step func directly - the function list editor will handle the conversion
-        return self.editing_step.func
+        result = self.editing_step.func
+        print(f"🔍 DUAL EDITOR _convert_step_func_to_list: returning {result}")
+        return result
 
 
 

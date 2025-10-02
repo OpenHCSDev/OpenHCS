@@ -74,20 +74,11 @@ class FunctionPaneWidget(QWidget):
             self.param_defaults = {name: info.default_value for name, info in param_info.items()}
 
             print(f"🔍 FUNCTION PANE: func={self.func.__name__}, kwargs={self.kwargs}")
-
-            # CRITICAL FIX: Pass saved kwargs as initial_values to populate form with saved values
-            # ParameterFormManager will extract parameters from function signature (defaults),
-            # then override with initial_values to show the saved kwargs
-            self.form_manager = ParameterFormManager(
-                object_instance=self.func,    # Pass function as the object to build form for
-                field_id=f"func_{index}",     # Use function index as field identifier
-                parent=self,                  # Pass self as parent widget
-                context_obj=None,             # Functions don't need context for placeholder resolution
-                initial_values=self.kwargs    # Pass saved kwargs to populate form fields
-            )
         else:
-            self.form_manager = None
             self.param_defaults = {}
+
+        # Form manager will be created in create_parameter_form() when UI is built
+        self.form_manager = None
         
         # Internal kwargs tracking (extracted from Textual version)
         self._internal_kwargs = self.kwargs.copy()
@@ -112,7 +103,7 @@ class FunctionPaneWidget(QWidget):
         layout.addWidget(header_frame)
 
         # Parameter form (if function exists and parameters shown)
-        if self.func and self.show_parameters and self.form_manager:
+        if self.func and self.show_parameters:
             parameter_frame = self.create_parameter_form()
             layout.addWidget(parameter_frame)
 
@@ -233,28 +224,25 @@ class FunctionPaneWidget(QWidget):
         
         layout = QVBoxLayout(group_box)
 
-        # Use the enhanced ParameterFormManager that has help and reset functionality
-        if self.form_manager:
-            # Import the enhanced PyQt6 ParameterFormManager
-            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager as PyQtParameterFormManager
+        # Create the ParameterFormManager with help and reset functionality
+        # Import the enhanced PyQt6 ParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager as PyQtParameterFormManager
 
-            # FIXED: Use new simplified constructor
-            enhanced_form_manager = PyQtParameterFormManager(
-                object_instance=self.func,       # Pass function as the object to build form for
-                field_id=f"func_{self.index}",   # Use function index as field identifier
-                parent=self,                     # Pass self as parent widget
-                context_obj=None                 # Functions don't need context for placeholder resolution
-            )
+        # Create form manager with initial_values to load saved kwargs
+        self.form_manager = PyQtParameterFormManager(
+            object_instance=self.func,       # Pass function as the object to build form for
+            field_id=f"func_{self.index}",   # Use function index as field identifier
+            parent=self,                     # Pass self as parent widget
+            context_obj=None,                # Functions don't need context for placeholder resolution
+            initial_values=self.kwargs       # Pass saved kwargs to populate form fields
+        )
 
-            # Connect parameter changes
-            enhanced_form_manager.parameter_changed.connect(
-                lambda param_name, value: self.handle_parameter_change(param_name, value)
-            )
+        # Connect parameter changes
+        self.form_manager.parameter_changed.connect(
+            lambda param_name, value: self.handle_parameter_change(param_name, value)
+        )
 
-            layout.addWidget(enhanced_form_manager)
-
-            # Store reference for parameter updates
-            self.enhanced_form_manager = enhanced_form_manager
+        layout.addWidget(self.form_manager)
         
         return group_box
     
@@ -321,10 +309,7 @@ class FunctionPaneWidget(QWidget):
     
     def setup_connections(self):
         """Setup signal/slot connections."""
-        # CRITICAL FIX: Connect form manager's parameter_changed signal to handle_parameter_change
-        # This ensures that when user modifies a parameter, it updates self.functions in the parent
-        if self.form_manager:
-            self.form_manager.parameter_changed.connect(self.handle_parameter_change)
+        pass  # Connections are set up in widget creation
     
     def handle_button_action(self, action: str):
         """
@@ -347,40 +332,51 @@ class FunctionPaneWidget(QWidget):
     def handle_parameter_change(self, param_name: str, value: Any):
         """
         Handle parameter value changes (extracted from Textual version).
-        
+
         Args:
             param_name: Name of the parameter
             value: New parameter value
         """
         # Update internal kwargs without triggering reactive update
         self._internal_kwargs[param_name] = value
-        
-        # Update form manager
-        if self.form_manager:
-            self.form_manager.update_parameter(param_name, value)
-            final_value = self.form_manager.parameters[param_name]
-        else:
-            final_value = value
-        
-        # Emit parameter changed signal
-        self.parameter_changed.emit(self.index, param_name, final_value)
-        
-        logger.debug(f"Parameter changed: {param_name} = {final_value}")
+
+        # The form manager already has the updated value (it emitted this signal)
+        # No need to call update_parameter() again - that would be redundant
+
+        # Emit parameter changed signal to notify parent (function list editor)
+        self.parameter_changed.emit(self.index, param_name, value)
+
+        logger.debug(f"Parameter changed: {param_name} = {value}")
     
     def reset_all_parameters(self):
-        """Reset all parameters to default values using enhanced PyQt6 form manager."""
+        """Reset all parameters to default values using PyQt6 form manager."""
+        logger.info(f"🔍 RESET: reset_all_parameters called for function {self.index}")
+        logger.info(f"🔍 RESET: self.param_defaults = {self.param_defaults}")
 
-        # Use the PyQt6 form manager's reset functionality which properly handles widgets
-        self.enhanced_form_manager.reset_all_parameters()
+        if not self.form_manager:
+            logger.warning(f"🔍 RESET: No form_manager found!")
+            return
+
+        logger.info(f"🔍 RESET: form_manager.parameters = {self.form_manager.parameters}")
+
+        # CRITICAL FIX: Pass param_defaults to reset so it uses function signature defaults
+        # instead of type-based defaults (which would be None for most types)
+        # This matches the Textual TUI pattern (line 287 in textual function_pane.py)
+        for param_name in list(self.form_manager.parameters.keys()):
+            default_value = self.param_defaults.get(param_name)
+            logger.info(f"🔍 RESET: Resetting {param_name} to {default_value}")
+            self.form_manager.reset_parameter(param_name, default_value)
 
         # Update internal kwargs to match the reset values
+        self._internal_kwargs = self.form_manager.get_current_values()
+        logger.info(f"🔍 RESET: After reset, _internal_kwargs = {self._internal_kwargs}")
+
+        # Emit parameter changed signals for each reset parameter
         for param_name, default_value in self.param_defaults.items():
-            self._internal_kwargs[param_name] = default_value
-            # Emit parameter changed signal
             self.parameter_changed.emit(self.index, param_name, default_value)
 
         self.reset_parameters.emit(self.index)
-        logger.debug(f"Reset all parameters for function {self.index}")
+        logger.info(f"🔍 RESET: Reset complete for function {self.index}")
     
     def update_widget_value(self, widget: QWidget, value: Any):
         """
@@ -439,27 +435,18 @@ class FunctionPaneWidget(QWidget):
         self.func, self.kwargs = func_item
         self._internal_kwargs = self.kwargs.copy()
         
-        # Recreate form manager
+        # Update parameter defaults
         if self.func:
             param_info = SignatureAnalyzer.analyze(self.func)
-            parameters = {name: self.kwargs.get(name, info.default_value) for name, info in param_info.items()}
-            parameter_types = {name: info.param_type for name, info in param_info.items()}
-
             # Store function signature defaults
             self.param_defaults = {name: info.default_value for name, info in param_info.items()}
-
-            # SIMPLIFIED: Use new generic constructor with function as object_instance
-            self.form_manager = ParameterFormManager(
-                object_instance=self.func,       # Pass function as the object to build form for
-                field_id=f"func_{self.index}",   # Use function index as field identifier
-                parent=self,                     # Pass self as parent widget
-                context_obj=None                 # Functions don't need context for placeholder resolution
-            )
         else:
-            self.form_manager = None
             self.param_defaults = {}
-        
-        # Rebuild UI
+
+        # Form manager will be recreated in create_parameter_form() when UI is rebuilt
+        self.form_manager = None
+
+        # Rebuild UI (this will create the form manager in create_parameter_form())
         self.setup_ui()
         
         logger.debug(f"Updated function for index {self.index}")

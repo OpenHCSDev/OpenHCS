@@ -200,6 +200,9 @@ class ParameterFormManager(QWidget):
             with timer("  Initialize core attributes", threshold_ms=1.0):
                 self.config = config
                 self.param_defaults = self._extract_parameter_defaults()
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"🔍 PARAM FORM MANAGER __init__: param_defaults = {self.param_defaults}")
 
             # Initialize tracking attributes
             self.widgets = {}
@@ -337,14 +340,17 @@ class ParameterFormManager(QWidget):
 
         # CRITICAL FIX: For reset functionality, we need SIGNATURE defaults, not instance values
         # Analyze the CLASS/TYPE, not the instance, to get signature defaults
-        if dataclasses.is_dataclass(self.object_instance):
+        if callable(self.object_instance) and not dataclasses.is_dataclass(self.object_instance):
+            # For functions/callables, analyze directly (not their type)
+            analysis_target = self.object_instance
+        elif dataclasses.is_dataclass(self.object_instance):
             # For dataclass instances, analyze the type to get field defaults
             analysis_target = type(self.object_instance)
         elif hasattr(self.object_instance, '__class__'):
             # For regular object instances (like steps), analyze the class to get constructor defaults
             analysis_target = type(self.object_instance)
         else:
-            # For types/classes/functions, analyze directly
+            # For types/classes, analyze directly
             analysis_target = self.object_instance
 
         # Use unified analyzer to get signature defaults with same exclusions
@@ -986,14 +992,22 @@ class ParameterFormManager(QWidget):
 
     def _reset_parameter_impl(self, param_name: str, default_value: Any = None) -> None:
         """Internal reset implementation."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         # Function parameters reset to static defaults from param_defaults
         if self._is_function_parameter(param_name):
             reset_value = self.param_defaults.get(param_name) if hasattr(self, 'param_defaults') else None
+            logger.info(f"🔍 RESET_IMPL: Function parameter {param_name}, reset_value={reset_value}")
             self.parameters[param_name] = reset_value
 
             if param_name in self.widgets:
                 widget = self.widgets[param_name]
+                logger.info(f"🔍 RESET_IMPL: Updating widget for {param_name} to {reset_value}")
                 self.update_widget_value(widget, reset_value, param_name, skip_context_behavior=True)
+                # Verify widget was updated
+                actual_value = self.get_widget_value(widget)
+                logger.info(f"🔍 RESET_IMPL: Widget value after update: {actual_value}")
 
             self.parameter_changed.emit(param_name, reset_value)
             return
@@ -1057,6 +1071,7 @@ class ParameterFormManager(QWidget):
 
         # Generic config field reset - use context-aware reset value
         reset_value = self._get_reset_value(param_name)
+        logger.info(f"🔍 RESET_IMPL: Generic field {param_name}, reset_value={reset_value} (from _get_reset_value)")
         self.parameters[param_name] = reset_value
 
         # Track reset fields only for lazy behavior (when reset_value is None)
@@ -1074,7 +1089,11 @@ class ParameterFormManager(QWidget):
         # Update widget with reset value
         if param_name in self.widgets:
             widget = self.widgets[param_name]
+            logger.info(f"🔍 RESET_IMPL: Updating widget for {param_name} to {reset_value}")
             self.update_widget_value(widget, reset_value, param_name)
+            # Verify widget was updated
+            actual_value = self.get_widget_value(widget)
+            logger.info(f"🔍 RESET_IMPL: Widget value after update: {actual_value}")
 
             # Apply placeholder only if reset value is None (lazy behavior)
             if reset_value is None:

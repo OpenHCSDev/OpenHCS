@@ -74,21 +74,26 @@ class PatternDataManager:
     def extract_func_and_kwargs(func_item) -> Tuple[Optional[Callable], Dict]:
         """
         Parse (func, kwargs) tuples and bare callables.
-        
+
         Handles both tuple format and bare callable format exactly as current logic.
-        
+
         Args:
             func_item: Either (callable, kwargs) tuple or bare callable
-            
+
         Returns:
             Tuple of (callable, kwargs_dict)
         """
         # EXACT current logic preservation
         if isinstance(func_item, tuple) and len(func_item) == 2 and callable(func_item[0]):
-            return func_item[0], func_item[1]
+            result = func_item[0], func_item[1]
+            print(f"🔍 PATTERN DATA MANAGER extract_func_and_kwargs: tuple case - returning {result}")
+            return result
         elif callable(func_item):
-            return func_item, {}
+            result = func_item, {}
+            print(f"🔍 PATTERN DATA MANAGER extract_func_and_kwargs: callable case - returning {result}")
+            return result
         else:
+            print(f"🔍 PATTERN DATA MANAGER extract_func_and_kwargs: neither tuple nor callable - returning None, {{}}")
             return None, {}
     
     @staticmethod
