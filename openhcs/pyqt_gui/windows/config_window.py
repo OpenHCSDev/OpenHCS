@@ -67,6 +67,8 @@ class ConfigWindow(QDialog):
         self.current_config = current_config
         self.on_save_callback = on_save_callback
 
+        # Flag to prevent refresh during save operation
+        self._saving = False
 
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
@@ -497,6 +499,17 @@ class ConfigWindow(QDialog):
         Args:
             new_config: New configuration instance to display
         """
+        from openhcs.utils.performance_monitor import timer
+        with timer("⚠️ REFRESH_CONFIG CALLED", threshold_ms=0.0):
+            # CRITICAL: Don't refresh if we're currently saving - the window already has the correct data!
+            # This prevents recreating the entire form (1262ms) when the save operation triggers
+            # orchestrator_config_changed signal which calls this method.
+            saving_flag = getattr(self, '_saving', False)
+            logger.info(f"🔍 REFRESH_CONFIG: _saving={saving_flag} (id={id(self)})")
+            if saving_flag:
+                logger.info("✅ Skipping refresh_config during save operation")
+                return
+
         try:
             # Import required services
             from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
@@ -582,11 +595,21 @@ class ConfigWindow(QDialog):
                 current_values = self.form_manager.get_current_values()
                 new_config = self.config_class(**current_values)
 
-            # Emit signal and call callback
-            self.config_saved.emit(new_config)
+            # CRITICAL: Set flag to prevent refresh_config from recreating the form
+            # The window already has the correct data - it just saved it!
+            self._saving = True
+            logger.info(f"🔍 SAVE_CONFIG: Set _saving=True before callback (id={id(self)})")
+            try:
+                # Emit signal and call callback
+                self.config_saved.emit(new_config)
 
-            if self.on_save_callback:
-                self.on_save_callback(new_config)
+                if self.on_save_callback:
+                    logger.info(f"🔍 SAVE_CONFIG: Calling on_save_callback (id={id(self)})")
+                    self.on_save_callback(new_config)
+                    logger.info(f"🔍 SAVE_CONFIG: Returned from on_save_callback (id={id(self)})")
+            finally:
+                self._saving = False
+                logger.info(f"🔍 SAVE_CONFIG: Reset _saving=False (id={id(self)})")
 
             self.accept()
 
@@ -615,6 +638,19 @@ class ConfigWindow(QDialog):
 
     def _cleanup_signal_connections(self):
         """Clean up signal connections to prevent memory leaks."""
-        # The signal connection is handled by the plate manager
-        # We just need to mark that this window is closing
-        logger.debug("Config window closing, signal connections will be cleaned up")
+        # Disconnect the orchestrator_config_changed signal if it was connected
+        if hasattr(self, '_orchestrator_signal_connection'):
+            try:
+                # Find the plate manager in the parent hierarchy
+                parent = self.parent()
+                while parent is not None:
+                    # Check if parent has the orchestrator_config_changed signal
+                    if hasattr(parent, 'orchestrator_config_changed'):
+                        parent.orchestrator_config_changed.disconnect(self._orchestrator_signal_connection)
+                        logger.info(f"✅ Disconnected orchestrator_config_changed signal for window id={id(self)}")
+                        break
+                    parent = parent.parent()
+            except Exception as e:
+                logger.warning(f"Failed to disconnect signal: {e}")
+
+        logger.debug(f"Config window closing (id={id(self)})")
