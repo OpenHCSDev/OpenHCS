@@ -459,14 +459,31 @@ class QScintillaCodeEditorDialog(QDialog):
             logger.info(f"  📝 Current line: '{current_line}'")
             logger.info(f"  📝 Code length: {len(code)} chars")
 
-            # Log first 10 lines to see imports
-            code_lines = code.split('\n')
-            logger.info(f"  📋 First 10 lines of code:")
-            for i, l in enumerate(code_lines[:10]):
-                logger.info(f"    {i+1}: {l}")
+            # Check if we're typing an import statement or module access
+            # If the line starts with 'import' or 'from', add it if not already there
+            current_line_stripped = current_line.strip()
+            if current_line_stripped and not current_line_stripped.startswith(('import ', 'from ')):
+                # User is typing module.attribute without import - add implicit import for Jedi
+                # Extract the module path before the cursor
+                before_cursor = current_line[:col].strip()
+                if '.' in before_cursor:
+                    # Get the base module (everything before last dot)
+                    parts = before_cursor.rsplit('.', 1)
+                    if parts:
+                        module_path = parts[0]
+                        # Add import statement for Jedi
+                        code = f"import {module_path}\n" + code
+                        # Adjust line number since we added a line
+                        jedi_line = line + 2  # +1 for 1-based, +1 for added import
+                        logger.info(f"  💡 Added implicit import for Jedi: 'import {module_path}'")
+                    else:
+                        jedi_line = line + 1
+                else:
+                    jedi_line = line + 1
+            else:
+                jedi_line = line + 1
 
-            # Jedi uses 1-based line numbers
-            jedi_line = line + 1
+            # jedi_line already set above based on whether we added import
             jedi_col = col
 
             # Create Jedi script with current code
@@ -513,20 +530,31 @@ class QScintillaCodeEditorDialog(QDialog):
                 self.api.prepare()
                 logger.info(f"  ✓ Prepared API with {len(completions)} Jedi completions")
 
-                # Trigger autocomplete
-                self.editor.autoCompleteFromAPIs()
-                logger.info(f"  ✅ Called autoCompleteFromAPIs()")
+                # Check if autocomplete is already active
+                if self.editor.isListActive():
+                    logger.info(f"  ⚠️  Autocomplete list already active, canceling first")
+                    self.editor.cancelList()
+
+                # Trigger autocomplete - use autoCompleteFromAll to include both API and document
+                self.editor.autoCompleteFromAll()
+                logger.info(f"  ✅ Called autoCompleteFromAll()")
+
+                # Check if it's showing
+                if self.editor.isListActive():
+                    logger.info(f"  ✅ Autocomplete list is now active!")
+                else:
+                    logger.info(f"  ❌ Autocomplete list is NOT active - QScintilla may have filtered all results")
 
             else:
                 logger.info("  ⚠️  No Jedi completions - trying standard autocomplete")
                 # No Jedi completions, try standard autocomplete
-                self.editor.autoCompleteFromAPIs()
+                self.editor.autoCompleteFromAll()
 
         except Exception as e:
             logger.error(f"❌ Jedi autocomplete failed: {e}", exc_info=True)
             # Fall back to standard autocomplete
             try:
-                self.editor.autoCompleteFromAPIs()
+                self.editor.autoCompleteFromAll()
             except:
                 pass
 
