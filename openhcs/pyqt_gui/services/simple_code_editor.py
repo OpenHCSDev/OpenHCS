@@ -464,16 +464,17 @@ class QScintillaCodeEditorDialog(QDialog):
             jedi_col = col
 
             # Create Jedi script with current code
-            # Use sys_path to include current environment so Jedi can see openhcs modules
-            import sys
+            # Use project parameter to tell Jedi where to find openhcs modules
             import os
 
             # Get project root (where openhcs package is)
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-            sys_path = sys.path + [project_root]
 
-            script = jedi.Script(code, path='<editor>', sys_path=sys_path)
-            logger.info(f"  ✓ Created Jedi script with sys_path including project root")
+            # Create Jedi project
+            project = jedi.Project(path=project_root)
+
+            script = jedi.Script(code, path='<editor>', project=project)
+            logger.info(f"  ✓ Created Jedi script with project root: {project_root}")
 
             # Get completions at cursor position
             completions = script.complete(jedi_line, jedi_col)
