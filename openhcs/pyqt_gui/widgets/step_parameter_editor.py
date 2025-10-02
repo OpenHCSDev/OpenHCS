@@ -71,11 +71,6 @@ class StepParameterEditorWidget(QWidget):
         param_defaults = {}
 
         for name, info in param_info.items():
-            # CRITICAL FIX: Exclude 'func' parameter - it's handled by the Function Pattern tab
-            # The func parameter is specific to FunctionStep and should not be shown in step settings
-            if name == 'func':
-                continue
-
             # All AbstractStep parameters are relevant for editing
             # ParameterFormManager will automatically route lazy dataclass parameters to LazyDataclassEditor
             current_value = getattr(self.step, name, info.default_value)
@@ -102,11 +97,13 @@ class StepParameterEditorWidget(QWidget):
         # CRITICAL FIX: Use pipeline_config as context_obj (parent for inheritance)
         # The step is the overlay (what's being edited), not the parent context
         # Context hierarchy: GlobalPipelineConfig (thread-local) -> PipelineConfig (context_obj) -> Step (overlay)
+        # CRITICAL FIX: Exclude 'func' parameter - it's handled by the Function Pattern tab
         self.form_manager = ParameterFormManager(
             object_instance=self.step,           # Step instance being edited (overlay)
             field_id="step",                     # Use "step" as field identifier
             parent=self,                         # Pass self as parent widget
-            context_obj=self.pipeline_config     # Pipeline config as parent context for inheritance
+            context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
+            exclude_params=['func']              # Exclude func - it has its own dedicated tab
         )
         
         self.setup_ui()

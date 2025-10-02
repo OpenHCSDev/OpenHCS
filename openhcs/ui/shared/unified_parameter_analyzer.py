@@ -49,11 +49,12 @@ class UnifiedParameterAnalyzer:
     """
     
     @staticmethod
-    def analyze(target: Union[Callable, Type, object]) -> Dict[str, UnifiedParameterInfo]:
+    def analyze(target: Union[Callable, Type, object], exclude_params: Optional[list] = None) -> Dict[str, UnifiedParameterInfo]:
         """Analyze parameters from any source.
 
         Args:
             target: Function, method, dataclass type, or instance to analyze
+            exclude_params: Optional list of parameter names to exclude from analysis
 
         Returns:
             Dictionary mapping parameter names to UnifiedParameterInfo objects
@@ -67,6 +68,9 @@ class UnifiedParameterAnalyzer:
 
             # Instance analysis
             param_info = UnifiedParameterAnalyzer.analyze(my_instance)
+
+            # Instance analysis with exclusions (e.g., exclude 'func' from FunctionStep)
+            param_info = UnifiedParameterAnalyzer.analyze(step_instance, exclude_params=['func'])
         """
         if target is None:
             return {}
@@ -78,8 +82,15 @@ class UnifiedParameterAnalyzer:
             if dataclasses.is_dataclass(target):
                 result = UnifiedParameterAnalyzer._analyze_dataclass_type(target)
             else:
-                # Try to analyze constructor
-                result = UnifiedParameterAnalyzer._analyze_callable(target.__init__)
+                # CRITICAL FIX: For classes, use _analyze_object_instance with use_signature_defaults=True
+                # This traverses MRO to get all inherited parameters with signature defaults
+                # Create a dummy instance just to get the class hierarchy analyzed
+                try:
+                    dummy_instance = target.__new__(target)
+                    result = UnifiedParameterAnalyzer._analyze_object_instance(dummy_instance, use_signature_defaults=True)
+                except:
+                    # If we can't create a dummy instance, fall back to just analyzing __init__
+                    result = UnifiedParameterAnalyzer._analyze_callable(target.__init__)
         elif dataclasses.is_dataclass(target):
             # Instance of dataclass
             result = UnifiedParameterAnalyzer._analyze_dataclass_instance(target)
@@ -90,6 +101,10 @@ class UnifiedParameterAnalyzer:
             else:
                 # For regular object instances (like step instances), analyze their class constructor
                 result = UnifiedParameterAnalyzer._analyze_object_instance(target)
+
+        # Apply exclusions if specified
+        if exclude_params:
+            result = {name: info for name, info in result.items() if name not in exclude_params}
 
         return result
     
@@ -127,8 +142,13 @@ class UnifiedParameterAnalyzer:
         return unified_params
 
     @staticmethod
-    def _analyze_object_instance(instance: object) -> Dict[str, UnifiedParameterInfo]:
-        """Analyze a regular object instance by examining its full inheritance hierarchy."""
+    def _analyze_object_instance(instance: object, use_signature_defaults: bool = False) -> Dict[str, UnifiedParameterInfo]:
+        """Analyze a regular object instance by examining its full inheritance hierarchy.
+
+        Args:
+            instance: Object instance to analyze
+            use_signature_defaults: If True, use signature defaults instead of instance values
+        """
         # Use MRO to get all constructor parameters from the inheritance chain
         instance_class = type(instance)
         all_params = {}
@@ -159,14 +179,18 @@ class UnifiedParameterAnalyzer:
                 # Add parameters that haven't been seen yet (most specific wins)
                 for param_name, param_info in class_params.items():
                     if param_name not in all_params and param_name != 'kwargs':
-                        # Get current value from instance if it exists
-                        current_value = getattr(instance, param_name, param_info.default_value)
+                        # CRITICAL FIX: For reset functionality, use signature defaults instead of instance values
+                        if use_signature_defaults:
+                            default_value = param_info.default_value
+                        else:
+                            # Get current value from instance if it exists
+                            default_value = getattr(instance, param_name, param_info.default_value)
 
-                        # Create parameter info with current value
+                        # Create parameter info with appropriate default value
                         all_params[param_name] = UnifiedParameterInfo(
                             name=param_name,
                             param_type=param_info.param_type,
-                            default_value=current_value,
+                            default_value=default_value,
                             is_required=param_info.is_required,
                             description=param_info.description,  # CRITICAL FIX: Include description
                             source_type="object_instance"

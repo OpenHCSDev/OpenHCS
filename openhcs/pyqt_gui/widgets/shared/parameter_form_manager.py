@@ -125,7 +125,7 @@ class ParameterFormManager(QWidget):
     DEFAULT_PLACEHOLDER_PREFIX = "Default"
     DEFAULT_COLOR_SCHEME = None
 
-    def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None):
+    def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None):
         """
         Initialize PyQt parameter form manager with generic object introspection.
 
@@ -134,6 +134,7 @@ class ParameterFormManager(QWidget):
             field_id: Unique identifier for the form
             parent: Optional parent widget
             context_obj: Context object for placeholder resolution (orchestrator, pipeline_config, etc.)
+            exclude_params: Optional list of parameter names to exclude from the form
         """
         with timer(f"ParameterFormManager.__init__ ({field_id})", threshold_ms=5.0):
             QWidget.__init__(self, parent)
@@ -142,6 +143,7 @@ class ParameterFormManager(QWidget):
             self.object_instance = object_instance
             self.field_id = field_id
             self.context_obj = context_obj
+            self.exclude_params = exclude_params or []
 
             # Initialize service layer first (needed for parameter extraction)
             with timer("  Service initialization", threshold_ms=1.0):
@@ -149,7 +151,7 @@ class ParameterFormManager(QWidget):
 
             # Auto-extract parameters and types using generic introspection
             with timer("  Extract parameters from object", threshold_ms=2.0):
-                self.parameters, self.parameter_types, self.dataclass_type = self._extract_parameters_from_object(object_instance)
+                self.parameters, self.parameter_types, self.dataclass_type = self._extract_parameters_from_object(object_instance, self.exclude_params)
 
             # DELEGATE TO SERVICE LAYER: Analyze form structure using service
             # Use UnifiedParameterAnalyzer-derived descriptions as the single source of truth
@@ -268,16 +270,20 @@ class ParameterFormManager(QWidget):
 
     # ==================== GENERIC OBJECT INTROSPECTION METHODS ====================
 
-    def _extract_parameters_from_object(self, obj: Any) -> Tuple[Dict[str, Any], Dict[str, Type], Type]:
+    def _extract_parameters_from_object(self, obj: Any, exclude_params: Optional[list] = None) -> Tuple[Dict[str, Any], Dict[str, Type], Type]:
         """
         Extract parameters and types from any object using unified analysis.
 
         Uses the existing UnifiedParameterAnalyzer for consistent handling of all object types.
+
+        Args:
+            obj: Object to extract parameters from
+            exclude_params: Optional list of parameter names to exclude
         """
         from openhcs.ui.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
 
-        # Use unified analyzer for all object types
-        param_info_dict = UnifiedParameterAnalyzer.analyze(obj)
+        # Use unified analyzer for all object types with exclusions
+        param_info_dict = UnifiedParameterAnalyzer.analyze(obj, exclude_params=exclude_params)
 
         parameters = {}
         parameter_types = {}
@@ -310,15 +316,28 @@ class ParameterFormManager(QWidget):
         """
         Extract parameter defaults from the object.
 
-        For reset functionality: returns the initial values used to load widgets.
+        For reset functionality: returns the SIGNATURE defaults, not current instance values.
         - For functions: signature defaults
-        - For dataclasses: field defaults
-        - For any object: constructor parameter defaults
+        - For dataclasses: field defaults from class definition
+        - For any object: constructor parameter defaults from class definition
         """
         from openhcs.ui.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
+        import dataclasses
 
-        # Use unified analyzer to get defaults
-        param_info_dict = UnifiedParameterAnalyzer.analyze(self.object_instance)
+        # CRITICAL FIX: For reset functionality, we need SIGNATURE defaults, not instance values
+        # Analyze the CLASS/TYPE, not the instance, to get signature defaults
+        if dataclasses.is_dataclass(self.object_instance):
+            # For dataclass instances, analyze the type to get field defaults
+            analysis_target = type(self.object_instance)
+        elif hasattr(self.object_instance, '__class__'):
+            # For regular object instances (like steps), analyze the class to get constructor defaults
+            analysis_target = type(self.object_instance)
+        else:
+            # For types/classes/functions, analyze directly
+            analysis_target = self.object_instance
+
+        # Use unified analyzer to get signature defaults with same exclusions
+        param_info_dict = UnifiedParameterAnalyzer.analyze(analysis_target, exclude_params=self.exclude_params)
 
         return {name: info.default_value for name, info in param_info_dict.items()}
 
