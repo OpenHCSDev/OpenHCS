@@ -204,42 +204,15 @@ class StepParameterEditorWidget(QWidget):
 
         layout.addLayout(header_layout)
 
-        # Scrollable parameter form (like FunctionListEditorWidget)
+        # Scrollable parameter form (matches config window pattern)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.scroll_area.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 4px;
-            }}
-        """)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # No explicit styling - let it inherit from parent
 
-        # Parameter form container (like FunctionListEditorWidget)
-        self.parameter_container = QWidget()
-        container_layout = QVBoxLayout(self.parameter_container)
-        container_layout.setContentsMargins(10, 10, 10, 10)
-        container_layout.setSpacing(15)
-
-       # Parameter form (using shared form manager)
-        # ParameterFormManager automatically routes lazy dataclass parameters to LazyDataclassEditor
-        form_frame = QFrame()
-        # Use centralized styling - no custom frame styling
-
-        # Set size policy to allow form frame to expand
-        form_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
-        form_layout = QVBoxLayout(form_frame)
-
-        # Add parameter form manager
-        form_layout.addWidget(self.form_manager)
-
-        # Add form frame with stretch factor to make it expand
-        container_layout.addWidget(form_frame, 1)  # stretch factor = 1
-
-        # Set container in scroll area and add to main layout (like FunctionListEditorWidget)
-        self.scroll_area.setWidget(self.parameter_container)
+        # Add form manager directly to scroll area (like config window)
+        self.scroll_area.setWidget(self.form_manager)
         layout.addWidget(self.scroll_area)
     
     def _get_button_style(self) -> str:

@@ -21,6 +21,8 @@ from PyQt6.QtGui import QFont
 # Use the registry service from correct location
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.processing.backends.lib_registry.unified_registry import FunctionMetadata
+from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +132,10 @@ class FunctionSelectorDialog(QDialog):
         self.current_function = current_function
         self.selected_function = None
 
+        # Initialize color scheme and style generator
+        self.color_scheme = PyQt6ColorScheme()
+        self.style_generator = StyleSheetGenerator(self.color_scheme)
+
         # Load enhanced function metadata
         self.all_functions_metadata: Dict[str, FunctionMetadata] = {}
         self.filtered_functions: Dict[str, FunctionMetadata] = {}
@@ -237,9 +243,14 @@ class FunctionSelectorDialog(QDialog):
         layout = QVBoxLayout(pane_widget)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create title with consistent styling
+        # Create title with consistent styling using color scheme
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-weight: bold; background-color: #e0e0e0; padding: 5px;")
+        title_label.setStyleSheet(f"""
+            font-weight: bold;
+            background-color: {self.color_scheme.to_hex(self.color_scheme.input_bg)};
+            color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
+            padding: 5px;
+        """)
         layout.addWidget(title_label)
 
         # Add main widget
@@ -364,6 +375,7 @@ class FunctionSelectorDialog(QDialog):
         title_font.setBold(True)
         title_font.setPointSize(12)
         title_label.setFont(title_font)
+        title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
         layout.addWidget(title_label)
 
         # Search input with enhanced placeholder
@@ -448,7 +460,15 @@ class FunctionSelectorDialog(QDialog):
         
         button_layout.addStretch()
         layout.addLayout(button_layout)
-        
+
+        # Apply centralized styling
+        self.setStyleSheet(
+            self.style_generator.generate_dialog_style() + "\n" +
+            self.style_generator.generate_tree_widget_style() + "\n" +
+            self.style_generator.generate_table_widget_style() + "\n" +
+            self.style_generator.generate_button_style()
+        )
+
         # Connect buttons
         self.select_btn.clicked.connect(self.accept_selection)
         cancel_btn.clicked.connect(self.reject)

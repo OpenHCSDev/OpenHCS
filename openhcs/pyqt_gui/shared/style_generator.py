@@ -88,7 +88,7 @@ class StyleSheetGenerator:
     def generate_tree_widget_style(self) -> str:
         """
         Generate QStyleSheet for tree widgets and list widgets.
-        
+
         Returns:
             str: Complete QStyleSheet for tree/list widget styling
         """
@@ -111,6 +111,44 @@ class StyleSheetGenerator:
             QTreeWidget::item:selected, QListWidget::item:selected {{
                 background-color: {cs.to_hex(cs.selection_bg)};
                 color: {cs.to_hex(cs.selection_text)};
+            }}
+        """
+
+    def generate_table_widget_style(self) -> str:
+        """
+        Generate QStyleSheet for table widgets.
+
+        Returns:
+            str: Complete QStyleSheet for table widget styling
+        """
+        cs = self.color_scheme
+        return f"""
+            QTableWidget {{
+                background-color: {cs.to_hex(cs.panel_bg)};
+                color: {cs.to_hex(cs.text_primary)};
+                border: none;
+                border-radius: 3px;
+                gridline-color: {cs.to_hex(cs.border_color)};
+                selection-background-color: {cs.to_hex(cs.selection_bg)};
+            }}
+            QTableWidget::item {{
+                padding: 4px;
+                border: none;
+            }}
+            QTableWidget::item:hover {{
+                background-color: {cs.to_hex(cs.hover_bg)};
+            }}
+            QTableWidget::item:selected {{
+                background-color: {cs.to_hex(cs.selection_bg)};
+                color: {cs.to_hex(cs.selection_text)};
+            }}
+            QHeaderView::section {{
+                background-color: {cs.to_hex(cs.input_bg)};
+                color: {cs.to_hex(cs.text_primary)};
+                padding: 5px;
+                border: none;
+                border-bottom: 1px solid {cs.to_hex(cs.border_color)};
+                font-weight: bold;
             }}
         """
     
