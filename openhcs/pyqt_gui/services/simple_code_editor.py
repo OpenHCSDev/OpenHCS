@@ -453,7 +453,10 @@ class QScintillaCodeEditorDialog(QDialog):
             code = self.editor.text()
             line, col = self.editor.getCursorPosition()
 
+            # Get the current line text to see what we're completing
+            current_line = self.editor.text(line)
             logger.info(f"  📍 Cursor position: line={line}, col={col}")
+            logger.info(f"  📝 Current line: '{current_line}'")
             logger.info(f"  📝 Code length: {len(code)} chars")
 
             # Jedi uses 1-based line numbers
@@ -461,14 +464,31 @@ class QScintillaCodeEditorDialog(QDialog):
             jedi_col = col
 
             # Create Jedi script with current code
-            script = jedi.Script(code, path='<editor>')
-            logger.info(f"  ✓ Created Jedi script")
+            # Use sys_path to include current environment so Jedi can see openhcs modules
+            import sys
+            import os
+
+            # Get project root (where openhcs package is)
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            sys_path = sys.path + [project_root]
+
+            script = jedi.Script(code, path='<editor>', sys_path=sys_path)
+            logger.info(f"  ✓ Created Jedi script with sys_path including project root")
 
             # Get completions at cursor position
             completions = script.complete(jedi_line, jedi_col)
             logger.info(f"  🔍 Jedi returned {len(completions)} completions")
 
+            # If no completions, try to get more info about what Jedi sees
+            if len(completions) == 0:
+                logger.info(f"  ⚠️  No completions - Jedi may not be able to resolve the module")
+                logger.info(f"  💡 Project root: {project_root}")
+
             if completions:
+                # Log first few completions for debugging
+                sample = [c.name for c in completions[:5]]
+                logger.info(f"  📋 Sample completions: {sample}")
+
                 # Clear existing API and rebuild with Jedi completions
                 self.api.clear()
                 logger.info(f"  🗑️  Cleared existing API")
