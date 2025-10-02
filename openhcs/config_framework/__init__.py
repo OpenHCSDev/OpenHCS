@@ -93,6 +93,12 @@ from openhcs.config_framework.config import (
     get_base_config_type,
 )
 
+# Cache warming
+from openhcs.config_framework.cache_warming import (
+    prewarm_config_analysis_cache,
+    prewarm_callable_analysis_cache,
+)
+
 __all__ = [
     # Factory
     'LazyDataclassFactory',
@@ -120,6 +126,9 @@ __all__ = [
     # Configuration
     'set_base_config_type',
     'get_base_config_type',
+    # Cache warming
+    'prewarm_config_analysis_cache',
+    'prewarm_callable_analysis_cache',
 ]
 
 __version__ = '1.0.0'

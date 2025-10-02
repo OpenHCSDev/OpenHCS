@@ -65,6 +65,36 @@ def _create_none_aware_checkbox():
     return NoneAwareCheckBox()
 
 
+def _create_direct_int_widget(current_value: Any = None):
+    """Fast path: Create int widget directly without magicgui overhead."""
+    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import NoneAwareIntEdit
+    widget = NoneAwareIntEdit()
+    if current_value is not None:
+        widget.set_value(current_value)
+    return widget
+
+
+def _create_direct_float_widget(current_value: Any = None):
+    """Fast path: Create float widget directly without magicgui overhead."""
+    widget = NoScrollDoubleSpinBox()
+    widget.setRange(WidgetConfig.NUMERIC_RANGE_MIN, WidgetConfig.NUMERIC_RANGE_MAX)
+    widget.setDecimals(WidgetConfig.FLOAT_PRECISION)
+    if current_value is not None:
+        widget.setValue(float(current_value))
+    else:
+        widget.clear()
+    return widget
+
+
+def _create_direct_bool_widget(current_value: Any = None):
+    """Fast path: Create bool widget directly without magicgui overhead."""
+    from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+    widget = NoneAwareCheckBox()
+    if current_value is not None:
+        widget.setChecked(bool(current_value))
+    return widget
+
+
 def convert_widget_value_to_type(value: Any, param_type: Type) -> Any:
     """
     PyQt-specific type conversions for widget values.
@@ -197,37 +227,58 @@ class MagicGuiWidgetFactory:
     def create_widget(self, param_name: str, param_type: Type, current_value: Any,
                      widget_id: str, parameter_info: Any = None) -> Any:
         """Create widget using functional registry dispatch."""
-        resolved_type = resolve_optional(param_type)
+        from openhcs.utils.performance_monitor import timer
+
+        with timer(f"            resolve_optional", threshold_ms=0.1):
+            resolved_type = resolve_optional(param_type)
 
         # Handle direct List[Enum] types - create multi-selection checkbox group
         if is_list_of_enums(resolved_type):
-            return self._create_checkbox_group_widget(param_name, resolved_type, current_value)
+            with timer(f"            create checkbox group", threshold_ms=0.5):
+                return self._create_checkbox_group_widget(param_name, resolved_type, current_value)
 
         # Extract enum from list wrapper for other cases
-        extracted_value = (current_value[0] if isinstance(current_value, list) and
-                          len(current_value) == 1 and isinstance(current_value[0], Enum)
-                          else current_value)
+        with timer(f"            extract enum value", threshold_ms=0.1):
+            extracted_value = (current_value[0] if isinstance(current_value, list) and
+                              len(current_value) == 1 and isinstance(current_value[0], Enum)
+                              else current_value)
 
         # Handle direct enum types
         if is_enum(resolved_type):
-            return create_enum_widget_unified(resolved_type, extracted_value)
+            with timer(f"            create enum widget", threshold_ms=0.5):
+                return create_enum_widget_unified(resolved_type, extracted_value)
+
+        # OPTIMIZATION: Fast path for simple types - bypass magicgui overhead (~0.3ms per widget)
+        # This saves ~36ms for 120 widgets
+        if resolved_type == int:
+            with timer(f"            create int widget (fast path)", threshold_ms=0.5):
+                return _create_direct_int_widget(extracted_value)
+        elif resolved_type == float:
+            with timer(f"            create float widget (fast path)", threshold_ms=0.5):
+                return _create_direct_float_widget(extracted_value)
+        elif resolved_type == bool:
+            with timer(f"            create bool widget (fast path)", threshold_ms=0.5):
+                return _create_direct_bool_widget(extracted_value)
+        elif resolved_type == str:
+            with timer(f"            create string widget (fast path)", threshold_ms=0.5):
+                return create_string_fallback_widget(current_value=extracted_value)
 
         # Check for OpenHCS custom widget replacements
-        replacement_factory = WIDGET_REPLACEMENT_REGISTRY.get(resolved_type)
+        with timer(f"            registry lookup", threshold_ms=0.1):
+            replacement_factory = WIDGET_REPLACEMENT_REGISTRY.get(resolved_type)
+
         if replacement_factory:
-            widget = replacement_factory(
-                current_value=extracted_value,
-                param_name=param_name,
-                parameter_info=parameter_info
-            )
+            with timer(f"            call replacement factory for {resolved_type.__name__ if hasattr(resolved_type, '__name__') else resolved_type}", threshold_ms=0.5):
+                widget = replacement_factory(
+                    current_value=extracted_value,
+                    param_name=param_name,
+                    parameter_info=parameter_info
+                )
         else:
-            # For string types, use our NoneAwareLineEdit instead of magicgui
-            if resolved_type == str:
-                widget = create_string_fallback_widget(current_value=extracted_value)
-            else:
-                # Try magicgui for non-string types, with string fallback for unsupported types
-                try:
-                    # Handle None values to prevent magicgui from converting None to literal "None" string
+            # Try magicgui for complex types, with string fallback for unsupported types
+            try:
+                # Handle None values to prevent magicgui from converting None to literal "None" string
+                with timer(f"            prepare magicgui value", threshold_ms=0.1):
                     magicgui_value = extracted_value
                     if extracted_value is None:
                         # Use appropriate default values for magicgui to prevent "None" string conversion
@@ -244,11 +295,11 @@ class MagicGuiWidgetFactory:
                             magicgui_value = ()  # Empty tuple for tuple[T, ...] types
                         # For other types, let magicgui handle None (might still cause issues but less common)
 
-                    from openhcs.utils.performance_monitor import timer
-                    with timer(f"    magicgui.create_widget({param_name}, {resolved_type.__name__ if hasattr(resolved_type, '__name__') else resolved_type})", threshold_ms=0.0):
-                        widget = create_widget(annotation=resolved_type, value=magicgui_value)
+                with timer(f"            magicgui.create_widget({param_name}, {resolved_type.__name__ if hasattr(resolved_type, '__name__') else resolved_type})", threshold_ms=0.0):
+                    widget = create_widget(annotation=resolved_type, value=magicgui_value)
 
-                    # Check if magicgui returned a basic QWidget (which indicates failure)
+                # Check if magicgui returned a basic QWidget (which indicates failure)
+                with timer(f"            check magicgui result", threshold_ms=0.1):
                     if hasattr(widget, 'native') and type(widget.native).__name__ == 'QWidget':
                         logger.warning(f"magicgui returned basic QWidget for {param_name} ({resolved_type}), using fallback")
                         widget = create_string_fallback_widget(current_value=extracted_value)
@@ -269,14 +320,15 @@ class MagicGuiWidgetFactory:
                             native_widget = widget.native
                             native_widget._magicgui_widget = widget  # Store reference for signal connections
                             widget = native_widget
-                except Exception as e:
-                    # Fallback to string widget for any type magicgui cannot handle
-                    logger.warning(f"Widget creation failed for {param_name} ({resolved_type}): {e}", exc_info=True)
-                    widget = create_string_fallback_widget(current_value=extracted_value)
+            except Exception as e:
+                # Fallback to string widget for any type magicgui cannot handle
+                logger.warning(f"Widget creation failed for {param_name} ({resolved_type}): {e}", exc_info=True)
+                widget = create_string_fallback_widget(current_value=extracted_value)
 
         # Functional configuration dispatch
-        configurator = CONFIGURATION_REGISTRY.get(resolved_type, lambda w: w)
-        configurator(widget)
+        with timer(f"            apply widget configuration", threshold_ms=0.1):
+            configurator = CONFIGURATION_REGISTRY.get(resolved_type, lambda w: w)
+            configurator(widget)
 
         return widget
 

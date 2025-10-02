@@ -398,6 +398,9 @@ class ParameterFormService:
             is_optional=is_optional
         )
     
+    # Class-level cache for nested dataclass parameter info (descriptions only)
+    _nested_param_info_cache = {}
+
     def _analyze_nested_dataclass(self, param_name: str, param_type: Type, current_value: Any,
                                 nested_field_id: str, parent_dataclass_type: Type = None) -> FormStructure:
         """Analyze a nested dataclass parameter."""
@@ -412,16 +415,19 @@ class ParameterFormService:
             current_value, dataclass_type, parent_dataclass_type
         )
 
-        # Recursively analyze nested structure with proper descriptions for nested fields
-        try:
+        # OPTIMIZATION: Cache parameter info (descriptions) by dataclass type
+        # We only need descriptions, not instance values, so analyze the type once and reuse
+        cache_key = dataclass_type
+        if cache_key in self._nested_param_info_cache:
+            nested_param_info = self._nested_param_info_cache[cache_key]
+        else:
+            # Recursively analyze nested structure with proper descriptions for nested fields
             # Use existing infrastructure to extract field descriptions for the nested dataclass
             from openhcs.ui.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
-            # Prefer instance-based analysis when available so we respect lazy vs concrete values
-            analysis_source = current_value if current_value is not None else dataclass_type
-            nested_param_info = UnifiedParameterAnalyzer.analyze(analysis_source)
-        except Exception:
-            # Fail loud where it matters; but if analysis fails, keep the UI usable
-            nested_param_info = None
+            # OPTIMIZATION: Always analyze the TYPE, not the instance
+            # This allows caching and avoids extracting field values we don't need
+            nested_param_info = UnifiedParameterAnalyzer.analyze(dataclass_type)
+            self._nested_param_info_cache[cache_key] = nested_param_info
 
         return self.analyze_parameters(
             nested_params,

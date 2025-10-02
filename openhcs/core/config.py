@@ -699,3 +699,12 @@ set_base_config_type(GlobalPipelineConfig)
 # No custom priority function needed - the framework handles it generically.
 
 logger.debug("Configuration framework initialized with OpenHCS types")
+
+# PERFORMANCE OPTIMIZATION: Pre-warm analysis caches at import time
+# This eliminates the 1000ms+ first-load penalty when opening config windows
+from openhcs.config_framework import prewarm_config_analysis_cache
+
+# Warm config hierarchy cache (for config windows)
+prewarm_config_analysis_cache(GlobalPipelineConfig)
+
+# NOTE: Step editor cache warming is done in openhcs.core.steps.__init__ to avoid circular imports

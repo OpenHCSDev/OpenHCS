@@ -22,3 +22,7 @@ __all__ = [
    # 'CompositeStep',
    # 'NormStep',
     ]
+
+# PERFORMANCE OPTIMIZATION: Pre-warm step editor cache at import time
+from openhcs.config_framework import prewarm_callable_analysis_cache
+prewarm_callable_analysis_cache(AbstractStep.__init__)
