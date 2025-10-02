@@ -342,10 +342,13 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
         raise RuntimeError("No wells found for processing")
 
     # Compilation phase
-    compiled_contexts = orchestrator.compile_pipelines(
+    compilation_result = orchestrator.compile_pipelines(
         pipeline_definition=pipeline.steps,
         well_filter=wells
     )
+
+    # Extract compiled_contexts from the result dict
+    compiled_contexts = compilation_result['compiled_contexts']
 
     if len(compiled_contexts) != len(wells):
         raise RuntimeError(f"Compilation failed: expected {len(wells)} contexts, got {len(compiled_contexts)}")

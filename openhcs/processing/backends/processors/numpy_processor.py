@@ -161,8 +161,7 @@ def percentile_normalize(image: np.ndarray,
         percentile_func=np.percentile,
         clip_func=np.clip,
         ones_like_func=np.ones_like,
-        zeros_like_func=lambda arr, dtype=None: np.zeros_like(arr, dtype=dtype or np.float32),
-        preserve_dtype=preserve_dtype
+        zeros_like_func=lambda arr, dtype=None: np.zeros_like(arr, dtype=dtype or np.float32)
     )
 
 @numpy_func
@@ -204,8 +203,7 @@ def stack_percentile_normalize(stack: np.ndarray,
         target_max=target_max,
         percentile_func=lambda arr, pct: np.percentile(arr, pct, axis=None),
         clip_func=np.clip,
-        ones_like_func=np.ones_like,
-        preserve_dtype=preserve_dtype
+        ones_like_func=np.ones_like
     )
 
 @numpy_func
