@@ -69,20 +69,19 @@ class FunctionPaneWidget(QWidget):
         # Parameter management (extracted from Textual version)
         if self.func:
             param_info = SignatureAnalyzer.analyze(self.func)
-            print(f"🔍 FUNCTION PANE DEBUG: param_info = {param_info}")
-            parameters = {name: self.kwargs.get(name, info.default_value) for name, info in param_info.items()}
-            parameter_types = {name: info.param_type for name, info in param_info.items()}
 
             # Store function signature defaults
             self.param_defaults = {name: info.default_value for name, info in param_info.items()}
-            print(f"🔍 FUNCTION PANE DEBUG: param_defaults = {self.param_defaults}")
 
-            # SIMPLIFIED: Use new generic constructor with function as object_instance
+            # CRITICAL FIX: Pass saved kwargs as initial_values to populate form with saved values
+            # ParameterFormManager will extract parameters from function signature (defaults),
+            # then override with initial_values to show the saved kwargs
             self.form_manager = ParameterFormManager(
                 object_instance=self.func,    # Pass function as the object to build form for
                 field_id=f"func_{index}",     # Use function index as field identifier
                 parent=self,                  # Pass self as parent widget
-                context_obj=None              # Functions don't need context for placeholder resolution
+                context_obj=None,             # Functions don't need context for placeholder resolution
+                initial_values=self.kwargs    # Pass saved kwargs to populate form fields
             )
         else:
             self.form_manager = None

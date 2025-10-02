@@ -125,7 +125,7 @@ class ParameterFormManager(QWidget):
     DEFAULT_PLACEHOLDER_PREFIX = "Default"
     DEFAULT_COLOR_SCHEME = None
 
-    def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None):
+    def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None):
         """
         Initialize PyQt parameter form manager with generic object introspection.
 
@@ -135,6 +135,7 @@ class ParameterFormManager(QWidget):
             parent: Optional parent widget
             context_obj: Context object for placeholder resolution (orchestrator, pipeline_config, etc.)
             exclude_params: Optional list of parameter names to exclude from the form
+            initial_values: Optional dict of parameter values to use instead of extracted defaults
         """
         with timer(f"ParameterFormManager.__init__ ({field_id})", threshold_ms=5.0):
             QWidget.__init__(self, parent)
@@ -152,6 +153,12 @@ class ParameterFormManager(QWidget):
             # Auto-extract parameters and types using generic introspection
             with timer("  Extract parameters from object", threshold_ms=2.0):
                 self.parameters, self.parameter_types, self.dataclass_type = self._extract_parameters_from_object(object_instance, self.exclude_params)
+
+                # CRITICAL FIX: Override with initial_values if provided (for function kwargs)
+                if initial_values:
+                    for param_name, value in initial_values.items():
+                        if param_name in self.parameters:
+                            self.parameters[param_name] = value
 
             # DELEGATE TO SERVICE LAYER: Analyze form structure using service
             # Use UnifiedParameterAnalyzer-derived descriptions as the single source of truth
@@ -1080,42 +1087,12 @@ class ParameterFormManager(QWidget):
         self.parameter_changed.emit(param_name, reset_value)
 
     def _get_reset_value(self, param_name: str) -> Any:
+        """Get reset value - ALWAYS use signature defaults.
+
+        Simplified logic: Reset always returns the signature default from param_defaults.
+        For lazy dataclass fields, the signature default is None (for inheritance).
+        For non-lazy fields, the signature default is the actual default value.
         """
-        Get reset value - context-aware for different editing modes.
-
-        - For lazy dataclass fields: Use None for lazy resolution
-        - For non-lazy fields in lazy forms: Use param_defaults (static defaults)
-        - For GlobalPipelineConfig editing (root + nested configs): Use instance defaults from fresh dataclass
-        - For functions: Use signature defaults
-        """
-        # Check if this specific parameter is a lazy dataclass field
-        # (not whether the entire form is lazy)
-        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-        param_type = self.parameter_types.get(param_name)
-
-        # If this parameter is an Optional[LazyDataclass], reset to None for lazy resolution
-        if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
-            inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
-            # Check if it's a lazy dataclass by checking for lazy resolution methods
-            try:
-                test_instance = inner_type()
-                if hasattr(test_instance, '_resolve_field_value') or hasattr(test_instance, '_lazy_resolution_config'):
-                    return None  # Lazy dataclass field - reset to None
-            except:
-                pass
-
-        # Non-lazy configs in global editing mode: use fresh instance defaults
-        # This prevents reset from using loaded instance values
-        # CRITICAL: Only do this for actual dataclasses, not functions
-        import dataclasses
-        if (self.config.is_global_config_editing and
-            self.dataclass_type is not None and
-            dataclasses.is_dataclass(self.dataclass_type)):
-            fresh_instance = self.dataclass_type()
-            reset_value = getattr(fresh_instance, param_name, None)
-            return reset_value
-
-        # All other cases: use param_defaults (functions, non-global editing, non-lazy fields)
         return self.param_defaults.get(param_name)
 
 
@@ -1262,7 +1239,12 @@ class ParameterFormManager(QWidget):
                 # This prevents the parent from re-introducing old values when resetting fields in nested form
                 # Example: When resetting well_filter in StepMaterializationConfig, don't include
                 # step_materialization_config from parent's user-modified values
-                filtered_parent_values = {k: v for k, v in parent_user_values.items() if k != self.field_id}
+                # CRITICAL FIX: Also exclude params from parent's exclude_params list (e.g., 'func' for FunctionStep)
+                excluded_keys = {self.field_id}
+                if hasattr(parent_manager, 'exclude_params') and parent_manager.exclude_params:
+                    excluded_keys.update(parent_manager.exclude_params)
+
+                filtered_parent_values = {k: v for k, v in parent_user_values.items() if k not in excluded_keys}
 
                 if filtered_parent_values:
                     # Use lazy version of parent type to enable sibling inheritance
@@ -1272,9 +1254,17 @@ class ParameterFormManager(QWidget):
                     if lazy_parent_type:
                         parent_type = lazy_parent_type
 
+                    # CRITICAL FIX: Add excluded params from parent's object_instance
+                    # This allows instantiating parent_type even when some params are excluded from the form
+                    parent_values_with_excluded = filtered_parent_values.copy()
+                    if hasattr(parent_manager, 'exclude_params') and parent_manager.exclude_params:
+                        for excluded_param in parent_manager.exclude_params:
+                            if excluded_param not in parent_values_with_excluded and hasattr(parent_manager.object_instance, excluded_param):
+                                parent_values_with_excluded[excluded_param] = getattr(parent_manager.object_instance, excluded_param)
+
                     # Create parent overlay with only user-modified values (excluding current nested config)
                     # For global config editing (root form only), use mask_with_none=True to preserve None overrides
-                    parent_overlay_instance = parent_type(**filtered_parent_values)
+                    parent_overlay_instance = parent_type(**parent_values_with_excluded)
                     if is_root_global_config:
                         stack.enter_context(config_context(parent_overlay_instance, mask_with_none=True))
                     else:
@@ -1283,14 +1273,24 @@ class ParameterFormManager(QWidget):
         # Convert overlay dict to object instance for config_context()
         # config_context() expects an object with attributes, not a dict
         if isinstance(overlay, dict) and self.dataclass_type:
+            # CRITICAL FIX: For excluded params (e.g., 'func' for FunctionStep), use values from object_instance
+            # This allows us to instantiate the dataclass type while excluding certain params from the overlay
+            overlay_with_excluded = overlay.copy()
+            for excluded_param in self.exclude_params:
+                if excluded_param not in overlay_with_excluded and hasattr(self.object_instance, excluded_param):
+                    # Use the value from the original object instance for excluded params
+                    overlay_with_excluded[excluded_param] = getattr(self.object_instance, excluded_param)
+
             # For functions and non-dataclass objects: use SimpleNamespace to hold parameters
             # For dataclasses: instantiate normally
             try:
-                overlay_instance = self.dataclass_type(**overlay)
+                overlay_instance = self.dataclass_type(**overlay_with_excluded)
             except TypeError:
                 # Function or other non-instantiable type: use SimpleNamespace
                 from types import SimpleNamespace
-                overlay_instance = SimpleNamespace(**overlay)
+                # For SimpleNamespace, we don't need excluded params
+                filtered_overlay = {k: v for k, v in overlay.items() if k not in self.exclude_params}
+                overlay_instance = SimpleNamespace(**filtered_overlay)
         else:
             overlay_instance = overlay
 
