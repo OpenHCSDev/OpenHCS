@@ -79,30 +79,15 @@ class SimpleCodeEditorService:
             if QSCINTILLA_AVAILABLE:
                 logger.debug("Using QScintilla editor for code editing")
                 dialog = QScintillaCodeEditorDialog(self.parent, initial_content, title,
+                                                   callback=callback,
                                                    code_type=code_type, code_data=code_data,
                                                    initial_line=error_line)
             else:
                 logger.debug("QScintilla not available, using QTextEdit fallback")
                 dialog = CodeEditorDialog(self.parent, initial_content, title)
 
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                edited_content = dialog.get_content()
-                if callback:
-                    try:
-                        callback(edited_content)
-                    except (SyntaxError, Exception) as e:
-                        # Extract error line number
-                        error_line_num = self._extract_error_line(e)
-
-                        # Show error dialog
-                        error_msg = f"Error: {str(e)}"
-                        if error_line_num:
-                            error_msg = f"Error at line {error_line_num}: {str(e)}"
-                        self._show_error(error_msg)
-
-                        # Reopen editor with same content and cursor at error line
-                        logger.info(f"Reopening editor with cursor at line {error_line_num}")
-                        self._edit_with_qt_native(edited_content, title, callback, code_type, code_data, error_line_num)
+            # Execute dialog - callback is now handled inside the dialog
+            dialog.exec()
 
         except Exception as e:
             logger.error(f"Qt native editor failed: {e}")
@@ -152,24 +137,6 @@ class SimpleCodeEditorService:
         """Show error message to user."""
         QMessageBox.critical(self.parent, "Editor Error", message)
 
-    def _extract_error_line(self, exception: Exception) -> Optional[int]:
-        """Extract line number from exception if available."""
-        # For SyntaxError, use lineno attribute
-        if isinstance(exception, SyntaxError) and hasattr(exception, 'lineno'):
-            return exception.lineno
-
-        # For other exceptions, try to extract from traceback
-        import traceback
-        import sys
-        tb = sys.exc_info()[2]
-        if tb:
-            # Find the frame that executed the user's code (marked as '<string>')
-            for frame_summary in traceback.extract_tb(tb):
-                if '<string>' in frame_summary.filename:
-                    return frame_summary.lineno
-
-        return None
-
 
 class QScintillaCodeEditorDialog(QDialog):
     """
@@ -181,6 +148,7 @@ class QScintillaCodeEditorDialog(QDialog):
     """
 
     def __init__(self, parent, initial_content: str, title: str,
+                 callback: Optional[Callable[[str], None]] = None,
                  code_type: str = None, code_data: dict = None, initial_line: int = None):
         """
         Initialize code editor dialog.
@@ -189,6 +157,7 @@ class QScintillaCodeEditorDialog(QDialog):
             parent: Parent widget
             initial_content: Initial code content
             title: Window title
+            callback: Callback function called with edited content on successful save
             code_type: Type of code being edited ('orchestrator', 'pipeline', 'function', None)
             code_data: Data needed to regenerate code (for clean mode toggle)
             initial_line: Line number to position cursor at (1-based, None for start)
@@ -198,7 +167,8 @@ class QScintillaCodeEditorDialog(QDialog):
         self.setModal(True)
         self.resize(900, 700)
 
-        # Store code generation context for clean mode toggle
+        # Store callback and code generation context
+        self.callback = callback
         self.code_type = code_type
         self.code_data = code_data or {}
         self.clean_mode = self.code_data.get('clean_mode', True)  # Default to clean mode
@@ -249,7 +219,7 @@ class QScintillaCodeEditorDialog(QDialog):
         button_layout = QHBoxLayout()
 
         self.save_btn = QPushButton("Save")
-        self.save_btn.clicked.connect(self.accept)
+        self.save_btn.clicked.connect(self._handle_save)
         button_layout.addWidget(self.save_btn)
 
         self.cancel_btn = QPushButton("Cancel")
@@ -860,6 +830,60 @@ class QScintillaCodeEditorDialog(QDialog):
     def get_content(self) -> str:
         """Get the edited content."""
         return self.editor.text()
+
+    def _handle_save(self) -> None:
+        """
+        Handle save button click - validate code before closing.
+        Only closes dialog if callback succeeds, otherwise shows error and keeps dialog open.
+        """
+        if self.callback is None:
+            # No callback, just close
+            self.accept()
+            return
+
+        edited_content = self.get_content()
+
+        try:
+            # Try to execute the callback
+            self.callback(edited_content)
+            # Success - close the dialog
+            self.accept()
+
+        except (SyntaxError, Exception) as e:
+            # Error - extract line number and show error
+            error_line = self._extract_error_line(e)
+
+            # Show error message
+            error_msg = str(e)
+            if error_line:
+                error_msg = f"Line {error_line}: {error_msg}"
+
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Error Parsing Code", error_msg)
+
+            # Move cursor to error line
+            if error_line:
+                self._goto_line(error_line)
+
+            # Keep dialog open - user can fix the error or click Cancel
+
+    def _extract_error_line(self, exception: Exception) -> Optional[int]:
+        """Extract line number from exception if available."""
+        # For SyntaxError, use lineno attribute
+        if isinstance(exception, SyntaxError) and hasattr(exception, 'lineno'):
+            return exception.lineno
+
+        # For other exceptions, try to extract from traceback
+        import traceback
+        import sys
+        tb = sys.exc_info()[2]
+        if tb:
+            # Find the frame that executed the user's code (marked as '<string>')
+            for frame_summary in traceback.extract_tb(tb):
+                if '<string>' in frame_summary.filename:
+                    return frame_summary.lineno
+
+        return None
 
     def _goto_line(self, line_number: int) -> None:
         """
