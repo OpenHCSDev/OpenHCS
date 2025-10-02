@@ -19,6 +19,7 @@ from openhcs.core.steps.function_step import FunctionStep
 from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 logger = logging.getLogger(__name__)
 
 
@@ -56,8 +57,9 @@ class DualEditorWindow(QDialog):
         # Make window non-modal (like plate manager and pipeline editor)
         self.setModal(False)
 
-        # Initialize color scheme
+        # Initialize color scheme and style generator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.style_generator = StyleSheetGenerator(self.color_scheme)
         self.gui_config = gui_config
 
         # Business logic state (extracted from Textual version)
@@ -147,18 +149,13 @@ class DualEditorWindow(QDialog):
         self.create_function_tab()
         
         layout.addWidget(self.tab_widget)
-        
+
         # Button panel
         button_panel = self.create_button_panel()
         layout.addWidget(button_panel)
-        
-        # Set styling
-        self.setStyleSheet(f"""
-            QDialog {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
-                color: white;
-            }}
-        """)
+
+        # Apply centralized styling
+        self.setStyleSheet(self.style_generator.generate_config_window_style())
     
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""
@@ -241,59 +238,19 @@ class DualEditorWindow(QDialog):
             Widget containing action buttons
         """
         panel = QFrame()
-        panel.setFrameStyle(QFrame.Shape.NoFrame)
+        panel.setFrameStyle(QFrame.Shape.Box)
         panel.setStyleSheet(f"""
             QFrame {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
-                border: none;
+                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
+                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
                 border-radius: 3px;
-                padding: 5px;
+                padding: 10px;
             }}
         """)
 
         layout = QHBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
-
-        # View Code button (left side)
-        view_code_button = QPushButton("View Code")
-        view_code_button.setMinimumWidth(100)
-        view_code_button.clicked.connect(self._view_code)
-        view_code_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                color: white;
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_light)};
-                border-radius: 3px;
-                padding: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.button_hover_bg)};
-            }}
-        """)
-        layout.addWidget(view_code_button)
-
-        layout.addStretch()
-
-        # Reset to Defaults button
-        reset_button = QPushButton("Reset to Defaults")
-        reset_button.setMinimumWidth(120)
-        reset_button.clicked.connect(self._reset_to_defaults)
-        reset_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                color: white;
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_light)};
-                border-radius: 3px;
-                padding: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.button_hover_bg)};
-            }}
-        """)
-        layout.addWidget(reset_button)
-
-        layout.addSpacing(10)
 
         # Changes indicator
         self.changes_label = QLabel("")
@@ -302,22 +259,14 @@ class DualEditorWindow(QDialog):
 
         layout.addStretch()
 
+        # Get centralized button styles
+        button_styles = self.style_generator.generate_config_button_styles()
+
         # Cancel button
         cancel_button = QPushButton("Cancel")
         cancel_button.setMinimumWidth(80)
         cancel_button.clicked.connect(self.cancel_edit)
-        cancel_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.status_error)};
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.status_error)};
-            }}
-        """)
+        cancel_button.setStyleSheet(button_styles["cancel"])
         layout.addWidget(cancel_button)
 
         # Save button
@@ -325,17 +274,7 @@ class DualEditorWindow(QDialog):
         self.save_button.setMinimumWidth(80)
         self.save_button.setEnabled(False)  # Initially disabled
         self.save_button.clicked.connect(self.save_edit)
-        self.save_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
-            }}
+        self.save_button.setStyleSheet(button_styles["save"] + f"""
             QPushButton:disabled {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
                 color: {self.color_scheme.to_hex(self.color_scheme.border_light)};
@@ -516,76 +455,6 @@ class DualEditorWindow(QDialog):
             return None
 
     # Old function pane methods removed - now using dedicated FunctionListEditorWidget
-
-    def create_button_panel(self) -> QWidget:
-        """
-        Create the button panel with save/cancel actions.
-        
-        Returns:
-            Widget containing action buttons
-        """
-        panel = QFrame()
-        panel.setFrameStyle(QFrame.Shape.Box)
-        panel.setStyleSheet(f"""
-            QFrame {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
-                padding: 10px;
-            }}
-        """)
-        
-        layout = QHBoxLayout(panel)
-        
-        # Changes indicator
-        self.changes_label = QLabel("")
-        self.changes_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_warning)}; font-style: italic;")
-        layout.addWidget(self.changes_label)
-        
-        layout.addStretch()
-        
-        # Cancel button
-        cancel_button = QPushButton("Cancel")
-        cancel_button.setMinimumWidth(80)
-        cancel_button.clicked.connect(self.cancel_edit)
-        cancel_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.status_error)};
-                color: white;
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.status_error)};
-                border-radius: 3px;
-                padding: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.status_error)};
-            }}
-        """)
-        layout.addWidget(cancel_button)
-        
-        # Save button
-        self.save_button = QPushButton("Save")
-        self.save_button.setMinimumWidth(80)
-        self.save_button.clicked.connect(self.save_step)
-        self.save_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
-                color: white;
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
-                border-radius: 3px;
-                padding: 8px;
-            }}
-            QPushButton:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
-            }}
-        """)
-        layout.addWidget(self.save_button)
-        
-        return panel
-    
-    def setup_connections(self):
-        """Setup signal/slot connections."""
-        self.tab_widget.currentChanged.connect(self.on_tab_changed)
-        self.changes_detected.connect(self.on_changes_detected)
     
     def get_function_info(self) -> str:
         """
@@ -665,7 +534,7 @@ class DualEditorWindow(QDialog):
             self.changes_label.setText("")
             self.save_button.setEnabled(False)
     
-    def save_step(self):
+    def save_edit(self):
         """Save the edited step."""
         try:
             # CRITICAL FIX: Sync function pattern from function editor BEFORE collecting form values
@@ -768,99 +637,6 @@ class DualEditorWindow(QDialog):
             func=[],  # Start with empty function list
             name="New_Step"
         )
-
-    def _view_code(self):
-        """Open code editor to view/edit the step as Python code."""
-        try:
-            from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
-            from openhcs.debug.pickle_to_python import generate_complete_function_step_code
-            import os
-
-            # Generate code for the current step
-            python_code = generate_complete_function_step_code(
-                step=self.editing_step,
-                clean_mode=True
-            )
-
-            # Launch editor
-            editor_service = SimpleCodeEditorService(self)
-            use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
-
-            editor_service.edit_code(
-                initial_content=python_code,
-                title="View/Edit Step",
-                callback=self._handle_edited_step_code,
-                use_external=use_external,
-                code_type='step',
-                code_data={'step': self.editing_step, 'clean_mode': True}
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to view step code: {e}")
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "View Code Error", f"Failed to view code:\n{e}")
-
-    def _handle_edited_step_code(self, edited_code: str):
-        """Handle edited step code from the code editor."""
-        try:
-            namespace = {}
-            exec(edited_code, namespace)
-
-            new_step = namespace.get('step')
-            if not new_step:
-                raise ValueError("No 'step' variable found in edited code")
-
-            # Update the editing step with new values
-            import dataclasses
-            for field in dataclasses.fields(new_step):
-                value = getattr(new_step, field.name)
-                setattr(self.editing_step, field.name, value)
-
-            # Refresh the UI
-            self._refresh_all_tabs()
-            self._mark_changes()
-
-            logger.info(f"Updated step from edited code")
-
-        except Exception as e:
-            logger.error(f"Failed to apply edited step code: {e}")
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
-
-    def _reset_to_defaults(self):
-        """Reset all step parameters to their defaults."""
-        try:
-            from PyQt6.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                self,
-                "Reset to Defaults",
-                "Are you sure you want to reset all parameters to their default values?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-
-            if reply == QMessageBox.StandardButton.Yes:
-                # Reset step editor if it exists
-                if hasattr(self, 'step_editor') and hasattr(self.step_editor.form_manager, 'reset_all_parameters'):
-                    self.step_editor.form_manager.reset_all_parameters()
-
-                # Reset function list editor if it exists
-                if hasattr(self, 'function_list_editor') and hasattr(self.function_list_editor.form_manager, 'reset_all_parameters'):
-                    self.function_list_editor.form_manager.reset_all_parameters()
-
-                self._mark_changes()
-                logger.info("Reset all parameters to defaults")
-
-        except Exception as e:
-            logger.error(f"Failed to reset to defaults: {e}")
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Reset Error", f"Failed to reset:\n{e}")
-
-    def _refresh_all_tabs(self):
-        """Refresh all tabs to reflect updated step data."""
-        # This would need to recreate the tabs with the new data
-        # For now, just mark as changed
-        pass
 
     def cancel_edit(self):
         """Cancel editing and close dialog."""
