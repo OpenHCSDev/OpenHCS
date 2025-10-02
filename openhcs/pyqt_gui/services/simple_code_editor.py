@@ -72,13 +72,15 @@ class SimpleCodeEditorService:
     def _edit_with_qt_native(self, initial_content: str, title: str,
                            callback: Optional[Callable[[str], None]],
                            code_type: str = None,
-                           code_data: dict = None) -> None:
+                           code_data: dict = None,
+                           error_line: int = None) -> None:
         """Edit code using Qt native text editor dialog (QScintilla preferred)."""
         try:
             if QSCINTILLA_AVAILABLE:
                 logger.debug("Using QScintilla editor for code editing")
                 dialog = QScintillaCodeEditorDialog(self.parent, initial_content, title,
-                                                   code_type=code_type, code_data=code_data)
+                                                   code_type=code_type, code_data=code_data,
+                                                   initial_line=error_line)
             else:
                 logger.debug("QScintilla not available, using QTextEdit fallback")
                 dialog = CodeEditorDialog(self.parent, initial_content, title)
@@ -86,7 +88,21 @@ class SimpleCodeEditorService:
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 edited_content = dialog.get_content()
                 if callback:
-                    callback(edited_content)
+                    try:
+                        callback(edited_content)
+                    except (SyntaxError, Exception) as e:
+                        # Extract error line number
+                        error_line_num = self._extract_error_line(e)
+
+                        # Show error dialog
+                        error_msg = f"Error: {str(e)}"
+                        if error_line_num:
+                            error_msg = f"Error at line {error_line_num}: {str(e)}"
+                        self._show_error(error_msg)
+
+                        # Reopen editor with same content and cursor at error line
+                        logger.info(f"Reopening editor with cursor at line {error_line_num}")
+                        self._edit_with_qt_native(edited_content, title, callback, code_type, code_data, error_line_num)
 
         except Exception as e:
             logger.error(f"Qt native editor failed: {e}")
@@ -136,6 +152,24 @@ class SimpleCodeEditorService:
         """Show error message to user."""
         QMessageBox.critical(self.parent, "Editor Error", message)
 
+    def _extract_error_line(self, exception: Exception) -> Optional[int]:
+        """Extract line number from exception if available."""
+        # For SyntaxError, use lineno attribute
+        if isinstance(exception, SyntaxError) and hasattr(exception, 'lineno'):
+            return exception.lineno
+
+        # For other exceptions, try to extract from traceback
+        import traceback
+        import sys
+        tb = sys.exc_info()[2]
+        if tb:
+            # Find the frame that executed the user's code (marked as '<string>')
+            for frame_summary in traceback.extract_tb(tb):
+                if '<string>' in frame_summary.filename:
+                    return frame_summary.lineno
+
+        return None
+
 
 class QScintillaCodeEditorDialog(QDialog):
     """
@@ -147,7 +181,7 @@ class QScintillaCodeEditorDialog(QDialog):
     """
 
     def __init__(self, parent, initial_content: str, title: str,
-                 code_type: str = None, code_data: dict = None):
+                 code_type: str = None, code_data: dict = None, initial_line: int = None):
         """
         Initialize code editor dialog.
 
@@ -157,6 +191,7 @@ class QScintillaCodeEditorDialog(QDialog):
             title: Window title
             code_type: Type of code being edited ('orchestrator', 'pipeline', 'function', None)
             code_data: Data needed to regenerate code (for clean mode toggle)
+            initial_line: Line number to position cursor at (1-based, None for start)
         """
         super().__init__(parent)
         self.setWindowTitle(title)
@@ -167,6 +202,7 @@ class QScintillaCodeEditorDialog(QDialog):
         self.code_type = code_type
         self.code_data = code_data or {}
         self.clean_mode = self.code_data.get('clean_mode', True)  # Default to clean mode
+        self.initial_line = initial_line
 
         # Get color scheme from parent
         from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
@@ -177,6 +213,10 @@ class QScintillaCodeEditorDialog(QDialog):
 
         # Apply theming
         self._apply_theme()
+
+        # Move cursor to error line if specified
+        if self.initial_line is not None:
+            self._goto_line(self.initial_line)
 
         # Focus on editor
         self.editor.setFocus()
@@ -820,6 +860,29 @@ class QScintillaCodeEditorDialog(QDialog):
     def get_content(self) -> str:
         """Get the edited content."""
         return self.editor.text()
+
+    def _goto_line(self, line_number: int) -> None:
+        """
+        Move cursor to specified line and highlight it.
+
+        Args:
+            line_number: Line number to go to (1-based)
+        """
+        if line_number is None or line_number < 1:
+            return
+
+        # Convert to 0-based line number for QScintilla
+        line_index = line_number - 1
+
+        # Move cursor to the line
+        self.editor.setCursorPosition(line_index, 0)
+
+        # Ensure the line is visible
+        self.editor.ensureLineVisible(line_index)
+
+        # Select the entire line to highlight it
+        line_length = self.editor.lineLength(line_index)
+        self.editor.setSelection(line_index, 0, line_index, line_length)
 
 
 class CodeEditorDialog(QDialog):
