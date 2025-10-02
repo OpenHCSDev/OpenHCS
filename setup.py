@@ -182,7 +182,7 @@ setup(
         "watchdog>=6.0.0",  # For file system monitoring
 
         # Custom packages
-        "basicpy @ git+https://github.com/trissim/BaSiCPy.git",
+        "BaSiCPy>=1.2.0",
     ],
     extras_require=extras_require,
 

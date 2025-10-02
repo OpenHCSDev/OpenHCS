@@ -60,7 +60,7 @@ dependencies = [
     "watchdog>=6.0.0",
     
     # Custom packages
-    "basicpy @ git+https://github.com/trissim/BaSiCPy.git",
+    "BaSiCPy>=1.2.0",
 ]
 
 [project.optional-dependencies]
