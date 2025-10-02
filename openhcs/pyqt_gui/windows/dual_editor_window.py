@@ -626,6 +626,23 @@ class DualEditorWindow(QDialog):
     def save_step(self):
         """Save the edited step."""
         try:
+            # CRITICAL FIX: Sync function pattern from function editor BEFORE collecting form values
+            # The function editor doesn't use a form manager, so we need to explicitly sync it
+            if self.func_editor:
+                current_pattern = self.func_editor.current_pattern
+
+                # CRITICAL FIX: Use fresh imports to avoid unpicklable registry wrappers
+                if callable(current_pattern) and hasattr(current_pattern, '__module__'):
+                    try:
+                        import importlib
+                        module = importlib.import_module(current_pattern.__module__)
+                        current_pattern = getattr(module, current_pattern.__name__)
+                    except Exception:
+                        pass  # Use original if refresh fails
+
+                self.editing_step.func = current_pattern
+                logger.debug(f"Synced function pattern before save: {current_pattern}")
+
             # CRITICAL FIX: Collect current values from all form managers before saving
             # This ensures nested dataclass field values are properly saved to the step object
             for tab_index in range(self.tab_widget.count()):

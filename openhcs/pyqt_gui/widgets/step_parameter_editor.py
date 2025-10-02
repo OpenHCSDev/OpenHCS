@@ -69,8 +69,13 @@ class StepParameterEditorWidget(QWidget):
         parameters = {}
         parameter_types = {}
         param_defaults = {}
-        
+
         for name, info in param_info.items():
+            # CRITICAL FIX: Exclude 'func' parameter - it's handled by the Function Pattern tab
+            # The func parameter is specific to FunctionStep and should not be shown in step settings
+            if name == 'func':
+                continue
+
             # All AbstractStep parameters are relevant for editing
             # ParameterFormManager will automatically route lazy dataclass parameters to LazyDataclassEditor
             current_value = getattr(self.step, name, info.default_value)

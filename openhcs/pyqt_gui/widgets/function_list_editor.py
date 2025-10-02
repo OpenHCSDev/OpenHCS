@@ -156,19 +156,8 @@ class FunctionListEditorWidget(QWidget):
         add_btn.setStyleSheet(self._get_button_style())
         add_btn.clicked.connect(self.add_function)
         header_layout.addWidget(add_btn)
-        
-        load_btn = QPushButton("Load")
-        load_btn.setMaximumWidth(60)
-        load_btn.setStyleSheet(self._get_button_style())
-        load_btn.clicked.connect(self.load_function_pattern)
-        header_layout.addWidget(load_btn)
-        
-        save_btn = QPushButton("Save As")
-        save_btn.setMaximumWidth(80)
-        save_btn.setStyleSheet(self._get_button_style())
-        save_btn.clicked.connect(self.save_function_pattern)
-        header_layout.addWidget(save_btn)
-        
+
+        # Code button supersedes Load/Save buttons (provides both functionality via text editor)
         code_btn = QPushButton("Code")
         code_btn.setMaximumWidth(60)
         code_btn.setStyleSheet(self._get_button_style())
@@ -298,35 +287,7 @@ class FunctionListEditorWidget(QWidget):
             self.function_pattern_changed.emit()
             logger.debug(f"Added function: {selected_function.__name__}")
     
-    def load_function_pattern(self):
-        """Load function pattern from file (mirrors Textual TUI)."""
-        if self.service_adapter:
-            from openhcs.core.path_cache import PathCacheKey
-            
-            file_path = self.service_adapter.show_cached_file_dialog(
-                cache_key=PathCacheKey.FUNCTION_PATTERNS,
-                title="Load Function Pattern",
-                file_filter="Function Files (*.func);;All Files (*)",
-                mode="open"
-            )
-            
-            if file_path:
-                self._load_function_pattern_from_file(file_path)
-    
-    def save_function_pattern(self):
-        """Save function pattern to file (mirrors Textual TUI)."""
-        if self.service_adapter:
-            from openhcs.core.path_cache import PathCacheKey
-            
-            file_path = self.service_adapter.show_cached_file_dialog(
-                cache_key=PathCacheKey.FUNCTION_PATTERNS,
-                title="Save Function Pattern",
-                file_filter="Function Files (*.func);;All Files (*)",
-                mode="save"
-            )
-            
-            if file_path:
-                self._save_function_pattern_to_file(file_path)
+
     
     def edit_function_code(self):
         """Edit function pattern as code (simple and direct)."""
@@ -540,15 +501,7 @@ class FunctionListEditorWidget(QWidget):
     
 
     
-    def _load_function_pattern_from_file(self, file_path):
-        """Load function pattern from file."""
-        # TODO: Implement file loading
-        logger.debug(f"Load function pattern from {file_path} - TODO: implement")
-    
-    def _save_function_pattern_to_file(self, file_path):
-        """Save function pattern to file."""
-        # TODO: Implement file saving
-        logger.debug(f"Save function pattern to {file_path} - TODO: implement")
+
     
     def get_current_functions(self):
         """Get current function list."""

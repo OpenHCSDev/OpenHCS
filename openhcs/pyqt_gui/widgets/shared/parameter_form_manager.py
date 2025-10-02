@@ -1064,13 +1064,26 @@ class ParameterFormManager(QWidget):
         """
         Get reset value - context-aware for different editing modes.
 
-        - For lazy configs (PipelineConfig, StepConfig): Use None for lazy resolution
+        - For lazy dataclass fields: Use None for lazy resolution
+        - For non-lazy fields in lazy forms: Use param_defaults (static defaults)
         - For GlobalPipelineConfig editing (root + nested configs): Use instance defaults from fresh dataclass
         - For functions: Use signature defaults
         """
-        # Lazy configs always reset to None for lazy resolution from context
-        if self._is_lazy_dataclass():
-            return None
+        # Check if this specific parameter is a lazy dataclass field
+        # (not whether the entire form is lazy)
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+        param_type = self.parameter_types.get(param_name)
+
+        # If this parameter is an Optional[LazyDataclass], reset to None for lazy resolution
+        if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
+            inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
+            # Check if it's a lazy dataclass by checking for lazy resolution methods
+            try:
+                test_instance = inner_type()
+                if hasattr(test_instance, '_resolve_field_value') or hasattr(test_instance, '_lazy_resolution_config'):
+                    return None  # Lazy dataclass field - reset to None
+            except:
+                pass
 
         # Non-lazy configs in global editing mode: use fresh instance defaults
         # This prevents reset from using loaded instance values
@@ -1083,7 +1096,7 @@ class ParameterFormManager(QWidget):
             reset_value = getattr(fresh_instance, param_name, None)
             return reset_value
 
-        # All other cases: use param_defaults (functions, non-global editing)
+        # All other cases: use param_defaults (functions, non-global editing, non-lazy fields)
         return self.param_defaults.get(param_name)
 
 
