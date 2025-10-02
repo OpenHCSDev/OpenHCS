@@ -383,15 +383,21 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_m
         if not args and clean_mode:
             return get_name(func)
 
-        # Filter out defaults in clean mode
+        # Get function signature defaults
         try:
             defaults = {k: v.default for k, v in inspect.signature(func).parameters.items()
                        if v.default is not inspect.Parameter.empty}
         except (ValueError, TypeError):
             defaults = {}
 
-        final_args = {k: v for k, v in args.items()
-                     if not clean_mode or k not in defaults or v != defaults[k]}
+        if clean_mode:
+            # Clean mode: only show non-default values
+            final_args = {k: v for k, v in args.items()
+                         if k not in defaults or v != defaults[k]}
+        else:
+            # Explicit mode: show ALL parameters (merge provided args with defaults)
+            # Start with all defaults, then override with provided args
+            final_args = {**defaults, **args}
 
         if not final_args:
             return get_name(func) if clean_mode else f"({get_name(func)}, {{}})"
