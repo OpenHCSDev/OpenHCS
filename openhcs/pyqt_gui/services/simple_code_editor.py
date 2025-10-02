@@ -459,6 +459,12 @@ class QScintillaCodeEditorDialog(QDialog):
             logger.info(f"  📝 Current line: '{current_line}'")
             logger.info(f"  📝 Code length: {len(code)} chars")
 
+            # Log first 10 lines to see imports
+            code_lines = code.split('\n')
+            logger.info(f"  📋 First 10 lines of code:")
+            for i, l in enumerate(code_lines[:10]):
+                logger.info(f"    {i+1}: {l}")
+
             # Jedi uses 1-based line numbers
             jedi_line = line + 1
             jedi_col = col
