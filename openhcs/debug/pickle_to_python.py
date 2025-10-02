@@ -144,10 +144,29 @@ def generate_complete_function_pattern_code(func_obj, indent=0, clean_mode=False
     """Generate complete Python code for function pattern with imports."""
     # Collect imports from this pattern first to get name mappings
     function_imports, enum_imports, decorated_functions = collect_imports_from_data(func_obj)
-    import_lines, name_mappings = format_imports_as_strings(function_imports, enum_imports)
 
-    # Generate pattern representation using the name mappings for collision resolution
-    pattern_repr = generate_readable_function_repr(func_obj, indent, clean_mode, name_mappings)
+    # Create containers for additional imports discovered during repr generation
+    additional_function_imports = defaultdict(set)
+    additional_enum_imports = defaultdict(set)
+
+    # Merge initial imports with containers for additional imports
+    for module, names in function_imports.items():
+        additional_function_imports[module].update(names)
+    for module, names in enum_imports.items():
+        additional_enum_imports[module].update(names)
+
+    # Generate name mappings first (before repr generation)
+    import_lines, name_mappings = format_imports_as_strings(additional_function_imports, additional_enum_imports)
+
+    # Generate pattern representation, collecting additional imports as defaults are expanded
+    pattern_repr = generate_readable_function_repr(
+        func_obj, indent, clean_mode, name_mappings,
+        required_function_imports=additional_function_imports,
+        required_enum_imports=additional_enum_imports
+    )
+
+    # Regenerate import lines with all collected imports (including those from expanded defaults)
+    import_lines, name_mappings = format_imports_as_strings(additional_function_imports, additional_enum_imports)
 
     # Build complete code
     code_lines = ["# Edit this function pattern and save to apply changes", ""]
@@ -359,7 +378,8 @@ def convert_pickle_to_python(pickle_path, output_path=None, clean_mode=False):
         traceback.print_exc()
 
 
-def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_mappings=None):
+def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_mappings=None,
+                                   required_function_imports=None, required_enum_imports=None):
     """Generate readable Python representation with collision-resolved function names."""
     indent_str = "    " * indent
     next_indent_str = "    " * (indent + 1)
@@ -399,29 +419,45 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_m
             # Start with all defaults, then override with provided args
             final_args = {**defaults, **args}
 
+            # Collect imports from default values that weren't in original args
+            if required_function_imports is not None or required_enum_imports is not None:
+                for param_name, default_value in defaults.items():
+                    if param_name not in args:  # Only collect for newly added defaults
+                        # Collect imports from this default value
+                        if isinstance(default_value, Enum):
+                            if required_enum_imports is not None:
+                                enum_module = default_value.__class__.__module__
+                                enum_class = default_value.__class__.__name__
+                                required_enum_imports[enum_module].add(enum_class)
+                        elif is_dataclass(default_value):
+                            if required_function_imports is not None:
+                                dc_module = default_value.__class__.__module__
+                                dc_class = default_value.__class__.__name__
+                                required_function_imports[dc_module].add(dc_class)
+
         if not final_args:
             return get_name(func) if clean_mode else f"({get_name(func)}, {{}})"
 
-        args_items = [f"{next_indent_str}    '{k}': {generate_readable_function_repr(v, indent + 2, clean_mode, name_mappings)}"
+        args_items = [f"{next_indent_str}    '{k}': {generate_readable_function_repr(v, indent + 2, clean_mode, name_mappings, required_function_imports, required_enum_imports)}"
                      for k, v in final_args.items()]
         args_str = "{\n" + ",\n".join(args_items) + f"\n{next_indent_str}}}"
         return f"({get_name(func)}, {args_str})"
 
     elif isinstance(func_obj, list):
         if clean_mode and len(func_obj) == 1:
-            return generate_readable_function_repr(func_obj[0], indent, clean_mode, name_mappings)
+            return generate_readable_function_repr(func_obj[0], indent, clean_mode, name_mappings, required_function_imports, required_enum_imports)
         if not func_obj:
             return "[]"
-        items = [generate_readable_function_repr(item, indent, clean_mode, name_mappings) for item in func_obj]
+        items = [generate_readable_function_repr(item, indent, clean_mode, name_mappings, required_function_imports, required_enum_imports) for item in func_obj]
         return f"[\n{next_indent_str}{f',\n{next_indent_str}'.join(items)}\n{indent_str}]"
 
     elif isinstance(func_obj, dict):
         if not func_obj:
             return "{}"
-        items = [f"{next_indent_str}'{k}': {generate_readable_function_repr(v, indent, clean_mode, name_mappings)}"
+        items = [f"{next_indent_str}'{k}': {generate_readable_function_repr(v, indent, clean_mode, name_mappings, required_function_imports, required_enum_imports)}"
                 for k, v in func_obj.items()]
         return f"{{{',\n'.join(items)}\n{indent_str}}}"
-        
+
     else:
         return _value_to_repr(func_obj)
 
@@ -530,7 +566,8 @@ def _collect_enum_classes_from_step(step):
     return enum_classes
 
 
-def _generate_step_parameters(step, default_step, clean_mode=False, name_mappings=None):
+def _generate_step_parameters(step, default_step, clean_mode=False, name_mappings=None,
+                             required_function_imports=None, required_enum_imports=None):
     """Generate FunctionStep constructor parameters using functional introspection."""
     from openhcs.core.steps.abstract import AbstractStep
 
@@ -539,7 +576,7 @@ def _generate_step_parameters(step, default_step, clean_mode=False, name_mapping
                  [(name, param) for name, param in inspect.signature(AbstractStep.__init__).parameters.items()
                   if name != 'self']
 
-    return [f"{name}={generate_readable_function_repr(getattr(step, name, param.default), 1, clean_mode, name_mappings) if name == 'func' else _format_parameter_value(name, getattr(step, name, param.default), name_mappings)}"
+    return [f"{name}={generate_readable_function_repr(getattr(step, name, param.default), 1, clean_mode, name_mappings, required_function_imports, required_enum_imports) if name == 'func' else _format_parameter_value(name, getattr(step, name, param.default), name_mappings)}"
             for name, param in signatures
             if not clean_mode or getattr(step, name, param.default) != getattr(default_step, name, param.default)]
 
@@ -577,29 +614,38 @@ def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     # Virtual modules are now automatically created during OpenHCS import
     # No need to generate runtime virtual module creation code
 
-    # Format and add all collected imports
+    # Format and add all collected imports (initial pass)
+    import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
+
+    # Generate pipeline steps code, collecting additional imports from expanded defaults
+    step_code_lines = []
+    step_code_lines.append("# Pipeline steps")
+    step_code_lines.append("pipeline_steps = []")
+    step_code_lines.append("")
+
+    default_step = FunctionStep(func=lambda: None)
+    for i, step in enumerate(pipeline_steps):
+        step_code_lines.append(f"# Step {i+1}: {step.name}")
+
+        # Generate all FunctionStep parameters automatically using introspection
+        # Pass import containers to collect additional imports from expanded defaults
+        step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings,
+                                             all_function_imports, all_enum_imports)
+
+        args_str = ",\n    ".join(step_args)
+        step_code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
+        step_code_lines.append(f"pipeline_steps.append(step_{i+1})")
+        step_code_lines.append("")
+
+    # Regenerate import lines with all collected imports (including those from expanded defaults)
     import_lines, name_mappings = format_imports_as_strings(all_function_imports, all_enum_imports)
     if import_lines:
         code_lines.append("# Automatically collected imports")
         code_lines.extend(import_lines)
         code_lines.append("")
 
-    # Generate pipeline steps (extract exact logic from lines 164-198)
-    code_lines.append("# Pipeline steps")
-    code_lines.append("pipeline_steps = []")
-    code_lines.append("")
-
-    default_step = FunctionStep(func=lambda: None)
-    for i, step in enumerate(pipeline_steps):
-        code_lines.append(f"# Step {i+1}: {step.name}")
-
-        # Generate all FunctionStep parameters automatically using introspection
-        step_args = _generate_step_parameters(step, default_step, clean_mode, name_mappings)
-
-        args_str = ",\n    ".join(step_args)
-        code_lines.append(f"step_{i+1} = FunctionStep(\n    {args_str}\n)")
-        code_lines.append(f"pipeline_steps.append(step_{i+1})")
-        code_lines.append("")
+    # Add step code
+    code_lines.extend(step_code_lines)
 
     return "\n".join(code_lines)
 
