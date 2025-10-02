@@ -390,6 +390,9 @@ class QScintillaCodeEditorDialog(QDialog):
         # Show single item automatically
         self.editor.setAutoCompletionUseSingle(QsciScintilla.AutoCompletionUseSingle.AcusNever)
 
+        # Note: setAutoCompletionMaxVisibleItems() doesn't exist in QScintilla
+        # The list size is automatically managed
+
         # Setup Jedi-based API
         self._setup_jedi_api()
 
@@ -513,37 +516,32 @@ class QScintillaCodeEditorDialog(QDialog):
                 sample = [c.name for c in completions[:5]]
                 logger.info(f"  📋 Sample completions: {sample}")
 
-                # Clear existing API and rebuild with Jedi completions
-                self.api.clear()
-                logger.info(f"  🗑️  Cleared existing API")
-
-                # Add Jedi completions to API
-                for c in completions:
-                    name = c.name
-                    # Add with type hint if available
-                    if c.type:
-                        self.api.add(f"{name}?{c.type}")
-                    else:
-                        self.api.add(name)
-
-                # Prepare the updated API
-                self.api.prepare()
-                logger.info(f"  ✓ Prepared API with {len(completions)} Jedi completions")
-
                 # Check if autocomplete is already active
                 if self.editor.isListActive():
                     logger.info(f"  ⚠️  Autocomplete list already active, canceling first")
                     self.editor.cancelList()
 
-                # Trigger autocomplete - use autoCompleteFromAll to include both API and document
-                self.editor.autoCompleteFromAll()
-                logger.info(f"  ✅ Called autoCompleteFromAll()")
+                # Build completion list
+                # Format for each item: "name?type" where ?type is optional
+                completion_items = []
+                for c in completions:
+                    if c.type:
+                        completion_items.append(f"{c.name}?{c.type}")
+                    else:
+                        completion_items.append(c.name)
+
+                logger.info(f"  📝 Built {len(completion_items)} completion items")
+
+                # Use showUserList instead of autoCompleteFromAll to avoid QScintilla's filtering
+                # showUserList(id, list) - id=1 for user completions, list is an iterable of strings
+                self.editor.showUserList(1, completion_items)
+                logger.info(f"  ✅ Called showUserList() with {len(completions)} completions")
 
                 # Check if it's showing
                 if self.editor.isListActive():
                     logger.info(f"  ✅ Autocomplete list is now active!")
                 else:
-                    logger.info(f"  ❌ Autocomplete list is NOT active - QScintilla may have filtered all results")
+                    logger.info(f"  ❌ Autocomplete list is NOT active")
 
             else:
                 logger.info("  ⚠️  No Jedi completions - trying standard autocomplete")
