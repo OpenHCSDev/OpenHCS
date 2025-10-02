@@ -467,7 +467,7 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_m
         return f"{{{',\n'.join(items)}\n{indent_str}}}"
 
     else:
-        return _value_to_repr(func_obj)
+        return _value_to_repr(func_obj, required_imports=required_enum_imports, name_mappings=name_mappings)
 
 
 def _format_parameter_value(param_name, value, name_mappings=None):
