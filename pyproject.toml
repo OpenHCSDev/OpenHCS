@@ -124,9 +124,9 @@ gpu = [
     
     # pyclesperanto
     "pyclesperanto>=0.17.1",
-    
-    # torbi - GPU-accelerated Viterbi decoding
-    "torbi @ git+https://github.com/trissim/torbi.git",
+
+    # torbi - GPU-accelerated Viterbi decoding (git dependency, install manually if needed)
+    # "torbi @ git+https://github.com/trissim/torbi.git",
 ]
 
 # All non-dev extras combined (TUI excluded - deprecated)
@@ -151,7 +151,7 @@ all = [
     "tensorflow>=2.19.0,<2.20.0",
     "tensorflow-probability[tf]>=0.25.0,<0.26.0",
     "pyclesperanto>=0.17.1",
-    "torbi @ git+https://github.com/trissim/torbi.git",
+    # "torbi @ git+https://github.com/trissim/torbi.git",  # Git dependency, install manually if needed
 ]
 
 [project.urls]

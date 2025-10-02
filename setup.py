@@ -92,7 +92,7 @@ extras_require = {
         "pyclesperanto>=0.17.1",
 
         # torbi - GPU-accelerated Viterbi decoding (patched fork for PyTorch 2.6+ compatibility)
-        "torbi @ git+https://github.com/trissim/torbi.git",
+        # "torbi @ git+https://github.com/trissim/torbi.git",  # Git dependency, install manually if needed
 
         # torch_nlm - PyTorch-based non-local means denoising with GPU support
         # "nlm-torch>=0.1.0"  # Disabled: requires numpy==1.23.5 which conflicts with modern stack
