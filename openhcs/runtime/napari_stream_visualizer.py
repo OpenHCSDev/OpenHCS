@@ -223,6 +223,104 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
         else:
             # Multiple images - create multi-dimensional array for napari
             try:
+                # Check if all images have the same shape
+                first_shape = layer_images[0]['data'].shape
+                all_same_shape = all(img['data'].shape == first_shape for img in layer_images)
+
+                if not all_same_shape:
+                    # Images have different shapes - handle based on config
+                    # Get variable size handling mode from config
+                    from openhcs.core.config import NapariVariableSizeHandling
+                    variable_size_mode = NapariVariableSizeHandling.SEPARATE_LAYERS  # Default
+
+                    if isinstance(display_config, dict):
+                        mode_str = display_config.get('variable_size_handling')
+                        if mode_str:
+                            try:
+                                variable_size_mode = NapariVariableSizeHandling(mode_str)
+                            except (ValueError, KeyError):
+                                pass
+                    elif hasattr(display_config, 'variable_size_handling'):
+                        mode_value = display_config.variable_size_handling
+                        if mode_value is not None:
+                            variable_size_mode = mode_value
+
+                    if variable_size_mode == NapariVariableSizeHandling.PAD_TO_MAX:
+                        # Pad images to max size
+                        logger.info(f"🔬 NAPARI PROCESS: Images in layer {layer_key} have different shapes - padding to max size")
+
+                        # Find max dimensions
+                        max_shape = list(first_shape)
+                        for img_info in layer_images:
+                            img_shape = img_info['data'].shape
+                            for i, dim in enumerate(img_shape):
+                                max_shape[i] = max(max_shape[i], dim)
+                        max_shape = tuple(max_shape)
+
+                        # Pad all images to max shape
+                        padded_images = []
+                        for img_info in layer_images:
+                            img_data = img_info['data']
+                            if img_data.shape != max_shape:
+                                # Calculate padding for each dimension
+                                pad_width = []
+                                for i, (current_dim, max_dim) in enumerate(zip(img_data.shape, max_shape)):
+                                    pad_before = 0
+                                    pad_after = max_dim - current_dim
+                                    pad_width.append((pad_before, pad_after))
+
+                                # Pad with zeros
+                                padded_data = np.pad(img_data, pad_width, mode='constant', constant_values=0)
+                                img_info['data'] = padded_data
+                                logger.debug(f"🔬 NAPARI PROCESS: Padded image from {img_data.shape} to {padded_data.shape}")
+
+                        # Continue with normal stacking logic below (all images now have same shape)
+
+                    else:  # SEPARATE_LAYERS mode
+                        # Create separate layers per well
+                        logger.warning(f"🔬 NAPARI PROCESS: Images in layer {layer_key} have different shapes - creating separate layers per well")
+
+                        # Group by well and create separate layers
+                        wells_in_layer = {}
+                        for img_info in layer_images:
+                            well = img_info['components'].get('well', 'unknown_well')
+                            if well not in wells_in_layer:
+                                wells_in_layer[well] = []
+                            wells_in_layer[well].append(img_info)
+
+                        # Create a layer for each well
+                        for well, well_images in wells_in_layer.items():
+                            well_layer_name = f"{layer_key}_{well}"
+
+                            # If only one image for this well, add directly
+                            if len(well_images) == 1:
+                                well_image_data = well_images[0]['data']
+                            else:
+                                # Stack images for this well (they should have same shape within a well)
+                                well_image_stack = [img['data'] for img in well_images]
+                                from openhcs.core.memory.stack_utils import stack_slices
+                                well_image_data = stack_slices(well_image_stack, memory_type='numpy', gpu_id=0)
+
+                            # Check if layer exists
+                            existing_layer = None
+                            for layer in viewer.layers:
+                                if layer.name == well_layer_name:
+                                    existing_layer = layer
+                                    break
+
+                            if existing_layer is not None:
+                                existing_layer.data = well_image_data
+                                layers[well_layer_name] = existing_layer
+                                logger.info(f"🔬 NAPARI PROCESS: Updated well-specific layer {well_layer_name} (shape: {well_image_data.shape})")
+                            else:
+                                new_layer = viewer.add_image(well_image_data, name=well_layer_name, colormap=colormap)
+                                layers[well_layer_name] = new_layer
+                                logger.info(f"🔬 NAPARI PROCESS: Created well-specific layer {well_layer_name} (shape: {well_image_data.shape})")
+
+                        # Skip the normal stacking logic below
+                        return
+
+                # All images have same shape - proceed with normal stacking
                 # Sort images by stack components for consistent ordering
                 if stack_components:
                     def sort_key(img_info):
@@ -562,17 +660,25 @@ except Exception as e:
 '''
 
     try:
+        # Create log file for detached process
+        import tempfile
+        log_dir = os.path.expanduser("~/.local/share/openhcs/logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, f"napari_detached_port_{port}.log")
+
         # Use subprocess.Popen with detachment flags
         if sys.platform == "win32":
             # Windows: Use CREATE_NEW_PROCESS_GROUP to detach but preserve display environment
             env = os.environ.copy()  # Preserve environment variables
-            process = subprocess.Popen(
-                [sys.executable, "-c", python_code],
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
-                env=env,
-                cwd=os.getcwd()
-                # Don't redirect stdout/stderr to allow GUI to display properly
-            )
+            with open(log_file, 'w') as log_f:
+                process = subprocess.Popen(
+                    [sys.executable, "-c", python_code],
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                    env=env,
+                    cwd=os.getcwd(),
+                    stdout=log_f,
+                    stderr=subprocess.STDOUT
+                )
         else:
             # Unix: Use start_new_session to detach but preserve display environment
             env = os.environ.copy()  # Preserve DISPLAY and other environment variables
@@ -584,15 +690,17 @@ except Exception as e:
             # Ensure Qt can find the display
             env['QT_X11_NO_MITSHM'] = '1'  # Disable shared memory for X11 (helps with some display issues)
 
-            # Try without start_new_session to see if GUI displays properly
+            # Redirect stdout/stderr to log file for debugging
+            log_f = open(log_file, 'w')
             process = subprocess.Popen(
                 [sys.executable, "-c", python_code],
                 env=env,
-                cwd=os.getcwd()
-                # Don't redirect stdout/stderr to allow GUI to display properly
+                cwd=os.getcwd(),
+                stdout=log_f,
+                stderr=subprocess.STDOUT
             )
 
-        logger.info(f"🔬 VISUALIZER: Detached napari process started (PID: {process.pid})")
+        logger.info(f"🔬 VISUALIZER: Detached napari process started (PID: {process.pid}), logging to {log_file}")
         return process
 
     except Exception as e:
@@ -670,6 +778,7 @@ class NapariStreamVisualizer:
                 # For persistent viewers, use detached subprocess that truly survives parent termination
                 logger.info("🔬 VISUALIZER: Creating detached persistent napari viewer")
                 self.process = _spawn_detached_napari_process(self.port, self.viewer_title, self.replace_layers)
+                # DON'T track persistent viewers in global variable - they should survive test cleanup
             else:
                 # For non-persistent viewers, use multiprocessing.Process
                 logger.info("🔬 VISUALIZER: Creating non-persistent napari viewer")
@@ -680,10 +789,10 @@ class NapariStreamVisualizer:
                 )
                 self.process.start()
 
-            # Update global references
-            with _global_process_lock:
-                _global_viewer_process = self.process
-                _global_viewer_port = self.port
+                # Only track non-persistent viewers in global variable for test cleanup
+                with _global_process_lock:
+                    _global_viewer_process = self.process
+                    _global_viewer_port = self.port
 
             # Wait for napari viewer to be ready before setting up ZMQ
             self._wait_for_viewer_ready()

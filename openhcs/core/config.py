@@ -131,11 +131,13 @@ class GlobalPipelineConfig:
 
 
 def _headless_mode() -> bool:
-    """Detect headless/CI contexts where viz deps should not be required at import time."""
+    """Detect headless/CI contexts where viz deps should not be required at import time.
+
+    CPU-only mode does NOT imply headless - you can run CPU mode with napari.
+    Only CI or explicit OPENHCS_HEADLESS flag triggers headless mode.
+    """
     try:
         if os.getenv('CI', '').lower() == 'true':
-            return True
-        if os.getenv('OPENHCS_CPU_ONLY', '').lower() == 'true':
             return True
         if os.getenv('OPENHCS_HEADLESS', '').lower() == 'true':
             return True
@@ -208,6 +210,12 @@ class NapariDimensionMode(Enum):
     STACK = "stack"  # Show as 3D stack/volume
 
 
+class NapariVariableSizeHandling(Enum):
+    """How to handle images with different sizes in the same layer."""
+    SEPARATE_LAYERS = "separate_layers"  # Create separate layers per well (preserves exact data)
+    PAD_TO_MAX = "pad_to_max"  # Pad smaller images to match largest (enables stacking)
+
+
 def _create_napari_display_config():
     """Dynamically create NapariDisplayConfig with component-specific fields."""
     # Define components locally to avoid circular import
@@ -224,9 +232,11 @@ def _create_napari_display_config():
     # Create field annotations and defaults
     annotations = {
         'colormap': NapariColormap,
+        'variable_size_handling': NapariVariableSizeHandling,
     }
     defaults = {
         'colormap': NapariColormap.GRAY,
+        'variable_size_handling': NapariVariableSizeHandling.SEPARATE_LAYERS,
     }
 
     # Add dynamic component mode fields

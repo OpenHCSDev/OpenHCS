@@ -144,9 +144,10 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         message = {
             'type': 'batch',
             'images': batch_images,
-'display_config': {
+            'display_config': {
                 'colormap': display_config.get_colormap_name(),
-                'component_modes': component_modes
+                'component_modes': component_modes,
+                'variable_size_handling': display_config.variable_size_handling.value if hasattr(display_config, 'variable_size_handling') and display_config.variable_size_handling else None
             },
             'timestamp': time.time()
         }

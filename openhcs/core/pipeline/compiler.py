@@ -408,14 +408,15 @@ class PipelineCompiler:
                                     import os
 
                                     # Check if running in headless/CI environment
+                                    # CPU-only mode does NOT imply headless - you can run CPU mode with napari
                                     is_headless = (
-                                        os.getenv('OPENHCS_CPU_ONLY', 'false').lower() == 'true' or
                                         os.getenv('CI', 'false').lower() == 'true' or
+                                        os.getenv('OPENHCS_HEADLESS', 'false').lower() == 'true' or
                                         os.getenv('DISPLAY') is None
                                     )
 
                                     if is_headless:
-                                        logger.info(f"Napari streaming disabled for step '{step.name}': running in headless environment (CI/CPU_ONLY mode)")
+                                        logger.info(f"Napari streaming disabled for step '{step.name}': running in headless environment (CI or no DISPLAY)")
                                         continue  # Skip this streaming config
 
                                     napari = optional_import("napari")

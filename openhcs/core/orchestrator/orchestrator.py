@@ -709,26 +709,49 @@ class PipelineOrchestrator(ContextProvider):
 
             logger.info(f"🔬 ORCHESTRATOR: Found {len(unique_napari_ports)} unique napari ports: {unique_napari_ports}")
 
-            # Create a visualizer for each unique port
-            context = next(iter(compiled_contexts.values()))
-            for visualizer_info in context.required_visualizers:
-                config = visualizer_info['config']
+            # Collect all unique visualizer configs across all contexts
+            # Key: (backend_name, port) for napari, (backend_name,) for others
+            # Value: config object
+            unique_visualizer_configs = {}
 
-                # For napari configs, create one visualizer per unique port
+            for ctx in compiled_contexts.values():
+                for visualizer_info in ctx.required_visualizers:
+                    config = visualizer_info['config']
+
+                    # For napari configs, use port as part of the key
+                    if hasattr(config, 'napari_port'):
+                        key = ('napari', config.napari_port)
+                        # Store the first config we see for each port
+                        # All configs for the same port should be identical after resolution
+                        if key not in unique_visualizer_configs:
+                            logger.info(f"🔬 ORCHESTRATOR: Found first config for port {config.napari_port}: persistent={config.persistent}")
+                            unique_visualizer_configs[key] = (config, ctx.visualizer_config)
+                        else:
+                            # Log if we see a different config for the same port
+                            existing_config = unique_visualizer_configs[key][0]
+                            if existing_config.persistent != config.persistent:
+                                logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for port {config.napari_port}: existing={existing_config.persistent}, new={config.persistent}")
+                    else:
+                        # For non-napari visualizers, use backend name as key
+                        backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
+                        key = (backend_name,)
+                        if key not in unique_visualizer_configs:
+                            unique_visualizer_configs[key] = (config, ctx.visualizer_config)
+
+            # Create visualizers from unique configs
+            for key, (config, vis_config) in unique_visualizer_configs.items():
                 if hasattr(config, 'napari_port'):
                     port = config.napari_port
-                    # Check if we already created a visualizer for this port
-                    if not any(hasattr(v, 'napari_port') and v.napari_port == port for v in visualizers):
-                        logger.info(f"🔬 ORCHESTRATOR: Creating napari visualizer for port {port}")
-                        vis = config.create_visualizer(self.filemanager, context.visualizer_config)
-                        logger.info(f"🔬 ORCHESTRATOR: Starting napari visualizer on port {port}")
-                        vis.start_viewer()
-                        logger.info(f"🔬 ORCHESTRATOR: Napari visualizer started on port {port}, is_running: {vis.is_running}")
-                        visualizers.append(vis)
+                    logger.info(f"🔬 ORCHESTRATOR: Creating napari visualizer for port {port} (persistent={config.persistent})")
+                    vis = config.create_visualizer(self.filemanager, vis_config)
+                    logger.info(f"🔬 ORCHESTRATOR: Starting napari visualizer on port {port}")
+                    vis.start_viewer()
+                    logger.info(f"🔬 ORCHESTRATOR: Napari visualizer started on port {port}, is_running: {vis.is_running}")
+                    visualizers.append(vis)
                 else:
-                    # Non-napari visualizers (e.g., Fiji) - create once
+                    # Non-napari visualizers (e.g., Fiji)
                     logger.info(f"🔬 ORCHESTRATOR: Creating visualizer with config: {config}")
-                    vis = config.create_visualizer(self.filemanager, context.visualizer_config)
+                    vis = config.create_visualizer(self.filemanager, vis_config)
                     logger.info(f"🔬 ORCHESTRATOR: Starting visualizer: {vis}")
                     vis.start_viewer()
                     logger.info(f"🔬 ORCHESTRATOR: Visualizer started, is_running: {vis.is_running}")
