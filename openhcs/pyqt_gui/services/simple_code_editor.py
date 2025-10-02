@@ -371,14 +371,14 @@ class QScintillaCodeEditorDialog(QDialog):
 
     def _configure_autocomplete(self):
         """Configure autocomplete for Python code."""
-        # Disable built-in autocomplete - we'll use Jedi instead
-        self.editor.setAutoCompletionSource(QsciScintilla.AutoCompletionSource.AcsNone)
+        # Use custom autocomplete source (we'll populate it with Jedi)
+        self.editor.setAutoCompletionSource(QsciScintilla.AutoCompletionSource.AcsAPIs)
 
-        # Show autocomplete after typing 1 character (Jedi is smart enough)
-        self.editor.setAutoCompletionThreshold(1)
+        # Show autocomplete after typing 2 characters
+        self.editor.setAutoCompletionThreshold(2)
 
-        # Case-sensitive matching (Jedi handles this)
-        self.editor.setAutoCompletionCaseSensitivity(True)
+        # Case-insensitive matching
+        self.editor.setAutoCompletionCaseSensitivity(False)
 
         # Replace word when selecting from autocomplete
         self.editor.setAutoCompletionReplaceWord(True)
@@ -386,33 +386,55 @@ class QScintillaCodeEditorDialog(QDialog):
         # Show single item automatically
         self.editor.setAutoCompletionUseSingle(QsciScintilla.AutoCompletionUseSingle.AcusNever)
 
-        # Connect text changed signal to trigger Jedi autocomplete
-        self.editor.textChanged.connect(self._on_text_changed)
+        # Setup Jedi-based API
+        self._setup_jedi_api()
 
-        # Connect user list selection to handle autocomplete selection
-        self.editor.userListActivated.connect(self._on_autocomplete_selected)
+        # Install event filter to catch key presses for autocomplete triggering
+        self.editor.installEventFilter(self)
 
-        # Track if we're currently showing autocomplete
-        self._autocomplete_active = False
+    def eventFilter(self, obj, event):
+        """Filter events to trigger Jedi autocomplete on '.' """
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtGui import QKeyEvent
 
-    def _on_text_changed(self):
-        """Handle text changes to trigger Jedi autocomplete."""
-        # Only trigger if user is actively typing (not if autocomplete is showing)
-        if self._autocomplete_active:
-            return
+        if obj == self.editor and event.type() == QEvent.Type.KeyPress:
+            key_event = event
+            # Trigger autocomplete when '.' is typed
+            if key_event.text() == '.':
+                # Let the '.' be inserted first
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(10, self._show_jedi_completions)
 
-        # Get current cursor position
-        line, col = self.editor.getCursorPosition()
+        return super().eventFilter(obj, event)
 
-        # Get the character just typed
-        if col > 0:
-            text = self.editor.text(line)
-            if col <= len(text):
-                char = text[col - 1] if col > 0 else ''
+    def _setup_jedi_api(self):
+        """Setup initial API with basic Python keywords for fallback."""
+        try:
+            from PyQt6.Qsci import QsciAPIs
 
-                # Trigger autocomplete on '.' or after typing a character
-                if char == '.' or (char.isalnum() or char == '_'):
-                    self._show_jedi_completions()
+            # Create API object for Python lexer
+            self.api = QsciAPIs(self.lexer)
+
+            # Add basic Python keywords as fallback
+            python_keywords = [
+                'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await',
+                'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except',
+                'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
+                'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return',
+                'try', 'while', 'with', 'yield', 'print', 'len', 'range', 'str',
+                'int', 'float', 'list', 'dict', 'tuple', 'set'
+            ]
+
+            for keyword in python_keywords:
+                self.api.add(keyword)
+
+            # Prepare the API
+            self.api.prepare()
+
+            logger.debug("Jedi API autocomplete configured")
+
+        except Exception as e:
+            logger.warning(f"Failed to setup Jedi API autocomplete: {e}")
 
     def _show_jedi_completions(self):
         """Show Jedi-powered autocomplete suggestions."""
@@ -434,57 +456,36 @@ class QScintillaCodeEditorDialog(QDialog):
             completions = script.complete(jedi_line, jedi_col)
 
             if completions:
-                # Build completion list for QScintilla
-                # Format: space-separated list with optional "?type" suffix
-                completion_list = []
+                # Clear existing API and rebuild with Jedi completions
+                self.api.clear()
+
+                # Add Jedi completions to API
                 for c in completions:
-                    # Get completion name
                     name = c.name
-
-                    # Add type hint if available
-                    type_hint = c.type
-                    if type_hint:
-                        # Show type as suffix (function, class, module, etc.)
-                        completion_list.append(f"{name}?{type_hint}")
+                    # Add with type hint if available
+                    if c.type:
+                        self.api.add(f"{name}?{c.type}")
                     else:
-                        completion_list.append(name)
+                        self.api.add(name)
 
-                # Join with space separator for QScintilla
-                completion_string = ' '.join(completion_list)
+                # Prepare the updated API
+                self.api.prepare()
 
-                # Show autocomplete with Jedi suggestions
-                self._autocomplete_active = True
-                self.editor.showUserList(1, completion_string)
-                self._autocomplete_active = False
+                # Trigger autocomplete
+                self.editor.autoCompleteFromAPIs()
 
                 logger.debug(f"Jedi autocomplete: {len(completions)} suggestions")
+            else:
+                # No Jedi completions, try standard autocomplete
+                self.editor.autoCompleteFromAPIs()
 
         except Exception as e:
             logger.debug(f"Jedi autocomplete failed: {e}")
-            # Fall back to no autocomplete on error
-
-    def _on_autocomplete_selected(self, list_id: int, text: str):
-        """Handle autocomplete selection from user list."""
-        # Extract just the completion text (remove type suffix if present)
-        if '?' in text:
-            completion = text.split('?')[0]
-        else:
-            completion = text
-
-        # Get current cursor position
-        line, col = self.editor.getCursorPosition()
-
-        # Get the current line text
-        line_text = self.editor.text(line)
-
-        # Find the start of the current word being completed
-        word_start = col
-        while word_start > 0 and (line_text[word_start - 1].isalnum() or line_text[word_start - 1] == '_'):
-            word_start -= 1
-
-        # Replace the partial word with the completion
-        self.editor.setSelection(line, word_start, line, col)
-        self.editor.replaceSelectedText(completion)
+            # Fall back to standard autocomplete
+            try:
+                self.editor.autoCompleteFromAPIs()
+            except:
+                pass
 
     def _apply_theme(self):
         """Apply PyQt6ColorScheme theming to QScintilla editor."""
