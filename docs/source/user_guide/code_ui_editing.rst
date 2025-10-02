@@ -198,7 +198,7 @@ Orchestrator Configuration
         vfs=VFSConfig(memory_limit_gb=128)
     )
     
-    # Memory-constrained configuration  
+    # Memory-constrained configuration
     global_config = GlobalPipelineConfig(
         num_workers=8,
         vfs=VFSConfig(
@@ -206,6 +206,62 @@ Orchestrator Configuration
             memory_limit_gb=16
         )
     )
+
+Plate Metadata Viewer
+---------------------
+
+**When to Use**: Inspecting plate metadata, verifying microscope format detection, checking grid dimensions, pixel sizes, and available channels before processing.
+
+**Complete Workflow Example**:
+
+1. **Initialize Plates**: Add and initialize plates in the Plate Manager
+2. **Select Plates**: Select one or more plates to view metadata
+3. **Click "Meta" Button**: Opens a read-only metadata viewer for each selected plate
+4. **Inspect Metadata**: Review all plate metadata fields in a structured form
+
+**Available Metadata Fields**:
+
+The metadata viewer displays all fields from the plate's metadata using generic reflection:
+
+- **Microscope Handler**: The detected microscope format (ImageXpress, Opera Phenix, OpenHCS, etc.)
+- **Source Filename Parser**: The parser used to extract well/site/channel information
+- **Grid Dimensions**: Plate layout (rows × columns)
+- **Pixel Size**: Physical pixel dimensions (micrometers per pixel)
+- **Image Files**: List of all image files in the plate
+- **Channels**: Available imaging channels
+- **Wells**: Detected well positions
+- **Sites**: Number of sites per well
+- **Z-Indexes**: Available z-planes for z-stack imaging
+- **Available Backends**: Supported storage backends for this plate
+- **Main Subdirectory**: Primary data subdirectory (for OpenHCS format)
+
+**Multi-Subdirectory Plates**:
+
+For OpenHCS plates with multiple subdirectories (e.g., different processing outputs), the metadata viewer creates separate collapsible groups for each subdirectory, allowing you to inspect metadata for each independently.
+
+**Example Use Cases**:
+
+.. code-block:: python
+
+    # Verify pixel size before analysis
+    # Open metadata viewer → Check "Pixel Size" field
+    # Ensure it matches expected microscope calibration
+
+    # Check available channels
+    # Open metadata viewer → Review "Channels" field
+    # Verify all expected fluorescence channels are present
+
+    # Inspect grid dimensions
+    # Open metadata viewer → Check "Grid Dimensions" field
+    # Confirm plate layout (e.g., 8×12 for 96-well plate)
+
+**Benefits**:
+
+- **Read-Only Display**: Prevents accidental metadata modification
+- **Generic Reflection**: Automatically displays all metadata fields without custom formatting
+- **Multi-Plate Support**: Open metadata viewers for multiple plates simultaneously
+- **Format Agnostic**: Works with all supported microscope formats (ImageXpress, Opera Phenix, OpenHCS, etc.)
+- **Structured View**: Organized display using ParameterFormManager for consistent formatting
 
 Editor Integration
 -----------------
