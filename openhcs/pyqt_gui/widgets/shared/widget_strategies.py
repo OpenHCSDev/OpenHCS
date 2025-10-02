@@ -244,7 +244,9 @@ class MagicGuiWidgetFactory:
                             magicgui_value = ()  # Empty tuple for tuple[T, ...] types
                         # For other types, let magicgui handle None (might still cause issues but less common)
 
-                    widget = create_widget(annotation=resolved_type, value=magicgui_value)
+                    from openhcs.utils.performance_monitor import timer
+                    with timer(f"    magicgui.create_widget({param_name}, {resolved_type.__name__ if hasattr(resolved_type, '__name__') else resolved_type})", threshold_ms=0.0):
+                        widget = create_widget(annotation=resolved_type, value=magicgui_value)
 
                     # Check if magicgui returned a basic QWidget (which indicates failure)
                     if hasattr(widget, 'native') and type(widget.native).__name__ == 'QWidget':

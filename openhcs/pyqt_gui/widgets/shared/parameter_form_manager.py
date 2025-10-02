@@ -451,91 +451,111 @@ class ParameterFormManager(QWidget):
 
     def setup_ui(self):
         """Set up the UI layout."""
-        layout = QVBoxLayout(self)
-        # Apply configurable layout settings
-        layout.setSpacing(CURRENT_LAYOUT.main_layout_spacing)
-        layout.setContentsMargins(*CURRENT_LAYOUT.main_layout_margins)
+        from openhcs.utils.performance_monitor import timer
+
+        with timer("    Layout setup", threshold_ms=1.0):
+            layout = QVBoxLayout(self)
+            # Apply configurable layout settings
+            layout.setSpacing(CURRENT_LAYOUT.main_layout_spacing)
+            layout.setContentsMargins(*CURRENT_LAYOUT.main_layout_margins)
 
         # Apply centralized widget styling for uniform appearance (same as config_window.py)
-        from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
-        style_gen = StyleSheetGenerator(self.color_scheme)
-        self.setStyleSheet(style_gen.generate_config_window_style())
+        with timer("    Style generation", threshold_ms=1.0):
+            from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+            style_gen = StyleSheetGenerator(self.color_scheme)
+            self.setStyleSheet(style_gen.generate_config_window_style())
 
         # Build form content
-        form_widget = self.build_form()
+        with timer("    Build form", threshold_ms=5.0):
+            form_widget = self.build_form()
 
         # Add scroll area if requested
-        if self.config.use_scroll_area:
-            scroll_area = QScrollArea()
-            scroll_area.setWidgetResizable(True)
-            scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            scroll_area.setWidget(form_widget)
-            layout.addWidget(scroll_area)
-        else:
-            layout.addWidget(form_widget)
+        with timer("    Add scroll area", threshold_ms=1.0):
+            if self.config.use_scroll_area:
+                scroll_area = QScrollArea()
+                scroll_area.setWidgetResizable(True)
+                scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+                scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+                scroll_area.setWidget(form_widget)
+                layout.addWidget(scroll_area)
+            else:
+                layout.addWidget(form_widget)
 
     def build_form(self) -> QWidget:
         """Build form UI by delegating to service layer analysis."""
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
-        content_layout.setSpacing(CURRENT_LAYOUT.content_layout_spacing)
-        content_layout.setContentsMargins(*CURRENT_LAYOUT.content_layout_margins)
+        from openhcs.utils.performance_monitor import timer
+
+        with timer("      Create content widget", threshold_ms=1.0):
+            content_widget = QWidget()
+            content_layout = QVBoxLayout(content_widget)
+            content_layout.setSpacing(CURRENT_LAYOUT.content_layout_spacing)
+            content_layout.setContentsMargins(*CURRENT_LAYOUT.content_layout_margins)
 
         # DELEGATE TO SERVICE LAYER: Use analyzed form structure
-        for param_info in self.form_structure.parameters:
-            if param_info.is_optional and param_info.is_nested:
-                # Optional[Dataclass]: show checkbox
-                widget = self._create_optional_dataclass_widget(param_info)
-            elif param_info.is_nested:
-                # Direct dataclass (non-optional): nested group without checkbox
-                widget = self._create_nested_dataclass_widget(param_info)
-            else:
-                # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
-                widget = self._create_regular_parameter_widget(param_info)
-            content_layout.addWidget(widget)
+        with timer(f"      Create {len(self.form_structure.parameters)} parameter widgets", threshold_ms=5.0):
+            for param_info in self.form_structure.parameters:
+                with timer(f"        Create widget for {param_info.name} ({'nested' if param_info.is_nested else 'regular'})", threshold_ms=2.0):
+                    if param_info.is_optional and param_info.is_nested:
+                        # Optional[Dataclass]: show checkbox
+                        widget = self._create_optional_dataclass_widget(param_info)
+                    elif param_info.is_nested:
+                        # Direct dataclass (non-optional): nested group without checkbox
+                        widget = self._create_nested_dataclass_widget(param_info)
+                    else:
+                        # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
+                        widget = self._create_regular_parameter_widget(param_info)
+                    content_layout.addWidget(widget)
 
         return content_widget
 
     def _create_regular_parameter_widget(self, param_info) -> QWidget:
         """Create widget for regular parameter - DELEGATE TO SERVICE LAYER."""
-        display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
-        field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
+        from openhcs.utils.performance_monitor import timer
 
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
-        layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
+        with timer(f"          Get display info for {param_info.name}", threshold_ms=0.5):
+            display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
+            field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
+
+        with timer(f"          Create container/layout", threshold_ms=0.5):
+            container = QWidget()
+            layout = QHBoxLayout(container)
+            layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
+            layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
 
         # Label
-        label = LabelWithHelp(
-            text=display_info['field_label'], param_name=param_info.name,
-            param_description=display_info['description'], param_type=param_info.type,
-            color_scheme=self.config.color_scheme or PyQt6ColorScheme()
-        )
-        layout.addWidget(label)
+        with timer(f"          Create label for {param_info.name}", threshold_ms=0.5):
+            label = LabelWithHelp(
+                text=display_info['field_label'], param_name=param_info.name,
+                param_description=display_info['description'], param_type=param_info.type,
+                color_scheme=self.config.color_scheme or PyQt6ColorScheme()
+            )
+            layout.addWidget(label)
 
         # Widget
-        current_value = self.parameters.get(param_info.name)
-        print(f"🔍 CREATE WIDGET: {param_info.name} current_value={current_value} from self.parameters")
-        widget = self.create_widget(param_info.name, param_info.type, current_value, field_ids['widget_id'])
-        widget.setObjectName(field_ids['widget_id'])
-        layout.addWidget(widget, 1)
+        with timer(f"          Create actual widget for {param_info.name}", threshold_ms=0.5):
+            current_value = self.parameters.get(param_info.name)
+            print(f"🔍 CREATE WIDGET: {param_info.name} current_value={current_value} from self.parameters")
+            widget = self.create_widget(param_info.name, param_info.type, current_value, field_ids['widget_id'])
+            widget.setObjectName(field_ids['widget_id'])
+            layout.addWidget(widget, 1)
 
         # Reset button
-        reset_button = QPushButton(CONSTANTS.RESET_BUTTON_TEXT)
-        reset_button.setObjectName(field_ids['reset_button_id'])
-        reset_button.setMaximumWidth(CURRENT_LAYOUT.reset_button_width)
-        reset_button.clicked.connect(lambda: self.reset_parameter(param_info.name))
-        layout.addWidget(reset_button)
+        with timer(f"          Create reset button", threshold_ms=0.5):
+            reset_button = QPushButton(CONSTANTS.RESET_BUTTON_TEXT)
+            reset_button.setObjectName(field_ids['reset_button_id'])
+            reset_button.setMaximumWidth(CURRENT_LAYOUT.reset_button_width)
+            reset_button.clicked.connect(lambda: self.reset_parameter(param_info.name))
+            layout.addWidget(reset_button)
 
         # Store widgets and connect signals
-        self.widgets[param_info.name] = widget
-        PyQt6WidgetEnhancer.connect_change_signal(widget, param_info.name, self._emit_parameter_change)
+        with timer(f"          Store and connect signals", threshold_ms=0.5):
+            self.widgets[param_info.name] = widget
+            PyQt6WidgetEnhancer.connect_change_signal(widget, param_info.name, self._emit_parameter_change)
 
         # CRITICAL FIX: Apply placeholder behavior after widget creation
-        current_value = self.parameters.get(param_info.name)
-        self._apply_context_behavior(widget, current_value, param_info.name)
+        with timer(f"          Apply context behavior", threshold_ms=0.5):
+            current_value = self.parameters.get(param_info.name)
+            self._apply_context_behavior(widget, current_value, param_info.name)
 
         return container
 

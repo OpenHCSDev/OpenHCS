@@ -206,36 +206,41 @@ class UnifiedParameterAnalyzer:
     @staticmethod
     def _analyze_dataclass_instance(instance: object) -> Dict[str, UnifiedParameterInfo]:
         """Analyze a dataclass instance."""
+        from openhcs.utils.performance_monitor import timer
+
         # Get the type and analyze it
-        dataclass_type = type(instance)
-        unified_params = UnifiedParameterAnalyzer._analyze_dataclass_type(dataclass_type)
+        with timer(f"      Analyze dataclass type {type(instance).__name__}", threshold_ms=5.0):
+            dataclass_type = type(instance)
+            unified_params = UnifiedParameterAnalyzer._analyze_dataclass_type(dataclass_type)
 
         # Check if this specific instance is a lazy config - if so, use raw field values
-        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
-        # CRITICAL FIX: Don't check class name - PipelineConfig is lazy but doesn't start with "Lazy"
-        # get_base_type_for_lazy() is the authoritative check for lazy dataclasses
-        is_lazy_config = get_base_type_for_lazy(dataclass_type) is not None
+        with timer(f"      Check lazy config", threshold_ms=1.0):
+            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+            # CRITICAL FIX: Don't check class name - PipelineConfig is lazy but doesn't start with "Lazy"
+            # get_base_type_for_lazy() is the authoritative check for lazy dataclasses
+            is_lazy_config = get_base_type_for_lazy(dataclass_type) is not None
 
         # Update default values with current instance values
-        for name, param_info in unified_params.items():
-            if hasattr(instance, name):
-                if is_lazy_config:
-                    # For lazy configs, get raw field value to avoid triggering resolution
-                    # Use object.__getattribute__() to bypass lazy property getters
-                    current_value = object.__getattribute__(instance, name)
-                else:
-                    # For regular dataclasses, use normal getattr
-                    current_value = getattr(instance, name)
+        with timer(f"      Extract {len(unified_params)} field values from instance", threshold_ms=5.0):
+            for name, param_info in unified_params.items():
+                if hasattr(instance, name):
+                    if is_lazy_config:
+                        # For lazy configs, get raw field value to avoid triggering resolution
+                        # Use object.__getattribute__() to bypass lazy property getters
+                        current_value = object.__getattribute__(instance, name)
+                    else:
+                        # For regular dataclasses, use normal getattr
+                        current_value = getattr(instance, name)
 
-                # Create new UnifiedParameterInfo with current value as default
-                unified_params[name] = UnifiedParameterInfo(
-                    name=param_info.name,
-                    param_type=param_info.param_type,
-                    default_value=current_value,
-                    is_required=param_info.is_required,
-                    description=param_info.description,
-                    source_type="dataclass_instance"
-                )
+                    # Create new UnifiedParameterInfo with current value as default
+                    unified_params[name] = UnifiedParameterInfo(
+                        name=param_info.name,
+                        param_type=param_info.param_type,
+                        default_value=current_value,
+                        is_required=param_info.is_required,
+                        description=param_info.description,
+                        source_type="dataclass_instance"
+                    )
 
         return unified_params
     

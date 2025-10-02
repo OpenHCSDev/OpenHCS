@@ -313,6 +313,9 @@ class SignatureAnalyzer:
 
     # Class-level cache for field documentation to avoid re-parsing
     _field_docs_cache = {}
+
+    # Class-level cache for dataclass analysis results to avoid expensive AST parsing
+    _dataclass_analysis_cache = {}
     
     @staticmethod
     def analyze(target: Union[Callable, Type, object], skip_first_param: Optional[bool] = None) -> Dict[str, ParameterInfo]:
@@ -547,6 +550,18 @@ class SignatureAnalyzer:
     @staticmethod
     def _analyze_dataclass(dataclass_type: type) -> Dict[str, ParameterInfo]:
         """Extract parameter information from dataclass fields."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # PERFORMANCE: Check cache first to avoid expensive AST parsing
+        # Use the class object itself as the key (classes are hashable and have stable identity)
+        cache_key = dataclass_type
+        if cache_key in SignatureAnalyzer._dataclass_analysis_cache:
+            logger.info(f"✅ CACHE HIT for {dataclass_type.__name__} (id={id(dataclass_type)})")
+            return SignatureAnalyzer._dataclass_analysis_cache[cache_key]
+
+        logger.info(f"❌ CACHE MISS for {dataclass_type.__name__} (id={id(dataclass_type)}), cache has {len(SignatureAnalyzer._dataclass_analysis_cache)} entries")
+
         try:
             # Try to get type hints, fall back to __annotations__ if resolution fails
             try:
@@ -608,10 +623,12 @@ class SignatureAnalyzer:
                     description=field_description
                 )
 
+            # PERFORMANCE: Cache the result to avoid re-parsing
+            SignatureAnalyzer._dataclass_analysis_cache[cache_key] = parameters
             return parameters
 
         except Exception:
-            # Return empty dict on error
+            # Return empty dict on error (don't cache errors)
             return {}
 
     @staticmethod
