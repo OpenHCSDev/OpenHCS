@@ -294,7 +294,7 @@ Complete analysis workflows demonstrate OpenHCS capabilities:
 ```bash
 # View complete production examples
 git clone https://github.com/trissim/openhcs.git
-cat openhcs/debug/example_export.py
+cat openhcs/examples/example_export.py
 ```
 
 Example workflows include preprocessing, stitching, and analysis steps with GPU acceleration, large dataset handling through ZARR compression, parallel processing with resource monitoring, and comprehensive configuration management.
