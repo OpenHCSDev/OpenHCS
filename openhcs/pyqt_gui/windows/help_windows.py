@@ -29,7 +29,6 @@ class BaseHelpWindow(QDialog):
 
         self.setWindowTitle(title)
         self.setModal(False)  # Allow interaction with main window
-        self.resize(600, 400)
 
         # Setup UI
         self.setup_ui()
@@ -166,110 +165,93 @@ class DocstringHelpWindow(BaseHelpWindow):
         layout.addStretch()
         self.content_area.setWidget(content_widget)
 
-
-class ParameterHelpWindow(BaseHelpWindow):
-    """Help window for individual parameters - reuses Textual TUI parameter logic."""
-    
-    def __init__(self, param_name: str, param_description: str, param_type: type = None,
-                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
-        self.param_name = param_name
-        self.param_description = param_description
-        self.param_type = param_type
-
-        title = f"Parameter Help: {param_name}"
-        super().__init__(title, color_scheme, parent)
-        self.populate_content()
-        
-    def populate_content(self):
-        """Populate parameter help content with minimal styling."""
-        content_widget = QWidget()
-        layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)
-
-        # Parameter name and type
-        header_text = f"• {self.param_name}"
-        if self.param_type:
-            type_name = getattr(self.param_type, '__name__', str(self.param_type))
-            header_text += f" ({type_name})"
-
-        header_label = QLabel(header_text)
-        header_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 12px;")
-        layout.addWidget(header_label)
-
-        # Parameter description
-        if self.param_description:
-            desc_label = QLabel(self.param_description)
-            desc_label.setWordWrap(True)
-            desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 12px; margin-left: 15px;")
-            layout.addWidget(desc_label)
-        else:
-            no_desc_label = QLabel("No description available")
-            no_desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            no_desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)}; font-size: 12px; font-style: italic; margin-left: 15px;")
-            layout.addWidget(no_desc_label)
-
-        layout.addStretch()
-        self.content_area.setWidget(content_widget)
+        # Auto-size to content
+        self.adjustSize()
+        # Set reasonable min/max sizes
+        self.setMinimumSize(400, 200)
+        self.setMaximumSize(800, 600)
 
 
 class HelpWindowManager:
-    """PyQt6 help window manager - reuses Textual TUI help logic."""
-    
-    # Class-level storage for singleton windows
-    _docstring_window = None
-    _parameter_window = None
-    
+    """PyQt6 help window manager - unified window for all help content."""
+
+    # Class-level window reference for singleton behavior
+    _help_window = None
+
     @classmethod
     def show_docstring_help(cls, target: Union[Callable, type], title: Optional[str] = None, parent=None):
         """Show help for a function or class - reuses Textual TUI extraction logic."""
         try:
             # Check if existing window is still valid
-            if cls._docstring_window and hasattr(cls._docstring_window, 'isVisible'):
+            if cls._help_window and hasattr(cls._help_window, 'isVisible'):
                 try:
-                    if not cls._docstring_window.isHidden():
-                        cls._docstring_window.target = target
-                        cls._docstring_window.docstring_info = DocstringExtractor.extract(target)
-                        cls._docstring_window.populate_content()
-                        cls._docstring_window.raise_()
-                        cls._docstring_window.activateWindow()
+                    if not cls._help_window.isHidden():
+                        cls._help_window.target = target
+                        cls._help_window.docstring_info = DocstringExtractor.extract(target)
+                        cls._help_window.setWindowTitle(title or f"Help: {getattr(target, '__name__', 'Unknown')}")
+                        cls._help_window.populate_content()
+                        cls._help_window.raise_()
+                        cls._help_window.activateWindow()
                         return
                 except RuntimeError:
                     # Window was deleted, clear reference
-                    cls._docstring_window = None
+                    cls._help_window = None
 
             # Create new window
-            cls._docstring_window = DocstringHelpWindow(target, title=title, parent=parent)
-            cls._docstring_window.show()
+            cls._help_window = DocstringHelpWindow(target, title=title, parent=parent)
+            cls._help_window.show()
 
         except Exception as e:
             logger.error(f"Failed to show docstring help: {e}")
             QMessageBox.warning(parent, "Help Error", f"Failed to show help: {e}")
-    
+
     @classmethod
     def show_parameter_help(cls, param_name: str, param_description: str, param_type: type = None, parent=None):
-        """Show help for a parameter - reuses Textual TUI parameter logic."""
+        """Show help for a parameter - creates a fake docstring object and uses DocstringHelpWindow."""
         try:
+            # Create a fake docstring info object for the parameter
+            from dataclasses import dataclass
+
+            @dataclass
+            class FakeDocstringInfo:
+                summary: str = ""
+                description: str = ""
+                parameters: dict = None
+                returns: str = ""
+                examples: str = ""
+
+            # Build parameter display
+            type_str = f" ({getattr(param_type, '__name__', str(param_type))})" if param_type else ""
+            fake_info = FakeDocstringInfo(
+                summary=f"• {param_name}{type_str}",
+                description=param_description or "No description available",
+                parameters={},
+                returns="",
+                examples=""
+            )
+
             # Check if existing window is still valid
-            if cls._parameter_window and hasattr(cls._parameter_window, 'isVisible'):
+            if cls._help_window and hasattr(cls._help_window, 'isVisible'):
                 try:
-                    if not cls._parameter_window.isHidden():
-                        cls._parameter_window.param_name = param_name
-                        cls._parameter_window.param_description = param_description
-                        cls._parameter_window.param_type = param_type
-                        cls._parameter_window.populate_content()
-                        cls._parameter_window.raise_()
-                        cls._parameter_window.activateWindow()
+                    if not cls._help_window.isHidden():
+                        cls._help_window.docstring_info = fake_info
+                        cls._help_window.setWindowTitle(f"Parameter: {param_name}")
+                        cls._help_window.populate_content()
+                        cls._help_window.raise_()
+                        cls._help_window.activateWindow()
                         return
                 except RuntimeError:
                     # Window was deleted, clear reference
-                    cls._parameter_window = None
+                    cls._help_window = None
 
-            # Create new window
-            cls._parameter_window = ParameterHelpWindow(param_name, param_description, param_type, parent=parent)
-            cls._parameter_window.show()
+            # Create new window with fake target
+            class FakeTarget:
+                __name__ = param_name
+
+            cls._help_window = DocstringHelpWindow(FakeTarget, title=f"Parameter: {param_name}", parent=parent)
+            cls._help_window.docstring_info = fake_info
+            cls._help_window.populate_content()
+            cls._help_window.show()
 
         except Exception as e:
             logger.error(f"Failed to show parameter help: {e}")
