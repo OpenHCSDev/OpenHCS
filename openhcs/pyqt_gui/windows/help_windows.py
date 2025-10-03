@@ -83,15 +83,15 @@ class DocstringHelpWindow(BaseHelpWindow):
         """Populate the help content with minimal styling."""
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
 
         # Function/class summary
         if self.docstring_info.summary:
             summary_label = QLabel(self.docstring_info.summary)
             summary_label.setWordWrap(True)
             summary_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            summary_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};")
+            summary_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 12px;")
             layout.addWidget(summary_label)
 
         # Full description
@@ -99,21 +99,21 @@ class DocstringHelpWindow(BaseHelpWindow):
             desc_label = QLabel(self.docstring_info.description)
             desc_label.setWordWrap(True)
             desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};")
+            desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 12px;")
             layout.addWidget(desc_label)
             
         # Parameters section
         if self.docstring_info.parameters:
             params_label = QLabel("Parameters:")
             params_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            params_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; margin-top: 10px;")
+            params_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-size: 14px; font-weight: bold; margin-top: 8px;")
             layout.addWidget(params_label)
 
             for param_name, param_desc in self.docstring_info.parameters.items():
                 # Parameter name
                 name_label = QLabel(f"• {param_name}")
                 name_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-                name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; margin-left: 10px;")
+                name_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 12px; margin-left: 5px; margin-top: 3px;")
                 layout.addWidget(name_label)
 
                 # Parameter description
@@ -121,27 +121,27 @@ class DocstringHelpWindow(BaseHelpWindow):
                     desc_label = QLabel(param_desc)
                     desc_label.setWordWrap(True)
                     desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-                    desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; margin-left: 30px;")
+                    desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 12px; margin-left: 20px;")
                     layout.addWidget(desc_label)
                 
         # Returns section
         if self.docstring_info.returns:
             returns_label = QLabel("Returns:")
             returns_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            returns_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; margin-top: 10px;")
+            returns_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-size: 14px; font-weight: bold; margin-top: 8px;")
             layout.addWidget(returns_label)
 
             returns_desc = QLabel(self.docstring_info.returns)
             returns_desc.setWordWrap(True)
             returns_desc.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            returns_desc.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; margin-left: 10px;")
+            returns_desc.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 12px; margin-left: 5px;")
             layout.addWidget(returns_desc)
             
         # Examples section
         if self.docstring_info.examples:
             examples_label = QLabel("Examples:")
             examples_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            examples_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; margin-top: 10px;")
+            examples_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; font-size: 14px; font-weight: bold; margin-top: 8px;")
             layout.addWidget(examples_label)
 
             examples_text = QTextEdit()
@@ -155,7 +155,7 @@ class DocstringHelpWindow(BaseHelpWindow):
                     color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
                     border: none;
                     font-family: monospace;
-                    font-size: 9pt;
+                    font-size: 11px;
                 }}
                 QTextEdit:hover {{
                     background-color: transparent;
@@ -184,8 +184,8 @@ class ParameterHelpWindow(BaseHelpWindow):
         """Populate parameter help content with minimal styling."""
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
 
         # Parameter name and type
         header_text = f"• {self.param_name}"
@@ -195,7 +195,7 @@ class ParameterHelpWindow(BaseHelpWindow):
 
         header_label = QLabel(header_text)
         header_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};")
+        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 12px;")
         layout.addWidget(header_label)
 
         # Parameter description
@@ -203,12 +203,12 @@ class ParameterHelpWindow(BaseHelpWindow):
             desc_label = QLabel(self.param_description)
             desc_label.setWordWrap(True)
             desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; margin-left: 20px;")
+            desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_primary)}; font-size: 12px; margin-left: 15px;")
             layout.addWidget(desc_label)
         else:
             no_desc_label = QLabel("No description available")
             no_desc_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-            no_desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)}; font-style: italic; margin-left: 20px;")
+            no_desc_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)}; font-size: 12px; font-style: italic; margin-left: 15px;")
             layout.addWidget(no_desc_label)
 
         layout.addStretch()
