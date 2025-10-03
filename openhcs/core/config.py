@@ -577,6 +577,9 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
     napari_port: int = 5555
     """Port for napari streaming communication."""
 
+    napari_host: str = 'localhost'
+    """Host for napari streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
+
     @property
     def backend(self) -> Backend:
         return Backend.NAPARI_STREAM
@@ -588,6 +591,7 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
     def get_streaming_kwargs(self, context) -> dict:
         kwargs = {
             "napari_port": self.napari_port,
+            "napari_host": self.napari_host,
             "display_config": self  # self is now the display config
         }
 

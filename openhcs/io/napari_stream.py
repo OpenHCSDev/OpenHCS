@@ -42,28 +42,29 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         self._context = None
         self._shared_memory_blocks = {}
 
-    def _get_publisher(self, napari_port: int):
-        """Lazy initialization of ZeroMQ publisher for the given port."""
-        if napari_port not in self._publishers:
+    def _get_publisher(self, napari_host: str, napari_port: int):
+        """Lazy initialization of ZeroMQ publisher for the given host:port."""
+        key = f"{napari_host}:{napari_port}"
+        if key not in self._publishers:
             try:
                 import zmq
                 if self._context is None:
                     self._context = zmq.Context()
 
                 publisher = self._context.socket(zmq.PUB)
-                publisher.connect(f"tcp://localhost:{napari_port}")
-                logger.info(f"Napari streaming publisher connected to viewer on port {napari_port}")
+                publisher.connect(f"tcp://{napari_host}:{napari_port}")
+                logger.info(f"Napari streaming publisher connected to {napari_host}:{napari_port}")
 
                 # Small delay to ensure socket is ready
                 time.sleep(0.1)
 
-                self._publishers[napari_port] = publisher
+                self._publishers[key] = publisher
 
             except ImportError:
                 logger.error("ZeroMQ not available - napari streaming disabled")
                 raise RuntimeError("ZeroMQ required for napari streaming")
 
-        return self._publishers[napari_port]
+        return self._publishers[key]
 
 
 
@@ -86,7 +87,9 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             raise ValueError("data_list and file_paths must have the same length")
 
         try:
-            publisher = self._get_publisher(kwargs['napari_port'])
+            napari_host = kwargs.get('napari_host', 'localhost')  # Default to localhost for backward compatibility
+            napari_port = kwargs['napari_port']
+            publisher = self._get_publisher(napari_host, napari_port)
             display_config = kwargs['display_config']
             microscope_handler = kwargs['microscope_handler']
             step_index = kwargs.get('step_index', 0)
