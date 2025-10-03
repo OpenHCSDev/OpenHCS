@@ -422,12 +422,16 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
 
         # Data channel: SUB socket for receiving images
         data_socket = context.socket(zmq.SUB)
+        # CRITICAL: Set LINGER to 0 so socket closes immediately and frees port
+        data_socket.setsockopt(zmq.LINGER, 0)
         data_socket.bind(f"tcp://*:{port}")
         data_socket.setsockopt(zmq.SUBSCRIBE, b"")  # Subscribe to all messages
 
         # Control channel: REP socket for handshake
         control_port = port + 1000  # Use port+1000 for control
         control_socket = context.socket(zmq.REP)
+        # CRITICAL: Set LINGER to 0 so socket closes immediately and frees port
+        control_socket.setsockopt(zmq.LINGER, 0)
         control_socket.bind(f"tcp://*:{control_port}")
 
         # Create napari viewer in this process (main thread)
@@ -727,11 +731,51 @@ class NapariStreamVisualizer:
         self.process: Optional[multiprocessing.Process] = None
         self.zmq_context: Optional[zmq.Context] = None
         self.zmq_socket: Optional[zmq.Socket] = None
-        self.is_running = False
+        self._is_running = False  # Internal flag, use is_running property instead
+        self._connected_to_existing = False  # True if connected to viewer we didn't create
         self._lock = threading.Lock()
 
         # Clause 368: Visualization must be observer-only.
         # This class will only read data and display it.
+
+    @property
+    def is_running(self) -> bool:
+        """
+        Check if the napari viewer is actually running.
+
+        This property checks the actual process state, not just a cached flag.
+        Returns True only if the process exists and is alive.
+        """
+        if not self._is_running:
+            return False
+
+        # If we connected to an existing viewer (we didn't create the process),
+        # we can't check process status, so just return the flag
+        if self._connected_to_existing:
+            return self._is_running
+
+        if self.process is None:
+            self._is_running = False
+            return False
+
+        # Check if process is actually alive
+        try:
+            if hasattr(self.process, 'is_alive'):
+                # multiprocessing.Process
+                alive = self.process.is_alive()
+            else:
+                # subprocess.Popen
+                alive = self.process.poll() is None
+
+            if not alive:
+                logger.debug(f"🔬 VISUALIZER: Napari process on port {self.napari_port} is no longer alive")
+                self._is_running = False
+
+            return alive
+        except Exception as e:
+            logger.warning(f"🔬 VISUALIZER: Error checking process status: {e}")
+            self._is_running = False
+            return False
 
     def _find_free_port(self) -> int:
         """Find a free port for ZeroMQ communication."""
@@ -740,35 +784,54 @@ class NapariStreamVisualizer:
             s.bind(('', 0))
             return s.getsockname()[1]
 
-    def start_viewer(self):
-        """Starts the Napari viewer in a separate process."""
+    def start_viewer(self, async_mode: bool = True):
+        """
+        Starts the Napari viewer in a separate process.
+
+        Args:
+            async_mode: If True, start viewer asynchronously in background thread.
+                       If False, wait for viewer to be ready before returning (legacy behavior).
+        """
+        if async_mode:
+            # Start viewer asynchronously in background thread
+            thread = threading.Thread(target=self._start_viewer_sync, daemon=True)
+            thread.start()
+            logger.info(f"🔬 VISUALIZER: Starting napari viewer asynchronously on port {self.napari_port}")
+        else:
+            # Legacy synchronous mode
+            self._start_viewer_sync()
+
+    def _start_viewer_sync(self):
+        """Internal synchronous viewer startup (called by start_viewer)."""
         global _global_viewer_process, _global_viewer_port
 
         with self._lock:
             # Check if there's already a napari viewer running on the configured port
             port_in_use = self._is_port_in_use(self.napari_port)
             logger.info(f"🔬 VISUALIZER: Port {self.napari_port} in use: {port_in_use}")
+
             if port_in_use:
-                logger.info(f"🔬 VISUALIZER: Reusing existing napari viewer on port {self.napari_port}")
-                # Set the port and connect to existing viewer
+                # Try to connect to existing viewer first before killing it
+                logger.info(f"🔬 VISUALIZER: Port {self.napari_port} is in use, attempting to connect to existing viewer...")
                 self.port = self.napari_port
+                if self._try_connect_to_existing_viewer(self.napari_port):
+                    logger.info(f"🔬 VISUALIZER: Successfully connected to existing viewer on port {self.napari_port}")
+                    self._is_running = True
+                    self._connected_to_existing = True  # Mark that we connected to existing viewer
+                    return
+                else:
+                    # Existing viewer is unresponsive - kill it and start fresh
+                    logger.info(f"🔬 VISUALIZER: Existing viewer on port {self.napari_port} is unresponsive, killing and restarting...")
+                    self._kill_processes_on_port(self.napari_port)
+                    # Also kill control port
+                    self._kill_processes_on_port(self.napari_port + 1000)
+                    # Wait a moment for ports to be freed
+                    import time
+                    time.sleep(0.5)
 
-                # Check if we have a reference to the global process
-                with _global_process_lock:
-                    if _global_viewer_process and _global_viewer_port == self.napari_port:
-                        self.process = _global_viewer_process
-                        logger.info(f"🔬 VISUALIZER: Found global process reference (PID: {self.process.pid})")
-                    else:
-                        self.process = None  # External process we don't control
-                        logger.info("🔬 VISUALIZER: No global process reference (external viewer)")
-
-                self._setup_zmq_client()
-                self.is_running = True
-                return
-
-            if self.is_running:
+            if self._is_running:
                 logger.warning("Napari viewer is already running.")
-                return
+                return 
 
             # Use configured port for napari streaming
             self.port = self.napari_port
@@ -809,31 +872,129 @@ class NapariStreamVisualizer:
                 process_alive = self.process.poll() is None
 
             if process_alive:
-                self.is_running = True
+                self._is_running = True
                 logger.info(f"🔬 VISUALIZER: Napari viewer process started successfully (PID: {self.process.pid})")
             else:
                 logger.error("🔬 VISUALIZER: Failed to start napari viewer process")
 
     def _try_connect_to_existing_viewer(self, port: int) -> bool:
-        """Try to connect to an existing napari viewer on the given port."""
-        import socket
+        """
+        Try to connect to an existing napari viewer and verify it's responsive.
 
-        # First check if anything is listening on the port
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.1)  # 100ms timeout
+        Returns True only if we can successfully handshake with the viewer.
+        """
+        import zmq
+        import pickle
+
+        # Try to ping the control port to verify viewer is responsive
+        control_port = port + 1000
+        control_context = None
+        control_socket = None
+
         try:
-            result = sock.connect_ex(('localhost', port))
-            sock.close()
+            control_context = zmq.Context()
+            control_socket = control_context.socket(zmq.REQ)
+            control_socket.setsockopt(zmq.LINGER, 0)
+            control_socket.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
+            control_socket.connect(f"tcp://localhost:{control_port}")
 
-            if result == 0:  # Port is open
-                # Set up ZMQ connection
+            # Send ping
+            ping_message = {'type': 'ping'}
+            control_socket.send(pickle.dumps(ping_message))
+
+            # Wait for pong
+            response = control_socket.recv()
+            response_data = pickle.loads(response)
+
+            if response_data.get('type') == 'pong' and response_data.get('ready'):
+                # Viewer is responsive! Set up our ZMQ client
+                control_socket.close()
+                control_context.term()
                 self._setup_zmq_client()
                 return True
             else:
                 return False
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to connect to existing viewer on port {port}: {e}")
             return False
+        finally:
+            if control_socket:
+                try:
+                    control_socket.close()
+                except:
+                    pass
+            if control_context:
+                try:
+                    control_context.term()
+                except:
+                    pass
+
+    def _kill_processes_on_port(self, port: int) -> None:
+        """Kill all processes using the specified port."""
+        import subprocess
+        import platform
+
+        try:
+            system = platform.system()
+
+            if system == "Linux":
+                # Use lsof to find process using the port
+                result = subprocess.run(
+                    ['lsof', '-ti', f':{port}'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+
+                if result.returncode == 0 and result.stdout.strip():
+                    pids = result.stdout.strip().split('\n')
+                    for pid in pids:
+                        try:
+                            subprocess.run(['kill', '-9', pid], timeout=1)
+                            logger.info(f"🔬 VISUALIZER: Killed process {pid} on port {port}")
+                        except Exception as e:
+                            logger.warning(f"Failed to kill process {pid}: {e}")
+
+            elif system == "Darwin":  # macOS
+                # Same as Linux
+                result = subprocess.run(
+                    ['lsof', '-ti', f':{port}'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+
+                if result.returncode == 0 and result.stdout.strip():
+                    pids = result.stdout.strip().split('\n')
+                    for pid in pids:
+                        try:
+                            subprocess.run(['kill', '-9', pid], timeout=1)
+                            logger.info(f"🔬 VISUALIZER: Killed process {pid} on port {port}")
+                        except Exception as e:
+                            logger.warning(f"Failed to kill process {pid}: {e}")
+
+            elif system == "Windows":
+                # Use netstat to find process
+                result = subprocess.run(
+                    ['netstat', '-ano'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+
+                for line in result.stdout.split('\n'):
+                    if f':{port}' in line and 'LISTENING' in line:
+                        parts = line.split()
+                        pid = parts[-1]
+                        try:
+                            subprocess.run(['taskkill', '/F', '/PID', pid], timeout=1)
+                            logger.info(f"🔬 VISUALIZER: Killed process {pid} on port {port}")
+                        except Exception as e:
+                            logger.warning(f"Failed to kill process {pid}: {e}")
+
+        except Exception as e:
+            logger.warning(f"Failed to kill processes on port {port}: {e}")
 
     def _is_port_in_use(self, port: int) -> bool:
         """Check if a port is already in use (indicating existing napari viewer)."""
@@ -953,7 +1114,7 @@ class NapariStreamVisualizer:
                             except subprocess.TimeoutExpired:
                                 logger.warning("🔬 VISUALIZER: Force killing napari viewer process")
                                 self.process.kill()
-                self.is_running = False
+                self._is_running = False
             else:
                 logger.info("🔬 VISUALIZER: Keeping persistent napari viewer alive")
                 # Just cleanup our ZMQ connection, leave process running

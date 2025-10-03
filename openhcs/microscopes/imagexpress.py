@@ -455,6 +455,10 @@ class ImageXpressMetadataHandler(MetadataHandler):
     Handles finding and parsing HTD files for ImageXpress microscopes.
     Inherits fallback values from MetadataHandler ABC.
     """
+    # Microscope-specific directory structure constants
+    COMMON_DIRS = ['TimePoint_1']  # Subdirectories where images are typically stored
+    WORKSPACE_DIR = 'workspace'    # Workspace directory name (created by initialize_workspace)
+
     def __init__(self, filemanager: FileManager):
         """
         Initialize the metadata handler.
@@ -724,6 +728,64 @@ class ImageXpressMetadataHandler(MetadataHandler):
             None - ImageXpress doesn't provide rich z_index names in metadata
         """
         return None
+
+    def get_image_files(self, plate_path: Union[str, Path]) -> List[str]:
+        """
+        Get list of image files from the workspace image directory.
+
+        For ImageXpress, this lists all image files from the workspace directory
+        after flattening has been performed.
+
+        Args:
+            plate_path: Path to the plate folder (str or Path)
+
+        Returns:
+            List of image filenames (basenames, not full paths)
+
+        Raises:
+            TypeError: If plate_path is not a valid path type
+            FileNotFoundError: If plate path does not exist
+        """
+        # Ensure plate_path is a Path object
+        if isinstance(plate_path, str):
+            plate_path = Path(plate_path)
+        elif not isinstance(plate_path, Path):
+            raise TypeError(f"Expected str or Path, got {type(plate_path).__name__}")
+
+        # Ensure the path exists
+        if not plate_path.exists():
+            raise FileNotFoundError(f"Plate path does not exist: {plate_path}")
+
+        # For ImageXpress, after workspace preparation, images are in workspace/TimePoint_1
+        # Check for workspace subdirectory first (created by MicroscopeHandler.initialize_workspace)
+        workspace_dir = plate_path / self.WORKSPACE_DIR
+
+        if workspace_dir.exists() and workspace_dir.is_dir():
+            # Look for common_dirs inside workspace
+            image_dir = workspace_dir
+            for common_dir in self.COMMON_DIRS:
+                potential_dir = workspace_dir / common_dir
+                if potential_dir.exists() and potential_dir.is_dir():
+                    image_dir = potential_dir
+                    break
+        else:
+            # Fallback to plate root or common_dirs subdirectory
+            image_dir = plate_path
+            for common_dir in self.COMMON_DIRS:
+                potential_dir = plate_path / common_dir
+                if potential_dir.exists() and potential_dir.is_dir():
+                    image_dir = potential_dir
+                    break
+
+        # List all image files in the directory
+        image_files = self.filemanager.list_image_files(
+            image_dir,
+            Backend.DISK.value,
+            recursive=False
+        )
+
+        # Return paths relative to plate_path
+        return [str(Path(f).relative_to(plate_path)) for f in image_files]
 
 
 

@@ -230,6 +230,23 @@ class MetadataHandler(ABC):
         """
         pass
 
+    @abstractmethod
+    def get_image_files(self, plate_path: Union[str, Path]) -> list[str]:
+        """
+        Get list of image files for the plate.
+
+        Args:
+            plate_path: Path to the plate folder (str or Path)
+
+        Returns:
+            List of image filenames (basenames, not full paths)
+
+        Raises:
+            TypeError: If plate_path is not a valid path type
+            FileNotFoundError: If plate path does not exist
+        """
+        pass
+
     def parse_metadata(self, plate_path: Union[str, Path]) -> Dict[str, Dict[str, Optional[str]]]:
         """
         Parse all metadata using dynamic method resolution.

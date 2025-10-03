@@ -736,15 +736,15 @@ class PipelineOrchestrator(ContextProvider):
                         if key not in unique_visualizer_configs:
                             unique_visualizer_configs[key] = (config, ctx.visualizer_config)
 
-            # Create visualizers from unique configs
+            # Create and start all visualizers asynchronously (identical to image browser)
+            # This allows spawning multiple viewers at once without blocking
             for key, (config, vis_config) in unique_visualizer_configs.items():
                 if hasattr(config, 'napari_port'):
                     port = config.napari_port
                     logger.info(f"🔬 ORCHESTRATOR: Creating napari visualizer for port {port} (persistent={config.persistent})")
                     vis = config.create_visualizer(self.filemanager, vis_config)
-                    logger.info(f"🔬 ORCHESTRATOR: Starting napari visualizer on port {port}")
-                    vis.start_viewer()
-                    logger.info(f"🔬 ORCHESTRATOR: Napari visualizer started on port {port}, is_running: {vis.is_running}")
+                    logger.info(f"🔬 ORCHESTRATOR: Starting napari visualizer asynchronously on port {port}")
+                    vis.start_viewer(async_mode=True)  # Start asynchronously (non-blocking)
                     visualizers.append(vis)
                 else:
                     # Non-napari visualizers (e.g., Fiji)
@@ -752,8 +752,27 @@ class PipelineOrchestrator(ContextProvider):
                     vis = config.create_visualizer(self.filemanager, vis_config)
                     logger.info(f"🔬 ORCHESTRATOR: Starting visualizer: {vis}")
                     vis.start_viewer()
-                    logger.info(f"🔬 ORCHESTRATOR: Visualizer started, is_running: {vis.is_running}")
                     visualizers.append(vis)
+
+            # Wait for all napari viewers to be ready before starting pipeline
+            # This ensures viewers are available to receive images
+            napari_visualizers = [v for v in visualizers if hasattr(v, 'napari_port')]
+            if napari_visualizers:
+                logger.info(f"🔬 ORCHESTRATOR: Waiting for {len(napari_visualizers)} napari viewer(s) to be ready...")
+                import time
+                max_wait = 30.0  # Maximum wait time in seconds
+                start_time = time.time()
+
+                while time.time() - start_time < max_wait:
+                    all_ready = all(v.is_running for v in napari_visualizers)
+                    if all_ready:
+                        logger.info(f"🔬 ORCHESTRATOR: All napari viewers are ready!")
+                        break
+                    time.sleep(0.2)  # Check every 200ms
+                else:
+                    # Timeout - log which viewers aren't ready
+                    not_ready = [v.napari_port for v in napari_visualizers if not v.is_running]
+                    logger.warning(f"🔬 ORCHESTRATOR: Timeout waiting for napari viewers. Not ready: {not_ready}")
 
             # For backwards compatibility, set visualizer to the first one
             visualizer = visualizers[0] if visualizers else None

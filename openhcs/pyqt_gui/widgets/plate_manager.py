@@ -1305,36 +1305,37 @@ class PlateManagerWidget(QWidget):
         logger.debug(f"Invalidated compilation state for orchestrator: {plate_path}")
 
     def action_view_metadata(self):
-        """View plate metadata in read-only form. Opens one dialog per selected plate."""
+        """View plate images and metadata in tabbed window. Opens one window per selected plate."""
         selected_items = self.get_selected_plates()
 
         if not selected_items:
             self.service_adapter.show_error_dialog("No plates selected.")
             return
 
-        # Open metadata viewer for each selected plate
-        from openhcs.pyqt_gui.dialogs.metadata_viewer_dialog import MetadataViewerDialog
+        # Open plate viewer for each selected plate
+        from openhcs.pyqt_gui.windows.plate_viewer_window import PlateViewerWindow
 
         for item in selected_items:
             plate_path = item['path']
 
             # Check if orchestrator is initialized
             if plate_path not in self.orchestrators:
-                self.service_adapter.show_error_dialog(f"Plate must be initialized to view metadata: {plate_path}")
+                self.service_adapter.show_error_dialog(f"Plate must be initialized to view: {plate_path}")
                 continue
 
             orchestrator = self.orchestrators[plate_path]
 
             try:
-                dialog = MetadataViewerDialog(
+                # Create plate viewer window with tabs (Image Browser + Metadata)
+                viewer = PlateViewerWindow(
                     orchestrator=orchestrator,
                     color_scheme=self.color_scheme,
                     parent=self
                 )
-                dialog.show()  # Use show() instead of exec() to allow multiple windows
+                viewer.show()  # Use show() instead of exec() to allow multiple windows
             except Exception as e:
-                logger.error(f"Failed to open metadata viewer for {plate_path}: {e}", exc_info=True)
-                self.service_adapter.show_error_dialog(f"Failed to open metadata viewer: {str(e)}")
+                logger.error(f"Failed to open plate viewer for {plate_path}: {e}", exc_info=True)
+                self.service_adapter.show_error_dialog(f"Failed to open plate viewer: {str(e)}")
 
     # ========== UI Helper Methods ==========
     
@@ -1398,7 +1399,7 @@ class PlateManagerWidget(QWidget):
     def get_selected_plates(self) -> List[Dict]:
         """
         Get currently selected plates.
-        
+
         Returns:
             List of selected plate dictionaries
         """
@@ -1408,6 +1409,17 @@ class PlateManagerWidget(QWidget):
             if plate_data:
                 selected_items.append(plate_data)
         return selected_items
+
+    def get_selected_orchestrator(self):
+        """
+        Get the orchestrator for the currently selected plate.
+
+        Returns:
+            PipelineOrchestrator or None if no plate selected or not initialized
+        """
+        if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
+            return self.orchestrators[self.selected_plate_path]
+        return None
     
     def update_button_states(self):
         """Update button enabled/disabled states based on selection."""

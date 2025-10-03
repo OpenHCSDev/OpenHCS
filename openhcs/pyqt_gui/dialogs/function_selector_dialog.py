@@ -532,44 +532,40 @@ class FunctionSelectorDialog(QDialog):
         self.function_table.setSortingEnabled(True)  # Re-enable sorting
     
     def filter_functions(self, search_term: str):
-        """Filter functions using mathematical simplification (RST principle)."""
-        search_term = search_term.strip()
+        """Filter functions using shared search service (canonical code path)."""
+        # Use shared search service for consistent behavior
+        from openhcs.ui.shared.search_service import SearchService
 
-        if not search_term or len(search_term) < 2:
-            # Performance optimization: skip expensive table rebuild for short searches
-            # Table is already populated with all functions on initialization
-            if len(search_term) == 0:
-                # Only update if completely empty (to reset from previous filter)
-                if self.filtered_functions != self.all_functions_metadata:
-                    self._update_filtered_view(self.all_functions_metadata.copy())
-            # For 1-character searches, do nothing - keep current state
-            return
-        else:
-            # Mathematical simplification: functional approach to searchable text creation
-            search_lower = search_term.lower()
+        # Create searchable text extractor
+        def create_searchable_text(metadata):
+            """Create searchable text using functional approach."""
+            contract = metadata.get('contract')
+            contract_name = contract.name if hasattr(contract, 'name') else str(contract) if contract else ""
 
-            def create_searchable_text(metadata):
-                """Create searchable text using functional approach."""
-                contract = metadata.get('contract')
-                contract_name = contract.name if hasattr(contract, 'name') else str(contract) if contract else ""
+            # Functional approach: map fields to searchable strings
+            searchable_fields = [
+                metadata.get('name', ''),
+                metadata.get('module', ''),
+                contract_name,
+                " ".join(metadata.get('tags', [])),
+                metadata.get('doc', '')
+            ]
+            return " ".join(field for field in searchable_fields)
 
-                # Functional approach: map fields to searchable strings
-                searchable_fields = [
-                    metadata.get('name', ''),
-                    metadata.get('module', ''),
-                    contract_name,
-                    " ".join(metadata.get('tags', [])),
-                    metadata.get('doc', '')
-                ]
-                return " ".join(field.lower() for field in searchable_fields)
+        # Create search service if not exists
+        if not hasattr(self, '_search_service'):
+            self._search_service = SearchService(
+                all_items=self.all_functions_metadata,
+                searchable_text_extractor=create_searchable_text
+            )
 
-            # Filter using comprehension and factored text creation
-            filtered = {
-                name: metadata for name, metadata in self.all_functions_metadata.items()
-                if search_lower in create_searchable_text(metadata)
-            }
+        # Perform search using shared service
+        filtered = self._search_service.filter(search_term)
 
-            # Use factored update method
+        # Update view
+        if len(search_term.strip()) == 0:
+            self._update_filtered_view(filtered)
+        elif len(search_term.strip()) >= SearchService.MIN_SEARCH_CHARS:
             self._update_filtered_view(filtered, f"search: '{search_term}'")
 
     def on_tree_selection_changed(self):

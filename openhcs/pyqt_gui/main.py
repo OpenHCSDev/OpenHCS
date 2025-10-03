@@ -209,6 +209,52 @@ class OpenHCSMainWindow(QMainWindow):
 
 
 
+    def show_image_browser(self):
+        """Show image browser window."""
+        if "image_browser" not in self.floating_windows:
+            from openhcs.pyqt_gui.widgets.image_browser import ImageBrowserWidget
+            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+
+            # Create floating window
+            window = QDialog(self)
+            window.setWindowTitle("Image Browser")
+            window.setModal(False)
+            window.resize(900, 600)
+
+            # Add widget to window
+            layout = QVBoxLayout(window)
+            image_browser_widget = ImageBrowserWidget(
+                orchestrator=None,
+                color_scheme=self.service_adapter.get_current_color_scheme()
+            )
+            layout.addWidget(image_browser_widget)
+
+            self.floating_windows["image_browser"] = window
+
+            # Connect to plate manager to get current orchestrator
+            if "plate_manager" in self.floating_windows:
+                plate_dialog = self.floating_windows["plate_manager"]
+                plate_widget = plate_dialog.findChild(PlateManagerWidget)
+                if plate_widget:
+                    # Connect to plate selection changes
+                    def on_plate_selected():
+                        if hasattr(plate_widget, 'get_selected_orchestrator'):
+                            orchestrator = plate_widget.get_selected_orchestrator()
+                            if orchestrator:
+                                image_browser_widget.set_orchestrator(orchestrator)
+
+                    # Try to connect to selection signal if it exists
+                    if hasattr(plate_widget, 'plate_selected'):
+                        plate_widget.plate_selected.connect(on_plate_selected)
+
+                    # Set initial orchestrator if available
+                    on_plate_selected()
+
+        # Show the window
+        self.floating_windows["image_browser"].show()
+        self.floating_windows["image_browser"].raise_()
+        self.floating_windows["image_browser"].activateWindow()
+
     def show_log_viewer(self):
         """Show log viewer window (mirrors Textual TUI pattern)."""
         if "log_viewer" not in self.floating_windows:
@@ -297,6 +343,12 @@ class OpenHCSMainWindow(QMainWindow):
         pipeline_action.setShortcut("Ctrl+E")
         pipeline_action.triggered.connect(self.show_pipeline_editor)
         view_menu.addAction(pipeline_action)
+
+        # Image Browser window
+        image_browser_action = QAction("&Image Browser", self)
+        image_browser_action.setShortcut("Ctrl+I")
+        image_browser_action.triggered.connect(self.show_image_browser)
+        view_menu.addAction(image_browser_action)
 
         # Log Viewer window
         log_action = QAction("&Log Viewer", self)

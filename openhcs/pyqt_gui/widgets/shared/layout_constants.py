@@ -22,11 +22,11 @@ class ParameterFormLayoutConfig:
 
     # Parameter row layout settings (between label, widget, button)
     parameter_row_spacing: int = 4
-    parameter_row_margins: tuple = (0, 0, 0, 0)
+    parameter_row_margins: tuple = (1, 1, 1, 1)
 
     # Optional parameter layout settings (checkbox + nested content)
     optional_layout_spacing: int = 2
-    optional_layout_margins: tuple = (0, 0, 0, 0)
+    optional_layout_margins: tuple = (2, 2, 1, 1)
 
     # Reset button width
     reset_button_width: int = 60
