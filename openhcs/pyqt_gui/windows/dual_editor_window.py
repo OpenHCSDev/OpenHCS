@@ -150,9 +150,9 @@ class DualEditorWindow(QDialog):
         
         layout.addWidget(self.tab_widget)
 
-        # Button panel
-        button_panel = self.create_button_panel()
-        layout.addWidget(button_panel)
+        # Button panel (no container widget)
+        button_layout = self.create_button_panel()
+        layout.addLayout(button_layout)
 
         # Apply centralized styling
         self.setStyleSheet(self.style_generator.generate_config_window_style())
@@ -230,26 +230,15 @@ class DualEditorWindow(QDialog):
 
 
 
-    def create_button_panel(self) -> QWidget:
+    def create_button_panel(self) -> QHBoxLayout:
         """
-        Create the button panel with save/cancel actions.
+        Create the button panel layout (no container widget).
 
         Returns:
-            Widget containing action buttons
+            QHBoxLayout containing action buttons
         """
-        panel = QFrame()
-        panel.setFrameStyle(QFrame.Shape.Box)
-        panel.setStyleSheet(f"""
-            QFrame {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
-                padding: 10px;
-            }}
-        """)
-
-        layout = QHBoxLayout(panel)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(5, 3, 5, 3)
         layout.setSpacing(5)
 
         # Changes indicator
@@ -264,14 +253,16 @@ class DualEditorWindow(QDialog):
 
         # Cancel button
         cancel_button = QPushButton("Cancel")
-        cancel_button.setMinimumWidth(80)
+        cancel_button.setFixedHeight(28)
+        cancel_button.setMinimumWidth(70)
         cancel_button.clicked.connect(self.cancel_edit)
         cancel_button.setStyleSheet(button_styles["cancel"])
         layout.addWidget(cancel_button)
 
         # Save button
         self.save_button = QPushButton("Save")
-        self.save_button.setMinimumWidth(80)
+        self.save_button.setFixedHeight(28)
+        self.save_button.setMinimumWidth(70)
         self.save_button.setEnabled(False)  # Initially disabled
         self.save_button.clicked.connect(self.save_edit)
         self.save_button.setStyleSheet(button_styles["save"] + f"""
@@ -283,7 +274,7 @@ class DualEditorWindow(QDialog):
         """)
         layout.addWidget(self.save_button)
 
-        return panel
+        return layout
 
     def setup_connections(self):
         """Setup signal/slot connections."""

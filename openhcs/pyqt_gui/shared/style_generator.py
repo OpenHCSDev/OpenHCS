@@ -103,7 +103,7 @@ class StyleSheetGenerator:
             }}
             QTreeWidget::item, QListWidget::item {{
                 padding: 4px;
-                border: none;
+                border-bottom: 1px solid {cs.to_hex(cs.border_color)};
             }}
             QTreeWidget::item:hover, QListWidget::item:hover {{
                 background-color: {cs.to_hex(cs.hover_bg)};
@@ -111,6 +111,14 @@ class StyleSheetGenerator:
             QTreeWidget::item:selected, QListWidget::item:selected {{
                 background-color: {cs.to_hex(cs.selection_bg)};
                 color: {cs.to_hex(cs.selection_text)};
+            }}
+            QHeaderView::section {{
+                background-color: {cs.to_hex(cs.panel_bg)};
+                color: {cs.to_hex(cs.text_primary)};
+                padding: 4px;
+                border: none;
+                border-bottom: 1px solid {cs.to_hex(cs.border_color)};
+                font-weight: normal;
             }}
         """
 

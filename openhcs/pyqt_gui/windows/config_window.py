@@ -90,12 +90,14 @@ class ConfigWindow(QDialog):
         # The overlay (current form state) will be built by ParameterFormManager
         # This fixes the circular context bug where reset showed old values instead of global defaults
 
+        # CRITICAL: Config window manages its own scroll area, so tell form_manager NOT to create one
+        # This prevents double scroll areas which cause navigation bugs
         self.form_manager = ParameterFormManager.from_dataclass_instance(
             dataclass_instance=current_config,
             field_id=root_field_id,
             placeholder_prefix=placeholder_prefix,
             color_scheme=self.color_scheme,
-            use_scroll_area=True,
+            use_scroll_area=False,  # Config window handles scrolling
             global_config_type=global_config_type,
             context_obj=None  # Inherit from thread-local GlobalPipelineConfig only
         )
@@ -107,18 +109,6 @@ class ConfigWindow(QDialog):
         self.setup_ui()
 
         logger.debug(f"Config window initialized for {config_class.__name__}")
-
-    def _should_use_scroll_area(self) -> bool:
-        """Determine if scroll area should be used based on config complexity."""
-        # For simple dataclasses with few fields, don't use scroll area
-        # This ensures dataclass fields show in full as requested
-        if dataclasses.is_dataclass(self.config_class):
-            field_count = len(dataclasses.fields(self.config_class))
-            # Use scroll area for configs with more than 8 fields (PipelineConfig has ~12 fields)
-            return field_count > 8
-
-        # For non-dataclass configs, use scroll area
-        return True
 
     def setup_ui(self):
         """Setup the user interface."""
@@ -157,30 +147,30 @@ class ConfigWindow(QDialog):
         self.tree_widget = self._create_inheritance_tree()
         splitter.addWidget(self.tree_widget)
 
-        # Right panel - Parameter form
-        if self._should_use_scroll_area():
-            self.scroll_area = QScrollArea()
-            self.scroll_area.setWidgetResizable(True)
-            self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-            self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            self.scroll_area.setWidget(self.form_manager)
-            splitter.addWidget(self.scroll_area)
-        else:
-            # For simple dataclasses, show form directly without scrolling
-            splitter.addWidget(self.form_manager)
+        # Right panel - Parameter form with scroll area
+        # Always use scroll area for consistent navigation behavior
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setWidget(self.form_manager)
+        splitter.addWidget(self.scroll_area)
 
         # Set splitter proportions (30% tree, 70% form)
         splitter.setSizes([300, 700])
 
         # Add splitter with stretch factor so it expands to fill available space
         layout.addWidget(splitter, 1)  # stretch factor = 1
-        
-        # Button panel
-        button_panel = self.create_button_panel()
-        layout.addWidget(button_panel)
-        
-        # Apply centralized styling
-        self.setStyleSheet(self.style_generator.generate_config_window_style())
+
+        # Button panel (no container widget)
+        button_layout = self.create_button_panel()
+        layout.addLayout(button_layout)
+
+        # Apply centralized styling (config window style includes tree styling now)
+        self.setStyleSheet(
+            self.style_generator.generate_config_window_style() + "\n" +
+            self.style_generator.generate_tree_widget_style()
+        )
 
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""
@@ -189,27 +179,8 @@ class ConfigWindow(QDialog):
         # Remove width restrictions to allow horizontal dragging
         tree.setMinimumWidth(200)
 
-        # Style the tree with original appearance
-        tree.setStyleSheet(f"""
-            QTreeWidget {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
-                color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
-                font-size: 12px;
-            }}
-            QTreeWidget::item {{
-                padding: 4px;
-                border-bottom: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-            }}
-            QTreeWidget::item:selected {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
-                color: white;
-            }}
-            QTreeWidget::item:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
-            }}
-        """)
+        # Disable expand on double-click (use arrow only)
+        tree.setExpandsOnDoubleClick(False)
 
         # Build inheritance hierarchy
         self._populate_inheritance_tree(tree)
@@ -236,9 +207,23 @@ class ConfigWindow(QDialog):
         # Expand the tree
         tree.expandAll()
 
+    def _get_base_type(self, dataclass_type):
+        """Get base (non-lazy) type for a dataclass - type-based detection."""
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+        # Type-based lazy detection
+        if LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type):
+            # Get first non-Lazy base class
+            for base in dataclass_type.__bases__:
+                if base.__name__ != 'object' and not LazyDefaultPlaceholderService.has_lazy_resolution(base):
+                    return base
+
+        return dataclass_type
+
     def _add_ui_visible_dataclasses_to_tree(self, parent_item: QTreeWidgetItem, dataclass_type):
         """Add only dataclasses that are visible in the UI form."""
         import dataclasses
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
         # Get all fields from this dataclass
         fields = dataclasses.fields(dataclass_type)
@@ -249,30 +234,39 @@ class ConfigWindow(QDialog):
 
             # Only show dataclass fields (these appear as sections in the UI)
             if dataclasses.is_dataclass(field_type):
+                # Get the base (non-lazy) type for display and inheritance
+                base_type = self._get_base_type(field_type)
+                display_name = base_type.__name__
+
                 # Create a child item for this nested dataclass
-                field_item = QTreeWidgetItem([f"{field_name} ({field_type.__name__})"])
+                field_item = QTreeWidgetItem([f"{field_name} ({display_name})"])
                 field_item.setData(0, Qt.ItemDataRole.UserRole, {
                     'type': 'dataclass',
-                    'class': field_type,
+                    'class': field_type,  # Store original type for field lookup
                     'field_name': field_name
                 })
                 parent_item.addChild(field_item)
 
-                # Show inheritance hierarchy for this dataclass
-                self._add_inheritance_info(field_item, field_type)
+                # Show inheritance hierarchy using the BASE type (not lazy type)
+                # This automatically skips the lazy→base transition
+                self._add_inheritance_info(field_item, base_type)
 
-                # Recursively add nested dataclasses
-                self._add_ui_visible_dataclasses_to_tree(field_item, field_type)
+                # Recursively add nested dataclasses using BASE type
+                self._add_ui_visible_dataclasses_to_tree(field_item, base_type)
 
     def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
-        """Add inheritance information for a dataclass with proper hierarchy, skipping lazy classes."""
-        # Get direct base classes, skipping lazy versions
+        """Add inheritance information for a dataclass with proper hierarchy."""
+        # Get direct base classes (dataclass_type is already the base/non-lazy type)
         direct_bases = []
         for cls in dataclass_type.__bases__:
-            if (cls.__name__ != 'object' and
-                hasattr(cls, '__dataclass_fields__') and
-                not cls.__name__.startswith('Lazy')):  # Skip lazy dataclass wrappers
-                direct_bases.append(cls)
+            if cls.__name__ == 'object':
+                continue
+            if not hasattr(cls, '__dataclass_fields__'):
+                continue
+
+            # Always use base type (no lazy wrappers at this point)
+            base_type = self._get_base_type(cls)
+            direct_bases.append(base_type)
 
         # Add base classes directly as children (no "Inherits from:" label)
         for base_class in direct_bases:
@@ -306,155 +300,135 @@ class ConfigWindow(QDialog):
                 logger.debug(f"Double-clicked on root dataclass: {class_name}")
 
         elif item_type == 'inheritance_link':
-            # Find and navigate to the target class in the tree
+            # Navigate to the parent class section in the form
             target_class = data.get('target_class')
             if target_class:
-                self._navigate_to_class_in_tree(target_class)
-                logger.debug(f"Navigating to inherited class: {target_class.__name__}")
+                # Find the field that has this type (or its lazy version)
+                field_name = self._find_field_for_class(target_class)
+                if field_name:
+                    self._scroll_to_section(field_name)
+                    logger.debug(f"Navigating to inherited section: {field_name} (class: {target_class.__name__})")
+                else:
+                    logger.warning(f"Could not find field for class {target_class.__name__}")
 
-    def _navigate_to_class_in_tree(self, target_class):
-        """Find and highlight a class in the tree."""
-        # Search through all items in the tree to find the target class
-        root = self.tree_widget.invisibleRootItem()
-        self._search_and_highlight_class(root, target_class)
+    def _find_field_for_class(self, target_class) -> str:
+        """Find the field name that has the given class type (or its lazy version)."""
+        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+        import dataclasses
 
-    def _search_and_highlight_class(self, parent_item, target_class):
-        """Recursively search for and highlight a class in the tree."""
-        for i in range(parent_item.childCount()):
-            child = parent_item.child(i)
-            data = child.data(0, Qt.ItemDataRole.UserRole)
+        # Get the root dataclass type
+        root_config = self.form_manager.object_instance
+        if not dataclasses.is_dataclass(root_config):
+            return None
 
-            if data and data.get('type') == 'dataclass':
-                if data.get('class') == target_class:
-                    # Found the target - select and scroll to it
-                    self.tree_widget.setCurrentItem(child)
-                    self.tree_widget.scrollToItem(child)
-                    return True
+        root_type = type(root_config)
 
-            # Recursively search children
-            if self._search_and_highlight_class(child, target_class):
-                return True
+        # Search through all fields to find one with matching type
+        for field in dataclasses.fields(root_type):
+            field_type = field.type
 
-        return False
+            # Check if field type matches target class directly
+            if field_type == target_class:
+                return field.name
 
-    def _scroll_to_section(self, field_name: str):
-        """Scroll to a specific section in the form."""
-        try:
-            # Check if we have a scroll area
-            if hasattr(self, 'scroll_area') and self.scroll_area:
-                # Find the group box for this field name
-                form_widget = self.scroll_area.widget()
-                if form_widget:
-                    group_box = self._find_group_box_by_name(form_widget, field_name)
-                    if group_box:
-                        # Scroll to the group box with small margins for better visibility
-                        self.scroll_area.ensureWidgetVisible(group_box, 20, 20)
-                        logger.debug(f"Scrolled to section: {field_name}")
-                        return
-
-            # Fallback: try to scroll to form manager directly if no scroll area
-            if hasattr(self.form_manager, 'nested_managers') and field_name in self.form_manager.nested_managers:
-                nested_manager = self.form_manager.nested_managers[field_name]
-                if hasattr(self, 'scroll_area') and self.scroll_area:
-                    self.scroll_area.ensureWidgetVisible(nested_manager, 20, 20)
-                    logger.debug(f"Scrolled to nested manager: {field_name}")
-                    return
-
-            logger.debug(f"Could not find section to scroll to: {field_name}")
-        except Exception as e:
-            logger.warning(f"Error scrolling to section {field_name}: {e}")
-
-    def _find_group_box_by_name(self, parent_widget, field_name: str):
-        """Recursively find a group box by field name."""
-        from PyQt6.QtWidgets import QGroupBox
-
-        # Look for QGroupBox widgets with matching titles
-        group_boxes = parent_widget.findChildren(QGroupBox)
-
-        for group_box in group_boxes:
-            title = group_box.title()
-            # Check if field name matches the title (case insensitive)
-            if (field_name.lower() in title.lower() or
-                title.lower().replace(' ', '_') == field_name.lower() or
-                field_name.lower().replace('_', ' ') in title.lower()):
-                logger.debug(f"Found matching group box: '{title}' for field '{field_name}'")
-                return group_box
-
-        # Also check object names as fallback
-        for child in parent_widget.findChildren(QWidget):
-            if hasattr(child, 'objectName') and child.objectName():
-                if field_name.lower() in child.objectName().lower():
-                    logger.debug(f"Found matching widget by object name: '{child.objectName()}' for field '{field_name}'")
-                    return child
-
-        logger.debug(f"No matching section found for field: {field_name}")
-        # Debug: print all group box titles to help troubleshoot
-        all_titles = [gb.title() for gb in group_boxes]
-        logger.debug(f"Available group box titles: {all_titles}")
+            # Check if field type is a lazy version of target class
+            if LazyDefaultPlaceholderService.has_lazy_resolution(field_type):
+                # Get the base class of the lazy type
+                for base in field_type.__bases__:
+                    if base == target_class:
+                        return field.name
 
         return None
 
+    def _scroll_to_section(self, field_name: str):
+        """Scroll to a specific section in the form - type-driven, seamless."""
+        logger.info(f"🔍 Scrolling to section: {field_name}")
+        logger.info(f"Available nested managers: {list(self.form_manager.nested_managers.keys())}")
 
+        # Type-driven: nested_managers dict has exact field name as key
+        if field_name in self.form_manager.nested_managers:
+            nested_manager = self.form_manager.nested_managers[field_name]
 
+            # Strategy: Find the first parameter widget in this nested manager (like the test does)
+            # This is more reliable than trying to find the GroupBox
+            first_widget = None
 
-    
+            if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
+                # Get the first widget from the nested manager's widgets dict
+                first_param_name = next(iter(nested_manager.widgets.keys()))
+                first_widget = nested_manager.widgets[first_param_name]
+                logger.info(f"Found first widget: {first_param_name}")
 
-    
-    def create_button_panel(self) -> QWidget:
+            if first_widget:
+                # Scroll to the first widget (this will show the section header too)
+                self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
+                logger.info(f"✅ Scrolled to {field_name} via first widget")
+            else:
+                # Fallback: try to find the GroupBox
+                from PyQt6.QtWidgets import QGroupBox
+                current = nested_manager.parentWidget()
+                while current:
+                    if isinstance(current, QGroupBox):
+                        self.scroll_area.ensureWidgetVisible(current, 50, 50)
+                        logger.info(f"✅ Scrolled to {field_name} via GroupBox")
+                        return
+                    current = current.parentWidget()
+
+                logger.warning(f"⚠️ Could not find widget or GroupBox for {field_name}")
+        else:
+            logger.warning(f"❌ Field '{field_name}' not in nested_managers")
+
+    def create_button_panel(self) -> QHBoxLayout:
         """
-        Create the button panel.
-        
+        Create the button panel layout (no container widget).
+
         Returns:
-            Widget containing action buttons
+            QHBoxLayout containing action buttons
         """
-        panel = QFrame()
-        panel.setFrameStyle(QFrame.Shape.Box)
-        panel.setStyleSheet(f"""
-            QFrame {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
-                padding: 10px;
-            }}
-        """)
-        
-        layout = QHBoxLayout(panel)
+        layout = QHBoxLayout()
+        layout.setContentsMargins(5, 3, 5, 3)
+        layout.setSpacing(5)
         layout.addStretch()
+
+        button_styles = self.style_generator.generate_config_button_styles()
 
         # View Code button (left side)
         view_code_button = QPushButton("View Code")
-        view_code_button.setMinimumWidth(100)
+        view_code_button.setFixedHeight(28)
+        view_code_button.setMinimumWidth(80)
         view_code_button.clicked.connect(self._view_code)
-        button_styles = self.style_generator.generate_config_button_styles()
-        view_code_button.setStyleSheet(button_styles["reset"])  # Use reset style for now
+        view_code_button.setStyleSheet(button_styles["reset"])
         layout.addWidget(view_code_button)
 
         layout.addStretch()
 
         # Reset button
         reset_button = QPushButton("Reset to Defaults")
-        reset_button.setMinimumWidth(120)
+        reset_button.setFixedHeight(28)
+        reset_button.setMinimumWidth(100)
         reset_button.clicked.connect(self.reset_to_defaults)
         reset_button.setStyleSheet(button_styles["reset"])
         layout.addWidget(reset_button)
 
-        layout.addSpacing(10)
+        layout.addSpacing(5)
 
         # Cancel button
         cancel_button = QPushButton("Cancel")
-        cancel_button.setMinimumWidth(80)
+        cancel_button.setFixedHeight(28)
+        cancel_button.setMinimumWidth(70)
         cancel_button.clicked.connect(self.reject)
         cancel_button.setStyleSheet(button_styles["cancel"])
         layout.addWidget(cancel_button)
 
         # Save button
         save_button = QPushButton("Save")
-        save_button.setMinimumWidth(80)
+        save_button.setFixedHeight(28)
+        save_button.setMinimumWidth(70)
         save_button.clicked.connect(self.save_config)
         save_button.setStyleSheet(button_styles["save"])
         layout.addWidget(save_button)
 
-        return panel
+        return layout
     
 
 
@@ -521,7 +495,6 @@ class ConfigWindow(QDialog):
 
         try:
             # Import required services
-            from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 
             # Update the current config
             self.current_config = new_config

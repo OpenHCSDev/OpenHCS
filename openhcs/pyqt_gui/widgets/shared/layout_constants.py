@@ -13,12 +13,12 @@ class ParameterFormLayoutConfig:
     """Configuration for parameter form layout spacing and margins."""
 
     # Main form layout settings
-    main_layout_spacing: int = 2
-    main_layout_margins: tuple = (4, 4, 4, 4)  # left, top, right, bottom
+    main_layout_spacing: int = 4
+    main_layout_margins: tuple = (main_layout_spacing, main_layout_spacing, main_layout_spacing, main_layout_spacing)
 
     # Content layout settings (between parameter fields)
-    content_layout_spacing: int = 1
-    content_layout_margins: tuple = (2, 2, 2, 2)
+    content_layout_spacing: int = 2
+    content_layout_margins: tuple = (content_layout_spacing, content_layout_spacing, content_layout_spacing, content_layout_spacing)
 
     # Parameter row layout settings (between label, widget, button)
     parameter_row_spacing: int = 4
