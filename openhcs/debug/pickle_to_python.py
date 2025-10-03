@@ -32,6 +32,9 @@ def collect_imports_from_data(data_obj):
             function_imports[module].add(name)
             [register_imports(getattr(obj, f.name)) for f in fields(obj) if getattr(obj, f.name) is not None]
         elif callable(obj):
+            # Skip bound methods (like step.process) - only import standalone functions
+            if inspect.ismethod(obj):
+                return
             if _is_external_registered_function(obj):
                 # Use the actual module path but under openhcs namespace
                 original_module = obj.__module__

@@ -337,6 +337,61 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
     return orchestrator
 
 
+def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
+    """Export pipeline to Python file in the plate directory using the same code as the Code button."""
+    from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
+    from datetime import datetime
+
+    # Create output path in the plate directory
+    output_path = plate_dir / "test_pipeline.py"
+
+    # Generate code using the same function as the pipeline editor Code button
+    # This ensures consistency between UI and test exports
+    python_code = generate_complete_pipeline_steps_code(
+        pipeline_steps=pipeline.steps,
+        clean_mode=True
+    )
+
+    # Wrap in a complete script with header and main block
+    lines = []
+    lines.append('#!/usr/bin/env python3')
+    lines.append('"""')
+    lines.append(f'OpenHCS Pipeline Script - {pipeline.name}')
+    lines.append(f'Generated: {datetime.now()}')
+    lines.append('"""')
+    lines.append('')
+    lines.append('from openhcs.core.pipeline import Pipeline')
+    lines.append('')
+    lines.append('')
+    lines.append('def create_pipeline():')
+    lines.append('    """Create and return the pipeline."""')
+    lines.append('')
+
+    # Indent the generated pipeline steps code
+    for line in python_code.split('\n'):
+        if line.strip() and not line.startswith('#'):
+            lines.append(f'    {line}')
+        elif line.strip().startswith('#'):
+            lines.append(f'    {line}')
+
+    lines.append('')
+    lines.append(f'    return Pipeline(')
+    lines.append(f'        steps=pipeline_steps,')
+    lines.append(f'        name={repr(pipeline.name)}')
+    lines.append(f'    )')
+    lines.append('')
+    lines.append('')
+    lines.append('pipeline_steps = create_pipeline()')
+    lines.append('')
+
+    # Write to file
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, 'w') as f:
+        f.write('\n'.join(lines))
+
+    print(f"📝 Pipeline exported to: {output_path}")
+
+
 def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipeline) -> Dict:
     """Execute compilation and execution phases of the pipeline."""
     from openhcs.constants import MULTIPROCESSING_AXIS
@@ -400,6 +455,9 @@ def test_main(plate_dir: Union[Path, str], backend_config: str, data_type_config
 
     orchestrator = _initialize_orchestrator(test_config)
     pipeline = create_test_pipeline()
+
+    # Export pipeline to Python file in the synthetic data folder
+    _export_pipeline_to_file(pipeline, test_config.plate_dir)
 
     # Test orchestrator's pipeline config has the correct values
     # The dual-axis resolver will use these values during pipeline execution

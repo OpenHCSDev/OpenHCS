@@ -816,7 +816,11 @@ class PlateManagerWidget(QWidget):
                     ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                     return orchestrator.compile_pipelines(pipeline_obj.steps, wells)
 
-                compiled_contexts = await loop.run_in_executor(None, compile_with_context)
+                compilation_result = await loop.run_in_executor(None, compile_with_context)
+
+                # Extract compiled_contexts from the dict returned by compile_pipelines
+                # compile_pipelines now returns {'pipeline_definition': ..., 'compiled_contexts': ...}
+                compiled_contexts = compilation_result['compiled_contexts']
 
                 # Store compiled data
                 self.plate_compiled_data[plate_path] = (execution_pipeline, compiled_contexts)
