@@ -501,7 +501,7 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
                         napari_ready = True
                         logger.info(f"🔬 NAPARI PROCESS: Marked as ready after ping")
 
-                    response = {'type': 'pong', 'ready': napari_ready}
+                    response = {'type': 'pong', 'ready': napari_ready, 'viewer': 'napari', 'openhcs': True}
                     control_socket.send(pickle.dumps(response))
                     logger.debug(f"🔬 NAPARI PROCESS: Responded to ping with ready={napari_ready}")
 
@@ -931,17 +931,22 @@ class NapariStreamVisualizer:
                     pass
 
     def _kill_processes_on_port(self, port: int) -> None:
-        """Kill all processes using the specified port."""
+        """
+        Kill only the process LISTENING on the specified port (the Napari viewer).
+
+        Does NOT kill client processes that are merely connected to the port.
+        """
         import subprocess
         import platform
 
         try:
             system = platform.system()
 
-            if system == "Linux":
-                # Use lsof to find process using the port
+            if system == "Linux" or system == "Darwin":
+                # Use lsof with -sTCP:LISTEN to find only LISTENING processes
+                # This excludes client connections and only targets the server (Napari viewer)
                 result = subprocess.run(
-                    ['lsof', '-ti', f':{port}'],
+                    ['lsof', '-ti', f'TCP:{port}', '-sTCP:LISTEN'],
                     capture_output=True,
                     text=True,
                     timeout=2
@@ -952,30 +957,12 @@ class NapariStreamVisualizer:
                     for pid in pids:
                         try:
                             subprocess.run(['kill', '-9', pid], timeout=1)
-                            logger.info(f"🔬 VISUALIZER: Killed process {pid} on port {port}")
-                        except Exception as e:
-                            logger.warning(f"Failed to kill process {pid}: {e}")
-
-            elif system == "Darwin":  # macOS
-                # Same as Linux
-                result = subprocess.run(
-                    ['lsof', '-ti', f':{port}'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
-                if result.returncode == 0 and result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
-                        try:
-                            subprocess.run(['kill', '-9', pid], timeout=1)
-                            logger.info(f"🔬 VISUALIZER: Killed process {pid} on port {port}")
+                            logger.info(f"🔬 VISUALIZER: Killed process {pid} listening on port {port}")
                         except Exception as e:
                             logger.warning(f"Failed to kill process {pid}: {e}")
 
             elif system == "Windows":
-                # Use netstat to find process
+                # Use netstat to find processes LISTENING on the port
                 result = subprocess.run(
                     ['netstat', '-ano'],
                     capture_output=True,
@@ -989,7 +976,7 @@ class NapariStreamVisualizer:
                         pid = parts[-1]
                         try:
                             subprocess.run(['taskkill', '/F', '/PID', pid], timeout=1)
-                            logger.info(f"🔬 VISUALIZER: Killed process {pid} on port {port}")
+                            logger.info(f"🔬 VISUALIZER: Killed process {pid} listening on port {port}")
                         except Exception as e:
                             logger.warning(f"Failed to kill process {pid}: {e}")
 
