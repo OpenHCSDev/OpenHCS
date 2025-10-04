@@ -1,85 +1,141 @@
 #!/usr/bin/env python3
 """
-Import OpenHCS test data into OMERO for demo purposes.
+Generate and upload synthetic test data to OMERO.
 
-This script takes existing test data from tests/data/ and imports it into OMERO,
-creating a dataset that can be used for the OMERO integration demo.
+This script:
+1. Generates synthetic microscopy images using SyntheticMicroscopyGenerator
+2. Uploads them directly to OMERO via API
+3. Returns dataset ID for use in demo
 """
 
 import sys
+import tempfile
 from pathlib import Path
+import numpy as np
 from omero.gateway import BlitzGateway
-from omero.model import DatasetI, PlateI
-from omero.rtypes import rstring
+from omero.model import DatasetI, ImageI, PixelsI
+from omero.rtypes import rstring, rint, rdouble
+import omero.gateway
 
 
-def import_test_plate(conn, plate_path: Path, dataset_name: str = "OpenHCS_Test_Data"):
-    """Import a test plate into OMERO."""
-    
-    # Create dataset
-    dataset = DatasetI()
-    dataset.setName(rstring(dataset_name))
-    dataset = conn.getUpdateService().saveAndReturnObject(dataset)
-    dataset_id = dataset.getId().getValue()
-    
-    print(f"✓ Created dataset: {dataset_name} (ID: {dataset_id})")
-    
-    # Import images from plate
-    # Note: This is a simplified version - real import would use omero-py's import functionality
-    print(f"📁 Scanning plate directory: {plate_path}")
-    
-    image_files = list(plate_path.rglob("*.tif")) + list(plate_path.rglob("*.tiff"))
-    print(f"📸 Found {len(image_files)} image files")
-    
-    if not image_files:
-        print("⚠️  No image files found. Make sure test data exists.")
-        return None
-    
-    print(f"\n💡 To import these files into OMERO, run:")
-    print(f"   omero import -d {dataset_id} {plate_path}")
-    print(f"\nOr use OMERO.web interface at http://localhost:4080")
-    
-    return dataset_id
+def generate_and_upload_synthetic_data(
+    conn,
+    dataset_name: str = "OpenHCS_Synthetic_Test",
+    grid_size=(2, 2),
+    tile_size=(128, 128),
+    wavelengths=2,
+    z_stack_levels=3,
+    well='A01'
+):
+    """Generate synthetic data and upload to OMERO."""
+
+    print(f"[1/3] Generating synthetic microscopy data...")
+    print(f"  Grid: {grid_size[0]}x{grid_size[1]}, Tile: {tile_size}, Channels: {wavelengths}, Z-levels: {z_stack_levels}")
+
+    # Generate synthetic data to temp directory
+    from openhcs.tests.generators.generate_synthetic_data import SyntheticMicroscopyGenerator
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        generator = SyntheticMicroscopyGenerator(
+            output_dir=tmpdir,
+            grid_size=grid_size,
+            tile_size=tile_size,
+            overlap_percent=10,
+            wavelengths=wavelengths,
+            z_stack_levels=z_stack_levels,
+            wells=[well],
+            format='ImageXpress',
+            auto_image_size=True
+        )
+        generator.generate_dataset()
+
+        print(f"✓ Generated synthetic data")
+
+        # Create dataset in OMERO
+        print(f"\n[2/3] Creating OMERO dataset...")
+        dataset = DatasetI()
+        dataset.setName(rstring(dataset_name))
+        dataset = conn.getUpdateService().saveAndReturnObject(dataset)
+        dataset_id = dataset.getId().getValue()
+
+        print(f"✓ Created dataset: {dataset_name} (ID: {dataset_id})")
+
+        # Upload images to OMERO
+        print(f"\n[3/3] Uploading images to OMERO...")
+
+        plate_dir = Path(tmpdir) / well
+        image_files = sorted(plate_dir.rglob("*.tif"))
+
+        print(f"  Found {len(image_files)} images to upload")
+
+        image_ids = []
+        for i, img_path in enumerate(image_files, 1):
+            # Read image
+            import tifffile
+            img_data = tifffile.imread(img_path)
+
+            # Ensure 3D (Z, Y, X)
+            if img_data.ndim == 2:
+                img_data = img_data[np.newaxis, ...]
+
+            # Upload to OMERO
+            image_id = _upload_image_to_omero(
+                conn, img_data, img_path.name, dataset_id
+            )
+            image_ids.append(image_id)
+
+            if i % 5 == 0 or i == len(image_files):
+                print(f"  Uploaded {i}/{len(image_files)} images...")
+
+        print(f"✓ Uploaded {len(image_ids)} images")
+
+    return dataset_id, image_ids
+
+
+def _upload_image_to_omero(conn, img_data: np.ndarray, name: str, dataset_id: int) -> int:
+    """Upload a single image to OMERO."""
+
+    # Create image
+    sizeZ, sizeY, sizeX = img_data.shape
+    sizeC = 1
+    sizeT = 1
+
+    # Create image object
+    image = conn.createImageFromNumpySeq(
+        plane_gen=(img_data[z] for z in range(sizeZ)),
+        name=name,
+        sizeZ=sizeZ,
+        sizeC=sizeC,
+        sizeT=sizeT,
+        dataset=conn.getObject("Dataset", dataset_id)
+    )
+
+    return image.getId()
 
 
 def main():
+    """Generate synthetic data and upload to OMERO."""
+
     # Connect to OMERO
+    print("Connecting to OMERO...")
     conn = BlitzGateway('root', 'omero-root-password', host='localhost', port=4064)
     if not conn.connect():
         print("❌ Failed to connect to OMERO")
+        print("   Make sure OMERO is running: docker-compose up -d")
         sys.exit(1)
-    
-    print("✓ Connected to OMERO")
-    
+
+    print("✓ Connected to OMERO\n")
+
     try:
-        # Find test data
-        test_data_dir = Path("tests/data")
-        if not test_data_dir.exists():
-            print(f"❌ Test data directory not found: {test_data_dir}")
-            sys.exit(1)
-        
-        # Look for plate directories
-        plate_dirs = [d for d in test_data_dir.iterdir() if d.is_dir()]
-        
-        if not plate_dirs:
-            print(f"❌ No plate directories found in {test_data_dir}")
-            sys.exit(1)
-        
-        print(f"\n📦 Found {len(plate_dirs)} plate(s):")
-        for i, plate_dir in enumerate(plate_dirs, 1):
-            print(f"  {i}. {plate_dir.name}")
-        
-        # Import first plate
-        plate_path = plate_dirs[0]
-        print(f"\n🔄 Importing: {plate_path.name}")
-        
-        dataset_id = import_test_plate(conn, plate_path)
-        
-        if dataset_id:
-            print(f"\n✅ Setup complete!")
-            print(f"   Dataset ID: {dataset_id}")
-            print(f"   Use this ID in omero_demo.py")
-        
+        dataset_id, image_ids = generate_and_upload_synthetic_data(conn)
+
+        print(f"\n✅ Setup complete!")
+        print(f"   Dataset ID: {dataset_id}")
+        print(f"   Images uploaded: {len(image_ids)}")
+        print(f"\n   Use dataset ID {dataset_id} in omero_demo.py")
+
+        return dataset_id
+
     finally:
         conn.close()
 
