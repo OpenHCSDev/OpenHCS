@@ -101,10 +101,22 @@ def start_execution_server(omero_host='localhost', omero_port=4064, server_port=
 def start_napari_viewer(port=5555):
     """Start Napari viewer for streaming."""
     print(f"\n[4/8] Starting Napari viewer (port {port})...")
-    
-    visualizer = NapariStreamVisualizer()
-    visualizer.start_viewer(port=port, viewer_title="OpenHCS + OMERO Demo")
-    
+
+    # Create minimal FileManager for visualizer (not used in demo, but required)
+    from openhcs.io.file_manager import FileManager
+    from openhcs.config_framework.lazy_factory import LazyVisualizerConfig
+
+    fm = FileManager(base_dir="/tmp")  # Dummy base_dir
+    visualizer_config = LazyVisualizerConfig()
+
+    visualizer = NapariStreamVisualizer(
+        filemanager=fm,
+        visualizer_config=visualizer_config,
+        napari_port=port,
+        viewer_title="OpenHCS + OMERO Demo"
+    )
+    visualizer.start_viewer()
+
     print(f"✓ Viewer ready")
     return visualizer
 

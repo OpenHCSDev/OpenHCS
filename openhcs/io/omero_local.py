@@ -224,3 +224,52 @@ class OMEROLocalBackend(StorageBackend, metaclass=StorageBackendMeta):
 
         return image_ids
 
+    def load_batch(self, file_paths: List[Union[str, Path]], **kwargs) -> List[Any]:
+        """Load multiple images from OMERO."""
+        return [self.load(fp, **kwargs) for fp in file_paths]
+
+    # Filesystem operations - not supported for OMERO
+    def list_dir(self, path: Union[str, Path]) -> List[str]:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("list_dir not supported for OMERO backend")
+
+    def delete(self, file_path: Union[str, Path]) -> None:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("delete not supported for OMERO backend")
+
+    def delete_all(self, file_path: Union[str, Path]) -> None:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("delete_all not supported for OMERO backend")
+
+    def ensure_directory(self, directory: Union[str, Path]) -> Path:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("ensure_directory not supported for OMERO backend")
+
+    def create_symlink(self, source: Union[str, Path], link_name: Union[str, Path]):
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("create_symlink not supported for OMERO backend")
+
+    def is_symlink(self, source: Union[str, Path]) -> bool:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("is_symlink not supported for OMERO backend")
+
+    def is_file(self, source: Union[str, Path]) -> bool:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("is_file not supported for OMERO backend")
+
+    def is_dir(self, source: Union[str, Path]) -> bool:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("is_dir not supported for OMERO backend")
+
+    def move(self, src: Union[str, Path], dst: Union[str, Path]) -> None:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("move not supported for OMERO backend")
+
+    def copy(self, src: Union[str, Path], dst: Union[str, Path]) -> None:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("copy not supported for OMERO backend")
+
+    def stat(self, path: Union[str, Path]) -> dict:
+        """Not supported for OMERO backend."""
+        raise NotImplementedError("stat not supported for OMERO backend")
+

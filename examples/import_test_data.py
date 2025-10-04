@@ -63,8 +63,8 @@ def generate_and_upload_synthetic_data(
         # Upload images to OMERO
         print(f"\n[3/3] Uploading images to OMERO...")
 
-        plate_dir = Path(tmpdir) / well
-        image_files = sorted(plate_dir.rglob("*.tif"))
+        # ImageXpress format creates TimePoint_1/ZStep_N/*.tif structure
+        image_files = sorted(Path(tmpdir).rglob("*.tif"))
 
         print(f"  Found {len(image_files)} images to upload")
 
