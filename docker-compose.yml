@@ -19,7 +19,8 @@ services:
       CONFIG_omero_db_name: omero
       ROOTPASS: omero-root-password
     ports:
-      - "4064:4064"
+      - "4063:4063"  # Glacier2 router (secure)
+      - "4064:4064"  # Blitz server (insecure)
     volumes:
       - omero_data:/OMERO
     networks:

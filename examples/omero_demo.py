@@ -31,7 +31,7 @@ from tests.integration.test_main import create_test_pipeline, TestConstants
 from openhcs.core.config import GlobalPipelineConfig, VFSConfig
 from openhcs.runtime.remote_orchestrator import RemoteOrchestrator
 from openhcs.runtime.execution_server import OpenHCSExecutionServer
-from openhcs.runtime.napari_stream_visualizer import NapariStreamingVisualizer
+from openhcs.runtime.napari_stream_visualizer import NapariStreamVisualizer
 
 # Import data generator
 from import_test_data import generate_and_upload_synthetic_data
@@ -102,7 +102,7 @@ def start_napari_viewer(port=5555):
     """Start Napari viewer for streaming."""
     print(f"\n[4/8] Starting Napari viewer (port {port})...")
     
-    visualizer = NapariStreamingVisualizer()
+    visualizer = NapariStreamVisualizer()
     visualizer.start_viewer(port=port, viewer_title="OpenHCS + OMERO Demo")
     
     print(f"✓ Viewer ready")
