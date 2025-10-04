@@ -82,24 +82,65 @@ class OMEROLocalBackend(StorageBackend, metaclass=StorageBackendMeta):
             except (ValueError, TypeError):
                 raise ValueError(f"image_id required, got file_path={file_path}")
 
-        # Get local file path
-        local_path = self._get_local_file_path(image_id, conn)
+        # Two modes: direct file access (zero-copy) or API access
+        if self.omero_data_dir:
+            # Mode 1: Direct file access (zero-copy, server-side only)
+            local_path = self._get_local_file_path(image_id, conn)
+            suffix = local_path.suffix.lower()
 
-        # Load based on extension
-        suffix = local_path.suffix.lower()
-
-        if suffix in ['.tif', '.tiff']:
-            import tifffile
-            data = tifffile.imread(local_path)
-        elif suffix == '.zarr':
-            import zarr
-            data = zarr.open(local_path, mode='r')[:]
+            if suffix in ['.tif', '.tiff']:
+                import tifffile
+                data = tifffile.imread(local_path)
+            elif suffix == '.zarr':
+                import zarr
+                data = zarr.open(local_path, mode='r')[:]
+            else:
+                raise ValueError(f"Unsupported format: {suffix}")
         else:
-            raise ValueError(f"Unsupported format: {suffix}")
+            # Mode 2: OMERO API access (works from anywhere)
+            data = self._load_via_api(image_id, conn)
 
         # Ensure 3D
         if data.ndim == 2:
             data = data[np.newaxis, ...]
+
+        return data
+
+    def _load_via_api(self, image_id: int, conn) -> np.ndarray:
+        """Load image via OMERO API (slower but works remotely)."""
+        image = conn.getObject("Image", image_id)
+        if not image:
+            raise FileNotFoundError(f"OMERO image not found: {image_id}")
+
+        # Get image dimensions
+        sizeZ = image.getSizeZ()
+        sizeC = image.getSizeC()
+        sizeT = image.getSizeT()
+        sizeY = image.getSizeY()
+        sizeX = image.getSizeX()
+
+        # For now, load first timepoint only
+        # TODO: Support multi-timepoint images
+        if sizeT > 1:
+            logger.warning(f"Image {image_id} has {sizeT} timepoints, loading first only")
+
+        # Load pixels
+        pixels = image.getPrimaryPixels()
+
+        # Build 3D array (Z, Y, X) or 4D (Z, C, Y, X)
+        if sizeC == 1:
+            # Single channel: (Z, Y, X)
+            data = np.zeros((sizeZ, sizeY, sizeX), dtype=np.uint16)
+            for z in range(sizeZ):
+                plane = pixels.getPlane(z, 0, 0)  # z, c, t
+                data[z] = plane
+        else:
+            # Multi-channel: (Z, C, Y, X)
+            data = np.zeros((sizeZ, sizeC, sizeY, sizeX), dtype=np.uint16)
+            for z in range(sizeZ):
+                for c in range(sizeC):
+                    plane = pixels.getPlane(z, c, 0)  # z, c, t
+                    data[z, c] = plane
 
         return data
     

@@ -322,7 +322,8 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description='OpenHCS Execution Server')
-    parser.add_argument('--omero-data-dir', type=Path, default='/OMERO/Files')
+    parser.add_argument('--omero-data-dir', type=Path, default=None,
+                       help='Path to OMERO binary repository (optional, uses API if not set)')
     parser.add_argument('--omero-host', default='localhost')
     parser.add_argument('--omero-port', type=int, default=4064)
     parser.add_argument('--omero-user', default='root')

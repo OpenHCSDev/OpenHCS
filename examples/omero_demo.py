@@ -72,10 +72,10 @@ def get_test_dataset(conn, dataset_id=None):
 def start_execution_server(omero_host='localhost', omero_port=4064, server_port=7777):
     """Start execution server in background process."""
     print(f"[3/7] Starting execution server (port {server_port})...")
-    
+
     def run_server():
         server = OpenHCSExecutionServer(
-            omero_data_dir=Path('/OMERO/Files'),
+            omero_data_dir=None,  # Use OMERO API (works with Docker)
             omero_host=omero_host,
             omero_port=omero_port,
             omero_user='root',
@@ -84,11 +84,11 @@ def start_execution_server(omero_host='localhost', omero_port=4064, server_port=
             max_workers=4
         )
         server.start()
-    
+
     process = mp.Process(target=run_server, daemon=True)
     process.start()
     time.sleep(2)  # Give server time to start
-    
+
     print(f"✓ Server running (PID: {process.pid})")
     return process
 
