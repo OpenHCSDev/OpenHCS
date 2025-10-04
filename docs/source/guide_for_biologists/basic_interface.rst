@@ -23,21 +23,6 @@ The main window that opens when you launch OpenHCS.
 
 
 
-.. collapse:: Submenus
-
-
-      View submenus
-
-      .. figure:: ../_static/view_window.png
-         :alt: View Window
-               
-      Tool submenu
-
-      .. figure:: ../_static/tool_window.png
-         :alt: Tool Window
-
-
-
 
 ----------------------------
 
