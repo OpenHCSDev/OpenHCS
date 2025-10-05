@@ -475,4 +475,154 @@ def test_main(plate_dir: Union[Path, str], backend_config: str, data_type_config
     print(f"{CONSTANTS.SUCCESS_INDICATOR} ({len(results)} wells processed)")
 
 
+@pytest.mark.parametrize("use_code_serialization", [False, True], ids=["direct", "code_serialization"])
+def test_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, use_code_serialization: bool):
+    """
+    Parametrized test that can run with or without code serialization.
+
+    When use_code_serialization=True, this tests the pickle_to_python approach.
+    When use_code_serialization=False, this runs the normal test.
+    """
+    if use_code_serialization:
+        test_main_with_code_serialization(plate_dir, backend_config, data_type_config, execution_mode)
+    else:
+        test_main(plate_dir, backend_config, data_type_config, execution_mode)
+
+
+def test_main_with_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str):
+    """
+    Test using pickle_to_python for code-based object serialization.
+
+    This mirrors the UI's approach:
+    1. Create objects normally
+    2. Convert to Python code using pickle_to_python
+    3. Exec the code to recreate objects
+    4. Use recreated objects for execution
+
+    This proves the code-based serialization works for remote execution.
+    """
+    test_config = TestConfig(Path(plate_dir), backend_config, execution_mode)
+
+    print(f"{CONSTANTS.START_INDICATOR} [CODE SERIALIZATION TEST] with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}")
+
+    # Step 1: Create objects normally
+    from openhcs.io.base import reset_memory_backend
+    reset_memory_backend()
+    setup_global_gpu_registry()
+
+    global_config = _create_pipeline_config(test_config)
+
+    # Create PipelineConfig with lazy configs for proper hierarchical inheritance
+    pipeline_config = PipelineConfig(
+        path_planning_config=LazyPathPlanningConfig(
+            output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
+        ),
+        step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+    )
+
+    pipeline = create_test_pipeline()
+
+    print("📦 Step 1: Created original objects")
+    print(f"   - GlobalPipelineConfig: {type(global_config).__name__}")
+    print(f"   - PipelineConfig: {type(pipeline_config).__name__}")
+    print(f"   - Pipeline: {len(pipeline.steps)} steps")
+
+    # Step 2: Convert to Python code using pickle_to_python
+    from openhcs.debug.pickle_to_python import (
+        generate_config_code,
+        generate_complete_pipeline_steps_code
+    )
+
+    print("\n🔄 Step 2: Converting objects to Python code...")
+
+    # Generate code for GlobalPipelineConfig
+    global_config_code = generate_config_code(global_config, GlobalPipelineConfig, clean_mode=True)
+
+    # Generate code for PipelineConfig
+    pipeline_config_code = generate_config_code(pipeline_config, PipelineConfig, clean_mode=True)
+
+    # Generate code for Pipeline steps
+    pipeline_steps_code = generate_complete_pipeline_steps_code(pipeline.steps, clean_mode=True)
+
+    print(f"   - GlobalPipelineConfig code: {len(global_config_code)} chars")
+    print(f"   - PipelineConfig code: {len(pipeline_config_code)} chars")
+    print(f"   - Pipeline steps code: {len(pipeline_steps_code)} chars")
+
+    # Save the generated code to files for inspection
+    code_output_dir = test_config.plate_dir / "generated_code"
+    code_output_dir.mkdir(exist_ok=True)
+
+    (code_output_dir / "global_config.py").write_text(global_config_code)
+    (code_output_dir / "pipeline_config.py").write_text(pipeline_config_code)
+    (code_output_dir / "pipeline_steps.py").write_text(pipeline_steps_code)
+
+    print(f"   - Saved code to: {code_output_dir}")
+
+    # Step 3: Exec the code to recreate objects
+    print("\n⚙️  Step 3: Recreating objects from Python code using exec()...")
+
+    # Recreate GlobalPipelineConfig
+    global_config_namespace = {}
+    exec(global_config_code, global_config_namespace)
+    recreated_global_config = global_config_namespace['config']
+
+    # Recreate PipelineConfig
+    pipeline_config_namespace = {}
+    exec(pipeline_config_code, pipeline_config_namespace)
+    recreated_pipeline_config = pipeline_config_namespace['config']
+
+    # Recreate Pipeline steps
+    pipeline_steps_namespace = {}
+    exec(pipeline_steps_code, pipeline_steps_namespace)
+    recreated_pipeline_steps = pipeline_steps_namespace['pipeline_steps']
+
+    print(f"   - Recreated GlobalPipelineConfig: {type(recreated_global_config).__name__}")
+    print(f"   - Recreated PipelineConfig: {type(recreated_pipeline_config).__name__}")
+    print(f"   - Recreated Pipeline steps: {len(recreated_pipeline_steps)} steps")
+
+    # Verify the recreated objects match the originals
+    print("\n🔍 Step 4: Verifying recreated objects...")
+
+    # Check GlobalPipelineConfig fields
+    assert recreated_global_config.num_workers == global_config.num_workers
+    assert recreated_global_config.use_threading == global_config.use_threading
+    print(f"   ✅ GlobalPipelineConfig fields match")
+
+    # Check PipelineConfig fields
+    assert type(recreated_pipeline_config) == type(pipeline_config)
+    print(f"   ✅ PipelineConfig type matches")
+
+    # Check Pipeline steps
+    assert len(recreated_pipeline_steps) == len(pipeline.steps)
+    for i, (orig_step, recreated_step) in enumerate(zip(pipeline.steps, recreated_pipeline_steps)):
+        assert type(orig_step) == type(recreated_step)
+        assert orig_step.name == recreated_step.name
+    print(f"   ✅ Pipeline steps match ({len(recreated_pipeline_steps)} steps)")
+
+    # Step 5: Use recreated objects for execution
+    print("\n🚀 Step 5: Executing pipeline with recreated objects...")
+
+    # Set up global context for orchestrator
+    ensure_global_config_context(GlobalPipelineConfig, recreated_global_config)
+
+    # Create orchestrator with recreated config
+    orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=recreated_pipeline_config)
+    orchestrator.initialize()
+
+    # Create Pipeline object from recreated steps
+    recreated_pipeline = Pipeline(
+        steps=recreated_pipeline_steps,
+        name=pipeline.name
+    )
+
+    # Execute using recreated objects
+    results = _execute_pipeline_phases(orchestrator, recreated_pipeline)
+    validate_separate_materialization(test_config.plate_dir)
+
+    print_thread_activity_report()
+    print(f"\n{CONSTANTS.SUCCESS_INDICATOR} [CODE SERIALIZATION TEST] ({len(results)} wells processed)")
+    print("✅ Code-based serialization works perfectly!")
+    print("   This proves we can use Python code instead of pickling for remote execution.")
+
+
 

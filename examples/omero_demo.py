@@ -47,21 +47,31 @@ def print_banner(text):
 
 
 def connect_to_omero(host='localhost', port=4064, user='root', password='omero-root-password'):
-    """Connect to OMERO server."""
+    """Connect to OMERO server (start if needed)."""
     print(f"[1/8] Connecting to OMERO ({host}:{port})...")
-    conn = BlitzGateway(user, password, host=host, port=port)
-    if not conn.connect():
-        raise RuntimeError("Failed to connect to OMERO")
+
+    from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+
+    omero_manager = OMEROInstanceManager(
+        host=host,
+        port=port,
+        user=user,
+        password=password
+    )
+
+    if not omero_manager.connect(timeout=60):
+        raise RuntimeError("Failed to connect to or start OMERO")
+
     print(f"✓ Connected as {user}")
-    return conn
+    return omero_manager
 
 
-def generate_test_data(conn):
+def generate_test_data(omero_manager):
     """Generate and upload synthetic test data."""
     print(f"\n[2/8] Generating and uploading synthetic test data...")
 
     dataset_id, image_ids = generate_and_upload_synthetic_data(
-        conn,
+        omero_manager.conn,
         dataset_name="OpenHCS_Demo_Synthetic",
         grid_size=(2, 2),
         tile_size=(128, 128),
@@ -170,17 +180,17 @@ def execute_pipeline(dataset_id, server_host='localhost', server_port=7777, view
     return execution_id
 
 
-def validate_results(conn, dataset_id):
+def validate_results(omero_manager, dataset_id):
     """Validate results were saved to OMERO."""
     print(f"\n[6/8] Validating results...")
 
-    dataset = conn.getObject("Dataset", dataset_id)
+    dataset = omero_manager.conn.getObject("Dataset", dataset_id)
     image_count = dataset.countChildren()
 
     print(f"✓ Dataset contains {image_count} images")
 
     # Check for results dataset (created by pipeline)
-    datasets = list(conn.getObjects("Dataset"))
+    datasets = list(omero_manager.conn.getObjects("Dataset"))
     result_datasets = [d for d in datasets if 'result' in d.getName().lower()]
 
     if result_datasets:
@@ -197,11 +207,11 @@ def main():
     os.environ['OPENHCS_HEADLESS'] = 'false'
 
     try:
-        # 1. Connect to OMERO
-        conn = connect_to_omero()
+        # 1. Connect to OMERO (start if needed)
+        omero_manager = connect_to_omero()
 
         # 2. Generate and upload synthetic test data
-        dataset_id = generate_test_data(conn)
+        dataset_id = generate_test_data(omero_manager)
 
         # 3. Start execution server
         server_process = start_execution_server()
@@ -211,9 +221,9 @@ def main():
 
         # 5. Execute pipeline
         execution_id = execute_pipeline(dataset_id)
-        
+
         # 6. Validate results
-        validate_results(conn, dataset_id)
+        validate_results(omero_manager, dataset_id)
 
         # 7. Success!
         print(f"\n[7/8] Demo complete!")

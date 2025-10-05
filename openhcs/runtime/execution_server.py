@@ -10,7 +10,6 @@ import logging
 import signal
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -27,8 +26,7 @@ class OpenHCSExecutionServer:
         omero_port: int = 4064,
         omero_user: str = 'root',
         omero_password: str = 'omero-root-password',
-        server_port: int = 7777,
-        max_workers: int = 4
+        server_port: int = 7777
     ):
         self.omero_data_dir = Path(omero_data_dir) if omero_data_dir else None
         self.omero_host = omero_host
@@ -36,13 +34,11 @@ class OpenHCSExecutionServer:
         self.omero_user = omero_user
         self.omero_password = omero_password
         self.server_port = server_port
-        self.max_workers = max_workers
 
         self.running = False
         self.omero_conn = None
         self.zmq_context = None
         self.zmq_socket = None
-        self.executor = None
         self.active_executions: Dict[str, Dict[str, Any]] = {}
         self.start_time = None
 
@@ -58,7 +54,6 @@ class OpenHCSExecutionServer:
         self._register_backend()
         self._setup_zmq()
 
-        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
         self.running = True
 
         logger.info("=" * 60)
@@ -137,10 +132,15 @@ class OpenHCSExecutionServer:
         return handler(msg)
 
     def _handle_execute(self, msg: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle execution request."""
-        required = ['plate_id', 'pipeline_code', 'config_code']
-        if missing := [f for f in required if f not in msg]:
-            return {'status': 'error', 'message': f"Missing fields: {missing}"}
+        """Handle execution request - executes synchronously in main thread."""
+        # Require plate_id and pipeline_code
+        # Accept EITHER config_params (dict) OR config_code (Python code)
+        # Optionally accept pipeline_config_code for separate PipelineConfig
+        if 'plate_id' not in msg or 'pipeline_code' not in msg:
+            return {'status': 'error', 'message': 'Missing required fields: plate_id, pipeline_code'}
+
+        if 'config_params' not in msg and 'config_code' not in msg:
+            return {'status': 'error', 'message': 'Missing config: provide either config_params or config_code'}
 
         execution_id = str(uuid.uuid4())
 
@@ -148,7 +148,7 @@ class OpenHCSExecutionServer:
             'execution_id': execution_id,
             'plate_id': msg['plate_id'],
             'client_address': msg.get('client_address'),
-            'status': 'accepted',
+            'status': 'running',
             'start_time': time.time(),
             'end_time': None,
             'error': None
@@ -156,22 +156,38 @@ class OpenHCSExecutionServer:
 
         self.active_executions[execution_id] = record
 
-        record['future'] = self.executor.submit(
-            self._execute_pipeline,
-            execution_id,
-            msg['plate_id'],
-            msg['pipeline_code'],
-            msg['config_code'],
-            msg.get('client_address')
-        )
+        # Execute synchronously in main thread (like UI does)
+        # This ensures exec() runs in main thread, not worker thread
+        try:
+            results = self._execute_pipeline(
+                execution_id,
+                msg['plate_id'],
+                msg['pipeline_code'],
+                msg.get('config_params'),  # May be None
+                msg.get('config_code'),    # May be None
+                msg.get('pipeline_config_code'),  # May be None - separate PipelineConfig code
+                msg.get('client_address')
+            )
+            record['status'] = 'complete'
+            record['end_time'] = time.time()
+            record['results'] = results
 
-        logger.info(f"Accepted execution {execution_id} for plate {msg['plate_id']}")
+            return {
+                'status': 'complete',
+                'execution_id': execution_id,
+                'results': results
+            }
+        except Exception as e:
+            record['status'] = 'failed'
+            record['end_time'] = time.time()
+            record['error'] = str(e)
+            logger.error(f"[{execution_id}] ✗ Failed: {e}")
 
-        return {
-            'status': 'accepted',
-            'execution_id': execution_id,
-            'message': 'Pipeline execution started'
-        }
+            return {
+                'status': 'error',
+                'execution_id': execution_id,
+                'message': str(e)
+            }
 
     def _handle_status(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """Handle status request."""
@@ -204,7 +220,9 @@ class OpenHCSExecutionServer:
         execution_id: str,
         plate_id: int,
         pipeline_code: str,
-        config_code: str,
+        config_params: Optional[dict],
+        config_code: Optional[str],
+        pipeline_config_code: Optional[str],
         client_address: Optional[str] = None
     ):
         """Execute pipeline: reconstruct from code, compile server-side, execute."""
@@ -214,56 +232,134 @@ class OpenHCSExecutionServer:
         try:
             logger.info(f"[{execution_id}] Starting execution for plate {plate_id}")
 
-            # Reconstruct pipeline and config from code
-            namespace = {}
+            # Reconstruct pipeline by executing the exact generated Python code (same as UI)
+            # Use an empty namespace so imports resolve naturally to module-level symbols
+            namespace: Dict[str, Any] = {}
             exec(pipeline_code, namespace)
-            exec(config_code, namespace)
-
             pipeline_steps = namespace.get('pipeline_steps')
-            config = namespace.get('config')
-
-            if not pipeline_steps or not config:
-                raise ValueError("Code must define 'pipeline_steps' and 'config'")
+            if not pipeline_steps:
+                raise ValueError("Code must define 'pipeline_steps'")
 
             logger.info(f"[{execution_id}] Loaded {len(pipeline_steps)} steps")
+
+            # Create config - support both approaches
+            if config_code:
+                # Approach 1: Execute config code to get GlobalPipelineConfig object
+                logger.info(f"[{execution_id}] Loading config from code...")
+                # Use same namespace pattern to ensure enum identity
+                from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+                config_namespace = {}
+                exec(config_code, config_namespace)
+
+                global_config = config_namespace.get('config')
+                if not global_config:
+                    raise ValueError("config_code must define 'config' variable")
+
+                # Handle PipelineConfig - either from separate code or use defaults
+                if pipeline_config_code:
+                    logger.info(f"[{execution_id}] Loading PipelineConfig from code...")
+                    pipeline_config_namespace = {}
+                    exec(pipeline_config_code, pipeline_config_namespace)
+                    pipeline_config = pipeline_config_namespace.get('config')
+                    if not pipeline_config:
+                        raise ValueError("pipeline_config_code must define 'config' variable")
+                else:
+                    # Use defaults
+                    from openhcs.core.config import PipelineConfig
+                    pipeline_config = PipelineConfig()
+
+            elif config_params:
+                # Approach 2: Build GlobalPipelineConfig/PipelineConfig directly from params
+                logger.info(f"[{execution_id}] Creating config from params...")
+                from openhcs.core.config import (
+                    GlobalPipelineConfig,
+                    MaterializationBackend,
+                    PathPlanningConfig,
+                    StepWellFilterConfig,
+                    VFSConfig,
+                    ZarrConfig,
+                    PipelineConfig,
+                )
+
+                global_config = GlobalPipelineConfig(
+                    num_workers=config_params.get('num_workers', 4),
+                    path_planning_config=PathPlanningConfig(
+                        output_dir_suffix=config_params.get('output_dir_suffix', '_output')
+                    ),
+                    vfs_config=VFSConfig(
+                        materialization_backend=MaterializationBackend(
+                            config_params.get('materialization_backend', 'disk')
+                        )
+                    ),
+                    zarr_config=ZarrConfig(
+                        store_name='images.zarr',
+                        ome_zarr_metadata=True,
+                        write_plate_metadata=True,
+                    ),
+                    step_well_filter_config=StepWellFilterConfig(
+                        well_filter=config_params.get('well_filter')
+                    ),
+                    use_threading=config_params.get('use_threading', False),
+                )
+                pipeline_config = PipelineConfig()
+            else:
+                raise ValueError("Either config_params or config_code must be provided")
 
             # Update streaming configs to point to client
             if client_address:
                 pipeline_steps = self._update_streaming_configs(pipeline_steps, client_address)
 
-            # Set up orchestrator
+            # Set up orchestrator exactly like test_main.py (no special transport)
+            from pathlib import Path
+            from openhcs.config_framework.global_config import ensure_global_config_context
+            from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
             from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-            from openhcs.io.base import storage_registry, ensure_storage_registry
-            from openhcs.config_framework.lazy_factory import ensure_global_config_context
-            from openhcs.core.config import GlobalPipelineConfig
+            from openhcs.constants import MULTIPROCESSING_AXIS
+            from openhcs.io.base import reset_memory_backend
 
-            ensure_storage_registry()
-            ensure_global_config_context(GlobalPipelineConfig, config)
+            # Reset ephemeral backends and initialize GPU registry
+            reset_memory_backend()
+            setup_global_gpu_registry()
+
+            # Install global config context for dual-axis resolver
+            ensure_global_config_context(type(global_config), global_config)
 
             orchestrator = PipelineOrchestrator(
-                plate_path=str(plate_id),
-                storage_registry=storage_registry
+                plate_path=Path(str(plate_id)),
+                pipeline_config=pipeline_config
             )
-
             orchestrator.initialize()
 
-            # Compile and execute
-            logger.info(f"[{execution_id}] Compiling pipeline...")
-            compiled_contexts = orchestrator.compile_pipelines(pipeline_steps)
+            # Execute using standard compile→execute phases
+            logger.info(f"[{execution_id}] Executing pipeline...")
 
-            logger.info(f"[{execution_id}] Executing {len(compiled_contexts)} wells...")
-            orchestrator.execute_compiled_plate(
+            # Determine wells to process
+            if config_params and config_params.get('well_filter'):
+                wells = config_params['well_filter']
+            elif hasattr(global_config, 'step_well_filter_config') and global_config.step_well_filter_config and global_config.step_well_filter_config.well_filter:
+                wells = global_config.step_well_filter_config.well_filter
+            else:
+                wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+
+            compilation = orchestrator.compile_pipelines(
                 pipeline_definition=pipeline_steps,
-                compiled_contexts=compiled_contexts
+                well_filter=wells,
+            )
+            compiled_contexts = compilation['compiled_contexts']
+
+            results = orchestrator.execute_compiled_plate(
+                pipeline_definition=pipeline_steps,
+                compiled_contexts=compiled_contexts,
             )
 
             # Mark completed
             record['status'] = 'completed'
             record['end_time'] = time.time()
-            record['wells_processed'] = len(compiled_contexts)
+            record['wells_processed'] = len(results.get('well_results', {}))
 
             elapsed = record['end_time'] - record['start_time']
             logger.info(f"[{execution_id}] ✓ Completed in {elapsed:.1f}s")
+            return results
 
         except Exception as e:
             record['status'] = 'error'
@@ -296,17 +392,7 @@ class OpenHCSExecutionServer:
         logger.info("Shutting down...")
         self.running = False
 
-        # Wait for active executions
-        for execution_id, record in self.active_executions.items():
-            if 'future' in record and record['status'] == 'running':
-                try:
-                    record['future'].result(timeout=30)
-                except Exception as e:
-                    logger.error(f"Error waiting for {execution_id}: {e}")
-
         # Clean up resources
-        if self.executor:
-            self.executor.shutdown(wait=True)
         if self.omero_conn:
             self.omero_conn.close()
         if self.zmq_socket:
@@ -329,7 +415,6 @@ def main():
     parser.add_argument('--omero-user', default='root')
     parser.add_argument('--omero-password', default='omero-root-password')
     parser.add_argument('--port', type=int, default=7777)
-    parser.add_argument('--max-workers', type=int, default=4)
     parser.add_argument('--log-file', type=Path)
     parser.add_argument('--log-level', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])
 
@@ -349,8 +434,7 @@ def main():
         omero_port=args.omero_port,
         omero_user=args.omero_user,
         omero_password=args.omero_password,
-        server_port=args.port,
-        max_workers=args.max_workers
+        server_port=args.port
     )
 
     try:

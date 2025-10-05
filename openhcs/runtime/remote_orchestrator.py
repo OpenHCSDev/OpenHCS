@@ -57,32 +57,34 @@ class RemoteOrchestrator:
         self,
         plate_id: int,
         pipeline_steps: List[Any],
-        config: Any,
+        global_config: Any,
+        pipeline_config: Any = None,
         viewer_host: str = 'localhost',
         viewer_port: int = 5555
     ) -> Dict[str, Any]:
         """
         Execute pipeline on remote server.
-        
+
         Args:
             plate_id: OMERO plate ID
             pipeline_steps: List of FunctionStep objects
-            config: GlobalPipelineConfig instance
+            global_config: GlobalPipelineConfig instance
+            pipeline_config: Optional PipelineConfig instance
             viewer_host: Host for result streaming (this machine)
             viewer_port: Port for result streaming
-        
+
         Returns:
             Response from server with execution_id
         """
         # Generate pipeline code
         from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
         pipeline_code = generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=True)
-        
-        # Generate config code
+
+        # Generate global config code
         from openhcs.debug.pickle_to_python import generate_config_code
-        from openhcs.core.config import GlobalPipelineConfig
-        config_code = generate_config_code(config, GlobalPipelineConfig, clean_mode=True)
-        
+        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+        config_code = generate_config_code(global_config, GlobalPipelineConfig, clean_mode=True)
+
         # Build request
         request = {
             'command': 'execute',
@@ -91,16 +93,26 @@ class RemoteOrchestrator:
             'config_code': config_code,
             'client_address': f"{viewer_host}:{viewer_port}"
         }
-        
+
+        # Optionally add pipeline_config_code
+        if pipeline_config is not None:
+            pipeline_config_code = generate_config_code(pipeline_config, PipelineConfig, clean_mode=True)
+            request['pipeline_config_code'] = pipeline_config_code
+
         # Send request
         self._connect()
         logger.info(f"Sending execution request for plate {plate_id}...")
+        logger.info(f"  - Pipeline code: {len(pipeline_code)} chars")
+        logger.info(f"  - Global config code: {len(config_code)} chars")
+        if 'pipeline_config_code' in request:
+            logger.info(f"  - Pipeline config code: {len(request['pipeline_config_code'])} chars")
+
         self.zmq_socket.send_json(request)
-        
+
         # Receive response
         response = self.zmq_socket.recv_json()
         logger.info(f"Server response: {response.get('status')} - {response.get('message')}")
-        
+
         return response
     
     def get_status(self, execution_id: Optional[str] = None) -> Dict[str, Any]:
