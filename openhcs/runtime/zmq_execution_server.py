@@ -375,9 +375,15 @@ class ZMQExecutionServer(ZMQServer):
         )
         compiled_contexts = compilation['compiled_contexts']
 
+        # Create log file base for worker processes
+        from openhcs.utils.logging_config import get_log_directory
+        log_dir = get_log_directory()
+        log_file_base = str(log_dir / f"zmq_worker_exec_{execution_id}")
+
         results = orchestrator.execute_compiled_plate(
             pipeline_definition=pipeline_steps,
             compiled_contexts=compiled_contexts,
+            log_file_base=log_file_base
         )
 
         return results
