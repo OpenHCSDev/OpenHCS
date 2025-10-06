@@ -778,6 +778,7 @@ class LogViewerWindow(QMainWindow):
     def initialize_logs(self) -> None:
         """Initialize with main process log only and start monitoring."""
         # Only discover the current main process log, not old logs
+        initial_logs = []
         try:
             from openhcs.core.log_utils import get_current_log_file_path, classify_log_file
             from pathlib import Path
@@ -786,14 +787,83 @@ class LogViewerWindow(QMainWindow):
             main_log = Path(main_log_path)
             if main_log.exists():
                 log_info = classify_log_file(main_log, None, True)
-                self.populate_log_dropdown([log_info])
-                self.switch_to_log(main_log)
+                initial_logs.append(log_info)
         except Exception:
             # Main log not available, continue without it
             pass
 
+        # Scan for running ZMQ servers and Napari viewers
+        server_logs = self._scan_for_server_logs()
+        initial_logs.extend(server_logs)
+
+        # Populate dropdown with all discovered logs
+        if initial_logs:
+            self.populate_log_dropdown(initial_logs)
+            self.switch_to_log(initial_logs[0].path)
+
         # Start monitoring for new logs
         self.start_monitoring()
+
+    def _scan_for_server_logs(self) -> List[LogFileInfo]:
+        """
+        Scan for running ZMQ servers and Napari viewers by pinging common ports.
+        Returns list of LogFileInfo for discovered server log files.
+        """
+        from openhcs.core.log_utils import classify_log_file
+        from pathlib import Path
+        import zmq
+        import pickle
+
+        discovered_logs = []
+
+        # Common ports to scan
+        zmq_execution_ports = [7777]  # Default ZMQ execution server port
+        napari_ports = [5555 + i for i in range(5)]  # Scan Napari ports 5555-5559
+
+        def ping_server(port: int) -> dict:
+            """Ping a server and return pong response, or None if no response."""
+            control_port = port + 1000
+            try:
+                context = zmq.Context()
+                socket = context.socket(zmq.REQ)
+                socket.setsockopt(zmq.LINGER, 0)
+                socket.setsockopt(zmq.RCVTIMEO, 200)  # 200ms timeout
+                socket.connect(f"tcp://localhost:{control_port}")
+
+                # Send ping
+                socket.send(pickle.dumps({'type': 'ping'}))
+
+                # Wait for pong
+                response = socket.recv()
+                pong = pickle.loads(response)
+
+                socket.close()
+                context.term()
+                return pong
+            except Exception:
+                return None
+
+        # Scan ZMQ execution servers
+        for port in zmq_execution_ports:
+            pong = ping_server(port)
+            if pong and pong.get('log_file_path'):
+                log_path = Path(pong['log_file_path'])
+                if log_path.exists():
+                    log_info = classify_log_file(log_path, None, False)
+                    discovered_logs.append(log_info)
+                    logger.debug(f"Discovered ZMQ server log: {log_path}")
+
+        # Scan Napari viewers
+        for port in napari_ports:
+            pong = ping_server(port)
+            if pong and pong.get('viewer') == 'napari' and pong.get('log_file_path'):
+                log_path = Path(pong['log_file_path'])
+                if log_path.exists():
+                    log_info = classify_log_file(log_path, None, False)
+                    discovered_logs.append(log_info)
+                    logger.debug(f"Discovered Napari viewer log: {log_path}")
+
+        return discovered_logs
 
     # Dropdown Management Methods
     def populate_log_dropdown(self, log_files: List[LogFileInfo]) -> None:
