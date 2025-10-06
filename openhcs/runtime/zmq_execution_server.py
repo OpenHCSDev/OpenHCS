@@ -14,6 +14,7 @@ import time
 import uuid
 import zmq
 import threading
+import queue
 from pathlib import Path
 from typing import Any, Dict, Optional
 from openhcs.runtime.zmq_base import ZMQServer
@@ -41,6 +42,8 @@ class ZMQExecutionServer(ZMQServer):
         super().__init__(port, host, log_file_path)
         self.active_executions: Dict[str, Dict[str, Any]] = {}
         self.start_time = None
+        # Thread-safe queue for progress updates from background threads
+        self.progress_queue: queue.Queue = queue.Queue()
     
     def _create_pong_response(self) -> Dict[str, Any]:
         """Create pong response with execution server info."""
@@ -53,6 +56,27 @@ class ZMQExecutionServer(ZMQServer):
         if self.log_file_path:
             response['log_file_path'] = self.log_file_path
         return response
+
+    def process_messages(self):
+        """
+        Process control messages and drain progress queue.
+
+        Overrides parent to also send queued progress updates from background threads.
+        """
+        # First process control messages (ping/pong, execute, status, etc.)
+        super().process_messages()
+
+        # Then drain progress queue and send updates (thread-safe)
+        import json
+        while not self.progress_queue.empty():
+            try:
+                message = self.progress_queue.get_nowait()
+                if self.data_socket:
+                    self.data_socket.send_string(json.dumps(message))
+            except queue.Empty:
+                break
+            except Exception as e:
+                logger.warning(f"Failed to send queued progress update: {e}")
 
     def get_status_info(self) -> Dict[str, Any]:
         """Get server status with execution progress information."""
@@ -148,13 +172,21 @@ class ZMQExecutionServer(ZMQServer):
                 )
                 record['status'] = 'complete'
                 record['end_time'] = time.time()
-                record['results'] = results
+                # Store serializable summary instead of full results (which may contain unpicklable objects)
+                record['results_summary'] = {
+                    'well_count': len(results) if isinstance(results, dict) else 0,
+                    'wells': list(results.keys()) if isinstance(results, dict) else []
+                }
                 logger.info(f"[{execution_id}] ✓ Completed in {record['end_time'] - record['start_time']:.1f}s")
             except Exception as e:
                 record['status'] = 'failed'
                 record['end_time'] = time.time()
                 record['error'] = str(e)
                 logger.error(f"[{execution_id}] ✗ Failed: {e}", exc_info=True)
+            finally:
+                # Clean up unpicklable objects from record
+                if 'orchestrator' in record:
+                    del record['orchestrator']
 
         # Start background thread
         thread = threading.Thread(target=execute_in_background, daemon=True)
@@ -170,14 +202,19 @@ class ZMQExecutionServer(ZMQServer):
     def _handle_status(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """Handle status request."""
         execution_id = msg.get('execution_id')
-        
+
         if execution_id:
             # Status for specific execution
             if execution_id in self.active_executions:
                 record = self.active_executions[execution_id]
+                # Filter out unpicklable objects (orchestrator, etc.)
+                serializable_record = {
+                    k: v for k, v in record.items()
+                    if k not in ('orchestrator',)  # Exclude unpicklable objects
+                }
                 return {
                     'status': 'ok',
-                    'execution': record
+                    'execution': serializable_record
                 }
             else:
                 return {
@@ -433,16 +470,13 @@ class ZMQExecutionServer(ZMQServer):
         """
         Send progress update to clients via data channel.
 
+        Thread-safe: Queues the message for the main thread to send.
+
         Args:
             well_id: Well identifier
             step: Step name
             status: Status message
         """
-        if not self.data_socket:
-            return
-
-        import json
-
         message = {
             'type': 'progress',
             'well_id': well_id,
@@ -451,8 +485,9 @@ class ZMQExecutionServer(ZMQServer):
             'timestamp': time.time()
         }
 
+        # Queue the message for main thread to send (ZMQ sockets are not thread-safe)
         try:
-            self.data_socket.send_string(json.dumps(message))
-        except Exception as e:
-            logger.warning(f"Failed to send progress update: {e}")
+            self.progress_queue.put_nowait(message)
+        except queue.Full:
+            logger.warning(f"Progress queue full, dropping update for {well_id}")
 
