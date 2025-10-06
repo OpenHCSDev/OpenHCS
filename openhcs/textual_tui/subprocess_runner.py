@@ -2,6 +2,21 @@
 """
 OpenHCS Subprocess Runner
 
+DEPRECATED: This subprocess runner is deprecated in favor of the ZMQ execution pattern.
+For new code, use ZMQExecutionClient from openhcs.runtime.zmq_execution_client.
+
+The ZMQ execution pattern provides:
+- Bidirectional communication (vs fire-and-forget)
+- Real-time progress streaming
+- Graceful cancellation
+- Process reuse
+- Location-transparent execution (local or remote)
+
+To use ZMQ execution, set environment variable:
+    export OPENHCS_USE_ZMQ_EXECUTION=true
+
+This file is maintained for backward compatibility only.
+
 Standalone script that runs OpenHCS plate processing in a clean subprocess environment.
 This mimics the integration test pattern from test_main.py but runs independently.
 
