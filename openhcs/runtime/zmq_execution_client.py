@@ -321,16 +321,18 @@ class ZMQExecutionClient(ZMQClient):
         # Find the server launcher script
         launcher_module = 'openhcs.runtime.zmq_execution_server_launcher'
 
-        # Build command
-        cmd = [sys.executable, '-m', launcher_module, '--port', str(self.port)]
-        if self.persistent:
-            cmd.append('--persistent')
-
         # Create log file for ZMQ server output
         from pathlib import Path
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file_path = log_dir / f"zmq_server_port_{self.port}.log"
+
+        # Build command
+        cmd = [sys.executable, '-m', launcher_module, '--port', str(self.port)]
+        if self.persistent:
+            cmd.append('--persistent')
+        # Pass log file path to server so it can advertise it in pong responses
+        cmd.extend(['--log-file-path', str(log_file_path)])
 
         # Open log file for writing
         log_file = open(log_file_path, 'w')

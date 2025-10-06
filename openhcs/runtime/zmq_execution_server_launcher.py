@@ -30,19 +30,22 @@ def main():
     parser.add_argument('--port', type=int, default=7777, help='Data port (control port will be port + 1000)')
     parser.add_argument('--host', type=str, default='*', help='Host to bind to (default: * for all interfaces)')
     parser.add_argument('--persistent', action='store_true', help='Run as persistent server (detached)')
-    
+    parser.add_argument('--log-file-path', type=str, default=None, help='Path to server log file (for client discovery)')
+
     args = parser.parse_args()
-    
+
     logger.info("=" * 60)
     logger.info("ZMQ Execution Server")
     logger.info("=" * 60)
     logger.info(f"Port: {args.port} (control: {args.port + 1000})")
     logger.info(f"Host: {args.host}")
     logger.info(f"Persistent: {args.persistent}")
+    if args.log_file_path:
+        logger.info(f"Log file: {args.log_file_path}")
     logger.info("=" * 60)
-    
+
     # Create server
-    server = ZMQExecutionServer(port=args.port, host=args.host)
+    server = ZMQExecutionServer(port=args.port, host=args.host, log_file_path=args.log_file_path)
     
     # Set up signal handlers for graceful shutdown
     def signal_handler(sig, frame):

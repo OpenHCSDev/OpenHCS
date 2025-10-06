@@ -41,18 +41,20 @@ class ZMQServer(ABC):
     - handle_control_message(): Process control channel messages (beyond ping/pong)
     """
     
-    def __init__(self, port: int, host: str = '*'):
+    def __init__(self, port: int, host: str = '*', log_file_path: Optional[str] = None):
         """
         Initialize ZMQ server.
-        
+
         Args:
             port: Data port (control port will be port + 1000)
             host: Host to bind to (default: '*' for all interfaces)
+            log_file_path: Path to server log file (for client discovery)
         """
         self.port = port
         self.host = host
         self.control_port = port + 1000
-        
+        self.log_file_path = log_file_path
+
         self.zmq_context = None
         self.data_socket = None
         self.control_socket = None
@@ -155,11 +157,14 @@ class ZMQServer(ABC):
     
     def _create_pong_response(self) -> Dict[str, Any]:
         """Create pong response. Subclasses can override to add custom fields."""
-        return {
+        response = {
             'type': 'pong',
             'ready': self._ready,
             'server': self.__class__.__name__
         }
+        if self.log_file_path:
+            response['log_file_path'] = self.log_file_path
+        return response
     
     @abstractmethod
     def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:

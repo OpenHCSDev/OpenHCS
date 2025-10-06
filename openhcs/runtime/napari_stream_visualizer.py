@@ -401,7 +401,7 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
         raise  # Fail loud - no fallback
 
 
-def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = False):
+def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = False, log_file_path: str = None):
     """
     Napari viewer process entry point. Runs in a separate process.
     Listens for ZeroMQ messages with image data to display.
@@ -410,6 +410,7 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
         port: ZMQ port to listen on
         viewer_title: Title for the napari viewer window
         replace_layers: If True, replace existing layers; if False, add new layers with unique names
+        log_file_path: Path to log file (for client discovery via ping/pong)
     """
     try:
         import zmq
@@ -502,6 +503,8 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
                         logger.info(f"🔬 NAPARI PROCESS: Marked as ready after ping")
 
                     response = {'type': 'pong', 'ready': napari_ready, 'viewer': 'napari', 'openhcs': True}
+                    if log_file_path:
+                        response['log_file_path'] = log_file_path
                     control_socket.send(pickle.dumps(response))
                     logger.debug(f"🔬 NAPARI PROCESS: Responded to ping with ready={napari_ready}")
 
@@ -653,7 +656,7 @@ sys.path.insert(0, "{current_dir}")
 
 try:
     from openhcs.runtime.napari_stream_visualizer import _napari_viewer_process
-    _napari_viewer_process({port}, "{viewer_title}", {replace_layers})
+    _napari_viewer_process({port}, "{viewer_title}", {replace_layers}, "{current_dir}/.napari_log_path_placeholder")
 except Exception as e:
     import logging
     logger = logging.getLogger("openhcs.runtime.napari_detached")
@@ -669,6 +672,9 @@ except Exception as e:
         log_dir = os.path.expanduser("~/.local/share/openhcs/logs")
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"napari_detached_port_{port}.log")
+
+        # Replace placeholder with actual log file path in python code
+        python_code = python_code.replace(f"{current_dir}/.napari_log_path_placeholder", log_file)
 
         # Use subprocess.Popen with detachment flags
         if sys.platform == "win32":
@@ -847,7 +853,7 @@ class NapariStreamVisualizer:
                 logger.info("🔬 VISUALIZER: Creating non-persistent napari viewer")
                 self.process = multiprocessing.Process(
                     target=_napari_viewer_process,
-                    args=(self.port, self.viewer_title, self.replace_layers),
+                    args=(self.port, self.viewer_title, self.replace_layers, None),  # No log file for non-persistent
                     daemon=False
                 )
                 self.process.start()

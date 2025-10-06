@@ -28,15 +28,16 @@ class ZMQExecutionServer(ZMQServer):
     executes pipelines, and streams progress via data channel.
     """
     
-    def __init__(self, port: int = 7777, host: str = '*'):
+    def __init__(self, port: int = 7777, host: str = '*', log_file_path: Optional[str] = None):
         """
         Initialize execution server.
-        
+
         Args:
             port: Data port (control port will be port + 1000)
             host: Host to bind to (default: '*' for all interfaces)
+            log_file_path: Path to server log file (for client discovery)
         """
-        super().__init__(port, host)
+        super().__init__(port, host, log_file_path)
         self.active_executions: Dict[str, Dict[str, Any]] = {}
         self.start_time = None
     
