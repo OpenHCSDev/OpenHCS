@@ -159,6 +159,8 @@ class ZMQServer(ABC):
         """Create pong response. Subclasses can override to add custom fields."""
         response = {
             'type': 'pong',
+            'port': self.port,
+            'control_port': self.control_port,
             'ready': self._ready,
             'server': self.__class__.__name__
         }

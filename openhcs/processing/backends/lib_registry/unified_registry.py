@@ -356,10 +356,10 @@ class LibraryRegistryBase(ABC):
 
     def _load_from_cache(self) -> Optional[Dict[str, FunctionMetadata]]:
         """Load function metadata from cache with validation."""
-        logger.info(f"📂 LOAD FROM CACHE: Checking cache for {self.library_name}")
+        logger.debug(f"📂 LOAD FROM CACHE: Checking cache for {self.library_name}")
 
         if not self._cache_path.exists():
-            logger.info(f"📂 LOAD FROM CACHE: No cache file exists at {self._cache_path}")
+            logger.debug(f"📂 LOAD FROM CACHE: No cache file exists at {self._cache_path}")
             return None
 
         try:
@@ -382,10 +382,10 @@ class LibraryRegistryBase(ABC):
         cache_timestamp = cache_data.get('timestamp', 0)
         cache_age_days = (time.time() - cache_timestamp) / (24 * 3600)
         if cache_age_days > 7:
-            logger.info(f"Cache is {cache_age_days:.1f} days old - rebuilding")
+            logger.debug(f"Cache is {cache_age_days:.1f} days old - rebuilding")
             return None
 
-        logger.info(f"📂 LOAD FROM CACHE: Loading {len(cache_data['functions'])} functions for {self.library_name}")
+        logger.debug(f"📂 LOAD FROM CACHE: Loading {len(cache_data['functions'])} functions for {self.library_name}")
 
         functions = {}
         for func_name, cached_data in cache_data['functions'].items():
@@ -395,7 +395,7 @@ class LibraryRegistryBase(ABC):
 
             # Apply the same wrappers as during discovery
             has_adapter = hasattr(self, 'create_library_adapter')
-            logger.info(f"📂 LOAD FROM CACHE: {func_name} - hasattr(create_library_adapter)={has_adapter}")
+            logger.debug(f"📂 LOAD FROM CACHE: {func_name} - hasattr(create_library_adapter)={has_adapter}")
 
             if has_adapter:
                 # External library - apply library adapter + contract wrapper + param injection
@@ -578,7 +578,7 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         import inspect
         func_name = getattr(original_func, '__name__', 'unknown')
 
-        logger.info(f"🔧 CREATE LIBRARY ADAPTER: {func_name} from {getattr(original_func, '__module__', 'unknown')}")
+        logger.debug(f"🔧 CREATE LIBRARY ADAPTER: {func_name} from {getattr(original_func, '__module__', 'unknown')}")
 
         # Get original signature to preserve it
         original_sig = inspect.signature(original_func)
@@ -617,7 +617,7 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
             from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
             import numpy as np
 
-            logger.info(f"🔍 ENHANCE ANNOTATIONS: {original_func.__name__} from {original_func.__module__}")
+            logger.debug(f"🔍 ENHANCE ANNOTATIONS: {original_func.__name__} from {original_func.__module__}")
 
             # Unified type extraction with compatibility validation (mathematical simplification)
             TYPE_PATTERNS = {'ndarray': np.ndarray, 'array': np.ndarray, 'array_like': np.ndarray,
@@ -648,15 +648,15 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
                     # Inline compatibility check (single-use function inlining rule)
                     if python_type and (info.default_value is None or
                                       type(info.default_value) in COMPATIBLE_DEFAULTS.get(python_type, (python_type,))):
-                        logger.info(f"  ✓ Enhanced {param_name}: {python_type} (from first_line='{first_line[:50]}')")
+                        logger.debug(f"  ✓ Enhanced {param_name}: {python_type} (from first_line='{first_line[:50]}')")
                         wrapped_func.__annotations__[param_name] = python_type
                         enhanced_count += 1
                     elif info.description:
-                        logger.info(f"  ✗ Could not enhance {param_name}: first_line='{first_line[:50]}', extracted_type={python_type}")
+                        logger.debug(f"  ✗ Could not enhance {param_name}: first_line='{first_line[:50]}', extracted_type={python_type}")
 
             if enhanced_count > 0:
-                logger.info(f"  📝 Enhanced {enhanced_count} annotations for {original_func.__name__}")
-                logger.info(f"  Final annotations: {wrapped_func.__annotations__}")
+                logger.debug(f"  📝 Enhanced {enhanced_count} annotations for {original_func.__name__}")
+                logger.debug(f"  Final annotations: {wrapped_func.__annotations__}")
         except Exception as e:
             logger.error(f"  ❌ Error enhancing annotations for {original_func.__name__}: {e}", exc_info=True)
 

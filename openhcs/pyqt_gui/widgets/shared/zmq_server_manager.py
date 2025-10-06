@@ -66,6 +66,10 @@ class ZMQServerManagerWidget(QWidget):
         # Connect internal signal for async scanning
         self._scan_complete.connect(self._update_server_list)
 
+        # Auto-refresh timer (async scanning won't block UI)
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.refresh_servers)
+
         self.setup_ui()
 
     def showEvent(self, event):
@@ -73,6 +77,8 @@ class ZMQServerManagerWidget(QWidget):
         super().showEvent(event)
         # Scan for servers on first show
         self.refresh_servers()
+        # Start auto-refresh (10 second interval - async won't block UI)
+        self.refresh_timer.start(10000)
 
     def setup_ui(self):
         """Setup the user interface."""
