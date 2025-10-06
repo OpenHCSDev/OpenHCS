@@ -458,25 +458,27 @@ def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_co
 
     logger.info("🔌 Executing pipeline via ZMQ execution client")
 
-    # Create temporary orchestrator to get well list (same as direct mode)
-    # This matches the direct mode behavior where we get all wells
-    # Set up global context first
-    ensure_global_config_context(GlobalPipelineConfig, global_config)
-
-    temp_orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
-    temp_orchestrator.initialize()
-    wells = temp_orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-    if not wells:
-        raise RuntimeError("No wells found for processing")
-    logger.info(f"Found {len(wells)} wells to process: {wells}")
-
-    # Create ZMQ client
+    # Create ZMQ client FIRST before any CUDA initialization
+    # This is critical: the ZMQ server must be spawned before the test process
+    # initializes CUDA, otherwise the server subprocess inherits CUDA state
+    # and cannot reinitialize it (even with spawn method)
     client = ZMQExecutionClient(port=7777, persistent=False)
 
     try:
-        # Connect to server (spawns if needed)
+        # Connect to server (spawns if needed) BEFORE creating orchestrator
         client.connect(timeout=15)
         logger.info("✅ Connected to ZMQ execution server")
+
+        # Now create temporary orchestrator to get well list
+        # This will initialize CUDA in the test process, but the ZMQ server
+        # is already running in a separate process that was spawned before CUDA init
+        ensure_global_config_context(GlobalPipelineConfig, global_config)
+        temp_orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
+        temp_orchestrator.initialize()
+        wells = temp_orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+        if not wells:
+            raise RuntimeError("No wells found for processing")
+        logger.info(f"Found {len(wells)} wells to process: {wells}")
 
         # Execute pipeline with explicit well filter (matching direct mode)
         response = client.execute_pipeline(

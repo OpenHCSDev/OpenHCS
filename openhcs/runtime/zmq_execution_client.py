@@ -351,10 +351,14 @@ class ZMQExecutionClient(ZMQClient):
                 pass
             finally:
                 server.stop()
-        
-        process = multiprocessing.Process(target=run_server, daemon=False)
+
+        # CRITICAL: Use spawn context to avoid CUDA fork issues
+        # If parent process has initialized CUDA, fork will inherit that state
+        # and child cannot reinitialize. Spawn creates a clean process.
+        ctx = multiprocessing.get_context('spawn')
+        process = ctx.Process(target=run_server, daemon=False)
         process.start()
-        
+
         logger.info(f"Spawned multiprocessing execution server on port {self.port} (PID: {process.pid})")
         return process
     
