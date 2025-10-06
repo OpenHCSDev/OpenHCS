@@ -308,9 +308,6 @@ class OpenHCSMainWindow(QMainWindow):
             # Connect log file opened signal to log viewer
             zmq_manager_widget.log_file_opened.connect(self._open_log_file_in_viewer)
 
-            # Enable auto-refresh every 5 seconds
-            zmq_manager_widget.start_auto_refresh(interval_ms=5000)
-
             layout.addWidget(zmq_manager_widget)
 
             self.floating_windows["zmq_server_manager"] = window
