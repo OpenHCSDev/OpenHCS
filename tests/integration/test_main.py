@@ -451,42 +451,26 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
 def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_config: GlobalPipelineConfig, pipeline_config: PipelineConfig) -> Dict:
     """Execute pipeline using ZMQ execution client."""
     from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
-    from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-    from openhcs.constants import MULTIPROCESSING_AXIS
     import logging
     logger = logging.getLogger(__name__)
 
     logger.info("🔌 Executing pipeline via ZMQ execution client")
 
-    # Create ZMQ client FIRST before any CUDA initialization
-    # This is critical: the ZMQ server must be spawned before the test process
-    # initializes CUDA, otherwise the server subprocess inherits CUDA state
-    # and cannot reinitialize it (even with spawn method)
+    # Create ZMQ client and connect to server
+    # The server will create its own orchestrator and get the well list
     client = ZMQExecutionClient(port=7777, persistent=False)
 
     try:
-        # Connect to server (spawns if needed) BEFORE creating orchestrator
+        # Connect to server (spawns if needed)
         client.connect(timeout=15)
         logger.info("✅ Connected to ZMQ execution server")
 
-        # Now create temporary orchestrator to get well list
-        # This will initialize CUDA in the test process, but the ZMQ server
-        # is already running in a separate process that was spawned before CUDA init
-        ensure_global_config_context(GlobalPipelineConfig, global_config)
-        temp_orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
-        temp_orchestrator.initialize()
-        wells = temp_orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-        if not wells:
-            raise RuntimeError("No wells found for processing")
-        logger.info(f"Found {len(wells)} wells to process: {wells}")
-
-        # Execute pipeline with explicit well filter (matching direct mode)
+        # Execute pipeline - server will create orchestrator and get wells
         response = client.execute_pipeline(
             plate_id=str(test_config.plate_dir),
             pipeline_steps=pipeline.steps,
             global_config=global_config,
-            pipeline_config=pipeline_config,
-            config_params={'well_filter': wells}  # Pass well list explicitly
+            pipeline_config=pipeline_config
         )
 
         # Check response
