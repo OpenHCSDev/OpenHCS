@@ -388,6 +388,11 @@ class LazyDataclassFactory:
         for method_name, method_impl in method_bindings.items():
             setattr(lazy_class, method_name, method_impl)
 
+        # CRITICAL: Preserve original module for proper imports in generated code
+        # make_dataclass() sets __module__ to the caller's module (lazy_factory.py)
+        # We need to set it to the base class's original module for correct import paths
+        lazy_class.__module__ = base_class.__module__
+
         # Automatically register the lazy dataclass with the type registry
         register_lazy_type_mapping(lazy_class, base_class)
 
@@ -1014,6 +1019,11 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
         bases=target_class.__bases__,
         frozen=target_class.__dataclass_params__.frozen
     )
+
+    # CRITICAL: Preserve original module for proper imports in generated code
+    # make_dataclass() sets __module__ to the caller's module (lazy_factory.py)
+    # We need to set it to the target class's original module for correct import paths
+    new_class.__module__ = target_class.__module__
 
     # Sibling inheritance is now handled by the dual-axis resolver system
 
