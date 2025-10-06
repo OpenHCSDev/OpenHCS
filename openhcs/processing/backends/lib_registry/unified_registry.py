@@ -756,18 +756,18 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
                 if not self.should_include_function(func, name):
                     rejection_reason = self._get_rejection_reason(func, name)
                     if rejection_reason != "private":
-                        logger.info(f"    🚫 Skipping {full_path}: {rejection_reason}")
+                        logger.debug(f"    🚫 Skipping {full_path}: {rejection_reason}")
                     continue
 
                 module_tested += 1
                 total_tested += 1
 
                 contract, is_valid = self.classify_function_behavior(func)
-                logger.info(f"    🧪 Testing {full_path}")
-                logger.info(f"       Classification: {contract.name if contract else contract}")
+                logger.debug(f"    🧪 Testing {full_path}")
+                logger.debug(f"       Classification: {contract.name if contract else contract}")
 
                 if not is_valid:
-                    logger.info(f"       ❌ Rejected: Invalid classification")
+                    logger.debug(f"       ❌ Rejected: Invalid classification")
                     continue
 
                 doc_lines = (func.__doc__ or "").splitlines()
@@ -797,9 +797,9 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
                 functions[func_name] = metadata
                 module_accepted += 1
                 total_accepted += 1
-                logger.info(f"       ✅ Accepted as '{func_name}'")
+                logger.debug(f"       ✅ Accepted as '{func_name}'")
 
-            logger.info(f"  📊 Module {module_name}: {module_accepted}/{module_tested} functions accepted")
+            logger.debug(f"  📊 Module {module_name}: {module_accepted}/{module_tested} functions accepted")
 
         logger.info(f"✅ Discovery complete: {total_accepted}/{total_tested} functions accepted")
         return functions

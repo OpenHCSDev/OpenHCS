@@ -104,18 +104,6 @@ class MemoryStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         Returns:
             List of loaded data objects in the same order as file_paths
         """
-        # 🔧 DEBUG: Show memory contents before batch load
-        print(f"🔧 MEMORY DEBUG: About to load {len(file_paths)} files")
-        print(f"🔧 MEMORY DEBUG: Requested paths: {[str(p) for p in file_paths]}")
-        print(f"🔧 MEMORY DEBUG: Total files in memory: {len(self._memory_store)}")
-        print(f"🔧 MEMORY DEBUG: Memory keys (first 10): {list(self._memory_store.keys())[:10]}")
-
-        # Show directory structure (thread-safe copy of keys)
-        directories = set()
-        for path in list(self._memory_store.keys()):
-            directories.add(str(Path(path).parent))
-        print(f"🔧 MEMORY DEBUG: Directories in memory: {sorted(directories)}")
-
         results = []
         for file_path in file_paths:
             result = self.load(file_path)
@@ -139,14 +127,6 @@ class MemoryStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
 
         for data, output_path in zip(data_list, output_paths):
             self.save(data, output_path)
-
-
-
-        # Show directory structure (thread-safe copy of keys)
-        directories = set()
-        for path in list(self._memory_store.keys()):
-            directories.add(str(Path(path).parent))
-        print(f"🔧 MEMORY DEBUG: Directories in memory: {sorted(directories)}")
 
     def list_files(
         self,
