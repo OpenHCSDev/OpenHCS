@@ -130,9 +130,11 @@ def classify_log_file(log_path: Path, base_log_path: Optional[str] = None, inclu
         except RuntimeError:
             pass  # TUI log not found, continue with other classification
 
-    # Check for ZMQ server logs
-    if file_name.startswith('zmq_server_port_'):
-        port = file_name.replace('zmq_server_port_', '').replace('.log', '')
+    # Check for ZMQ server logs (openhcs_zmq_server_port_{port}_{timestamp}.log)
+    if file_name.startswith('openhcs_zmq_server_port_'):
+        # Extract port from filename
+        parts = file_name.replace('openhcs_zmq_server_port_', '').replace('.log', '').split('_')
+        port = parts[0] if parts else 'unknown'
         return LogFileInfo(log_path, "zmq_server", display_name=f"ZMQ Server (port {port})")
 
     # Check for ZMQ worker logs
@@ -214,15 +216,14 @@ def is_openhcs_log_file(file_path: Path) -> bool:
     # OpenHCS log patterns:
     # - openhcs_unified_*.log (main UI process)
     # - openhcs_subprocess_*.log (subprocess runner)
+    # - openhcs_zmq_server_port_*.log (ZMQ execution server)
     # - pyqt_gui_subprocess_*.log (PyQt subprocess runner)
-    # - zmq_server_port_*.log (ZMQ execution server)
     # - zmq_worker_exec_*.log (ZMQ worker processes)
     # - napari_detached_port_*.log (Napari viewer)
 
     openhcs_patterns = [
         'openhcs_',
         'pyqt_gui_subprocess_',
-        'zmq_server_',
         'zmq_worker_',
         'napari_detached_'
     ]

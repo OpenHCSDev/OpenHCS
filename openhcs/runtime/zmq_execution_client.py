@@ -323,9 +323,11 @@ class ZMQExecutionClient(ZMQClient):
 
         # Create log file for ZMQ server output
         from pathlib import Path
+        import time
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_file_path = log_dir / f"zmq_server_port_{self.port}.log"
+        timestamp = int(time.time() * 1000000)  # Microsecond timestamp like worker logs
+        log_file_path = log_dir / f"openhcs_zmq_server_port_{self.port}_{timestamp}.log"
 
         # Build command
         cmd = [sys.executable, '-m', launcher_module, '--port', str(self.port)]
