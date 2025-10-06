@@ -336,13 +336,13 @@ class ZMQExecutionClient(ZMQClient):
     def _spawn_multiprocessing_server(self):
         """Spawn multiprocessing.Process that dies with parent."""
         def run_server():
+            import time
             from openhcs.runtime.zmq_execution_server import ZMQExecutionServer
             server = ZMQExecutionServer(port=self.port)
             server.start()
             server.start_time = time.time()
-            
+
             # Run message loop
-            import time
             try:
                 while server.is_running():
                     server.process_messages()
