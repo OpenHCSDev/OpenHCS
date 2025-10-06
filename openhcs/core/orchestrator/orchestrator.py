@@ -197,7 +197,10 @@ def _execute_single_axis_static(
                     logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
 
     logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
-    return {"status": "success", "axis_id": axis_id}
+    result = {"status": "success", "axis_id": axis_id}
+    logger.info(f"🔥 SINGLE_AXIS: Returning result: {result}")
+    logger.info(f"🔥 SINGLE_AXIS: Result type check - status: {type(result['status'])}, axis_id: {type(result['axis_id'])}")
+    return result
 
 
 def _configure_worker_logging(log_file_base: str):

@@ -907,7 +907,9 @@ class PlateManagerWidget(QWidget):
                 }
 
                 # Get effective config for this plate (includes pipeline config if set)
+                # For subprocess execution, we need the merged config since subprocess doesn't use dual-axis resolver
                 if plate_path in self.orchestrators:
+                    # Get merged config from orchestrator (this resolves lazy values)
                     effective_configs[plate_path] = self.orchestrators[plate_path].get_effective_config()
                 else:
                     effective_configs[plate_path] = self.global_config
@@ -1072,12 +1074,16 @@ class PlateManagerWidget(QWidget):
                 # NOT the execution_pipeline (which is already compiled)
                 definition_pipeline = compiled_data['definition_pipeline']
 
-                # Get effective config for this plate
+                # Get config for this plate
+                # CRITICAL: Send GlobalPipelineConfig (concrete) and PipelineConfig (lazy overrides) separately
+                # The server will merge them via the dual-axis resolver
                 if plate_path in self.orchestrators:
-                    effective_config = self.orchestrators[plate_path].get_effective_config()
+                    # Send the global config (concrete values) + pipeline config (lazy overrides)
+                    global_config_to_send = self.global_config
                     pipeline_config = self.orchestrators[plate_path].pipeline_config
                 else:
-                    effective_config = self.global_config
+                    # No orchestrator - send global config with empty pipeline config
+                    global_config_to_send = self.global_config
                     from openhcs.core.config import PipelineConfig
                     pipeline_config = PipelineConfig()
 
@@ -1089,7 +1095,7 @@ class PlateManagerWidget(QWidget):
                     return self.zmq_client.execute_pipeline(
                         plate_id=str(plate_path),
                         pipeline_steps=definition_pipeline,
-                        global_config=effective_config,
+                        global_config=global_config_to_send,
                         pipeline_config=pipeline_config
                     )
 

@@ -207,10 +207,16 @@ class ZMQExecutionServer(ZMQServer):
             # Status for specific execution
             if execution_id in self.active_executions:
                 record = self.active_executions[execution_id]
-                # Filter out unpicklable objects (orchestrator, etc.)
+                # Filter out unpicklable objects (orchestrator, results, etc.)
+                # Only include basic status fields that are guaranteed to be picklable
                 serializable_record = {
-                    k: v for k, v in record.items()
-                    if k not in ('orchestrator',)  # Exclude unpicklable objects
+                    'execution_id': record.get('execution_id'),
+                    'plate_id': record.get('plate_id'),
+                    'status': record.get('status'),
+                    'start_time': record.get('start_time'),
+                    'end_time': record.get('end_time'),
+                    'error': record.get('error'),
+                    'results_summary': record.get('results_summary')
                 }
                 return {
                     'status': 'ok',
@@ -273,11 +279,16 @@ class ZMQExecutionServer(ZMQServer):
     ):
         """
         Execute pipeline: reconstruct from code, compile server-side, execute.
-        
+
         This mirrors the execution_server.py implementation exactly.
         """
+        # CRITICAL: Force enum creation BEFORE any exec() to ensure pickle identity
+        # This must happen before exec(pipeline_code) or exec(config_code)
+        from openhcs.constants import AllComponents, VariableComponents, GroupBy
+        logger.debug(f"🔧 ENUM INIT: Forced enum creation in _execute_pipeline (VariableComponents={id(VariableComponents)})")
+
         record = self.active_executions[execution_id]
-        
+
         try:
             logger.info(f"[{execution_id}] Starting execution for plate {plate_id}")
             
@@ -294,15 +305,32 @@ class ZMQExecutionServer(ZMQServer):
             if config_code:
                 # Approach 1: Execute config code
                 from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
-                config_namespace = {}
-                exec(config_code, config_namespace)
-                
-                global_config = config_namespace.get('config')
-                if not global_config:
-                    raise ValueError("config_code must define 'config' variable")
-                
+
+                # Check if config code is empty (just creates default config)
+                # Empty config code looks like: "config = GlobalPipelineConfig(\n\n)"
+                is_empty_config = 'GlobalPipelineConfig(\n\n)' in config_code or 'GlobalPipelineConfig()' in config_code
+
+                if is_empty_config:
+                    # Use direct instantiation for empty configs to avoid import issues
+                    logger.info(f"[{execution_id}] Using default GlobalPipelineConfig (empty config code)")
+                    global_config = GlobalPipelineConfig()
+                else:
+                    # Execute non-empty config code
+                    logger.info(f"🔍 SERVER DEBUG: Received GlobalPipelineConfig code:\n{config_code}")
+                    config_namespace = {}
+                    exec(config_code, config_namespace)
+
+                    global_config = config_namespace.get('config')
+                    if not global_config:
+                        raise ValueError("config_code must define 'config' variable")
+
+                    logger.info(f"🔍 SERVER DEBUG: Recreated GlobalPipelineConfig")
+                    logger.info(f"🔍 SERVER DEBUG: global_config.zarr_config type: {type(global_config.zarr_config)}")
+                    logger.info(f"🔍 SERVER DEBUG: global_config.zarr_config.compressor: {global_config.zarr_config.compressor}")
+
                 # Handle PipelineConfig
                 if pipeline_config_code:
+                    logger.info(f"🔍 SERVER DEBUG: Received PipelineConfig code:\n{pipeline_config_code}")
                     pipeline_config_namespace = {}
                     exec(pipeline_config_code, pipeline_config_namespace)
                     pipeline_config = pipeline_config_namespace.get('config')
@@ -399,6 +427,12 @@ class ZMQExecutionServer(ZMQServer):
         from openhcs.io.base import reset_memory_backend
 
         logger = logging.getLogger(__name__)
+
+        # CRITICAL: Force enum creation BEFORE multiprocessing to ensure identity consistency
+        # The lazy __getattr__ in constants.py creates enums on first access and stores them in globals()
+        # We must do this in the parent process so worker processes inherit the same enum objects
+        from openhcs.constants import AllComponents, VariableComponents, GroupBy
+        logger.debug(f"🔧 ENUM INIT: Forced enum creation before multiprocessing (AllComponents={id(AllComponents)}, VariableComponents={id(VariableComponents)})")
 
         # CUDA COMPATIBILITY: Set spawn method for multiprocessing to support CUDA
         try:

@@ -169,13 +169,19 @@ class ZMQExecutionClient(ZMQClient):
             # Generate config code
             from openhcs.debug.pickle_to_python import generate_config_code
             from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
-            
+            import logging
+            logger = logging.getLogger(__name__)
+
             config_code = generate_config_code(global_config, GlobalPipelineConfig, clean_mode=True)
+            logger.info(f"🔍 CLIENT DEBUG: Generated GlobalPipelineConfig code:\n{config_code}")
+            logger.info(f"🔍 CLIENT DEBUG: global_config.zarr_config type: {type(global_config.zarr_config)}")
+            logger.info(f"🔍 CLIENT DEBUG: global_config.zarr_config.compressor: {global_config.zarr_config.compressor}")
             request['config_code'] = config_code
-            
+
             # Optionally add pipeline_config_code
             if pipeline_config is not None:
                 pipeline_config_code = generate_config_code(pipeline_config, PipelineConfig, clean_mode=True)
+                logger.info(f"🔍 CLIENT DEBUG: Generated PipelineConfig code:\n{pipeline_config_code}")
                 request['pipeline_config_code'] = pipeline_config_code
         
         logger.info(f"Sending execution request for plate {plate_id}...")
@@ -206,10 +212,12 @@ class ZMQExecutionClient(ZMQClient):
 
                     if exec_status == 'complete':
                         logger.info(f"Execution {execution_id} completed successfully")
+                        results_summary = execution.get('results_summary', {})
+                        logger.info(f"  Processed {results_summary.get('well_count', 0)} wells")
                         return {
                             'status': 'complete',
                             'execution_id': execution_id,
-                            'results': execution.get('results')
+                            'results': results_summary
                         }
                     elif exec_status == 'failed':
                         logger.error(f"Execution {execution_id} failed: {execution.get('error')}")

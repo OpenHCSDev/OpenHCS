@@ -19,7 +19,7 @@ class Microscope(Enum):
 
 def get_openhcs_config():
     """Get the OpenHCS configuration, initializing it if needed."""
-    from openhcs.core.components.framework import ComponentConfigurationFactory
+    from openhcs.components.framework import ComponentConfigurationFactory
     return ComponentConfigurationFactory.create_openhcs_default_configuration()
 
 
@@ -32,6 +32,14 @@ def _create_enums():
     attributes so they can be pickled correctly in multiprocessing contexts.
     The enums are stored in module globals() to ensure identity consistency.
     """
+    import logging
+    import os
+    import traceback
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔧 _create_enums() CALLED in process {os.getpid()}")
+    logger.info(f"🔧 _create_enums() cache_info: {_create_enums.cache_info()}")
+    logger.info(f"🔧 _create_enums() STACK TRACE:\n{''.join(traceback.format_stack())}")
+
     config = get_openhcs_config()
     remaining = config.get_remaining_components()
 
@@ -59,6 +67,9 @@ def _create_enums():
     GroupBy.__str__ = lambda self: f"GroupBy.{self.name}"
     GroupBy.__repr__ = lambda self: f"GroupBy.{self.name}"
 
+    logger.info(f"🔧 _create_enums() RETURNING in process {os.getpid()}: "
+               f"AllComponents={id(all_components)}, VariableComponents={id(vc)}, GroupBy={id(GroupBy)}")
+    logger.info(f"🔧 _create_enums() cache_info after return: {_create_enums.cache_info()}")
     return all_components, vc, GroupBy
 
 
@@ -74,10 +85,19 @@ def __getattr__(name):
             return globals()[name]
 
         # Create all enums at once and store in globals
+        import logging
+        import os
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔧 ENUM CREATION: Creating {name} in process {os.getpid()}")
+
         all_components, vc, gb = _create_enums()
         globals()['AllComponents'] = all_components
         globals()['VariableComponents'] = vc
         globals()['GroupBy'] = gb
+
+        logger.info(f"🔧 ENUM CREATION: Created enums in process {os.getpid()}: "
+                   f"AllComponents={id(all_components)}, VariableComponents={id(vc)}, GroupBy={id(gb)}")
+        logger.info(f"🔧 ENUM CREATION: VariableComponents.__module__={vc.__module__}, __qualname__={vc.__qualname__}")
 
         return globals()[name]
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
