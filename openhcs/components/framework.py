@@ -182,6 +182,7 @@ class ComponentConfigurationFactory:
             SITE = "site"
             CHANNEL = "channel"
             Z_INDEX = "z_index"
+            TIMEPOINT = "timepoint"
             WELL = "well"
 
         return ComponentConfigurationFactory.create_configuration(

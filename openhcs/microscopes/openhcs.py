@@ -363,6 +363,7 @@ class OpenHCSMetadata:
     wells: Optional[Dict[str, str]]
     sites: Optional[Dict[str, str]]
     z_indexes: Optional[Dict[str, str]]
+    timepoints: Optional[Dict[str, str]]
     available_backends: Dict[str, bool]
     main: Optional[bool] = None  # Indicates if this subdirectory is the primary/input subdirectory
 
@@ -459,6 +460,7 @@ class OpenHCSMetadataGenerator:
             wells=cache.get(AllComponents.WELL),  # Use AllComponents for multiprocessing axis
             sites=cache.get(GroupBy.SITE),
             z_indexes=cache.get(GroupBy.Z_INDEX),
+            timepoints=cache.get(GroupBy.TIMEPOINT),
             available_backends={write_backend: True},
             main=is_main if is_main else None
         )

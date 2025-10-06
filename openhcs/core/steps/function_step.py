@@ -1132,6 +1132,7 @@ class FunctionStep(AbstractStep):
                 "wells": self._extract_component_metadata(context, VariableComponents.WELL),
                 "sites": self._extract_component_metadata(context, VariableComponents.SITE),
                 "z_indexes": self._extract_component_metadata(context, VariableComponents.Z_INDEX),
+                "timepoints": self._extract_component_metadata(context, VariableComponents.TIMEPOINT),
                 "available_backends": available_backends
             }
 

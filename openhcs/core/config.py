@@ -218,14 +218,8 @@ class NapariVariableSizeHandling(Enum):
 
 def _create_napari_display_config():
     """Dynamically create NapariDisplayConfig with component-specific fields."""
-    # Define components locally to avoid circular import
-    from enum import Enum
-
-    class VariableComponents(Enum):
-        SITE = "site"
-        CHANNEL = "channel"
-        Z_INDEX = "z_index"
-        WELL = "well"
+    # Import the actual VariableComponents from constants
+    from openhcs.constants import VariableComponents
 
     variable_components = list(VariableComponents)
 

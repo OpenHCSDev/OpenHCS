@@ -356,7 +356,9 @@ class OperaPhenixFilenameParser(FilenameParser):
     """
 
     # Regular expression pattern for Opera Phenix filenames
-    _pattern = re.compile(r"r(\d{1,2})c(\d{1,2})f(\d+|\{[^\}]*\})p(\d+|\{[^\}]*\})-ch(\d+|\{[^\}]*\})(?:sk\d+)?(?:fk\d+)?(?:fl\d+)?(\.\w+)$", re.I)
+    # Supports: row, column, site (field), z_index (plane), channel, timepoint (sk=stack)
+    # sk = stack/timepoint, fk = field stack, fl = focal level
+    _pattern = re.compile(r"r(\d{1,2})c(\d{1,2})f(\d+|\{[^\}]*\})p(\d+|\{[^\}]*\})-ch(\d+|\{[^\}]*\})(?:sk(\d+|\{[^\}]*\}))?(?:fk\d+)?(?:fl\d+)?(\.\w+)$", re.I)
 
     # Pattern for extracting row and column from Opera Phenix well format
     _well_pattern = re.compile(r"R(\d{2})C(\d{2})", re.I)
@@ -413,7 +415,7 @@ class OperaPhenixFilenameParser(FilenameParser):
         match = self._pattern.match(basename)
         if match:
             logger.debug("Regex match successful for '%s'", basename)
-            row, col, site_str, z_str, channel_str, ext = match.groups()
+            row, col, site_str, z_str, channel_str, sk_str, ext = match.groups()
 
             # Helper function to parse component strings
             def parse_comp(s):
@@ -429,6 +431,7 @@ class OperaPhenixFilenameParser(FilenameParser):
             site = parse_comp(site_str)
             channel = parse_comp(channel_str)
             z_index = parse_comp(z_str)
+            timepoint = parse_comp(sk_str)  # sk = stack/timepoint
 
             result = {
                 'well': well,
@@ -436,6 +439,7 @@ class OperaPhenixFilenameParser(FilenameParser):
                 'channel': channel,
                 'wavelength': channel,  # For backward compatibility
                 'z_index': z_index,
+                'timepoint': timepoint,  # sk = stack/timepoint
                 'extension': ext if ext else '.tif'
             }
             return result
@@ -450,12 +454,14 @@ class OperaPhenixFilenameParser(FilenameParser):
         This method now uses **kwargs to accept any component values dynamically,
         making it compatible with the generic parser interface.
 
+        Note: Opera Phenix uses 'sk' (stack) for timepoint in filenames.
+
         Args:
             extension (str, optional): File extension (default: '.tiff')
             site_padding (int, optional): Width to pad site numbers to (default: 3)
             z_padding (int, optional): Width to pad Z-index numbers to (default: 3)
             **component_values: Component values as keyword arguments.
-                               Expected keys: well, site, channel, z_index
+                               Expected keys: well, site, channel, z_index, timepoint
 
         Returns:
             str: Constructed filename
@@ -465,6 +471,7 @@ class OperaPhenixFilenameParser(FilenameParser):
         site = component_values.get('site')
         channel = component_values.get('channel')
         z_index = component_values.get('z_index')
+        timepoint = component_values.get('timepoint')
 
         if not well:
             raise ValueError("Well component is required for filename construction")
@@ -479,9 +486,10 @@ class OperaPhenixFilenameParser(FilenameParser):
         else:
             raise ValueError(f"Invalid well format: {well}. Expected format: 'R01C03'")
 
-        # Default Z-index to 1 if not provided
+        # Default Z-index and timepoint to 1 if not provided
         z_index = 1 if z_index is None else z_index
         channel = 1 if channel is None else channel
+        timepoint = 1 if timepoint is None else timepoint
 
         # Construct filename in Opera Phenix format
         if isinstance(site, str):
@@ -498,7 +506,13 @@ class OperaPhenixFilenameParser(FilenameParser):
             # Otherwise, format it as a padded integer
             z_part = f"p{z_index:0{z_padding}d}"
 
-        return f"r{row:02d}c{col:02d}{site_part}{z_part}-ch{channel}sk1fk1fl1{extension}"
+        # Always include sk (stack/timepoint) - like ImageXpress always includes _t
+        if isinstance(timepoint, str):
+            sk_part = f"sk{timepoint}"
+        else:
+            sk_part = f"sk{timepoint}"
+
+        return f"r{row:02d}c{col:02d}{site_part}{z_part}-ch{channel}{sk_part}fk1fl1{extension}"
 
     def remap_field_in_filename(self, filename: str, xml_parser: Optional[OperaPhenixXmlParser] = None) -> str:
         """
@@ -796,6 +810,18 @@ class OperaPhenixMetadataHandler(MetadataHandler):
 
         Returns:
             None - Opera Phenix doesn't provide rich z_index names in metadata
+        """
+        return None
+
+    def get_timepoint_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
+        """
+        Get timepoint key→name mapping from Opera Phenix metadata.
+
+        Args:
+            plate_path: Path to the plate folder (str or Path)
+
+        Returns:
+            None - Opera Phenix doesn't provide rich timepoint names in metadata
         """
         return None
 
