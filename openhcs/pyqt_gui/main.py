@@ -338,21 +338,6 @@ class OpenHCSMainWindow(QMainWindow):
                 log_viewer_widget.switch_to_log(Path(log_file_path))
                 logger.info(f"Switched log viewer to: {log_file_path}")
 
-            # Connect to plate manager signals if it exists
-            if "plate_manager" in self.floating_windows:
-                plate_dialog = self.floating_windows["plate_manager"]
-                # Find the PlateManagerWidget inside the dialog
-                plate_widget = plate_dialog.findChild(PlateManagerWidget)
-                if plate_widget and hasattr(plate_widget, 'clear_subprocess_logs'):
-                    plate_widget.clear_subprocess_logs.connect(log_viewer_widget.clear_subprocess_logs)
-                    plate_widget.subprocess_log_started.connect(log_viewer_widget.start_monitoring)
-                    plate_widget.subprocess_log_stopped.connect(log_viewer_widget.stop_monitoring)
-
-        # Show the window
-        self.floating_windows["log_viewer"].show()
-        self.floating_windows["log_viewer"].raise_()
-        self.floating_windows["log_viewer"].activateWindow()
-
     def setup_menu_bar(self):
         """Setup application menu bar."""
         menubar = self.menuBar()

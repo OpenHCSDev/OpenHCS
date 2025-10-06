@@ -502,7 +502,15 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
                         napari_ready = True
                         logger.info(f"🔬 NAPARI PROCESS: Marked as ready after ping")
 
-                    response = {'type': 'pong', 'ready': napari_ready, 'viewer': 'napari', 'openhcs': True}
+                    response = {
+                        'type': 'pong',
+                        'port': port,
+                        'control_port': control_port,
+                        'ready': napari_ready,
+                        'viewer': 'napari',
+                        'server': 'NapariViewer',
+                        'openhcs': True
+                    }
                     if log_file_path:
                         response['log_file_path'] = log_file_path
                     control_socket.send(pickle.dumps(response))
