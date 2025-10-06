@@ -176,45 +176,13 @@ class ZMQExecutionServer(ZMQServer):
             }
     
     def _handle_cancel(self, msg: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle cancellation request."""
+        """Handle cancellation request (not implemented - cancellation support removed)."""
         execution_id = msg.get('execution_id')
-
-        if not execution_id:
-            return {
-                'status': 'error',
-                'message': 'Missing execution_id'
-            }
-
-        # Find the orchestrator for this execution
-        if execution_id not in self.active_executions:
-            return {
-                'status': 'error',
-                'message': f'No active execution found for {execution_id}'
-            }
-
-        execution_info = self.active_executions[execution_id]
-        orchestrator = execution_info.get('orchestrator')
-
-        if not orchestrator:
-            return {
-                'status': 'error',
-                'message': f'No orchestrator found for execution {execution_id}'
-            }
-
-        # Request cancellation
-        try:
-            orchestrator.cancel()
-            logger.info(f"🛑 Cancellation requested for execution {execution_id}")
-            return {
-                'status': 'ok',
-                'message': f'Cancellation requested for {execution_id}'
-            }
-        except Exception as e:
-            logger.error(f"Failed to cancel execution {execution_id}: {e}")
-            return {
-                'status': 'error',
-                'message': f'Failed to cancel: {str(e)}'
-            }
+        logger.warning(f"Cancellation requested for {execution_id} but cancellation support is not implemented")
+        return {
+            'status': 'error',
+            'message': 'Cancellation support not implemented'
+        }
     
     def _execute_pipeline(
         self,
@@ -389,9 +357,6 @@ class ZMQExecutionServer(ZMQServer):
         # Store orchestrator in active_executions for cancellation support
         record = self.active_executions[execution_id]
         record['orchestrator'] = orchestrator
-
-        # Reset cancellation flag before execution
-        orchestrator.reset_cancellation()
 
         # Execute using standard compile→execute phases
         logger.info(f"[{execution_id}] Executing pipeline...")
