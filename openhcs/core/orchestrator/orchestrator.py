@@ -16,7 +16,6 @@ import logging
 import contextlib
 import concurrent.futures
 import multiprocessing
-import threading
 from dataclasses import fields
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Set
@@ -448,36 +447,11 @@ class PipelineOrchestrator(ContextProvider):
         if progress_callback:
             logger.info("PipelineOrchestrator initialized with progress callback")
 
-        # Cancellation support (threading-based, not pickled)
-        self._cancel_requested = threading.Event()
-        self._cancel_lock = threading.Lock()
-
-        # Multiprocessing cancellation support
-        # Create a multiprocessing.Event that can be shared with worker processes
-        import multiprocessing
-        self._mp_cancel_event = multiprocessing.Event()
-
         # Component keys cache for fast access - uses AllComponents (includes multiprocessing axis)
         self._component_keys_cache: Dict['AllComponents', List[str]] = {}
 
         # Metadata cache service
         self._metadata_cache_service = get_metadata_cache()
-
-    def __getstate__(self):
-        """Custom pickle support - exclude threading objects that can't be pickled."""
-        state = self.__dict__.copy()
-        # Remove threading objects (they can't be pickled)
-        state.pop('_cancel_requested', None)
-        state.pop('_cancel_lock', None)
-        # Note: _mp_cancel_event CAN be pickled (it's a multiprocessing.Event)
-        return state
-
-    def __setstate__(self, state):
-        """Custom unpickle support - recreate threading objects."""
-        self.__dict__.update(state)
-        # Recreate threading objects
-        self._cancel_requested = threading.Event()
-        self._cancel_lock = threading.Lock()
 
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -503,35 +477,6 @@ class PipelineOrchestrator(ContextProvider):
     def state(self) -> OrchestratorState:
         """Get the current orchestrator state."""
         return self._state
-
-    def cancel(self):
-        """
-        Request cancellation of the current execution.
-
-        This sets a cancellation flag that will be checked before each step.
-        The execution will raise RuntimeError when cancellation is detected.
-
-        Thread-safe and can be called from any thread.
-        Works for both threading and multiprocessing modes.
-        """
-        with self._cancel_lock:
-            if not self._cancel_requested.is_set():
-                logger.info("🛑 CANCELLATION: Cancellation requested")
-                self._cancel_requested.set()
-                self._mp_cancel_event.set()  # Also set multiprocessing event
-
-    def reset_cancellation(self):
-        """
-        Reset the cancellation flag.
-
-        Should be called before starting a new execution to clear any previous
-        cancellation state.
-        """
-        with self._cancel_lock:
-            if self._cancel_requested.is_set():
-                logger.info("🔄 CANCELLATION: Cancellation flag reset")
-                self._cancel_requested.clear()
-                self._mp_cancel_event.clear()  # Also clear multiprocessing event
 
     def initialize_microscope_handler(self):
         """Initializes the microscope handler."""
@@ -683,22 +628,6 @@ class PipelineOrchestrator(ContextProvider):
         logger.info(f"🔥 SINGLE_AXIS: Processing {len(pipeline_definition)} steps for axis {axis_id}")
 
         for step_index, step in enumerate(pipeline_definition):
-            # Check for cancellation before each step
-            if self._cancel_requested.is_set():
-                logger.info(f"🛑 CANCELLATION: Execution cancelled for axis {axis_id} at step {step_index}")
-
-                # Send cancellation progress update
-                if self.progress_callback:
-                    try:
-                        self.progress_callback(axis_id, 'pipeline', 'cancelled', {
-                            'step_index': step_index,
-                            'total_steps': len(pipeline_definition)
-                        })
-                    except Exception as e:
-                        logger.warning(f"Progress callback failed for cancellation: {e}")
-
-                raise RuntimeError(f"Execution cancelled by user at step {step_index}")
-
             step_name = frozen_context.step_plans[step_index]["step_name"]
 
             logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
