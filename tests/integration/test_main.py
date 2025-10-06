@@ -460,6 +460,9 @@ def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_co
 
     # Create temporary orchestrator to get well list (same as direct mode)
     # This matches the direct mode behavior where we get all wells
+    # Set up global context first
+    ensure_global_config_context(GlobalPipelineConfig, global_config)
+
     temp_orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
     temp_orchestrator.initialize()
     wells = temp_orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
