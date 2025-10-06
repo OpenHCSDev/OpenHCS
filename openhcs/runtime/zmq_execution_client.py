@@ -187,9 +187,39 @@ class ZMQExecutionClient(ZMQClient):
         
         # Send request via control channel
         response = self._send_control_request(request)
-        
+
         logger.info(f"Server response: {response.get('status')}")
-        
+
+        # If server accepted the request (async execution), poll for completion
+        if response.get('status') == 'accepted':
+            execution_id = response.get('execution_id')
+            logger.info(f"Execution started with ID: {execution_id}, polling for completion...")
+
+            # Poll for completion
+            while True:
+                time.sleep(0.5)  # Poll every 500ms
+                status_response = self.get_status(execution_id)
+
+                if status_response.get('status') == 'ok':
+                    execution = status_response.get('execution', {})
+                    exec_status = execution.get('status')
+
+                    if exec_status == 'complete':
+                        logger.info(f"Execution {execution_id} completed successfully")
+                        return {
+                            'status': 'complete',
+                            'execution_id': execution_id,
+                            'results': execution.get('results')
+                        }
+                    elif exec_status == 'failed':
+                        logger.error(f"Execution {execution_id} failed: {execution.get('error')}")
+                        return {
+                            'status': 'error',
+                            'execution_id': execution_id,
+                            'message': execution.get('error')
+                        }
+                    # else: still running, continue polling
+
         return response
     
     def get_status(self, execution_id: Optional[str] = None) -> Dict[str, Any]:

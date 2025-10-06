@@ -13,6 +13,7 @@ import logging
 import time
 import uuid
 import zmq
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 from openhcs.runtime.zmq_base import ZMQServer
@@ -97,16 +98,16 @@ class ZMQExecutionServer(ZMQServer):
     
     def _handle_execute(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle execution request - executes synchronously in main thread.
-        
+        Handle execution request - executes asynchronously in background thread.
+
         Required fields:
         - plate_id: Plate identifier (path or ID)
         - pipeline_code: Python code defining pipeline_steps
-        
+
         Config options (one required):
         - config_params: Dict of config parameters
         - config_code: Python code defining global_config
-        
+
         Optional fields:
         - pipeline_config_code: Python code defining pipeline_config
         - client_address: Address for streaming results
@@ -114,12 +115,12 @@ class ZMQExecutionServer(ZMQServer):
         # Validate required fields
         if 'plate_id' not in msg or 'pipeline_code' not in msg:
             return {'status': 'error', 'message': 'Missing required fields: plate_id, pipeline_code'}
-        
+
         if 'config_params' not in msg and 'config_code' not in msg:
             return {'status': 'error', 'message': 'Missing config: provide either config_params or config_code'}
-        
+
         execution_id = str(uuid.uuid4())
-        
+
         # Create execution record
         record = {
             'execution_id': execution_id,
@@ -130,40 +131,41 @@ class ZMQExecutionServer(ZMQServer):
             'end_time': None,
             'error': None
         }
-        
+
         self.active_executions[execution_id] = record
-        
-        # Execute synchronously in main thread (like UI does)
-        try:
-            results = self._execute_pipeline(
-                execution_id,
-                msg['plate_id'],
-                msg['pipeline_code'],
-                msg.get('config_params'),
-                msg.get('config_code'),
-                msg.get('pipeline_config_code'),
-                msg.get('client_address')
-            )
-            record['status'] = 'complete'
-            record['end_time'] = time.time()
-            record['results'] = results
-            
-            return {
-                'status': 'complete',
-                'execution_id': execution_id,
-                'results': results
-            }
-        except Exception as e:
-            record['status'] = 'failed'
-            record['end_time'] = time.time()
-            record['error'] = str(e)
-            logger.error(f"[{execution_id}] ✗ Failed: {e}", exc_info=True)
-            
-            return {
-                'status': 'error',
-                'execution_id': execution_id,
-                'message': str(e)
-            }
+
+        # Execute asynchronously in background thread so server can continue processing control messages
+        def execute_in_background():
+            try:
+                results = self._execute_pipeline(
+                    execution_id,
+                    msg['plate_id'],
+                    msg['pipeline_code'],
+                    msg.get('config_params'),
+                    msg.get('config_code'),
+                    msg.get('pipeline_config_code'),
+                    msg.get('client_address')
+                )
+                record['status'] = 'complete'
+                record['end_time'] = time.time()
+                record['results'] = results
+                logger.info(f"[{execution_id}] ✓ Completed in {record['end_time'] - record['start_time']:.1f}s")
+            except Exception as e:
+                record['status'] = 'failed'
+                record['end_time'] = time.time()
+                record['error'] = str(e)
+                logger.error(f"[{execution_id}] ✗ Failed: {e}", exc_info=True)
+
+        # Start background thread
+        thread = threading.Thread(target=execute_in_background, daemon=True)
+        thread.start()
+
+        # Return immediately with execution_id (client can poll for status)
+        return {
+            'status': 'accepted',
+            'execution_id': execution_id,
+            'message': 'Execution started in background'
+        }
     
     def _handle_status(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """Handle status request."""
