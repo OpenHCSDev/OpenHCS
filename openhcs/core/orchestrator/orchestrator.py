@@ -136,13 +136,20 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
 def _execute_single_axis_static(
     pipeline_definition: List[AbstractStep],
     frozen_context: 'ProcessingContext',
-    visualizer: Optional['NapariVisualizerType']
+    visualizer: Optional['NapariVisualizerType'],
+    cancel_event=None
 ) -> Dict[str, Any]:
     """
     Static version of _execute_single_axis for multiprocessing compatibility.
 
     This function is identical to PipelineOrchestrator._execute_single_axis but doesn't
     require an orchestrator instance, making it safe for pickling in ProcessPoolExecutor.
+
+    Args:
+        pipeline_definition: List of pipeline steps to execute
+        frozen_context: Frozen processing context for this axis
+        visualizer: Optional Napari visualizer (not used in multiprocessing)
+        cancel_event: Optional multiprocessing.Event for cancellation support
     """
     axis_id = frozen_context.axis_id
     logger.info(f"🔥 SINGLE_AXIS: Starting execution for axis {axis_id}")
@@ -160,6 +167,11 @@ def _execute_single_axis_static(
 
     # Execute each step in the pipeline
     for step_index, step in enumerate(pipeline_definition):
+        # Check for cancellation before each step (multiprocessing mode)
+        if cancel_event and cancel_event.is_set():
+            logger.info(f"🛑 CANCELLATION: Execution cancelled for axis {axis_id} at step {step_index} (multiprocessing)")
+            raise RuntimeError(f"Execution cancelled by user at step {step_index}")
+
         step_name = frozen_context.step_plans[step_index]["step_name"]
 
         logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
@@ -439,6 +451,11 @@ class PipelineOrchestrator(ContextProvider):
         self._cancel_requested = threading.Event()
         self._cancel_lock = threading.Lock()
 
+        # Multiprocessing cancellation support
+        # Create a multiprocessing.Event that can be shared with worker processes
+        import multiprocessing
+        self._mp_cancel_event = multiprocessing.Event()
+
         # Component keys cache for fast access - uses AllComponents (includes multiprocessing axis)
         self._component_keys_cache: Dict['AllComponents', List[str]] = {}
 
@@ -481,11 +498,13 @@ class PipelineOrchestrator(ContextProvider):
         The execution will raise RuntimeError when cancellation is detected.
 
         Thread-safe and can be called from any thread.
+        Works for both threading and multiprocessing modes.
         """
         with self._cancel_lock:
             if not self._cancel_requested.is_set():
                 logger.info("🛑 CANCELLATION: Cancellation requested")
                 self._cancel_requested.set()
+                self._mp_cancel_event.set()  # Also set multiprocessing event
 
     def reset_cancellation(self):
         """
@@ -498,6 +517,7 @@ class PipelineOrchestrator(ContextProvider):
             if self._cancel_requested.is_set():
                 logger.info("🔄 CANCELLATION: Cancellation flag reset")
                 self._cancel_requested.clear()
+                self._mp_cancel_event.clear()  # Also clear multiprocessing event
 
     def initialize_microscope_handler(self):
         """Initializes the microscope handler."""
@@ -961,7 +981,14 @@ class PipelineOrchestrator(ContextProvider):
                         # Use static function to avoid pickling the orchestrator instance
                         # Note: Use original pipeline_definition to preserve collision-resolved configs
                         # Don't pass visualizer to worker processes - they communicate via ZeroMQ
-                        future = executor.submit(_execute_single_axis_static, pipeline_definition, resolved_context, None)
+                        # Pass multiprocessing cancel event for graceful cancellation
+                        future = executor.submit(
+                            _execute_single_axis_static,
+                            pipeline_definition,
+                            resolved_context,
+                            None,  # visualizer
+                            self._mp_cancel_event  # cancel_event
+                        )
                         future_to_axis_id[future] = axis_id
                         logger.info(f"🔥 ORCHESTRATOR: Task submitted for {axis_name} {axis_id}")
                         logger.info(f"🔥 DEATH_MARKER: TASK_SUBMITTED_FOR_{axis_name.upper()}_{axis_id}")
