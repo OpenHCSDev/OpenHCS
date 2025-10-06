@@ -1033,10 +1033,10 @@ class PlateManagerWidget(QWidget):
             # Clear subprocess logs before starting new execution
             self.clear_subprocess_logs.emit()
 
-            # Create ZMQ client (non-persistent mode for UI-managed execution)
+            # Create ZMQ client (persistent mode - server stays alive like Napari)
             self.zmq_client = ZMQExecutionClient(
                 port=7777,
-                persistent=False,  # UI manages lifecycle
+                persistent=True,  # Server persists across executions
                 progress_callback=self._on_zmq_progress
             )
 
