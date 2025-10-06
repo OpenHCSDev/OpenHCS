@@ -29,19 +29,19 @@ logger = logging.getLogger(__name__)
 class ZMQServer(ABC):
     """
     Abstract base class for ZMQ servers using dual-channel pattern.
-    
+
     Implements:
     - Dual-channel setup (data + control ports)
     - Handshake protocol (ping/pong)
     - Port management utilities
     - Lifecycle management
-    
+
     Subclasses must implement:
     - handle_data_message(): Process data channel messages
     - handle_control_message(): Process control channel messages (beyond ping/pong)
     """
-    
-    def __init__(self, port: int, host: str = '*', log_file_path: Optional[str] = None):
+
+    def __init__(self, port: int, host: str = '*', log_file_path: Optional[str] = None, data_socket_type: int = None):
         """
         Initialize ZMQ server.
 
@@ -49,11 +49,15 @@ class ZMQServer(ABC):
             port: Data port (control port will be port + 1000)
             host: Host to bind to (default: '*' for all interfaces)
             log_file_path: Path to server log file (for client discovery)
+            data_socket_type: ZMQ socket type for data channel (default: zmq.PUB for sending, or zmq.SUB for receiving)
         """
+        import zmq
+
         self.port = port
         self.host = host
         self.control_port = port + 1000
         self.log_file_path = log_file_path
+        self.data_socket_type = data_socket_type if data_socket_type is not None else zmq.PUB
 
         self.zmq_context = None
         self.data_socket = None
@@ -65,27 +69,32 @@ class ZMQServer(ABC):
     def start(self):
         """Start the ZMQ server (bind sockets and start message loop)."""
         import zmq
-        
+
         with self._lock:
             if self._running:
                 logger.warning("Server already running")
                 return
-            
+
             # Create ZMQ context
             self.zmq_context = zmq.Context()
-            
-            # Set up data socket (PUB for sending data to clients)
-            self.data_socket = self.zmq_context.socket(zmq.PUB)
+
+            # Set up data socket (configurable type: PUB for sending, SUB for receiving)
+            self.data_socket = self.zmq_context.socket(self.data_socket_type)
             self.data_socket.setsockopt(zmq.LINGER, 0)
             self.data_socket.bind(f"tcp://{self.host}:{self.port}")
-            
+
+            # If SUB socket, subscribe to all messages
+            if self.data_socket_type == zmq.SUB:
+                self.data_socket.setsockopt(zmq.SUBSCRIBE, b"")
+
             # Set up control socket (REP for handshake and control)
             self.control_socket = self.zmq_context.socket(zmq.REP)
             self.control_socket.setsockopt(zmq.LINGER, 0)
             self.control_socket.bind(f"tcp://{self.host}:{self.control_port}")
-            
+
             self._running = True
-            logger.info(f"ZMQ Server started on data port {self.port}, control port {self.control_port}")
+            socket_type_name = "PUB" if self.data_socket_type == zmq.PUB else "SUB" if self.data_socket_type == zmq.SUB else str(self.data_socket_type)
+            logger.info(f"ZMQ Server started on data port {self.port} ({socket_type_name}), control port {self.control_port}")
     
     def stop(self):
         """Stop the ZMQ server (close sockets and cleanup)."""
