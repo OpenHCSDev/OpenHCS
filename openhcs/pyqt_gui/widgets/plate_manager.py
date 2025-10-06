@@ -1114,7 +1114,7 @@ class PlateManagerWidget(QWidget):
             for plate in ready_items:
                 plate_path = plate['path']
                 if plate_path in self.orchestrators:
-                    self.orchestrators[plate_path]._state = OrchestratorState.EXEC_COMPLETE
+                    self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
 
             self.update_button_states()
 
