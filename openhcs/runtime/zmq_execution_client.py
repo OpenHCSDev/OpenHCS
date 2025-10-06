@@ -327,8 +327,9 @@ class ZMQExecutionClient(ZMQClient):
             cmd.append('--persistent')
 
         # Create log file for ZMQ server output
-        from openhcs.utils.logging_config import get_log_directory
-        log_dir = get_log_directory()
+        from pathlib import Path
+        log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
         log_file_path = log_dir / f"zmq_server_port_{self.port}.log"
 
         # Open log file for writing
