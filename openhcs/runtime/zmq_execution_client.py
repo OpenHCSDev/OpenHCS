@@ -326,18 +326,27 @@ class ZMQExecutionClient(ZMQClient):
         if self.persistent:
             cmd.append('--persistent')
 
+        # Create log file for ZMQ server output
+        from openhcs.utils.logging_config import get_log_directory
+        log_dir = get_log_directory()
+        log_file_path = log_dir / f"zmq_server_port_{self.port}.log"
+
+        # Open log file for writing
+        log_file = open(log_file_path, 'w')
+
         # Spawn subprocess
         # - Persistent: Detached (survives parent death)
         # - Non-persistent: Attached (dies with parent)
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,  # Merge stderr into stdout
             start_new_session=self.persistent  # Detach only if persistent
         )
 
         mode = "detached" if self.persistent else "attached"
         logger.info(f"Spawned {mode} execution server on port {self.port} (PID: {process.pid})")
+        logger.info(f"ZMQ server logs: {log_file_path}")
         return process
     
     def disconnect(self):
