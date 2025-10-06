@@ -26,20 +26,31 @@ def get_openhcs_config():
 # Simple lazy initialization - just defer the config call
 @lru_cache(maxsize=1)
 def _create_enums():
-    """Create enums when first needed."""
+    """Create enums when first needed.
+
+    CRITICAL: This function must create enums with proper __module__ and __qualname__
+    attributes so they can be pickled correctly in multiprocessing contexts.
+    The enums are stored in module globals() to ensure identity consistency.
+    """
     config = get_openhcs_config()
     remaining = config.get_remaining_components()
 
     # AllComponents: ALL possible dimensions (including multiprocessing axis)
     all_components = Enum('AllComponents', {c.name: c.value for c in config.all_components})
+    all_components.__module__ = __name__
+    all_components.__qualname__ = 'AllComponents'
 
     # VariableComponents: Components available for variable selection (excludes multiprocessing axis)
     vc = Enum('VariableComponents', {c.name: c.value for c in remaining})
+    vc.__module__ = __name__
+    vc.__qualname__ = 'VariableComponents'
 
     # GroupBy: Same as VariableComponents + NONE option (they're the same concept)
     gb_dict = {c.name: c.value for c in remaining}
     gb_dict['NONE'] = None
     GroupBy = Enum('GroupBy', gb_dict)
+    GroupBy.__module__ = __name__
+    GroupBy.__qualname__ = 'GroupBy'
 
     # Add original interface methods
     GroupBy.component = property(lambda self: self.value)
@@ -52,12 +63,22 @@ def _create_enums():
 
 
 def __getattr__(name):
-    """Lazy enum creation."""
+    """Lazy enum creation with identity guarantee.
+
+    CRITICAL: Ensures enums are created exactly once per process and stored in globals()
+    so that pickle identity checks pass in multiprocessing contexts.
+    """
     if name in ('AllComponents', 'VariableComponents', 'GroupBy'):
+        # Check if already created (handles race conditions)
+        if name in globals():
+            return globals()[name]
+
+        # Create all enums at once and store in globals
         all_components, vc, gb = _create_enums()
         globals()['AllComponents'] = all_components
         globals()['VariableComponents'] = vc
         globals()['GroupBy'] = gb
+
         return globals()[name]
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
