@@ -345,7 +345,7 @@ class ZMQExecutionServer(ZMQServer):
     ):
         """Execute pipeline using standard orchestrator pattern."""
         from pathlib import Path
-        from openhcs.config_framework.global_config import ensure_global_config_context
+        from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
         from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
         from openhcs.constants import MULTIPROCESSING_AXIS
