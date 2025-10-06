@@ -743,11 +743,19 @@ class PlateManagerWidget(QWidget):
         for i, plate_data in enumerate(selected_items):
             plate_path = plate_data['path']
 
-            # Get definition pipeline and make fresh copy
+            # Get definition pipeline - this is the ORIGINAL pipeline from the editor
+            # It should have func attributes intact
             definition_pipeline = self._get_current_pipeline_definition(plate_path)
             if not definition_pipeline:
                 logger.warning(f"No pipeline defined for {plate_data['name']}, using empty pipeline")
                 definition_pipeline = []
+
+            # Validate that steps have func attribute (required for ZMQ execution)
+            for i, step in enumerate(definition_pipeline):
+                if not hasattr(step, 'func'):
+                    logger.error(f"Step {i} ({step.name}) missing 'func' attribute! Cannot execute via ZMQ.")
+                    raise AttributeError(f"Step '{step.name}' is missing 'func' attribute. "
+                                       "This usually means the pipeline was loaded from a compiled state instead of the original definition.")
 
             try:
                 # Get or create orchestrator for compilation
