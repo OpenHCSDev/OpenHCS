@@ -321,8 +321,11 @@ class ZMQClient(ABC):
 
             self._cleanup_sockets()
 
-            # Only kill server if we spawned it (not if we connected to existing)
-            if not self._connected_to_existing and self.server_process:
+            # Only kill server if:
+            # 1. We spawned it (not connected to existing)
+            # 2. AND it's non-persistent (persistent servers stay alive)
+            if not self._connected_to_existing and self.server_process and not self.persistent:
+                logger.info("Killing non-persistent server on disconnect")
                 if hasattr(self.server_process, 'is_alive'):
                     # multiprocessing.Process
                     if self.server_process.is_alive():
@@ -338,6 +341,8 @@ class ZMQClient(ABC):
                             self.server_process.wait(timeout=5)
                         except subprocess.TimeoutExpired:
                             self.server_process.kill()
+            elif self.persistent:
+                logger.info(f"Disconnecting from persistent server on port {self.port} (server stays alive)")
 
             self._connected = False
             logger.info("Disconnected from server")

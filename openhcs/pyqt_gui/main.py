@@ -60,9 +60,12 @@ class OpenHCSMainWindow(QMainWindow):
         
         # Floating windows registry (replaces dock widgets)
         self.floating_windows: Dict[str, QDialog] = {}
-        
+
         # Settings for window state persistence
         self.settings = QSettings("OpenHCS", "PyQt6GUI")
+
+        # Initialize Log Viewer on startup (hidden) for continuous log monitoring
+        self._initialize_log_viewer()
         
         # Initialize UI
         self.setup_ui()
@@ -255,29 +258,42 @@ class OpenHCSMainWindow(QMainWindow):
         self.floating_windows["image_browser"].raise_()
         self.floating_windows["image_browser"].activateWindow()
 
+    def _initialize_log_viewer(self):
+        """
+        Initialize Log Viewer on startup (hidden) for continuous log monitoring.
+
+        This ensures all server logs are captured regardless of when the
+        Log Viewer window is opened by the user.
+        """
+        from openhcs.pyqt_gui.widgets.log_viewer import LogViewerWindow
+
+        # Create floating window (hidden)
+        window = QDialog(self)
+        window.setWindowTitle("Log Viewer")
+        window.setModal(False)
+        window.resize(900, 700)
+
+        # Add widget to window
+        layout = QVBoxLayout(window)
+        log_viewer_widget = LogViewerWindow(self.file_manager, self.service_adapter)
+        layout.addWidget(log_viewer_widget)
+
+        self.floating_windows["log_viewer"] = window
+
+        # Window stays hidden until user opens it
+        logger.info("Log Viewer initialized (hidden) - monitoring for new logs")
+
     def show_log_viewer(self):
         """Show log viewer window (mirrors Textual TUI pattern)."""
-        if "log_viewer" not in self.floating_windows:
-            from openhcs.pyqt_gui.widgets.log_viewer import LogViewerWindow
-            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
-
-            # Create floating window
-            window = QDialog(self)
-            window.setWindowTitle("Log Viewer")
-            window.setModal(False)
-            window.resize(900, 700)
-
-            # Add widget to window
-            layout = QVBoxLayout(window)
-            log_viewer_widget = LogViewerWindow(self.file_manager, self.service_adapter)
-            layout.addWidget(log_viewer_widget)
-
-            self.floating_windows["log_viewer"] = window
-
-        # Show window
-        self.floating_windows["log_viewer"].show()
-        self.floating_windows["log_viewer"].raise_()
-        self.floating_windows["log_viewer"].activateWindow()
+        # Log viewer is already initialized on startup, just show it
+        if "log_viewer" in self.floating_windows:
+            self.floating_windows["log_viewer"].show()
+            self.floating_windows["log_viewer"].raise_()
+            self.floating_windows["log_viewer"].activateWindow()
+        else:
+            # Fallback: initialize if somehow not created
+            self._initialize_log_viewer()
+            self.show_log_viewer()
 
     def show_zmq_server_manager(self):
         """Show ZMQ server manager window."""
