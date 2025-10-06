@@ -175,7 +175,7 @@ class ZMQServerManagerWidget(QWidget):
             control_context = zmq.Context()
             control_socket = control_context.socket(zmq.REQ)
             control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 200)  # 200ms timeout (fast scan)
+            control_socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout (servers may be busy)
             control_socket.connect(f"tcp://localhost:{control_port}")
 
             # Send ping

@@ -671,6 +671,7 @@ class LogViewerWindow(QMainWindow):
         self.tail_timer: QTimer = None
         self.highlighter: LogHighlighter = None
         self.file_loader: Optional[LogFileLoader] = None  # Async file loader
+        self.server_scan_timer: QTimer = None  # Periodic ZMQ server scanning
 
         self.setup_ui()
         self.setup_connections()
@@ -828,7 +829,7 @@ class LogViewerWindow(QMainWindow):
                 context = zmq.Context()
                 socket = context.socket(zmq.REQ)
                 socket.setsockopt(zmq.LINGER, 0)
-                socket.setsockopt(zmq.RCVTIMEO, 200)  # 200ms timeout
+                socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout (servers may be busy)
                 socket.connect(f"tcp://localhost:{control_port}")
 
                 # Send ping
