@@ -85,6 +85,12 @@ DATA_TYPE_CONFIGS = {
     "3d": {"z_stack_levels": 3, "name": "zstack_plate"}  # Changed from 5 to 3 z-planes
 }
 
+# Execution mode configurations for parametrized testing
+EXECUTION_MODE_CONFIGS = ["threading", "multiprocessing"]
+
+# ZMQ execution mode configurations for parametrized testing
+ZMQ_EXECUTION_MODE_CONFIGS = ["direct", "zmq"]
+
 @pytest.fixture(scope="module")
 def microscope_config(request):
     """Provide microscope configuration - parametrized by pytest_generate_tests."""
@@ -126,6 +132,34 @@ def execution_mode(request):
         os.environ['OPENHCS_USE_THREADING'] = original_value
     else:
         os.environ.pop('OPENHCS_USE_THREADING', None)
+
+@pytest.fixture(scope="module")
+def zmq_execution_mode(request):
+    """
+    ZMQ execution mode fixture with environment variable management.
+    Parametrized by pytest_generate_tests hook.
+
+    This allows tests to run with both direct orchestrator and ZMQ execution modes.
+    - 'direct': Execute using orchestrator directly (in-process)
+    - 'zmq': Execute using ZMQExecutionClient (subprocess/remote)
+
+    Direct mode is useful for debugging and faster tests.
+    ZMQ mode tests the full execution stack including client/server communication.
+    """
+    # Store original value if it exists
+    original_value = os.environ.get('OPENHCS_USE_ZMQ_EXECUTION')
+
+    # Set the ZMQ execution mode based on parameter
+    use_zmq = request.param == "zmq"
+    os.environ['OPENHCS_USE_ZMQ_EXECUTION'] = 'true' if use_zmq else 'false'
+
+    yield request.param
+
+    # Restore original value after test
+    if original_value is not None:
+        os.environ['OPENHCS_USE_ZMQ_EXECUTION'] = original_value
+    else:
+        os.environ.pop('OPENHCS_USE_ZMQ_EXECUTION', None)
 
 @pytest.fixture(scope="module")
 def base_test_dir(microscope_config):

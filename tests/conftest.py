@@ -46,6 +46,13 @@ def pytest_addoption(parser):
     )
 
     parser.addoption(
+        "--it-zmq-mode",
+        action="store",
+        default=env_default("IT_ZMQ_MODE", "direct"),
+        help="Comma-separated list of ZMQ execution modes (default: direct). Options: direct,zmq. Use 'all' for full coverage."
+    )
+
+    parser.addoption(
         "--it-processing-axis",
         action="store",
         default=env_default("IT_PROCESSING_AXIS", "well"),
@@ -62,15 +69,17 @@ def pytest_configure(config):
         "microscopes": ["ImageXpress", "OperaPhenix"],
         "dims": ["2d", "3d"],
         "exec_modes": ["threading", "multiprocessing"],
+        "zmq_modes": ["direct", "zmq"],
         "processing_axis": ["well"]
     }
-    
+
     # Validate each option
     options_to_validate = [
         ("--it-backends", "backends"),
         ("--it-microscopes", "microscopes"),
         ("--it-dims", "dims"),
         ("--it-exec-mode", "exec_modes"),
+        ("--it-zmq-mode", "zmq_modes"),
         ("--it-processing-axis", "processing_axis")
     ]
     
@@ -91,7 +100,10 @@ def pytest_configure(config):
 
 
 # Import constants from fixture_utils for parametrization
-from tests.integration.helpers.fixture_utils import BACKEND_CONFIGS, MICROSCOPE_CONFIGS, DATA_TYPE_CONFIGS
+from tests.integration.helpers.fixture_utils import (
+    BACKEND_CONFIGS, MICROSCOPE_CONFIGS, DATA_TYPE_CONFIGS,
+    EXECUTION_MODE_CONFIGS, ZMQ_EXECUTION_MODE_CONFIGS
+)
 
 # Extensible configuration mapping for pytest_generate_tests
 INTEGRATION_TEST_CONFIG = {
@@ -112,7 +124,12 @@ INTEGRATION_TEST_CONFIG = {
     },
     'execution_mode': {
         'option': '--it-exec-mode',
-        'choices': ['threading', 'multiprocessing'],
+        'choices': EXECUTION_MODE_CONFIGS,
+        'value_mapper': lambda x: x  # Return mode name as-is
+    },
+    'zmq_execution_mode': {
+        'option': '--it-zmq-mode',
+        'choices': ZMQ_EXECUTION_MODE_CONFIGS,
         'value_mapper': lambda x: x  # Return mode name as-is
     },
     'processing_axis': {

@@ -39,7 +39,8 @@ from openhcs.core.memory.decorators import DtypeConversion
 # Test utilities and fixtures
 from tests.integration.helpers.fixture_utils import (
     backend_config, base_test_dir, data_type_config, execution_mode,
-    microscope_config, plate_dir, test_params, print_thread_activity_report
+    microscope_config, plate_dir, test_params, print_thread_activity_report,
+    zmq_execution_mode
 )
 
 from openhcs.config_framework.lazy_factory import ensure_global_config_context
@@ -393,7 +394,7 @@ def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
 
 
 def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipeline) -> Dict:
-    """Execute compilation and execution phases of the pipeline."""
+    """Execute compilation and execution phases of the pipeline (direct mode)."""
     from openhcs.constants import MULTIPROCESSING_AXIS
     import logging
     logger = logging.getLogger(__name__)
@@ -447,28 +448,98 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
     return results
 
 
-def test_main(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str):
+def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_config: GlobalPipelineConfig, pipeline_config: PipelineConfig) -> Dict:
+    """Execute pipeline using ZMQ execution client."""
+    from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.info("🔌 Executing pipeline via ZMQ execution client")
+
+    # Create ZMQ client
+    client = ZMQExecutionClient(port=7777, persistent=False)
+
+    try:
+        # Connect to server (spawns if needed)
+        client.connect(timeout=15)
+        logger.info("✅ Connected to ZMQ execution server")
+
+        # Execute pipeline
+        response = client.execute_pipeline(
+            plate_id=str(test_config.plate_dir),
+            pipeline_steps=pipeline.steps,
+            global_config=global_config,
+            pipeline_config=pipeline_config
+        )
+
+        # Check response
+        if response.get('status') == 'error':
+            error_msg = response.get('message', 'Unknown error')
+            raise RuntimeError(f"ZMQ execution failed: {error_msg}")
+
+        logger.info(f"✅ ZMQ execution completed: {response.get('status')}")
+
+        # Convert response to results format expected by tests
+        # ZMQ returns {'status': 'complete', 'execution_id': '...', 'result': {...}}
+        # We need to return the result dict
+        return response.get('result', {})
+
+    finally:
+        # Cleanup
+        client.disconnect()
+        logger.info("🔌 Disconnected from ZMQ execution server")
+
+
+def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq_mode: str) -> Dict:
+    """
+    Execute pipeline using either direct orchestrator or ZMQ client based on mode.
+
+    Args:
+        test_config: Test configuration
+        pipeline: Pipeline to execute
+        zmq_mode: 'direct' for orchestrator, 'zmq' for ZMQ client
+
+    Returns:
+        Execution results dict
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if zmq_mode == "zmq":
+        logger.info("📡 Using ZMQ execution mode")
+
+        # Create global config for ZMQ execution
+        global_config = _create_pipeline_config(test_config)
+
+        # Create pipeline config with lazy configs
+        from openhcs.config_framework.lazy_factory import LazyPathPlanningConfig, LazyStepWellFilterConfig
+        pipeline_config = PipelineConfig(
+            path_planning_config=LazyPathPlanningConfig(
+                output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
+            ),
+            step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+        )
+
+        return _execute_pipeline_zmq(test_config, pipeline, global_config, pipeline_config)
+    else:
+        logger.info("🔧 Using direct orchestrator mode")
+        orchestrator = _initialize_orchestrator(test_config)
+        return _execute_pipeline_phases(orchestrator, pipeline)
+
+
+def test_main(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str):
     """Unified test for all combinations of microscope types, backends, data types, and execution modes."""
     test_config = TestConfig(Path(plate_dir), backend_config, execution_mode)
 
-    print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}")
+    print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
 
-    orchestrator = _initialize_orchestrator(test_config)
     pipeline = create_test_pipeline()
 
     # Export pipeline to Python file in the synthetic data folder
     _export_pipeline_to_file(pipeline, test_config.plate_dir)
 
-    # Test orchestrator's pipeline config has the correct values
-    # The dual-axis resolver will use these values during pipeline execution
-    orchestrator_step_config = orchestrator.pipeline_config.step_well_filter_config
-#    if CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST == None:
-#        print(f"StepWellFilterConfig.well_filter in PipelineConfig not set, should be resolved from GlobalPipelineConfig")
-#        assert orchestrator_step_config.well_filter == CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST, f"Expected orchestrator's step_well_filter_config.well_filter={CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST}, got {orchestrator_step_config.well_filter}"
-#    assert orchestrator_step_config.well_filter == CONSTANTS.STEP_WELL_FILTER_TEST, f"Expected orchestrator's step_well_filter_config.well_filter={CONSTANTS.STEP_WELL_FILTER_TEST}, got {orchestrator_step_config.well_filter}"
-#    print(f"✅ Orchestrator config test passed: step_well_filter_config.well_filter = {orchestrator_step_config.well_filter}")
-
-    results = _execute_pipeline_phases(orchestrator, pipeline)
+    # Execute using the specified mode (direct or zmq)
+    results = _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode)
     validate_separate_materialization(test_config.plate_dir)
 
     print_thread_activity_report()
@@ -476,7 +547,7 @@ def test_main(plate_dir: Union[Path, str], backend_config: str, data_type_config
 
 
 @pytest.mark.parametrize("use_code_serialization", [False, True], ids=["direct", "code_serialization"])
-def test_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, use_code_serialization: bool):
+def test_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, use_code_serialization: bool):
     """
     Parametrized test that can run with or without code serialization.
 
@@ -484,12 +555,12 @@ def test_code_serialization(plate_dir: Union[Path, str], backend_config: str, da
     When use_code_serialization=False, this runs the normal test.
     """
     if use_code_serialization:
-        test_main_with_code_serialization(plate_dir, backend_config, data_type_config, execution_mode)
+        test_main_with_code_serialization(plate_dir, backend_config, data_type_config, execution_mode, zmq_execution_mode)
     else:
-        test_main(plate_dir, backend_config, data_type_config, execution_mode)
+        test_main(plate_dir, backend_config, data_type_config, execution_mode, zmq_execution_mode)
 
 
-def test_main_with_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str):
+def test_main_with_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str):
     """
     Test using pickle_to_python for code-based object serialization.
 
@@ -503,7 +574,7 @@ def test_main_with_code_serialization(plate_dir: Union[Path, str], backend_confi
     """
     test_config = TestConfig(Path(plate_dir), backend_config, execution_mode)
 
-    print(f"{CONSTANTS.START_INDICATOR} [CODE SERIALIZATION TEST] with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}")
+    print(f"{CONSTANTS.START_INDICATOR} [CODE SERIALIZATION TEST] with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
 
     # Step 1: Create objects normally
     from openhcs.io.base import reset_memory_backend
@@ -602,21 +673,23 @@ def test_main_with_code_serialization(plate_dir: Union[Path, str], backend_confi
     # Step 5: Use recreated objects for execution
     print("\n🚀 Step 5: Executing pipeline with recreated objects...")
 
-    # Set up global context for orchestrator
-    ensure_global_config_context(GlobalPipelineConfig, recreated_global_config)
-
-    # Create orchestrator with recreated config
-    orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=recreated_pipeline_config)
-    orchestrator.initialize()
-
     # Create Pipeline object from recreated steps
     recreated_pipeline = Pipeline(
         steps=recreated_pipeline_steps,
         name=pipeline.name
     )
 
-    # Execute using recreated objects
-    results = _execute_pipeline_phases(orchestrator, recreated_pipeline)
+    # Execute using the specified mode (direct or zmq)
+    if zmq_execution_mode == "zmq":
+        # For ZMQ mode, use the recreated configs directly
+        results = _execute_pipeline_zmq(test_config, recreated_pipeline, recreated_global_config, recreated_pipeline_config)
+    else:
+        # For direct mode, set up global context and use orchestrator
+        ensure_global_config_context(GlobalPipelineConfig, recreated_global_config)
+        orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=recreated_pipeline_config)
+        orchestrator.initialize()
+        results = _execute_pipeline_phases(orchestrator, recreated_pipeline)
+
     validate_separate_materialization(test_config.plate_dir)
 
     print_thread_activity_report()
