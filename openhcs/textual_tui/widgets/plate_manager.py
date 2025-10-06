@@ -148,6 +148,7 @@ class PlateManagerWidget(ButtonListWidget):
         # --- Subprocess Architecture ---
         self.current_process: Optional[subprocess.Popen] = None
         self.zmq_client = None  # ZMQ execution client (when using ZMQ mode)
+        self.current_execution_id = None  # Track current execution ID for cancellation
         self.log_file_path: Optional[str] = None  # Single source of truth
         self.log_file_position: int = 0  # Track position in log file for incremental reading
         # Async monitoring using Textual's interval system
@@ -958,6 +959,10 @@ class PlateManagerWidget(ButtonListWidget):
 
                 response = await loop.run_in_executor(None, _execute)
 
+                # Track execution ID for cancellation
+                if response.get('execution_id'):
+                    self.current_execution_id = response['execution_id']
+
                 logger.info(f"Plate {plate_path} execution response: {response.get('status')}")
 
                 if response.get('status') != 'complete':
@@ -966,6 +971,7 @@ class PlateManagerWidget(ButtonListWidget):
                     self.app.show_error(f"Execution failed for {plate_path}: {error_msg}")
 
             # Execution complete
+            self.current_execution_id = None
             self.app.current_status = f"Completed {len(ready_items)} plate(s)"
 
             # Update orchestrator states
@@ -987,6 +993,7 @@ class PlateManagerWidget(ButtonListWidget):
         except Exception as e:
             logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
             self.app.show_error(f"Failed to execute: {e}")
+            self.current_execution_id = None
             self._reset_execution_state("ZMQ execution failed")
 
             # Cleanup ZMQ client
@@ -1023,16 +1030,56 @@ class PlateManagerWidget(ButtonListWidget):
         if self.zmq_client:
             try:
                 logger.info("🛑 Requesting graceful cancellation via ZMQ...")
-                # TODO: Need to track execution_id to cancel specific execution
-                # For now, just disconnect which will stop the client
-                def _disconnect():
-                    self.zmq_client.disconnect()
 
                 import asyncio
                 loop = asyncio.get_event_loop()
+
+                # Cancel specific execution if we have an ID
+                if self.current_execution_id:
+                    logger.info(f"🛑 Cancelling execution {self.current_execution_id}")
+
+                    def _cancel():
+                        return self.zmq_client.cancel_execution(self.current_execution_id)
+
+                    response = await loop.run_in_executor(None, _cancel)
+
+                    if response.get('status') == 'ok':
+                        logger.info("🛑 Cancellation request accepted, waiting for graceful shutdown...")
+                        self.app.current_status = "Cancellation requested, waiting..."
+
+                        # Wait for graceful cancellation with timeout
+                        timeout = 5  # seconds
+                        start_time = asyncio.get_event_loop().time()
+
+                        while (asyncio.get_event_loop().time() - start_time) < timeout:
+                            # Check if execution is still running
+                            def _check_status():
+                                return self.zmq_client.get_status(self.current_execution_id)
+
+                            status_response = await loop.run_in_executor(None, _check_status)
+
+                            if status_response.get('status') == 'error':
+                                # Execution no longer exists (completed or cancelled)
+                                logger.info("🛑 Execution completed/cancelled gracefully")
+                                break
+
+                            await asyncio.sleep(0.5)
+                        else:
+                            # Timeout reached - execution still running
+                            logger.warning("🛑 Graceful cancellation timeout - execution may still be running")
+                            self.app.current_status = "Cancellation timeout - execution may still be running"
+                    else:
+                        logger.warning(f"🛑 Cancellation failed: {response.get('message')}")
+                        self.app.current_status = f"Cancellation failed: {response.get('message')}"
+
+                # Disconnect client
+                def _disconnect():
+                    self.zmq_client.disconnect()
+
                 await loop.run_in_executor(None, _disconnect)
 
                 self.zmq_client = None
+                self.current_execution_id = None
                 self._reset_execution_state("Execution cancelled by user")
 
             except Exception as e:

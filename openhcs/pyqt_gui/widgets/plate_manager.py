@@ -102,6 +102,7 @@ class PlateManagerWidget(QWidget):
         self.plate_compiled_data: Dict[str, tuple] = {}  # Store compiled pipeline data
         self.current_process = None
         self.zmq_client = None  # ZMQ execution client (when using ZMQ mode)
+        self.current_execution_id = None  # Track current execution ID for cancellation
         self.execution_state = "idle"
         self.log_file_path: Optional[str] = None
         self.log_file_position: int = 0
@@ -1075,6 +1076,10 @@ class PlateManagerWidget(QWidget):
 
                 response = await loop.run_in_executor(None, _execute)
 
+                # Track execution ID for cancellation
+                if response.get('execution_id'):
+                    self.current_execution_id = response['execution_id']
+
                 logger.info(f"Plate {plate_path} execution response: {response.get('status')}")
 
                 if response.get('status') != 'complete':
@@ -1084,6 +1089,7 @@ class PlateManagerWidget(QWidget):
 
             # Execution complete
             self.execution_state = "idle"
+            self.current_execution_id = None
             self.status_message.emit(f"Completed {len(ready_items)} plate(s)")
 
             # Update orchestrator states
@@ -1105,6 +1111,7 @@ class PlateManagerWidget(QWidget):
             logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
             self.service_adapter.show_error_dialog(f"Failed to execute: {e}")
             self.execution_state = "idle"
+            self.current_execution_id = None
             self.update_button_states()
 
             # Cleanup ZMQ client
@@ -1139,16 +1146,56 @@ class PlateManagerWidget(QWidget):
         if self.zmq_client:
             try:
                 logger.info("🛑 Requesting graceful cancellation via ZMQ...")
-                # TODO: Need to track execution_id to cancel specific execution
-                # For now, just disconnect which will stop the client
-                def _disconnect():
-                    self.zmq_client.disconnect()
 
                 import asyncio
                 loop = asyncio.get_event_loop()
+
+                # Cancel specific execution if we have an ID
+                if self.current_execution_id:
+                    logger.info(f"🛑 Cancelling execution {self.current_execution_id}")
+
+                    def _cancel():
+                        return self.zmq_client.cancel_execution(self.current_execution_id)
+
+                    response = await loop.run_in_executor(None, _cancel)
+
+                    if response.get('status') == 'ok':
+                        logger.info("🛑 Cancellation request accepted, waiting for graceful shutdown...")
+                        self.status_message.emit("Cancellation requested, waiting...")
+
+                        # Wait for graceful cancellation with timeout
+                        timeout = 5  # seconds
+                        start_time = asyncio.get_event_loop().time()
+
+                        while (asyncio.get_event_loop().time() - start_time) < timeout:
+                            # Check if execution is still running
+                            def _check_status():
+                                return self.zmq_client.get_status(self.current_execution_id)
+
+                            status_response = await loop.run_in_executor(None, _check_status)
+
+                            if status_response.get('status') == 'error':
+                                # Execution no longer exists (completed or cancelled)
+                                logger.info("🛑 Execution completed/cancelled gracefully")
+                                break
+
+                            await asyncio.sleep(0.5)
+                        else:
+                            # Timeout reached - execution still running
+                            logger.warning("🛑 Graceful cancellation timeout - execution may still be running")
+                            self.status_message.emit("Cancellation timeout - execution may still be running")
+                    else:
+                        logger.warning(f"🛑 Cancellation failed: {response.get('message')}")
+                        self.status_message.emit(f"Cancellation failed: {response.get('message')}")
+
+                # Disconnect client
+                def _disconnect():
+                    self.zmq_client.disconnect()
+
                 await loop.run_in_executor(None, _disconnect)
 
                 self.zmq_client = None
+                self.current_execution_id = None
                 self.execution_state = "idle"
 
                 # Update orchestrator states

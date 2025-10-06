@@ -652,6 +652,17 @@ class PipelineOrchestrator(ContextProvider):
             # Check for cancellation before each step
             if self._cancel_requested.is_set():
                 logger.info(f"🛑 CANCELLATION: Execution cancelled for axis {axis_id} at step {step_index}")
+
+                # Send cancellation progress update
+                if self.progress_callback:
+                    try:
+                        self.progress_callback(axis_id, 'pipeline', 'cancelled', {
+                            'step_index': step_index,
+                            'total_steps': len(pipeline_definition)
+                        })
+                    except Exception as e:
+                        logger.warning(f"Progress callback failed for cancellation: {e}")
+
                 raise RuntimeError(f"Execution cancelled by user at step {step_index}")
 
             step_name = frozen_context.step_plans[step_index]["step_name"]
