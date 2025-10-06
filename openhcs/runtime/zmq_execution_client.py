@@ -11,7 +11,6 @@ execution (same API whether server is localhost subprocess or remote machine).
 
 import logging
 import subprocess
-import multiprocessing
 import sys
 import time
 import threading
@@ -305,61 +304,40 @@ class ZMQExecutionClient(ZMQClient):
     
     def _spawn_server_process(self):
         """
-        Spawn new execution server process.
-        
+        Spawn new execution server process using subprocess.Popen.
+
+        This approach works for both persistent and non-persistent modes:
+        - Persistent: Detached subprocess (start_new_session=True)
+        - Non-persistent: Regular subprocess (dies with parent)
+
+        Using subprocess.Popen instead of multiprocessing.Process avoids:
+        - Pickling issues with spawn context
+        - CUDA fork issues (subprocess is always clean)
+        - Complexity of two different spawning mechanisms
+
         Returns:
-            Process object (subprocess.Popen or multiprocessing.Process)
+            subprocess.Popen object
         """
-        if self.persistent:
-            # Spawn detached subprocess
-            return self._spawn_detached_server()
-        else:
-            # Spawn multiprocessing.Process
-            return self._spawn_multiprocessing_server()
-    
-    def _spawn_detached_server(self):
-        """Spawn detached subprocess that survives parent termination."""
         # Find the server launcher script
         launcher_module = 'openhcs.runtime.zmq_execution_server_launcher'
-        
-        # Spawn detached process
+
+        # Build command
+        cmd = [sys.executable, '-m', launcher_module, '--port', str(self.port)]
+        if self.persistent:
+            cmd.append('--persistent')
+
+        # Spawn subprocess
+        # - Persistent: Detached (survives parent death)
+        # - Non-persistent: Attached (dies with parent)
         process = subprocess.Popen(
-            [sys.executable, '-m', launcher_module, '--port', str(self.port), '--persistent'],
+            cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            start_new_session=True  # Detach from parent
+            start_new_session=self.persistent  # Detach only if persistent
         )
-        
-        logger.info(f"Spawned detached execution server on port {self.port} (PID: {process.pid})")
-        return process
-    
-    def _spawn_multiprocessing_server(self):
-        """Spawn multiprocessing.Process that dies with parent."""
-        def run_server():
-            import time
-            from openhcs.runtime.zmq_execution_server import ZMQExecutionServer
-            server = ZMQExecutionServer(port=self.port)
-            server.start()
-            server.start_time = time.time()
 
-            # Run message loop
-            try:
-                while server.is_running():
-                    server.process_messages()
-                    time.sleep(0.01)  # Small delay to avoid busy loop
-            except KeyboardInterrupt:
-                pass
-            finally:
-                server.stop()
-
-        # CRITICAL: Use spawn context to avoid CUDA fork issues
-        # If parent process has initialized CUDA, fork will inherit that state
-        # and child cannot reinitialize. Spawn creates a clean process.
-        ctx = multiprocessing.get_context('spawn')
-        process = ctx.Process(target=run_server, daemon=False)
-        process.start()
-
-        logger.info(f"Spawned multiprocessing execution server on port {self.port} (PID: {process.pid})")
+        mode = "detached" if self.persistent else "attached"
+        logger.info(f"Spawned {mode} execution server on port {self.port} (PID: {process.pid})")
         return process
     
     def disconnect(self):
