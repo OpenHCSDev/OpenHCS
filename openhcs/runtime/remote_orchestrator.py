@@ -2,13 +2,16 @@
 """
 Remote Orchestrator - Client for OpenHCS Execution Server
 
-Sends pipeline execution requests to remote OpenHCS server and receives
-streamed results. Generates Python code instead of pickling objects.
+DEPRECATED: This class is now a thin wrapper around ZMQExecutionClient.
+For new code, use ZMQExecutionClient directly from openhcs.runtime.zmq_execution_client.
+
+This wrapper is maintained for backward compatibility with existing code.
 """
 
-import json
 import logging
+import warnings
 from typing import Any, Dict, List, Optional
+from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
 
 logger = logging.getLogger(__name__)
 
@@ -16,43 +19,77 @@ logger = logging.getLogger(__name__)
 class RemoteOrchestrator:
     """
     Client-side orchestrator for remote pipeline execution.
-    
-    Sends pipeline code to execution server, receives streamed results.
+
+    DEPRECATED: This class is now a thin wrapper around ZMQExecutionClient.
+    For new code, use ZMQExecutionClient directly:
+
+    ```python
+    from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
+
+    client = ZMQExecutionClient(host='remote-server', port=7777, persistent=True)
+    client.connect()
+    response = client.execute_pipeline(
+        plate_id=plate_id,
+        pipeline_steps=pipeline_steps,
+        global_config=global_config,
+        pipeline_config=pipeline_config
+    )
+    ```
+
+    This wrapper maintains backward compatibility but delegates all work to
+    ZMQExecutionClient, which provides additional features:
+    - Progress callbacks
+    - Graceful cancellation
+    - Multi-instance support
+    - Automatic server spawning
     """
-    
+
     def __init__(self, server_host: str, server_port: int = 7777):
         """
         Initialize remote orchestrator.
-        
+
         Args:
             server_host: Execution server hostname/IP
-            server_port: Execution server port
+            server_port: Execution server port (control port will be port + 1000)
         """
+        warnings.warn(
+            "RemoteOrchestrator is deprecated. Use ZMQExecutionClient directly for new code. "
+            "See openhcs.runtime.zmq_execution_client.ZMQExecutionClient",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
         self.server_host = server_host
         self.server_port = server_port
-        self.zmq_context = None
-        self.zmq_socket = None
-        
+
+        # Create ZMQExecutionClient (persistent mode for remote servers)
+        self.client = ZMQExecutionClient(
+            host=server_host,
+            port=server_port,
+            persistent=True  # Remote servers should be persistent
+        )
+
         logger.info(f"RemoteOrchestrator configured for {server_host}:{server_port}")
-    
+        logger.info("  (Using ZMQExecutionClient internally)")
+
     def _connect(self):
-        """Establish ZeroMQ connection to server."""
-        if self.zmq_socket is None:
-            import zmq
-            self.zmq_context = zmq.Context()
-            self.zmq_socket = self.zmq_context.socket(zmq.REQ)
-            self.zmq_socket.connect(f"tcp://{self.server_host}:{self.server_port}")
-            logger.info(f"Connected to execution server at {self.server_host}:{self.server_port}")
-    
+        """
+        Establish connection to server.
+
+        DEPRECATED: Use client.connect() directly.
+        """
+        if not self.client.is_connected():
+            self.client.connect()
+
     def _disconnect(self):
-        """Close ZeroMQ connection."""
-        if self.zmq_socket:
-            self.zmq_socket.close()
-            self.zmq_socket = None
-        if self.zmq_context:
-            self.zmq_context.term()
-            self.zmq_context = None
-    
+        """
+        Close connection.
+
+        DEPRECATED: Use client.disconnect() directly.
+        """
+        if self.client.is_connected():
+            self.client.disconnect()
+
     def run_remote_pipeline(
         self,
         plate_id: int,
@@ -66,96 +103,80 @@ class RemoteOrchestrator:
         Execute pipeline on remote server.
 
         Args:
-            plate_id: OMERO plate ID
+            plate_id: OMERO plate ID or plate path
             pipeline_steps: List of FunctionStep objects
             global_config: GlobalPipelineConfig instance
             pipeline_config: Optional PipelineConfig instance
-            viewer_host: Host for result streaming (this machine)
-            viewer_port: Port for result streaming
+            viewer_host: Host for result streaming (this machine) - DEPRECATED, not used
+            viewer_port: Port for result streaming - DEPRECATED, not used
 
         Returns:
-            Response from server with execution_id
+            Response from server with execution_id and results
         """
-        # Generate pipeline code
-        from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
-        pipeline_code = generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=True)
-
-        # Generate global config code
-        from openhcs.debug.pickle_to_python import generate_config_code
-        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
-        config_code = generate_config_code(global_config, GlobalPipelineConfig, clean_mode=True)
-
-        # Build request
-        request = {
-            'command': 'execute',
-            'plate_id': plate_id,
-            'pipeline_code': pipeline_code,
-            'config_code': config_code,
-            'client_address': f"{viewer_host}:{viewer_port}"
-        }
-
-        # Optionally add pipeline_config_code
-        if pipeline_config is not None:
-            pipeline_config_code = generate_config_code(pipeline_config, PipelineConfig, clean_mode=True)
-            request['pipeline_config_code'] = pipeline_config_code
-
-        # Send request
+        # Ensure connected
         self._connect()
-        logger.info(f"Sending execution request for plate {plate_id}...")
-        logger.info(f"  - Pipeline code: {len(pipeline_code)} chars")
-        logger.info(f"  - Global config code: {len(config_code)} chars")
-        if 'pipeline_config_code' in request:
-            logger.info(f"  - Pipeline config code: {len(request['pipeline_config_code'])} chars")
 
-        self.zmq_socket.send_json(request)
+        # Delegate to ZMQExecutionClient
+        logger.info(f"Executing pipeline on remote server {self.server_host}:{self.server_port}...")
 
-        # Receive response
-        response = self.zmq_socket.recv_json()
-        logger.info(f"Server response: {response.get('status')} - {response.get('message')}")
+        response = self.client.execute_pipeline(
+            plate_id=str(plate_id),
+            pipeline_steps=pipeline_steps,
+            global_config=global_config,
+            pipeline_config=pipeline_config
+        )
 
-        return response
-    
+        # Convert response format for backward compatibility
+        # ZMQExecutionClient returns {'status': 'complete', 'execution_id': ..., 'results': ...}
+        # Old format expected {'status': 'ok', 'message': ..., 'execution_id': ...}
+        if response.get('status') == 'complete':
+            return {
+                'status': 'ok',
+                'message': 'Pipeline execution completed',
+                'execution_id': response.get('execution_id'),
+                'results': response.get('results')
+            }
+        elif response.get('status') == 'error':
+            return {
+                'status': 'error',
+                'message': response.get('message', 'Unknown error'),
+                'execution_id': response.get('execution_id')
+            }
+        else:
+            return response
+
     def get_status(self, execution_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Query execution status.
-        
+
         Args:
             execution_id: Specific execution ID, or None for server status
-        
+
         Returns:
             Status response
         """
-        request = {'command': 'status'}
-        if execution_id:
-            request['execution_id'] = execution_id
-        
         self._connect()
-        self.zmq_socket.send_json(request)
-        response = self.zmq_socket.recv_json()
-        
-        return response
-    
+        return self.client.get_status(execution_id)
+
     def ping(self) -> bool:
         """
         Ping server to check if alive.
-        
+
         Returns:
             True if server responds
         """
         try:
-            self._connect()
-            self.zmq_socket.send_json({'command': 'ping'})
-            response = self.zmq_socket.recv_json()
-            return response.get('status') == 'ok'
+            # Don't auto-connect for ping (just check if server is responsive)
+            return self.client.ping()
         except Exception as e:
             logger.error(f"Ping failed: {e}")
             return False
-    
+
     def __enter__(self):
         """Context manager entry."""
         self._connect()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self._disconnect()

@@ -339,6 +339,7 @@ class PipelineOrchestrator(ContextProvider):
         *,
         pipeline_config: Optional['PipelineConfig'] = None,
         storage_registry: Optional[Any] = None,
+        progress_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
     ):
         # Lock removed - was orphaned code never used
 
@@ -428,6 +429,11 @@ class PipelineOrchestrator(ContextProvider):
         self.default_pipeline_definition: Optional[List[AbstractStep]] = None
         self._initialized: bool = False
         self._state: OrchestratorState = OrchestratorState.CREATED
+
+        # Progress callback for real-time execution updates
+        self.progress_callback = progress_callback
+        if progress_callback:
+            logger.info("PipelineOrchestrator initialized with progress callback")
 
         # Component keys cache for fast access - uses AllComponents (includes multiprocessing axis)
         self._component_keys_cache: Dict['AllComponents', List[str]] = {}
@@ -588,6 +594,15 @@ class PipelineOrchestrator(ContextProvider):
         axis_id = frozen_context.axis_id
         logger.info(f"🔥 SINGLE_AXIS: Starting execution for axis {axis_id}")
 
+        # Send progress: axis started
+        if self.progress_callback:
+            try:
+                self.progress_callback(axis_id, 'pipeline', 'started', {
+                    'total_steps': len(pipeline_definition)
+                })
+            except Exception as e:
+                logger.warning(f"Progress callback failed for axis {axis_id} start: {e}")
+
         # NUCLEAR VALIDATION
         if not frozen_context.is_frozen():
             error_msg = f"🔥 SINGLE_AXIS ERROR: Context for axis {axis_id} is not frozen before execution"
@@ -608,6 +623,16 @@ class PipelineOrchestrator(ContextProvider):
 
             logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
+            # Send progress: step started
+            if self.progress_callback:
+                try:
+                    self.progress_callback(axis_id, step_name, 'started', {
+                        'step_index': step_index,
+                        'total_steps': len(pipeline_definition)
+                    })
+                except Exception as e:
+                    logger.warning(f"Progress callback failed for axis {axis_id} step {step_name} start: {e}")
+
             # Verify step has process method (should always be true for AbstractStep subclasses)
             if not hasattr(step, 'process'):
                 error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} missing process method for axis {axis_id}"
@@ -617,6 +642,16 @@ class PipelineOrchestrator(ContextProvider):
             # Call process method on step instance
             step.process(frozen_context, step_index)
             logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
+
+            # Send progress: step completed
+            if self.progress_callback:
+                try:
+                    self.progress_callback(axis_id, step_name, 'completed', {
+                        'step_index': step_index,
+                        'total_steps': len(pipeline_definition)
+                    })
+                except Exception as e:
+                    logger.warning(f"Progress callback failed for axis {axis_id} step {step_name} completion: {e}")
 
     #        except Exception as step_error:
     #            import traceback
@@ -643,6 +678,16 @@ class PipelineOrchestrator(ContextProvider):
                         logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
         
         logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
+
+        # Send progress: axis completed
+        if self.progress_callback:
+            try:
+                self.progress_callback(axis_id, 'pipeline', 'completed', {
+                    'total_steps': len(pipeline_definition)
+                })
+            except Exception as e:
+                logger.warning(f"Progress callback failed for axis {axis_id} completion: {e}")
+
         return {"status": "success", "axis_id": axis_id}
 
     def execute_compiled_plate(

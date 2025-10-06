@@ -324,9 +324,15 @@ class ZMQExecutionServer(ZMQServer):
         # Install global config context for dual-axis resolver
         ensure_global_config_context(type(global_config), global_config)
 
+        # Create progress callback that sends updates via ZMQ
+        def progress_callback(axis_id: str, step: str, status: str, metadata: dict):
+            """Send progress update via ZMQ data channel."""
+            self.send_progress_update(axis_id, step, status)
+
         orchestrator = PipelineOrchestrator(
             plate_path=Path(str(plate_id)),
-            pipeline_config=pipeline_config
+            pipeline_config=pipeline_config,
+            progress_callback=progress_callback
         )
         orchestrator.initialize()
 

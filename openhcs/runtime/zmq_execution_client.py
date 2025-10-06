@@ -14,6 +14,8 @@ import subprocess
 import multiprocessing
 import sys
 import time
+import threading
+import json
 import zmq
 import pickle
 from pathlib import Path
@@ -49,7 +51,77 @@ class ZMQExecutionClient(ZMQClient):
         """
         super().__init__(port, host, persistent)
         self.progress_callback = progress_callback
-    
+        self._progress_thread = None
+        self._progress_stop_event = threading.Event()
+
+    def _start_progress_listener(self):
+        """Start background thread to listen for progress updates."""
+        if self._progress_thread is not None and self._progress_thread.is_alive():
+            return  # Already running
+
+        if not self.progress_callback:
+            return  # No callback, no need to listen
+
+        self._progress_stop_event.clear()
+        self._progress_thread = threading.Thread(
+            target=self._progress_listener_loop,
+            daemon=True,
+            name="ZMQProgressListener"
+        )
+        self._progress_thread.start()
+        logger.debug("Progress listener thread started")
+
+    def _stop_progress_listener(self):
+        """Stop background progress listener thread."""
+        if self._progress_thread is None:
+            return
+
+        self._progress_stop_event.set()
+        if self._progress_thread.is_alive():
+            self._progress_thread.join(timeout=2)
+        self._progress_thread = None
+        logger.debug("Progress listener thread stopped")
+
+    def _progress_listener_loop(self):
+        """Background thread loop that listens for progress updates."""
+        logger.debug("Progress listener loop started")
+
+        try:
+            while not self._progress_stop_event.is_set():
+                if not self.data_socket:
+                    time.sleep(0.1)
+                    continue
+
+                try:
+                    # Non-blocking receive with timeout
+                    message = self.data_socket.recv_string(zmq.NOBLOCK)
+
+                    # Parse JSON message
+                    try:
+                        data = json.loads(message)
+
+                        # Call user's progress callback
+                        if self.progress_callback and data.get('type') == 'progress':
+                            try:
+                                self.progress_callback(data)
+                            except Exception as e:
+                                logger.warning(f"Progress callback raised exception: {e}")
+
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse progress message: {e}")
+
+                except zmq.Again:
+                    # No message available, sleep briefly
+                    time.sleep(0.05)
+                except Exception as e:
+                    logger.warning(f"Error in progress listener: {e}")
+                    time.sleep(0.1)
+
+        except Exception as e:
+            logger.error(f"Progress listener loop crashed: {e}", exc_info=True)
+        finally:
+            logger.debug("Progress listener loop exited")
+
     def execute_pipeline(
         self,
         plate_id: str,
@@ -75,7 +147,11 @@ class ZMQExecutionClient(ZMQClient):
         if not self._connected:
             if not self.connect():
                 raise RuntimeError("Failed to connect to execution server")
-        
+
+        # Start progress listener if callback is provided
+        if self.progress_callback:
+            self._start_progress_listener()
+
         # Generate pipeline code
         from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code
         pipeline_code = generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=True)
@@ -270,15 +346,23 @@ class ZMQExecutionClient(ZMQClient):
         logger.info(f"Spawned multiprocessing execution server on port {self.port} (PID: {process.pid})")
         return process
     
+    def disconnect(self):
+        """Disconnect from server and stop progress listener."""
+        # Stop progress listener first
+        self._stop_progress_listener()
+
+        # Then call parent disconnect
+        super().disconnect()
+
     def send_data(self, data: Dict[str, Any]):
         """
         Send data to server (not used for execution client).
-        
+
         For execution client, we send requests via control channel,
         not data channel.
         """
         pass
-    
+
     def __enter__(self):
         """Context manager entry."""
         self.connect()
