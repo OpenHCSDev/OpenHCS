@@ -345,11 +345,27 @@ class ZMQExecutionServer(ZMQServer):
     ):
         """Execute pipeline using standard orchestrator pattern."""
         from pathlib import Path
+        import multiprocessing
+        import logging
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
         from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
         from openhcs.constants import MULTIPROCESSING_AXIS
         from openhcs.io.base import reset_memory_backend
+
+        logger = logging.getLogger(__name__)
+
+        # CUDA COMPATIBILITY: Set spawn method for multiprocessing to support CUDA
+        try:
+            current_method = multiprocessing.get_start_method(allow_none=True)
+            if current_method != 'spawn':
+                logger.info(f"🔥 CUDA: Setting multiprocessing start method from '{current_method}' to 'spawn' for CUDA compatibility")
+                multiprocessing.set_start_method('spawn', force=True)
+            else:
+                logger.debug("🔥 CUDA: Multiprocessing start method already set to 'spawn'")
+        except RuntimeError as e:
+            # Start method may already be set, which is fine
+            logger.debug(f"🔥 CUDA: Start method already configured: {e}")
 
         # Reset ephemeral backends and initialize GPU registry
         reset_memory_backend()
