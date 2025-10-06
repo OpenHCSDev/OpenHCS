@@ -1058,6 +1058,7 @@ class PlateManagerWidget(QWidget):
                 plate_path = plate['path']
                 if plate_path in self.orchestrators:
                     self.orchestrators[plate_path]._state = OrchestratorState.EXECUTING
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXECUTING.value)
 
             self.execution_state = "running"
             self.status_message.emit(f"Running {len(ready_items)} plate(s) via ZMQ...")
@@ -1115,6 +1116,7 @@ class PlateManagerWidget(QWidget):
                 plate_path = plate['path']
                 if plate_path in self.orchestrators:
                     self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
 
             self.update_button_states()
 
