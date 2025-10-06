@@ -353,7 +353,7 @@ class ZMQExecutionServer(ZMQServer):
 
         # Reset ephemeral backends and initialize GPU registry
         reset_memory_backend()
-        setup_global_gpu_registry()
+        setup_global_gpu_registry(global_config=global_config)
 
         # Install global config context for dual-axis resolver
         ensure_global_config_context(type(global_config), global_config)
