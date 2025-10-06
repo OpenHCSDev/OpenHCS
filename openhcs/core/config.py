@@ -716,9 +716,13 @@ logger.debug("Configuration framework initialized with OpenHCS types")
 
 # PERFORMANCE OPTIMIZATION: Pre-warm analysis caches at import time
 # This eliminates the 1000ms+ first-load penalty when opening config windows
-from openhcs.config_framework import prewarm_config_analysis_cache
-
-# Warm config hierarchy cache (for config windows)
-prewarm_config_analysis_cache(GlobalPipelineConfig)
+try:
+    from openhcs.config_framework import prewarm_config_analysis_cache
+    # Warm config hierarchy cache (for config windows)
+    prewarm_config_analysis_cache(GlobalPipelineConfig)
+except ImportError:
+    # Circular import during subprocess initialization - cache warming not needed
+    # for non-UI execution contexts (ZMQ server, workers, etc.)
+    logger.debug("Skipping config cache warming (circular import during subprocess init)")
 
 # NOTE: Step editor cache warming is done in openhcs.core.steps.__init__ to avoid circular imports
