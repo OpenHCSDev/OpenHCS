@@ -824,8 +824,13 @@ class PlateManagerWidget(QWidget):
                 # compile_pipelines now returns {'pipeline_definition': ..., 'compiled_contexts': ...}
                 compiled_contexts = compilation_result['compiled_contexts']
 
-                # Store compiled data
-                self.plate_compiled_data[plate_path] = (execution_pipeline, compiled_contexts)
+                # Store compiled data AND original definition pipeline
+                # ZMQ mode needs the original definition, direct mode needs the compiled execution pipeline
+                self.plate_compiled_data[plate_path] = {
+                    'definition_pipeline': definition_pipeline,  # Original uncompiled pipeline for ZMQ
+                    'execution_pipeline': execution_pipeline,    # Compiled pipeline for direct mode
+                    'compiled_contexts': compiled_contexts
+                }
                 logger.info(f"Successfully compiled {plate_path}")
 
                 # Update orchestrator state change signal
@@ -887,10 +892,10 @@ class PlateManagerWidget(QWidget):
             pipeline_data = {}
             effective_configs = {}
             for plate_path in plate_paths_to_run:
-                execution_pipeline, compiled_contexts = self.plate_compiled_data[plate_path]
+                compiled_data = self.plate_compiled_data[plate_path]
                 pipeline_data[plate_path] = {
-                    'pipeline_definition': execution_pipeline,  # Use execution pipeline (stripped)
-                    'compiled_contexts': compiled_contexts      # Pre-compiled contexts
+                    'pipeline_definition': compiled_data['execution_pipeline'],  # Use execution pipeline (stripped)
+                    'compiled_contexts': compiled_data['compiled_contexts']      # Pre-compiled contexts
                 }
 
                 # Get effective config for this plate (includes pipeline config if set)
@@ -1052,7 +1057,11 @@ class PlateManagerWidget(QWidget):
 
             # Execute each plate
             for plate_path in plate_paths_to_run:
-                execution_pipeline, compiled_contexts = self.plate_compiled_data[plate_path]
+                compiled_data = self.plate_compiled_data[plate_path]
+
+                # Use DEFINITION pipeline for ZMQ (server will compile)
+                # NOT the execution_pipeline (which is already compiled)
+                definition_pipeline = compiled_data['definition_pipeline']
 
                 # Get effective config for this plate
                 if plate_path in self.orchestrators:
@@ -1066,10 +1075,11 @@ class PlateManagerWidget(QWidget):
                 logger.info(f"Executing plate: {plate_path}")
 
                 # Execute via ZMQ (in executor to avoid blocking UI)
+                # Send original definition pipeline - server will compile it
                 def _execute():
                     return self.zmq_client.execute_pipeline(
                         plate_id=str(plate_path),
-                        pipeline_steps=execution_pipeline,
+                        pipeline_steps=definition_pipeline,
                         global_config=effective_config,
                         pipeline_config=pipeline_config
                     )
