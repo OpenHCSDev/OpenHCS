@@ -435,6 +435,10 @@ class PipelineOrchestrator(ContextProvider):
         if progress_callback:
             logger.info("PipelineOrchestrator initialized with progress callback")
 
+        # Cancellation support
+        self._cancel_requested = threading.Event()
+        self._cancel_lock = threading.Lock()
+
         # Component keys cache for fast access - uses AllComponents (includes multiprocessing axis)
         self._component_keys_cache: Dict['AllComponents', List[str]] = {}
 
@@ -468,6 +472,32 @@ class PipelineOrchestrator(ContextProvider):
     def state(self) -> OrchestratorState:
         """Get the current orchestrator state."""
         return self._state
+
+    def cancel(self):
+        """
+        Request cancellation of the current execution.
+
+        This sets a cancellation flag that will be checked before each step.
+        The execution will raise RuntimeError when cancellation is detected.
+
+        Thread-safe and can be called from any thread.
+        """
+        with self._cancel_lock:
+            if not self._cancel_requested.is_set():
+                logger.info("🛑 CANCELLATION: Cancellation requested")
+                self._cancel_requested.set()
+
+    def reset_cancellation(self):
+        """
+        Reset the cancellation flag.
+
+        Should be called before starting a new execution to clear any previous
+        cancellation state.
+        """
+        with self._cancel_lock:
+            if self._cancel_requested.is_set():
+                logger.info("🔄 CANCELLATION: Cancellation flag reset")
+                self._cancel_requested.clear()
 
     def initialize_microscope_handler(self):
         """Initializes the microscope handler."""
@@ -619,6 +649,11 @@ class PipelineOrchestrator(ContextProvider):
         logger.info(f"🔥 SINGLE_AXIS: Processing {len(pipeline_definition)} steps for axis {axis_id}")
 
         for step_index, step in enumerate(pipeline_definition):
+            # Check for cancellation before each step
+            if self._cancel_requested.is_set():
+                logger.info(f"🛑 CANCELLATION: Execution cancelled for axis {axis_id} at step {step_index}")
+                raise RuntimeError(f"Execution cancelled by user at step {step_index}")
+
             step_name = frozen_context.step_plans[step_index]["step_name"]
 
             logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")

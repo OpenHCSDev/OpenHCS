@@ -1131,11 +1131,39 @@ class PlateManagerWidget(QWidget):
             logger.warning(f"Failed to handle progress update: {e}")
 
     async def action_stop_execution(self):
-        """Handle Stop Execution - terminate running subprocess (matches TUI implementation)."""
-        logger.info("🛑 Stop button pressed. Terminating subprocess.")
+        """Handle Stop Execution - cancel ZMQ execution or terminate subprocess."""
+        logger.info("🛑 Stop button pressed.")
         self.status_message.emit("Terminating execution...")
 
-        if self.current_process and self.current_process.poll() is None:  # Still running
+        # Check if using ZMQ execution
+        if self.zmq_client:
+            try:
+                logger.info("🛑 Requesting graceful cancellation via ZMQ...")
+                # TODO: Need to track execution_id to cancel specific execution
+                # For now, just disconnect which will stop the client
+                def _disconnect():
+                    self.zmq_client.disconnect()
+
+                import asyncio
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, _disconnect)
+
+                self.zmq_client = None
+                self.execution_state = "idle"
+
+                # Update orchestrator states
+                for orchestrator in self.orchestrators.values():
+                    if orchestrator.state == OrchestratorState.EXECUTING:
+                        orchestrator._state = OrchestratorState.COMPILED
+
+                self.status_message.emit("Execution cancelled by user")
+                self.update_button_states()
+
+            except Exception as e:
+                logger.error(f"🛑 Error cancelling ZMQ execution: {e}")
+                self.service_adapter.show_error_dialog(f"Failed to cancel execution: {e}")
+
+        elif self.current_process and self.current_process.poll() is None:  # Still running subprocess
             try:
                 # Kill the entire process group, not just the parent process (matches TUI)
                 # The subprocess creates its own process group, so we need to kill that group

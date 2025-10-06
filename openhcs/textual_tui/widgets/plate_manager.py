@@ -1013,13 +1013,33 @@ class PlateManagerWidget(ButtonListWidget):
             logger.warning(f"Failed to handle progress update: {e}")
 
     async def action_stop_execution(self) -> None:
-        logger.info("🛑 Stop button pressed. Terminating subprocess.")
+        logger.info("🛑 Stop button pressed.")
         self.app.current_status = "Terminating execution..."
 
         # Stop async monitoring first
         self._stop_monitoring()
 
-        if self.current_process and self.current_process.poll() is None:  # Still running
+        # Check if using ZMQ execution
+        if self.zmq_client:
+            try:
+                logger.info("🛑 Requesting graceful cancellation via ZMQ...")
+                # TODO: Need to track execution_id to cancel specific execution
+                # For now, just disconnect which will stop the client
+                def _disconnect():
+                    self.zmq_client.disconnect()
+
+                import asyncio
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, _disconnect)
+
+                self.zmq_client = None
+                self._reset_execution_state("Execution cancelled by user")
+
+            except Exception as e:
+                logger.error(f"🛑 Error cancelling ZMQ execution: {e}")
+                self.app.show_error(f"Failed to cancel execution: {e}")
+
+        elif self.current_process and self.current_process.poll() is None:  # Still running subprocess
             try:
                 # Kill the entire process group, not just the parent process
                 # The subprocess creates its own process group, so we need to kill that group

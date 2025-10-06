@@ -211,20 +211,32 @@ class ZMQExecutionClient(ZMQClient):
     
     def cancel_execution(self, execution_id: str) -> Dict[str, Any]:
         """
-        Cancel execution (not yet implemented).
-        
+        Cancel execution.
+
+        Sends a cancellation request to the server. The server will set a cancellation
+        flag on the orchestrator, which will be checked before each step. The execution
+        will raise RuntimeError when cancellation is detected.
+
         Args:
             execution_id: Execution to cancel
-        
+
         Returns:
-            Cancellation response
+            Cancellation response with status 'ok' or 'error'
         """
         request = {
             'type': 'cancel',
             'execution_id': execution_id
         }
-        
-        return self._send_control_request(request)
+
+        logger.info(f"Requesting cancellation for execution {execution_id}")
+        response = self._send_control_request(request)
+
+        if response.get('status') == 'ok':
+            logger.info(f"Cancellation requested successfully for {execution_id}")
+        else:
+            logger.warning(f"Cancellation request failed: {response.get('message')}")
+
+        return response
     
     def ping(self) -> bool:
         """
