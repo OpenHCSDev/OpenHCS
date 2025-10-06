@@ -814,6 +814,7 @@ class LogViewerWindow(QMainWindow):
         import zmq
         import pickle
 
+        logger.debug("Scanning for running ZMQ/Napari servers...")
         discovered_logs = []
 
         # Common ports to scan
@@ -839,8 +840,10 @@ class LogViewerWindow(QMainWindow):
 
                 socket.close()
                 context.term()
+                logger.debug(f"Port {port} responded: {pong}")
                 return pong
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Port {port} no response: {e}")
                 return None
 
         # Scan ZMQ execution servers
