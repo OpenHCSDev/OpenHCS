@@ -451,10 +451,21 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
 def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_config: GlobalPipelineConfig, pipeline_config: PipelineConfig) -> Dict:
     """Execute pipeline using ZMQ execution client."""
     from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
+    from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
+    from openhcs.constants import MULTIPROCESSING_AXIS
     import logging
     logger = logging.getLogger(__name__)
 
     logger.info("🔌 Executing pipeline via ZMQ execution client")
+
+    # Create temporary orchestrator to get well list (same as direct mode)
+    # This matches the direct mode behavior where we get all wells
+    temp_orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
+    temp_orchestrator.initialize()
+    wells = temp_orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+    if not wells:
+        raise RuntimeError("No wells found for processing")
+    logger.info(f"Found {len(wells)} wells to process: {wells}")
 
     # Create ZMQ client
     client = ZMQExecutionClient(port=7777, persistent=False)
@@ -464,12 +475,13 @@ def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_co
         client.connect(timeout=15)
         logger.info("✅ Connected to ZMQ execution server")
 
-        # Execute pipeline
+        # Execute pipeline with explicit well filter (matching direct mode)
         response = client.execute_pipeline(
             plate_id=str(test_config.plate_dir),
             pipeline_steps=pipeline.steps,
             global_config=global_config,
-            pipeline_config=pipeline_config
+            pipeline_config=pipeline_config,
+            config_params={'well_filter': wells}  # Pass well list explicitly
         )
 
         # Check response
