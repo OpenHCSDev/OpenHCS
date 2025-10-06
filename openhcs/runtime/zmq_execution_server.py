@@ -362,10 +362,10 @@ class ZMQExecutionServer(ZMQServer):
         logger.info(f"[{execution_id}] Executing pipeline...")
 
         # Determine wells to process
+        # Always get wells from orchestrator (matches direct mode behavior)
+        # config_params['well_filter'] can optionally provide a pre-computed list
         if config_params and config_params.get('well_filter'):
             wells = config_params['well_filter']
-        elif hasattr(global_config, 'step_well_filter_config') and global_config.step_well_filter_config and global_config.step_well_filter_config.well_filter:
-            wells = global_config.step_well_filter_config.well_filter
         else:
             wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
 
