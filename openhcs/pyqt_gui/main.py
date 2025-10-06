@@ -274,6 +274,73 @@ class OpenHCSMainWindow(QMainWindow):
 
             self.floating_windows["log_viewer"] = window
 
+        # Show window
+        self.floating_windows["log_viewer"].show()
+        self.floating_windows["log_viewer"].raise_()
+        self.floating_windows["log_viewer"].activateWindow()
+
+    def show_zmq_server_manager(self):
+        """Show ZMQ server manager window."""
+        if "zmq_server_manager" not in self.floating_windows:
+            from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import ZMQServerManagerWidget
+            from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
+
+            # Create floating window
+            window = QDialog(self)
+            window.setWindowTitle("ZMQ Server Manager")
+            window.setModal(False)
+            window.resize(600, 400)
+
+            # Add widget to window
+            layout = QVBoxLayout(window)
+
+            # Scan common ports:
+            # - 7777: Default ZMQ execution server
+            # - 5555-5564: Napari viewers (10 ports)
+            ports_to_scan = [7777] + [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]
+
+            zmq_manager_widget = ZMQServerManagerWidget(
+                ports_to_scan=ports_to_scan,
+                title="ZMQ Servers (Execution + Napari)",
+                style_generator=self.service_adapter.get_style_generator()
+            )
+
+            # Connect log file opened signal to log viewer
+            zmq_manager_widget.log_file_opened.connect(self._open_log_file_in_viewer)
+
+            # Enable auto-refresh every 5 seconds
+            zmq_manager_widget.start_auto_refresh(interval_ms=5000)
+
+            layout.addWidget(zmq_manager_widget)
+
+            self.floating_windows["zmq_server_manager"] = window
+
+        # Show window
+        self.floating_windows["zmq_server_manager"].show()
+        self.floating_windows["zmq_server_manager"].raise_()
+        self.floating_windows["zmq_server_manager"].activateWindow()
+
+    def _open_log_file_in_viewer(self, log_file_path: str):
+        """
+        Open a log file in the log viewer.
+
+        Args:
+            log_file_path: Path to log file to open
+        """
+        # Show log viewer if not already open
+        self.show_log_viewer()
+
+        # Switch to the log file
+        if "log_viewer" in self.floating_windows:
+            log_dialog = self.floating_windows["log_viewer"]
+            from openhcs.pyqt_gui.widgets.log_viewer import LogViewerWindow
+            log_viewer_widget = log_dialog.findChild(LogViewerWindow)
+            if log_viewer_widget:
+                # Switch to the log file
+                from pathlib import Path
+                log_viewer_widget.switch_to_log(Path(log_file_path))
+                logger.info(f"Switched log viewer to: {log_file_path}")
+
             # Connect to plate manager signals if it exists
             if "plate_manager" in self.floating_windows:
                 plate_dialog = self.floating_windows["plate_manager"]
@@ -355,7 +422,13 @@ class OpenHCSMainWindow(QMainWindow):
         log_action.setShortcut("Ctrl+L")
         log_action.triggered.connect(self.show_log_viewer)
         view_menu.addAction(log_action)
-        
+
+        # ZMQ Server Manager window
+        zmq_server_action = QAction("&ZMQ Server Manager", self)
+        zmq_server_action.setShortcut("Ctrl+Z")
+        zmq_server_action.triggered.connect(self.show_zmq_server_manager)
+        view_menu.addAction(zmq_server_action)
+
         # Configuration action
         config_action = QAction("&Global Configuration", self)
         config_action.setShortcut("Ctrl+G")
