@@ -165,7 +165,35 @@ class ZMQServer(ABC):
         if self.log_file_path:
             response['log_file_path'] = self.log_file_path
         return response
-    
+
+    def get_status_info(self) -> Dict[str, Any]:
+        """
+        Get server status information for UI display.
+
+        Subclasses can override to add custom fields (e.g., execution progress).
+
+        Returns:
+            Dictionary with server status information
+        """
+        return {
+            'port': self.port,
+            'control_port': self.control_port,
+            'running': self._running,
+            'ready': self._ready,
+            'server_type': self.__class__.__name__,
+            'log_file': self.log_file_path
+        }
+
+    def request_shutdown(self):
+        """
+        Request graceful shutdown of the server.
+
+        This sets a flag that the server should check and shutdown cleanly.
+        Subclasses can override for custom shutdown logic.
+        """
+        logger.info("Shutdown requested")
+        self._running = False
+
     @abstractmethod
     def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -515,6 +543,150 @@ class ZMQClient(ABC):
 
         except Exception as e:
             logger.warning(f"Failed to kill processes on port {port}: {e}")
+
+    @staticmethod
+    def scan_servers(ports: list[int], host: str = 'localhost', timeout_ms: int = 200) -> list[Dict[str, Any]]:
+        """
+        Scan ports for running ZMQ servers and return their status information.
+
+        Args:
+            ports: List of ports to scan
+            host: Hostname to connect to
+            timeout_ms: Timeout in milliseconds for each ping
+
+        Returns:
+            List of server info dictionaries from pong responses
+        """
+        import zmq
+
+        servers = []
+
+        for port in ports:
+            control_port = port + 1000
+            context = None
+            socket = None
+
+            try:
+                context = zmq.Context()
+                socket = context.socket(zmq.REQ)
+                socket.setsockopt(zmq.LINGER, 0)
+                socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
+                socket.connect(f"tcp://{host}:{control_port}")
+
+                # Send ping
+                ping_message = {'type': 'ping'}
+                socket.send(pickle.dumps(ping_message))
+
+                # Wait for pong
+                response = socket.recv()
+                pong = pickle.loads(response)
+
+                if pong.get('type') == 'pong':
+                    # Add port info to response
+                    pong['port'] = port
+                    pong['control_port'] = control_port
+                    servers.append(pong)
+                    logger.debug(f"Found server on port {port}: {pong.get('server', 'unknown')}")
+
+            except Exception as e:
+                logger.debug(f"No server on port {port}: {e}")
+            finally:
+                if socket:
+                    try:
+                        socket.close()
+                    except:
+                        pass
+                if context:
+                    try:
+                        context.term()
+                    except:
+                        pass
+
+        return servers
+
+    @staticmethod
+    def kill_server_on_port(port: int, graceful: bool = True, timeout: float = 5.0) -> bool:
+        """
+        Kill server on specified port.
+
+        Args:
+            port: Data port of server to kill
+            graceful: If True, send shutdown command first; if False, force kill immediately
+            timeout: Timeout for graceful shutdown
+
+        Returns:
+            True if server was killed successfully
+        """
+        import zmq
+
+        control_port = port + 1000
+
+        if graceful:
+            # Try graceful shutdown first
+            context = None
+            socket = None
+
+            try:
+                context = zmq.Context()
+                socket = context.socket(zmq.REQ)
+                socket.setsockopt(zmq.LINGER, 0)
+                socket.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
+                socket.connect(f"tcp://localhost:{control_port}")
+
+                # Send shutdown command
+                shutdown_message = {'type': 'shutdown'}
+                socket.send(pickle.dumps(shutdown_message))
+
+                # Wait for acknowledgment
+                response = socket.recv()
+                ack = pickle.loads(response)
+
+                if ack.get('type') == 'shutdown_ack':
+                    logger.info(f"Server on port {port} acknowledged shutdown")
+                    # Give it time to cleanup
+                    time.sleep(1.0)
+                    return True
+
+            except Exception as e:
+                logger.debug(f"Graceful shutdown failed for port {port}: {e}")
+            finally:
+                if socket:
+                    try:
+                        socket.close()
+                    except:
+                        pass
+                if context:
+                    try:
+                        context.term()
+                    except:
+                        pass
+
+        # Force kill if graceful failed or not requested
+        logger.info(f"Force killing server on port {port}")
+        # Use subprocess directly to kill processes
+        try:
+            system = platform.system()
+            if system == "Linux" or system == "Darwin":
+                # Kill processes on both data and control ports
+                for p in [port, control_port]:
+                    result = subprocess.run(
+                        ['lsof', '-ti', f'TCP:{p}', '-sTCP:LISTEN'],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        pids = result.stdout.strip().split('\n')
+                        for pid in pids:
+                            try:
+                                subprocess.run(['kill', '-9', pid], timeout=1)
+                                logger.info(f"Killed process {pid} on port {p}")
+                            except Exception as e:
+                                logger.warning(f"Failed to kill process {pid}: {e}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to force kill server on port {port}: {e}")
+            return False
 
     @abstractmethod
     def _spawn_server_process(self):

@@ -43,31 +43,46 @@ class ZMQExecutionServer(ZMQServer):
     
     def _create_pong_response(self) -> Dict[str, Any]:
         """Create pong response with execution server info."""
-        return {
-            'type': 'pong',
-            'ready': self._ready,
+        response = super()._create_pong_response()
+        response.update({
             'server': 'ZMQExecutionServer',
             'active_executions': len(self.active_executions),
             'uptime': time.time() - self.start_time if self.start_time else 0
-        }
-    
+        })
+        if self.log_file_path:
+            response['log_file_path'] = self.log_file_path
+        return response
+
+    def get_status_info(self) -> Dict[str, Any]:
+        """Get server status with execution progress information."""
+        status = super().get_status_info()
+        status.update({
+            'active_executions': len(self.active_executions),
+            'uptime': time.time() - self.start_time if self.start_time else 0,
+            'executions': list(self.active_executions.values())
+        })
+        return status
+
     def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle control channel messages.
-        
+
         Supported message types:
         - execute: Execute pipeline
         - status: Query execution status
         - cancel: Cancel execution (not yet implemented)
+        - shutdown: Graceful shutdown request
         """
         msg_type = message.get('type')
-        
+
         if msg_type == 'execute':
             return self._handle_execute(message)
         elif msg_type == 'status':
             return self._handle_status(message)
         elif msg_type == 'cancel':
             return self._handle_cancel(message)
+        elif msg_type == 'shutdown':
+            return self._handle_shutdown(message)
         else:
             return {'status': 'error', 'message': f'Unknown message type: {msg_type}'}
     
@@ -184,7 +199,29 @@ class ZMQExecutionServer(ZMQServer):
             'status': 'error',
             'message': 'Cancellation support not implemented'
         }
-    
+
+    def _handle_shutdown(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle graceful shutdown request."""
+        logger.info("Shutdown requested via control channel")
+
+        # Check if there are active executions
+        if self.active_executions:
+            return {
+                'type': 'shutdown_rejected',
+                'status': 'error',
+                'message': f'Cannot shutdown: {len(self.active_executions)} active executions',
+                'active_executions': list(self.active_executions.keys())
+            }
+
+        # Request shutdown
+        self.request_shutdown()
+
+        return {
+            'type': 'shutdown_ack',
+            'status': 'success',
+            'message': 'Server shutting down'
+        }
+
     def _execute_pipeline(
         self,
         execution_id: str,
