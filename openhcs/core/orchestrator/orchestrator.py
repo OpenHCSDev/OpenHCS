@@ -448,7 +448,7 @@ class PipelineOrchestrator(ContextProvider):
         if progress_callback:
             logger.info("PipelineOrchestrator initialized with progress callback")
 
-        # Cancellation support
+        # Cancellation support (threading-based, not pickled)
         self._cancel_requested = threading.Event()
         self._cancel_lock = threading.Lock()
 
@@ -463,8 +463,21 @@ class PipelineOrchestrator(ContextProvider):
         # Metadata cache service
         self._metadata_cache_service = get_metadata_cache()
 
+    def __getstate__(self):
+        """Custom pickle support - exclude threading objects that can't be pickled."""
+        state = self.__dict__.copy()
+        # Remove threading objects (they can't be pickled)
+        state.pop('_cancel_requested', None)
+        state.pop('_cancel_lock', None)
+        # Note: _mp_cancel_event CAN be pickled (it's a multiprocessing.Event)
+        return state
 
-
+    def __setstate__(self, state):
+        """Custom unpickle support - recreate threading objects."""
+        self.__dict__.update(state)
+        # Recreate threading objects
+        self._cancel_requested = threading.Event()
+        self._cancel_lock = threading.Lock()
 
 
     def __setattr__(self, name: str, value: Any) -> None:
