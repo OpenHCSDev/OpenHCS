@@ -358,6 +358,9 @@ class PipelineOrchestrator(ContextProvider):
                 "Ensure application startup has called ensure_global_config_context()."
             )
 
+        # Track executor for cancellation support
+        self._executor = None
+
         # Initialize auto-sync control for pipeline config
         self._pipeline_config = None
         self._auto_sync_enabled = True
@@ -695,6 +698,21 @@ class PipelineOrchestrator(ContextProvider):
 
         return {"status": "success", "axis_id": axis_id}
 
+    def cancel_execution(self):
+        """
+        Cancel ongoing execution by shutting down the executor.
+
+        This gracefully cancels pending futures and shuts down worker processes
+        without killing all child processes (preserving Napari viewers, etc.).
+        """
+        if self._executor:
+            try:
+                logger.info("🔥 ORCHESTRATOR: Cancelling execution - shutting down executor")
+                self._executor.shutdown(wait=False, cancel_futures=True)
+                logger.info("🔥 ORCHESTRATOR: Executor shutdown initiated")
+            except Exception as e:
+                logger.warning(f"🔥 ORCHESTRATOR: Failed to cancel executor: {e}")
+
     def execute_compiled_plate(
         self,
         pipeline_definition: List[AbstractStep],
@@ -889,6 +907,8 @@ class PipelineOrchestrator(ContextProvider):
                     )
 
             logger.info(f"🔥 DEATH_MARKER: ENTERING_{executor_type.upper()}_CONTEXT")
+            # Store executor for cancellation support
+            self._executor = executor
             with executor:
                 logger.info(f"🔥 DEATH_MARKER: {executor_type.upper()}_CREATED_SUCCESSFULLY")
                 logger.info(f"🔥 ORCHESTRATOR: {executor_type} created, submitting {len(compiled_contexts)} tasks")

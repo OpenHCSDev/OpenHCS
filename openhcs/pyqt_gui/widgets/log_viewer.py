@@ -26,6 +26,9 @@ from openhcs.pyqt_gui.utils.log_detection_utils import (
 from openhcs.core.log_utils import (
     classify_log_file, is_openhcs_log_file, infer_base_log_path
 )
+from openhcs.pyqt_gui.utils.process_tracker import (
+    ProcessTracker, extract_pid_from_log_filename, get_log_display_name, get_log_tooltip
+)
 
 # Import Pygments for advanced syntax highlighting
 from pygments import highlight
@@ -590,9 +593,15 @@ class LogViewerWindow(QMainWindow):
         self.server_scan_timer: QTimer = None  # Periodic ZMQ server scanning
         self._pending_log_to_load: Optional[Path] = None  # Log to load when window is shown
 
+        # Process tracking for alive/dead process indication
+        self.process_tracker = ProcessTracker()
+        self.process_update_timer: QTimer = None
+        self.show_alive_only: bool = False  # Filter to show only logs from running processes
+
         self.setup_ui()
         self.setup_connections()
         self.initialize_logs()
+        self.start_process_tracking()
 
     def setup_ui(self) -> None:
         """Setup complete UI layout with exact widget hierarchy."""
@@ -655,10 +664,15 @@ class LogViewerWindow(QMainWindow):
         self.clear_btn = QPushButton("Clear")
         self.bottom_btn = QPushButton("Bottom")
 
+        # Process filter checkbox
+        self.show_alive_only_cb = QCheckBox("Show only running processes")
+        self.show_alive_only_cb.setToolTip("Filter logs to show only those from currently running processes")
+
         control_layout.addWidget(self.auto_scroll_btn)
         control_layout.addWidget(self.pause_btn)
         control_layout.addWidget(self.clear_btn)
         control_layout.addWidget(self.bottom_btn)
+        control_layout.addWidget(self.show_alive_only_cb)
         control_layout.addStretch()  # Push buttons to left
 
         main_layout.addLayout(control_layout)
@@ -690,6 +704,7 @@ class LogViewerWindow(QMainWindow):
         self.pause_btn.toggled.connect(self.toggle_pause_tailing)
         self.clear_btn.clicked.connect(self.clear_log_display)
         self.bottom_btn.clicked.connect(self.scroll_to_bottom)
+        self.show_alive_only_cb.stateChanged.connect(self.on_filter_changed)
 
         # Internal signals
         self._server_scan_complete.connect(self._on_server_scan_complete)
@@ -837,7 +852,7 @@ class LogViewerWindow(QMainWindow):
     # Dropdown Management Methods
     def populate_log_dropdown(self, log_files: List[LogFileInfo]) -> None:
         """
-        Populate QComboBox with log files. Store LogFileInfo as item data.
+        Populate QComboBox with log files with process status indicators.
 
         Args:
             log_files: List of LogFileInfo objects to add to dropdown
@@ -847,10 +862,23 @@ class LogViewerWindow(QMainWindow):
         # Sort logs: TUI first, main subprocess, then workers by timestamp
         sorted_logs = sorted(log_files, key=self._log_sort_key)
 
-        for log_info in sorted_logs:
-            self.log_selector.addItem(log_info.display_name, log_info)
+        # Filter if "show alive only" is enabled
+        if self.show_alive_only:
+            sorted_logs = [
+                log_info for log_info in sorted_logs
+                if self._is_log_from_alive_process(log_info)
+            ]
 
-        logger.debug(f"Populated dropdown with {len(log_files)} log files")
+        for log_info in sorted_logs:
+            # Add process status indicator to display name
+            display_name = get_log_display_name(log_info.path, self.process_tracker)
+            tooltip = get_log_tooltip(log_info.path, self.process_tracker)
+
+            self.log_selector.addItem(display_name, log_info)
+            # Set tooltip for the item
+            self.log_selector.setItemData(self.log_selector.count() - 1, tooltip, Qt.ItemDataRole.ToolTipRole)
+
+        logger.debug(f"Populated dropdown with {len(sorted_logs)} log files (filtered: {self.show_alive_only})")
 
     def _log_sort_key(self, log_info: LogFileInfo) -> tuple:
         """
@@ -1246,6 +1274,95 @@ class LogViewerWindow(QMainWindow):
             self.file_detector = None
         logger.info("Stopped monitoring for new logs")
 
+    def start_process_tracking(self) -> None:
+        """Start periodic process status updates."""
+        # Initial update
+        self.process_tracker.update()
+
+        # Setup timer for periodic updates (every 2 seconds)
+        self.process_update_timer = QTimer()
+        self.process_update_timer.timeout.connect(self.update_process_status)
+        self.process_update_timer.start(2000)  # 2 second interval
+
+        logger.debug("Started process tracking")
+
+    def update_process_status(self) -> None:
+        """Update process status and refresh dropdown if needed."""
+        # Update process tracker
+        self.process_tracker.update()
+
+        # Refresh dropdown to update status indicators
+        # Only if we have logs loaded
+        if self.log_selector.count() > 0:
+            # Get current logs from dropdown
+            current_logs = []
+            for i in range(self.log_selector.count()):
+                log_info = self.log_selector.itemData(i)
+                if log_info:
+                    current_logs.append(log_info)
+
+            # Remember current selection
+            current_index = self.log_selector.currentIndex()
+            current_log_info = self.log_selector.itemData(current_index) if current_index >= 0 else None
+
+            # Temporarily disconnect signal to avoid triggering reload
+            self.log_selector.currentIndexChanged.disconnect(self.on_log_selection_changed)
+
+            try:
+                # Repopulate with updated status indicators
+                self.populate_log_dropdown(current_logs)
+
+                # Restore selection if possible
+                if current_log_info:
+                    # Find the same log in the new dropdown
+                    for i in range(self.log_selector.count()):
+                        log_info = self.log_selector.itemData(i)
+                        if log_info and log_info.path == current_log_info.path:
+                            self.log_selector.setCurrentIndex(i)
+                            break
+            finally:
+                # Reconnect signal
+                self.log_selector.currentIndexChanged.connect(self.on_log_selection_changed)
+
+    def _is_log_from_alive_process(self, log_info: LogFileInfo) -> bool:
+        """
+        Check if a log file is from a currently running process.
+
+        Args:
+            log_info: LogFileInfo to check
+
+        Returns:
+            bool: True if process is alive or unknown, False if terminated
+        """
+        pid = extract_pid_from_log_filename(log_info.path)
+        if pid is None:
+            # No PID found - assume it's a main log (always show)
+            return True
+        return self.process_tracker.is_alive(pid)
+
+    def on_filter_changed(self, state: int) -> None:
+        """
+        Handle filter checkbox state change.
+
+        Args:
+            state: Qt.CheckState value
+        """
+        self.show_alive_only = (state == Qt.CheckState.Checked.value)
+
+        # Refresh dropdown with filter applied
+        # Get all logs from current dropdown
+        all_logs = []
+        for i in range(self.log_selector.count()):
+            log_info = self.log_selector.itemData(i)
+            if log_info:
+                all_logs.append(log_info)
+
+        # If we have logs, repopulate
+        if all_logs:
+            self.populate_log_dropdown(all_logs)
+
+        logger.debug(f"Filter changed: show_alive_only={self.show_alive_only}")
+
     def cleanup(self) -> None:
         """Cleanup all resources and background processes."""
         try:
@@ -1254,6 +1371,12 @@ class LogViewerWindow(QMainWindow):
                 self.tail_timer.stop()
                 self.tail_timer.deleteLater()
                 self.tail_timer = None
+
+            # Stop process tracking timer
+            if hasattr(self, 'process_update_timer') and self.process_update_timer and self.process_update_timer.isActive():
+                self.process_update_timer.stop()
+                self.process_update_timer.deleteLater()
+                self.process_update_timer = None
 
             # Stop file monitoring
             self.stop_monitoring()
@@ -1272,5 +1395,7 @@ class LogViewerWindow(QMainWindow):
             self.file_detector.stop_watching()
         if self.tail_timer:
             self.tail_timer.stop()
+        if hasattr(self, 'process_update_timer') and self.process_update_timer:
+            self.process_update_timer.stop()
         self.window_closed.emit()
         super().closeEvent(event)

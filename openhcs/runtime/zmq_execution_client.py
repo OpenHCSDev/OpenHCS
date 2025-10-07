@@ -226,6 +226,13 @@ class ZMQExecutionClient(ZMQClient):
                             'execution_id': execution_id,
                             'message': execution.get('error')
                         }
+                    elif exec_status == 'cancelled':
+                        logger.info(f"Execution {execution_id} was cancelled")
+                        return {
+                            'status': 'cancelled',
+                            'execution_id': execution_id,
+                            'message': 'Execution was cancelled by server shutdown'
+                        }
                     # else: still running, continue polling
 
         return response

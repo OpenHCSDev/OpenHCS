@@ -1109,7 +1109,14 @@ class PlateManagerWidget(QWidget):
 
                 logger.info(f"Plate {plate_path} execution response: {response.get('status')}")
 
-                if response.get('status') != 'complete':
+                # Handle different response statuses
+                status = response.get('status')
+                if status == 'cancelled':
+                    # Cancellation is expected, not an error - just log it
+                    logger.info(f"Plate {plate_path} execution was cancelled")
+                    self.status_message.emit(f"Execution cancelled for {plate_path}")
+                elif status != 'complete':
+                    # Actual error - show error dialog
                     error_msg = response.get('message', 'Unknown error')
                     logger.error(f"Plate {plate_path} execution failed: {error_msg}")
                     self.service_adapter.show_error_dialog(f"Execution failed for {plate_path}: {error_msg}")

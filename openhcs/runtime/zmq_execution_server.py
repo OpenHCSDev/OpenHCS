@@ -18,7 +18,7 @@ import queue
 import os
 import signal
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from openhcs.runtime.zmq_base import ZMQServer
 
 logger = logging.getLogger(__name__)
@@ -66,10 +66,16 @@ class ZMQExecutionServer(ZMQServer):
                     'elapsed': time.time() - record.get('start_time', 0) if record.get('start_time') else 0
                 })
 
+        # Get worker process information
+        logger.debug(f"🔍 PONG: Getting worker info (running executions: {running_count})")
+        workers = self._get_worker_info()
+        logger.debug(f"🔍 PONG: Got {len(workers)} workers")
+
         response.update({
             'server': 'ZMQExecutionServer',
             'active_executions': running_count,
             'running_executions': running_executions,  # Detailed list for UI
+            'workers': workers,  # Worker process info for hierarchical display
             'uptime': time.time() - self.start_time if self.start_time else 0
         })
         if self.log_file_path:
@@ -283,13 +289,14 @@ class ZMQExecutionServer(ZMQServer):
 
         logger.info(f"[{execution_id}] Cancellation requested - killing worker processes")
 
-        # Kill all worker processes spawned by this server
-        killed_count = self._kill_worker_processes()
-
-        # Mark execution as cancelled
+        # CRITICAL: Mark execution as cancelled BEFORE killing workers
+        # This prevents race condition where BrokenProcessPool is raised before status is set
         record = self.active_executions[execution_id]
         record['status'] = 'cancelled'
         record['end_time'] = time.time()
+
+        # Kill all worker processes spawned by this server
+        killed_count = self._kill_worker_processes()
 
         logger.info(f"[{execution_id}] Cancelled - killed {killed_count} worker processes")
 
@@ -315,8 +322,10 @@ class ZMQExecutionServer(ZMQServer):
         terminating any currently running workers.
         """
         logger.info("Shutdown requested via control channel - killing workers only")
-        killed_count = self._kill_worker_processes()
+        # CRITICAL: Mark executions as cancelled BEFORE killing workers
+        # This prevents race condition where BrokenProcessPool is raised before status is set
         self._cancel_all_executions()
+        killed_count = self._kill_worker_processes()
         logger.info(f"Shutdown complete - killed {killed_count} workers, server remains alive")
 
         return {
@@ -583,8 +592,105 @@ class ZMQExecutionServer(ZMQServer):
         except queue.Full:
             logger.warning(f"Progress queue full, dropping update for {well_id}")
 
+    def _get_worker_info(self) -> List[Dict[str, Any]]:
+        """
+        Get information about worker processes.
+
+        Returns list of worker process info dicts with pid, status, etc.
+        """
+        workers = []
+
+        try:
+            import psutil
+        except ImportError:
+            logger.warning("psutil not available - cannot get worker info")
+            return workers
+
+        try:
+            current_process = psutil.Process(os.getpid())
+
+            # Try both direct children and recursive (workers might be grandchildren)
+            direct_children = current_process.children(recursive=False)
+            all_descendants = current_process.children(recursive=True)
+
+            logger.info(f"🔍 WORKER DETECTION: Server PID {os.getpid()}")
+            logger.info(f"🔍 WORKER DETECTION: Found {len(direct_children)} direct children, {len(all_descendants)} total descendants")
+
+            # Check all descendants (workers might be spawned by a subprocess)
+            for child in all_descendants:
+                try:
+                    # Check if it's a Python worker process
+                    cmdline = child.cmdline()
+                    cmdline_preview = ' '.join(cmdline[:3]) if cmdline else 'None'
+                    logger.info(f"🔍 WORKER DETECTION: Descendant PID {child.pid} cmdline: {cmdline_preview}...")
+
+                    if cmdline and len(cmdline) > 0 and 'python' in cmdline[0].lower():
+                        cmdline_str = ' '.join(cmdline)
+
+                        # Exclude Napari viewers
+                        if 'napari' in cmdline_str.lower():
+                            logger.info(f"🔍 WORKER DETECTION: Skipping Napari viewer PID {child.pid}")
+                            continue
+
+                        # Exclude multiprocessing helper processes (infrastructure, not workers)
+                        # resource_tracker and semaphore_tracker are helpers
+                        # BUT spawn_main is the actual worker process!
+                        if 'resource_tracker' in cmdline_str or 'semaphore_tracker' in cmdline_str:
+                            logger.info(f"🔍 WORKER DETECTION: Skipping multiprocessing helper PID {child.pid}")
+                            continue
+
+                        # Exclude the server process itself (shouldn't happen but be safe)
+                        if child.pid == os.getpid():
+                            continue
+
+                        # Include all other Python processes as potential workers
+                        # ProcessPoolExecutor workers are just spawned Python processes
+                        logger.info(f"🔍 WORKER DETECTION: ✅ Identified worker PID {child.pid}")
+                        workers.append({
+                            'pid': child.pid,
+                            'status': child.status(),
+                            'cpu_percent': child.cpu_percent(interval=0),  # Non-blocking (returns 0.0 on first call)
+                            'memory_mb': child.memory_info().rss / 1024 / 1024,
+                            'create_time': child.create_time()
+                        })
+                    else:
+                        logger.info(f"🔍 WORKER DETECTION: Skipping non-Python process PID {child.pid}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                    logger.debug(f"🔍 WORKER DETECTION: Cannot access process: {e}")
+
+        except Exception as e:
+            logger.warning(f"Error getting worker info: {e}", exc_info=True)
+
+        logger.info(f"🔍 WORKER DETECTION: Returning {len(workers)} workers")
+        return workers
+
     def _kill_worker_processes(self) -> int:
-        """Kill all worker processes spawned by this server using psutil."""
+        """
+        Kill worker processes spawned by ProcessPoolExecutor.
+
+        This method attempts to gracefully shutdown executors via orchestrator first,
+        then falls back to killing only Python worker processes (not all children like Napari viewers).
+        """
+        killed_count = 0
+
+        # First, try to gracefully cancel via orchestrator
+        for execution_id, record in self.active_executions.items():
+            if 'orchestrator' in record:
+                try:
+                    orchestrator = record['orchestrator']
+                    logger.info(f"[{execution_id}] Gracefully cancelling execution via orchestrator")
+                    orchestrator.cancel_execution()
+                    killed_count += 1
+                except Exception as e:
+                    logger.warning(f"[{execution_id}] Failed to cancel via orchestrator: {e}")
+
+        # If we successfully shutdown executors, return
+        if killed_count > 0:
+            logger.info(f"Gracefully shutdown {killed_count} executor(s)")
+            return killed_count
+
+        # Fallback: Kill only Python worker processes (not all children)
+        # This avoids killing Napari viewers and other independent child processes
         try:
             import psutil
         except ImportError:
@@ -593,29 +699,51 @@ class ZMQExecutionServer(ZMQServer):
 
         try:
             current_process = psutil.Process(os.getpid())
-            children = current_process.children(recursive=True)
+            children = current_process.children(recursive=False)  # Non-recursive to avoid Napari
 
             if not children:
                 return 0
 
-            logger.info(f"Killing {len(children)} worker processes")
-
-            # Terminate all children
+            # Filter for Python processes that look like workers or helper processes
+            # We want to kill workers AND multiprocessing helpers (resource_tracker, etc.)
+            # but NOT Napari viewers
+            worker_processes = []
             for child in children:
+                try:
+                    # Check if it's a Python process
+                    cmdline = child.cmdline()
+                    if cmdline and 'python' in cmdline[0].lower():
+                        cmdline_str = ' '.join(cmdline)
+                        # Exclude Napari viewers (they should stay alive)
+                        if 'napari' not in cmdline_str.lower():
+                            # Include workers AND helper processes (resource_tracker, etc.)
+                            worker_processes.append(child)
+                            logger.debug(f"Will kill child process PID {child.pid}: {cmdline_str[:100]}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            if not worker_processes:
+                logger.info("No worker processes found to kill")
+                return 0
+
+            logger.info(f"Killing {len(worker_processes)} worker processes")
+
+            # Terminate worker processes
+            for child in worker_processes:
                 try:
                     child.terminate()
                 except (psutil.NoSuchProcess, Exception):
                     pass
 
             # Wait for graceful exit, then force kill stragglers
-            gone, alive = psutil.wait_procs(children, timeout=3)
+            gone, alive = psutil.wait_procs(worker_processes, timeout=3)
             for child in alive:
                 try:
                     child.kill()
                 except (psutil.NoSuchProcess, Exception):
                     pass
 
-            return len(children)
+            return len(worker_processes)
 
         except Exception as e:
             logger.error(f"Error killing worker processes: {e}")
@@ -628,8 +756,10 @@ class ZMQExecutionServer(ZMQServer):
         This is the nuclear option that terminates everything.
         """
         logger.info("Force shutdown requested - killing workers and shutting down server")
-        killed_count = self._kill_worker_processes()
+        # CRITICAL: Mark executions as cancelled BEFORE killing workers
+        # This prevents race condition where BrokenProcessPool is raised before status is set
         self._cancel_all_executions()
+        killed_count = self._kill_worker_processes()
         self.request_shutdown()
         logger.info(f"Force shutdown complete - killed {killed_count} workers, server shutting down")
 

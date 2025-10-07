@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
+    QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
     QPushButton, QGroupBox, QMessageBox, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QThread
@@ -90,12 +90,15 @@ class ZMQServerManagerWidget(QWidget):
         group_box = QGroupBox(self.title)
         group_layout = QVBoxLayout(group_box)
         group_layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Server list
-        self.server_list = QListWidget()
-        self.server_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.server_list.itemDoubleClicked.connect(self._on_item_double_clicked)
-        group_layout.addWidget(self.server_list)
+
+        # Server tree (hierarchical display with workers as children)
+        self.server_tree = QTreeWidget()
+        self.server_tree.setHeaderLabels(["Server / Worker", "Status", "Info"])
+        self.server_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.server_tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.server_tree.setColumnWidth(0, 250)
+        self.server_tree.setColumnWidth(1, 100)
+        group_layout.addWidget(self.server_tree)
         
         # Buttons
         button_layout = QHBoxLayout()
@@ -115,10 +118,10 @@ class ZMQServerManagerWidget(QWidget):
         group_layout.addLayout(button_layout)
         
         layout.addWidget(group_box)
-        
-        # Apply styling
+
+        # Apply styling - tree widget inherits global theme automatically
+        # Only apply button styles if style generator is provided
         if self.style_generator:
-            self.setStyleSheet(self.style_generator.generate_plate_manager_style())
             self.refresh_btn.setStyleSheet(self.style_generator.generate_button_style())
             self.quit_btn.setStyleSheet(self.style_generator.generate_button_style())
             self.force_kill_btn.setStyleSheet(self.style_generator.generate_button_style())
@@ -180,7 +183,7 @@ class ZMQServerManagerWidget(QWidget):
             control_context = zmq.Context()
             control_socket = control_context.socket(zmq.REQ)
             control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout (servers may be busy)
+            control_socket.setsockopt(zmq.RCVTIMEO, 3000)  # 3 second timeout (servers may be busy during startup)
             control_socket.connect(f"tcp://localhost:{control_port}")
 
             # Send ping
@@ -213,9 +216,9 @@ class ZMQServerManagerWidget(QWidget):
 
     @pyqtSlot(list)
     def _update_server_list(self, servers: List[Dict[str, Any]]):
-        """Update server list on UI thread (called via signal)."""
+        """Update server tree on UI thread (called via signal)."""
         self.servers = servers
-        self.server_list.clear()
+        self.server_tree.clear()
 
         for server in servers:
             port = server.get('port', 'unknown')
@@ -224,56 +227,57 @@ class ZMQServerManagerWidget(QWidget):
 
             # Determine status icon
             if ready:
-                status_icon = "✅ Ready"
+                status_icon = "✅"
             else:
-                status_icon = "🚀 Starting"
+                status_icon = "🚀"
 
-            # Build display text
-            display_text = f"Port {port} - {status_icon}"
-
-            # Handle execution servers specially - show each running execution
+            # Handle execution servers specially - show workers as children
             if server_type == 'ZMQExecutionServer':
                 running_executions = server.get('running_executions', [])
+                workers = server.get('workers', [])
 
+                # Create server item
                 if running_executions:
-                    # Show server entry
-                    server_text = f"Port {port} - Execution Server ({len(running_executions)} running)"
-                    server_item = QListWidgetItem(server_text)
-                    server_item.setData(Qt.ItemDataRole.UserRole, server)
-                    self.server_list.addItem(server_item)
-
-                    # Show each running execution as indented sub-item
-                    for exec_info in running_executions:
-                        exec_id = exec_info.get('execution_id', 'unknown')[:8]  # Short ID
-                        plate_id = exec_info.get('plate_id', 'unknown')
-                        elapsed = exec_info.get('elapsed', 0)
-
-                        # Format elapsed time
-                        if elapsed < 60:
-                            time_str = f"{elapsed:.0f}s"
-                        elif elapsed < 3600:
-                            time_str = f"{elapsed/60:.1f}m"
-                        else:
-                            time_str = f"{elapsed/3600:.1f}h"
-
-                        exec_text = f"  ⏳ {exec_id} - {plate_id} ({time_str})"
-                        exec_item = QListWidgetItem(exec_text)
-                        # Store execution info with server context
-                        exec_data = server.copy()
-                        exec_data['execution_id'] = exec_info.get('execution_id')
-                        exec_item.setData(Qt.ItemDataRole.UserRole, exec_data)
-                        self.server_list.addItem(exec_item)
+                    server_text = f"Port {port} - Execution Server"
+                    status_text = f"{status_icon} {len(running_executions)} exec"
+                    info_text = f"{len(workers)} workers"
                 else:
-                    # No running executions - show idle server
-                    display_text = f"Port {port} - Execution Server (idle)"
-                    item = QListWidgetItem(display_text)
-                    item.setData(Qt.ItemDataRole.UserRole, server)
-                    self.server_list.addItem(item)
+                    server_text = f"Port {port} - Execution Server"
+                    status_text = f"{status_icon} Idle"
+                    info_text = f"{len(workers)} workers" if workers else ""
+
+                server_item = QTreeWidgetItem([server_text, status_text, info_text])
+                server_item.setData(0, Qt.ItemDataRole.UserRole, server)
+                self.server_tree.addTopLevelItem(server_item)
+
+                # Add worker processes as children
+                for worker in workers:
+                    pid = worker.get('pid', 'unknown')
+                    status = worker.get('status', 'unknown')
+                    cpu = worker.get('cpu_percent', 0)
+                    mem_mb = worker.get('memory_mb', 0)
+
+                    worker_text = f"  Worker PID {pid}"
+                    worker_status = f"⚙️ {status}"
+                    worker_info = f"CPU: {cpu:.1f}% | Mem: {mem_mb:.0f}MB"
+
+                    worker_item = QTreeWidgetItem([worker_text, worker_status, worker_info])
+                    worker_item.setData(0, Qt.ItemDataRole.UserRole, {'type': 'worker', 'pid': pid, 'server': server})
+                    server_item.addChild(worker_item)
+
+                # Expand server item if it has workers
+                if workers:
+                    server_item.setExpanded(True)
+
             else:
                 # Other server types (Napari, etc.) - show normally
-                item = QListWidgetItem(display_text)
-                item.setData(Qt.ItemDataRole.UserRole, server)
-                self.server_list.addItem(item)
+                display_text = f"Port {port} - {server_type}"
+                status_text = status_icon
+                info_text = ""
+
+                item = QTreeWidgetItem([display_text, status_text, info_text])
+                item.setData(0, Qt.ItemDataRole.UserRole, server)
+                self.server_tree.addTopLevelItem(item)
 
         logger.debug(f"Found {len(servers)} ZMQ servers")
 
@@ -282,12 +286,12 @@ class ZMQServerManagerWidget(QWidget):
         """Handle kill operation completion on UI thread."""
         if not success:
             QMessageBox.warning(self, "Kill Failed", message)
-        # Refresh list after kill
-        QTimer.singleShot(1000, self.refresh_servers)
+        # Refresh list after kill (quick refresh for better UX)
+        QTimer.singleShot(200, self.refresh_servers)
     
     def quit_selected_servers(self):
         """Gracefully quit selected servers (async to avoid blocking UI)."""
-        selected_items = self.server_list.selectedItems()
+        selected_items = self.server_tree.selectedItems()
         if not selected_items:
             QMessageBox.warning(self, "No Selection", "Please select servers to quit.")
             return
@@ -305,11 +309,14 @@ class ZMQServerManagerWidget(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Collect ports to kill
+        # Collect ports to kill (skip worker items, only kill servers)
         ports_to_kill = []
         for item in selected_items:
-            server = item.data(Qt.ItemDataRole.UserRole)
-            port = server.get('port')
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            # Skip worker items (they don't have ports)
+            if data and data.get('type') == 'worker':
+                continue
+            port = data.get('port') if data else None
             if port:
                 ports_to_kill.append(port)
 
@@ -344,7 +351,7 @@ class ZMQServerManagerWidget(QWidget):
     
     def force_kill_selected_servers(self):
         """Force kill selected servers (async to avoid blocking UI)."""
-        selected_items = self.server_list.selectedItems()
+        selected_items = self.server_tree.selectedItems()
         if not selected_items:
             QMessageBox.warning(self, "No Selection", "Please select servers to force kill.")
             return
@@ -363,11 +370,14 @@ class ZMQServerManagerWidget(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Collect ports to kill
+        # Collect ports to kill (skip worker items, only kill servers)
         ports_to_kill = []
         for item in selected_items:
-            server = item.data(Qt.ItemDataRole.UserRole)
-            port = server.get('port')
+            data = item.data(0, Qt.ItemDataRole.UserRole)
+            # Skip worker items (they don't have ports)
+            if data and data.get('type') == 'worker':
+                continue
+            port = data.get('port') if data else None
             if port:
                 ports_to_kill.append(port)
 
@@ -400,10 +410,15 @@ class ZMQServerManagerWidget(QWidget):
         thread = threading.Thread(target=kill_servers, daemon=True)
         thread.start()
     
-    def _on_item_double_clicked(self, item: QListWidgetItem):
-        """Handle double-click on server item - open log file."""
-        server = item.data(Qt.ItemDataRole.UserRole)
-        log_file = server.get('log_file_path')
+    def _on_item_double_clicked(self, item: QTreeWidgetItem):
+        """Handle double-click on tree item - open log file."""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+
+        # For worker items, get the server from parent
+        if data and data.get('type') == 'worker':
+            data = data.get('server', {})
+
+        log_file = data.get('log_file_path') if data else None
 
         if log_file and Path(log_file).exists():
             # Emit signal for parent to handle (e.g., open in log viewer)
@@ -413,6 +428,6 @@ class ZMQServerManagerWidget(QWidget):
             QMessageBox.information(
                 self,
                 "No Log File",
-                f"No log file available for this server.\n\nPort: {server.get('port', 'unknown')}"
+                f"No log file available for this item.\n\nPort: {data.get('port', 'unknown') if data else 'unknown'}"
             )
 
