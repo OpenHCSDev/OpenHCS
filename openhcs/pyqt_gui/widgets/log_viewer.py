@@ -940,9 +940,6 @@ class LogViewerWindow(QMainWindow):
             log_path: Path to log file to display
         """
         try:
-            # Disable highlighter FIRST to prevent blocking during content change
-            self.highlighter.setDocument(None)
-
             # Stop current tailing
             if self.tail_timer and self.tail_timer.isActive():
                 self.tail_timer.stop()
@@ -959,23 +956,17 @@ class LogViewerWindow(QMainWindow):
             # Store path for later use
             self.current_log_path = log_path
 
-            # Check file size to decide loading strategy
+            # ALWAYS use async loading to prevent UI blocking
+            # QSyntaxHighlighter is already lazy - it only highlights visible blocks
             file_size = log_path.stat().st_size
+            logger.debug(f"Loading log file ({file_size} bytes) asynchronously")
+            self.log_display.setText(f"Loading log file ({file_size // 1024} KB)...")
 
-            if file_size > 100000:  # 100KB threshold - use async loading
-                logger.debug(f"Large log file ({file_size} bytes), loading asynchronously")
-                self.log_display.setText(f"Loading large log file ({file_size // 1024} KB)...")
-
-                # Create and start async loader
-                self.file_loader = LogFileLoader(log_path)
-                self.file_loader.content_loaded.connect(self._on_file_loaded)
-                self.file_loader.load_failed.connect(self._on_file_load_failed)
-                self.file_loader.start()
-            else:
-                # Small file - load synchronously
-                with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                    content = f.read()
-                self._on_file_loaded(content)
+            # Create and start async loader
+            self.file_loader = LogFileLoader(log_path)
+            self.file_loader.content_loaded.connect(self._on_file_loaded)
+            self.file_loader.load_failed.connect(self._on_file_load_failed)
+            self.file_loader.start()
 
         except Exception as e:
             logger.error(f"Error switching to log {log_path}: {e}")
@@ -984,14 +975,11 @@ class LogViewerWindow(QMainWindow):
     def _on_file_loaded(self, content: str) -> None:
         """Handle file content loaded (either sync or async)."""
         try:
-            # Set content
+            # Set content - QSyntaxHighlighter only processes visible blocks automatically
             self.log_display.setText(content)
 
             # Update file position
             self.current_file_position = len(content.encode('utf-8'))
-
-            # Re-enable highlighter (regex-based, fast)
-            self.highlighter.setDocument(self.log_display.document())
 
             # Start tailing if not paused
             if not self.tailing_paused and self.current_log_path:
