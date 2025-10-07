@@ -10,7 +10,7 @@ import logging
 from typing import Any, Dict, Type, Optional, Callable, Tuple
 from dataclasses import replace
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton, QLineEdit, QCheckBox, QComboBox, QGroupBox
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
 # Performance monitoring
 from openhcs.utils.performance_monitor import timer, get_monitor
@@ -143,6 +143,9 @@ class ParameterFormManager(QWidget):
 
     # Performance optimization: Skip expensive operations for nested configs
     OPTIMIZE_NESTED_WIDGETS = True
+
+    # Performance optimization: Async widget creation for large forms
+    ASYNC_WIDGET_CREATION = True  # Create widgets progressively to avoid UI blocking
 
     def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None):
         """
@@ -527,21 +530,56 @@ class ParameterFormManager(QWidget):
             content_layout.setContentsMargins(*CURRENT_LAYOUT.content_layout_margins)
 
         # DELEGATE TO SERVICE LAYER: Use analyzed form structure
-        with timer(f"      Create {len(self.form_structure.parameters)} parameter widgets", threshold_ms=5.0):
-            for param_info in self.form_structure.parameters:
-                with timer(f"        Create widget for {param_info.name} ({'nested' if param_info.is_nested else 'regular'})", threshold_ms=2.0):
-                    if param_info.is_optional and param_info.is_nested:
-                        # Optional[Dataclass]: show checkbox
-                        widget = self._create_optional_dataclass_widget(param_info)
-                    elif param_info.is_nested:
-                        # Direct dataclass (non-optional): nested group without checkbox
-                        widget = self._create_nested_dataclass_widget(param_info)
-                    else:
-                        # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
-                        widget = self._create_regular_parameter_widget(param_info)
-                    content_layout.addWidget(widget)
+        if self.ASYNC_WIDGET_CREATION and len(self.form_structure.parameters) > 5:
+            # Async widget creation for large forms (>5 parameters)
+            # Create widgets progressively to avoid blocking the UI
+            with timer(f"      Schedule async creation of {len(self.form_structure.parameters)} widgets", threshold_ms=1.0):
+                self._create_widgets_async(content_layout, self.form_structure.parameters)
+        else:
+            # Sync widget creation for small forms (<=5 parameters)
+            with timer(f"      Create {len(self.form_structure.parameters)} parameter widgets", threshold_ms=5.0):
+                for param_info in self.form_structure.parameters:
+                    with timer(f"        Create widget for {param_info.name} ({'nested' if param_info.is_nested else 'regular'})", threshold_ms=2.0):
+                        widget = self._create_widget_for_param(param_info)
+                        content_layout.addWidget(widget)
 
         return content_widget
+
+    def _create_widget_for_param(self, param_info):
+        """Create widget for a single parameter based on its type."""
+        if param_info.is_optional and param_info.is_nested:
+            # Optional[Dataclass]: show checkbox
+            return self._create_optional_dataclass_widget(param_info)
+        elif param_info.is_nested:
+            # Direct dataclass (non-optional): nested group without checkbox
+            return self._create_nested_dataclass_widget(param_info)
+        else:
+            # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
+            return self._create_regular_parameter_widget(param_info)
+
+    def _create_widgets_async(self, layout, param_infos):
+        """Create widgets asynchronously to avoid blocking the UI."""
+        # Create widgets in batches using QTimer to yield to event loop
+        batch_size = 3  # Create 3 widgets at a time
+        index = 0
+
+        def create_next_batch():
+            nonlocal index
+            batch_end = min(index + batch_size, len(param_infos))
+
+            for i in range(index, batch_end):
+                param_info = param_infos[i]
+                widget = self._create_widget_for_param(param_info)
+                layout.addWidget(widget)
+
+            index = batch_end
+
+            # Schedule next batch if there are more widgets
+            if index < len(param_infos):
+                QTimer.singleShot(0, create_next_batch)
+
+        # Start creating widgets
+        QTimer.singleShot(0, create_next_batch)
 
     def _create_regular_parameter_widget(self, param_info) -> QWidget:
         """Create widget for regular parameter - DELEGATE TO SERVICE LAYER."""
