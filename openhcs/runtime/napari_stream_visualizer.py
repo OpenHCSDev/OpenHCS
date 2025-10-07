@@ -440,8 +440,25 @@ class NapariViewerServer(ZMQServer):
         return response
 
     def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle control messages beyond ping/pong."""
-        # Currently no additional control messages needed
+        """
+        Handle control messages beyond ping/pong.
+
+        Supported message types:
+        - shutdown: Graceful shutdown (closes viewer)
+        - force_shutdown: Force shutdown (same as shutdown for Napari)
+        """
+        msg_type = message.get('type')
+
+        if msg_type == 'shutdown' or msg_type == 'force_shutdown':
+            logger.info(f"🔬 NAPARI SERVER: {msg_type} requested, closing viewer")
+            self.request_shutdown()
+            return {
+                'type': 'shutdown_ack',
+                'status': 'success',
+                'message': 'Napari viewer shutting down'
+            }
+
+        # Unknown message type
         return {'status': 'ok'}
 
     def handle_data_message(self, message: Dict[str, Any]):
@@ -692,7 +709,8 @@ except Exception as e:
                 env=env,
                 cwd=os.getcwd(),
                 stdout=log_f,
-                stderr=subprocess.STDOUT
+                stderr=subprocess.STDOUT,
+                start_new_session=True  # CRITICAL: Detach from parent process group
             )
 
         logger.info(f"🔬 VISUALIZER: Detached napari process started (PID: {process.pid}), logging to {log_file}")
@@ -813,9 +831,10 @@ class NapariStreamVisualizer:
                 else:
                     # Existing viewer is unresponsive - kill it and start fresh
                     logger.info(f"🔬 VISUALIZER: Existing viewer on port {self.napari_port} is unresponsive, killing and restarting...")
-                    self._kill_processes_on_port(self.napari_port)
-                    # Also kill control port
-                    self._kill_processes_on_port(self.napari_port + 1000)
+                    # Use shared method from ZMQServer ABC
+                    from openhcs.runtime.zmq_base import ZMQServer
+                    ZMQServer.kill_processes_on_port(self.napari_port)
+                    ZMQServer.kill_processes_on_port(self.napari_port + 1000)
                     # Wait a moment for ports to be freed
                     import time
                     time.sleep(0.5)
@@ -921,58 +940,7 @@ class NapariStreamVisualizer:
                 except:
                     pass
 
-    def _kill_processes_on_port(self, port: int) -> None:
-        """
-        Kill only the process LISTENING on the specified port (the Napari viewer).
 
-        Does NOT kill client processes that are merely connected to the port.
-        """
-        import subprocess
-        import platform
-
-        try:
-            system = platform.system()
-
-            if system == "Linux" or system == "Darwin":
-                # Use lsof with -sTCP:LISTEN to find only LISTENING processes
-                # This excludes client connections and only targets the server (Napari viewer)
-                result = subprocess.run(
-                    ['lsof', '-ti', f'TCP:{port}', '-sTCP:LISTEN'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
-                if result.returncode == 0 and result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
-                        try:
-                            subprocess.run(['kill', '-9', pid], timeout=1)
-                            logger.info(f"🔬 VISUALIZER: Killed process {pid} listening on port {port}")
-                        except Exception as e:
-                            logger.warning(f"Failed to kill process {pid}: {e}")
-
-            elif system == "Windows":
-                # Use netstat to find processes LISTENING on the port
-                result = subprocess.run(
-                    ['netstat', '-ano'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
-                for line in result.stdout.split('\n'):
-                    if f':{port}' in line and 'LISTENING' in line:
-                        parts = line.split()
-                        pid = parts[-1]
-                        try:
-                            subprocess.run(['taskkill', '/F', '/PID', pid], timeout=1)
-                            logger.info(f"🔬 VISUALIZER: Killed process {pid} listening on port {port}")
-                        except Exception as e:
-                            logger.warning(f"Failed to kill process {pid}: {e}")
-
-        except Exception as e:
-            logger.warning(f"Failed to kill processes on port {port}: {e}")
 
     def _is_port_in_use(self, port: int) -> bool:
         """Check if a port is already in use (indicating existing napari viewer)."""

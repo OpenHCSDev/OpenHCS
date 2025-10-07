@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QToolBar, QLineEdit, QCheckBox, QPushButton, QDialog
 )
 from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument
-from PyQt6.QtCore import QObject, QTimer, QFileSystemWatcher, pyqtSignal, Qt, QRegularExpression, QThread
+from PyQt6.QtCore import QObject, QTimer, QFileSystemWatcher, pyqtSignal, pyqtSlot, Qt, QRegularExpression, QThread
 from PyQt6.QtGui import QTextCharFormat, QColor, QAction, QFont, QTextCursor
 
 from openhcs.io.filemanager import FileManager
@@ -159,6 +159,7 @@ class LogFileDetector(QObject):
     
     # Signals
     new_log_detected = pyqtSignal(object)  # LogFileInfo object
+    _server_scan_complete = pyqtSignal(list)  # List of LogFileInfo from server scan
 
     def __init__(self, base_log_path: Optional[str] = None):
         """
@@ -305,6 +306,9 @@ class LogHighlighter(QSyntaxHighlighter):
         self.color_scheme = color_scheme or LogColorScheme()
         self.setup_pygments_styles()
         self.setup_highlighting_rules()
+
+        # Cache for pre-computed Pygments highlighting
+        self.pygments_cache = {}  # {line_number: [(start, length, format), ...]}
 
     def setup_pygments_styles(self) -> None:
         """Setup Pygments token to QTextCharFormat mapping using color scheme."""
@@ -519,14 +523,29 @@ class LogHighlighter(QSyntaxHighlighter):
 
         return LogColorScheme()  # Return default scheme
 
+    def set_pygments_cache(self, cache: dict) -> None:
+        """
+        Set pre-computed Pygments highlighting cache.
+
+        Args:
+            cache: Dictionary mapping line numbers to formatting info
+        """
+        self.pygments_cache = cache
+        # Trigger re-highlighting of the document
+        self.rehighlight()
+
+    def clear_pygments_cache(self) -> None:
+        """Clear the Pygments highlighting cache."""
+        self.pygments_cache = {}
+
     def highlightBlock(self, text: str) -> None:
         """
         Apply advanced highlighting to text block.
 
-        Uses both regex patterns for log-specific content and Pygments
-        for Python syntax highlighting of complex data structures.
+        Uses both regex patterns for log-specific content and pre-computed
+        Pygments cache for Python syntax highlighting.
         """
-        # First apply log-specific patterns
+        # First apply log-specific patterns (fast)
         for pattern, format in self.highlighting_rules:
             iterator = pattern.globalMatch(text)
             while iterator.hasNext():
@@ -535,91 +554,14 @@ class LogHighlighter(QSyntaxHighlighter):
                 length = match.capturedLength()
                 self.setFormat(start, length, format)
 
-        # Then apply Pygments highlighting for Python-like content
-        self._highlight_python_content(text)
+        # Then apply pre-computed Pygments highlighting from cache (instant)
+        current_block = self.currentBlock()
+        line_number = current_block.blockNumber()
 
-    def _highlight_python_content(self, text: str) -> None:
-        """
-        Apply Pygments Python syntax highlighting to parts of the text that contain
-        Python data structures (dictionaries, lists, function signatures, etc.).
-        """
-        try:
-            # Look for Python-like patterns in the log line
-            python_patterns = [
-                # Dictionary patterns: {'key': 'value', ...}
-                r'\{[^{}]*:[^{}]*\}',
-                # List patterns: [item1, item2, ...]
-                r'\[[^\[\]]*,.*?\]',
-                # Function signatures: function_name(arg1=value, arg2=value)
-                r'\b[a-zA-Z_][a-zA-Z0-9_]*\([^)]*=.*?\)',
-                # Complex nested structures
-                r'\{.*?:\s*\[.*?\].*?\}',
-
-                # Enhanced patterns for Phase 1
-
-                # Tuple patterns: (item1, item2, item3)
-                r'\([^()]*,.*?\)',
-                # Set patterns: {item1, item2, item3} (no colons, distinguishes from dict)
-                r'\{[^{}:]*,.*?\}',
-                # List comprehensions: [x for x in items]
-                r'\[[^\[\]]*\s+for\s+[^\[\]]*\s+in\s+[^\[\]]*\]',
-                # Generator expressions: (x for x in items)
-                r'\([^()]*\s+for\s+[^()]*\s+in\s+[^()]*\)',
-                # Class representations: <class 'module.ClassName'>
-                r"<class '[^']*'>",
-                # Function representations: <function name at 0xaddress>
-                r"<function [^>]+ at 0x[0-9a-fA-F]+>",
-                # Complex function calls with keyword arguments
-                r'\b[a-zA-Z_][a-zA-Z0-9_]*\([^)]*[a-zA-Z_][a-zA-Z0-9_]*\s*=.*?\)',
-                # Multi-line dictionary/list structures (single line representation)
-                r'\{[^{}]*:\s*[^{}]*,\s*[^{}]*:\s*[^{}]*\}',
-                # Nested collections: [{...}, {...}] or [(...), (...)]
-                r'\[[\{\(][^[\]]*[\}\)],\s*[\{\(][^[\]]*[\}\)]\]',
-            ]
-
-            for pattern in python_patterns:
-                regex = QRegularExpression(pattern)
-                iterator = regex.globalMatch(text)
-
-                while iterator.hasNext():
-                    match = iterator.next()
-                    start = match.capturedStart()
-                    length = match.capturedLength()
-                    python_text = match.captured(0)
-
-                    # Use Pygments to highlight this Python-like content
-                    self._apply_pygments_highlighting(python_text, start)
-
-        except Exception as e:
-            # Don't let highlighting errors break the log viewer
-            logger.debug(f"Error in Python content highlighting: {e}")
-
-    def _apply_pygments_highlighting(self, python_text: str, start_offset: int) -> None:
-        """
-        Apply Pygments highlighting to a specific piece of Python-like text.
-        """
-        try:
-            from pygments.lexers import PythonLexer
-
-            lexer = PythonLexer()
-            tokens = list(lexer.get_tokens(python_text))
-
-            current_pos = 0
-            for token_type, token_value in tokens:
-                if token_value.strip():  # Skip whitespace-only tokens
-                    token_start = start_offset + current_pos
-                    token_length = len(token_value)
-
-                    # Apply format if we have a mapping for this token type
-                    if token_type in self.token_formats:
-                        format = self.token_formats[token_type]
-                        self.setFormat(token_start, token_length, format)
-
-                current_pos += len(token_value)
-
-        except Exception as e:
-            # Don't let Pygments errors break the highlighting
-            logger.debug(f"Error in Pygments highlighting: {e}")
+        if line_number in self.pygments_cache:
+            # Apply cached formatting (already QTextCharFormat objects)
+            for start, length, format in self.pygments_cache[line_number]:
+                self.setFormat(start, length, format)
 
 
 class LogFileLoader(QThread):
@@ -643,10 +585,110 @@ class LogFileLoader(QThread):
             self.load_failed.emit(str(e))
 
 
+class AsyncHighlighter(QThread):
+    """Background thread for pre-computing Pygments highlighting using proper Pygments API."""
+
+    # Signals
+    highlighting_complete = pyqtSignal(dict)  # Emits {line_number: [(start, length, QTextCharFormat), ...]}
+
+    def __init__(self, content: str, pygments_style: str = 'monokai'):
+        super().__init__()
+        self.content = content
+        self.pygments_style = pygments_style
+
+    def run(self):
+        """Pre-compute highlighting for all lines in background using Pygments."""
+        try:
+            from pygments import lex
+            from pygments.lexers import PythonLexer, get_lexer_by_name
+            from pygments.token import Token
+            from pygments.styles import get_style_by_name
+
+            # Get Pygments style
+            style = get_style_by_name(self.pygments_style)
+
+            # Split content into lines
+            lines = self.content.split('\n')
+
+            # Pre-compute highlighting for each line
+            highlighting_cache = {}
+
+            for line_num, line_text in enumerate(lines):
+                # Skip empty lines
+                if not line_text.strip():
+                    continue
+
+                # Try to detect lexer based on content
+                lexer = self._get_lexer_for_line(line_text)
+                if not lexer:
+                    continue
+
+                # Tokenize with Pygments
+                try:
+                    tokens = list(lex(line_text, lexer))
+
+                    # Convert tokens to Qt formatting
+                    formats = []
+                    position = 0
+
+                    for token_type, token_text in tokens:
+                        length = len(token_text)
+                        if length > 0 and token_type not in Token.Text:
+                            # Get style for this token type from Pygments
+                            token_style = style.style_for_token(token_type)
+
+                            # Convert to QTextCharFormat
+                            format = QTextCharFormat()
+
+                            if token_style['color']:
+                                format.setForeground(QColor(f"#{token_style['color']}"))
+                            if token_style['bold']:
+                                format.setFontWeight(QFont.Weight.Bold)
+                            if token_style['italic']:
+                                format.setFontItalic(True)
+                            if token_style['underline']:
+                                format.setFontUnderline(True)
+
+                            formats.append((position, length, format))
+                        position += length
+
+                    if formats:
+                        highlighting_cache[line_num] = formats
+
+                except Exception:
+                    # Skip lines that fail to parse
+                    pass
+
+            self.highlighting_complete.emit(highlighting_cache)
+
+        except Exception as e:
+            logger.debug(f"Error in async highlighting: {e}")
+            # Emit empty cache on error
+            self.highlighting_complete.emit({})
+
+    def _get_lexer_for_line(self, text: str):
+        """Detect appropriate lexer for a line of text."""
+        from pygments.lexers import PythonLexer, get_lexer_by_name
+
+        # Heuristics to detect Python-like content
+        python_indicators = [
+            '{', '}', '[', ']',  # Data structures
+            'def ', 'class ', 'import ', 'from ',  # Keywords
+            '__', 'self.',  # Python-specific
+            ':', '=',  # Common syntax
+        ]
+
+        if any(indicator in text for indicator in python_indicators):
+            return PythonLexer()
+
+        return None
+
+
 class LogViewerWindow(QMainWindow):
     """Main log viewer window with dropdown, search, and real-time tailing."""
-    
+
     window_closed = pyqtSignal()
+    _server_scan_complete = pyqtSignal(list)  # Internal signal for async server scan
 
     def __init__(self, file_manager: FileManager, service_adapter, parent=None):
         super().__init__(parent)
@@ -671,7 +713,9 @@ class LogViewerWindow(QMainWindow):
         self.tail_timer: QTimer = None
         self.highlighter: LogHighlighter = None
         self.file_loader: Optional[LogFileLoader] = None  # Async file loader
+        self.async_highlighter: Optional[AsyncHighlighter] = None  # Async Pygments highlighter
         self.server_scan_timer: QTimer = None  # Periodic ZMQ server scanning
+        self._pending_log_to_load: Optional[Path] = None  # Log to load when window is shown
 
         self.setup_ui()
         self.setup_connections()
@@ -774,10 +818,22 @@ class LogViewerWindow(QMainWindow):
         self.clear_btn.clicked.connect(self.clear_log_display)
         self.bottom_btn.clicked.connect(self.scroll_to_bottom)
 
+        # Internal signals
+        self._server_scan_complete.connect(self._on_server_scan_complete)
+
         logger.debug("LogViewerWindow connections setup complete")
 
+    def showEvent(self, event):
+        """Override showEvent to load log when window is first shown."""
+        super().showEvent(event)
+
+        # Load pending log on first show
+        if self._pending_log_to_load:
+            self.switch_to_log(self._pending_log_to_load)
+            self._pending_log_to_load = None
+
     def initialize_logs(self) -> None:
-        """Initialize with main process log only and start monitoring."""
+        """Initialize with main process log only and start monitoring (async)."""
         # Only discover the current main process log, not old logs
         initial_logs = []
         try:
@@ -793,17 +849,53 @@ class LogViewerWindow(QMainWindow):
             # Main log not available, continue without it
             pass
 
-        # Scan for running ZMQ servers and Napari viewers
-        server_logs = self._scan_for_server_logs()
-        initial_logs.extend(server_logs)
-
-        # Populate dropdown with all discovered logs
+        # Populate dropdown with main log immediately (fast)
         if initial_logs:
             self.populate_log_dropdown(initial_logs)
-            self.switch_to_log(initial_logs[0].path)
+            # Store first log to load when window is shown (defer loading)
+            self._pending_log_to_load = initial_logs[0].path
 
         # Start monitoring for new logs
         self.start_monitoring()
+
+        # Scan for servers in background (async - doesn't block)
+        self._scan_servers_async()
+
+    def _scan_servers_async(self) -> None:
+        """Scan for ZMQ servers in background thread (non-blocking)."""
+        import threading
+
+        def scan_and_update():
+            """Background thread function."""
+            server_logs = self._scan_for_server_logs()
+            # Emit signal to update UI on main thread
+            self._server_scan_complete.emit(server_logs)
+
+        thread = threading.Thread(target=scan_and_update, daemon=True)
+        thread.start()
+        logger.debug("Started async server scan in background")
+
+    @pyqtSlot(list)
+    def _on_server_scan_complete(self, server_logs: List[LogFileInfo]) -> None:
+        """Handle server scan completion on UI thread."""
+        if not server_logs:
+            logger.debug("No server logs found during scan")
+            return
+
+        # Get current logs from dropdown
+        current_logs = []
+        for i in range(self.log_selector.count()):
+            log_info = self.log_selector.itemData(i)
+            if log_info:
+                current_logs.append(log_info)
+
+        # Add server logs
+        current_logs.extend(server_logs)
+
+        # Repopulate dropdown with all logs
+        self.populate_log_dropdown(current_logs)
+
+        logger.info(f"Added {len(server_logs)} server logs to dropdown")
 
     def _scan_for_server_logs(self) -> List[LogFileInfo]:
         """
@@ -975,6 +1067,9 @@ class LogViewerWindow(QMainWindow):
             log_path: Path to log file to display
         """
         try:
+            # Disable highlighter FIRST to prevent blocking during content change
+            self.highlighter.setDocument(None)
+
             # Stop current tailing
             if self.tail_timer and self.tail_timer.isActive():
                 self.tail_timer.stop()
@@ -998,9 +1093,6 @@ class LogViewerWindow(QMainWindow):
                 logger.debug(f"Large log file ({file_size} bytes), loading asynchronously")
                 self.log_display.setText(f"Loading large log file ({file_size // 1024} KB)...")
 
-                # Temporarily disable highlighter to prevent blocking during setText
-                self.highlighter.setDocument(None)
-
                 # Create and start async loader
                 self.file_loader = LogFileLoader(log_path)
                 self.file_loader.content_loaded.connect(self._on_file_loaded)
@@ -1019,14 +1111,23 @@ class LogViewerWindow(QMainWindow):
     def _on_file_loaded(self, content: str) -> None:
         """Handle file content loaded (either sync or async)."""
         try:
+            # Clear any existing Pygments cache
+            self.highlighter.clear_pygments_cache()
+
+            # Disable highlighter before setText (faster)
+            self.highlighter.setDocument(None)
+
             # Set content
             self.log_display.setText(content)
 
-            # Re-enable highlighter
-            self.highlighter.setDocument(self.log_display.document())
-
             # Update file position
             self.current_file_position = len(content.encode('utf-8'))
+
+            # Re-enable highlighter immediately (without Pygments, it's fast)
+            self.highlighter.setDocument(self.log_display.document())
+
+            # Start async Pygments highlighting in background
+            self._start_async_highlighting(content)
 
             # Start tailing if not paused
             if not self.tailing_paused and self.current_log_path:
@@ -1040,6 +1141,26 @@ class LogViewerWindow(QMainWindow):
 
         except Exception as e:
             logger.error(f"Error displaying loaded content: {e}")
+
+    def _start_async_highlighting(self, content: str) -> None:
+        """Start async Pygments highlighting in background thread."""
+        # Stop any existing highlighter
+        if self.async_highlighter and self.async_highlighter.isRunning():
+            self.async_highlighter.wait()
+
+        # Create and start new async highlighter with Pygments style
+        # Use 'monokai' for dark theme - looks great and has good contrast
+        self.async_highlighter = AsyncHighlighter(content, pygments_style='monokai')
+        self.async_highlighter.highlighting_complete.connect(self._on_highlighting_complete)
+        self.async_highlighter.start()
+        logger.debug("Started async Pygments highlighting with monokai style")
+
+    @pyqtSlot(dict)
+    def _on_highlighting_complete(self, cache: dict) -> None:
+        """Handle async highlighting completion."""
+        # Update highlighter cache
+        self.highlighter.set_pygments_cache(cache)
+        logger.debug(f"Async highlighting complete - cached {len(cache)} lines")
 
     def _on_file_load_failed(self, error_msg: str) -> None:
         """Handle file load failure."""

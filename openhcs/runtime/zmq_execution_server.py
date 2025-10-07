@@ -15,6 +15,8 @@ import uuid
 import zmq
 import threading
 import queue
+import os
+import signal
 from pathlib import Path
 from typing import Any, Dict, Optional
 from openhcs.runtime.zmq_base import ZMQServer
@@ -25,11 +27,11 @@ logger = logging.getLogger(__name__)
 class ZMQExecutionServer(ZMQServer):
     """
     ZMQ-based execution server for OpenHCS pipelines.
-    
+
     Receives pipeline code and config code via control channel,
     executes pipelines, and streams progress via data channel.
     """
-    
+
     def __init__(self, port: int = 7777, host: str = '*', log_file_path: Optional[str] = None):
         """
         Initialize execution server.
@@ -48,9 +50,26 @@ class ZMQExecutionServer(ZMQServer):
     def _create_pong_response(self) -> Dict[str, Any]:
         """Create pong response with execution server info."""
         response = super()._create_pong_response()
+
+        # Count only RUNNING executions
+        running_count = sum(1 for record in self.active_executions.values()
+                           if record.get('status') == 'running')
+
+        # Get list of running execution details for UI display
+        running_executions = []
+        for exec_id, record in self.active_executions.items():
+            if record.get('status') == 'running':
+                running_executions.append({
+                    'execution_id': exec_id,
+                    'plate_id': record.get('plate_id', 'unknown'),
+                    'start_time': record.get('start_time', 0),
+                    'elapsed': time.time() - record.get('start_time', 0) if record.get('start_time') else 0
+                })
+
         response.update({
             'server': 'ZMQExecutionServer',
-            'active_executions': len(self.active_executions),
+            'active_executions': running_count,
+            'running_executions': running_executions,  # Detailed list for UI
             'uptime': time.time() - self.start_time if self.start_time else 0
         })
         if self.log_file_path:
@@ -95,8 +114,9 @@ class ZMQExecutionServer(ZMQServer):
         Supported message types:
         - execute: Execute pipeline
         - status: Query execution status
-        - cancel: Cancel execution (not yet implemented)
-        - shutdown: Graceful shutdown request
+        - cancel: Cancel execution (kills workers for specific execution)
+        - shutdown: Graceful shutdown (kills all workers, server stays alive)
+        - force_shutdown: Force shutdown (kills workers AND server)
         """
         msg_type = message.get('type')
 
@@ -108,6 +128,8 @@ class ZMQExecutionServer(ZMQServer):
             return self._handle_cancel(message)
         elif msg_type == 'shutdown':
             return self._handle_shutdown(message)
+        elif msg_type == 'force_shutdown':
+            return self._handle_force_shutdown(message)
         else:
             return {'status': 'error', 'message': f'Unknown message type: {msg_type}'}
     
@@ -179,10 +201,17 @@ class ZMQExecutionServer(ZMQServer):
                 }
                 logger.info(f"[{execution_id}] ✓ Completed in {record['end_time'] - record['start_time']:.1f}s")
             except Exception as e:
-                record['status'] = 'failed'
-                record['end_time'] = time.time()
-                record['error'] = str(e)
-                logger.error(f"[{execution_id}] ✗ Failed: {e}", exc_info=True)
+                # Check if this is a BrokenProcessPool due to intentional cancellation
+                from concurrent.futures.process import BrokenProcessPool
+                if isinstance(e, BrokenProcessPool) and record['status'] == 'cancelled':
+                    # This is expected - workers were killed intentionally
+                    logger.info(f"[{execution_id}] Execution cancelled - workers were terminated")
+                else:
+                    # Unexpected failure
+                    record['status'] = 'failed'
+                    record['end_time'] = time.time()
+                    record['error'] = str(e)
+                    logger.error(f"[{execution_id}] ✗ Failed: {e}", exc_info=True)
             finally:
                 # Clean up unpicklable objects from record
                 if 'orchestrator' in record:
@@ -237,34 +266,63 @@ class ZMQExecutionServer(ZMQServer):
             }
     
     def _handle_cancel(self, msg: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle cancellation request (not implemented - cancellation support removed)."""
+        """Handle cancellation request - kill worker processes for the execution."""
         execution_id = msg.get('execution_id')
-        logger.warning(f"Cancellation requested for {execution_id} but cancellation support is not implemented")
-        return {
-            'status': 'error',
-            'message': 'Cancellation support not implemented'
-        }
 
-    def _handle_shutdown(self, msg: Dict[str, Any]) -> Dict[str, Any]:
-        """Handle graceful shutdown request."""
-        logger.info("Shutdown requested via control channel")
-
-        # Check if there are active executions
-        if self.active_executions:
+        if not execution_id:
             return {
-                'type': 'shutdown_rejected',
                 'status': 'error',
-                'message': f'Cannot shutdown: {len(self.active_executions)} active executions',
-                'active_executions': list(self.active_executions.keys())
+                'message': 'Missing execution_id'
             }
 
-        # Request shutdown
-        self.request_shutdown()
+        if execution_id not in self.active_executions:
+            return {
+                'status': 'error',
+                'message': f'Execution {execution_id} not found'
+            }
+
+        logger.info(f"[{execution_id}] Cancellation requested - killing worker processes")
+
+        # Kill all worker processes spawned by this server
+        killed_count = self._kill_worker_processes()
+
+        # Mark execution as cancelled
+        record = self.active_executions[execution_id]
+        record['status'] = 'cancelled'
+        record['end_time'] = time.time()
+
+        logger.info(f"[{execution_id}] Cancelled - killed {killed_count} worker processes")
+
+        return {
+            'status': 'ok',
+            'message': f'Execution cancelled - killed {killed_count} worker processes',
+            'workers_killed': killed_count
+        }
+
+    def _cancel_all_executions(self) -> None:
+        """Mark all active executions as cancelled."""
+        for execution_id, record in self.active_executions.items():
+            if record['status'] == 'running':
+                record['status'] = 'cancelled'
+                record['end_time'] = time.time()
+                logger.info(f"[{execution_id}] Marked as cancelled")
+
+    def _handle_shutdown(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle graceful shutdown request - kills workers only, server stays alive.
+
+        This allows the server to remain available for new executions while
+        terminating any currently running workers.
+        """
+        logger.info("Shutdown requested via control channel - killing workers only")
+        killed_count = self._kill_worker_processes()
+        self._cancel_all_executions()
+        logger.info(f"Shutdown complete - killed {killed_count} workers, server remains alive")
 
         return {
             'type': 'shutdown_ack',
             'status': 'success',
-            'message': 'Server shutting down'
+            'message': f'Workers terminated ({killed_count} killed), server remains alive'
         }
 
     def _execute_pipeline(
@@ -524,4 +582,60 @@ class ZMQExecutionServer(ZMQServer):
             self.progress_queue.put_nowait(message)
         except queue.Full:
             logger.warning(f"Progress queue full, dropping update for {well_id}")
+
+    def _kill_worker_processes(self) -> int:
+        """Kill all worker processes spawned by this server using psutil."""
+        try:
+            import psutil
+        except ImportError:
+            logger.warning("psutil not available - cannot kill worker processes")
+            return 0
+
+        try:
+            current_process = psutil.Process(os.getpid())
+            children = current_process.children(recursive=True)
+
+            if not children:
+                return 0
+
+            logger.info(f"Killing {len(children)} worker processes")
+
+            # Terminate all children
+            for child in children:
+                try:
+                    child.terminate()
+                except (psutil.NoSuchProcess, Exception):
+                    pass
+
+            # Wait for graceful exit, then force kill stragglers
+            gone, alive = psutil.wait_procs(children, timeout=3)
+            for child in alive:
+                try:
+                    child.kill()
+                except (psutil.NoSuchProcess, Exception):
+                    pass
+
+            return len(children)
+
+        except Exception as e:
+            logger.error(f"Error killing worker processes: {e}")
+            return 0
+
+    def _handle_force_shutdown(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle force shutdown request - kills workers AND shuts down server.
+
+        This is the nuclear option that terminates everything.
+        """
+        logger.info("Force shutdown requested - killing workers and shutting down server")
+        killed_count = self._kill_worker_processes()
+        self._cancel_all_executions()
+        self.request_shutdown()
+        logger.info(f"Force shutdown complete - killed {killed_count} workers, server shutting down")
+
+        return {
+            'type': 'shutdown_ack',
+            'status': 'success',
+            'message': f'Force shutdown complete - killed {killed_count} workers, server shutting down'
+        }
 

@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QPushButton, QGroupBox, QMessageBox, QAbstractItemView
 )
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QThread
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ class ZMQServerManagerWidget(QWidget):
     server_killed = pyqtSignal(int)  # Emitted when server is killed (port)
     log_file_opened = pyqtSignal(str)  # Emitted when log file is opened (path)
     _scan_complete = pyqtSignal(list)  # Internal signal for async scan completion
+    _kill_complete = pyqtSignal(bool, str)  # Internal signal for async kill completion (success, message)
 
     def __init__(
         self,
@@ -121,6 +122,10 @@ class ZMQServerManagerWidget(QWidget):
             self.refresh_btn.setStyleSheet(self.style_generator.generate_button_style())
             self.quit_btn.setStyleSheet(self.style_generator.generate_button_style())
             self.force_kill_btn.setStyleSheet(self.style_generator.generate_button_style())
+
+        # Connect internal signals
+        self._scan_complete.connect(self._update_server_list)
+        self._kill_complete.connect(self._on_kill_complete)
     
     def refresh_servers(self):
         """Scan ports and refresh server list (async in background)."""
@@ -226,94 +231,174 @@ class ZMQServerManagerWidget(QWidget):
             # Build display text
             display_text = f"Port {port} - {status_icon}"
 
-            # Add extra info for execution servers
+            # Handle execution servers specially - show each running execution
             if server_type == 'ZMQExecutionServer':
-                active_execs = server.get('active_executions', 0)
-                if active_execs > 0:
-                    display_text = f"Port {port} - ⏳ {active_execs} active"
+                running_executions = server.get('running_executions', [])
 
-            # Create list item
-            item = QListWidgetItem(display_text)
-            item.setData(Qt.ItemDataRole.UserRole, server)
-            self.server_list.addItem(item)
+                if running_executions:
+                    # Show server entry
+                    server_text = f"Port {port} - Execution Server ({len(running_executions)} running)"
+                    server_item = QListWidgetItem(server_text)
+                    server_item.setData(Qt.ItemDataRole.UserRole, server)
+                    self.server_list.addItem(server_item)
+
+                    # Show each running execution as indented sub-item
+                    for exec_info in running_executions:
+                        exec_id = exec_info.get('execution_id', 'unknown')[:8]  # Short ID
+                        plate_id = exec_info.get('plate_id', 'unknown')
+                        elapsed = exec_info.get('elapsed', 0)
+
+                        # Format elapsed time
+                        if elapsed < 60:
+                            time_str = f"{elapsed:.0f}s"
+                        elif elapsed < 3600:
+                            time_str = f"{elapsed/60:.1f}m"
+                        else:
+                            time_str = f"{elapsed/3600:.1f}h"
+
+                        exec_text = f"  ⏳ {exec_id} - {plate_id} ({time_str})"
+                        exec_item = QListWidgetItem(exec_text)
+                        # Store execution info with server context
+                        exec_data = server.copy()
+                        exec_data['execution_id'] = exec_info.get('execution_id')
+                        exec_item.setData(Qt.ItemDataRole.UserRole, exec_data)
+                        self.server_list.addItem(exec_item)
+                else:
+                    # No running executions - show idle server
+                    display_text = f"Port {port} - Execution Server (idle)"
+                    item = QListWidgetItem(display_text)
+                    item.setData(Qt.ItemDataRole.UserRole, server)
+                    self.server_list.addItem(item)
+            else:
+                # Other server types (Napari, etc.) - show normally
+                item = QListWidgetItem(display_text)
+                item.setData(Qt.ItemDataRole.UserRole, server)
+                self.server_list.addItem(item)
 
         logger.debug(f"Found {len(servers)} ZMQ servers")
+
+    @pyqtSlot(bool, str)
+    def _on_kill_complete(self, success: bool, message: str):
+        """Handle kill operation completion on UI thread."""
+        if not success:
+            QMessageBox.warning(self, "Kill Failed", message)
+        # Refresh list after kill
+        QTimer.singleShot(1000, self.refresh_servers)
     
     def quit_selected_servers(self):
-        """Gracefully quit selected servers."""
+        """Gracefully quit selected servers (async to avoid blocking UI)."""
         selected_items = self.server_list.selectedItems()
         if not selected_items:
             QMessageBox.warning(self, "No Selection", "Please select servers to quit.")
             return
-        
+
         # Confirm with user
         reply = QMessageBox.question(
             self,
             "Quit Confirmation",
             f"Gracefully quit {len(selected_items)} server(s)?\n\n"
-            "Servers with active executions will reject the shutdown request.",
+            "For execution servers: kills workers only, server stays alive.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes
         )
-        
+
         if reply != QMessageBox.StandardButton.Yes:
             return
-        
-        # Kill each selected server
-        from openhcs.runtime.zmq_base import ZMQClient
-        
+
+        # Collect ports to kill
+        ports_to_kill = []
         for item in selected_items:
             server = item.data(Qt.ItemDataRole.UserRole)
             port = server.get('port')
-            
             if port:
-                success = ZMQClient.kill_server_on_port(port, graceful=True)
-                if success:
-                    logger.info(f"Quit server on port {port}")
-                    self.server_killed.emit(port)
-                else:
-                    logger.warning(f"Failed to quit server on port {port}")
-        
-        # Refresh list after a delay
-        QTimer.singleShot(1000, self.refresh_servers)
+                ports_to_kill.append(port)
+
+        # Kill in background thread to avoid blocking UI
+        import threading
+
+        def kill_servers():
+            from openhcs.runtime.zmq_base import ZMQClient
+            failed_ports = []
+
+            for port in ports_to_kill:
+                try:
+                    success = ZMQClient.kill_server_on_port(port, graceful=True)
+                    if success:
+                        logger.info(f"Quit server on port {port}")
+                        self.server_killed.emit(port)
+                    else:
+                        failed_ports.append(port)
+                        logger.warning(f"Failed to quit server on port {port}")
+                except Exception as e:
+                    failed_ports.append(port)
+                    logger.error(f"Error quitting server on port {port}: {e}")
+
+            # Emit completion signal
+            if failed_ports:
+                self._kill_complete.emit(False, f"Failed to quit servers on ports: {failed_ports}")
+            else:
+                self._kill_complete.emit(True, "All servers quit successfully")
+
+        thread = threading.Thread(target=kill_servers, daemon=True)
+        thread.start()
     
     def force_kill_selected_servers(self):
-        """Force kill selected servers without verification."""
+        """Force kill selected servers (async to avoid blocking UI)."""
         selected_items = self.server_list.selectedItems()
         if not selected_items:
             QMessageBox.warning(self, "No Selection", "Please select servers to force kill.")
             return
-        
+
         # Confirm with user
         reply = QMessageBox.question(
             self,
             "Force Kill Confirmation",
-            f"Force kill {len(selected_items)} server(s) without verification?\n\n"
-            "This will immediately kill any process listening on the selected ports.",
+            f"Force kill {len(selected_items)} server(s)?\n\n"
+            "For execution servers: kills workers AND server.\n"
+            "For Napari viewers: kills the viewer process.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
-        
+
         if reply != QMessageBox.StandardButton.Yes:
             return
-        
-        # Kill each selected server
-        from openhcs.runtime.zmq_base import ZMQClient
-        
+
+        # Collect ports to kill
+        ports_to_kill = []
         for item in selected_items:
             server = item.data(Qt.ItemDataRole.UserRole)
             port = server.get('port')
-            
             if port:
-                success = ZMQClient.kill_server_on_port(port, graceful=False)
-                if success:
-                    logger.info(f"Force killed server on port {port}")
-                    self.server_killed.emit(port)
-                else:
-                    logger.warning(f"Failed to force kill server on port {port}")
-        
-        # Refresh list after a delay
-        QTimer.singleShot(1000, self.refresh_servers)
+                ports_to_kill.append(port)
+
+        # Kill in background thread to avoid blocking UI
+        import threading
+
+        def kill_servers():
+            from openhcs.runtime.zmq_base import ZMQClient
+            failed_ports = []
+
+            for port in ports_to_kill:
+                try:
+                    success = ZMQClient.kill_server_on_port(port, graceful=False)
+                    if success:
+                        logger.info(f"Force killed server on port {port}")
+                        self.server_killed.emit(port)
+                    else:
+                        failed_ports.append(port)
+                        logger.warning(f"Failed to force kill server on port {port}")
+                except Exception as e:
+                    failed_ports.append(port)
+                    logger.error(f"Error force killing server on port {port}: {e}")
+
+            # Emit completion signal
+            if failed_ports:
+                self._kill_complete.emit(False, f"Failed to force kill servers on ports: {failed_ports}")
+            else:
+                self._kill_complete.emit(True, "All servers force killed successfully")
+
+        thread = threading.Thread(target=kill_servers, daemon=True)
+        thread.start()
     
     def _on_item_double_clicked(self, item: QListWidgetItem):
         """Handle double-click on server item - open log file."""
