@@ -3,7 +3,9 @@ Basic Workflow: Stitching Images
 
 This guide walks you through the process of stitching microscope images using OpenHCS. We'll use a practical example with sample data to demonstrate each step, from adding your plate to viewing the final stitched image.
 
-----------------------------
+
+While parameters may vary based on your specific experiment and imaging setup, this guide provides a foundational understanding of the stitching workflow in OpenHCS. You can adapt this example pipeline with minimal difficulty for most common microscopy setups.
+
 
 In this guide, we will use sample microscope data from a neurite outgrowth assay. The data is available for download from this link: <!placeholder for link to sample data>.
 
@@ -17,11 +19,14 @@ Step 1: Adding a Plate
 
 In microscopy, a "plate" refers to a sample holder containing multiple wells (like a 96-well plate used in experiments). Each well may contain multiple images (or "fields") taken at different positions. OpenHCS organizes your images based on this plate structure.
 
-***Supported plate formats:***
+**Supported plate formats:**
 
 OpenHCS currently supports:
+
 - ImageXpress plate format
+
 - Opera Phenix plate format
+
 - OpenHCS's native ZARR format - a flexible format for storing large image datasets, that can be generated using OpenHCS
 
 The plate provided in the example dataset is a ZARR plate. The steps remain the same for other supported formats.
@@ -49,7 +54,7 @@ The plate provided in the example dataset is a ZARR plate. The steps remain the 
 Step 2: Setting up a Stitching Pipeline
 ---------------------------------------
 
-Once you learn more about OpenHCS pipelines, you can create your own stitching pipelines. For now, we'll use a pipeline with values tuned for this experiment.
+Once you learn more about OpenHCS pipelines, you can create your own stitching pipelines. For now, we'll use a pipeline with values tuned for this experiment. This pipeline can be adapted for most common multi-well microscopy setups with minimal changes.
 
 
 **Loading a Pipeline from Disk**
@@ -64,20 +69,17 @@ If you already have a stitching pipeline:
 3. The pipeline will load with all its steps and settings.
 
 **Understanding Pipelines, Steps, and Functions**
-```````````````````````````````
+----------------------------------------------------
 
 **What is a pipeline?**
-----------------------
+``````````````````````````````````````
 
 A pipeline is a sequence of steps that process your images in a specific order. Think of it like a laboratory protocol:
-
-- **Laboratory protocol example:** Fix cells → Permeabilize → Block → Add antibodies → Wash → Image
-- **Stitching pipeline example:** Load images → Find overlaps → Align tiles → Blend edges → Create final image
 
 A step in OpenHCS is a single operation. This doesn't mean they only do one thing, however. Many steps perform multiple operations. Open the "Initial Processing" by clicking on it, and then clicking on "Edit" so we can take a deeper look.
 
 **Steps and the Step Editor**
------------------------------
+```````````````````````````````
 
 There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Lets look at step settings for now.
 
@@ -90,13 +92,32 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 
    - Typical image microscopy plates have many "dimensions", such like which well they came from, which site in the well, which channel (DAPI, FITC, TL-20), which timepoint (for live imaging), or which z dimension it was on (for 3D image, commonly reffered to as a "z-slice   ").
   
-   - Variable components let you choose which of these dimensions should define separate groups of images. Each group is then processed independently.
-  
-   - In this example, the variable component is the site. This means that each site in the well will be processed separately.
+   - OpenHCS groups images into "piles" based on the variable components you select. Each pile is processed separately. 
+   
+   - The variable component you choose determines which variable changes within a pile. All other dimensions (not selected as variable components) remain the same within that pile.
 
+   - OpenHCS will create a separate pile for every unique combination of the non-variable dimensions.
 
-   If that doesn't make sense, think about it this way: Imagine you have a stack of exam papers from multiple classes, and each paper is labeled with both the class and the student’s seat number. If you group the papers by class, all the papers from Class A go into one pile, Class B into another, and so on — this is similar to setting Well as the variable component in OpenHCS. On the other hand, if you group the papers by seat number, all students who sat in Seat 1 — whether in Class A, B, or C — go into a single pile, all students in Seat 2 go into another pile, and so on. This is analogous to setting Site as the variable component, where all images from the same site number, across all wells, are grouped together. In both cases, the grouping determines how the data are split before any further processing. It might seem unusual to group the tests by seat number, but in some scenarios, it makes sense to analyze data based on a specific variable rather than the more obvious one. For our image processing, we want to handle each site individally because stitching requires spatial continuity - you don’t want to mix tiles from different wells or experimental conditions. So setting Site as the variable component ensures that each site’s tiles are processed as their own unit, rather than combining unrelated fields.
+   - In this example, the variable component is the site. The other dimensions are well and channel. This means that for each well and channel combination, there will be a seperate pile, and within each pile, the only difference between images is the site. So, for well A1 and channel DAPI, there will be a pile with an image for each site. There will be another pile for well A1 and channel FITC, again with images for each site, and so on.
+    .. dropdown:: Extra help
 
+      If that doesn't make sense, think about it this way: Imagine you're a teacher with exam papers from multiple classes (Class A, B, C), 
+      multiple sections (Math, Science, English), multiple time periods (Morning, Evening), and multiple seat numbers (1-30) in each class.
+      
+      If you select "Time period" as your Variable Component:
+      
+      - You'd create separate piles for each class, section and seat number combination
+      - Within each pile, all papers will have the same class, subject, and seat number — only the time period will differ.
+      - For example: One pile might have all papers from Class A, Seat #1, across all sessions
+      - Another pile would have Science papers from Class B, seat #15, and so on.
+      
+      
+      In our microscopy example where "site" is the Variable Component:
+
+      - We create separate processing groups where only the site varies
+      - Each group contains images from all sites of a specific channel of a specific well
+      - This is done because sometimes the processing we want to do (like stitching) needs to consider all sites together for each well and channel. Or, we might want to have our variable component be channel so that we can compare how different fluorescence markers look in the same well and site.
+   
 3. **Group By**
   
    - This tells OpenHCS how to treat variations inside each group.
@@ -105,14 +126,19 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
   
    - For example, in this example we want to process each channel differently: our DAPI and FITC fluorescence channels need different filtering than our TL-20 channel. So we “Group By” channel.
   
-   - Important: Group By must be different from Variable Components. That’s because once you split images into groups by a certain dimension, there’s only one value of that dimension in each group, so it doesn’t make sense to vary it again.
-
-
-   If that doesnt make sense, think about it this way: Imagine you have the aforementioned exam papers, but you decided to be extra mean this year and have multiple sections in the exam paper, testing multiple subjects. Each paper has scores for Math, Science, and English. You want to process each subject individually because the grading rules differ. So, you “Group By” subject within each class pile, and use a different answer key to mark each test. Similarily, in OpenHCS, you might want to vary your analysis based on which fluorescence markers you stained with.
    
-   Whats important is that you cannot Group By the same thing you used for Variable Components. If you already set your variable component so that you seperated the papers by class, each class pile only contains papers from that one class — there’s no variation left in class within the pile. So trying to "vary" your grading - i.e. group by class again would make no sense; there’s only one class in each pile, just like in OpenHCS, where you can’t vary a dimension that has already been used to define the groups.
+ .. dropdown:: Extra help
 
-Variable components and group by settings are used to process the entire plate but dynamically adjust to the different variables in the dataset. This is especially useful for large datasets with many variables. You should consider your experimental setup and your analysis goal in order to determine how to group your data.
+      If that doesn't make sense, think about it this way: 
+      
+      Imagine you're a teacher with exam papers from multiple classes (Class A, B, C), multiple sections (Math, Science, English), multiple time periods (Morning, Evening) , and multiple seat numbers (1-30) in each class.
+      
+      You want to process each subject individually because the grading rules differ. So, you “Group By” subject within each class pile, and use a different answer key to mark each test. 
+      
+      Similarly, in OpenHCS, you might want to vary your analysis based on which fluorescence markers you stained with.
+
+
+Variable components and group by settings are used to process the entire plate but dynamically adjust to the different variables in the dataset. This is especially useful for large datasets with many variables. You should consider your experimental setup and your analysis goal in order to determine how to group your data. This functionality works for all different dimensions specified.
 
 4. **Input Source**
 
@@ -131,7 +157,7 @@ Variable components and group by settings are used to process the entire plate b
 
 7. **Napari/Fiji Streaming Config**
 
-   - This allows you to visualize the results of this step in Napari or Fiji. We won't go into detail here, but you can set it up if you want to visualize the results of this step.
+   - This allows you to visualize the results of this step in Napari or Fiji. We won't go into detail here, but you can set it up if you want to visualize the results of this step. It has the same inheritance behavior as the materialization config.
 
 
 Now, click on the "Function Pattern" tab at the top of the window.
@@ -144,6 +170,7 @@ A step consists of a "Function pattern" which is a series of operations each ste
 <!-- IMAGE: Screenshot of Step Editor with "Function Pattern" tab highlighted, and the different parts of the windows explained briefly   -->
 
 You can add, remove, or edit functions as needed. For now, we won't change anything here, but this step is just processing the images by running certain filters on them to prepare them for the image stitching algorithm. However, at the left of the top bar, you can see that you can change the selected channels, and hit the arrows to cycle through the channels. This is because we set our "Group By" to channel, so we can see how this step will process each channel differently.
+In this case, the DAPI and FITC channels use a "TopHat" filter as their second function, while the TL-20 channel uses a "Sobel" filter. 
 
 
 **Basic Stitching Pipeline Overview**
@@ -166,6 +193,7 @@ Hit save and close the step editor. Now, lets take a look at the entire pipeline
 - This is where the actual stitching calculation happens
 - The algorithm finds how your image tiles overlap
 - It calculates the exact position where each tile should be placeholder
+- It has its variable component set to site, so it looks at each well and finds the positions for all sites in that well. (The channel component doesn't matter here since we are using the composite images from step 2, and so the channels have been "flattened" into one image).
 - Whats important to note is that this step doesn't output any images. It only outputs the positions of each tile, which are used in the next step.
 
 **Step 4: Re-processing**
