@@ -70,6 +70,7 @@ class PlateManagerWidget(QWidget):
     # Error handling signals (thread-safe error reporting)
     compilation_error = pyqtSignal(str, str)  # plate_name, error_message
     initialization_error = pyqtSignal(str, str)  # plate_name, error_message
+    execution_error = pyqtSignal(str)  # error_message
     
     def __init__(self, file_manager: FileManager, service_adapter,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
@@ -294,6 +295,7 @@ class PlateManagerWidget(QWidget):
         # Error handling signals for thread-safe error reporting
         self.compilation_error.connect(self._handle_compilation_error)
         self.initialization_error.connect(self._handle_initialization_error)
+        self.execution_error.connect(self._handle_execution_error)
     
     def handle_button_action(self, action: str):
         """
@@ -1135,7 +1137,8 @@ class PlateManagerWidget(QWidget):
 
         except Exception as e:
             logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
-            self.service_adapter.show_error_dialog(f"Failed to execute: {e}")
+            # Use signal for thread-safe error reporting
+            self.execution_error.emit(f"Failed to execute: {e}")
             self.execution_state = "idle"
             self.current_execution_id = None
             self.update_button_states()
@@ -1878,3 +1881,7 @@ class PlateManagerWidget(QWidget):
     def _handle_initialization_error(self, plate_name: str, error_message: str):
         """Handle initialization error on main thread (slot)."""
         self.service_adapter.show_error_dialog(f"Failed to initialize {plate_name}: {error_message}")
+
+    def _handle_execution_error(self, error_message: str):
+        """Handle execution error on main thread (slot)."""
+        self.service_adapter.show_error_dialog(error_message)
