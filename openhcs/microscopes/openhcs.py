@@ -39,6 +39,7 @@ class OpenHCSMetadataFields:
     WELLS: str = "wells"
     SITES: str = "sites"
     Z_INDEXES: str = "z_indexes"
+    TIMEPOINTS: str = "timepoints"
     OBJECTIVES: str = "objectives"
     ACQUISITION_DATETIME: str = "acquisition_datetime"
     PLATE_NAME: str = "plate_name"
@@ -252,6 +253,9 @@ class OpenHCSMetadataHandler(MetadataHandler):
 
     def get_z_index_values(self, plate_path: Union[str, Path], context: Optional[Any] = None) -> Optional[Dict[str, Optional[str]]]:
         return self._get_optional_metadata_dict(plate_path, FIELDS.Z_INDEXES)
+
+    def get_timepoint_values(self, plate_path: Union[str, Path], context: Optional[Any] = None) -> Optional[Dict[str, Optional[str]]]:
+        return self._get_optional_metadata_dict(plate_path, FIELDS.TIMEPOINTS)
 
     def get_objective_values(self, plate_path: Union[str, Path], context: Optional[Any] = None) -> Optional[Dict[str, Any]]:
         """Get objective lens information if available."""
