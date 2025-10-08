@@ -43,6 +43,58 @@ Key Design Principles
 **On-Demand Generation**
   Files created only when needed (e.g., derived plates)
 
+**Automatic Backend Selection**
+  OMERO plates automatically use ``omero_local`` for both read and write operations, ignoring user's materialization backend choice
+
+Automatic Backend Selection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Critical Design Rule**: OMERO plates MUST use ``omero_local`` backend for both input (read) and output (materialization). The system automatically enforces this regardless of user configuration.
+
+**Why This Matters**:
+
+- OMERO uses virtual paths like ``/omero/plate_123/`` that don't exist on the filesystem
+- Attempting to read/write using ``disk`` or ``zarr`` backends will fail with permission errors
+- OMERO output must be saved as FileAnnotations attached to OMERO objects, not as files
+
+**Automatic Override Logic**:
+
+The compiler automatically detects OMERO plates and overrides backend configuration:
+
+.. code-block:: python
+
+   # User configuration (will be overridden for OMERO)
+   vfs_config = VFSConfig(
+       read_backend=Backend.AUTO,              # Default
+       materialization_backend=MaterializationBackend.DISK  # Default
+   )
+
+   # Compiler detects OMERO plate and overrides BOTH backends
+   if microscope_type == 'omero':
+       vfs_config = VFSConfig(
+           read_backend=Backend.OMERO_LOCAL,              # Forced
+           materialization_backend=MaterializationBackend.OMERO_LOCAL  # Forced
+       )
+
+**Log Output**:
+
+.. code-block:: text
+
+   🔧 OMERO plate detected - overriding backends to omero_local
+      (read: auto → omero_local, materialization: disk → omero_local)
+
+**User Impact**:
+
+- Users don't need to configure backends for OMERO plates
+- System "just works" regardless of VFSConfig settings
+- Prevents common errors from trying to write to ``/omero/`` paths
+
+**Contrast with Other Microscopes**:
+
+- **ImageXpress/Opera Phenix**: Read from disk → Write to OpenHCS format (disk or zarr based on ``materialization_backend``)
+- **OpenHCS**: Read from zarr/disk (auto-detected from metadata) → Write to OpenHCS format (disk or zarr based on ``materialization_backend``)
+- **OMERO**: Read from omero_local → Write to omero_local (``materialization_backend`` choice ignored)
+
 VirtualBackend ABC
 ~~~~~~~~~~~~~~~~~~
 

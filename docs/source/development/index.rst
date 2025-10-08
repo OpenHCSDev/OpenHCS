@@ -37,6 +37,11 @@ Testing and CI
 
 Continuous integration and testing strategies.
 
+.. toctree::
+   :maxdepth: 1
+
+   omero_testing
+
 **CPU-Only Testing**: OpenHCS supports CPU-only mode for CI environments without GPU dependencies. See :doc:`../user_guide/cpu_only_mode` for configuration details.
 
 **CI Configuration Example**:

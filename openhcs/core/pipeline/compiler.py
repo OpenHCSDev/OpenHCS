@@ -265,19 +265,30 @@ class PipelineCompiler:
                     logger.debug(f"Input conversion to zarr enabled for first step: {first_step.name}")
 
         # === OMERO BACKEND AUTO-DETECTION ===
-        # If microscope type is OMERO, automatically override materialization backend to omero_local
-        # This prevents trying to create directories under /omero/ virtual paths
+        # If microscope type is OMERO, automatically override BOTH read and materialization backends to omero_local
+        # This prevents trying to read/write from/to /omero/ virtual paths using disk/zarr backends
+        # OMERO plates MUST use omero_local for both input and output, ignoring user's materialization_backend choice
         pipeline_config = orchestrator.pipeline_config
         # microscope_type is stored as a string, not enum
         if context.microscope_handler.microscope_type == 'omero':
-            current_backend = pipeline_config.vfs_config.materialization_backend
-            if current_backend != MaterializationBackend('omero_local'):
-                logger.info(f"🔧 OMERO plate detected - overriding materialization backend from {current_backend.value} to omero_local")
-                # Create new VFSConfig with omero_local backend
+            current_read = pipeline_config.vfs_config.read_backend
+            current_mat = pipeline_config.vfs_config.materialization_backend
+            needs_override = (
+                current_read != Backend('omero_local') or
+                current_mat != MaterializationBackend('omero_local')
+            )
+
+            if needs_override:
+                logger.info(
+                    f"🔧 OMERO plate detected - overriding backends to omero_local "
+                    f"(read: {current_read.value} → omero_local, materialization: {current_mat.value} → omero_local)"
+                )
+                # Create new VFSConfig with omero_local for both read and materialization
                 pipeline_config = dataclasses.replace(
                     pipeline_config,
                     vfs_config=dataclasses.replace(
                         pipeline_config.vfs_config,
+                        read_backend=Backend('omero_local'),
                         materialization_backend=MaterializationBackend('omero_local')
                     )
                 )

@@ -157,9 +157,84 @@ Server dies with parent process. Ideal for:
 
    client = ZMQExecutionClient(port=7777, persistent=False)
    client.connect()
-   
+
    # Server runs as multiprocessing.Process
    # Automatically cleaned up when client disconnects
+
+Server Monitoring
+-----------------
+
+Worker Process Tracking
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+The ZMQ execution server tracks worker processes spawned by the ProcessPoolExecutor and reports their status in pong responses. This enables real-time monitoring of pipeline execution.
+
+**Worker Information Provided:**
+
+- Process ID (PID)
+- Process status (running, sleeping, zombie, etc.)
+- CPU usage percentage
+- Memory usage (MB)
+- Process creation time
+
+**Implementation:**
+
+.. code-block:: python
+
+   # Server automatically tracks workers using psutil
+   # Client gets worker info via ping
+   server_info = client.get_server_info()
+
+   # Response includes worker details
+   {
+       'type': 'pong',
+       'ready': True,
+       'active_executions': 2,
+       'workers': [
+           {
+               'pid': 12345,
+               'status': 'running',
+               'cpu_percent': 95.2,
+               'memory_mb': 512.3,
+               'create_time': 1696800000.0
+           },
+           {
+               'pid': 12346,
+               'status': 'running',
+               'cpu_percent': 87.1,
+               'memory_mb': 498.7,
+               'create_time': 1696800001.0
+           }
+       ]
+   }
+
+**Hierarchical Display in UI:**
+
+The PyQt server manager widget displays workers hierarchically under their parent server:
+
+.. code-block:: text
+
+   Port 7777 - Execution Server    ✅ 2 exec    4 workers
+   ├── Worker PID 12345             ⚙️ running   CPU: 95.2% | Mem: 512MB
+   ├── Worker PID 12346             ⚙️ running   CPU: 87.1% | Mem: 499MB
+   ├── Worker PID 12347             ⚙️ running   CPU: 92.5% | Mem: 505MB
+   └── Worker PID 12348             ⚙️ running   CPU: 88.3% | Mem: 501MB
+
+**Worker Detection Logic:**
+
+The server uses ``psutil`` to identify worker processes:
+
+1. Get all descendant processes of the server
+2. Filter for Python processes
+3. Exclude infrastructure processes (resource_tracker, semaphore_tracker)
+4. Exclude Napari viewers (independent processes)
+5. Include ProcessPoolExecutor workers
+
+This ensures only actual pipeline workers are tracked, not helper processes or independent viewers.
+
+**Performance Impact:**
+
+Worker detection runs on every ping (typically every 3 seconds during UI refresh). The operation is fast (~1-2ms) and uses DEBUG-level logging to avoid log spam.
 
 Multi-Instance Support
 ----------------------

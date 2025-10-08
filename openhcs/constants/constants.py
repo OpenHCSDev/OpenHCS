@@ -233,8 +233,3 @@ MEMORY_TYPE_JAX = MemoryType.JAX.value
 MEMORY_TYPE_PYCLESPERANTO = MemoryType.PYCLESPERANTO.value
 
 DEFAULT_NUM_WORKERS = 1
-# Consolidated definition for number of workers
-DEFAULT_OUT_DIR_SUFFIX = "_out"
-DEFAULT_POSITIONS_DIR_SUFFIX = "_positions"
-DEFAULT_STITCHED_DIR_SUFFIX = "_stitched"
-DEFAULT_WORKSPACE_DIR_SUFFIX = "_workspace"

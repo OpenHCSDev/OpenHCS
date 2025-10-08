@@ -20,7 +20,7 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Set
 
-from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
+from openhcs.constants.constants import Backend, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.config_framework.global_config import set_current_global_config, get_current_global_config

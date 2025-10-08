@@ -36,10 +36,11 @@ Variable components tell OpenHCS how to group files for processing. They define 
    from openhcs.constants.constants import VariableComponents
 
    # Available variable components
-   VariableComponents.SITE      # Process each site separately
-   VariableComponents.CHANNEL   # Process each channel separately  
-   VariableComponents.Z_INDEX   # Process each Z-plane separately
-   VariableComponents.WELL      # Process each well separately
+   VariableComponents.SITE       # Process each site separately
+   VariableComponents.CHANNEL    # Process each channel separately
+   VariableComponents.Z_INDEX    # Process each Z-plane separately
+   VariableComponents.TIMEPOINT  # Process each timepoint separately
+   VariableComponents.WELL       # Process each well separately
 
 Most Common: Process Each Site Separately
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -97,6 +98,51 @@ Process Each Z-Plane Separately
    )
 
 **What this does**: Groups files by (well, site, channel) and processes each Z-plane separately.
+
+Process Each Timepoint Separately
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   # Process each timepoint independently for time series analysis
+   step = FunctionStep(
+       func=(track_cells_over_time, {}),
+       variable_components=[VariableComponents.TIMEPOINT],
+       name="cell_tracking"
+   )
+
+**What this does**: Groups files by (well, site, channel, z_index) and processes each timepoint separately.
+
+**Example grouping** (ImageXpress format):
+- Group 1: [A01_s1_w1_t001.tif] → Process timepoint 1
+- Group 2: [A01_s1_w1_t002.tif] → Process timepoint 2
+- Group 3: [A01_s1_w1_t003.tif] → Process timepoint 3
+
+**When to use**: Time series analysis, cell tracking, temporal dynamics studies.
+
+**Microscope Format Support:**
+
+- **ImageXpress**: ``_t001``, ``_t002``, etc. (e.g., ``A01_s1_w1_t003.tif``)
+- **Opera Phenix**: ``sk1``, ``sk2``, etc. (e.g., ``r01c01f01p01-ch1sk5.tif``)
+- **OMERO**: Timepoint dimension from OMERO metadata
+- **OpenHCS**: ``_t001``, ``_t002``, etc. (native format)
+
+**Accessing Timepoint Values:**
+
+All microscope handlers provide ``get_timepoint_values()`` to retrieve available timepoints:
+
+.. code-block:: python
+
+   from openhcs.microscopes import get_microscope_handler
+
+   handler = get_microscope_handler('/path/to/plate', microscope_type='imagexpress')
+
+   # Get all timepoints for a specific well
+   timepoints = handler.get_timepoint_values(well_id='A01')
+   # Returns: ['001', '002', '003', ...]
+
+   # Timepoint is now a first-class component dimension
+   # alongside channel, z-index, site, and well
 
 **When to use**: 3D imaging where you need to combine or analyze across Z-planes, such as creating maximum projections.
 
