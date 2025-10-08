@@ -15,6 +15,7 @@ class Microscope(Enum):
     OPENHCS = "openhcs"  # Added for the OpenHCS pre-processed format
     IMAGEXPRESS = "ImageXpress"
     OPERAPHENIX = "OperaPhenix"
+    OMERO = "omero"  # Added for OMERO virtual filesystem backend
 
 
 def get_openhcs_config():
@@ -161,6 +162,7 @@ class Backend(Enum):
     ZARR = "zarr"
     NAPARI_STREAM = "napari_stream"
     FIJI_STREAM = "fiji_stream"
+    OMERO_LOCAL = "omero_local"
 
 class FileFormat(Enum):
     TIFF = list(DEFAULT_IMAGE_EXTENSIONS)
@@ -169,7 +171,9 @@ class FileFormat(Enum):
     JAX = [".jax"]
     CUPY = [".cupy",".craw"]
     TENSORFLOW = [".tf"]
-    TEXT = [".txt",".csv",".json",".py",".md"]
+    JSON = [".json"]
+    CSV = [".csv"]
+    TEXT = [".txt", ".py", ".md"]
 
 DEFAULT_BACKEND = Backend.MEMORY
 REQUIRES_DISK_READ = "requires_disk_read"

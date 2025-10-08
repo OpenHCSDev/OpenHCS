@@ -402,20 +402,21 @@ def materialize_consolidated_results(
     data: pd.DataFrame,
     output_path: str,
     filemanager,
+    backend: str,
     well_id: str
 ) -> str:
     """Materialize consolidated results DataFrame to CSV using OpenHCS FileManager."""
     try:
         csv_content = data.to_csv(index=False)
-        
+
         # Remove existing file if present
-        if filemanager.exists(output_path, Backend.DISK.value):
-            filemanager.delete(output_path, Backend.DISK.value)
-        
-        filemanager.save(csv_content, output_path, Backend.DISK.value)
+        if filemanager.exists(output_path, backend):
+            filemanager.delete(output_path, backend)
+
+        filemanager.save(csv_content, output_path, backend)
         logger.info(f"Materialized consolidated results to {output_path}")
         return output_path
-        
+
     except Exception as e:
         logger.error(f"Failed to materialize consolidated results: {e}")
         raise

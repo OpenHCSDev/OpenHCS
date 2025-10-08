@@ -235,7 +235,8 @@ class FileManager:
 
 
     def list_files(self, directory: Union[str, Path], backend: str,
-                   pattern: str = None, extensions: Set[str] = None, recursive: bool = False) -> List[str]:
+                   pattern: str = None, extensions: Set[str] = None, recursive: bool = False,
+                   **kwargs) -> List[str]:
         """
         List all files in a directory using the specified backend.
 
@@ -246,17 +247,18 @@ class FileManager:
 
         Args:
             directory: Directory to search (str or Path)
-            backend: Backend to use for listing ('disk', 'memory', 'zarr') - POSITIONAL
+            backend: Backend to use for listing ('disk', 'memory', 'zarr', 'omero_local') - POSITIONAL
             pattern: Pattern to filter files (e.g., "*.txt") - can be keyword arg
             extensions: Set of file extensions to filter by - can be keyword arg
             recursive: Whether to search recursively - can be keyword arg
+            **kwargs: Backend-specific arguments (e.g., plate_id for OMERO)
 
         Returns:
             List of string paths for files found
 
         Raises:
             StorageResolutionError: If the backend is not supported
-            TypeError: If directory is not a valid path type
+            TypeError: If directory is not a valid path type or required kwargs missing
             PathMismatchError: If the path scheme doesn't match the expected scheme for the backend
         """
         # Get backend instance
@@ -264,7 +266,7 @@ class FileManager:
 
         # List files and apply natural sorting
         from openhcs.core.utils import natural_sort
-        files = backend_instance.list_files(str(directory), pattern, extensions, recursive)
+        files = backend_instance.list_files(str(directory), pattern, extensions, recursive, **kwargs)
         return natural_sort(files)
 
 

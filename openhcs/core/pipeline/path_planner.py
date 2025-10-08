@@ -222,7 +222,13 @@ class PathPlanner:
         """
 
 
-        base = Path(path_config.global_output_folder) if path_config.global_output_folder else plate_path.parent
+        # OMERO paths always use /omero as base, ignore global_output_folder
+        if str(plate_path).startswith("/omero/"):
+            base = plate_path.parent
+        elif path_config.global_output_folder:
+            base = Path(path_config.global_output_folder)
+        else:
+            base = plate_path.parent
 
         # Handle empty suffix differently for per-step vs pipeline-level materialization
         if not path_config.output_dir_suffix:

@@ -393,17 +393,18 @@ class PipelineOrchestrator(ContextProvider):
         # The orchestrator should not modify thread-local storage during initialization
         # Global config is already available through the dual-axis resolver fallback
 
-        # Validate plate_path if provided
+        # Convert to Path and validate
         if plate_path:
             plate_path = Path(plate_path)
 
-        if plate_path:
-            if not plate_path.is_absolute():
-                raise ValueError(f"Plate path must be absolute: {plate_path}")
-            if not plate_path.exists():
-                raise FileNotFoundError(f"Plate path does not exist: {plate_path}")
-            if not plate_path.is_dir():
-                raise NotADirectoryError(f"Plate path is not a directory: {plate_path}")
+            # Validate filesystem paths (skip for OMERO virtual paths)
+            if not str(plate_path).startswith("/omero/"):
+                if not plate_path.is_absolute():
+                    raise ValueError(f"Plate path must be absolute: {plate_path}")
+                if not plate_path.exists():
+                    raise FileNotFoundError(f"Plate path does not exist: {plate_path}")
+                if not plate_path.is_dir():
+                    raise NotADirectoryError(f"Plate path is not a directory: {plate_path}")
 
         # Initialize _plate_path_frozen first to allow plate_path to be set during initialization
         object.__setattr__(self, '_plate_path_frozen', False)
@@ -521,12 +522,13 @@ class PipelineOrchestrator(ContextProvider):
             )
 
             # Use the actual image directory returned by the microscope handler
+            # All handlers now return Path (including OMERO with virtual paths)
             self.input_dir = Path(actual_image_dir)
             logger.info(f"Set input directory to: {self.input_dir}")
 
             # Set workspace_path based on what the handler returned
             if actual_image_dir != self.plate_path:
-                # Handler created a workspace
+                # Handler created a workspace (or virtual path for OMERO)
                 self.workspace_path = Path(actual_image_dir).parent if Path(actual_image_dir).name != "workspace" else Path(actual_image_dir)
             else:
                 # Handler used plate directly (like OpenHCS)
@@ -887,7 +889,6 @@ class PipelineOrchestrator(ContextProvider):
                 logger.info("🔥 PRODUCTION MODE: Using ProcessPoolExecutor for true parallelism")
                 # CRITICAL FIX: Use _configure_worker_with_gpu to ensure workers have function registry
                 # Workers need the function registry to access decorated functions with memory types
-                from openhcs.config_framework.global_config import get_current_global_config
                 global_config = get_current_global_config(GlobalPipelineConfig)
                 global_config_dict = global_config.__dict__ if global_config else {}
 

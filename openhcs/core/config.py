@@ -79,6 +79,7 @@ class MaterializationBackend(Enum):
     AUTO = "auto"
     ZARR = "zarr"
     DISK = "disk"
+    OMERO_LOCAL = "omero_local"
 
 
 class WellFilterMode(Enum):

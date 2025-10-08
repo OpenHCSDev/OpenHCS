@@ -136,6 +136,7 @@ class OpenHCSExecutionServer:
         # Require plate_id and pipeline_code
         # Accept EITHER config_params (dict) OR config_code (Python code)
         # Optionally accept pipeline_config_code for separate PipelineConfig
+        # Optionally accept omero_config for OMERO mode
         if 'plate_id' not in msg or 'pipeline_code' not in msg:
             return {'status': 'error', 'message': 'Missing required fields: plate_id, pipeline_code'}
 
@@ -166,7 +167,8 @@ class OpenHCSExecutionServer:
                 msg.get('config_params'),  # May be None
                 msg.get('config_code'),    # May be None
                 msg.get('pipeline_config_code'),  # May be None - separate PipelineConfig code
-                msg.get('client_address')
+                msg.get('client_address'),
+                msg.get('omero_config')  # May be None - OMERO connection config
             )
             record['status'] = 'complete'
             record['end_time'] = time.time()
@@ -215,6 +217,41 @@ class OpenHCSExecutionServer:
             'omero_connected': self.omero_conn and self.omero_conn.isConnected()
         }
 
+    def _setup_omero_connection(self, omero_config: dict) -> None:
+        """
+        Connect to OMERO and set connection on backend.
+
+        Args:
+            omero_config: {"host": ..., "port": ..., "username": ..., "password": ...}
+        """
+        from omero.gateway import BlitzGateway
+        from openhcs.io.base import storage_registry
+        from openhcs.constants.constants import Backend
+
+        # Connect to OMERO
+        self.omero_conn = BlitzGateway(
+            omero_config['username'],
+            omero_config['password'],
+            host=omero_config['host'],
+            port=omero_config.get('port', 4064)
+        )
+
+        if not self.omero_conn.connect():
+            raise ConnectionError("Failed to connect to OMERO")
+
+        # Set connection on OMERO backend
+        omero_backend = storage_registry[Backend.OMERO_LOCAL.value]
+        omero_backend.omero_conn = self.omero_conn
+
+        logger.info(f"Connected to OMERO at {omero_config['host']}")
+
+    def _teardown_omero_connection(self) -> None:
+        """Close OMERO connection if open."""
+        if self.omero_conn:
+            self.omero_conn.close()
+            self.omero_conn = None
+            logger.info("Closed OMERO connection")
+
     def _execute_pipeline(
         self,
         execution_id: str,
@@ -223,13 +260,18 @@ class OpenHCSExecutionServer:
         config_params: Optional[dict],
         config_code: Optional[str],
         pipeline_config_code: Optional[str],
-        client_address: Optional[str] = None
+        client_address: Optional[str] = None,
+        omero_config: Optional[dict] = None
     ):
         """Execute pipeline: reconstruct from code, compile server-side, execute."""
         record = self.active_executions[execution_id]
         record['status'] = 'running'
 
         try:
+            # OMERO-specific setup
+            if omero_config:
+                self._setup_omero_connection(omero_config)
+
             logger.info(f"[{execution_id}] Starting execution for plate {plate_id}")
 
             # Reconstruct pipeline by executing the exact generated Python code (same as UI)
@@ -280,6 +322,12 @@ class OpenHCSExecutionServer:
                     ZarrConfig,
                     PipelineConfig,
                 )
+                from openhcs.constants.constants import Backend
+
+                # OMERO mode overrides
+                if omero_config:
+                    config_params['read_backend'] = Backend.OMERO_LOCAL.value
+                    config_params['materialization_backend'] = 'zarr'  # Force zarr for OMERO
 
                 global_config = GlobalPipelineConfig(
                     num_workers=config_params.get('num_workers', 4),
@@ -287,6 +335,7 @@ class OpenHCSExecutionServer:
                         output_dir_suffix=config_params.get('output_dir_suffix', '_output')
                     ),
                     vfs_config=VFSConfig(
+                        read_backend=Backend(config_params.get('read_backend', 'auto')),
                         materialization_backend=MaterializationBackend(
                             config_params.get('materialization_backend', 'disk')
                         )
@@ -325,7 +374,7 @@ class OpenHCSExecutionServer:
             ensure_global_config_context(type(global_config), global_config)
 
             orchestrator = PipelineOrchestrator(
-                plate_path=Path(str(plate_id)),
+                plate_path=Path(f"/omero/plate_{plate_id}"),
                 pipeline_config=pipeline_config
             )
             orchestrator.initialize()
@@ -366,6 +415,12 @@ class OpenHCSExecutionServer:
             record['end_time'] = time.time()
             record['error'] = str(e)
             logger.error(f"[{execution_id}] ✗ Failed: {e}", exc_info=True)
+            raise
+
+        finally:
+            # OMERO-specific teardown
+            if omero_config:
+                self._teardown_omero_connection()
 
     def _update_streaming_configs(self, pipeline_steps, client_address):
         """Update streaming configs to point to client."""

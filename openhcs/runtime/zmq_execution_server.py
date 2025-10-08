@@ -526,7 +526,7 @@ class ZMQExecutionServer(ZMQServer):
             self.send_progress_update(axis_id, step, status)
 
         orchestrator = PipelineOrchestrator(
-            plate_path=Path(str(plate_id)),
+            plate_path=Path(f"/omero/plate_{plate_id}"),
             pipeline_config=pipeline_config,
             progress_callback=progress_callback
         )

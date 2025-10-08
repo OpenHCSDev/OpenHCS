@@ -27,6 +27,7 @@ def materialize_hmm_analysis(
     hmm_analysis_data: Dict[str, Any],
     path: str,
     filemanager,
+    backend: str,
     **kwargs
 ) -> str:
     """
@@ -41,6 +42,7 @@ def materialize_hmm_analysis(
         hmm_analysis_data: The HMM analysis results dictionary
         path: Base path for output files (from special output path)
         filemanager: FileManager instance for consistent I/O
+        backend: Backend to use for materialization
         **kwargs: Additional materialization options
 
     Returns:
@@ -57,9 +59,10 @@ def materialize_hmm_analysis(
     graphml_path = f"{base_path}_graph.graphml"
     csv_path = f"{base_path}_edges.csv"
 
-    # Ensure output directory exists
+    # Ensure output directory exists for disk backend
     output_dir = Path(json_path).parent
-    filemanager.ensure_directory(str(output_dir), Backend.DISK.value)
+    if backend == Backend.DISK.value:
+        filemanager.ensure_directory(str(output_dir), backend)
 
     # 1. Save summary and metadata as JSON (primary output)
     summary_data = {
@@ -68,13 +71,15 @@ def materialize_hmm_analysis(
         'metadata': hmm_analysis_data['metadata']
     }
     json_content = json.dumps(summary_data, indent=2, default=str)
-    filemanager.save(json_content, json_path, Backend.DISK.value)
+    filemanager.save(json_content, json_path, backend)
 
     # 2. Save NetworkX graph as GraphML
     graph = hmm_analysis_data['graph']
     if graph and graph.number_of_nodes() > 0:
         # Use direct file I/O for GraphML (NetworkX doesn't support string I/O)
-        nx.write_graphml(graph, graphml_path)
+        # Note: NetworkX requires actual file path, not compatible with OMERO backend
+        if backend == Backend.DISK.value:
+            nx.write_graphml(graph, graphml_path)
 
         # 3. Save edge data as CSV
         if graph.number_of_edges() > 0:
@@ -90,20 +95,19 @@ def materialize_hmm_analysis(
 
             edge_df = pd.DataFrame(edge_data)
             csv_content = edge_df.to_csv(index=False)
-            filemanager.save(csv_content, csv_path, Backend.DISK.value)
+            filemanager.save(csv_content, csv_path, backend)
 
     return json_path
 
 
-def materialize_trace_visualizations(data: List[np.ndarray], path: str, filemanager) -> str:
+def materialize_trace_visualizations(data: List[np.ndarray], path: str, filemanager, backend: str) -> str:
     """Materialize trace visualizations as individual TIFF files."""
 
     if not data:
         # Create empty summary file to indicate no visualizations were generated
         summary_path = path.replace('.pkl', '_trace_summary.txt')
         summary_content = "No trace visualizations generated (return_trace_visualizations=False)\n"
-        from openhcs.constants.constants import Backend
-        filemanager.save(summary_content, summary_path, Backend.DISK.value)
+        filemanager.save(summary_content, summary_path, backend)
         return summary_path
 
     # Generate output file paths based on the input path

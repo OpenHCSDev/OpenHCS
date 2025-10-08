@@ -50,15 +50,27 @@ def _generate_materialized_paths(memory_paths: List[str], step_output_dir: Path,
 def _save_materialized_data(filemanager, memory_data: List, materialized_paths: List[str],
                            materialized_backend: str, step_plan: Dict, context, axis_id: str) -> None:
     """Save data to materialized location using appropriate backend."""
+
+    # Build kwargs with parser metadata (all backends receive it)
+    save_kwargs = {
+        'parser_name': context.microscope_handler.parser.__class__.__name__,
+        'microscope_type': context.microscope_handler.microscope_type
+    }
+
     if materialized_backend == Backend.ZARR.value:
         n_channels, n_z, n_fields = _calculate_zarr_dimensions(materialized_paths, context.microscope_handler)
         row, col = context.microscope_handler.parser.extract_component_coordinates(axis_id)
-        filemanager.save_batch(memory_data, materialized_paths, materialized_backend,
-                             chunk_name=axis_id, zarr_config=step_plan.get("zarr_config"),
-                             n_channels=n_channels, n_z=n_z, n_fields=n_fields,
-                             row=row, col=col)
-    else:
-        filemanager.save_batch(memory_data, materialized_paths, materialized_backend)
+        save_kwargs.update({
+            'chunk_name': axis_id,
+            'zarr_config': step_plan.get("zarr_config"),
+            'n_channels': n_channels,
+            'n_z': n_z,
+            'n_fields': n_fields,
+            'row': row,
+            'col': col
+        })
+
+    filemanager.save_batch(memory_data, materialized_paths, materialized_backend, **save_kwargs)
 
 
 
@@ -942,10 +954,21 @@ class FunctionStep(AbstractStep):
                 n_channels, n_z, n_fields = _calculate_zarr_dimensions(memory_paths, context.microscope_handler)
                 row, col = context.microscope_handler.parser.extract_component_coordinates(axis_id)
                 filemanager.ensure_directory(step_output_dir, write_backend)
-                filemanager.save_batch(memory_data, memory_paths, write_backend,
-                                     chunk_name=axis_id, zarr_config=step_plan["zarr_config"],
-                                     n_channels=n_channels, n_z=n_z, n_fields=n_fields,
-                                     row=row, col=col)
+
+                # Build save kwargs with parser metadata for all backends
+                save_kwargs = {
+                    'chunk_name': axis_id,
+                    'zarr_config': step_plan["zarr_config"],
+                    'n_channels': n_channels,
+                    'n_z': n_z,
+                    'n_fields': n_fields,
+                    'row': row,
+                    'col': col,
+                    'parser_name': context.microscope_handler.parser.__class__.__name__,
+                    'microscope_type': context.microscope_handler.microscope_type
+                }
+
+                filemanager.save_batch(memory_data, memory_paths, write_backend, **save_kwargs)
 
             # 📄 PER-STEP MATERIALIZATION: Additional materialized output if configured
             if "materialized_output_dir" in step_plan:
@@ -991,31 +1014,36 @@ class FunctionStep(AbstractStep):
             # Track which backend was actually used for writing files
             actual_write_backend = step_plan['write_backend']
 
-            from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
-            metadata_generator = OpenHCSMetadataGenerator(context.filemanager)
+            # Only create OpenHCS metadata for disk/zarr backends, not OMERO
+            # OMERO has its own metadata system and doesn't use openhcs_metadata.json
+            if actual_write_backend not in [Backend.OMERO_LOCAL.value, Backend.MEMORY.value]:
+                from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
+                metadata_generator = OpenHCSMetadataGenerator(context.filemanager)
 
-            # Main step output metadata
-            is_pipeline_output = (actual_write_backend != Backend.MEMORY.value)
-            metadata_generator.create_metadata(
-                context,
-                step_plan['output_dir'],
-                actual_write_backend,
-                is_main=is_pipeline_output,
-                plate_root=step_plan['output_plate_root'],
-                sub_dir=step_plan['sub_dir']
-            )
-
-            # 📄 MATERIALIZED METADATA: Create metadata for materialized directory if it exists
-            if 'materialized_output_dir' in step_plan:
-                materialized_backend = step_plan.get('materialized_backend', actual_write_backend)
+                # Main step output metadata
+                is_pipeline_output = (actual_write_backend != Backend.MEMORY.value)
                 metadata_generator.create_metadata(
                     context,
-                    step_plan['materialized_output_dir'],
-                    materialized_backend,
-                    is_main=False,
-                    plate_root=step_plan['materialized_plate_root'],
-                    sub_dir=step_plan['materialized_sub_dir']
+                    step_plan['output_dir'],
+                    actual_write_backend,
+                    is_main=is_pipeline_output,
+                    plate_root=step_plan['output_plate_root'],
+                    sub_dir=step_plan['sub_dir']
                 )
+
+                # 📄 MATERIALIZED METADATA: Create metadata for materialized directory if it exists
+                if 'materialized_output_dir' in step_plan:
+                    materialized_backend = step_plan['materialized_backend']
+                    # Only create metadata if materialized backend is also disk/zarr
+                    if materialized_backend not in [Backend.OMERO_LOCAL.value, Backend.MEMORY.value]:
+                        metadata_generator.create_metadata(
+                            context,
+                            step_plan['materialized_output_dir'],
+                            materialized_backend,
+                            is_main=False,
+                            plate_root=step_plan['materialized_plate_root'],
+                            sub_dir=step_plan['materialized_sub_dir']
+                        )
 
             #  SPECIAL DATA MATERIALIZATION
             special_outputs = step_plan.get('special_outputs', {})
@@ -1023,7 +1051,8 @@ class FunctionStep(AbstractStep):
             logger.debug(f"🔍 MATERIALIZATION: special_outputs is empty? {not special_outputs}")
             if special_outputs:
                 logger.info(f"🔬 MATERIALIZATION: Starting materialization for {len(special_outputs)} special outputs")
-                self._materialize_special_outputs(filemanager, step_plan, special_outputs)
+                # Use actual_write_backend for special outputs (they go to same location as main output)
+                self._materialize_special_outputs(filemanager, step_plan, special_outputs, actual_write_backend)
                 logger.info(f"🔬 MATERIALIZATION: Completed materialization")
             else:
                 logger.debug(f"🔍 MATERIALIZATION: No special outputs to materialize")
@@ -1076,9 +1105,10 @@ class FunctionStep(AbstractStep):
             output_dir: Output directory path where metadata should be written
             write_backend: Backend being used for the write (disk/zarr)
         """
-        # Check if this is a materialization write (disk/zarr) - memory writes don't need metadata
-        if write_backend == Backend.MEMORY.value:
-            logger.debug(f"Skipping metadata creation (memory write)")
+        # Only create OpenHCS metadata for disk/zarr backends
+        # OMERO has its own metadata system, memory doesn't need metadata
+        if write_backend in [Backend.MEMORY.value, Backend.OMERO_LOCAL.value]:
+            logger.debug(f"Skipping metadata creation (backend={write_backend})")
             return
 
         logger.debug(f"Creating metadata for materialization write: {write_backend} -> {output_dir}")
@@ -1177,9 +1207,9 @@ class FunctionStep(AbstractStep):
         return backends
 
 
-    def _materialize_special_outputs(self, filemanager, step_plan, special_outputs):
+    def _materialize_special_outputs(self, filemanager, step_plan, special_outputs, backend):
         """Load special data from memory and call materialization functions."""
-        logger.debug(f"🔍 MATERIALIZE_METHOD: Processing {len(special_outputs)} special outputs")
+        logger.debug(f"🔍 MATERIALIZE_METHOD: Processing {len(special_outputs)} special outputs with backend={backend}")
 
         for output_key, output_info in special_outputs.items():
             logger.debug(f"🔍 MATERIALIZE_METHOD: Processing output_key: {output_key}")
@@ -1190,14 +1220,15 @@ class FunctionStep(AbstractStep):
 
             if mat_func:
                 path = output_info['path']
-                logger.info(f"🔬 MATERIALIZING: {output_key} from {path}")
+                logger.info(f"🔬 MATERIALIZING: {output_key} from {path} using backend={backend}")
 
                 try:
                     filemanager.ensure_directory(Path(path).parent, Backend.MEMORY.value)
                     special_data = filemanager.load(path, Backend.MEMORY.value)
                     logger.debug(f"🔍 MATERIALIZE_METHOD: Loaded special data type: {type(special_data)}")
 
-                    result_path = mat_func(special_data, path, filemanager)
+                    # Pass backend to materialization function
+                    result_path = mat_func(special_data, path, filemanager, backend)
                     logger.info(f"🔬 MATERIALIZED: {output_key} → {result_path}")
 
                 except Exception as e:

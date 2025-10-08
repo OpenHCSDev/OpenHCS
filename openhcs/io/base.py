@@ -65,6 +65,92 @@ class DataSink(ABC):
         pass
 
 
+class VirtualBackend(DataSink):
+    """
+    Abstract base for backends that provide virtual filesystem semantics.
+
+    Virtual backends generate file listings on-demand without real filesystem operations.
+    Examples: OMERO (generates filenames from plate structure), S3 (lists objects), HTTP APIs.
+
+    Virtual backends may require additional context via kwargs.
+    Backends MUST validate required kwargs and raise TypeError if missing.
+    """
+
+    @abstractmethod
+    def load(self, file_path: Union[str, Path], **kwargs) -> Any:
+        """
+        Load data from virtual path.
+
+        Args:
+            file_path: Virtual path to load
+            **kwargs: Backend-specific context (e.g., plate_id for OMERO)
+
+        Returns:
+            The loaded data
+
+        Raises:
+            FileNotFoundError: If the virtual path does not exist
+            TypeError: If required kwargs are missing
+            ValueError: If the data cannot be loaded
+        """
+        pass
+
+    @abstractmethod
+    def load_batch(self, file_paths: List[Union[str, Path]], **kwargs) -> List[Any]:
+        """
+        Load multiple virtual paths in a single batch operation.
+
+        Args:
+            file_paths: List of virtual paths to load
+            **kwargs: Backend-specific context
+
+        Returns:
+            List of loaded data objects in the same order as file_paths
+
+        Raises:
+            FileNotFoundError: If any virtual path does not exist
+            TypeError: If required kwargs are missing
+            ValueError: If any data cannot be loaded
+        """
+        pass
+
+    @abstractmethod
+    def list_files(self, directory: Union[str, Path], pattern: Optional[str] = None,
+                  extensions: Optional[Set[str]] = None, recursive: bool = False,
+                  **kwargs) -> List[str]:
+        """
+        Generate virtual file listing.
+
+        Args:
+            directory: Virtual directory path
+            pattern: Optional file pattern filter
+            extensions: Optional set of file extensions to filter
+            recursive: Whether to list recursively
+            **kwargs: Backend-specific context (e.g., plate_id for OMERO)
+
+        Returns:
+            List of virtual filenames
+
+        Raises:
+            TypeError: If required kwargs are missing
+            ValueError: If directory is invalid
+        """
+        pass
+
+    @property
+    def requires_filesystem_validation(self) -> bool:
+        """
+        Whether this backend requires filesystem validation.
+
+        Virtual backends return False - they don't have real filesystem paths.
+        Real backends return True - they need path validation.
+
+        Returns:
+            False for virtual backends
+        """
+        return False
+
+
 class StorageBackend(DataSink):
     """
     Abstract base class for persistent storage operations.
@@ -150,7 +236,8 @@ class StorageBackend(DataSink):
 
     @abstractmethod
     def list_files(self, directory: Union[str, Path], pattern: Optional[str] = None,
-                  extensions: Optional[Set[str]] = None, recursive: bool = False) -> List[Path]:
+                  extensions: Optional[Set[str]] = None, recursive: bool = False,
+                  **kwargs) -> List[Path]:
         """
         List files in a directory, optionally filtering by pattern and extensions.
 
@@ -160,6 +247,7 @@ class StorageBackend(DataSink):
             extensions: Optional set of file extensions to filter by (e.g., {'.tif', '.png'}).
                         Extensions should include the dot and are case-insensitive.
             recursive: Whether to search recursively.
+            **kwargs: Backend-specific arguments (unused for most backends)
 
         Returns:
             List of paths to matching files.
@@ -169,6 +257,19 @@ class StorageBackend(DataSink):
             FileNotFoundError: If the directory does not exist
         """
         pass
+
+    @property
+    def requires_filesystem_validation(self) -> bool:
+        """
+        Whether this backend requires filesystem validation.
+
+        Real filesystem backends return True - they need path validation.
+        Virtual backends return False - they don't have real filesystem paths.
+
+        Returns:
+            True for real filesystem backends
+        """
+        return True
 
     @abstractmethod
     def list_dir(self, path: Union[str, Path]) -> List[str]:

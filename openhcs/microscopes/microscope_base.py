@@ -85,13 +85,14 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
     # Optional class attribute for explicit metadata handler registration
     _metadata_handler_class: Optional[Type[MetadataHandler]] = None
 
-    def __init__(self, parser: FilenameParser,
+    def __init__(self, parser: Optional[FilenameParser],
                  metadata_handler: MetadataHandler):
         """
         Initialize the microscope handler.
 
         Args:
-            parser: Parser for microscopy filenames.
+            parser: Parser for microscopy filenames. Can be None for virtual backends
+                   that don't need workspace preparation or pattern discovery.
             metadata_handler: Handler for microscope metadata.
         """
         self.parser = parser
