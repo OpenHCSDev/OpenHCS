@@ -148,6 +148,9 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         if path_str.endswith(('.json', '.csv', '.txt')):
             from openhcs.io.backend_registry import get_backend_instance
             disk_backend = get_backend_instance(Backend.DISK.value)
+            # Ensure parent directory exists before saving
+            parent_dir = Path(output_path).parent
+            disk_backend.ensure_directory(parent_dir)
             return disk_backend.save(data, output_path, **kwargs)
 
         store, key = self._split_store_and_key(output_path)
