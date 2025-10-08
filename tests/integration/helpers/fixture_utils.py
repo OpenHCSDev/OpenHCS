@@ -187,7 +187,9 @@ def base_test_dir(microscope_config):
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
         # Ensure the directory exists
         if base_dir.exists():
-            shutil.rmtree(base_dir)
+            # Use ignore_errors=True to handle race conditions with multiprocessing workers
+            # that might still have file handles open during cleanup
+            shutil.rmtree(base_dir, ignore_errors=True)
 
         # Create the directory
         base_dir.mkdir(parents=True, exist_ok=True)
