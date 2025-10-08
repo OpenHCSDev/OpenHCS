@@ -146,8 +146,8 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         # Zarr only supports array data, not text files
         path_str = str(output_path)
         if path_str.endswith(('.json', '.csv', '.txt')):
-            from openhcs.io.backend_registry import get_backend
-            disk_backend = get_backend(Backend.DISK.value)
+            from openhcs.io.backend_registry import get_backend_instance
+            disk_backend = get_backend_instance(Backend.DISK.value)
             return disk_backend.save(data, output_path, **kwargs)
 
         store, key = self._split_store_and_key(output_path)
@@ -654,8 +654,8 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         # Passthrough to disk backend for text files (JSON, CSV, TXT)
         path_str = str(path)
         if path_str.endswith(('.json', '.csv', '.txt')):
-            from openhcs.io.backend_registry import get_backend
-            disk_backend = get_backend(Backend.DISK.value)
+            from openhcs.io.backend_registry import get_backend_instance
+            disk_backend = get_backend_instance(Backend.DISK.value)
             return disk_backend.delete(path)
 
         path = str(path)
@@ -715,8 +715,8 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         # Passthrough to disk backend for text files (JSON, CSV, TXT)
         path_str = str(path)
         if path_str.endswith(('.json', '.csv', '.txt')):
-            from openhcs.io.backend_registry import get_backend
-            disk_backend = get_backend(Backend.DISK.value)
+            from openhcs.io.backend_registry import get_backend_instance
+            disk_backend = get_backend_instance(Backend.DISK.value)
             return disk_backend.exists(path)
 
         path = Path(path)
