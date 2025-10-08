@@ -131,6 +131,20 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             self._text_reader
         ))
 
+        # JSON
+        formats.append((
+            FileFormat.JSON.value,
+            self._json_writer,
+            self._json_reader
+        ))
+
+        # CSV
+        formats.append((
+            FileFormat.CSV.value,
+            self._csv_writer,
+            self._csv_reader
+        ))
+
         # Register everything
         for extensions, writer, reader in formats:
             for ext in extensions:
@@ -183,6 +197,44 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
 
     def _text_reader(self, path):
         return path.read_text()
+
+    def _json_writer(self, path, data, **kwargs):
+        import json
+        path.write_text(json.dumps(data, indent=2))
+
+    def _json_reader(self, path):
+        import json
+        return json.loads(path.read_text())
+
+    def _csv_writer(self, path, data, **kwargs):
+        import csv
+        # Assume data is a list of rows or a dict
+        with path.open('w', newline='') as f:
+            if isinstance(data, dict):
+                # Write dict as CSV with headers
+                writer = csv.DictWriter(f, fieldnames=data.keys())
+                writer.writeheader()
+                writer.writerow(data)
+            elif isinstance(data, list) and len(data) > 0:
+                if isinstance(data[0], dict):
+                    # List of dicts
+                    writer = csv.DictWriter(f, fieldnames=data[0].keys())
+                    writer.writeheader()
+                    writer.writerows(data)
+                else:
+                    # List of lists/tuples
+                    writer = csv.writer(f)
+                    writer.writerows(data)
+            else:
+                # Fallback: write as single row
+                writer = csv.writer(f)
+                writer.writerow([data])
+
+    def _csv_reader(self, path):
+        import csv
+        with path.open('r', newline='') as f:
+            reader = csv.DictReader(f)
+            return list(reader)
 
 
     def load(self, file_path: Union[str, Path], **kwargs) -> Any:
