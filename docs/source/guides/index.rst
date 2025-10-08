@@ -23,6 +23,7 @@ System Integration Guides
 
    memory_type_integration
    pipeline_compilation_workflow
+   omero_integration
 
 Memory Type Integration
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -31,12 +32,19 @@ Learn how OpenHCS automatically converts between NumPy, CuPy, PyTorch, JAX, Tens
 
 :doc:`memory_type_integration`
 
-Pipeline Compilation Workflow  
+Pipeline Compilation Workflow
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Understand the 5-phase compilation system that transforms pipeline definitions into optimized execution plans. Learn about path planning, materialization, memory contract validation, and GPU resource assignment.
 
 :doc:`pipeline_compilation_workflow`
+
+OMERO Integration
+^^^^^^^^^^^^^^^^^
+
+Complete server-side execution support for OpenHCS on OMERO servers with zero data transfer overhead. Learn about virtual backends, multiprocessing-safe connection management, and automatic instance management.
+
+:doc:`omero_integration`
 
 Quick Reference
 ---------------

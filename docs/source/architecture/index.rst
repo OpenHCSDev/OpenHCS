@@ -52,6 +52,8 @@ File management, memory types, and backend systems.
    storage_and_memory_system
    memory_type_system
    napari_streaming_system
+   omero_backend_system
+   zmq_execution_system
 
 System Integration
 ==================
@@ -132,6 +134,8 @@ Quick Start Paths
 **Configuration Systems?** Focus on :doc:`lazy_class_system` → :doc:`configuration_resolution` → :doc:`composition_detection_system` → :doc:`context_management_system`
 
 **Real-Time Visualization?** Begin with :doc:`napari_streaming_system` → :doc:`storage_and_memory_system` → :doc:`system_integration`
+
+**OMERO Integration?** Start with :doc:`omero_backend_system` → :doc:`zmq_execution_system` → :doc:`storage_and_memory_system`
 
 **UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`placeholder_resolution_system` → :doc:`tui_system` → :doc:`code_ui_interconversion`
 
