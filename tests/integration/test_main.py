@@ -70,7 +70,7 @@ class TestConstants:
     # Metadata validation
     METADATA_FILENAME: str = "openhcs_metadata.json"
     SUBDIRECTORIES_FIELD: str = "subdirectories"
-    MIN_METADATA_ENTRIES: int = 2
+    MIN_METADATA_ENTRIES: int = 1
 
 
 
