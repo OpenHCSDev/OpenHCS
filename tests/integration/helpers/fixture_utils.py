@@ -51,6 +51,14 @@ MICROSCOPE_CONFIGS = {
         "test_dir_name": "opera_phenix_pipeline",
         "microscope_type": "auto",  # Explicitly specify type
         "auto_image_size": True
+    },
+    "OMERO": {
+        "format": "OMERO",
+        "test_dir_name": "omero_test_plate",  # Will be created dynamically
+        "microscope_type": "omero",
+        "auto_image_size": True,
+        "is_virtual": True,  # Flag to indicate virtual backend
+        "requires_connection": True  # Flag to indicate OMERO connection needed
     }
 }
 
@@ -73,6 +81,14 @@ TEST_PARAMS = {
     "OperaPhenix": {
         "default": syn_data_params
         # Add test-specific overrides here if needed
+    },
+    "OMERO": {
+        "default": {
+            **syn_data_params,
+            "wells": ['A01', 'A02', 'B01', 'B02'],  # 4 wells to match test expectations
+            "grid_size": (2, 2),  # Smaller grid for faster upload
+            "tile_size": (128, 128)  # Smaller tiles for faster upload
+        }
     }
 }
 
@@ -245,14 +261,79 @@ def create_synthetic_plate_data(test_function_dir, microscope_config, test_param
 
 @pytest.fixture
 def plate_dir(test_function_dir, microscope_config, test_params, data_type_config):
-    """Create synthetic plate data for the specified microscope type and data type as a VirtualPath."""
-    return create_synthetic_plate_data(
-        test_function_dir=test_function_dir,
-        microscope_config=microscope_config,
-        test_params=test_params,
-        plate_name=data_type_config["name"],
-        z_stack_levels=data_type_config["z_stack_levels"]
-    )
+    """
+    Create synthetic plate data for the specified microscope type and data type.
+
+    For disk-based microscopes: Returns Path to plate directory
+    For OMERO: Returns plate_id (int) after uploading to OMERO
+    """
+    # Handle OMERO specially
+    if microscope_config.get("is_virtual") and microscope_config.get("requires_connection"):
+        from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+        import tempfile
+        from pathlib import Path
+
+        # Connect to OMERO
+        omero_manager = OMEROInstanceManager()
+        if not omero_manager.connect(timeout=60):
+            pytest.skip("OMERO server not available - skipping OMERO tests")
+
+        # Generate synthetic data using the SAME generator as disk-based tests
+        # This ensures identical test data across all backends
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # OMERO uses ImageXpress-compatible filenames, so generate ImageXpress format
+            generator_format = "ImageXpress" if microscope_config["format"] == "OMERO" else microscope_config["format"]
+
+            # Use the same SyntheticMicroscopyGenerator with same parameters
+            generator = SyntheticMicroscopyGenerator(
+                output_dir=tmpdir,
+                grid_size=test_params.get("grid_size", (3, 3)),
+                tile_size=test_params.get("tile_size", (128, 128)),
+                overlap_percent=test_params.get("overlap_percent", 10),
+                wavelengths=test_params.get("wavelengths", 2),
+                z_stack_levels=data_type_config["z_stack_levels"],
+                cell_size_range=test_params.get("cell_size_range", (5, 10)),
+                wells=test_params.get("wells", ['A01']),
+                format=generator_format,  # Use ImageXpress format for OMERO
+                auto_image_size=test_params.get(
+                    "auto_image_size",
+                    microscope_config["auto_image_size"]
+                )
+            )
+
+            # Don't suppress output so we can see what's happening
+            generator.generate_dataset()
+
+            # Upload to OMERO with grid dimensions
+            import sys
+            examples_dir = Path(__file__).parent.parent.parent.parent / "examples"
+            sys.path.insert(0, str(examples_dir))
+            try:
+                from import_test_data import upload_plate_to_omero
+                plate_id = upload_plate_to_omero(
+                    omero_manager.conn,
+                    tmpdir,
+                    plate_name=f"Test_{data_type_config['name']}",
+                    microscope_format=generator_format,  # Use ImageXpress format
+                    grid_dimensions=test_params.get("grid_size", (3, 3))  # Pass grid dimensions
+                )
+            finally:
+                sys.path.pop(0)
+
+        yield plate_id
+
+        # Don't cleanup - leave plates in OMERO for inspection
+        omero_manager.close()
+
+    # Standard disk-based microscopes
+    else:
+        return create_synthetic_plate_data(
+            test_function_dir=test_function_dir,
+            microscope_config=microscope_config,
+            test_params=test_params,
+            plate_name=data_type_config["name"],
+            z_stack_levels=data_type_config["z_stack_levels"]
+        )
 
 # Keep legacy fixtures for backward compatibility
 @pytest.fixture

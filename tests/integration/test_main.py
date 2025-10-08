@@ -86,13 +86,24 @@ class TestConstants:
 @dataclass
 class TestConfig:
     """Configuration for test execution."""
-    plate_dir: Path
+    plate_dir: Union[Path, int]  # Path for disk-based, int (plate_id) for OMERO
     backend_config: str
     execution_mode: str
+    microscope_config: Dict
     use_threading: bool = False
 
     def __post_init__(self):
         self.use_threading = self.execution_mode == "threading"
+
+    @property
+    def is_omero(self) -> bool:
+        """Check if this is an OMERO test (plate_dir is int)."""
+        return isinstance(self.plate_dir, int)
+
+    @property
+    def microscope_type(self) -> str:
+        """Get microscope type from config."""
+        return self.microscope_config.get("microscope_type", "auto")
 
 
 CONSTANTS = TestConstants()
@@ -297,13 +308,26 @@ def validate_separate_materialization(plate_dir: Path) -> None:
 
 def _create_pipeline_config(test_config: TestConfig) -> GlobalPipelineConfig:
     """Create pipeline configuration for test execution."""
+    from openhcs.constants import Microscope
+
+    # Set microscope type from config
+    microscope = Microscope[test_config.microscope_type.upper()] if test_config.microscope_type != "auto" else Microscope.AUTO
+
+    # For OMERO tests, use omero_local backend for materialization
+    # For other tests, use the configured backend
+    if test_config.is_omero:
+        materialization_backend = MaterializationBackend('omero_local')
+    else:
+        materialization_backend = MaterializationBackend(test_config.backend_config)
+
     return GlobalPipelineConfig(
         num_workers=CONSTANTS.DEFAULT_WORKERS,
+        microscope=microscope,
         path_planning_config=PathPlanningConfig(
             sub_dir=CONSTANTS.DEFAULT_SUB_DIR,
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
-        vfs_config=VFSConfig(materialization_backend=MaterializationBackend(test_config.backend_config)),
+        vfs_config=VFSConfig(materialization_backend=materialization_backend),
         zarr_config=ZarrConfig(
             store_name=CONSTANTS.ZARR_STORE_NAME,
             ome_zarr_metadata=True,
@@ -325,6 +349,22 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
     # Set up global context for orchestrator - legitimate test setup
     ensure_global_config_context(GlobalPipelineConfig, global_config)
 
+    # For OMERO: Register OMERO backend with connection
+    omero_manager = None
+    if test_config.is_omero:
+        from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+        from openhcs.io.omero_local import OMEROLocalBackend
+        from openhcs.io.base import storage_registry
+
+        # Connect to OMERO
+        omero_manager = OMEROInstanceManager()
+        if not omero_manager.connect(timeout=60):
+            pytest.skip("OMERO server not available - skipping OMERO tests")
+
+        # Register OMERO backend with connection in global storage registry
+        omero_backend = OMEROLocalBackend(omero_conn=omero_manager.conn)
+        storage_registry['omero_local'] = omero_backend
+
     # Create PipelineConfig with lazy configs for proper hierarchical inheritance
     pipeline_config = PipelineConfig(
         path_planning_config=LazyPathPlanningConfig(
@@ -333,7 +373,13 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
         step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
     )
 
-    orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
+    # Convert plate_dir to Path - for OMERO, format as /omero/plate_{id}
+    if test_config.is_omero:
+        plate_path = Path(f"/omero/plate_{test_config.plate_dir}")
+    else:
+        plate_path = test_config.plate_dir
+
+    orchestrator = PipelineOrchestrator(plate_path, pipeline_config=pipeline_config)
     orchestrator.initialize()
     return orchestrator
 
@@ -528,20 +574,54 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
         return _execute_pipeline_phases(orchestrator, pipeline)
 
 
-def test_main(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str):
+def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict):
     """Unified test for all combinations of microscope types, backends, data types, and execution modes."""
-    test_config = TestConfig(Path(plate_dir), backend_config, execution_mode)
+    # Handle both Path and int (OMERO plate_id)
+    if isinstance(plate_dir, int):
+        test_config = TestConfig(plate_dir, backend_config, execution_mode, microscope_config)
+    else:
+        test_config = TestConfig(Path(plate_dir), backend_config, execution_mode, microscope_config)
 
-    print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
+    # For OMERO tests, verify OMERO is running before proceeding
+    if test_config.is_omero:
+        from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+        print("🔍 Checking OMERO server availability...")
+        omero_manager = OMEROInstanceManager()
+        if not omero_manager.connect(timeout=10):
+            pytest.skip("OMERO server not available - skipping OMERO tests. Start OMERO with: docker-compose up -d")
+        omero_manager.close()
+        print("✅ OMERO server is running")
+
+    print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, microscope: {microscope_config['format']}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
 
     pipeline = create_test_pipeline()
 
-    # Export pipeline to Python file in the synthetic data folder
-    _export_pipeline_to_file(pipeline, test_config.plate_dir)
+    # Export pipeline to Python file (skip for OMERO - no filesystem)
+    if not test_config.is_omero:
+        _export_pipeline_to_file(pipeline, test_config.plate_dir)
 
     # Execute using the specified mode (direct or zmq)
     results = _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode)
-    validate_separate_materialization(test_config.plate_dir)
+
+    # Validate materialization (skip for OMERO - different validation needed)
+    if not test_config.is_omero:
+        validate_separate_materialization(test_config.plate_dir)
+    else:
+        # For OMERO tests, open browser to view the plate
+        import os
+        import webbrowser
+
+        # Get OMERO web URL from config
+        omero_web_host = os.getenv('OMERO_WEB_HOST', 'localhost')
+        omero_web_port = os.getenv('OMERO_WEB_PORT', '4080')
+        plate_url = f"http://{omero_web_host}:{omero_web_port}/webclient/?show=plate-{plate_dir}"
+
+        print(f"\n{'='*80}")
+        print(f"OMERO Plate URL: {plate_url}")
+        print(f"{'='*80}\n")
+
+        # Open browser
+        webbrowser.open(plate_url)
 
     print_thread_activity_report()
     print(f"{CONSTANTS.SUCCESS_INDICATOR} ({len(results)} wells processed)")

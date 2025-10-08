@@ -61,8 +61,13 @@ class OMEROInstanceManager:
         self._started_by_us = False
     
     def _find_docker_compose(self) -> Optional[Path]:
-        """Find docker-compose.yml in project root."""
-        # Start from current file and go up to find project root
+        """Find docker-compose.yml in OMERO module or project root."""
+        # First check OMERO module directory (preferred location)
+        omero_module = Path(__file__).parent.parent / "omero" / "docker-compose.yml"
+        if omero_module.exists():
+            return omero_module
+
+        # Fallback: search up from current file to find project root
         current = Path(__file__).parent
         for _ in range(5):  # Search up to 5 levels
             docker_compose = current / "docker-compose.yml"
