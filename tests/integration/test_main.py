@@ -628,7 +628,7 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
 
 
 @pytest.mark.parametrize("use_code_serialization", [False, True], ids=["direct", "code_serialization"])
-def test_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, use_code_serialization: bool):
+def test_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict, use_code_serialization: bool):
     """
     Parametrized test that can run with or without code serialization.
 
@@ -636,12 +636,12 @@ def test_code_serialization(plate_dir: Union[Path, str], backend_config: str, da
     When use_code_serialization=False, this runs the normal test.
     """
     if use_code_serialization:
-        test_main_with_code_serialization(plate_dir, backend_config, data_type_config, execution_mode, zmq_execution_mode)
+        test_main_with_code_serialization(plate_dir, backend_config, data_type_config, execution_mode, zmq_execution_mode, microscope_config)
     else:
-        test_main(plate_dir, backend_config, data_type_config, execution_mode, zmq_execution_mode)
+        test_main(plate_dir, backend_config, data_type_config, execution_mode, zmq_execution_mode, microscope_config)
 
 
-def test_main_with_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str):
+def test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict):
     """
     Test using pickle_to_python for code-based object serialization.
 
@@ -653,7 +653,11 @@ def test_main_with_code_serialization(plate_dir: Union[Path, str], backend_confi
 
     This proves the code-based serialization works for remote execution.
     """
-    test_config = TestConfig(Path(plate_dir), backend_config, execution_mode)
+    # Handle both Path and int (OMERO plate_id)
+    if isinstance(plate_dir, int):
+        test_config = TestConfig(plate_dir, backend_config, execution_mode, microscope_config)
+    else:
+        test_config = TestConfig(Path(plate_dir), backend_config, execution_mode, microscope_config)
 
     print(f"{CONSTANTS.START_INDICATOR} [CODE SERIALIZATION TEST] with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
 
