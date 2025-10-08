@@ -55,6 +55,17 @@ File management, memory types, and backend systems.
    omero_backend_system
    zmq_execution_system
 
+External Integrations
+=====================
+
+Integration with external tools and platforms (Napari, OMERO, Fiji).
+
+.. toctree::
+   :maxdepth: 1
+
+   external_integrations_overview
+   napari_integration_architecture
+
 System Integration
 ==================
 
@@ -133,9 +144,11 @@ Quick Start Paths
 
 **Configuration Systems?** Focus on :doc:`lazy_class_system` → :doc:`configuration_resolution` → :doc:`composition_detection_system` → :doc:`context_management_system`
 
-**Real-Time Visualization?** Begin with :doc:`napari_streaming_system` → :doc:`storage_and_memory_system` → :doc:`system_integration`
+**Real-Time Visualization?** Begin with :doc:`napari_integration_architecture` → :doc:`napari_streaming_system` → :doc:`storage_and_memory_system`
 
 **OMERO Integration?** Start with :doc:`omero_backend_system` → :doc:`zmq_execution_system` → :doc:`storage_and_memory_system`
+
+**External Integrations?** Start with :doc:`external_integrations_overview` → :doc:`napari_integration_architecture` → :doc:`omero_backend_system`
 
 **UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`placeholder_resolution_system` → :doc:`tui_system` → :doc:`code_ui_interconversion`
 
