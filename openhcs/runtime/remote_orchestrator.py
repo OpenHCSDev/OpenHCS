@@ -172,6 +172,19 @@ class RemoteOrchestrator:
             logger.error(f"Ping failed: {e}")
             return False
 
+    def get_server_info(self) -> Dict[str, Any]:
+        """
+        Get detailed server information including worker processes.
+
+        Returns:
+            Server info with workers, active executions, uptime, etc.
+        """
+        try:
+            return self.client.get_server_info()
+        except Exception as e:
+            logger.error(f"Get server info failed: {e}")
+            return {'status': 'error', 'message': str(e)}
+
     def __enter__(self):
         """Context manager entry."""
         self._connect()

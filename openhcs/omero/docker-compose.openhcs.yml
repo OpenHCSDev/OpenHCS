@@ -35,23 +35,13 @@ services:
         hard: 65536
 
   omeroweb:
-    # Custom build with OpenHCS plugin pre-installed
-    # This ensures the OpenHCS tab appears automatically in OMERO.web
+    # Custom build with OpenHCS plugin
     build:
       context: ../..
       dockerfile: openhcs/omero/Dockerfile.omeroweb-openhcs
     image: "openhcs-omeroweb:latest"
     environment:
       OMEROHOST: omeroserver
-      # Configure OpenHCS plugin via environment variables
-      CONFIG_omero_web_apps: '["omero_figure", "omero_iviewer", "omero_mapr", "omero_parade", "omero_autotag", "omero_tagsearch", "omero_openhcs"]'
-      CONFIG_omero_web_ui_right__plugins: '[["Acquisition", "webclient/data/includes/right_plugin.acquisition.js.html", "metadata_tab"], ["Preview", "webclient/data/includes/right_plugin.preview.js.html", "preview_tab"], ["OpenHCS", "omero_openhcs/webclient_plugins/right_plugin.js.html", "openhcs_panel"]]'
-      # OpenHCS execution server connection (host.docker.internal allows container to reach host)
-      OPENHCS_EXECUTION_HOST: host.docker.internal
-      OPENHCS_EXECUTION_PORT: 7777
-    extra_hosts:
-      # Enable host.docker.internal on Linux (works automatically on Mac/Windows)
-      - "host.docker.internal:host-gateway"
     networks:
       - omero
     ports:
@@ -65,3 +55,4 @@ networks:
 volumes:
   database:
   omero:
+

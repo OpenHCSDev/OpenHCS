@@ -525,8 +525,25 @@ class ZMQExecutionServer(ZMQServer):
             """Send progress update via ZMQ data channel."""
             self.send_progress_update(axis_id, step, status)
 
+        # Construct OMERO virtual path
+        plate_path = Path(f"/omero/plate_{plate_id}")
+
+        # For OMERO plates, register OMERO backend with connection
+        from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+        from openhcs.io.omero_local import OMEROLocalBackend
+        from openhcs.io.base import storage_registry
+
+        omero_manager = OMEROInstanceManager()
+        if not omero_manager.connect(timeout=60):
+            raise RuntimeError("OMERO server not available - cannot execute pipeline on OMERO plate")
+
+        # Register OMERO backend with connection in global storage registry
+        omero_backend = OMEROLocalBackend(omero_conn=omero_manager.conn)
+        storage_registry['omero_local'] = omero_backend
+        logger.info(f"[{execution_id}] Registered OMERO backend for plate {plate_id}")
+
         orchestrator = PipelineOrchestrator(
-            plate_path=Path(f"/omero/plate_{plate_id}"),
+            plate_path=plate_path,
             pipeline_config=pipeline_config,
             progress_callback=progress_callback
         )
@@ -613,8 +630,8 @@ class ZMQExecutionServer(ZMQServer):
             direct_children = current_process.children(recursive=False)
             all_descendants = current_process.children(recursive=True)
 
-            logger.info(f"🔍 WORKER DETECTION: Server PID {os.getpid()}")
-            logger.info(f"🔍 WORKER DETECTION: Found {len(direct_children)} direct children, {len(all_descendants)} total descendants")
+            logger.debug(f"🔍 WORKER DETECTION: Server PID {os.getpid()}")
+            logger.debug(f"🔍 WORKER DETECTION: Found {len(direct_children)} direct children, {len(all_descendants)} total descendants")
 
             # Check all descendants (workers might be spawned by a subprocess)
             for child in all_descendants:
@@ -622,21 +639,21 @@ class ZMQExecutionServer(ZMQServer):
                     # Check if it's a Python worker process
                     cmdline = child.cmdline()
                     cmdline_preview = ' '.join(cmdline[:3]) if cmdline else 'None'
-                    logger.info(f"🔍 WORKER DETECTION: Descendant PID {child.pid} cmdline: {cmdline_preview}...")
+                    logger.debug(f"🔍 WORKER DETECTION: Descendant PID {child.pid} cmdline: {cmdline_preview}...")
 
                     if cmdline and len(cmdline) > 0 and 'python' in cmdline[0].lower():
                         cmdline_str = ' '.join(cmdline)
 
                         # Exclude Napari viewers
                         if 'napari' in cmdline_str.lower():
-                            logger.info(f"🔍 WORKER DETECTION: Skipping Napari viewer PID {child.pid}")
+                            logger.debug(f"🔍 WORKER DETECTION: Skipping Napari viewer PID {child.pid}")
                             continue
 
                         # Exclude multiprocessing helper processes (infrastructure, not workers)
                         # resource_tracker and semaphore_tracker are helpers
                         # BUT spawn_main is the actual worker process!
                         if 'resource_tracker' in cmdline_str or 'semaphore_tracker' in cmdline_str:
-                            logger.info(f"🔍 WORKER DETECTION: Skipping multiprocessing helper PID {child.pid}")
+                            logger.debug(f"🔍 WORKER DETECTION: Skipping multiprocessing helper PID {child.pid}")
                             continue
 
                         # Exclude the server process itself (shouldn't happen but be safe)
@@ -645,7 +662,7 @@ class ZMQExecutionServer(ZMQServer):
 
                         # Include all other Python processes as potential workers
                         # ProcessPoolExecutor workers are just spawned Python processes
-                        logger.info(f"🔍 WORKER DETECTION: ✅ Identified worker PID {child.pid}")
+                        logger.debug(f"🔍 WORKER DETECTION: ✅ Identified worker PID {child.pid}")
                         workers.append({
                             'pid': child.pid,
                             'status': child.status(),
@@ -654,14 +671,14 @@ class ZMQExecutionServer(ZMQServer):
                             'create_time': child.create_time()
                         })
                     else:
-                        logger.info(f"🔍 WORKER DETECTION: Skipping non-Python process PID {child.pid}")
+                        logger.debug(f"🔍 WORKER DETECTION: Skipping non-Python process PID {child.pid}")
                 except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
                     logger.debug(f"🔍 WORKER DETECTION: Cannot access process: {e}")
 
         except Exception as e:
             logger.warning(f"Error getting worker info: {e}", exc_info=True)
 
-        logger.info(f"🔍 WORKER DETECTION: Returning {len(workers)} workers")
+        logger.debug(f"🔍 WORKER DETECTION: Returning {len(workers)} workers")
         return workers
 
     def _kill_worker_processes(self) -> int:

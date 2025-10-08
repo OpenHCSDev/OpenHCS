@@ -285,37 +285,51 @@ class ZMQExecutionClient(ZMQClient):
     def ping(self) -> bool:
         """
         Ping server to check if alive.
-        
+
         Returns:
             True if server responds
+        """
+        try:
+            pong_data = self.get_server_info()
+            return pong_data.get('type') == 'pong' and pong_data.get('ready')
+        except Exception as e:
+            logger.debug(f"Ping failed: {e}")
+            return False
+
+    def get_server_info(self) -> Dict[str, Any]:
+        """
+        Get detailed server information including worker processes.
+
+        Returns:
+            Pong response with server status, workers, active executions, etc.
         """
         try:
             if not self._connected:
                 # Try to connect first
                 if not self.connect():
-                    return False
-            
+                    return {'status': 'error', 'message': 'Not connected'}
+
             # Send ping via control channel
             control_context = zmq.Context()
             control_socket = control_context.socket(zmq.REQ)
             control_socket.setsockopt(zmq.LINGER, 0)
             control_socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout
             control_socket.connect(f"tcp://{self.host}:{self.control_port}")
-            
+
             ping_message = {'type': 'ping'}
             control_socket.send(pickle.dumps(ping_message))
-            
+
             response = control_socket.recv()
             response_data = pickle.loads(response)
-            
+
             control_socket.close()
             control_context.term()
-            
-            return response_data.get('type') == 'pong' and response_data.get('ready')
-        
+
+            return response_data
+
         except Exception as e:
-            logger.debug(f"Ping failed: {e}")
-            return False
+            logger.debug(f"Get server info failed: {e}")
+            return {'status': 'error', 'message': str(e)}
     
     def _send_control_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """

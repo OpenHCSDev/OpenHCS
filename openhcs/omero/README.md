@@ -2,6 +2,27 @@
 
 Complete OMERO server-side execution support for OpenHCS, enabling high-performance image processing directly on OMERO servers with zero data transfer overhead.
 
+---
+
+## 🚀 Quick Start (Testing)
+
+**TL;DR:** Start OMERO, run the test.
+
+```bash
+# 1. Start OMERO
+cd openhcs/omero
+docker-compose up -d
+./wait_for_omero.sh
+
+# 2. Run integration tests
+cd ../..
+pytest tests/integration/test_main.py --it-microscopes=OMERO --it-backends=disk -v
+```
+
+**See:** [`OMERO_TESTING_GUIDE.md`](../../OMERO_TESTING_GUIDE.md) in project root for complete testing documentation.
+
+---
+
 ## Overview
 
 The OMERO integration provides:

@@ -114,7 +114,16 @@ class OMEROMetadataHandler(MetadataHandler):
         return metadata
 
     def find_metadata_file(self, plate_path: Union[str, Path]) -> Optional[Path]:
-        """OMERO doesn't use metadata files - returns None."""
+        """
+        OMERO doesn't use metadata files, but detects based on /omero/ path pattern.
+
+        Returns the plate_path itself if it matches the OMERO virtual path pattern,
+        otherwise returns None.
+        """
+        plate_path = Path(plate_path)
+        # OMERO plates use virtual paths like /omero/plate_123
+        if str(plate_path).startswith('/omero/plate_'):
+            return plate_path
         return None
 
     def _extract_plate_id(self, plate_path: Union[str, Path, int]) -> int:

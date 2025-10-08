@@ -200,6 +200,8 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
 
     def _json_writer(self, path, data, **kwargs):
         import json
+        # Ensure parent directory exists
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2))
 
     def _json_reader(self, path):

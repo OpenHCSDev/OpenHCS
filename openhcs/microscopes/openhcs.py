@@ -181,6 +181,10 @@ class OpenHCSMetadataHandler(MetadataHandler):
 
         try:
             content = self.filemanager.load(str(metadata_file_path), Backend.DISK.value)
+            # Backend may return already-parsed dict (disk backend auto-parses JSON)
+            if isinstance(content, dict):
+                return content
+            # Otherwise parse raw bytes/string
             return json.loads(content.decode('utf-8') if isinstance(content, bytes) else content)
         except json.JSONDecodeError as e:
             raise MetadataNotFoundError(f"Error decoding JSON from '{metadata_file_path}': {e}") from e
