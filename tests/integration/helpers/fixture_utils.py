@@ -327,36 +327,39 @@ def plate_dir(test_function_dir, microscope_config, test_params, data_type_confi
 
     # Standard disk-based microscopes
     else:
-        return create_synthetic_plate_data(
+        plate_path = create_synthetic_plate_data(
             test_function_dir=test_function_dir,
             microscope_config=microscope_config,
             test_params=test_params,
             plate_name=data_type_config["name"],
             z_stack_levels=data_type_config["z_stack_levels"]
         )
+        yield plate_path
 
 # Keep legacy fixtures for backward compatibility
 @pytest.fixture
 def flat_plate_dir(test_function_dir, microscope_config, test_params):
     """Create synthetic flat plate data for the specified microscope type as a VirtualPath."""
-    return create_synthetic_plate_data(
+    plate_path = create_synthetic_plate_data(
         test_function_dir=test_function_dir,
         microscope_config=microscope_config,
         test_params=test_params,
         plate_name="flat_plate",
         z_stack_levels=1  # Flat plate has only 1 Z-level
     )
+    yield plate_path
 
 @pytest.fixture
 def zstack_plate_dir(test_function_dir, microscope_config, test_params):
     """Create synthetic Z-stack plate data for the specified microscope type as a VirtualPath."""
-    return create_synthetic_plate_data(
+    plate_path = create_synthetic_plate_data(
         test_function_dir=test_function_dir,
         microscope_config=microscope_config,
         test_params=test_params,
         plate_name="zstack_plate",
         z_stack_levels=5  # Z-stack plate has 5 Z-levels
     )
+    yield plate_path
 
 # Mock thread tracking utilities
 def track_thread_activity(func):
