@@ -807,6 +807,8 @@ class PipelineEditorWidget(QWidget):
         Args:
             file_path: Path to save pipeline
         """
+        if not str(file_path).lower().endswith('.pipeline'):
+            file_path = Path(str(file_path) + '.pipeline')
         try:
             import dill as pickle
             with open(file_path, 'wb') as f:
