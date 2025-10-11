@@ -122,6 +122,7 @@ class AbstractStep(abc.ABC, ContextProvider):
         self,
         *,  # Force keyword-only arguments
         name: str = None,
+        description: str = None,
         variable_components: List[VariableComponents] = get_default_variable_components(),
         group_by: Optional[GroupBy] = get_default_group_by(),
         input_source: InputSource = InputSource.PREVIOUS_STEP,
@@ -153,6 +154,7 @@ class AbstractStep(abc.ABC, ContextProvider):
                                  When provided, enables real-time streaming to Fiji viewer.
         """
         self.name = name or self.__class__.__name__
+        self.description = description
         self.variable_components = variable_components
         self.group_by = group_by
         self.input_source = input_source
