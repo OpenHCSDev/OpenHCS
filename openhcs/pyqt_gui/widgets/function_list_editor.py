@@ -583,6 +583,8 @@ class FunctionListEditorWidget(QWidget):
         # Get current selection from pattern data (mirrors Textual TUI logic)
         selected_components = self._get_current_component_selection()
 
+
+
         # Show group by selector dialog (reuses Textual TUI logic)
         result = GroupBySelectorDialog.select_components(
             available_components=available_components,
@@ -640,6 +642,8 @@ class FunctionListEditorWidget(QWidget):
         # Update component button text and navigation
         self._refresh_component_button()
         logger.debug(f"Updated components: {new_components}")
+        
+        self.function_pattern_changed.emit()
 
     def _update_components(self, new_components):
         """Update function pattern structure based on component selection (mirrors Textual TUI)."""
