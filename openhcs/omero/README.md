@@ -123,24 +123,17 @@ docker-compose up -d
 ./wait_for_omero.sh
 ```
 
-### 2. Import Test Data
+### 2. Run Integration Tests
 
-```python
-from openhcs.omero import OMEROInstanceManager
-from examples.import_test_data import generate_and_upload_synthetic_plate
+```bash
+# Run OMERO integration tests (generates and uploads test data automatically)
+pytest tests/integration/test_main.py --it-microscopes=OMERO --it-backends=disk -v
 
-# Connect to OMERO (auto-starts if not running)
-with OMEROInstanceManager() as manager:
-    plate_id = generate_and_upload_synthetic_plate(
-        manager.conn,
-        plate_name="Test_Plate",
-        grid_size=(2, 2),
-        tile_size=(512, 512),
-        wavelengths=2,
-        z_stack_levels=3,
-        wells=['A01', 'A02']
-    )
-    print(f"Created plate: {plate_id}")
+# Tests automatically:
+# - Generate synthetic microscopy data
+# - Upload to OMERO as a Plate
+# - Run full OpenHCS pipeline
+# - Save results back to OMERO as FileAnnotations
 ```
 
 ### 3. Run Pipeline on OMERO Plate

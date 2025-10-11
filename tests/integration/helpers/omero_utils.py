@@ -245,7 +245,7 @@ def main():
 
         print(f"\n✅ Setup complete!")
         print(f"   Plate ID: {plate_id}")
-        print(f"\n   Use plate ID {plate_id} in omero_demo.py")
+        print(f"\n   Plate ID: {plate_id}")
         print(f"\n   View in OMERO.web: http://localhost:4080/webclient/?show=plate-{plate_id}")
 
         return plate_id

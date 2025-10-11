@@ -309,26 +309,14 @@ Test Parameters
    # All OMERO tests (disk + zarr)
    pytest tests/integration/test_main.py --it-microscopes=OMERO -v
 
-Manual Testing
---------------
+Running Pipelines on OMERO Plates
+----------------------------------
 
-Import Test Data Manually
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: bash
-
-   # Generate and upload synthetic plate
-   python examples/import_test_data.py
-
-This creates a plate with 4 wells (A01, A02, B01, B02) and opens OMERO.web to view it.
-
-Run Pipeline on Existing Plate
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The integration tests demonstrate the complete workflow. To run pipelines on existing OMERO plates:
 
 .. code-block:: python
 
    from openhcs.omero import OMEROInstanceManager
-   from openhcs.io.omero_local import OMEROLocalBackend
    from openhcs.core.orchestrator import Orchestrator
    from openhcs.core.pipeline import Pipeline
 
@@ -336,7 +324,7 @@ Run Pipeline on Existing Plate
    with OMEROInstanceManager() as manager:
        # Create pipeline
        pipeline = Pipeline(...)
-       
+
        # Execute on plate (use plate ID from OMERO.web)
        orchestrator = Orchestrator(
            plate_dir=f"/omero/plate_123",  # Replace 123 with actual plate ID
@@ -363,7 +351,7 @@ Why Grid Dimensions Are Stored as Metadata
 
 .. code-block:: python
 
-   # In examples/import_test_data.py
+   # In tests/integration/helpers/omero_utils.py
    upload_plate_to_omero(
        conn,
        data_dir,

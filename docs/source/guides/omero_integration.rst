@@ -214,40 +214,12 @@ Data Import
 Import Test Data
 ~~~~~~~~~~~~~~~~
 
-.. code-block:: python
-
-   from openhcs.omero import OMEROInstanceManager
-   from examples.import_test_data import import_test_plate
-   
-   with OMEROInstanceManager() as manager:
-       conn = manager.get_connection()
-       
-       # Import test plate
-       plate_id = import_test_plate(
-           conn,
-           plate_dir='tests/integration/tests_data/omero_test_plate',
-           plate_name='Test Plate'
-       )
-       
-       print(f"Imported plate ID: {plate_id}")
+The integration tests in ``tests/integration/test_main.py`` demonstrate the complete workflow for uploading data to OMERO and running pipelines. See :doc:`../development/omero_testing` for details.
 
 Import from ImageXpress
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
-
-   from openhcs.omero import OMEROInstanceManager
-   from examples.import_test_plate import import_imagexpress_plate
-   
-   with OMEROInstanceManager() as manager:
-       conn = manager.get_connection()
-       
-       # Import ImageXpress plate
-       plate_id = import_imagexpress_plate(
-           conn,
-           plate_dir='/path/to/imagexpress/plate',
-           plate_name='My Experiment'
-       )
+Use the OMERO CLI or OMERO.web interface to import ImageXpress plates. OpenHCS will automatically detect the format when processing via ``/omero/plate_{plate_id}`` paths.
 
 List Plates
 ~~~~~~~~~~~
@@ -288,19 +260,16 @@ The test suite automatically:
 4. Runs full pipeline execution
 5. Opens browser to view results
 
-Example Scripts
-~~~~~~~~~~~~~~~
+Running Tests
+~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-   # Complete OMERO demo
-   python examples/omero_demo.py
-   
-   # List OMERO plates
-   python examples/list_omero_plates.py
-   
-   # Import test data
-   python examples/import_test_data.py
+   # Run OMERO integration tests
+   pytest tests/integration/test_main.py --it-microscopes=OMERO --it-backends=disk -v
+
+   # See full testing guide
+   # docs/source/development/omero_testing.rst
 
 Troubleshooting
 ---------------

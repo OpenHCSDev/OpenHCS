@@ -307,20 +307,14 @@ def plate_dir(test_function_dir, microscope_config, test_params, data_type_confi
             generator.generate_dataset()
 
             # Upload to OMERO with grid dimensions
-            import sys
-            examples_dir = Path(__file__).parent.parent.parent.parent / "examples"
-            sys.path.insert(0, str(examples_dir))
-            try:
-                from import_test_data import upload_plate_to_omero
-                plate_id = upload_plate_to_omero(
-                    omero_manager.conn,
-                    tmpdir,
-                    plate_name=f"Test_{data_type_config['name']}",
-                    microscope_format=generator_format,  # Use ImageXpress format
-                    grid_dimensions=test_params.get("grid_size", (3, 3))  # Pass grid dimensions
-                )
-            finally:
-                sys.path.pop(0)
+            from tests.integration.helpers.omero_utils import upload_plate_to_omero
+            plate_id = upload_plate_to_omero(
+                omero_manager.conn,
+                tmpdir,
+                plate_name=f"Test_{data_type_config['name']}",
+                microscope_format=generator_format,  # Use ImageXpress format
+                grid_dimensions=test_params.get("grid_size", (3, 3))  # Pass grid dimensions
+            )
 
         yield plate_id
 
