@@ -27,7 +27,7 @@ class FijiViewerServer(ZMQServer):
     def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None):
         """
         Initialize Fiji viewer server.
-        
+
         Args:
             port: Data port for receiving images (control port will be port + 1000)
             viewer_title: Title for the Fiji viewer window
@@ -35,15 +35,14 @@ class FijiViewerServer(ZMQServer):
             log_file_path: Path to log file (for client discovery)
         """
         import zmq
-        
+
         # Initialize with SUB socket for receiving images
         super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.SUB)
-        
+
         self.viewer_title = viewer_title
         self.display_config = display_config
         self.ij = None  # PyImageJ instance
-        self.images = {}  # Track displayed images by layer name
-        self.component_groups = {}  # Track component groupings
+        self.hyperstacks = {}  # Track hyperstacks by (step_name, well) key
         self._shutdown_requested = False
     
     def start(self):
@@ -90,150 +89,210 @@ class FijiViewerServer(ZMQServer):
     def process_image_message(self, message: bytes):
         """
         Process incoming image data message.
-        
+
+        Builds 5D hyperstacks organized by (step_name, well).
+        Each hyperstack has dimensions organized as: channels, slices (z), frames (time).
+        Sites are treated as additional channels.
+
         Args:
             message: Raw ZMQ message containing image data
         """
         import json
-        import numpy as np
-        from multiprocessing import shared_memory
-        
+
         # Parse JSON message
         data = json.loads(message.decode('utf-8'))
-        
+
         # Check if this is a batch message
         if data.get('type') == 'batch':
             images = data.get('images', [])
             display_config_dict = data.get('display_config', {})
-            
+
+            if not images:
+                return
+
+            # Group images by (step_name, well) for hyperstack creation
+            step_name = images[0].get('step_name', 'unknown_step')
+            images_by_well = {}
+
             for image_info in images:
-                self._process_single_image(image_info, display_config_dict)
+                component_metadata = image_info.get('component_metadata', {})
+                well = component_metadata.get('well', 'unknown_well')
+
+                if well not in images_by_well:
+                    images_by_well[well] = []
+                images_by_well[well].append(image_info)
+
+            # Process each well's images into a hyperstack
+            for well, well_images in images_by_well.items():
+                self._add_images_to_hyperstack(step_name, well, well_images, display_config_dict)
         else:
-            self._process_single_image(data, data.get('display_config', {}))
-    
-    def _process_single_image(self, image_info: Dict[str, Any], display_config_dict: Dict[str, Any]):
-        """Process and display a single image via PyImageJ."""
+            # Single image message (fallback)
+            self._add_images_to_hyperstack(
+                data.get('step_name', 'unknown_step'),
+                data.get('component_metadata', {}).get('well', 'unknown_well'),
+                [data],
+                data.get('display_config', {})
+            )
+
+    def _add_images_to_hyperstack(self, step_name: str, well: str, images: List[Dict[str, Any]],
+                                    display_config_dict: Dict[str, Any]):
+        """
+        Add images to a 5D hyperstack for the given step and well.
+
+        ImageJ hyperstack dimensions:
+        - Channels: site * channel (combined)
+        - Slices: z_index
+        - Frames: timepoint
+
+        Args:
+            step_name: Name of the processing step
+            well: Well identifier
+            images: List of image info dicts with metadata and shared memory names
+            display_config_dict: Display configuration (LUT, auto-contrast, etc.)
+        """
         import numpy as np
         from multiprocessing import shared_memory
 
-        # Extract image data from shared memory
-        shm_name = image_info.get('shm_name')
-        shape = tuple(image_info.get('shape'))
-        dtype = np.dtype(image_info.get('dtype'))
+        hyperstack_key = (step_name, well)
 
-        try:
-            shm = shared_memory.SharedMemory(name=shm_name)
-            np_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
-            shm.close()
-        except Exception as e:
-            logger.error(f"🔬 FIJI SERVER: Failed to read shared memory {shm_name}: {e}")
+        # Load all images from shared memory
+        image_data_list = []
+        for image_info in images:
+            shm_name = image_info.get('shm_name')
+            shape = tuple(image_info.get('shape'))
+            dtype = np.dtype(image_info.get('dtype'))
+            component_metadata = image_info.get('component_metadata', {})
+
+            try:
+                shm = shared_memory.SharedMemory(name=shm_name)
+                np_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                shm.close()
+                shm.unlink()  # Clean up shared memory
+
+                image_data_list.append({
+                    'data': np_data,
+                    'metadata': component_metadata
+                })
+            except Exception as e:
+                logger.error(f"🔬 FIJI SERVER: Failed to read shared memory {shm_name}: {e}")
+                continue
+
+        if not image_data_list:
             return
 
-        # Extract metadata
-        component_metadata = image_info.get('component_metadata', {})
-        step_name = image_info.get('step_name', 'unknown')
-        path = image_info.get('path', 'unknown')
+        # Organize images by dimensions (site, channel, z_index, timepoint)
+        # Build dimension indices
+        sites = sorted(set(img['metadata'].get('site', 1) for img in image_data_list))
+        channels = sorted(set(img['metadata'].get('channel', 1) for img in image_data_list))
+        z_indices = sorted(set(img['metadata'].get('z_index', 1) for img in image_data_list))
+        timepoints = sorted(set(img['metadata'].get('timepoint', 1) for img in image_data_list))
 
-        # Build stack name and slice label from component metadata
-        stack_name, slice_label = self._build_stack_name_and_label(component_metadata, step_name, display_config_dict)
+        # Map values to indices
+        site_map = {v: i for i, v in enumerate(sites)}
+        channel_map = {v: i for i, v in enumerate(channels)}
+        z_map = {v: i for i, v in enumerate(z_indices)}
+        time_map = {v: i for i, v in enumerate(timepoints)}
 
-        # Apply display config
+        # ImageJ hyperstack dimensions
+        nChannels = len(sites) * len(channels)  # Combine site and channel
+        nSlices = len(z_indices)
+        nFrames = len(timepoints)
+
+        logger.info(f"🔬 FIJI SERVER: Building hyperstack for {step_name}/{well}: "
+                   f"{nChannels}C x {nSlices}Z x {nFrames}T "
+                   f"(sites={len(sites)}, channels={len(channels)})")
+
+        # Create ImageStack and add all images in the correct order
+        # ImageJ expects: C1Z1T1, C2Z1T1, ..., C1Z2T1, C2Z2T1, ..., C1Z1T2, ...
+        from ij import ImageStack
+
+        first_img = image_data_list[0]['data']
+        height, width = first_img.shape[-2:]  # Get spatial dimensions
+
+        stack = ImageStack(width, height)
+
+        # Build lookup dict for fast access
+        image_lookup = {}
+        for img_data in image_data_list:
+            meta = img_data['metadata']
+            key = (
+                meta.get('site', 1),
+                meta.get('channel', 1),
+                meta.get('z_index', 1),
+                meta.get('timepoint', 1)
+            )
+            image_lookup[key] = img_data['data']
+
+        # Add slices in ImageJ order: iterate T, then Z, then C
+        for t_val in timepoints:
+            for z_val in z_indices:
+                for site_val in sites:
+                    for ch_val in channels:
+                        key = (site_val, ch_val, z_val, t_val)
+
+                        if key in image_lookup:
+                            np_data = image_lookup[key]
+
+                            # Handle 3D data (take middle slice if needed)
+                            if np_data.ndim == 3:
+                                np_data = np_data[np_data.shape[0] // 2]
+
+                            # Convert to ImageProcessor
+                            temp_imp = self.ij.py.to_imageplus(np_data)
+                            processor = temp_imp.getProcessor()
+
+                            # Build label
+                            label = f"S{site_val}_C{ch_val}_Z{z_val}_T{t_val}"
+                            stack.addSlice(label, processor)
+                        else:
+                            # Add blank slice if missing
+                            logger.warning(f"🔬 FIJI SERVER: Missing image for {key}, adding blank slice")
+                            from ij.process import ShortProcessor
+                            blank = ShortProcessor(width, height)
+                            stack.addSlice(f"BLANK_{key}", blank)
+
+        # Create ImagePlus from stack
+        from ij import ImagePlus
+        title = f"{step_name}_{well}"
+        imp = ImagePlus(title, stack)
+
+        # Set hyperstack dimensions
+        imp.setDimensions(nChannels, nSlices, nFrames)
+
+        # Convert to CompositeImage if multiple channels
+        if nChannels > 1:
+            from ij import CompositeImage
+            comp = CompositeImage(imp, CompositeImage.COMPOSITE)
+            comp.setTitle(title)
+            imp = comp
+
+        # Apply LUT and auto-contrast
         lut_name = display_config_dict.get('lut', 'gray')
         auto_contrast = display_config_dict.get('auto_contrast', True)
 
-        # Convert to ImageJ format and display
-        try:
-            # Check if stack already exists
-            if stack_name in self.images:
-                # Add to existing stack
-                existing_imp = self.images[stack_name]
-                stack = existing_imp.getStack()
+        if lut_name.lower() not in ['gray', 'grays'] and nChannels == 1:
+            try:
+                self.ij.IJ.run(imp, lut_name, "")
+            except Exception as e:
+                logger.warning(f"🔬 FIJI SERVER: Failed to apply LUT {lut_name}: {e}")
 
-                # Convert numpy to ImageProcessor for this slice
-                new_imp = self.ij.py.to_imageplus(np_data)
-                new_processor = new_imp.getProcessor()
+        if auto_contrast:
+            try:
+                self.ij.IJ.run(imp, "Enhance Contrast", "saturated=0.35")
+            except Exception as e:
+                logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
 
-                # Add slice to existing stack
-                stack.addSlice(slice_label or f"slice_{stack.getSize() + 1}", new_processor)
+        # Show or update
+        if hyperstack_key in self.hyperstacks:
+            # Close old one
+            old_imp = self.hyperstacks[hyperstack_key]
+            old_imp.close()
 
-                # Update the ImagePlus with the new stack
-                existing_imp.setStack(stack)
-                existing_imp.updateAndDraw()
+        imp.show()
+        self.hyperstacks[hyperstack_key] = imp
 
-                logger.debug(f"🔬 FIJI SERVER: Added slice to {stack_name} (slice: {slice_label}, total: {stack.getSize()})")
-            else:
-                # Create new stack
-                imp = self.ij.py.to_imageplus(np_data)
-                imp.setTitle(stack_name)
+        logger.info(f"🔬 FIJI SERVER: Displayed hyperstack {title} with {stack.getSize()} slices")
 
-                # Apply LUT if not gray
-                if lut_name.lower() != 'gray' and lut_name.lower() != 'grays':
-                    try:
-                        self.ij.IJ.run(imp, lut_name, "")
-                        logger.debug(f"🔬 FIJI SERVER: Applied LUT {lut_name} to {stack_name}")
-                    except Exception as e:
-                        logger.warning(f"🔬 FIJI SERVER: Failed to apply LUT {lut_name}: {e}")
-
-                # Apply auto-contrast
-                if auto_contrast:
-                    try:
-                        self.ij.IJ.run(imp, "Enhance Contrast", "saturated=0.35")
-                        logger.debug(f"🔬 FIJI SERVER: Applied auto-contrast to {stack_name}")
-                    except Exception as e:
-                        logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
-
-                # Set slice label if provided
-                if slice_label:
-                    imp.getStack().setSliceLabel(slice_label, 1)
-
-                # Show the image
-                imp.show()
-
-                # Store reference
-                self.images[stack_name] = imp
-                logger.debug(f"🔬 FIJI SERVER: Created new stack {stack_name} (slice: {slice_label})")
-
-        except Exception as e:
-            logger.error(f"🔬 FIJI SERVER: Failed to display image {stack_name}: {e}")
-    
-    def _build_stack_name_and_label(self, component_metadata: Dict[str, Any], step_name: str,
-                                      display_config_dict: Dict[str, Any]) -> tuple:
-        """
-        Build stack name and slice label based on dimension modes.
-
-        Images with same stack name will be grouped together.
-        Slice label identifies individual slices within a stack.
-
-        Returns:
-            (stack_name, slice_label)
-        """
-        component_modes = display_config_dict.get('component_modes', {})
-
-        # Components that should be stacked (mode='stack')
-        stack_components = []
-        # Components that should be sliced (mode='slice')
-        slice_components = []
-
-        for key in ['well', 'site', 'channel', 'z_index', 'timepoint']:
-            if key in component_metadata:
-                value = component_metadata[key]
-                mode = component_modes.get(key, 'stack')  # Default to stack
-
-                if mode == 'stack':
-                    # STACK mode: images with different values go into SAME stack as slices
-                    stack_components.append(f"{key}={value}")
-                else:  # mode == 'slice'
-                    # SLICE mode: images with different values go into SEPARATE stacks
-                    slice_components.append(f"{key}={value}")
-
-        # Build stack name from step + slice components (these define separate stacks)
-        stack_parts = [step_name] + stack_components
-        stack_name = "_".join(stack_parts) if stack_parts else step_name
-
-        # Build slice label from stack components (these are slices within the stack)
-        slice_label = "_".join(slice_components) if slice_components else None
-
-        return stack_name, slice_label
     
     def request_shutdown(self):
         """Request graceful shutdown."""
