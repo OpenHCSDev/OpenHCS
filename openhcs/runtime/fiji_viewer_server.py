@@ -112,12 +112,12 @@ class FijiViewerServer(ZMQServer):
         """Process and display a single image via PyImageJ."""
         import numpy as np
         from multiprocessing import shared_memory
-        
+
         # Extract image data from shared memory
         shm_name = image_info.get('shm_name')
         shape = tuple(image_info.get('shape'))
         dtype = np.dtype(image_info.get('dtype'))
-        
+
         try:
             shm = shared_memory.SharedMemory(name=shm_name)
             np_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
@@ -125,55 +125,91 @@ class FijiViewerServer(ZMQServer):
         except Exception as e:
             logger.error(f"🔬 FIJI SERVER: Failed to read shared memory {shm_name}: {e}")
             return
-        
+
         # Extract metadata
         component_metadata = image_info.get('component_metadata', {})
         step_name = image_info.get('step_name', 'unknown')
         path = image_info.get('path', 'unknown')
-        
-        # Build layer name from component metadata
-        layer_name = self._build_layer_name(component_metadata, step_name)
-        
+
+        # Build stack name and slice label from component metadata
+        stack_name, slice_label = self._build_stack_name_and_label(component_metadata, step_name, display_config_dict)
+
         # Apply display config
         lut_name = display_config_dict.get('lut', 'gray')
         auto_contrast = display_config_dict.get('auto_contrast', True)
-        
+
         # Convert to ImageJ format and display
         try:
-            ij_image = self.ij.py.to_java(np_data)
-            self.ij.ui().show(layer_name, ij_image)
-            
+            # Convert numpy to ImagePlus using PyImageJ's to_imageplus()
+            imp = self.ij.py.to_imageplus(np_data)
+            imp.setTitle(stack_name)
+
             # Apply LUT if not gray
-            if lut_name != 'gray':
+            if lut_name.lower() != 'gray' and lut_name.lower() != 'grays':
                 try:
-                    self.ij.IJ.run(ij_image, lut_name, "")
+                    self.ij.IJ.run(imp, lut_name, "")
+                    logger.debug(f"🔬 FIJI SERVER: Applied LUT {lut_name} to {stack_name}")
                 except Exception as e:
                     logger.warning(f"🔬 FIJI SERVER: Failed to apply LUT {lut_name}: {e}")
-            
+
             # Apply auto-contrast
             if auto_contrast:
                 try:
-                    self.ij.IJ.run(ij_image, "Enhance Contrast", "saturated=0.35")
+                    self.ij.IJ.run(imp, "Enhance Contrast", "saturated=0.35")
+                    logger.debug(f"🔬 FIJI SERVER: Applied auto-contrast to {stack_name}")
                 except Exception as e:
                     logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
-            
-            self.images[layer_name] = ij_image
-            logger.debug(f"🔬 FIJI SERVER: Displayed {layer_name} with LUT={lut_name}")
-            
+
+            # Show the image
+            imp.show()
+
+            # Set slice label if this is part of a stack
+            if slice_label:
+                imp.setSlice(imp.getNSlices())  # Go to last slice
+                imp.getStack().setSliceLabel(slice_label, imp.getCurrentSlice())
+
+            self.images[stack_name] = imp
+            logger.debug(f"🔬 FIJI SERVER: Displayed {stack_name} (slice: {slice_label})")
+
         except Exception as e:
-            logger.error(f"🔬 FIJI SERVER: Failed to display image {layer_name}: {e}")
+            logger.error(f"🔬 FIJI SERVER: Failed to display image {stack_name}: {e}")
     
-    def _build_layer_name(self, component_metadata: Dict[str, Any], step_name: str) -> str:
-        """Build layer name from component metadata."""
-        parts = [step_name]
-        
-        # Add component values in consistent order
+    def _build_stack_name_and_label(self, component_metadata: Dict[str, Any], step_name: str,
+                                      display_config_dict: Dict[str, Any]) -> tuple:
+        """
+        Build stack name and slice label based on dimension modes.
+
+        Images with same stack name will be grouped together.
+        Slice label identifies individual slices within a stack.
+
+        Returns:
+            (stack_name, slice_label)
+        """
+        component_modes = display_config_dict.get('component_modes', {})
+
+        # Components that should be stacked (mode='stack')
+        stack_components = []
+        # Components that should be sliced (mode='slice')
+        slice_components = []
+
         for key in ['well', 'site', 'channel', 'z_index', 'timepoint']:
             if key in component_metadata:
                 value = component_metadata[key]
-                parts.append(f"{key}={value}")
-        
-        return "_".join(parts)
+                mode = component_modes.get(key, 'stack')  # Default to stack
+
+                if mode == 'stack':
+                    slice_components.append(f"{key}={value}")
+                else:  # mode == 'slice'
+                    stack_components.append(f"{key}={value}")
+
+        # Build stack name from step + slice components (these define separate stacks)
+        stack_parts = [step_name] + stack_components
+        stack_name = "_".join(stack_parts) if stack_parts else step_name
+
+        # Build slice label from stack components (these are slices within the stack)
+        slice_label = "_".join(slice_components) if slice_components else None
+
+        return stack_name, slice_label
     
     def request_shutdown(self):
         """Request graceful shutdown."""
