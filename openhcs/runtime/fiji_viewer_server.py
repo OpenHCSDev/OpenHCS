@@ -7,7 +7,7 @@ via PyImageJ. Inherits from ZMQServer ABC for ping/pong handshake and dual-chann
 
 import logging
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from pathlib import Path
 
 from openhcs.runtime.zmq_base import ZMQServer
@@ -240,7 +240,6 @@ class FijiViewerServer(ZMQServer):
             frame_components: Components mapped to Frame dimension
         """
         import numpy as np
-        from ij import ImageStack, ImagePlus, CompositeImage
 
         # Collect unique values for each dimension
         channel_values = self._collect_dimension_values(images, channel_components)
@@ -261,7 +260,8 @@ class FijiViewerServer(ZMQServer):
         first_img = images[0]['data']
         height, width = first_img.shape[-2:]
 
-        # Create ImageStack
+        # Create ImageStack using ImageJ classes from PyImageJ
+        ImageStack = self.ij.gateway.jvm.ij.ImageStack
         stack = ImageStack(width, height)
 
         # Build lookup dict
@@ -303,11 +303,12 @@ class FijiViewerServer(ZMQServer):
                         stack.addSlice(label, processor)
                     else:
                         # Add blank slice if missing
-                        from ij.process import ShortProcessor
+                        ShortProcessor = self.ij.gateway.jvm.ij.process.ShortProcessor
                         blank = ShortProcessor(width, height)
                         stack.addSlice(f"BLANK", blank)
 
-        # Create ImagePlus
+        # Create ImagePlus using ImageJ classes from PyImageJ
+        ImagePlus = self.ij.gateway.jvm.ij.ImagePlus
         imp = ImagePlus(window_key, stack)
 
         # Set hyperstack dimensions
@@ -315,6 +316,7 @@ class FijiViewerServer(ZMQServer):
 
         # Convert to CompositeImage if multiple channels
         if nChannels > 1:
+            CompositeImage = self.ij.gateway.jvm.ij.CompositeImage
             comp = CompositeImage(imp, CompositeImage.COMPOSITE)
             comp.setTitle(window_key)
             imp = comp
