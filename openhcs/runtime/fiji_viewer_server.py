@@ -220,19 +220,17 @@ class FijiViewerServer(ZMQServer):
                 mode = component_modes.get(key, 'stack')  # Default to stack
 
                 if mode == 'stack':
-                    # STACK mode: different values of this component go into SAME window as different slices
-                    # So this component should be in the slice_label (varies within window)
-                    slice_components.append(f"{key}={value}")
-                else:  # mode == 'slice'
-                    # SLICE mode: different values of this component go into SEPARATE windows
-                    # So this component should be in the stack_name (defines which window)
+                    # STACK mode: images with different values go into SAME stack as slices
                     stack_components.append(f"{key}={value}")
+                else:  # mode == 'slice'
+                    # SLICE mode: images with different values go into SEPARATE stacks
+                    slice_components.append(f"{key}={value}")
 
-        # Build stack name from step + slice_mode components (these define separate windows)
+        # Build stack name from step + slice components (these define separate stacks)
         stack_parts = [step_name] + stack_components
         stack_name = "_".join(stack_parts) if stack_parts else step_name
 
-        # Build slice label from stack_mode components (these vary within the same window)
+        # Build slice label from stack components (these are slices within the stack)
         slice_label = "_".join(slice_components) if slice_components else None
 
         return stack_name, slice_label
@@ -268,28 +266,20 @@ def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, lo
         logger.info(f"🔬 FIJI SERVER: Waiting for images...")
         
         # Message processing loop
-        message_count = 0
-        loop_count = 0
         while not server._shutdown_requested:
-            loop_count += 1
-            if loop_count % 1000 == 0:
-                logger.debug(f"🔬 FIJI SERVER: Loop iteration {loop_count}, received {message_count} messages")
-
             # Process control messages (ping/pong handled by ABC)
             server.process_messages()
-
+            
             # Process data messages (images) if ready
             if server._ready:
                 # Process multiple messages per iteration for better throughput
                 for _ in range(10):
                     try:
                         message = server.data_socket.recv(zmq.NOBLOCK)
-                        message_count += 1
-                        logger.info(f"🔬 FIJI SERVER: Received message #{message_count}")
                         server.process_image_message(message)
                     except zmq.Again:
                         break
-
+            
             time.sleep(0.01)  # 10ms sleep to prevent busy-waiting
         
         logger.info("🔬 FIJI SERVER: Shutting down...")
