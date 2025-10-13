@@ -1,14 +1,15 @@
 """
 Fiji streaming backend for OpenHCS.
 
-Streams image data directly to Fiji/ImageJ GUI for interactive exploration.
-Uses PyImageJ to send numpy arrays directly to running Fiji instance.
-Requires PyImageJ, JPype, and Maven to be properly configured.
+Streams image data to Fiji/ImageJ viewer using ZMQ for IPC.
+Follows same architecture as Napari streaming for consistency.
 """
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Union, List
+import os
 import numpy as np
 
 from openhcs.io.streaming import StreamingBackend
@@ -19,134 +20,126 @@ logger = logging.getLogger(__name__)
 
 
 class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
-    """
-    Fiji streaming backend with automatic metaclass registration.
+    """Fiji streaming backend with ZMQ publisher pattern (matches Napari architecture)."""
 
-    Streams image data directly to Fiji/ImageJ GUI for interactive exploration.
-    Uses PyImageJ to send numpy arrays directly to running Fiji instance.
-    """
-    
-    # Backend type from enum for registration
-    _backend_type = Backend.FIJI_STREAM.value  # You'd need to add this to the Backend enum
-    
+    _backend_type = Backend.FIJI_STREAM.value
+
     def __init__(self):
-        """Initialize the Fiji streaming backend."""
-        self._ij = None
-        
+        """Initialize Fiji streaming backend with ZMQ publisher pooling."""
+        self._publishers = {}
+        self._context = None
+        self._shared_memory_blocks = {}
+
+    def _get_publisher(self, fiji_host: str, fiji_port: int):
+        """Lazy initialization of ZeroMQ publisher for given host:port."""
+        key = f"{fiji_host}:{fiji_port}"
+        if key not in self._publishers:
+            import zmq
+            if self._context is None:
+                self._context = zmq.Context()
+
+            publisher = self._context.socket(zmq.PUB)
+            publisher.connect(f"tcp://{fiji_host}:{fiji_port}")
+            logger.info(f"Fiji streaming publisher connected to {fiji_host}:{fiji_port}")
+            time.sleep(0.1)  # Socket ready delay
+            self._publishers[key] = publisher
+
+        return self._publishers[key]
+
     def save(self, data: Any, file_path: Union[str, Path], **kwargs) -> None:
-        """
-        Stream single image to Fiji.
-        
-        Args:
-            data: Image data (numpy array)
-            file_path: Identifier for the image
-            **kwargs: Additional metadata
-        """
-        if not isinstance(data, np.ndarray):
-            logger.warning(f"Fiji streaming requires numpy arrays, got {type(data)}")
-            return
-            
-        # Send image directly to Fiji GUI using PyImageJ (fail loudly)
-        self._send_to_fiji_pyimagej(data, str(file_path), **kwargs)
-        logger.debug(f"🔬 FIJI: Streamed {file_path} to Fiji GUI for exploration")
-    
+        """Stream single image to Fiji."""
+        self.save_batch([data], [file_path], **kwargs)
+
     def save_batch(self, data_list: List[Any], file_paths: List[Union[str, Path]], **kwargs) -> None:
-        """
-        Stream batch of images to Fiji.
-        
-        Args:
-            data_list: List of image data arrays
-            file_paths: List of file path identifiers
-            **kwargs: Additional metadata
-        """
+        """Stream batch of images to Fiji via ZMQ."""
         if len(data_list) != len(file_paths):
-            raise ValueError("Data list and file paths must have same length")
-        
+            raise ValueError("data_list and file_paths must have same length")
+
+        # Extract required kwargs
+        fiji_host = kwargs.get('fiji_host', 'localhost')
+        fiji_port = kwargs['fiji_port']
+        publisher = self._get_publisher(fiji_host, fiji_port)
+        display_config = kwargs['display_config']
+        microscope_handler = kwargs['microscope_handler']
+        step_index = kwargs.get('step_index', 0)
+        step_name = kwargs.get('step_name', 'unknown_step')
+
+        # Prepare batch messages
+        batch_images = []
         for data, file_path in zip(data_list, file_paths):
-            self.save(data, file_path, **kwargs)
-        
-        logger.info(f"🔬 FIJI: Streamed batch of {len(data_list)} images to Fiji")
+            # Convert to numpy
+            np_data = data.cpu().numpy() if hasattr(data, 'cpu') else \
+                      data.get() if hasattr(data, 'get') else np.asarray(data)
 
-    def _send_to_fiji_pyimagej(self, data: np.ndarray, identifier: str, **kwargs) -> None:
-        """Send image directly to Fiji using PyImageJ."""
-        # Try to import PyImageJ
-        try:
-            import imagej
-        except ImportError:
-            raise ImportError("PyImageJ not available. Install with: pip install 'openhcs[viz]'")
+            # Create shared memory
+            from multiprocessing import shared_memory
+            shm_name = f"fiji_{id(data)}_{time.time_ns()}"
+            shm = shared_memory.SharedMemory(create=True, size=np_data.nbytes, name=shm_name)
+            shm_array = np.ndarray(np_data.shape, dtype=np_data.dtype, buffer=shm.buf)
+            shm_array[:] = np_data[:]
+            self._shared_memory_blocks[shm_name] = shm
 
-        # Initialize PyImageJ connection if not already done
-        if not hasattr(self, '_ij') or self._ij is None:
-            logger.info("🔬 FIJI: Attempting to connect via PyImageJ...")
-            self._ij = imagej.init(mode='interactive')
-            logger.info("🔬 FIJI: ✅ Connected to Fiji via PyImageJ")
+            # Parse component metadata
+            filename = os.path.basename(str(file_path))
+            component_metadata = microscope_handler.parser.parse_filename(filename)
 
-        # Convert numpy array to ImageJ format and display
-        ij_image = self._ij.py.to_java(data)
-        self._ij.ui().show(identifier, ij_image)
+            batch_images.append({
+                'path': str(file_path),
+                'shape': np_data.shape,
+                'dtype': str(np_data.dtype),
+                'shm_name': shm_name,
+                'component_metadata': component_metadata,
+                'step_index': step_index,
+                'step_name': step_name
+            })
 
-        # Apply auto-contrast if requested
-        if kwargs.get('auto_contrast', True):
-            self._ij.op().run("enhance.contrast", ij_image)
+        # Extract component modes from display config
+        from openhcs.constants import VariableComponents
+        component_modes = {
+            comp.value: display_config.get_dimension_mode(comp).value
+            for comp in VariableComponents
+        }
 
-        logger.info(f"🔬 FIJI: ✅ Sent {identifier} to Fiji via PyImageJ")
+        # Send batch message
+        message = {
+            'type': 'batch',
+            'images': batch_images,
+            'display_config': {
+                'lut': display_config.get_lut_name(),
+                'component_modes': component_modes,
+                'auto_contrast': display_config.auto_contrast if hasattr(display_config, 'auto_contrast') else True
+            },
+            'timestamp': time.time()
+        }
 
+        publisher.send_json(message)
+        logger.debug(f"Streamed batch of {len(batch_images)} images to Fiji on port {fiji_port}")
 
-    
-
-
-        
-        # Example using command line (requires Fiji installation)
-        try:
-            import subprocess
-            
-            # Write macro to temporary file
-            macro_file = self._temp_dir / "temp_macro.ijm"
-            macro_file.write_text(macro_cmd)
-            
-            # Execute via Fiji (adjust path as needed)
-            fiji_path = self._get_fiji_path()
-            if fiji_path:
-                subprocess.run([
-                    str(fiji_path), 
-                    "--headless", 
-                    "--console", 
-                    "-macro", 
-                    str(macro_file)
-                ], check=False, capture_output=True)
-            
-        except Exception as e:
-            logger.warning(f"Failed to execute Fiji macro: {e}")
-    
-    def _get_fiji_path(self) -> Path:
-        """Get path to Fiji executable."""
-        # Try common Fiji installation paths
-        common_paths = [
-            Path("/Applications/Fiji.app/Contents/MacOS/ImageJ-macosx"),  # macOS
-            Path("C:/Fiji.app/ImageJ-win64.exe"),  # Windows
-            Path("/opt/fiji/ImageJ-linux64"),  # Linux
-            Path.home() / "Fiji.app" / "ImageJ-linux64",  # User installation
-        ]
-        
-        for path in common_paths:
-            if path.exists():
-                return path
-        
-        logger.warning("Fiji executable not found in common locations")
-        return None
-    
     def cleanup(self) -> None:
-        """Clean up temporary files and resources."""
-        # Clean up temporary directory
-        if self._temp_dir and self._temp_dir.exists():
+        """Clean up ZMQ resources and shared memory blocks."""
+        # Close shared memory blocks
+        for shm_name, shm in self._shared_memory_blocks.items():
             try:
-                import shutil
-                shutil.rmtree(self._temp_dir)
-                logger.debug("Cleaned up Fiji temporary files")
+                shm.close()
+                shm.unlink()
             except Exception as e:
-                logger.warning(f"Failed to cleanup Fiji temp directory: {e}")
-        
-        self._temp_dir = None
-        self._macro_queue.clear()
-        
+                logger.warning(f"Failed to cleanup shared memory {shm_name}: {e}")
+        self._shared_memory_blocks.clear()
+
+        # Close ZMQ publishers
+        for key, publisher in self._publishers.items():
+            try:
+                publisher.close()
+            except Exception as e:
+                logger.warning(f"Failed to close publisher {key}: {e}")
+        self._publishers.clear()
+
+        # Terminate ZMQ context
+        if self._context:
+            try:
+                self._context.term()
+            except Exception as e:
+                logger.warning(f"Failed to terminate ZMQ context: {e}")
+            self._context = None
+
         logger.debug("Fiji streaming backend cleaned up")
