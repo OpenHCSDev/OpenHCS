@@ -220,9 +220,11 @@ class FijiViewerServer(ZMQServer):
                 mode = component_modes.get(key, 'stack')  # Default to stack
 
                 if mode == 'stack':
-                    slice_components.append(f"{key}={value}")
-                else:  # mode == 'slice'
+                    # STACK mode: images with different values go into SAME stack as slices
                     stack_components.append(f"{key}={value}")
+                else:  # mode == 'slice'
+                    # SLICE mode: images with different values go into SEPARATE stacks
+                    slice_components.append(f"{key}={value}")
 
         # Build stack name from step + slice components (these define separate stacks)
         stack_parts = [step_name] + stack_components
