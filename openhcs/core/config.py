@@ -131,78 +131,12 @@ class GlobalPipelineConfig:
 
 
 
-def _headless_mode() -> bool:
-    """Detect headless/CI contexts where viz deps should not be required at import time.
-
-    CPU-only mode does NOT imply headless - you can run CPU mode with napari.
-    Only CI or explicit OPENHCS_HEADLESS flag triggers headless mode.
-    """
-    try:
-        if os.getenv('CI', '').lower() == 'true':
-            return True
-        if os.getenv('OPENHCS_HEADLESS', '').lower() == 'true':
-            return True
-    except Exception:
-        # Fail-closed to False; only explicit envs enable headless mode
-        pass
-    return False
-
-
-def _get_available_colormaps():
-    """Get available colormaps using introspection - napari first, then matplotlib."""
-    # In headless/CI/CPU-only contexts, avoid importing viz libs; return minimal stable set
-    if _headless_mode():
-        return [
-            'gray',
-            'viridis',
-        ]
-
-    # Try napari first (preferred for napari visualization)
-    try:
-        from napari.utils.colormaps import AVAILABLE_COLORMAPS
-        return list(AVAILABLE_COLORMAPS.keys())
-    except ImportError:
-        pass
-
-    # Try matplotlib as fallback
-    try:
-        import matplotlib.pyplot as plt
-        return list(plt.colormaps())
-    except ImportError:
-        pass
-
-    # If both fail, return empty list - fail loud, no hardcoding
-    raise ImportError("Neither napari nor matplotlib colormaps are available. Install napari or matplotlib.")
-
-
-def _create_colormap_enum():
-    """Create a dynamic enum for available colormaps using pure introspection."""
-    available_cmaps = _get_available_colormaps()
-
-    if not available_cmaps:
-        raise ValueError("No colormaps available for enum creation")
-
-    # Create enum members dictionary with proper Python identifier conversion
-    members = {}
-    for cmap_name in available_cmaps:
-        # Convert to valid Python identifier
-        enum_name = cmap_name.replace(' ', '_').replace('-', '_').replace('.', '_').upper()
-        # Handle names that start with numbers
-        if enum_name and enum_name[0].isdigit():
-            enum_name = f"CMAP_{enum_name}"
-        # Ensure we have a valid identifier
-        if enum_name and enum_name.replace('_', '').replace('CMAP', '').isalnum():
-            members[enum_name] = cmap_name
-
-    if not members:
-        raise ValueError("No valid colormap identifiers could be created")
-
-    # Create the enum class dynamically
-    return Enum('NapariColormap', members)
-
+# Import utilities for dynamic config creation
+from openhcs.utils.enum_factory import create_colormap_enum
+from openhcs.utils.display_config_factory import create_napari_display_config, create_fiji_display_config
 
 # Create the colormap enum using pure introspection
-NapariColormap = _create_colormap_enum()
+NapariColormap = create_colormap_enum()
 
 
 class NapariDimensionMode(Enum):
@@ -217,102 +151,46 @@ class NapariVariableSizeHandling(Enum):
     PAD_TO_MAX = "pad_to_max"  # Pad smaller images to match largest (enables stacking)
 
 
-def _create_napari_display_config():
-    """Dynamically create NapariDisplayConfig with component-specific fields."""
-    # Import the actual VariableComponents from constants
-    from openhcs.constants import VariableComponents
-
-    variable_components = list(VariableComponents)
-
-    # Create field annotations and defaults
-    annotations = {
-        'colormap': NapariColormap,
-        'variable_size_handling': NapariVariableSizeHandling,
-    }
-    defaults = {
-        'colormap': NapariColormap.GRAY,
-        'variable_size_handling': NapariVariableSizeHandling.SEPARATE_LAYERS,
-    }
-
-    # Add dynamic component mode fields
-    for component in variable_components:
-        field_name = f"{component.value}_mode"
-        annotations[field_name] = NapariDimensionMode
-        # Default: channel=SLICE (separate 2D slices), everything else=STACK (3D volumes)
-        default_mode = NapariDimensionMode.SLICE if component.value == 'channel' else NapariDimensionMode.STACK
-        defaults[field_name] = default_mode
-
-    # Create the class dynamically
-    def __init__(self, **kwargs):
-        # Set defaults for any missing fields
-        for field_name, default_value in defaults.items():
-            if field_name not in kwargs:
-                kwargs[field_name] = default_value
-
-        # Set all attributes
-        for field_name, value in kwargs.items():
-            object.__setattr__(self, field_name, value)
-
-    def get_dimension_mode(self, component) -> NapariDimensionMode:
-        """Get the dimension mode for a given component."""
-        # Handle enum components, component names, or string values
-        if hasattr(component, 'value'):
-            component_value = component.value
-        elif hasattr(component, 'name'):
-            component_value = component.name.lower()
-        else:
-            # Handle string input
-            component_value = str(component).lower()
-
-        # Look up the corresponding field
-        field_name = f"{component_value}_mode"
-        mode = getattr(self, field_name, None)
-
-        # Handle None values from inheritance system - use defaults
-        if mode is None:
-            # Default: channel=SLICE (separate 2D slices), everything else=STACK (3D volumes)
-            return NapariDimensionMode.SLICE if component_value == 'channel' else NapariDimensionMode.STACK
-
-        return mode
-
-    def get_colormap_name(self) -> str:
-        """Get the string name of the colormap for serialization."""
-        return self.colormap.value
-
-
-
-    # Create class attributes
-    class_attrs = {
-        '__annotations__': annotations,
-        '__init__': __init__,
-        'get_dimension_mode': get_dimension_mode,
-        'get_colormap_name': get_colormap_name,
-
-        '__doc__': """Configuration for napari display behavior for all OpenHCS components.
-
-        This class is dynamically generated with individual fields for each variable component.
-        Each component has a corresponding {component}_mode field that controls whether
-        it's displayed as a slice or stack in napari.
-        """,
-    }
-
-    # Add default values as class attributes for dataclass compatibility
-    for field_name, default_value in defaults.items():
-        class_attrs[field_name] = default_value
-
-    # Create the class
-    NapariDisplayConfig = type('NapariDisplayConfig', (), class_attrs)
-
-    # Make it a frozen dataclass
-    NapariDisplayConfig = dataclass(frozen=True)(NapariDisplayConfig)
-
-    return NapariDisplayConfig
-
-# Create the dynamic class
-NapariDisplayConfig = _create_napari_display_config()
+# Create NapariDisplayConfig using factory
+NapariDisplayConfig = create_napari_display_config(
+    colormap_enum=NapariColormap,
+    dimension_mode_enum=NapariDimensionMode,
+    variable_size_handling_enum=NapariVariableSizeHandling
+)
 
 # Apply the global pipeline config decorator
 NapariDisplayConfig = global_pipeline_config(NapariDisplayConfig)
+
+
+# ============================================================================
+# Fiji Display Configuration
+# ============================================================================
+
+class FijiLUT(Enum):
+    """Fiji/ImageJ LUT options."""
+    GRAYS = "Grays"
+    FIRE = "Fire"
+    ICE = "Ice"
+    SPECTRUM = "Spectrum"
+    RED = "Red"
+    GREEN = "Green"
+    BLUE = "Blue"
+
+
+class FijiDimensionMode(Enum):
+    """Fiji dimension handling."""
+    SLICE = "slice"
+    STACK = "stack"
+
+
+# Create FijiDisplayConfig using factory (with component-specific fields like Napari)
+FijiDisplayConfig = create_fiji_display_config(
+    lut_enum=FijiLUT,
+    dimension_mode_enum=FijiDimensionMode
+)
+
+# Apply the global pipeline config decorator
+FijiDisplayConfig = global_pipeline_config(FijiDisplayConfig)
 
 
 @global_pipeline_config
@@ -610,8 +488,19 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
 
 @global_pipeline_config
 @dataclass(frozen=True)
-class FijiStreamingConfig(StreamingConfig):
-    """Configuration for fiji streaming."""
+class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
+    """
+    Configuration for Fiji streaming with display options.
+
+    Inherits from both StreamingConfig and FijiDisplayConfig to provide
+    feature parity with NapariStreamingConfig.
+    """
+    fiji_port: int = 5556
+    """Port for Fiji streaming communication (different default from Napari)."""
+
+    fiji_host: str = 'localhost'
+    """Host for Fiji streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
+
     fiji_executable_path: Optional[Path] = None
     """Path to Fiji/ImageJ executable. If None, will auto-detect."""
 
@@ -623,16 +512,30 @@ class FijiStreamingConfig(StreamingConfig):
     def step_plan_output_key(self) -> str:
         return "fiji_streaming_paths"
 
-    def get_streaming_kwargs(self, global_config) -> dict:
-        return {"fiji_executable_path": self.fiji_executable_path}
+    def get_streaming_kwargs(self, context) -> dict:
+        """Return kwargs needed for Fiji streaming backend (matches Napari pattern)."""
+        kwargs = {
+            "fiji_port": self.fiji_port,
+            "fiji_host": self.fiji_host,
+            "fiji_executable_path": self.fiji_executable_path,
+            "display_config": self  # self is now the display config
+        }
+
+        # Include microscope handler for component parsing
+        if context:
+            kwargs["microscope_handler"] = context.microscope_handler
+
+        return kwargs
 
     def create_visualizer(self, filemanager, visualizer_config):
         from openhcs.runtime.fiji_stream_visualizer import FijiStreamVisualizer
         return FijiStreamVisualizer(
             filemanager,
+            visualizer_config,
             viewer_title="OpenHCS Fiji Visualization",
-            visualizer_config=visualizer_config,
-            persistent=self.persistent
+            persistent=self.persistent,
+            fiji_port=self.fiji_port,
+            display_config=self
         )
 
 @dataclass(frozen=True)

@@ -1,16 +1,4 @@
-"""
-Generic ZMQ communication pattern extracted from Napari streaming.
-
-This module provides abstract base classes for dual-channel ZMQ communication:
-- Data channel: For sending/receiving data (SUB/PUB pattern)
-- Control channel: For handshake and control messages (REQ/REP pattern)
-
-The pattern supports:
-- Multi-instance management (connect to existing or spawn new)
-- Port-based tracking
-- Handshake protocol (ping/pong)
-- Process lifecycle management
-"""
+"""Generic ZMQ dual-channel pattern (data + control)."""
 
 import logging
 import socket
@@ -21,45 +9,22 @@ import threading
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Callable, Any, Dict, List
 import pickle
+from openhcs.runtime.zmq_messages import ControlMessageType, ResponseType, MessageFields, PongResponse, SocketType
 
 logger = logging.getLogger(__name__)
 
 
 class ZMQServer(ABC):
-    """
-    Abstract base class for ZMQ servers using dual-channel pattern.
+    """ABC for ZMQ servers - dual-channel pattern with ping/pong handshake."""
 
-    Implements:
-    - Dual-channel setup (data + control ports)
-    - Handshake protocol (ping/pong)
-    - Port management utilities
-    - Lifecycle management
-
-    Subclasses must implement:
-    - handle_data_message(): Process data channel messages
-    - handle_control_message(): Process control channel messages (beyond ping/pong)
-    """
-
-    def __init__(self, port: int, host: str = '*', log_file_path: Optional[str] = None, data_socket_type: int = None):
-        """
-        Initialize ZMQ server.
-
-        Args:
-            port: Data port (control port will be port + 1000)
-            host: Host to bind to (default: '*' for all interfaces)
-            log_file_path: Path to server log file (for client discovery)
-            data_socket_type: ZMQ socket type for data channel (default: zmq.PUB for sending, or zmq.SUB for receiving)
-        """
+    def __init__(self, port, host='*', log_file_path=None, data_socket_type=None):
         import zmq
-
         self.port = port
         self.host = host
         self.control_port = port + 1000
         self.log_file_path = log_file_path
         self.data_socket_type = data_socket_type if data_socket_type is not None else zmq.PUB
-
         self.zmq_context = None
         self.data_socket = None
         self.control_socket = None
@@ -68,260 +33,113 @@ class ZMQServer(ABC):
         self._lock = threading.Lock()
     
     def start(self):
-        """Start the ZMQ server (bind sockets and start message loop)."""
         import zmq
-
         with self._lock:
             if self._running:
-                logger.warning("Server already running")
                 return
-
-            # Create ZMQ context
             self.zmq_context = zmq.Context()
-
-            # Set up data socket (configurable type: PUB for sending, SUB for receiving)
             self.data_socket = self.zmq_context.socket(self.data_socket_type)
             self.data_socket.setsockopt(zmq.LINGER, 0)
             self.data_socket.bind(f"tcp://{self.host}:{self.port}")
-
-            # If SUB socket, subscribe to all messages
             if self.data_socket_type == zmq.SUB:
                 self.data_socket.setsockopt(zmq.SUBSCRIBE, b"")
-
-            # Set up control socket (REP for handshake and control)
             self.control_socket = self.zmq_context.socket(zmq.REP)
             self.control_socket.setsockopt(zmq.LINGER, 0)
             self.control_socket.bind(f"tcp://{self.host}:{self.control_port}")
-
             self._running = True
-            socket_type_name = "PUB" if self.data_socket_type == zmq.PUB else "SUB" if self.data_socket_type == zmq.SUB else str(self.data_socket_type)
-            logger.info(f"ZMQ Server started on data port {self.port} ({socket_type_name}), control port {self.control_port}")
-    
+            logger.info(f"ZMQ Server started on {self.port} ({SocketType.from_zmq_constant(self.data_socket_type).get_display_name()}), control {self.control_port}")
+
     def stop(self):
-        """Stop the ZMQ server (close sockets and cleanup)."""
         with self._lock:
             if not self._running:
                 return
-            
             self._running = False
-            
             if self.data_socket:
                 self.data_socket.close()
                 self.data_socket = None
-            
             if self.control_socket:
                 self.control_socket.close()
                 self.control_socket = None
-            
             if self.zmq_context:
                 self.zmq_context.term()
                 self.zmq_context = None
-            
             logger.info("ZMQ Server stopped")
-    
-    def is_running(self) -> bool:
-        """Check if server is running."""
+
+    def is_running(self):
         return self._running
-    
+
     def process_messages(self):
-        """
-        Process incoming messages on both channels.
-        
-        This should be called periodically (e.g., in a timer or event loop).
-        """
         import zmq
-        
         if not self._running:
             return
-        
-        # Handle control messages (handshake) first
         try:
-            control_message = self.control_socket.recv(zmq.NOBLOCK)
-            control_data = pickle.loads(control_message)
-            
-            if control_data.get('type') == 'ping':
-                # Handle ping - mark as ready after first ping
+            control_data = pickle.loads(self.control_socket.recv(zmq.NOBLOCK))
+            if control_data.get(MessageFields.TYPE) == ControlMessageType.PING.value:
                 if not self._ready:
                     self._ready = True
-                    logger.info("Server marked as ready after ping")
-                
+                    logger.info("Server ready")
                 response = self._create_pong_response()
-                self.control_socket.send(pickle.dumps(response))
-                logger.debug(f"Responded to ping with ready={self._ready}")
             else:
-                # Delegate to subclass
                 response = self.handle_control_message(control_data)
-                self.control_socket.send(pickle.dumps(response))
-        
+            self.control_socket.send(pickle.dumps(response))
         except zmq.Again:
-            pass  # No control messages
-        
-        # Process data messages only if ready
-        if self._ready:
-            try:
-                # Subclasses can override to receive data messages
-                # For execution server, we use REQ/REP on control channel instead
-                pass
-            except zmq.Again:
-                pass  # No data messages
-    
-    def _create_pong_response(self) -> Dict[str, Any]:
-        """Create pong response. Subclasses can override to add custom fields."""
-        response = {
-            'type': 'pong',
-            'port': self.port,
-            'control_port': self.control_port,
-            'ready': self._ready,
-            'server': self.__class__.__name__
-        }
-        if self.log_file_path:
-            response['log_file_path'] = self.log_file_path
-        return response
+            pass
 
-    def get_status_info(self) -> Dict[str, Any]:
-        """
-        Get server status information for UI display.
+    def _create_pong_response(self):
+        return PongResponse(port=self.port, control_port=self.control_port, ready=self._ready,
+                           server=self.__class__.__name__, log_file_path=self.log_file_path).to_dict()
 
-        Subclasses can override to add custom fields (e.g., execution progress).
-
-        Returns:
-            Dictionary with server status information
-        """
-        return {
-            'port': self.port,
-            'control_port': self.control_port,
-            'running': self._running,
-            'ready': self._ready,
-            'server_type': self.__class__.__name__,
-            'log_file': self.log_file_path
-        }
+    def get_status_info(self):
+        return {'port': self.port, 'control_port': self.control_port, 'running': self._running,
+                'ready': self._ready, 'server_type': self.__class__.__name__, 'log_file': self.log_file_path}
 
     def request_shutdown(self):
-        """
-        Request graceful shutdown of the server.
-
-        This sets a flag that the server should check and shutdown cleanly.
-        Subclasses can override for custom shutdown logic.
-        """
-        logger.info("Shutdown requested")
         self._running = False
 
     @staticmethod
-    def kill_processes_on_port(port: int) -> int:
-        """
-        Kill processes listening on the specified port.
-
-        This is extracted from Napari's implementation and shared across all servers.
-        Only kills processes that are LISTENING on the port (not clients connected to it).
-
-        Args:
-            port: Port number to kill processes on
-
-        Returns:
-            Number of processes killed
-        """
-        killed_count = 0
-
+    def kill_processes_on_port(port):
+        killed = 0
         try:
             system = platform.system()
-
-            if system == "Linux" or system == "Darwin":
-                # Use lsof with -sTCP:LISTEN to find only LISTENING processes
-                result = subprocess.run(
-                    ['lsof', '-ti', f'TCP:{port}', '-sTCP:LISTEN'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
+            if system in ["Linux", "Darwin"]:
+                result = subprocess.run(['lsof', '-ti', f'TCP:{port}', '-sTCP:LISTEN'], capture_output=True, text=True, timeout=2)
                 if result.returncode == 0 and result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
+                    for pid in result.stdout.strip().split('\n'):
                         try:
                             subprocess.run(['kill', '-9', pid], timeout=1)
-                            logger.info(f"Killed process {pid} listening on port {port}")
-                            killed_count += 1
-                        except Exception as e:
-                            logger.warning(f"Failed to kill process {pid}: {e}")
-
+                            killed += 1
+                        except:
+                            pass
             elif system == "Windows":
-                # Use netstat to find processes LISTENING on the port
-                result = subprocess.run(
-                    ['netstat', '-ano'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
+                result = subprocess.run(['netstat', '-ano'], capture_output=True, text=True, timeout=2)
                 for line in result.stdout.split('\n'):
                     if f':{port}' in line and 'LISTENING' in line:
-                        parts = line.split()
-                        pid = parts[-1]
                         try:
-                            subprocess.run(['taskkill', '/F', '/PID', pid], timeout=1)
-                            logger.info(f"Killed process {pid} listening on port {port}")
-                            killed_count += 1
-                        except Exception as e:
-                            logger.warning(f"Failed to kill process {pid}: {e}")
-
-        except Exception as e:
-            logger.warning(f"Failed to kill processes on port {port}: {e}")
-
-        return killed_count
+                            subprocess.run(['taskkill', '/F', '/PID', line.split()[-1]], timeout=1)
+                            killed += 1
+                        except:
+                            pass
+        except:
+            pass
+        return killed
 
     @abstractmethod
-    def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle control channel messages (beyond ping/pong).
-        
-        Args:
-            message: Deserialized message from control channel
-        
-        Returns:
-            Response to send back to client
-        """
+    def handle_control_message(self, message):
         pass
-    
+
     @abstractmethod
-    def handle_data_message(self, message: Dict[str, Any]):
-        """
-        Handle data channel messages.
-        
-        Args:
-            message: Deserialized message from data channel
-        """
+    def handle_data_message(self, message):
         pass
 
 
 class ZMQClient(ABC):
-    """
-    Abstract base class for ZMQ clients using dual-channel pattern.
-    
-    Implements:
-    - Connection management (connect to existing or spawn new server)
-    - Handshake verification (ping/pong)
-    - Multi-instance support (port-based tracking)
-    - Process spawning utilities
-    
-    Subclasses must implement:
-    - _spawn_server_process(): Spawn new server process
-    - send_data(): Send data to server
-    """
-    
-    def __init__(self, port: int, host: str = 'localhost', persistent: bool = True):
-        """
-        Initialize ZMQ client.
-        
-        Args:
-            port: Server data port (control port will be port + 1000)
-            host: Server hostname
-            persistent: If True, spawn detached subprocess; if False, use multiprocessing.Process
-        """
+    """ABC for ZMQ clients - dual-channel pattern with auto-spawning."""
+
+    def __init__(self, port, host='localhost', persistent=True):
         self.port = port
         self.host = host
         self.control_port = port + 1000
         self.persistent = persistent
-        
         self.zmq_context = None
         self.data_socket = None
         self.control_socket = None
@@ -330,113 +148,61 @@ class ZMQClient(ABC):
         self._connected_to_existing = False
         self._lock = threading.Lock()
     
-    def connect(self, timeout: float = 10.0) -> bool:
-        """
-        Connect to server, spawning new one if needed.
-        
-        Args:
-            timeout: Maximum time to wait for server to be ready
-        
-        Returns:
-            True if connected successfully
-        """
+    def connect(self, timeout=10.0):
         with self._lock:
-            # Check if already connected
             if self._connected:
-                logger.info("Already connected to server")
                 return True
-            
-            # Try to connect to existing server
             if self._is_port_in_use(self.port):
-                logger.info(f"Port {self.port} in use, attempting to connect to existing server...")
                 if self._try_connect_to_existing(self.port):
-                    logger.info(f"Successfully connected to existing server on port {self.port}")
-                    self._connected = True
-                    self._connected_to_existing = True
+                    self._connected = self._connected_to_existing = True
                     return True
-                else:
-                    # Existing server is unresponsive - kill it and start fresh
-                    logger.info(f"Existing server on port {self.port} is unresponsive, killing and restarting...")
-                    self._kill_processes_on_port(self.port)
-                    self._kill_processes_on_port(self.control_port)
-                    time.sleep(0.5)
-            
-            # Spawn new server process
-            logger.info(f"Starting new server on port {self.port}")
+                self._kill_processes_on_port(self.port)
+                self._kill_processes_on_port(self.control_port)
+                time.sleep(0.5)
             self.server_process = self._spawn_server_process()
-            
-            # Wait for server to be ready
             if not self._wait_for_server_ready(timeout):
-                logger.error("Server failed to become ready")
                 return False
-            
-            # Set up client sockets
             self._setup_client_sockets()
-            
             self._connected = True
-            logger.info(f"Successfully connected to new server on port {self.port}")
             return True
 
     def disconnect(self):
-        """Disconnect from server and cleanup."""
         with self._lock:
             if not self._connected:
                 return
-
             self._cleanup_sockets()
-
-            # Only kill server if:
-            # 1. We spawned it (not connected to existing)
-            # 2. AND it's non-persistent (persistent servers stay alive)
             if not self._connected_to_existing and self.server_process and not self.persistent:
-                logger.info("Killing non-persistent server on disconnect")
                 if hasattr(self.server_process, 'is_alive'):
-                    # multiprocessing.Process
                     if self.server_process.is_alive():
                         self.server_process.terminate()
                         self.server_process.join(timeout=5)
                         if self.server_process.is_alive():
                             self.server_process.kill()
                 else:
-                    # subprocess.Popen
                     if self.server_process.poll() is None:
                         self.server_process.terminate()
                         try:
                             self.server_process.wait(timeout=5)
                         except subprocess.TimeoutExpired:
                             self.server_process.kill()
-            elif self.persistent:
-                logger.info(f"Disconnecting from persistent server on port {self.port} (server stays alive)")
-
             self._connected = False
-            logger.info("Disconnected from server")
 
-    def is_connected(self) -> bool:
-        """Check if connected to server."""
+    def is_connected(self):
         return self._connected
 
     def _setup_client_sockets(self):
-        """Set up client ZMQ sockets."""
         import zmq
-
         self.zmq_context = zmq.Context()
-
-        # Data socket (SUB for receiving data from server)
         self.data_socket = self.zmq_context.socket(zmq.SUB)
         self.data_socket.setsockopt(zmq.LINGER, 0)
         self.data_socket.connect(f"tcp://{self.host}:{self.port}")
-        self.data_socket.setsockopt(zmq.SUBSCRIBE, b"")  # Subscribe to all messages
-
-        # Brief delay for connection to establish
+        self.data_socket.setsockopt(zmq.SUBSCRIBE, b"")
         time.sleep(0.1)
-        logger.info(f"Client sockets connected to {self.host}:{self.port}")
 
     def _cleanup_sockets(self):
-        """Close client sockets."""
         if self.data_socket:
             self.data_socket.close()
             self.data_socket = None
-
         if self.control_socket:
             self.control_socket.close()
             self.control_socket = None
@@ -445,372 +211,160 @@ class ZMQClient(ABC):
             self.zmq_context.term()
             self.zmq_context = None
 
-    def _try_connect_to_existing(self, port: int) -> bool:
-        """
-        Try to connect to existing server and verify it's responsive.
-
-        Returns:
-            True if successfully connected and verified
-        """
+    def _try_connect_to_existing(self, port):
         import zmq
-
-        control_port = port + 1000
-        control_context = None
-        control_socket = None
-
         try:
-            control_context = zmq.Context()
-            control_socket = control_context.socket(zmq.REQ)
-            control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
-            control_socket.connect(f"tcp://{self.host}:{control_port}")
-
-            # Send ping
-            ping_message = {'type': 'ping'}
-            control_socket.send(pickle.dumps(ping_message))
-
-            # Wait for pong
-            response = control_socket.recv()
-            response_data = pickle.loads(response)
-
-            if response_data.get('type') == 'pong' and response_data.get('ready'):
-                # Server is responsive!
-                return True
-            else:
-                return False
-
-        except Exception as e:
-            logger.debug(f"Failed to connect to existing server on port {port}: {e}")
+            ctx = zmq.Context()
+            sock = ctx.socket(zmq.REQ)
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.setsockopt(zmq.RCVTIMEO, 500)
+            sock.connect(f"tcp://{self.host}:{port + 1000}")
+            sock.send(pickle.dumps({'type': 'ping'}))
+            response = pickle.loads(sock.recv())
+            return response.get('type') == 'pong' and response.get('ready')
+        except:
             return False
         finally:
-            if control_socket:
-                try:
-                    control_socket.close()
-                except:
-                    pass
-            if control_context:
-                try:
-                    control_context.term()
-                except:
-                    pass
+            try:
+                sock.close()
+                ctx.term()
+            except:
+                pass
 
-    def _wait_for_server_ready(self, timeout: float = 10.0) -> bool:
-        """
-        Wait for server to be ready using handshake protocol.
-
-        Args:
-            timeout: Maximum time to wait (seconds)
-
-        Returns:
-            True if server became ready
-        """
+    def _wait_for_server_ready(self, timeout=10.0):
         import zmq
-
-        logger.info(f"Waiting for server to be ready on port {self.port}...")
-
-        # First wait for ports to be bound
-        start_time = time.time()
-        while time.time() - start_time < timeout:
+        start = time.time()
+        while time.time() - start < timeout:
             if self._is_port_in_use(self.port) and self._is_port_in_use(self.control_port):
                 break
             time.sleep(0.2)
         else:
-            logger.warning("Timeout waiting for ports to be bound")
             return False
-
-        # Now use handshake protocol
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            control_context = zmq.Context()
-            control_socket = control_context.socket(zmq.REQ)
-            control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout
-
+        start = time.time()
+        while time.time() - start < timeout:
             try:
-                control_socket.connect(f"tcp://{self.host}:{self.control_port}")
-
-                ping_message = {'type': 'ping'}
-                control_socket.send(pickle.dumps(ping_message))
-
-                response = control_socket.recv()
-                response_data = pickle.loads(response)
-
-                if response_data.get('type') == 'pong' and response_data.get('ready'):
-                    logger.info(f"Server is ready on port {self.port}")
-                    control_socket.close()
-                    control_context.term()
+                ctx = zmq.Context()
+                sock = ctx.socket(zmq.REQ)
+                sock.setsockopt(zmq.LINGER, 0)
+                sock.setsockopt(zmq.RCVTIMEO, 1000)
+                sock.connect(f"tcp://{self.host}:{self.control_port}")
+                sock.send(pickle.dumps({'type': 'ping'}))
+                response = pickle.loads(sock.recv())
+                if response.get('type') == 'pong' and response.get('ready'):
+                    sock.close()
+                    ctx.term()
                     return True
-
-            except Exception:
+            except:
                 pass
             finally:
                 try:
-                    control_socket.close()
-                    control_context.term()
+                    sock.close()
+                    ctx.term()
                 except:
                     pass
-
             time.sleep(0.5)
 
-        logger.warning("Timeout waiting for server to be ready")
         return False
 
-    def _is_port_in_use(self, port: int) -> bool:
-        """Check if a port is already in use."""
+    def _is_port_in_use(self, port):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(0.1)
         try:
             sock.bind(('localhost', port))
             sock.close()
-            return False  # Port is free
+            return False
         except OSError:
             sock.close()
-            return True  # Port is in use
-        except Exception:
+            return True
+        except:
             return False
 
-    def _find_free_port(self) -> int:
-        """Find a free port for ZMQ communication."""
+    def _find_free_port(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(('', 0))
             return s.getsockname()[1]
 
-    def _kill_processes_on_port(self, port: int):
-        """
-        Kill only the process LISTENING on the specified port.
-
-        Does NOT kill client processes that are merely connected to the port.
-        """
+    def _kill_processes_on_port(self, port):
         try:
             system = platform.system()
-
-            if system == "Linux" or system == "Darwin":
-                # Use lsof with -sTCP:LISTEN to find only LISTENING processes
-                result = subprocess.run(
-                    ['lsof', '-ti', f'TCP:{port}', '-sTCP:LISTEN'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
+            if system in ["Linux", "Darwin"]:
+                result = subprocess.run(['lsof', '-ti', f'TCP:{port}', '-sTCP:LISTEN'], capture_output=True, text=True, timeout=2)
                 if result.returncode == 0 and result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
+                    for pid in result.stdout.strip().split('\n'):
                         try:
                             subprocess.run(['kill', '-9', pid], timeout=1)
-                            logger.info(f"Killed process {pid} listening on port {port}")
-                        except Exception as e:
-                            logger.warning(f"Failed to kill process {pid}: {e}")
-
+                        except:
+                            pass
             elif system == "Windows":
-                # Use netstat to find processes LISTENING on the port
-                result = subprocess.run(
-                    ['netstat', '-ano'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
+                result = subprocess.run(['netstat', '-ano'], capture_output=True, text=True, timeout=2)
                 for line in result.stdout.split('\n'):
                     if f':{port}' in line and 'LISTENING' in line:
-                        parts = line.split()
-                        pid = parts[-1]
                         try:
-                            subprocess.run(['taskkill', '/F', '/PID', pid], timeout=1)
-                            logger.info(f"Killed process {pid} listening on port {port}")
-                        except Exception as e:
-                            logger.warning(f"Failed to kill process {pid}: {e}")
-
-        except Exception as e:
-            logger.warning(f"Failed to kill processes on port {port}: {e}")
+                            subprocess.run(['taskkill', '/F', '/PID', line.split()[-1]], timeout=1)
+                        except:
+                            pass
+        except:
+            pass
 
     @staticmethod
-    def scan_servers(ports: list[int], host: str = 'localhost', timeout_ms: int = 200) -> list[Dict[str, Any]]:
-        """
-        Scan ports for running ZMQ servers and return their status information.
-
-        Args:
-            ports: List of ports to scan
-            host: Hostname to connect to
-            timeout_ms: Timeout in milliseconds for each ping
-
-        Returns:
-            List of server info dictionaries from pong responses
-        """
+    def scan_servers(ports, host='localhost', timeout_ms=200):
         import zmq
-
         servers = []
-
         for port in ports:
-            control_port = port + 1000
-            context = None
-            socket = None
-
             try:
-                context = zmq.Context()
-                socket = context.socket(zmq.REQ)
-                socket.setsockopt(zmq.LINGER, 0)
-                socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
-                socket.connect(f"tcp://{host}:{control_port}")
-
-                # Send ping
-                ping_message = {'type': 'ping'}
-                socket.send(pickle.dumps(ping_message))
-
-                # Wait for pong
-                response = socket.recv()
-                pong = pickle.loads(response)
-
+                ctx = zmq.Context()
+                sock = ctx.socket(zmq.REQ)
+                sock.setsockopt(zmq.LINGER, 0)
+                sock.setsockopt(zmq.RCVTIMEO, timeout_ms)
+                sock.connect(f"tcp://{host}:{port + 1000}")
+                sock.send(pickle.dumps({'type': 'ping'}))
+                pong = pickle.loads(sock.recv())
                 if pong.get('type') == 'pong':
-                    # Add port info to response
                     pong['port'] = port
-                    pong['control_port'] = control_port
+                    pong['control_port'] = port + 1000
                     servers.append(pong)
-                    logger.debug(f"Found server on port {port}: {pong.get('server', 'unknown')}")
-
-            except Exception as e:
-                logger.debug(f"No server on port {port}: {e}")
+            except:
+                pass
             finally:
-                if socket:
-                    try:
-                        socket.close()
-                    except:
-                        pass
-                if context:
-                    try:
-                        context.term()
-                    except:
-                        pass
-
+                try:
+                    sock.close()
+                    ctx.term()
+                except:
+                    pass
         return servers
 
     @staticmethod
-    def kill_server_on_port(port: int, graceful: bool = True, timeout: float = 5.0) -> bool:
-        """
-        Kill server on specified port.
-
-        Args:
-            port: Data port of server to kill
-            graceful: If True, send shutdown command (kills workers only for execution servers);
-                     If False, send force_shutdown (kills workers AND server)
-            timeout: Timeout for graceful shutdown
-
-        Returns:
-            True if server was killed successfully
-        """
+    def kill_server_on_port(port, graceful=True, timeout=5.0):
         import zmq
-
-        control_port = port + 1000
-
-        if graceful:
-            # Graceful shutdown: kills workers only, server stays alive
-            context = None
-            socket = None
-
+        msg_type = 'shutdown' if graceful else 'force_shutdown'
+        try:
+            ctx = zmq.Context()
+            sock = ctx.socket(zmq.REQ)
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
+            sock.connect(f"tcp://localhost:{port + 1000}")
+            sock.send(pickle.dumps({'type': msg_type}))
+            ack = pickle.loads(sock.recv())
+            if ack.get('type') == 'shutdown_ack':
+                time.sleep(1.0)
+                return True
+        except:
+            pass
+        finally:
             try:
-                context = zmq.Context()
-                socket = context.socket(zmq.REQ)
-                socket.setsockopt(zmq.LINGER, 0)
-                socket.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
-                socket.connect(f"tcp://localhost:{control_port}")
-
-                # Send shutdown command (kills workers, server stays alive)
-                shutdown_message = {'type': 'shutdown'}
-                socket.send(pickle.dumps(shutdown_message))
-
-                # Wait for acknowledgment
-                response = socket.recv()
-                ack = pickle.loads(response)
-
-                if ack.get('type') == 'shutdown_ack':
-                    logger.info(f"Server on port {port} acknowledged shutdown: {ack.get('message')}")
-                    # Give it time to cleanup
-                    time.sleep(1.0)
-                    return True
-
-            except Exception as e:
-                logger.debug(f"Graceful shutdown failed for port {port}: {e}")
-            finally:
-                if socket:
-                    try:
-                        socket.close()
-                    except:
-                        pass
-                if context:
-                    try:
-                        context.term()
-                    except:
-                        pass
-        else:
-            # Force shutdown: kills workers AND server
-            context = None
-            socket = None
-
-            try:
-                context = zmq.Context()
-                socket = context.socket(zmq.REQ)
-                socket.setsockopt(zmq.LINGER, 0)
-                socket.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
-                socket.connect(f"tcp://localhost:{control_port}")
-
-                # Send force_shutdown command (kills workers AND server)
-                shutdown_message = {'type': 'force_shutdown'}
-                socket.send(pickle.dumps(shutdown_message))
-
-                # Wait for acknowledgment
-                response = socket.recv()
-                ack = pickle.loads(response)
-
-                if ack.get('type') == 'shutdown_ack':
-                    logger.info(f"Server on port {port} acknowledged force shutdown: {ack.get('message')}")
-                    # Give it time to cleanup
-                    time.sleep(1.0)
-                    return True
-
-            except Exception as e:
-                logger.debug(f"Force shutdown command failed for port {port}: {e}")
-            finally:
-                if socket:
-                    try:
-                        socket.close()
-                    except:
-                        pass
-                if context:
-                    try:
-                        context.term()
-                    except:
-                        pass
-
-        # If shutdown commands failed, only fall back to port-based killing if graceful=False
-        # For graceful shutdown, we respect the server's decision to reject the shutdown
+                sock.close()
+                ctx.term()
+            except:
+                pass
         if not graceful:
-            logger.warning(f"Force shutdown command failed, falling back to port-based killing for port {port}")
-            # Use the shared kill_processes_on_port method
-            killed_count = 0
-            for p in [port, control_port]:
-                killed_count += ZMQServer.kill_processes_on_port(p)
-            return killed_count > 0
-        else:
-            logger.info(f"Graceful shutdown rejected or failed for port {port}")
-            return False
+            return sum(ZMQServer.kill_processes_on_port(p) for p in [port, port + 1000]) > 0
+        return False
 
     @abstractmethod
     def _spawn_server_process(self):
-        """
-        Spawn new server process.
-
-        Returns:
-            Process object (subprocess.Popen or multiprocessing.Process)
-        """
         pass
 
     @abstractmethod
-    def send_data(self, data: Dict[str, Any]):
-        """
-        Send data to server.
-
-        Args:
-            data: Data to send
-        """
+    def send_data(self, data):
         pass
 
