@@ -240,6 +240,13 @@ class FijiViewerServer(ZMQServer):
             frame_components: Components mapped to Frame dimension
         """
         import numpy as np
+        import scyjava as sj
+
+        # Import ImageJ classes using scyjava
+        ImageStack = sj.jimport('ij.ImageStack')
+        ImagePlus = sj.jimport('ij.ImagePlus')
+        CompositeImage = sj.jimport('ij.CompositeImage')
+        ShortProcessor = sj.jimport('ij.process.ShortProcessor')
 
         # Collect unique values for each dimension
         channel_values = self._collect_dimension_values(images, channel_components)
@@ -260,8 +267,7 @@ class FijiViewerServer(ZMQServer):
         first_img = images[0]['data']
         height, width = first_img.shape[-2:]
 
-        # Create ImageStack using ImageJ classes from PyImageJ
-        ImageStack = self.ij.gateway.jvm.ij.ImageStack
+        # Create ImageStack
         stack = ImageStack(width, height)
 
         # Build lookup dict
@@ -303,12 +309,10 @@ class FijiViewerServer(ZMQServer):
                         stack.addSlice(label, processor)
                     else:
                         # Add blank slice if missing
-                        ShortProcessor = self.ij.gateway.jvm.ij.process.ShortProcessor
                         blank = ShortProcessor(width, height)
                         stack.addSlice(f"BLANK", blank)
 
-        # Create ImagePlus using ImageJ classes from PyImageJ
-        ImagePlus = self.ij.gateway.jvm.ij.ImagePlus
+        # Create ImagePlus
         imp = ImagePlus(window_key, stack)
 
         # Set hyperstack dimensions
@@ -316,7 +320,6 @@ class FijiViewerServer(ZMQServer):
 
         # Convert to CompositeImage if multiple channels
         if nChannels > 1:
-            CompositeImage = self.ij.gateway.jvm.ij.CompositeImage
             comp = CompositeImage(imp, CompositeImage.COMPOSITE)
             comp.setTitle(window_key)
             imp = comp
