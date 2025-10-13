@@ -1,0 +1,234 @@
+"""
+Fiji viewer server for OpenHCS.
+
+ZMQ-based server that receives images from FijiStreamingBackend and displays them
+via PyImageJ. Inherits from ZMQServer ABC for ping/pong handshake and dual-channel pattern.
+"""
+
+import logging
+import time
+from typing import Dict, Any, Optional
+from pathlib import Path
+
+from openhcs.runtime.zmq_base import ZMQServer
+
+logger = logging.getLogger(__name__)
+
+
+class FijiViewerServer(ZMQServer):
+    """
+    ZMQ server for Fiji viewer that receives images from clients.
+    
+    Inherits from ZMQServer ABC to get ping/pong, port management, etc.
+    Uses SUB socket to receive images from pipeline clients.
+    Displays images via PyImageJ.
+    """
+    
+    def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None):
+        """
+        Initialize Fiji viewer server.
+        
+        Args:
+            port: Data port for receiving images (control port will be port + 1000)
+            viewer_title: Title for the Fiji viewer window
+            display_config: FijiDisplayConfig with LUT, dimension modes, etc.
+            log_file_path: Path to log file (for client discovery)
+        """
+        import zmq
+        
+        # Initialize with SUB socket for receiving images
+        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.SUB)
+        
+        self.viewer_title = viewer_title
+        self.display_config = display_config
+        self.ij = None  # PyImageJ instance
+        self.images = {}  # Track displayed images by layer name
+        self.component_groups = {}  # Track component groupings
+        self._shutdown_requested = False
+    
+    def start(self):
+        """Start server and initialize PyImageJ."""
+        super().start()
+        
+        # Initialize PyImageJ in this process
+        try:
+            import imagej
+            logger.info("🔬 FIJI SERVER: Initializing PyImageJ...")
+            self.ij = imagej.init(mode='interactive')
+            logger.info(f"🔬 FIJI SERVER: PyImageJ initialized successfully")
+        except ImportError:
+            raise ImportError("PyImageJ not available. Install with: pip install 'openhcs[viz]'")
+    
+    def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle control messages beyond ping/pong.
+        
+        Supported message types:
+        - shutdown: Graceful shutdown (closes viewer)
+        - force_shutdown: Force shutdown (same as shutdown for Fiji)
+        """
+        msg_type = message.get('type')
+        
+        if msg_type == 'shutdown' or msg_type == 'force_shutdown':
+            logger.info(f"🔬 FIJI SERVER: {msg_type} requested, closing viewer")
+            self.request_shutdown()
+            return {
+                'type': 'shutdown_ack',
+                'status': 'success',
+                'message': 'Fiji viewer shutting down'
+            }
+        
+        return {'status': 'ok'}
+    
+    def handle_data_message(self, message: Dict[str, Any]):
+        """Handle incoming image data - called by process_messages()."""
+        pass
+    
+    def process_image_message(self, message: bytes):
+        """
+        Process incoming image data message.
+        
+        Args:
+            message: Raw ZMQ message containing image data
+        """
+        import json
+        import numpy as np
+        from multiprocessing import shared_memory
+        
+        # Parse JSON message
+        data = json.loads(message.decode('utf-8'))
+        
+        # Check if this is a batch message
+        if data.get('type') == 'batch':
+            images = data.get('images', [])
+            display_config_dict = data.get('display_config', {})
+            
+            for image_info in images:
+                self._process_single_image(image_info, display_config_dict)
+        else:
+            self._process_single_image(data, data.get('display_config', {}))
+    
+    def _process_single_image(self, image_info: Dict[str, Any], display_config_dict: Dict[str, Any]):
+        """Process and display a single image via PyImageJ."""
+        import numpy as np
+        from multiprocessing import shared_memory
+        
+        # Extract image data from shared memory
+        shm_name = image_info.get('shm_name')
+        shape = tuple(image_info.get('shape'))
+        dtype = np.dtype(image_info.get('dtype'))
+        
+        try:
+            shm = shared_memory.SharedMemory(name=shm_name)
+            np_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+            shm.close()
+        except Exception as e:
+            logger.error(f"🔬 FIJI SERVER: Failed to read shared memory {shm_name}: {e}")
+            return
+        
+        # Extract metadata
+        component_metadata = image_info.get('component_metadata', {})
+        step_name = image_info.get('step_name', 'unknown')
+        path = image_info.get('path', 'unknown')
+        
+        # Build layer name from component metadata
+        layer_name = self._build_layer_name(component_metadata, step_name)
+        
+        # Apply display config
+        lut_name = display_config_dict.get('lut', 'gray')
+        auto_contrast = display_config_dict.get('auto_contrast', True)
+        
+        # Convert to ImageJ format and display
+        try:
+            ij_image = self.ij.py.to_java(np_data)
+            self.ij.ui().show(layer_name, ij_image)
+            
+            # Apply LUT if not gray
+            if lut_name != 'gray':
+                try:
+                    self.ij.IJ.run(ij_image, lut_name, "")
+                except Exception as e:
+                    logger.warning(f"🔬 FIJI SERVER: Failed to apply LUT {lut_name}: {e}")
+            
+            # Apply auto-contrast
+            if auto_contrast:
+                try:
+                    self.ij.IJ.run(ij_image, "Enhance Contrast", "saturated=0.35")
+                except Exception as e:
+                    logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
+            
+            self.images[layer_name] = ij_image
+            logger.debug(f"🔬 FIJI SERVER: Displayed {layer_name} with LUT={lut_name}")
+            
+        except Exception as e:
+            logger.error(f"🔬 FIJI SERVER: Failed to display image {layer_name}: {e}")
+    
+    def _build_layer_name(self, component_metadata: Dict[str, Any], step_name: str) -> str:
+        """Build layer name from component metadata."""
+        parts = [step_name]
+        
+        # Add component values in consistent order
+        for key in ['well', 'site', 'channel', 'z_index', 'timepoint']:
+            if key in component_metadata:
+                value = component_metadata[key]
+                parts.append(f"{key}={value}")
+        
+        return "_".join(parts)
+    
+    def request_shutdown(self):
+        """Request graceful shutdown."""
+        self._shutdown_requested = True
+        self.stop()
+
+
+def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, log_file_path: str = None):
+    """
+    Fiji viewer server process function.
+    
+    Runs in separate process to manage Fiji instance and handle incoming image data.
+    
+    Args:
+        port: ZMQ port to listen on
+        viewer_title: Title for the Fiji viewer window
+        display_config: FijiDisplayConfig instance
+        log_file_path: Path to log file (for client discovery via ping/pong)
+    """
+    try:
+        import zmq
+        
+        # Create ZMQ server instance (inherits from ZMQServer ABC)
+        server = FijiViewerServer(port, viewer_title, display_config, log_file_path)
+        
+        # Start the server (binds sockets, initializes PyImageJ)
+        server.start()
+        
+        logger.info(f"🔬 FIJI SERVER: Server started on port {port}, control port {port + 1000}")
+        logger.info(f"🔬 FIJI SERVER: Waiting for images...")
+        
+        # Message processing loop
+        while not server._shutdown_requested:
+            # Process control messages (ping/pong handled by ABC)
+            server.process_messages()
+            
+            # Process data messages (images) if ready
+            if server._ready:
+                # Process multiple messages per iteration for better throughput
+                for _ in range(10):
+                    try:
+                        message = server.data_socket.recv(zmq.NOBLOCK)
+                        server.process_image_message(message)
+                    except zmq.Again:
+                        break
+            
+            time.sleep(0.01)  # 10ms sleep to prevent busy-waiting
+        
+        logger.info("🔬 FIJI SERVER: Shutting down...")
+        server.stop()
+        
+    except Exception as e:
+        logger.error(f"🔬 FIJI SERVER: Error: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        logger.info("🔬 FIJI SERVER: Process terminated")
+
