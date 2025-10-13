@@ -157,9 +157,17 @@ def create_fiji_display_config(
     """
     Create FijiDisplayConfig with component-specific fields.
 
+    Maps OpenHCS dimensions to ImageJ hyperstack dimensions (C, Z, T).
+    Default mapping:
+    - well → WINDOW (separate windows per well)
+    - site → CHANNEL (sites become channels)
+    - channel → CHANNEL (channels become channels)
+    - z_index → SLICE (z-planes become slices)
+    - timepoint → FRAME (timepoints become frames)
+
     Args:
         lut_enum: Enum for Fiji LUT options
-        dimension_mode_enum: Enum for dimension modes (SLICE/STACK)
+        dimension_mode_enum: Enum for dimension modes (WINDOW/CHANNEL/SLICE/FRAME)
 
     Returns:
         FijiDisplayConfig dataclass
@@ -176,7 +184,15 @@ def create_fiji_display_config(
         mode = getattr(self, field_name, None)
 
         if mode is None:
-            return dimension_mode_enum.SLICE if component_value == 'channel' else dimension_mode_enum.STACK
+            # Default mapping for Fiji hyperstacks
+            defaults = {
+                'well': dimension_mode_enum.WINDOW,
+                'site': dimension_mode_enum.CHANNEL,
+                'channel': dimension_mode_enum.CHANNEL,
+                'z_index': dimension_mode_enum.SLICE,
+                'timepoint': dimension_mode_enum.FRAME
+            }
+            return defaults.get(component_value, dimension_mode_enum.CHANNEL)
 
         return mode
 
@@ -190,7 +206,13 @@ def create_fiji_display_config(
             'auto_contrast': (bool, True),
         },
         component_mode_enum=dimension_mode_enum,
-        component_defaults={'channel': dimension_mode_enum.SLICE},
+        component_defaults={
+            'well': dimension_mode_enum.WINDOW,
+            'site': dimension_mode_enum.CHANNEL,
+            'channel': dimension_mode_enum.CHANNEL,
+            'z_index': dimension_mode_enum.SLICE,
+            'timepoint': dimension_mode_enum.FRAME
+        },
         methods={
             'get_dimension_mode': get_dimension_mode,
             'get_lut_name': get_lut_name,
@@ -198,8 +220,15 @@ def create_fiji_display_config(
         docstring="""Configuration for Fiji display behavior for all OpenHCS components.
 
         This class is dynamically generated with individual fields for each variable component.
-        Each component has a corresponding {component}_mode field that controls whether
-        it's displayed as a slice or stack in Fiji.
+        Each component has a corresponding {component}_mode field that controls how it maps
+        to ImageJ hyperstack dimensions (WINDOW/CHANNEL/SLICE/FRAME).
+
+        ImageJ hyperstacks have 3 dimensions:
+        - Channels (C): Color channels or sites
+        - Slices (Z): Z-planes or depth
+        - Frames (T): Time points or temporal dimension
+
+        WINDOW mode creates separate windows instead of combining into hyperstack.
         """
     )
 

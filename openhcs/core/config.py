@@ -178,9 +178,21 @@ class FijiLUT(Enum):
 
 
 class FijiDimensionMode(Enum):
-    """Fiji dimension handling."""
-    SLICE = "slice"
-    STACK = "stack"
+    """
+    How to map OpenHCS dimensions to ImageJ hyperstack dimensions.
+
+    ImageJ hyperstacks have 3 dimensions: Channels (C), Slices (Z), Frames (T).
+    Each OpenHCS component (site, channel, z_index, timepoint) can be mapped to one of these.
+
+    - WINDOW: Create separate windows for each value (like Napari SLICE mode)
+    - CHANNEL: Map to ImageJ Channel dimension (C)
+    - SLICE: Map to ImageJ Slice dimension (Z)
+    - FRAME: Map to ImageJ Frame dimension (T)
+    """
+    WINDOW = "window"  # Separate windows (like Napari SLICE mode)
+    CHANNEL = "channel"  # ImageJ Channel dimension (C)
+    SLICE = "slice"  # ImageJ Slice dimension (Z)
+    FRAME = "frame"  # ImageJ Frame dimension (T)
 
 
 # Create FijiDisplayConfig using factory (with component-specific fields like Napari)

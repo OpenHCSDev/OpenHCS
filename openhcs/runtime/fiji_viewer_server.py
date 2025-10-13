@@ -137,23 +137,22 @@ class FijiViewerServer(ZMQServer):
     def _add_images_to_hyperstack(self, step_name: str, well: str, images: List[Dict[str, Any]],
                                     display_config_dict: Dict[str, Any]):
         """
-        Add images to a 5D hyperstack for the given step and well.
+        Add images to ImageJ hyperstacks using configurable dimension mapping.
 
-        ImageJ hyperstack dimensions:
-        - Channels: site * channel (combined)
-        - Slices: z_index
-        - Frames: timepoint
+        Uses FijiDimensionMode to map OpenHCS dimensions to ImageJ hyperstack dimensions:
+        - WINDOW: Create separate windows
+        - CHANNEL: Map to ImageJ Channel dimension (C)
+        - SLICE: Map to ImageJ Slice dimension (Z)
+        - FRAME: Map to ImageJ Frame dimension (T)
 
         Args:
             step_name: Name of the processing step
             well: Well identifier
             images: List of image info dicts with metadata and shared memory names
-            display_config_dict: Display configuration (LUT, auto-contrast, etc.)
+            display_config_dict: Display configuration with component_modes
         """
         import numpy as np
         from multiprocessing import shared_memory
-
-        hyperstack_key = (step_name, well)
 
         # Load all images from shared memory
         image_data_list = []
@@ -180,97 +179,151 @@ class FijiViewerServer(ZMQServer):
         if not image_data_list:
             return
 
-        # Organize images by dimensions (site, channel, z_index, timepoint)
-        # Build dimension indices
-        sites = sorted(set(img['metadata'].get('site', 1) for img in image_data_list))
-        channels = sorted(set(img['metadata'].get('channel', 1) for img in image_data_list))
-        z_indices = sorted(set(img['metadata'].get('z_index', 1) for img in image_data_list))
-        timepoints = sorted(set(img['metadata'].get('timepoint', 1) for img in image_data_list))
+        # Get component modes from display config
+        component_modes = display_config_dict.get('component_modes', {})
 
-        # Map values to indices
-        site_map = {v: i for i, v in enumerate(sites)}
-        channel_map = {v: i for i, v in enumerate(channels)}
-        z_map = {v: i for i, v in enumerate(z_indices)}
-        time_map = {v: i for i, v in enumerate(timepoints)}
+        # Organize dimensions by their mode
+        window_components = []  # Components that create separate windows
+        channel_components = []  # Components mapped to ImageJ Channels
+        slice_components = []  # Components mapped to ImageJ Slices
+        frame_components = []  # Components mapped to ImageJ Frames
 
-        # ImageJ hyperstack dimensions
-        nChannels = len(sites) * len(channels)  # Combine site and channel
-        nSlices = len(z_indices)
-        nFrames = len(timepoints)
+        for comp_name in ['well', 'site', 'channel', 'z_index', 'timepoint']:
+            mode = component_modes.get(comp_name, 'channel')  # Default to channel
 
-        logger.info(f"🔬 FIJI SERVER: Building hyperstack for {step_name}/{well}: "
-                   f"{nChannels}C x {nSlices}Z x {nFrames}T "
-                   f"(sites={len(sites)}, channels={len(channels)})")
+            if mode == 'window':
+                window_components.append(comp_name)
+            elif mode == 'channel':
+                channel_components.append(comp_name)
+            elif mode == 'slice':
+                slice_components.append(comp_name)
+            elif mode == 'frame':
+                frame_components.append(comp_name)
 
-        # Create ImageStack and add all images in the correct order
-        # ImageJ expects: C1Z1T1, C2Z1T1, ..., C1Z2T1, C2Z2T1, ..., C1Z1T2, ...
-        from ij import ImageStack
-
-        first_img = image_data_list[0]['data']
-        height, width = first_img.shape[-2:]  # Get spatial dimensions
-
-        stack = ImageStack(width, height)
-
-        # Build lookup dict for fast access
-        image_lookup = {}
+        # Group images by window components
+        windows = {}
         for img_data in image_data_list:
             meta = img_data['metadata']
-            key = (
-                meta.get('site', 1),
-                meta.get('channel', 1),
-                meta.get('z_index', 1),
-                meta.get('timepoint', 1)
+
+            # Build window key from window components
+            window_key_parts = [step_name, well]
+            for comp in window_components:
+                if comp in meta and comp != 'well':  # well already in key
+                    window_key_parts.append(f"{comp}={meta[comp]}")
+            window_key = "_".join(window_key_parts)
+
+            if window_key not in windows:
+                windows[window_key] = []
+            windows[window_key].append(img_data)
+
+        # Build hyperstack for each window
+        for window_key, window_images in windows.items():
+            self._build_single_hyperstack(
+                window_key, window_images, display_config_dict,
+                channel_components, slice_components, frame_components
             )
-            image_lookup[key] = img_data['data']
 
-        # Add slices in ImageJ order: iterate T, then Z, then C
-        for t_val in timepoints:
-            for z_val in z_indices:
-                for site_val in sites:
-                    for ch_val in channels:
-                        key = (site_val, ch_val, z_val, t_val)
+    def _build_single_hyperstack(self, window_key: str, images: List[Dict[str, Any]],
+                                  display_config_dict: Dict[str, Any],
+                                  channel_components: List[str],
+                                  slice_components: List[str],
+                                  frame_components: List[str]):
+        """
+        Build a single ImageJ hyperstack from images.
 
-                        if key in image_lookup:
-                            np_data = image_lookup[key]
+        Args:
+            window_key: Unique key for this window
+            images: List of image data dicts
+            display_config_dict: Display configuration
+            channel_components: Components mapped to Channel dimension
+            slice_components: Components mapped to Slice dimension
+            frame_components: Components mapped to Frame dimension
+        """
+        import numpy as np
+        from ij import ImageStack, ImagePlus, CompositeImage
 
-                            # Handle 3D data (take middle slice if needed)
-                            if np_data.ndim == 3:
-                                np_data = np_data[np_data.shape[0] // 2]
+        # Collect unique values for each dimension
+        channel_values = self._collect_dimension_values(images, channel_components)
+        slice_values = self._collect_dimension_values(images, slice_components)
+        frame_values = self._collect_dimension_values(images, frame_components)
 
-                            # Convert to ImageProcessor
-                            temp_imp = self.ij.py.to_imageplus(np_data)
-                            processor = temp_imp.getProcessor()
+        nChannels = len(channel_values)
+        nSlices = len(slice_values)
+        nFrames = len(frame_values)
 
-                            # Build label
-                            label = f"S{site_val}_C{ch_val}_Z{z_val}_T{t_val}"
-                            stack.addSlice(label, processor)
-                        else:
-                            # Add blank slice if missing
-                            logger.warning(f"🔬 FIJI SERVER: Missing image for {key}, adding blank slice")
-                            from ij.process import ShortProcessor
-                            blank = ShortProcessor(width, height)
-                            stack.addSlice(f"BLANK_{key}", blank)
+        logger.info(f"🔬 FIJI SERVER: Building hyperstack '{window_key}': "
+                   f"{nChannels}C x {nSlices}Z x {nFrames}T")
+        logger.info(f"  Channel components: {channel_components}")
+        logger.info(f"  Slice components: {slice_components}")
+        logger.info(f"  Frame components: {frame_components}")
 
-        # Create ImagePlus from stack
-        from ij import ImagePlus
-        title = f"{step_name}_{well}"
-        imp = ImagePlus(title, stack)
+        # Get spatial dimensions
+        first_img = images[0]['data']
+        height, width = first_img.shape[-2:]
+
+        # Create ImageStack
+        stack = ImageStack(width, height)
+
+        # Build lookup dict
+        image_lookup = {}
+        for img_data in images:
+            meta = img_data['metadata']
+            c_key = tuple(meta.get(comp, 1) for comp in channel_components)
+            z_key = tuple(meta.get(comp, 1) for comp in slice_components)
+            t_key = tuple(meta.get(comp, 1) for comp in frame_components)
+            image_lookup[(c_key, z_key, t_key)] = img_data['data']
+
+        # Add slices in ImageJ CZT order
+        for t_key in frame_values:
+            for z_key in slice_values:
+                for c_key in channel_values:
+                    key = (c_key, z_key, t_key)
+
+                    if key in image_lookup:
+                        np_data = image_lookup[key]
+
+                        # Handle 3D data (take middle slice)
+                        if np_data.ndim == 3:
+                            np_data = np_data[np_data.shape[0] // 2]
+
+                        # Convert to ImageProcessor
+                        temp_imp = self.ij.py.to_imageplus(np_data)
+                        processor = temp_imp.getProcessor()
+
+                        # Build label
+                        label_parts = []
+                        if channel_components:
+                            label_parts.append(f"C{c_key}")
+                        if slice_components:
+                            label_parts.append(f"Z{z_key}")
+                        if frame_components:
+                            label_parts.append(f"T{t_key}")
+                        label = "_".join(label_parts) if label_parts else "slice"
+
+                        stack.addSlice(label, processor)
+                    else:
+                        # Add blank slice if missing
+                        from ij.process import ShortProcessor
+                        blank = ShortProcessor(width, height)
+                        stack.addSlice(f"BLANK", blank)
+
+        # Create ImagePlus
+        imp = ImagePlus(window_key, stack)
 
         # Set hyperstack dimensions
         imp.setDimensions(nChannels, nSlices, nFrames)
 
         # Convert to CompositeImage if multiple channels
         if nChannels > 1:
-            from ij import CompositeImage
             comp = CompositeImage(imp, CompositeImage.COMPOSITE)
-            comp.setTitle(title)
+            comp.setTitle(window_key)
             imp = comp
 
         # Apply LUT and auto-contrast
-        lut_name = display_config_dict.get('lut', 'gray')
+        lut_name = display_config_dict.get('lut', 'Grays')
         auto_contrast = display_config_dict.get('auto_contrast', True)
 
-        if lut_name.lower() not in ['gray', 'grays'] and nChannels == 1:
+        if lut_name not in ['Grays', 'grays'] and nChannels == 1:
             try:
                 self.ij.IJ.run(imp, lut_name, "")
             except Exception as e:
@@ -283,15 +336,36 @@ class FijiViewerServer(ZMQServer):
                 logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
 
         # Show or update
-        if hyperstack_key in self.hyperstacks:
-            # Close old one
-            old_imp = self.hyperstacks[hyperstack_key]
+        if window_key in self.hyperstacks:
+            old_imp = self.hyperstacks[window_key]
             old_imp.close()
 
         imp.show()
-        self.hyperstacks[hyperstack_key] = imp
+        self.hyperstacks[window_key] = imp
 
-        logger.info(f"🔬 FIJI SERVER: Displayed hyperstack {title} with {stack.getSize()} slices")
+        logger.info(f"🔬 FIJI SERVER: Displayed hyperstack '{window_key}' with {stack.getSize()} slices")
+
+    def _collect_dimension_values(self, images: List[Dict[str, Any]], components: List[str]) -> List[tuple]:
+        """
+        Collect unique dimension value tuples from images.
+
+        Args:
+            images: List of image data dicts
+            components: List of component names to collect
+
+        Returns:
+            Sorted list of unique value tuples
+        """
+        if not components:
+            return [()]  # Single value if no components
+
+        values = set()
+        for img_data in images:
+            meta = img_data['metadata']
+            value_tuple = tuple(meta.get(comp, 1) for comp in components)
+            values.add(value_tuple)
+
+        return sorted(values)
 
     
     def request_shutdown(self):
