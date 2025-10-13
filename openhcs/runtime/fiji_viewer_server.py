@@ -49,13 +49,16 @@ class FijiViewerServer(ZMQServer):
     def start(self):
         """Start server and initialize PyImageJ."""
         super().start()
-        
+
         # Initialize PyImageJ in this process
         try:
             import imagej
             logger.info("🔬 FIJI SERVER: Initializing PyImageJ...")
             self.ij = imagej.init(mode='interactive')
-            logger.info(f"🔬 FIJI SERVER: PyImageJ initialized successfully")
+
+            # Show Fiji UI so users can interact with images and menus
+            self.ij.ui().showUI()
+            logger.info(f"🔬 FIJI SERVER: PyImageJ initialized and UI shown")
         except ImportError:
             raise ImportError("PyImageJ not available. Install with: pip install 'openhcs[viz]'")
     
@@ -140,36 +143,55 @@ class FijiViewerServer(ZMQServer):
 
         # Convert to ImageJ format and display
         try:
-            # Convert numpy to ImagePlus using PyImageJ's to_imageplus()
-            imp = self.ij.py.to_imageplus(np_data)
-            imp.setTitle(stack_name)
+            # Check if stack already exists
+            if stack_name in self.images:
+                # Add to existing stack
+                existing_imp = self.images[stack_name]
+                stack = existing_imp.getStack()
 
-            # Apply LUT if not gray
-            if lut_name.lower() != 'gray' and lut_name.lower() != 'grays':
-                try:
-                    self.ij.IJ.run(imp, lut_name, "")
-                    logger.debug(f"🔬 FIJI SERVER: Applied LUT {lut_name} to {stack_name}")
-                except Exception as e:
-                    logger.warning(f"🔬 FIJI SERVER: Failed to apply LUT {lut_name}: {e}")
+                # Convert numpy to ImageProcessor for this slice
+                new_imp = self.ij.py.to_imageplus(np_data)
+                new_processor = new_imp.getProcessor()
 
-            # Apply auto-contrast
-            if auto_contrast:
-                try:
-                    self.ij.IJ.run(imp, "Enhance Contrast", "saturated=0.35")
-                    logger.debug(f"🔬 FIJI SERVER: Applied auto-contrast to {stack_name}")
-                except Exception as e:
-                    logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
+                # Add slice to existing stack
+                stack.addSlice(slice_label or f"slice_{stack.getSize() + 1}", new_processor)
 
-            # Show the image
-            imp.show()
+                # Update the ImagePlus with the new stack
+                existing_imp.setStack(stack)
+                existing_imp.updateAndDraw()
 
-            # Set slice label if this is part of a stack
-            if slice_label:
-                imp.setSlice(imp.getNSlices())  # Go to last slice
-                imp.getStack().setSliceLabel(slice_label, imp.getCurrentSlice())
+                logger.debug(f"🔬 FIJI SERVER: Added slice to {stack_name} (slice: {slice_label}, total: {stack.getSize()})")
+            else:
+                # Create new stack
+                imp = self.ij.py.to_imageplus(np_data)
+                imp.setTitle(stack_name)
 
-            self.images[stack_name] = imp
-            logger.debug(f"🔬 FIJI SERVER: Displayed {stack_name} (slice: {slice_label})")
+                # Apply LUT if not gray
+                if lut_name.lower() != 'gray' and lut_name.lower() != 'grays':
+                    try:
+                        self.ij.IJ.run(imp, lut_name, "")
+                        logger.debug(f"🔬 FIJI SERVER: Applied LUT {lut_name} to {stack_name}")
+                    except Exception as e:
+                        logger.warning(f"🔬 FIJI SERVER: Failed to apply LUT {lut_name}: {e}")
+
+                # Apply auto-contrast
+                if auto_contrast:
+                    try:
+                        self.ij.IJ.run(imp, "Enhance Contrast", "saturated=0.35")
+                        logger.debug(f"🔬 FIJI SERVER: Applied auto-contrast to {stack_name}")
+                    except Exception as e:
+                        logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
+
+                # Set slice label if provided
+                if slice_label:
+                    imp.getStack().setSliceLabel(slice_label, 1)
+
+                # Show the image
+                imp.show()
+
+                # Store reference
+                self.images[stack_name] = imp
+                logger.debug(f"🔬 FIJI SERVER: Created new stack {stack_name} (slice: {slice_label})")
 
         except Exception as e:
             logger.error(f"🔬 FIJI SERVER: Failed to display image {stack_name}: {e}")
