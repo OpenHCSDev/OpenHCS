@@ -39,6 +39,9 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 self._context = zmq.Context()
 
             publisher = self._context.socket(zmq.PUB)
+            # Set high water mark to allow more buffering (default is 1000)
+            # This prevents blocking when Fiji is slow to process hyperstacks
+            publisher.setsockopt(zmq.SNDHWM, 10000)
             publisher.connect(f"tcp://{fiji_host}:{fiji_port}")
             logger.info(f"Fiji streaming publisher connected to {fiji_host}:{fiji_port}")
             time.sleep(0.1)  # Socket ready delay
@@ -112,8 +115,23 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             'timestamp': time.time()
         }
 
-        publisher.send_json(message)
-        logger.debug(f"Streamed batch of {len(batch_images)} images to Fiji on port {fiji_port}")
+        # Send non-blocking to prevent hanging if Fiji is slow to process
+        import zmq
+        try:
+            publisher.send_json(message, flags=zmq.NOBLOCK)
+            logger.debug(f"Streamed batch of {len(batch_images)} images to Fiji on port {fiji_port}")
+        except zmq.Again:
+            logger.warning(f"Fiji viewer busy, dropped batch of {len(batch_images)} images (port {fiji_port})")
+            # Clean up shared memory for dropped images
+            for img in batch_images:
+                shm_name = img['shm_name']
+                if shm_name in self._shared_memory_blocks:
+                    try:
+                        shm = self._shared_memory_blocks.pop(shm_name)
+                        shm.close()
+                        shm.unlink()
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup dropped shared memory {shm_name}: {e}")
 
     def cleanup(self) -> None:
         """Clean up ZMQ resources and shared memory blocks."""
