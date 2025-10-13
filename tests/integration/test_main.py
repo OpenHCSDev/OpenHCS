@@ -21,7 +21,7 @@ from openhcs.core.config import (
     PathPlanningConfig, StepWellFilterConfig, VFSConfig, ZarrConfig,
     NapariVariableSizeHandling
 )
-from openhcs.config_framework.lazy_factory import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig
+from openhcs.config_framework.lazy_factory import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyFijiStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.pipeline import Pipeline
@@ -191,12 +191,14 @@ def create_test_pipeline() -> Pipeline:
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
                 step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
                 step_materialization_config=LazyStepMaterializationConfig(),
-                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5555) if not _headless_mode() else None
+                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5555) if not _headless_mode() else None,
+                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5556) if not _headless_mode() else None
             ),
             Step(
                 func=create_composite,
                 variable_components=[VariableComponents.CHANNEL],
-                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5556) if not _headless_mode() else None
+                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5557) if not _headless_mode() else None,
+                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5558) if not _headless_mode() else None
             ),
             Step(
                 name="Z-Stack Flattening",
@@ -230,9 +232,10 @@ def create_test_pipeline() -> Pipeline:
                     }
                 ),
                 napari_streaming_config=LazyNapariStreamingConfig(
-                    napari_port=5555,
+                    napari_port=5559,
                     variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX
-                ) if not _headless_mode() else None
+                ) if not _headless_mode() else None,
+                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5560) if not _headless_mode() else None
             ),
         ],
         name=f"Multi-Subdirectory Test Pipeline{' (CPU-Only)' if cpu_only_mode else ''}",

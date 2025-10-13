@@ -15,7 +15,6 @@ from typing import Optional
 from pathlib import Path
 
 from openhcs.io.filemanager import FileManager
-from openhcs.runtime.zmq_base import ZMQClient
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,6 @@ class FijiStreamVisualizer:
         self.process: Optional[multiprocessing.Process] = None
         self.is_running = False
         self._lock = threading.Lock()
-        self._zmq_client: Optional[ZMQClient] = None
 
     def start_viewer(self, async_mode: bool = False) -> None:
         """Start Fiji viewer server process."""
@@ -116,14 +114,29 @@ class FijiStreamVisualizer:
 
     def _wait_for_server_ready(self, timeout: float = 10.0) -> bool:
         """Wait for Fiji server to be ready via ping/pong."""
-        logger.info(f"🔬 FIJI VISUALIZER: Waiting for server on port {self.fiji_port} to be ready...")
+        import zmq
+        import pickle
 
-        self._zmq_client = ZMQClient(self.fiji_port, host='localhost')
+        logger.info(f"🔬 FIJI VISUALIZER: Waiting for server on port {self.fiji_port} to be ready...")
 
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                if self._zmq_client.ping():
+                # Simple ping/pong check
+                ctx = zmq.Context()
+                sock = ctx.socket(zmq.REQ)
+                sock.setsockopt(zmq.LINGER, 0)
+                sock.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
+                sock.connect(f"tcp://localhost:{self.fiji_port + 1000}")
+
+                # Send ping
+                sock.send(pickle.dumps({'type': 'ping'}))
+                response = pickle.loads(sock.recv())
+
+                sock.close()
+                ctx.term()
+
+                if response.get('type') == 'pong':
                     logger.info(f"🔬 FIJI VISUALIZER: Server ready on port {self.fiji_port}")
                     return True
             except Exception as e:
