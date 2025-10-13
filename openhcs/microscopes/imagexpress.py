@@ -72,8 +72,8 @@ class ImageXpressHandler(MicroscopeHandler):
 
     def _prepare_workspace(self, workspace_path: Path, filemanager: FileManager) -> Path:
         """
-        Flattens the Z-step folder structure and renames image files for
-        consistent padding and Z-plane resolution.
+        Flattens TimePoint and Z-step folder structures and renames image files for
+        consistent padding and dimension resolution.
 
         This method performs preparation but does not determine the final image directory.
 
@@ -84,6 +84,10 @@ class ImageXpressHandler(MicroscopeHandler):
         Returns:
             Path to the flattened image directory.
         """
+        # First, flatten timepoint folders (if they exist)
+        self._flatten_timepoints(workspace_path, filemanager)
+
+        # Then flatten Z-steps (existing logic)
         # Find all subdirectories in workspace using the filemanager
         # Pass the backend parameter as required by Clause 306 (Backend Positional Parameters)
         entries = filemanager.list_dir(workspace_path, Backend.DISK.value)
@@ -131,96 +135,21 @@ class ImageXpressHandler(MicroscopeHandler):
             directory: Path to directory that might contain Z-step folders
             fm: FileManager instance for file operations
         """
-        # Check for Z step folders
         zstep_pattern = re.compile(r"ZStep[_-]?(\d+)", re.IGNORECASE)
 
-        # List all subdirectories using the filemanager
-        # Pass the backend parameter as required by Clause 306 (Backend Positional Parameters)
-        entries = fm.list_dir(directory, Backend.DISK.value)
+        # Find and process Z-step folders
+        found_folders = self._flatten_indexed_folders(
+            directory=directory,
+            fm=fm,
+            folder_pattern=zstep_pattern,
+            component_name='z_index',
+            folder_type="ZStep"
+        )
 
-        # Filter entries to get only directories
-        subdirs = []
-        for entry in entries:
-            entry_path = Path(directory) / entry
-            if entry_path.is_dir():
-                subdirs.append(entry_path)
-
-        # Find potential Z-step folders
-        potential_z_folders = []
-        for d in subdirs:
-            dir_name = d.name if isinstance(d, Path) else os.path.basename(str(d))
-            if zstep_pattern.search(dir_name):
-                potential_z_folders.append(d)
-
-        if not potential_z_folders:
+        # If no Z-step folders found, process files directly
+        if not found_folders:
             logger.info("No Z step folders found in %s. Processing files directly in directory.", directory)
-            # Process files directly in the directory to ensure complete metadata
             self._process_files_in_directory(directory, fm)
-            return
-
-        # Sort Z folders by index
-        z_folders = []
-        for d in potential_z_folders:
-            dir_name = d.name if isinstance(d, Path) else os.path.basename(str(d))
-            match = zstep_pattern.search(dir_name)
-            if match:
-                z_index = int(match.group(1))
-                z_folders.append((z_index, d))
-
-        # Sort by Z index
-        z_folders.sort(key=lambda x: x[0])
-
-        # Process each Z folder
-        for z_index, z_dir in z_folders:
-            # List all files in the Z folder
-            # Pass the backend parameter as required by Clause 306 (Backend Positional Parameters)
-            img_files = fm.list_files(z_dir, Backend.DISK.value)
-
-            for img_file in img_files:
-                # Skip if not a file
-                # Pass the backend parameter as required by Clause 306 (Backend Positional Parameters)
-                if not fm.is_file(img_file, Backend.DISK.value):
-                    continue
-
-                # Get the filename
-                img_file_name = img_file.name if isinstance(img_file, Path) else os.path.basename(str(img_file))
-
-                # Parse the original filename to extract components
-                components = self.parser.parse_filename(img_file_name)
-
-                if not components:
-                    continue
-
-                # Update the z_index in the components
-                components['z_index'] = z_index
-
-                # Use the parser to construct a new filename with the updated z_index
-                new_name = self.parser.construct_filename(**components)
-
-                # Create the new path in the parent directory
-                new_path = directory / new_name if isinstance(directory, Path) else Path(os.path.join(str(directory), new_name))
-
-                try:
-                    # Pass the backend parameter as required by Clause 306 (Backend Positional Parameters)
-                    # Use replace_symlinks=True to allow overwriting existing symlinks
-                    fm.move(img_file, new_path, Backend.DISK.value, replace_symlinks=True)
-                    logger.debug("Moved %s to %s", img_file, new_path)
-                except FileExistsError as e:
-                    # Propagate FileExistsError with clear message
-                    logger.error("Cannot move %s to %s: %s", img_file, new_path, e)
-                    raise
-                except Exception as e:
-                    logger.error("Error moving %s to %s: %s", img_file, new_path, e)
-                    raise
-
-        # Remove Z folders after all files have been moved
-        for _, z_dir in z_folders:
-            try:
-                # Pass the backend parameter as required by Clause 306 (Backend Positional Parameters)
-                fm.delete_all(z_dir, Backend.DISK.value)
-                logger.debug("Removed Z-step folder: %s", z_dir)
-            except Exception as e:
-                logger.warning("Failed to remove Z-step folder %s: %s", z_dir, e)
 
     def _process_files_in_directory(self, directory: Path, fm: FileManager):
         """
@@ -287,6 +216,114 @@ class ImageXpressHandler(MicroscopeHandler):
                         logger.error("Error renaming %s to %s: %s", img_file, new_path, e)
                         raise
 
+    def _flatten_timepoints(self, directory: Path, fm: FileManager):
+        """
+        Process TimePoint folders in the given directory.
+
+        Flattens structure: TimePoint_N/ZStep_M/file.tif → file_zM_tN.tif
+
+        Args:
+            directory: Path to directory that might contain TimePoint folders
+            fm: FileManager instance for file operations
+        """
+        timepoint_pattern = re.compile(r"TimePoint[_-]?(\d+)", re.IGNORECASE)
+
+        # First flatten Z-steps within each timepoint folder (if they exist)
+        entries = fm.list_dir(directory, Backend.DISK.value)
+        subdirs = [Path(directory) / entry for entry in entries
+                   if (Path(directory) / entry).is_dir()]
+
+        for subdir in subdirs:
+            if timepoint_pattern.search(subdir.name):
+                # Flatten Z-steps within this timepoint folder
+                self._flatten_zsteps(subdir, fm)
+
+        # Then flatten timepoint folders themselves
+        self._flatten_indexed_folders(
+            directory=directory,
+            fm=fm,
+            folder_pattern=timepoint_pattern,
+            component_name='timepoint',
+            folder_type="TimePoint"
+        )
+
+    def _flatten_indexed_folders(self, directory: Path, fm: FileManager,
+                                 folder_pattern: re.Pattern, component_name: str,
+                                 folder_type: str) -> bool:
+        """
+        Generic helper to flatten indexed folders (TimePoint_N, ZStep_M, etc.).
+
+        Updates the specified component in filenames and moves files to parent directory.
+
+        Args:
+            directory: Path to directory that might contain indexed folders
+            fm: FileManager instance for file operations
+            folder_pattern: Regex pattern to match folder names (must have one capture group for index)
+            component_name: Component to update in metadata (e.g., 'z_index', 'timepoint')
+            folder_type: Human-readable folder type name (for logging)
+
+        Returns:
+            bool: True if folders were found and processed, False otherwise
+        """
+        # List all subdirectories
+        entries = fm.list_dir(directory, Backend.DISK.value)
+        subdirs = [Path(directory) / entry for entry in entries
+                   if (Path(directory) / entry).is_dir()]
+
+        # Find indexed folders
+        indexed_folders = []
+        for d in subdirs:
+            match = folder_pattern.search(d.name)
+            if match:
+                index = int(match.group(1))
+                indexed_folders.append((index, d))
+
+        if not indexed_folders:
+            return False
+
+        # Sort by index
+        indexed_folders.sort(key=lambda x: x[0])
+
+        logger.info(f"Found {len(indexed_folders)} {folder_type} folders. Flattening...")
+
+        # Process each folder
+        for index, folder in indexed_folders:
+            logger.debug(f"Processing {folder.name} ({folder_type}={index})")
+
+            # List all files in the folder
+            img_files = fm.list_files(str(folder), Backend.DISK.value)
+
+            for img_file in img_files:
+                if not fm.is_file(img_file, Backend.DISK.value):
+                    continue
+
+                filename = Path(img_file).name
+
+                # Parse existing filename
+                metadata = self.parser.parse_filename(filename)
+                if not metadata:
+                    continue
+
+                # Update the component
+                metadata[component_name] = index
+
+                # Reconstruct filename
+                new_filename = self.parser.construct_filename(**metadata)
+                new_path = directory / new_filename
+
+                # Move file to parent directory
+                fm.move(img_file, str(new_path), Backend.DISK.value, replace_symlinks=True)
+                logger.debug(f"  Moved: {filename} → {new_filename}")
+
+            # Remove empty folder after processing
+            try:
+                fm.delete_all(str(folder), Backend.DISK.value)
+                logger.debug(f"  Removed empty folder: {folder.name}")
+            except Exception as e:
+                logger.warning(f"Failed to remove {folder_type} folder {folder}: {e}")
+
+        return True
+
 
 class ImageXpressFilenameParser(FilenameParser):
     """
@@ -298,7 +335,8 @@ class ImageXpressFilenameParser(FilenameParser):
     """
 
     # Regular expression pattern for ImageXpress filenames
-    _pattern = re.compile(r'(?:.*?_)?([A-Z]\d+)(?:_s(\d+|\{[^\}]*\}))?(?:_w(\d+|\{[^\}]*\}))?(?:_z(\d+|\{[^\}]*\}))?(\.\w+)?$')
+    # Supports: well, site, channel, z_index, timepoint
+    _pattern = re.compile(r'(?:.*?_)?([A-Z]\d+)(?:_s(\d+|\{[^\}]*\}))?(?:_w(\d+|\{[^\}]*\}))?(?:_z(\d+|\{[^\}]*\}))?(?:_t(\d+|\{[^\}]*\}))?(\.\w+)?$')
 
     def __init__(self, filemanager=None, pattern_format=None):
         """
@@ -352,13 +390,14 @@ class ImageXpressFilenameParser(FilenameParser):
         match = self._pattern.match(basename)
 
         if match:
-            well, site_str, channel_str, z_str, ext = match.groups()
+            well, site_str, channel_str, z_str, t_str, ext = match.groups()
 
             #handle {} place holders
             parse_comp = lambda s: None if not s or '{' in s else int(s)
             site = parse_comp(site_str)
             channel = parse_comp(channel_str)
             z_index = parse_comp(z_str)
+            timepoint = parse_comp(t_str)
 
             # Use the parsed components in the result
             result = {
@@ -366,6 +405,7 @@ class ImageXpressFilenameParser(FilenameParser):
                 'site': site,
                 'channel': channel,
                 'z_index': z_index,
+                'timepoint': timepoint,
                 'extension': ext if ext else '.tif'  # Default if somehow empty
             }
 
@@ -399,9 +439,9 @@ class ImageXpressFilenameParser(FilenameParser):
 
         return row, col
 
-    def construct_filename(self, extension: str = '.tif', site_padding: int = 3, z_padding: int = 3, **component_values) -> str:
+    def construct_filename(self, extension: str = '.tif', site_padding: int = 3, z_padding: int = 3, timepoint_padding: int = 3, **component_values) -> str:
         """
-        Construct an ImageXpress filename from components, only including parts if provided.
+        Construct an ImageXpress filename from components.
 
         This method now uses **kwargs to accept any component values dynamically,
         making it compatible with the generic parser interface.
@@ -410,8 +450,9 @@ class ImageXpressFilenameParser(FilenameParser):
             extension (str, optional): File extension (default: '.tif')
             site_padding (int, optional): Width to pad site numbers to (default: 3)
             z_padding (int, optional): Width to pad Z-index numbers to (default: 3)
+            timepoint_padding (int, optional): Width to pad timepoint numbers to (default: 3)
             **component_values: Component values as keyword arguments.
-                               Expected keys: well, site, channel, z_index
+                               Expected keys: well, site, channel, z_index, timepoint
 
         Returns:
             str: Constructed filename
@@ -421,16 +462,21 @@ class ImageXpressFilenameParser(FilenameParser):
         site = component_values.get('site')
         channel = component_values.get('channel')
         z_index = component_values.get('z_index')
+        timepoint = component_values.get('timepoint')
+
         if not well:
             raise ValueError("Well ID cannot be empty or None.")
 
+        # Default timepoint to 1 if not provided (like z_index)
+        if timepoint is None:
+            timepoint = 1
+
         parts = [well]
+
         if site is not None:
             if isinstance(site, str):
-                # If site is a string (e.g., '{iii}'), use it directly
                 parts.append(f"_s{site}")
             else:
-                # Otherwise, format it as a padded integer
                 parts.append(f"_s{site:0{site_padding}d}")
 
         if channel is not None:
@@ -438,11 +484,15 @@ class ImageXpressFilenameParser(FilenameParser):
 
         if z_index is not None:
             if isinstance(z_index, str):
-                # If z_index is a string (e.g., '{zzz}'), use it directly
                 parts.append(f"_z{z_index}")
             else:
-                # Otherwise, format it as a padded integer
                 parts.append(f"_z{z_index:0{z_padding}d}")
+
+        # Always add timepoint (like z_index)
+        if isinstance(timepoint, str):
+            parts.append(f"_t{timepoint}")
+        else:
+            parts.append(f"_t{timepoint:0{timepoint_padding}d}")
 
         base_name = "".join(parts)
         return f"{base_name}{extension}"
@@ -726,6 +776,18 @@ class ImageXpressMetadataHandler(MetadataHandler):
 
         Returns:
             None - ImageXpress doesn't provide rich z_index names in metadata
+        """
+        return None
+
+    def get_timepoint_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
+        """
+        Get timepoint key→name mapping from ImageXpress metadata.
+
+        Args:
+            plate_path: Path to the plate folder (str or Path)
+
+        Returns:
+            None - ImageXpress doesn't provide rich timepoint names in metadata
         """
         return None
 

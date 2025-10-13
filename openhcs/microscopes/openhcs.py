@@ -39,6 +39,7 @@ class OpenHCSMetadataFields:
     WELLS: str = "wells"
     SITES: str = "sites"
     Z_INDEXES: str = "z_indexes"
+    TIMEPOINTS: str = "timepoints"
     OBJECTIVES: str = "objectives"
     ACQUISITION_DATETIME: str = "acquisition_datetime"
     PLATE_NAME: str = "plate_name"
@@ -180,6 +181,10 @@ class OpenHCSMetadataHandler(MetadataHandler):
 
         try:
             content = self.filemanager.load(str(metadata_file_path), Backend.DISK.value)
+            # Backend may return already-parsed dict (disk backend auto-parses JSON)
+            if isinstance(content, dict):
+                return content
+            # Otherwise parse raw bytes/string
             return json.loads(content.decode('utf-8') if isinstance(content, bytes) else content)
         except json.JSONDecodeError as e:
             raise MetadataNotFoundError(f"Error decoding JSON from '{metadata_file_path}': {e}") from e
@@ -252,6 +257,9 @@ class OpenHCSMetadataHandler(MetadataHandler):
 
     def get_z_index_values(self, plate_path: Union[str, Path], context: Optional[Any] = None) -> Optional[Dict[str, Optional[str]]]:
         return self._get_optional_metadata_dict(plate_path, FIELDS.Z_INDEXES)
+
+    def get_timepoint_values(self, plate_path: Union[str, Path], context: Optional[Any] = None) -> Optional[Dict[str, Optional[str]]]:
+        return self._get_optional_metadata_dict(plate_path, FIELDS.TIMEPOINTS)
 
     def get_objective_values(self, plate_path: Union[str, Path], context: Optional[Any] = None) -> Optional[Dict[str, Any]]:
         """Get objective lens information if available."""
@@ -363,6 +371,7 @@ class OpenHCSMetadata:
     wells: Optional[Dict[str, str]]
     sites: Optional[Dict[str, str]]
     z_indexes: Optional[Dict[str, str]]
+    timepoints: Optional[Dict[str, str]]
     available_backends: Dict[str, bool]
     main: Optional[bool] = None  # Indicates if this subdirectory is the primary/input subdirectory
 
@@ -459,6 +468,7 @@ class OpenHCSMetadataGenerator:
             wells=cache.get(AllComponents.WELL),  # Use AllComponents for multiprocessing axis
             sites=cache.get(GroupBy.SITE),
             z_indexes=cache.get(GroupBy.Z_INDEX),
+            timepoints=cache.get(GroupBy.TIMEPOINT),
             available_backends={write_backend: True},
             main=is_main if is_main else None
         )

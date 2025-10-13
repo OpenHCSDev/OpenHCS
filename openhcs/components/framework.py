@@ -176,15 +176,18 @@ class ComponentConfigurationFactory:
         # Import here to avoid circular import with constants.py
         from enum import Enum
 
-        class VariableComponents(Enum):
+        # CRITICAL: Use a different name to avoid conflicts with the real VariableComponents
+        # enum created in constants.py. This is just a template for creating the configuration.
+        class _ComponentTemplate(Enum):
             SITE = "site"
             CHANNEL = "channel"
             Z_INDEX = "z_index"
+            TIMEPOINT = "timepoint"
             WELL = "well"
 
         return ComponentConfigurationFactory.create_configuration(
-            VariableComponents,
-            multiprocessing_axis=VariableComponents.WELL,
-            default_variable=[VariableComponents.SITE],
-            default_group_by=VariableComponents.CHANNEL
+            _ComponentTemplate,
+            multiprocessing_axis=_ComponentTemplate.WELL,
+            default_variable=[_ComponentTemplate.SITE],
+            default_group_by=_ComponentTemplate.CHANNEL
         )

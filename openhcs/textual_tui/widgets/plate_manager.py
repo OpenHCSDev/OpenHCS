@@ -147,6 +147,8 @@ class PlateManagerWidget(ButtonListWidget):
 
         # --- Subprocess Architecture ---
         self.current_process: Optional[subprocess.Popen] = None
+        self.zmq_client = None  # ZMQ execution client (when using ZMQ mode)
+        self.current_execution_id = None  # Track current execution ID for cancellation
         self.log_file_path: Optional[str] = None  # Single source of truth
         self.log_file_position: int = 0  # Track position in log file for incremental reading
         # Async monitoring using Textual's interval system
@@ -554,6 +556,24 @@ class PlateManagerWidget(ButtonListWidget):
             self.app.show_error("Selected plates are not compiled. Please compile first.")
             return
 
+        # Check if ZMQ execution is enabled (default: True)
+        import os
+        use_zmq = os.environ.get('OPENHCS_USE_ZMQ_EXECUTION', 'true').lower() in ('true', '1', 'yes')
+
+        if use_zmq:
+            await self._run_plates_zmq(ready_items)
+        else:
+            await self._run_plates_subprocess(ready_items)
+
+    async def _run_plates_subprocess(self, ready_items) -> None:
+        """Run plates using legacy subprocess runner (deprecated)."""
+        import warnings
+        warnings.warn(
+            "Subprocess runner is deprecated. Set OPENHCS_USE_ZMQ_EXECUTION=true to use ZMQ execution.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
         try:
             # Use subprocess approach like integration tests
             logger.debug("🔥 Using subprocess approach for clean isolation")
@@ -879,14 +899,194 @@ class PlateManagerWidget(ButtonListWidget):
 
 
 
+    async def _run_plates_zmq(self, ready_items) -> None:
+        """Run plates using ZMQ execution client (recommended)."""
+        try:
+            from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
+
+            plate_paths_to_run = [item['path'] for item in ready_items]
+            logger.info(f"Starting ZMQ execution for {len(plate_paths_to_run)} plates")
+
+            # Create ZMQ client (non-persistent mode for UI-managed execution)
+            self.zmq_client = ZMQExecutionClient(
+                port=7777,
+                persistent=False,  # UI manages lifecycle
+                progress_callback=self._on_zmq_progress
+            )
+
+            # Connect to server (will spawn if needed)
+            def _connect():
+                return self.zmq_client.connect(timeout=15)
+
+            import asyncio
+            loop = asyncio.get_event_loop()
+            connected = await loop.run_in_executor(None, _connect)
+
+            if not connected:
+                raise RuntimeError("Failed to connect to ZMQ execution server")
+
+            logger.info("Connected to ZMQ execution server")
+
+            # Update orchestrator states to show running state
+            for plate in ready_items:
+                plate_path = plate['path']
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.EXECUTING
+
+            self._trigger_ui_refresh()
+            self.app.current_status = f"Running {len(ready_items)} plate(s) via ZMQ..."
+            self._update_button_states()
+
+            # Execute each plate
+            for plate_path in plate_paths_to_run:
+                definition_pipeline = self._get_current_pipeline_definition(plate_path)
+
+                # Get effective config for this plate
+                effective_config = self.app.global_config
+                from openhcs.core.config import PipelineConfig
+                pipeline_config = PipelineConfig()
+
+                logger.info(f"Executing plate: {plate_path}")
+
+                # Execute via ZMQ (in executor to avoid blocking UI)
+                def _execute():
+                    return self.zmq_client.execute_pipeline(
+                        plate_id=str(plate_path),
+                        pipeline_steps=definition_pipeline,
+                        global_config=effective_config,
+                        pipeline_config=pipeline_config
+                    )
+
+                response = await loop.run_in_executor(None, _execute)
+
+                # Track execution ID for cancellation
+                if response.get('execution_id'):
+                    self.current_execution_id = response['execution_id']
+
+                logger.info(f"Plate {plate_path} execution response: {response.get('status')}")
+
+                if response.get('status') != 'complete':
+                    error_msg = response.get('message', 'Unknown error')
+                    logger.error(f"Plate {plate_path} execution failed: {error_msg}")
+                    self.app.show_error(f"Execution failed for {plate_path}: {error_msg}")
+
+            # Execution complete
+            self.current_execution_id = None
+            self.app.current_status = f"Completed {len(ready_items)} plate(s)"
+
+            # Update orchestrator states
+            for plate in ready_items:
+                plate_path = plate['path']
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.EXEC_COMPLETE
+
+            self._trigger_ui_refresh()
+            self._update_button_states()
+
+            # Disconnect from server
+            def _disconnect():
+                self.zmq_client.disconnect()
+
+            await loop.run_in_executor(None, _disconnect)
+            self.zmq_client = None
+
+        except Exception as e:
+            logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
+            self.app.show_error(f"Failed to execute: {e}")
+            self.current_execution_id = None
+            self._reset_execution_state("ZMQ execution failed")
+
+            # Cleanup ZMQ client
+            if hasattr(self, 'zmq_client') and self.zmq_client:
+                try:
+                    self.zmq_client.disconnect()
+                except:
+                    pass
+                self.zmq_client = None
+
+    def _on_zmq_progress(self, message):
+        """Handle progress updates from ZMQ execution server."""
+        try:
+            well_id = message.get('well_id', 'unknown')
+            step = message.get('step', 'unknown')
+            status = message.get('status', 'unknown')
+
+            # Update status in TUI
+            progress_text = f"[{well_id}] {step}: {status}"
+            self.app.current_status = progress_text
+            logger.debug(f"Progress: {progress_text}")
+
+        except Exception as e:
+            logger.warning(f"Failed to handle progress update: {e}")
+
     async def action_stop_execution(self) -> None:
-        logger.info("🛑 Stop button pressed. Terminating subprocess.")
+        logger.info("🛑 Stop button pressed.")
         self.app.current_status = "Terminating execution..."
 
         # Stop async monitoring first
         self._stop_monitoring()
 
-        if self.current_process and self.current_process.poll() is None:  # Still running
+        # Check if using ZMQ execution
+        if self.zmq_client:
+            try:
+                logger.info("🛑 Requesting graceful cancellation via ZMQ...")
+
+                import asyncio
+                loop = asyncio.get_event_loop()
+
+                # Cancel specific execution if we have an ID
+                if self.current_execution_id:
+                    logger.info(f"🛑 Cancelling execution {self.current_execution_id}")
+
+                    def _cancel():
+                        return self.zmq_client.cancel_execution(self.current_execution_id)
+
+                    response = await loop.run_in_executor(None, _cancel)
+
+                    if response.get('status') == 'ok':
+                        logger.info("🛑 Cancellation request accepted, waiting for graceful shutdown...")
+                        self.app.current_status = "Cancellation requested, waiting..."
+
+                        # Wait for graceful cancellation with timeout
+                        timeout = 5  # seconds
+                        start_time = asyncio.get_event_loop().time()
+
+                        while (asyncio.get_event_loop().time() - start_time) < timeout:
+                            # Check if execution is still running
+                            def _check_status():
+                                return self.zmq_client.get_status(self.current_execution_id)
+
+                            status_response = await loop.run_in_executor(None, _check_status)
+
+                            if status_response.get('status') == 'error':
+                                # Execution no longer exists (completed or cancelled)
+                                logger.info("🛑 Execution completed/cancelled gracefully")
+                                break
+
+                            await asyncio.sleep(0.5)
+                        else:
+                            # Timeout reached - execution still running
+                            logger.warning("🛑 Graceful cancellation timeout - execution may still be running")
+                            self.app.current_status = "Cancellation timeout - execution may still be running"
+                    else:
+                        logger.warning(f"🛑 Cancellation failed: {response.get('message')}")
+                        self.app.current_status = f"Cancellation failed: {response.get('message')}"
+
+                # Disconnect client
+                def _disconnect():
+                    self.zmq_client.disconnect()
+
+                await loop.run_in_executor(None, _disconnect)
+
+                self.zmq_client = None
+                self.current_execution_id = None
+                self._reset_execution_state("Execution cancelled by user")
+
+            except Exception as e:
+                logger.error(f"🛑 Error cancelling ZMQ execution: {e}")
+                self.app.show_error(f"Failed to cancel execution: {e}")
+
+        elif self.current_process and self.current_process.poll() is None:  # Still running subprocess
             try:
                 # Kill the entire process group, not just the parent process
                 # The subprocess creates its own process group, so we need to kill that group

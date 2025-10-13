@@ -15,31 +15,51 @@ class Microscope(Enum):
     OPENHCS = "openhcs"  # Added for the OpenHCS pre-processed format
     IMAGEXPRESS = "ImageXpress"
     OPERAPHENIX = "OperaPhenix"
+    OMERO = "omero"  # Added for OMERO virtual filesystem backend
 
 
 def get_openhcs_config():
     """Get the OpenHCS configuration, initializing it if needed."""
-    from openhcs.core.components.framework import ComponentConfigurationFactory
+    from openhcs.components.framework import ComponentConfigurationFactory
     return ComponentConfigurationFactory.create_openhcs_default_configuration()
 
 
 # Simple lazy initialization - just defer the config call
 @lru_cache(maxsize=1)
 def _create_enums():
-    """Create enums when first needed."""
+    """Create enums when first needed.
+
+    CRITICAL: This function must create enums with proper __module__ and __qualname__
+    attributes so they can be pickled correctly in multiprocessing contexts.
+    The enums are stored in module globals() to ensure identity consistency.
+    """
+    import logging
+    import os
+    import traceback
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔧 _create_enums() CALLED in process {os.getpid()}")
+    logger.info(f"🔧 _create_enums() cache_info: {_create_enums.cache_info()}")
+    logger.info(f"🔧 _create_enums() STACK TRACE:\n{''.join(traceback.format_stack())}")
+
     config = get_openhcs_config()
     remaining = config.get_remaining_components()
 
     # AllComponents: ALL possible dimensions (including multiprocessing axis)
     all_components = Enum('AllComponents', {c.name: c.value for c in config.all_components})
+    all_components.__module__ = __name__
+    all_components.__qualname__ = 'AllComponents'
 
     # VariableComponents: Components available for variable selection (excludes multiprocessing axis)
     vc = Enum('VariableComponents', {c.name: c.value for c in remaining})
+    vc.__module__ = __name__
+    vc.__qualname__ = 'VariableComponents'
 
     # GroupBy: Same as VariableComponents + NONE option (they're the same concept)
     gb_dict = {c.name: c.value for c in remaining}
     gb_dict['NONE'] = None
     GroupBy = Enum('GroupBy', gb_dict)
+    GroupBy.__module__ = __name__
+    GroupBy.__qualname__ = 'GroupBy'
 
     # Add original interface methods
     GroupBy.component = property(lambda self: self.value)
@@ -48,16 +68,38 @@ def _create_enums():
     GroupBy.__str__ = lambda self: f"GroupBy.{self.name}"
     GroupBy.__repr__ = lambda self: f"GroupBy.{self.name}"
 
+    logger.info(f"🔧 _create_enums() RETURNING in process {os.getpid()}: "
+               f"AllComponents={id(all_components)}, VariableComponents={id(vc)}, GroupBy={id(GroupBy)}")
+    logger.info(f"🔧 _create_enums() cache_info after return: {_create_enums.cache_info()}")
     return all_components, vc, GroupBy
 
 
 def __getattr__(name):
-    """Lazy enum creation."""
+    """Lazy enum creation with identity guarantee.
+
+    CRITICAL: Ensures enums are created exactly once per process and stored in globals()
+    so that pickle identity checks pass in multiprocessing contexts.
+    """
     if name in ('AllComponents', 'VariableComponents', 'GroupBy'):
+        # Check if already created (handles race conditions)
+        if name in globals():
+            return globals()[name]
+
+        # Create all enums at once and store in globals
+        import logging
+        import os
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔧 ENUM CREATION: Creating {name} in process {os.getpid()}")
+
         all_components, vc, gb = _create_enums()
         globals()['AllComponents'] = all_components
         globals()['VariableComponents'] = vc
         globals()['GroupBy'] = gb
+
+        logger.info(f"🔧 ENUM CREATION: Created enums in process {os.getpid()}: "
+                   f"AllComponents={id(all_components)}, VariableComponents={id(vc)}, GroupBy={id(gb)}")
+        logger.info(f"🔧 ENUM CREATION: VariableComponents.__module__={vc.__module__}, __qualname__={vc.__qualname__}")
+
         return globals()[name]
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
@@ -120,6 +162,7 @@ class Backend(Enum):
     ZARR = "zarr"
     NAPARI_STREAM = "napari_stream"
     FIJI_STREAM = "fiji_stream"
+    OMERO_LOCAL = "omero_local"
 
 class FileFormat(Enum):
     TIFF = list(DEFAULT_IMAGE_EXTENSIONS)
@@ -128,7 +171,9 @@ class FileFormat(Enum):
     JAX = [".jax"]
     CUPY = [".cupy",".craw"]
     TENSORFLOW = [".tf"]
-    TEXT = [".txt",".csv",".json",".py",".md"]
+    JSON = [".json"]
+    CSV = [".csv"]
+    TEXT = [".txt", ".py", ".md"]
 
 DEFAULT_BACKEND = Backend.MEMORY
 REQUIRES_DISK_READ = "requires_disk_read"
@@ -188,8 +233,3 @@ MEMORY_TYPE_JAX = MemoryType.JAX.value
 MEMORY_TYPE_PYCLESPERANTO = MemoryType.PYCLESPERANTO.value
 
 DEFAULT_NUM_WORKERS = 1
-# Consolidated definition for number of workers
-DEFAULT_OUT_DIR_SUFFIX = "_out"
-DEFAULT_POSITIONS_DIR_SUFFIX = "_positions"
-DEFAULT_STITCHED_DIR_SUFFIX = "_stitched"
-DEFAULT_WORKSPACE_DIR_SUFFIX = "_workspace"

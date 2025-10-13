@@ -156,7 +156,7 @@ class FijiStreamVisualizer:
     for independence and persistence across pipeline runs.
     """
 
-    def __init__(self, filemanager: FileManager, viewer_title: str = "OpenHCS Fiji Visualization", persistent: bool = True, visualizer_config):
+    def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Fiji Visualization", persistent: bool = True):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
         self.persistent = persistent

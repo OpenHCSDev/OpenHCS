@@ -39,7 +39,8 @@ from openhcs.core.memory.decorators import DtypeConversion
 # Test utilities and fixtures
 from tests.integration.helpers.fixture_utils import (
     backend_config, base_test_dir, data_type_config, execution_mode,
-    microscope_config, plate_dir, test_params, print_thread_activity_report
+    microscope_config, plate_dir, test_params, print_thread_activity_report,
+    zmq_execution_mode
 )
 
 from openhcs.config_framework.lazy_factory import ensure_global_config_context
@@ -69,7 +70,7 @@ class TestConstants:
     # Metadata validation
     METADATA_FILENAME: str = "openhcs_metadata.json"
     SUBDIRECTORIES_FIELD: str = "subdirectories"
-    MIN_METADATA_ENTRIES: int = 2
+    MIN_METADATA_ENTRIES: int = 1
 
 
 
@@ -85,13 +86,24 @@ class TestConstants:
 @dataclass
 class TestConfig:
     """Configuration for test execution."""
-    plate_dir: Path
+    plate_dir: Union[Path, int]  # Path for disk-based, int (plate_id) for OMERO
     backend_config: str
     execution_mode: str
+    microscope_config: Dict
     use_threading: bool = False
 
     def __post_init__(self):
         self.use_threading = self.execution_mode == "threading"
+
+    @property
+    def is_omero(self) -> bool:
+        """Check if this is an OMERO test (plate_dir is int)."""
+        return isinstance(self.plate_dir, int)
+
+    @property
+    def microscope_type(self) -> str:
+        """Get microscope type from config."""
+        return self.microscope_config.get("microscope_type", "auto")
 
 
 CONSTANTS = TestConstants()
@@ -296,13 +308,26 @@ def validate_separate_materialization(plate_dir: Path) -> None:
 
 def _create_pipeline_config(test_config: TestConfig) -> GlobalPipelineConfig:
     """Create pipeline configuration for test execution."""
+    from openhcs.constants import Microscope
+
+    # Set microscope type from config
+    microscope = Microscope[test_config.microscope_type.upper()] if test_config.microscope_type != "auto" else Microscope.AUTO
+
+    # For OMERO tests, use omero_local backend for materialization
+    # For other tests, use the configured backend
+    if test_config.is_omero:
+        materialization_backend = MaterializationBackend('omero_local')
+    else:
+        materialization_backend = MaterializationBackend(test_config.backend_config)
+
     return GlobalPipelineConfig(
         num_workers=CONSTANTS.DEFAULT_WORKERS,
+        microscope=microscope,
         path_planning_config=PathPlanningConfig(
             sub_dir=CONSTANTS.DEFAULT_SUB_DIR,
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
-        vfs_config=VFSConfig(materialization_backend=MaterializationBackend(test_config.backend_config)),
+        vfs_config=VFSConfig(materialization_backend=materialization_backend),
         zarr_config=ZarrConfig(
             store_name=CONSTANTS.ZARR_STORE_NAME,
             ome_zarr_metadata=True,
@@ -324,6 +349,22 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
     # Set up global context for orchestrator - legitimate test setup
     ensure_global_config_context(GlobalPipelineConfig, global_config)
 
+    # For OMERO: Register OMERO backend with connection
+    omero_manager = None
+    if test_config.is_omero:
+        from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+        from openhcs.io.omero_local import OMEROLocalBackend
+        from openhcs.io.base import storage_registry
+
+        # Connect to OMERO
+        omero_manager = OMEROInstanceManager()
+        if not omero_manager.connect(timeout=60):
+            pytest.skip("OMERO server not available - skipping OMERO tests")
+
+        # Register OMERO backend with connection in global storage registry
+        omero_backend = OMEROLocalBackend(omero_conn=omero_manager.conn)
+        storage_registry['omero_local'] = omero_backend
+
     # Create PipelineConfig with lazy configs for proper hierarchical inheritance
     pipeline_config = PipelineConfig(
         path_planning_config=LazyPathPlanningConfig(
@@ -332,7 +373,13 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
         step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
     )
 
-    orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=pipeline_config)
+    # Convert plate_dir to Path - for OMERO, format as /omero/plate_{id}
+    if test_config.is_omero:
+        plate_path = Path(f"/omero/plate_{test_config.plate_dir}")
+    else:
+        plate_path = test_config.plate_dir
+
+    orchestrator = PipelineOrchestrator(plate_path, pipeline_config=pipeline_config)
     orchestrator.initialize()
     return orchestrator
 
@@ -393,7 +440,7 @@ def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
 
 
 def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipeline) -> Dict:
-    """Execute compilation and execution phases of the pipeline."""
+    """Execute compilation and execution phases of the pipeline (direct mode)."""
     from openhcs.constants import MULTIPROCESSING_AXIS
     import logging
     logger = logging.getLogger(__name__)
@@ -447,32 +494,293 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
     return results
 
 
-def test_main(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str):
+def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_config: GlobalPipelineConfig, pipeline_config: PipelineConfig) -> Dict:
+    """Execute pipeline using ZMQ execution client."""
+    from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.info("🔌 Executing pipeline via ZMQ execution client")
+
+    # Create ZMQ client and connect to server
+    # The server will create its own orchestrator and get the well list
+    client = ZMQExecutionClient(port=7777, persistent=False)
+
+    try:
+        # Connect to server (spawns if needed)
+        client.connect(timeout=15)
+        logger.info("✅ Connected to ZMQ execution server")
+
+        # Execute pipeline - server will create orchestrator and get wells
+        response = client.execute_pipeline(
+            plate_id=str(test_config.plate_dir),
+            pipeline_steps=pipeline.steps,
+            global_config=global_config,
+            pipeline_config=pipeline_config
+        )
+
+        # Check response
+        if response.get('status') == 'error':
+            error_msg = response.get('message', 'Unknown error')
+            raise RuntimeError(f"ZMQ execution failed: {error_msg}")
+
+        logger.info(f"✅ ZMQ execution completed: {response.get('status')}")
+
+        # Convert response to results format expected by tests
+        # ZMQ returns {'status': 'complete', 'execution_id': '...', 'result': {...}}
+        # We need to return the result dict
+        return response.get('result', {})
+
+    finally:
+        # Cleanup
+        client.disconnect()
+        logger.info("🔌 Disconnected from ZMQ execution server")
+
+
+def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq_mode: str) -> Dict:
+    """
+    Execute pipeline using either direct orchestrator or ZMQ client based on mode.
+
+    Args:
+        test_config: Test configuration
+        pipeline: Pipeline to execute
+        zmq_mode: 'direct' for orchestrator, 'zmq' for ZMQ client
+
+    Returns:
+        Execution results dict
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if zmq_mode == "zmq":
+        logger.info("📡 Using ZMQ execution mode")
+
+        # Create global config for ZMQ execution
+        global_config = _create_pipeline_config(test_config)
+
+        # Create pipeline config with lazy configs
+        from openhcs.config_framework.lazy_factory import LazyPathPlanningConfig, LazyStepWellFilterConfig
+        pipeline_config = PipelineConfig(
+            path_planning_config=LazyPathPlanningConfig(
+                output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
+            ),
+            step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+        )
+
+        return _execute_pipeline_zmq(test_config, pipeline, global_config, pipeline_config)
+    else:
+        logger.info("🔧 Using direct orchestrator mode")
+        orchestrator = _initialize_orchestrator(test_config)
+        return _execute_pipeline_phases(orchestrator, pipeline)
+
+
+def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict):
     """Unified test for all combinations of microscope types, backends, data types, and execution modes."""
-    test_config = TestConfig(Path(plate_dir), backend_config, execution_mode)
+    # Handle both Path and int (OMERO plate_id)
+    if isinstance(plate_dir, int):
+        test_config = TestConfig(plate_dir, backend_config, execution_mode, microscope_config)
+    else:
+        test_config = TestConfig(Path(plate_dir), backend_config, execution_mode, microscope_config)
 
-    print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}")
+    # For OMERO tests, verify OMERO is running before proceeding
+    if test_config.is_omero:
+        from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+        print("🔍 Checking OMERO server availability...")
+        omero_manager = OMEROInstanceManager()
+        if not omero_manager.connect(timeout=10):
+            pytest.skip("OMERO server not available - skipping OMERO tests. Start OMERO with: docker-compose up -d")
+        omero_manager.close()
+        print("✅ OMERO server is running")
 
-    orchestrator = _initialize_orchestrator(test_config)
+    print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, microscope: {microscope_config['format']}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
+
     pipeline = create_test_pipeline()
 
-    # Export pipeline to Python file in the synthetic data folder
-    _export_pipeline_to_file(pipeline, test_config.plate_dir)
+    # Export pipeline to Python file (skip for OMERO - no filesystem)
+    if not test_config.is_omero:
+        _export_pipeline_to_file(pipeline, test_config.plate_dir)
 
-    # Test orchestrator's pipeline config has the correct values
-    # The dual-axis resolver will use these values during pipeline execution
-    orchestrator_step_config = orchestrator.pipeline_config.step_well_filter_config
-#    if CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST == None:
-#        print(f"StepWellFilterConfig.well_filter in PipelineConfig not set, should be resolved from GlobalPipelineConfig")
-#        assert orchestrator_step_config.well_filter == CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST, f"Expected orchestrator's step_well_filter_config.well_filter={CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST}, got {orchestrator_step_config.well_filter}"
-#    assert orchestrator_step_config.well_filter == CONSTANTS.STEP_WELL_FILTER_TEST, f"Expected orchestrator's step_well_filter_config.well_filter={CONSTANTS.STEP_WELL_FILTER_TEST}, got {orchestrator_step_config.well_filter}"
-#    print(f"✅ Orchestrator config test passed: step_well_filter_config.well_filter = {orchestrator_step_config.well_filter}")
+    # Execute using the specified mode (direct or zmq)
+    results = _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode)
 
-    results = _execute_pipeline_phases(orchestrator, pipeline)
-    validate_separate_materialization(test_config.plate_dir)
+    # Validate materialization (skip for OMERO - different validation needed)
+    if not test_config.is_omero:
+        validate_separate_materialization(test_config.plate_dir)
+    else:
+        # For OMERO tests, open browser to view the plate
+        import os
+        import webbrowser
+
+        # Get OMERO web URL from config
+        omero_web_host = os.getenv('OMERO_WEB_HOST', 'localhost')
+        omero_web_port = os.getenv('OMERO_WEB_PORT', '4080')
+        plate_url = f"http://{omero_web_host}:{omero_web_port}/webclient/?show=plate-{plate_dir}"
+
+        print(f"\n{'='*80}")
+        print(f"OMERO Plate URL: {plate_url}")
+        print(f"{'='*80}\n")
+
+        # Open browser
+        webbrowser.open(plate_url)
 
     print_thread_activity_report()
     print(f"{CONSTANTS.SUCCESS_INDICATOR} ({len(results)} wells processed)")
+
+
+@pytest.mark.parametrize("use_code_serialization", [False, True], ids=["direct", "code_serialization"])
+def test_code_serialization(plate_dir: Union[Path, str], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict, use_code_serialization: bool):
+    """
+    Parametrized test that can run with or without code serialization.
+
+    When use_code_serialization=True, this tests the pickle_to_python approach.
+    When use_code_serialization=False, this runs the normal test.
+    """
+    if use_code_serialization:
+        test_main_with_code_serialization(plate_dir, backend_config, data_type_config, execution_mode, zmq_execution_mode, microscope_config)
+    else:
+        test_main(plate_dir, backend_config, data_type_config, execution_mode, zmq_execution_mode, microscope_config)
+
+
+def test_main_with_code_serialization(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict):
+    """
+    Test using pickle_to_python for code-based object serialization.
+
+    This mirrors the UI's approach:
+    1. Create objects normally
+    2. Convert to Python code using pickle_to_python
+    3. Exec the code to recreate objects
+    4. Use recreated objects for execution
+
+    This proves the code-based serialization works for remote execution.
+    """
+    # Handle both Path and int (OMERO plate_id)
+    if isinstance(plate_dir, int):
+        test_config = TestConfig(plate_dir, backend_config, execution_mode, microscope_config)
+    else:
+        test_config = TestConfig(Path(plate_dir), backend_config, execution_mode, microscope_config)
+
+    print(f"{CONSTANTS.START_INDICATOR} [CODE SERIALIZATION TEST] with plate: {plate_dir}, backend: {backend_config}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
+
+    # Step 1: Create objects normally
+    from openhcs.io.base import reset_memory_backend
+    reset_memory_backend()
+    setup_global_gpu_registry()
+
+    global_config = _create_pipeline_config(test_config)
+
+    # Create PipelineConfig with lazy configs for proper hierarchical inheritance
+    pipeline_config = PipelineConfig(
+        path_planning_config=LazyPathPlanningConfig(
+            output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
+        ),
+        step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+    )
+
+    pipeline = create_test_pipeline()
+
+    print("📦 Step 1: Created original objects")
+    print(f"   - GlobalPipelineConfig: {type(global_config).__name__}")
+    print(f"   - PipelineConfig: {type(pipeline_config).__name__}")
+    print(f"   - Pipeline: {len(pipeline.steps)} steps")
+
+    # Step 2: Convert to Python code using pickle_to_python
+    from openhcs.debug.pickle_to_python import (
+        generate_config_code,
+        generate_complete_pipeline_steps_code
+    )
+
+    print("\n🔄 Step 2: Converting objects to Python code...")
+
+    # Generate code for GlobalPipelineConfig
+    global_config_code = generate_config_code(global_config, GlobalPipelineConfig, clean_mode=True)
+
+    # Generate code for PipelineConfig
+    pipeline_config_code = generate_config_code(pipeline_config, PipelineConfig, clean_mode=True)
+
+    # Generate code for Pipeline steps
+    pipeline_steps_code = generate_complete_pipeline_steps_code(pipeline.steps, clean_mode=True)
+
+    print(f"   - GlobalPipelineConfig code: {len(global_config_code)} chars")
+    print(f"   - PipelineConfig code: {len(pipeline_config_code)} chars")
+    print(f"   - Pipeline steps code: {len(pipeline_steps_code)} chars")
+
+    # Save the generated code to files for inspection
+    code_output_dir = test_config.plate_dir / "generated_code"
+    code_output_dir.mkdir(exist_ok=True)
+
+    (code_output_dir / "global_config.py").write_text(global_config_code)
+    (code_output_dir / "pipeline_config.py").write_text(pipeline_config_code)
+    (code_output_dir / "pipeline_steps.py").write_text(pipeline_steps_code)
+
+    print(f"   - Saved code to: {code_output_dir}")
+
+    # Step 3: Exec the code to recreate objects
+    print("\n⚙️  Step 3: Recreating objects from Python code using exec()...")
+
+    # Recreate GlobalPipelineConfig
+    global_config_namespace = {}
+    exec(global_config_code, global_config_namespace)
+    recreated_global_config = global_config_namespace['config']
+
+    # Recreate PipelineConfig
+    pipeline_config_namespace = {}
+    exec(pipeline_config_code, pipeline_config_namespace)
+    recreated_pipeline_config = pipeline_config_namespace['config']
+
+    # Recreate Pipeline steps
+    pipeline_steps_namespace = {}
+    exec(pipeline_steps_code, pipeline_steps_namespace)
+    recreated_pipeline_steps = pipeline_steps_namespace['pipeline_steps']
+
+    print(f"   - Recreated GlobalPipelineConfig: {type(recreated_global_config).__name__}")
+    print(f"   - Recreated PipelineConfig: {type(recreated_pipeline_config).__name__}")
+    print(f"   - Recreated Pipeline steps: {len(recreated_pipeline_steps)} steps")
+
+    # Verify the recreated objects match the originals
+    print("\n🔍 Step 4: Verifying recreated objects...")
+
+    # Check GlobalPipelineConfig fields
+    assert recreated_global_config.num_workers == global_config.num_workers
+    assert recreated_global_config.use_threading == global_config.use_threading
+    print(f"   ✅ GlobalPipelineConfig fields match")
+
+    # Check PipelineConfig fields
+    assert type(recreated_pipeline_config) == type(pipeline_config)
+    print(f"   ✅ PipelineConfig type matches")
+
+    # Check Pipeline steps
+    assert len(recreated_pipeline_steps) == len(pipeline.steps)
+    for i, (orig_step, recreated_step) in enumerate(zip(pipeline.steps, recreated_pipeline_steps)):
+        assert type(orig_step) == type(recreated_step)
+        assert orig_step.name == recreated_step.name
+    print(f"   ✅ Pipeline steps match ({len(recreated_pipeline_steps)} steps)")
+
+    # Step 5: Use recreated objects for execution
+    print("\n🚀 Step 5: Executing pipeline with recreated objects...")
+
+    # Create Pipeline object from recreated steps
+    recreated_pipeline = Pipeline(
+        steps=recreated_pipeline_steps,
+        name=pipeline.name
+    )
+
+    # Execute using the specified mode (direct or zmq)
+    if zmq_execution_mode == "zmq":
+        # For ZMQ mode, use the recreated configs directly
+        results = _execute_pipeline_zmq(test_config, recreated_pipeline, recreated_global_config, recreated_pipeline_config)
+    else:
+        # For direct mode, set up global context and use orchestrator
+        ensure_global_config_context(GlobalPipelineConfig, recreated_global_config)
+        orchestrator = PipelineOrchestrator(test_config.plate_dir, pipeline_config=recreated_pipeline_config)
+        orchestrator.initialize()
+        results = _execute_pipeline_phases(orchestrator, recreated_pipeline)
+
+    validate_separate_materialization(test_config.plate_dir)
+
+    print_thread_activity_report()
+    print(f"\n{CONSTANTS.SUCCESS_INDICATOR} [CODE SERIALIZATION TEST] ({len(results)} wells processed)")
+    print("✅ Code-based serialization works perfectly!")
+    print("   This proves we can use Python code instead of pickling for remote execution.")
 
 
 

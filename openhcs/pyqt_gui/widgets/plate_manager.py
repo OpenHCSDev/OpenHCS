@@ -70,6 +70,7 @@ class PlateManagerWidget(QWidget):
     # Error handling signals (thread-safe error reporting)
     compilation_error = pyqtSignal(str, str)  # plate_name, error_message
     initialization_error = pyqtSignal(str, str)  # plate_name, error_message
+    execution_error = pyqtSignal(str)  # error_message
     
     def __init__(self, file_manager: FileManager, service_adapter,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
@@ -101,6 +102,8 @@ class PlateManagerWidget(QWidget):
         self.plate_configs: Dict[str, Dict] = {}
         self.plate_compiled_data: Dict[str, tuple] = {}  # Store compiled pipeline data
         self.current_process = None
+        self.zmq_client = None  # ZMQ execution client (when using ZMQ mode)
+        self.current_execution_id = None  # Track current execution ID for cancellation
         self.execution_state = "idle"
         self.log_file_path: Optional[str] = None
         self.log_file_position: int = 0
@@ -292,6 +295,7 @@ class PlateManagerWidget(QWidget):
         # Error handling signals for thread-safe error reporting
         self.compilation_error.connect(self._handle_compilation_error)
         self.initialization_error.connect(self._handle_initialization_error)
+        self.execution_error.connect(self._handle_execution_error)
     
     def handle_button_action(self, action: str):
         """
@@ -741,11 +745,19 @@ class PlateManagerWidget(QWidget):
         for i, plate_data in enumerate(selected_items):
             plate_path = plate_data['path']
 
-            # Get definition pipeline and make fresh copy
+            # Get definition pipeline - this is the ORIGINAL pipeline from the editor
+            # It should have func attributes intact
             definition_pipeline = self._get_current_pipeline_definition(plate_path)
             if not definition_pipeline:
                 logger.warning(f"No pipeline defined for {plate_data['name']}, using empty pipeline")
                 definition_pipeline = []
+
+            # Validate that steps have func attribute (required for ZMQ execution)
+            for i, step in enumerate(definition_pipeline):
+                if not hasattr(step, 'func'):
+                    logger.error(f"Step {i} ({step.name}) missing 'func' attribute! Cannot execute via ZMQ.")
+                    raise AttributeError(f"Step '{step.name}' is missing 'func' attribute. "
+                                       "This usually means the pipeline was loaded from a compiled state instead of the original definition.")
 
             try:
                 # Get or create orchestrator for compilation
@@ -822,8 +834,13 @@ class PlateManagerWidget(QWidget):
                 # compile_pipelines now returns {'pipeline_definition': ..., 'compiled_contexts': ...}
                 compiled_contexts = compilation_result['compiled_contexts']
 
-                # Store compiled data
-                self.plate_compiled_data[plate_path] = (execution_pipeline, compiled_contexts)
+                # Store compiled data AND original definition pipeline
+                # ZMQ mode needs the original definition, direct mode needs the compiled execution pipeline
+                self.plate_compiled_data[plate_path] = {
+                    'definition_pipeline': definition_pipeline,  # Original uncompiled pipeline for ZMQ
+                    'execution_pipeline': execution_pipeline,    # Compiled pipeline for direct mode
+                    'compiled_contexts': compiled_contexts
+                }
                 logger.info(f"Successfully compiled {plate_path}")
 
                 # Update orchestrator state change signal
@@ -857,6 +874,24 @@ class PlateManagerWidget(QWidget):
             self.service_adapter.show_error_dialog("Selected plates are not compiled. Please compile first.")
             return
 
+        # Check if ZMQ execution is enabled (default: True)
+        import os
+        use_zmq = os.environ.get('OPENHCS_USE_ZMQ_EXECUTION', 'true').lower() in ('true', '1', 'yes')
+
+        if use_zmq:
+            await self._run_plates_zmq(ready_items)
+        else:
+            await self._run_plates_subprocess(ready_items)
+
+    async def _run_plates_subprocess(self, ready_items):
+        """Run plates using legacy subprocess runner (deprecated)."""
+        import warnings
+        warnings.warn(
+            "Subprocess runner is deprecated. Set OPENHCS_USE_ZMQ_EXECUTION=true to use ZMQ execution.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+
         try:
             # Use subprocess approach like Textual TUI
             logger.debug("Using subprocess approach for clean isolation")
@@ -867,14 +902,16 @@ class PlateManagerWidget(QWidget):
             pipeline_data = {}
             effective_configs = {}
             for plate_path in plate_paths_to_run:
-                execution_pipeline, compiled_contexts = self.plate_compiled_data[plate_path]
+                compiled_data = self.plate_compiled_data[plate_path]
                 pipeline_data[plate_path] = {
-                    'pipeline_definition': execution_pipeline,  # Use execution pipeline (stripped)
-                    'compiled_contexts': compiled_contexts      # Pre-compiled contexts
+                    'pipeline_definition': compiled_data['execution_pipeline'],  # Use execution pipeline (stripped)
+                    'compiled_contexts': compiled_data['compiled_contexts']      # Pre-compiled contexts
                 }
 
                 # Get effective config for this plate (includes pipeline config if set)
+                # For subprocess execution, we need the merged config since subprocess doesn't use dual-axis resolver
                 if plate_path in self.orchestrators:
+                    # Get merged config from orchestrator (this resolves lazy values)
                     effective_configs[plate_path] = self.orchestrators[plate_path].get_effective_config()
                 else:
                     effective_configs[plate_path] = self.global_config
@@ -989,12 +1026,227 @@ class PlateManagerWidget(QWidget):
             self.execution_state = "idle"
             self.update_button_states()
     
+    async def _run_plates_zmq(self, ready_items):
+        """Run plates using ZMQ execution client (recommended)."""
+        try:
+            from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
+
+            plate_paths_to_run = [item['path'] for item in ready_items]
+            logger.info(f"Starting ZMQ execution for {len(plate_paths_to_run)} plates")
+
+            # Clear subprocess logs before starting new execution
+            self.clear_subprocess_logs.emit()
+
+            # Create ZMQ client (persistent mode - server stays alive like Napari)
+            self.zmq_client = ZMQExecutionClient(
+                port=7777,
+                persistent=True,  # Server persists across executions
+                progress_callback=self._on_zmq_progress
+            )
+
+            # Connect to server (will spawn if needed)
+            def _connect():
+                return self.zmq_client.connect(timeout=15)
+
+            import asyncio
+            loop = asyncio.get_event_loop()
+            connected = await loop.run_in_executor(None, _connect)
+
+            if not connected:
+                raise RuntimeError("Failed to connect to ZMQ execution server")
+
+            logger.info("Connected to ZMQ execution server")
+
+            # Update orchestrator states to show running state
+            for plate in ready_items:
+                plate_path = plate['path']
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.EXECUTING
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXECUTING.value)
+
+            self.execution_state = "running"
+            self.status_message.emit(f"Running {len(ready_items)} plate(s) via ZMQ...")
+            self.update_button_states()
+
+            # Execute each plate
+            for plate_path in plate_paths_to_run:
+                compiled_data = self.plate_compiled_data[plate_path]
+
+                # Use DEFINITION pipeline for ZMQ (server will compile)
+                # NOT the execution_pipeline (which is already compiled)
+                definition_pipeline = compiled_data['definition_pipeline']
+
+                # Get config for this plate
+                # CRITICAL: Send GlobalPipelineConfig (concrete) and PipelineConfig (lazy overrides) separately
+                # The server will merge them via the dual-axis resolver
+                if plate_path in self.orchestrators:
+                    # Send the global config (concrete values) + pipeline config (lazy overrides)
+                    global_config_to_send = self.global_config
+                    pipeline_config = self.orchestrators[plate_path].pipeline_config
+                else:
+                    # No orchestrator - send global config with empty pipeline config
+                    global_config_to_send = self.global_config
+                    from openhcs.core.config import PipelineConfig
+                    pipeline_config = PipelineConfig()
+
+                logger.info(f"Executing plate: {plate_path}")
+
+                # Execute via ZMQ (in executor to avoid blocking UI)
+                # Send original definition pipeline - server will compile it
+                def _execute():
+                    return self.zmq_client.execute_pipeline(
+                        plate_id=str(plate_path),
+                        pipeline_steps=definition_pipeline,
+                        global_config=global_config_to_send,
+                        pipeline_config=pipeline_config
+                    )
+
+                response = await loop.run_in_executor(None, _execute)
+
+                # Track execution ID for cancellation
+                if response.get('execution_id'):
+                    self.current_execution_id = response['execution_id']
+
+                logger.info(f"Plate {plate_path} execution response: {response.get('status')}")
+
+                # Handle different response statuses
+                status = response.get('status')
+                if status == 'cancelled':
+                    # Cancellation is expected, not an error - just log it
+                    logger.info(f"Plate {plate_path} execution was cancelled")
+                    self.status_message.emit(f"Execution cancelled for {plate_path}")
+                elif status != 'complete':
+                    # Actual error - show error dialog
+                    error_msg = response.get('message', 'Unknown error')
+                    logger.error(f"Plate {plate_path} execution failed: {error_msg}")
+                    self.service_adapter.show_error_dialog(f"Execution failed for {plate_path}: {error_msg}")
+
+            # Execution complete
+            self.execution_state = "idle"
+            self.current_execution_id = None
+            self.status_message.emit(f"Completed {len(ready_items)} plate(s)")
+
+            # Update orchestrator states
+            for plate in ready_items:
+                plate_path = plate['path']
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
+
+            self.update_button_states()
+
+            # Disconnect from server
+            def _disconnect():
+                self.zmq_client.disconnect()
+
+            await loop.run_in_executor(None, _disconnect)
+            self.zmq_client = None
+
+        except Exception as e:
+            logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
+            # Use signal for thread-safe error reporting
+            self.execution_error.emit(f"Failed to execute: {e}")
+            self.execution_state = "idle"
+            self.current_execution_id = None
+            self.update_button_states()
+
+            # Cleanup ZMQ client
+            if hasattr(self, 'zmq_client') and self.zmq_client:
+                try:
+                    self.zmq_client.disconnect()
+                except:
+                    pass
+                self.zmq_client = None
+
+    def _on_zmq_progress(self, message):
+        """Handle progress updates from ZMQ execution server."""
+        try:
+            well_id = message.get('well_id', 'unknown')
+            step = message.get('step', 'unknown')
+            status = message.get('status', 'unknown')
+
+            # Emit progress message to UI
+            progress_text = f"[{well_id}] {step}: {status}"
+            self.status_message.emit(progress_text)
+            logger.debug(f"Progress: {progress_text}")
+
+        except Exception as e:
+            logger.warning(f"Failed to handle progress update: {e}")
+
     async def action_stop_execution(self):
-        """Handle Stop Execution - terminate running subprocess (matches TUI implementation)."""
-        logger.info("🛑 Stop button pressed. Terminating subprocess.")
+        """Handle Stop Execution - cancel ZMQ execution or terminate subprocess."""
+        logger.info("🛑 Stop button pressed.")
         self.status_message.emit("Terminating execution...")
 
-        if self.current_process and self.current_process.poll() is None:  # Still running
+        # Check if using ZMQ execution
+        if self.zmq_client:
+            try:
+                logger.info("🛑 Requesting graceful cancellation via ZMQ...")
+
+                import asyncio
+                loop = asyncio.get_event_loop()
+
+                # Cancel specific execution if we have an ID
+                if self.current_execution_id:
+                    logger.info(f"🛑 Cancelling execution {self.current_execution_id}")
+
+                    def _cancel():
+                        return self.zmq_client.cancel_execution(self.current_execution_id)
+
+                    response = await loop.run_in_executor(None, _cancel)
+
+                    if response.get('status') == 'ok':
+                        logger.info("🛑 Cancellation request accepted, waiting for graceful shutdown...")
+                        self.status_message.emit("Cancellation requested, waiting...")
+
+                        # Wait for graceful cancellation with timeout
+                        timeout = 5  # seconds
+                        start_time = asyncio.get_event_loop().time()
+
+                        while (asyncio.get_event_loop().time() - start_time) < timeout:
+                            # Check if execution is still running
+                            def _check_status():
+                                return self.zmq_client.get_status(self.current_execution_id)
+
+                            status_response = await loop.run_in_executor(None, _check_status)
+
+                            if status_response.get('status') == 'error':
+                                # Execution no longer exists (completed or cancelled)
+                                logger.info("🛑 Execution completed/cancelled gracefully")
+                                break
+
+                            await asyncio.sleep(0.5)
+                        else:
+                            # Timeout reached - execution still running
+                            logger.warning("🛑 Graceful cancellation timeout - execution may still be running")
+                            self.status_message.emit("Cancellation timeout - execution may still be running")
+                    else:
+                        logger.warning(f"🛑 Cancellation failed: {response.get('message')}")
+                        self.status_message.emit(f"Cancellation failed: {response.get('message')}")
+
+                # Disconnect client
+                def _disconnect():
+                    self.zmq_client.disconnect()
+
+                await loop.run_in_executor(None, _disconnect)
+
+                self.zmq_client = None
+                self.current_execution_id = None
+                self.execution_state = "idle"
+
+                # Update orchestrator states
+                for orchestrator in self.orchestrators.values():
+                    if orchestrator.state == OrchestratorState.EXECUTING:
+                        orchestrator._state = OrchestratorState.COMPILED
+
+                self.status_message.emit("Execution cancelled by user")
+                self.update_button_states()
+
+            except Exception as e:
+                logger.error(f"🛑 Error cancelling ZMQ execution: {e}")
+                self.service_adapter.show_error_dialog(f"Failed to cancel execution: {e}")
+
+        elif self.current_process and self.current_process.poll() is None:  # Still running subprocess
             try:
                 # Kill the entire process group, not just the parent process (matches TUI)
                 # The subprocess creates its own process group, so we need to kill that group
@@ -1636,3 +1888,7 @@ class PlateManagerWidget(QWidget):
     def _handle_initialization_error(self, plate_name: str, error_message: str):
         """Handle initialization error on main thread (slot)."""
         self.service_adapter.show_error_dialog(f"Failed to initialize {plate_name}: {error_message}")
+
+    def _handle_execution_error(self, error_message: str):
+        """Handle execution error on main thread (slot)."""
+        self.service_adapter.show_error_dialog(error_message)

@@ -10,7 +10,7 @@ from typing import Generic, TypeVar, Dict, List, Optional, Any, Callable
 from enum import Enum
 from dataclasses import dataclass
 
-from .framework import ComponentConfiguration
+from openhcs.components.framework import ComponentConfiguration
 
 logger = logging.getLogger(__name__)
 

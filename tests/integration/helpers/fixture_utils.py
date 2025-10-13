@@ -51,6 +51,14 @@ MICROSCOPE_CONFIGS = {
         "test_dir_name": "opera_phenix_pipeline",
         "microscope_type": "auto",  # Explicitly specify type
         "auto_image_size": True
+    },
+    "OMERO": {
+        "format": "OMERO",
+        "test_dir_name": "omero_test_plate",  # Will be created dynamically
+        "microscope_type": "omero",
+        "auto_image_size": True,
+        "is_virtual": True,  # Flag to indicate virtual backend
+        "requires_connection": True  # Flag to indicate OMERO connection needed
     }
 }
 
@@ -73,6 +81,14 @@ TEST_PARAMS = {
     "OperaPhenix": {
         "default": syn_data_params
         # Add test-specific overrides here if needed
+    },
+    "OMERO": {
+        "default": {
+            **syn_data_params,
+            "wells": ['A01', 'A02', 'B01', 'B02'],  # 4 wells to match test expectations
+            "grid_size": (2, 2),  # Smaller grid for faster upload
+            "tile_size": (128, 128)  # Smaller tiles for faster upload
+        }
     }
 }
 
@@ -84,6 +100,12 @@ DATA_TYPE_CONFIGS = {
     "2d": {"z_stack_levels": 1, "name": "flat_plate"},
     "3d": {"z_stack_levels": 3, "name": "zstack_plate"}  # Changed from 5 to 3 z-planes
 }
+
+# Execution mode configurations for parametrized testing
+EXECUTION_MODE_CONFIGS = ["threading", "multiprocessing"]
+
+# ZMQ execution mode configurations for parametrized testing
+ZMQ_EXECUTION_MODE_CONFIGS = ["direct", "zmq"]
 
 @pytest.fixture(scope="module")
 def microscope_config(request):
@@ -128,6 +150,34 @@ def execution_mode(request):
         os.environ.pop('OPENHCS_USE_THREADING', None)
 
 @pytest.fixture(scope="module")
+def zmq_execution_mode(request):
+    """
+    ZMQ execution mode fixture with environment variable management.
+    Parametrized by pytest_generate_tests hook.
+
+    This allows tests to run with both direct orchestrator and ZMQ execution modes.
+    - 'direct': Execute using orchestrator directly (in-process)
+    - 'zmq': Execute using ZMQExecutionClient (subprocess/remote)
+
+    Direct mode is useful for debugging and faster tests.
+    ZMQ mode tests the full execution stack including client/server communication.
+    """
+    # Store original value if it exists
+    original_value = os.environ.get('OPENHCS_USE_ZMQ_EXECUTION')
+
+    # Set the ZMQ execution mode based on parameter
+    use_zmq = request.param == "zmq"
+    os.environ['OPENHCS_USE_ZMQ_EXECUTION'] = 'true' if use_zmq else 'false'
+
+    yield request.param
+
+    # Restore original value after test
+    if original_value is not None:
+        os.environ['OPENHCS_USE_ZMQ_EXECUTION'] = original_value
+    else:
+        os.environ.pop('OPENHCS_USE_ZMQ_EXECUTION', None)
+
+@pytest.fixture(scope="module")
 def base_test_dir(microscope_config):
     """Create base test directory for the specific microscope type."""
     # Create the base directory using Path
@@ -137,7 +187,9 @@ def base_test_dir(microscope_config):
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
         # Ensure the directory exists
         if base_dir.exists():
-            shutil.rmtree(base_dir)
+            # Use ignore_errors=True to handle race conditions with multiprocessing workers
+            # that might still have file handles open during cleanup
+            shutil.rmtree(base_dir, ignore_errors=True)
 
         # Create the directory
         base_dir.mkdir(parents=True, exist_ok=True)
@@ -211,37 +263,99 @@ def create_synthetic_plate_data(test_function_dir, microscope_config, test_param
 
 @pytest.fixture
 def plate_dir(test_function_dir, microscope_config, test_params, data_type_config):
-    """Create synthetic plate data for the specified microscope type and data type as a VirtualPath."""
-    return create_synthetic_plate_data(
-        test_function_dir=test_function_dir,
-        microscope_config=microscope_config,
-        test_params=test_params,
-        plate_name=data_type_config["name"],
-        z_stack_levels=data_type_config["z_stack_levels"]
-    )
+    """
+    Create synthetic plate data for the specified microscope type and data type.
+
+    For disk-based microscopes: Returns Path to plate directory
+    For OMERO: Returns plate_id (int) after uploading to OMERO
+    """
+    # Handle OMERO specially
+    if microscope_config.get("is_virtual") and microscope_config.get("requires_connection"):
+        from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
+        import tempfile
+        from pathlib import Path
+
+        # Connect to OMERO
+        omero_manager = OMEROInstanceManager()
+        if not omero_manager.connect(timeout=60):
+            pytest.skip("OMERO server not available - skipping OMERO tests")
+
+        # Generate synthetic data using the SAME generator as disk-based tests
+        # This ensures identical test data across all backends
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # OMERO uses ImageXpress-compatible filenames, so generate ImageXpress format
+            generator_format = "ImageXpress" if microscope_config["format"] == "OMERO" else microscope_config["format"]
+
+            # Use the same SyntheticMicroscopyGenerator with same parameters
+            generator = SyntheticMicroscopyGenerator(
+                output_dir=tmpdir,
+                grid_size=test_params.get("grid_size", (3, 3)),
+                tile_size=test_params.get("tile_size", (128, 128)),
+                overlap_percent=test_params.get("overlap_percent", 10),
+                wavelengths=test_params.get("wavelengths", 2),
+                z_stack_levels=data_type_config["z_stack_levels"],
+                cell_size_range=test_params.get("cell_size_range", (5, 10)),
+                wells=test_params.get("wells", ['A01']),
+                format=generator_format,  # Use ImageXpress format for OMERO
+                auto_image_size=test_params.get(
+                    "auto_image_size",
+                    microscope_config["auto_image_size"]
+                )
+            )
+
+            # Don't suppress output so we can see what's happening
+            generator.generate_dataset()
+
+            # Upload to OMERO with grid dimensions
+            from tests.integration.helpers.omero_utils import upload_plate_to_omero
+            plate_id = upload_plate_to_omero(
+                omero_manager.conn,
+                tmpdir,
+                plate_name=f"Test_{data_type_config['name']}",
+                microscope_format=generator_format,  # Use ImageXpress format
+                grid_dimensions=test_params.get("grid_size", (3, 3))  # Pass grid dimensions
+            )
+
+        yield plate_id
+
+        # Don't cleanup - leave plates in OMERO for inspection
+        omero_manager.close()
+
+    # Standard disk-based microscopes
+    else:
+        plate_path = create_synthetic_plate_data(
+            test_function_dir=test_function_dir,
+            microscope_config=microscope_config,
+            test_params=test_params,
+            plate_name=data_type_config["name"],
+            z_stack_levels=data_type_config["z_stack_levels"]
+        )
+        yield plate_path
 
 # Keep legacy fixtures for backward compatibility
 @pytest.fixture
 def flat_plate_dir(test_function_dir, microscope_config, test_params):
     """Create synthetic flat plate data for the specified microscope type as a VirtualPath."""
-    return create_synthetic_plate_data(
+    plate_path = create_synthetic_plate_data(
         test_function_dir=test_function_dir,
         microscope_config=microscope_config,
         test_params=test_params,
         plate_name="flat_plate",
         z_stack_levels=1  # Flat plate has only 1 Z-level
     )
+    yield plate_path
 
 @pytest.fixture
 def zstack_plate_dir(test_function_dir, microscope_config, test_params):
     """Create synthetic Z-stack plate data for the specified microscope type as a VirtualPath."""
-    return create_synthetic_plate_data(
+    plate_path = create_synthetic_plate_data(
         test_function_dir=test_function_dir,
         microscope_config=microscope_config,
         test_params=test_params,
         plate_name="zstack_plate",
         z_stack_levels=5  # Z-stack plate has 5 Z-levels
     )
+    yield plate_path
 
 # Mock thread tracking utilities
 def track_thread_activity(func):

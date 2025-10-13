@@ -27,6 +27,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
    analysis_consolidation
    experimental_layouts
    real_time_visualization
+   log_viewer
 
 **Available Guides**:
 
@@ -36,6 +37,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
 - :doc:`cpu_only_mode` - CPU-only mode for CI testing and deployment
 - :doc:`analysis_consolidation` - Automatic analysis result consolidation
 - :doc:`experimental_layouts` - Excel-based experimental design and well-to-condition mapping
+- :doc:`log_viewer` - Advanced log viewing with async loading and server discovery
 
 **Environment Configuration**:
 

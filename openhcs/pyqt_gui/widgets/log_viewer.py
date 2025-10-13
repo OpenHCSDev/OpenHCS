@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QTextEdit, QToolBar, QLineEdit, QCheckBox, QPushButton, QDialog
 )
 from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument
-from PyQt6.QtCore import QObject, QTimer, QFileSystemWatcher, pyqtSignal, Qt, QRegularExpression, QThread
+from PyQt6.QtCore import QObject, QTimer, QFileSystemWatcher, pyqtSignal, pyqtSlot, Qt, QRegularExpression, QThread
 from PyQt6.QtGui import QTextCharFormat, QColor, QAction, QFont, QTextCursor
 
 from openhcs.io.filemanager import FileManager
@@ -25,6 +25,9 @@ from openhcs.pyqt_gui.utils.log_detection_utils import (
 )
 from openhcs.core.log_utils import (
     classify_log_file, is_openhcs_log_file, infer_base_log_path
+)
+from openhcs.pyqt_gui.utils.process_tracker import (
+    ProcessTracker, extract_pid_from_log_filename, get_log_display_name, get_log_tooltip
 )
 
 # Import Pygments for advanced syntax highlighting
@@ -159,6 +162,7 @@ class LogFileDetector(QObject):
     
     # Signals
     new_log_detected = pyqtSignal(object)  # LogFileInfo object
+    _server_scan_complete = pyqtSignal(list)  # List of LogFileInfo from server scan
 
     def __init__(self, base_log_path: Optional[str] = None):
         """
@@ -521,12 +525,12 @@ class LogHighlighter(QSyntaxHighlighter):
 
     def highlightBlock(self, text: str) -> None:
         """
-        Apply advanced highlighting to text block.
+        Apply highlighting to text block using regex patterns.
 
-        Uses both regex patterns for log-specific content and Pygments
-        for Python syntax highlighting of complex data structures.
+        Uses regex patterns for log-specific content (timestamps, log levels, etc.).
+        Fast and doesn't block the UI.
         """
-        # First apply log-specific patterns
+        # Apply log-specific patterns
         for pattern, format in self.highlighting_rules:
             iterator = pattern.globalMatch(text)
             while iterator.hasNext():
@@ -534,92 +538,6 @@ class LogHighlighter(QSyntaxHighlighter):
                 start = match.capturedStart()
                 length = match.capturedLength()
                 self.setFormat(start, length, format)
-
-        # Then apply Pygments highlighting for Python-like content
-        self._highlight_python_content(text)
-
-    def _highlight_python_content(self, text: str) -> None:
-        """
-        Apply Pygments Python syntax highlighting to parts of the text that contain
-        Python data structures (dictionaries, lists, function signatures, etc.).
-        """
-        try:
-            # Look for Python-like patterns in the log line
-            python_patterns = [
-                # Dictionary patterns: {'key': 'value', ...}
-                r'\{[^{}]*:[^{}]*\}',
-                # List patterns: [item1, item2, ...]
-                r'\[[^\[\]]*,.*?\]',
-                # Function signatures: function_name(arg1=value, arg2=value)
-                r'\b[a-zA-Z_][a-zA-Z0-9_]*\([^)]*=.*?\)',
-                # Complex nested structures
-                r'\{.*?:\s*\[.*?\].*?\}',
-
-                # Enhanced patterns for Phase 1
-
-                # Tuple patterns: (item1, item2, item3)
-                r'\([^()]*,.*?\)',
-                # Set patterns: {item1, item2, item3} (no colons, distinguishes from dict)
-                r'\{[^{}:]*,.*?\}',
-                # List comprehensions: [x for x in items]
-                r'\[[^\[\]]*\s+for\s+[^\[\]]*\s+in\s+[^\[\]]*\]',
-                # Generator expressions: (x for x in items)
-                r'\([^()]*\s+for\s+[^()]*\s+in\s+[^()]*\)',
-                # Class representations: <class 'module.ClassName'>
-                r"<class '[^']*'>",
-                # Function representations: <function name at 0xaddress>
-                r"<function [^>]+ at 0x[0-9a-fA-F]+>",
-                # Complex function calls with keyword arguments
-                r'\b[a-zA-Z_][a-zA-Z0-9_]*\([^)]*[a-zA-Z_][a-zA-Z0-9_]*\s*=.*?\)',
-                # Multi-line dictionary/list structures (single line representation)
-                r'\{[^{}]*:\s*[^{}]*,\s*[^{}]*:\s*[^{}]*\}',
-                # Nested collections: [{...}, {...}] or [(...), (...)]
-                r'\[[\{\(][^[\]]*[\}\)],\s*[\{\(][^[\]]*[\}\)]\]',
-            ]
-
-            for pattern in python_patterns:
-                regex = QRegularExpression(pattern)
-                iterator = regex.globalMatch(text)
-
-                while iterator.hasNext():
-                    match = iterator.next()
-                    start = match.capturedStart()
-                    length = match.capturedLength()
-                    python_text = match.captured(0)
-
-                    # Use Pygments to highlight this Python-like content
-                    self._apply_pygments_highlighting(python_text, start)
-
-        except Exception as e:
-            # Don't let highlighting errors break the log viewer
-            logger.debug(f"Error in Python content highlighting: {e}")
-
-    def _apply_pygments_highlighting(self, python_text: str, start_offset: int) -> None:
-        """
-        Apply Pygments highlighting to a specific piece of Python-like text.
-        """
-        try:
-            from pygments.lexers import PythonLexer
-
-            lexer = PythonLexer()
-            tokens = list(lexer.get_tokens(python_text))
-
-            current_pos = 0
-            for token_type, token_value in tokens:
-                if token_value.strip():  # Skip whitespace-only tokens
-                    token_start = start_offset + current_pos
-                    token_length = len(token_value)
-
-                    # Apply format if we have a mapping for this token type
-                    if token_type in self.token_formats:
-                        format = self.token_formats[token_type]
-                        self.setFormat(token_start, token_length, format)
-
-                current_pos += len(token_value)
-
-        except Exception as e:
-            # Don't let Pygments errors break the highlighting
-            logger.debug(f"Error in Pygments highlighting: {e}")
 
 
 class LogFileLoader(QThread):
@@ -645,8 +563,9 @@ class LogFileLoader(QThread):
 
 class LogViewerWindow(QMainWindow):
     """Main log viewer window with dropdown, search, and real-time tailing."""
-    
+
     window_closed = pyqtSignal()
+    _server_scan_complete = pyqtSignal(list)  # Internal signal for async server scan
 
     def __init__(self, file_manager: FileManager, service_adapter, parent=None):
         super().__init__(parent)
@@ -671,10 +590,18 @@ class LogViewerWindow(QMainWindow):
         self.tail_timer: QTimer = None
         self.highlighter: LogHighlighter = None
         self.file_loader: Optional[LogFileLoader] = None  # Async file loader
+        self.server_scan_timer: QTimer = None  # Periodic ZMQ server scanning
+        self._pending_log_to_load: Optional[Path] = None  # Log to load when window is shown
+
+        # Process tracking for alive/dead process indication
+        self.process_tracker = ProcessTracker()
+        self.process_update_timer: QTimer = None
+        self.show_alive_only: bool = False  # Filter to show only logs from running processes
 
         self.setup_ui()
         self.setup_connections()
         self.initialize_logs()
+        self.start_process_tracking()
 
     def setup_ui(self) -> None:
         """Setup complete UI layout with exact widget hierarchy."""
@@ -737,10 +664,15 @@ class LogViewerWindow(QMainWindow):
         self.clear_btn = QPushButton("Clear")
         self.bottom_btn = QPushButton("Bottom")
 
+        # Process filter checkbox
+        self.show_alive_only_cb = QCheckBox("Show only running processes")
+        self.show_alive_only_cb.setToolTip("Filter logs to show only those from currently running processes")
+
         control_layout.addWidget(self.auto_scroll_btn)
         control_layout.addWidget(self.pause_btn)
         control_layout.addWidget(self.clear_btn)
         control_layout.addWidget(self.bottom_btn)
+        control_layout.addWidget(self.show_alive_only_cb)
         control_layout.addStretch()  # Push buttons to left
 
         main_layout.addLayout(control_layout)
@@ -772,12 +704,26 @@ class LogViewerWindow(QMainWindow):
         self.pause_btn.toggled.connect(self.toggle_pause_tailing)
         self.clear_btn.clicked.connect(self.clear_log_display)
         self.bottom_btn.clicked.connect(self.scroll_to_bottom)
+        self.show_alive_only_cb.stateChanged.connect(self.on_filter_changed)
+
+        # Internal signals
+        self._server_scan_complete.connect(self._on_server_scan_complete)
 
         logger.debug("LogViewerWindow connections setup complete")
 
+    def showEvent(self, event):
+        """Override showEvent to load log when window is first shown."""
+        super().showEvent(event)
+
+        # Load pending log on first show
+        if self._pending_log_to_load:
+            self.switch_to_log(self._pending_log_to_load)
+            self._pending_log_to_load = None
+
     def initialize_logs(self) -> None:
-        """Initialize with main process log only and start monitoring."""
+        """Initialize with main process log only and start monitoring (async)."""
         # Only discover the current main process log, not old logs
+        initial_logs = []
         try:
             from openhcs.core.log_utils import get_current_log_file_path, classify_log_file
             from pathlib import Path
@@ -786,19 +732,127 @@ class LogViewerWindow(QMainWindow):
             main_log = Path(main_log_path)
             if main_log.exists():
                 log_info = classify_log_file(main_log, None, True)
-                self.populate_log_dropdown([log_info])
-                self.switch_to_log(main_log)
+                initial_logs.append(log_info)
         except Exception:
             # Main log not available, continue without it
             pass
 
+        # Populate dropdown with main log immediately (fast)
+        if initial_logs:
+            self.populate_log_dropdown(initial_logs)
+            # Store first log to load when window is shown (defer loading)
+            self._pending_log_to_load = initial_logs[0].path
+
         # Start monitoring for new logs
         self.start_monitoring()
+
+        # Scan for servers in background (async - doesn't block)
+        self._scan_servers_async()
+
+    def _scan_servers_async(self) -> None:
+        """Scan for ZMQ servers in background thread (non-blocking)."""
+        import threading
+
+        def scan_and_update():
+            """Background thread function."""
+            server_logs = self._scan_for_server_logs()
+            # Emit signal to update UI on main thread
+            self._server_scan_complete.emit(server_logs)
+
+        thread = threading.Thread(target=scan_and_update, daemon=True)
+        thread.start()
+        logger.debug("Started async server scan in background")
+
+    @pyqtSlot(list)
+    def _on_server_scan_complete(self, server_logs: List[LogFileInfo]) -> None:
+        """Handle server scan completion on UI thread."""
+        if not server_logs:
+            logger.debug("No server logs found during scan")
+            return
+
+        # Get current logs from dropdown
+        current_logs = []
+        for i in range(self.log_selector.count()):
+            log_info = self.log_selector.itemData(i)
+            if log_info:
+                current_logs.append(log_info)
+
+        # Add server logs
+        current_logs.extend(server_logs)
+
+        # Repopulate dropdown with all logs
+        self.populate_log_dropdown(current_logs)
+
+        logger.info(f"Added {len(server_logs)} server logs to dropdown")
+
+    def _scan_for_server_logs(self) -> List[LogFileInfo]:
+        """
+        Scan for running ZMQ servers and Napari viewers by pinging common ports.
+        Returns list of LogFileInfo for discovered server log files.
+        """
+        from openhcs.core.log_utils import classify_log_file
+        from pathlib import Path
+        import zmq
+        import pickle
+
+        logger.debug("Scanning for running ZMQ/Napari servers...")
+        discovered_logs = []
+
+        # Common ports to scan
+        zmq_execution_ports = [7777]  # Default ZMQ execution server port
+        napari_ports = [5555 + i for i in range(5)]  # Scan Napari ports 5555-5559
+
+        def ping_server(port: int) -> dict:
+            """Ping a server and return pong response, or None if no response."""
+            control_port = port + 1000
+            try:
+                context = zmq.Context()
+                socket = context.socket(zmq.REQ)
+                socket.setsockopt(zmq.LINGER, 0)
+                socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout (servers may be busy)
+                socket.connect(f"tcp://localhost:{control_port}")
+
+                # Send ping
+                socket.send(pickle.dumps({'type': 'ping'}))
+
+                # Wait for pong
+                response = socket.recv()
+                pong = pickle.loads(response)
+
+                socket.close()
+                context.term()
+                logger.debug(f"Port {port} responded: {pong}")
+                return pong
+            except Exception as e:
+                logger.debug(f"Port {port} no response: {e}")
+                return None
+
+        # Scan ZMQ execution servers
+        for port in zmq_execution_ports:
+            pong = ping_server(port)
+            if pong and pong.get('log_file_path'):
+                log_path = Path(pong['log_file_path'])
+                if log_path.exists():
+                    log_info = classify_log_file(log_path, None, False)
+                    discovered_logs.append(log_info)
+                    logger.debug(f"Discovered ZMQ server log: {log_path}")
+
+        # Scan Napari viewers
+        for port in napari_ports:
+            pong = ping_server(port)
+            if pong and pong.get('viewer') == 'napari' and pong.get('log_file_path'):
+                log_path = Path(pong['log_file_path'])
+                if log_path.exists():
+                    log_info = classify_log_file(log_path, None, False)
+                    discovered_logs.append(log_info)
+                    logger.debug(f"Discovered Napari viewer log: {log_path}")
+
+        return discovered_logs
 
     # Dropdown Management Methods
     def populate_log_dropdown(self, log_files: List[LogFileInfo]) -> None:
         """
-        Populate QComboBox with log files. Store LogFileInfo as item data.
+        Populate QComboBox with log files with process status indicators.
 
         Args:
             log_files: List of LogFileInfo objects to add to dropdown
@@ -808,10 +862,23 @@ class LogViewerWindow(QMainWindow):
         # Sort logs: TUI first, main subprocess, then workers by timestamp
         sorted_logs = sorted(log_files, key=self._log_sort_key)
 
-        for log_info in sorted_logs:
-            self.log_selector.addItem(log_info.display_name, log_info)
+        # Filter if "show alive only" is enabled
+        if self.show_alive_only:
+            sorted_logs = [
+                log_info for log_info in sorted_logs
+                if self._is_log_from_alive_process(log_info)
+            ]
 
-        logger.debug(f"Populated dropdown with {len(log_files)} log files")
+        for log_info in sorted_logs:
+            # Add process status indicator to display name
+            display_name = get_log_display_name(log_info.path, self.process_tracker)
+            tooltip = get_log_tooltip(log_info.path, self.process_tracker)
+
+            self.log_selector.addItem(display_name, log_info)
+            # Set tooltip for the item
+            self.log_selector.setItemData(self.log_selector.count() - 1, tooltip, Qt.ItemDataRole.ToolTipRole)
+
+        logger.debug(f"Populated dropdown with {len(sorted_logs)} log files (filtered: {self.show_alive_only})")
 
     def _log_sort_key(self, log_info: LogFileInfo) -> tuple:
         """
@@ -917,26 +984,17 @@ class LogViewerWindow(QMainWindow):
             # Store path for later use
             self.current_log_path = log_path
 
-            # Check file size to decide loading strategy
+            # ALWAYS use async loading to prevent UI blocking
+            # QSyntaxHighlighter is already lazy - it only highlights visible blocks
             file_size = log_path.stat().st_size
+            logger.debug(f"Loading log file ({file_size} bytes) asynchronously")
+            self.log_display.setText(f"Loading log file ({file_size // 1024} KB)...")
 
-            if file_size > 100000:  # 100KB threshold - use async loading
-                logger.debug(f"Large log file ({file_size} bytes), loading asynchronously")
-                self.log_display.setText(f"Loading large log file ({file_size // 1024} KB)...")
-
-                # Temporarily disable highlighter to prevent blocking during setText
-                self.highlighter.setDocument(None)
-
-                # Create and start async loader
-                self.file_loader = LogFileLoader(log_path)
-                self.file_loader.content_loaded.connect(self._on_file_loaded)
-                self.file_loader.load_failed.connect(self._on_file_load_failed)
-                self.file_loader.start()
-            else:
-                # Small file - load synchronously
-                with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
-                    content = f.read()
-                self._on_file_loaded(content)
+            # Create and start async loader
+            self.file_loader = LogFileLoader(log_path)
+            self.file_loader.content_loaded.connect(self._on_file_loaded)
+            self.file_loader.load_failed.connect(self._on_file_load_failed)
+            self.file_loader.start()
 
         except Exception as e:
             logger.error(f"Error switching to log {log_path}: {e}")
@@ -945,11 +1003,8 @@ class LogViewerWindow(QMainWindow):
     def _on_file_loaded(self, content: str) -> None:
         """Handle file content loaded (either sync or async)."""
         try:
-            # Set content
+            # Set content - QSyntaxHighlighter only processes visible blocks automatically
             self.log_display.setText(content)
-
-            # Re-enable highlighter
-            self.highlighter.setDocument(self.log_display.document())
 
             # Update file position
             self.current_file_position = len(content.encode('utf-8'))
@@ -1219,6 +1274,95 @@ class LogViewerWindow(QMainWindow):
             self.file_detector = None
         logger.info("Stopped monitoring for new logs")
 
+    def start_process_tracking(self) -> None:
+        """Start periodic process status updates."""
+        # Initial update
+        self.process_tracker.update()
+
+        # Setup timer for periodic updates (every 2 seconds)
+        self.process_update_timer = QTimer()
+        self.process_update_timer.timeout.connect(self.update_process_status)
+        self.process_update_timer.start(2000)  # 2 second interval
+
+        logger.debug("Started process tracking")
+
+    def update_process_status(self) -> None:
+        """Update process status and refresh dropdown if needed."""
+        # Update process tracker
+        self.process_tracker.update()
+
+        # Refresh dropdown to update status indicators
+        # Only if we have logs loaded
+        if self.log_selector.count() > 0:
+            # Get current logs from dropdown
+            current_logs = []
+            for i in range(self.log_selector.count()):
+                log_info = self.log_selector.itemData(i)
+                if log_info:
+                    current_logs.append(log_info)
+
+            # Remember current selection
+            current_index = self.log_selector.currentIndex()
+            current_log_info = self.log_selector.itemData(current_index) if current_index >= 0 else None
+
+            # Temporarily disconnect signal to avoid triggering reload
+            self.log_selector.currentIndexChanged.disconnect(self.on_log_selection_changed)
+
+            try:
+                # Repopulate with updated status indicators
+                self.populate_log_dropdown(current_logs)
+
+                # Restore selection if possible
+                if current_log_info:
+                    # Find the same log in the new dropdown
+                    for i in range(self.log_selector.count()):
+                        log_info = self.log_selector.itemData(i)
+                        if log_info and log_info.path == current_log_info.path:
+                            self.log_selector.setCurrentIndex(i)
+                            break
+            finally:
+                # Reconnect signal
+                self.log_selector.currentIndexChanged.connect(self.on_log_selection_changed)
+
+    def _is_log_from_alive_process(self, log_info: LogFileInfo) -> bool:
+        """
+        Check if a log file is from a currently running process.
+
+        Args:
+            log_info: LogFileInfo to check
+
+        Returns:
+            bool: True if process is alive or unknown, False if terminated
+        """
+        pid = extract_pid_from_log_filename(log_info.path)
+        if pid is None:
+            # No PID found - assume it's a main log (always show)
+            return True
+        return self.process_tracker.is_alive(pid)
+
+    def on_filter_changed(self, state: int) -> None:
+        """
+        Handle filter checkbox state change.
+
+        Args:
+            state: Qt.CheckState value
+        """
+        self.show_alive_only = (state == Qt.CheckState.Checked.value)
+
+        # Refresh dropdown with filter applied
+        # Get all logs from current dropdown
+        all_logs = []
+        for i in range(self.log_selector.count()):
+            log_info = self.log_selector.itemData(i)
+            if log_info:
+                all_logs.append(log_info)
+
+        # If we have logs, repopulate
+        if all_logs:
+            self.populate_log_dropdown(all_logs)
+
+        logger.debug(f"Filter changed: show_alive_only={self.show_alive_only}")
+
     def cleanup(self) -> None:
         """Cleanup all resources and background processes."""
         try:
@@ -1227,6 +1371,12 @@ class LogViewerWindow(QMainWindow):
                 self.tail_timer.stop()
                 self.tail_timer.deleteLater()
                 self.tail_timer = None
+
+            # Stop process tracking timer
+            if hasattr(self, 'process_update_timer') and self.process_update_timer and self.process_update_timer.isActive():
+                self.process_update_timer.stop()
+                self.process_update_timer.deleteLater()
+                self.process_update_timer = None
 
             # Stop file monitoring
             self.stop_monitoring()
@@ -1245,5 +1395,7 @@ class LogViewerWindow(QMainWindow):
             self.file_detector.stop_watching()
         if self.tail_timer:
             self.tail_timer.stop()
+        if hasattr(self, 'process_update_timer') and self.process_update_timer:
+            self.process_update_timer.stop()
         self.window_closed.emit()
         super().closeEvent(event)

@@ -817,8 +817,14 @@ class ImageBrowserWidget(QWidget):
         plate_path = Path(self.orchestrator.plate_path)
         image_path = plate_path / filename
 
-        # Load image using FileManager
-        image_data = self.filemanager.load(str(image_path), Backend.DISK.value)
+        # Load image using FileManager with VFS config's read_backend
+        # Use AUTO backend to respect VFS config (will auto-detect zarr vs disk)
+        from openhcs.config_framework.lazy_factory import get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+        global_config = get_current_global_config(GlobalPipelineConfig)
+        read_backend = global_config.vfs_config.read_backend.value
+
+        image_data = self.filemanager.load(str(image_path), read_backend)
 
         # Resolve Napari config using compiler pattern:
         # 1. Get current widget values

@@ -46,6 +46,7 @@ def materialize_axon_analysis(
     axon_analysis_data: Dict[str, Any],
     path: str,
     filemanager,
+    backend: str,
     **kwargs
 ) -> str:
     """
@@ -60,12 +61,13 @@ def materialize_axon_analysis(
         axon_analysis_data: The axon analysis results dictionary
         path: Base path for output files (from special output path)
         filemanager: FileManager instance for consistent I/O
+        backend: Backend to use for materialization
         **kwargs: Additional materialization options
 
     Returns:
         str: Path to the primary output file (JSON summary)
     """
-    logger.info(f"🔬 SKAN_MATERIALIZE: Called with path={path}, data_keys={list(axon_analysis_data.keys()) if axon_analysis_data else 'None'}")
+    logger.info(f"🔬 SKAN_MATERIALIZE: Called with path={path}, backend={backend}, data_keys={list(axon_analysis_data.keys()) if axon_analysis_data else 'None'}")
     import json
     from pathlib import Path
     from openhcs.constants.constants import Backend
@@ -78,7 +80,8 @@ def materialize_axon_analysis(
 
     # Ensure output directory exists for disk backend
     output_dir = Path(json_path).parent
-    filemanager.ensure_directory(str(output_dir), Backend.DISK.value)
+    if backend == Backend.DISK.value:
+        filemanager.ensure_directory(str(output_dir), backend)
 
     # 1. Save summary and metadata as JSON (primary output)
     summary_data = {
@@ -88,20 +91,21 @@ def materialize_axon_analysis(
     }
     json_content = json.dumps(summary_data, indent=2, default=str)
     # Remove existing file if it exists using filemanager
-    if filemanager.exists(json_path, Backend.DISK.value):
-        filemanager.delete(json_path, Backend.DISK.value)
-    filemanager.save(json_content, json_path, Backend.DISK.value)
+    if filemanager.exists(json_path, backend):
+        filemanager.delete(json_path, backend)
+    filemanager.save(json_content, json_path, backend)
 
     # 2. Save detailed branch data as CSV
     branch_df = pd.DataFrame(axon_analysis_data['branch_data'])
     csv_content = branch_df.to_csv(index=False)
     # Remove existing file if it exists using filemanager
-    if filemanager.exists(csv_path, Backend.DISK.value):
-        filemanager.delete(csv_path, Backend.DISK.value)
-    filemanager.save(csv_content, csv_path, Backend.DISK.value)
+    if filemanager.exists(csv_path, backend):
+        filemanager.delete(csv_path, backend)
+    filemanager.save(csv_content, csv_path, backend)
 
     # 3. Optional: Create Excel file with multiple sheets (using direct file I/O for Excel)
-    if kwargs.get('create_excel', True):
+    # Note: Excel files require actual file paths, not compatible with OMERO backend
+    if kwargs.get('create_excel', True) and backend == Backend.DISK.value:
         excel_path = f"{base_path}_complete.xlsx"
         # Remove existing file if it exists
         if Path(excel_path).exists():
@@ -128,15 +132,14 @@ def materialize_axon_analysis(
     return json_path
 
 
-def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filemanager) -> str:
+def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filemanager, backend: str) -> str:
     """Materialize skeleton visualizations as individual TIFF files."""
 
     if not data:
         # Create empty summary file to indicate no visualizations were generated
         summary_path = path.replace('.pkl', '_skeleton_summary.txt')
         summary_content = "No skeleton visualizations generated (return_skeleton_visualizations=False)\n"
-        from openhcs.constants.constants import Backend
-        filemanager.save(summary_content, summary_path, Backend.DISK.value)
+        filemanager.save(summary_content, summary_path, backend)
         return summary_path
 
     # Generate output file paths based on the input path

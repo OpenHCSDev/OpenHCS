@@ -79,6 +79,7 @@ class MaterializationBackend(Enum):
     AUTO = "auto"
     ZARR = "zarr"
     DISK = "disk"
+    OMERO_LOCAL = "omero_local"
 
 
 class WellFilterMode(Enum):
@@ -218,14 +219,8 @@ class NapariVariableSizeHandling(Enum):
 
 def _create_napari_display_config():
     """Dynamically create NapariDisplayConfig with component-specific fields."""
-    # Define components locally to avoid circular import
-    from enum import Enum
-
-    class VariableComponents(Enum):
-        SITE = "site"
-        CHANNEL = "channel"
-        Z_INDEX = "z_index"
-        WELL = "well"
+    # Import the actual VariableComponents from constants
+    from openhcs.constants import VariableComponents
 
     variable_components = list(VariableComponents)
 
@@ -577,6 +572,9 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
     napari_port: int = 5555
     """Port for napari streaming communication."""
 
+    napari_host: str = 'localhost'
+    """Host for napari streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
+
     @property
     def backend(self) -> Backend:
         return Backend.NAPARI_STREAM
@@ -588,6 +586,7 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
     def get_streaming_kwargs(self, context) -> dict:
         kwargs = {
             "napari_port": self.napari_port,
+            "napari_host": self.napari_host,
             "display_config": self  # self is now the display config
         }
 
@@ -712,9 +711,13 @@ logger.debug("Configuration framework initialized with OpenHCS types")
 
 # PERFORMANCE OPTIMIZATION: Pre-warm analysis caches at import time
 # This eliminates the 1000ms+ first-load penalty when opening config windows
-from openhcs.config_framework import prewarm_config_analysis_cache
-
-# Warm config hierarchy cache (for config windows)
-prewarm_config_analysis_cache(GlobalPipelineConfig)
+try:
+    from openhcs.config_framework import prewarm_config_analysis_cache
+    # Warm config hierarchy cache (for config windows)
+    prewarm_config_analysis_cache(GlobalPipelineConfig)
+except ImportError:
+    # Circular import during subprocess initialization - cache warming not needed
+    # for non-UI execution contexts (ZMQ server, workers, etc.)
+    logger.debug("Skipping config cache warming (circular import during subprocess init)")
 
 # NOTE: Step editor cache warming is done in openhcs.core.steps.__init__ to avoid circular imports

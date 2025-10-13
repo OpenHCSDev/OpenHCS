@@ -26,6 +26,7 @@ from typing import Any, Dict, Optional
 from openhcs.io.filemanager import FileManager
 from openhcs.utils.import_utils import optional_import
 from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
+from openhcs.runtime.zmq_base import ZMQServer
 
 # Optional napari import - this module should only be imported if napari is available
 napari = optional_import("napari")
@@ -401,7 +402,135 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
         raise  # Fail loud - no fallback
 
 
-def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = False):
+class NapariViewerServer(ZMQServer):
+    """
+    ZMQ server for Napari viewer that receives images from clients.
+
+    Inherits from ZMQServer ABC to get ping/pong, port management, etc.
+    Uses SUB socket to receive images from pipeline clients.
+    """
+
+    def __init__(self, port: int, viewer_title: str, replace_layers: bool = False, log_file_path: str = None):
+        """
+        Initialize Napari viewer server.
+
+        Args:
+            port: Data port for receiving images (control port will be port + 1000)
+            viewer_title: Title for the napari viewer window
+            replace_layers: If True, replace existing layers; if False, add new layers
+            log_file_path: Path to log file (for client discovery)
+        """
+        import zmq
+
+        # Initialize with SUB socket for receiving images
+        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.SUB)
+
+        self.viewer_title = viewer_title
+        self.replace_layers = replace_layers
+        self.viewer = None
+        self.layers = {}
+        self.component_groups = {}
+
+    def _create_pong_response(self) -> Dict[str, Any]:
+        """Override to add Napari-specific fields."""
+        response = super()._create_pong_response()
+        response['viewer'] = 'napari'
+        response['openhcs'] = True
+        response['server'] = 'NapariViewer'
+        return response
+
+    def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle control messages beyond ping/pong.
+
+        Supported message types:
+        - shutdown: Graceful shutdown (closes viewer)
+        - force_shutdown: Force shutdown (same as shutdown for Napari)
+        """
+        msg_type = message.get('type')
+
+        if msg_type == 'shutdown' or msg_type == 'force_shutdown':
+            logger.info(f"🔬 NAPARI SERVER: {msg_type} requested, closing viewer")
+            self.request_shutdown()
+            return {
+                'type': 'shutdown_ack',
+                'status': 'success',
+                'message': 'Napari viewer shutting down'
+            }
+
+        # Unknown message type
+        return {'status': 'ok'}
+
+    def handle_data_message(self, message: Dict[str, Any]):
+        """Handle incoming image data - called by process_messages()."""
+        # This will be called from the Qt timer
+        pass
+
+    def process_image_message(self, message: bytes):
+        """
+        Process incoming image data message.
+
+        Args:
+            message: Raw ZMQ message containing image data
+        """
+        import json
+        import numpy as np
+
+        # Parse JSON message
+        data = json.loads(message.decode('utf-8'))
+
+        # Check if this is a batch message
+        if data.get('type') == 'batch':
+            # Handle batch of images
+            images = data.get('images', [])
+            display_config_dict = data.get('display_config')
+
+            for image_info in images:
+                self._process_single_image(image_info, display_config_dict)
+        else:
+            # Handle single image
+            self._process_single_image(data, data.get('display_config'))
+
+    def _process_single_image(self, image_info: Dict[str, Any], display_config_dict: Dict[str, Any]):
+        """Process a single image and display in Napari."""
+        import numpy as np
+
+        path = image_info.get('path', 'unknown')
+        shape = image_info.get('shape')
+        dtype = image_info.get('dtype')
+        shm_name = image_info.get('shm_name')
+        direct_data = image_info.get('data')
+        component_metadata = image_info.get('component_metadata', {})
+
+        # Add step information to component metadata
+        component_metadata['step_index'] = image_info.get('step_index', 0)
+        component_metadata['step_name'] = image_info.get('step_name', 'unknown_step')
+
+        # Load image data
+        if shm_name:
+            from multiprocessing import shared_memory
+            shm = shared_memory.SharedMemory(name=shm_name)
+            image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+            shm.close()
+        elif direct_data:
+            image_data = np.array(direct_data, dtype=dtype).reshape(shape)
+        else:
+            logger.warning(f"🔬 NAPARI PROCESS: No image data in message")
+            return
+
+        # Extract colormap
+        colormap = 'viridis'
+        if display_config_dict and 'colormap' in display_config_dict:
+            colormap = display_config_dict['colormap']
+
+        # Component-aware layer management
+        _handle_component_aware_display(
+            self.viewer, self.layers, self.component_groups, image_data, path,
+            colormap, display_config_dict or {}, self.replace_layers, component_metadata
+        )
+
+
+def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = False, log_file_path: str = None):
     """
     Napari viewer process entry point. Runs in a separate process.
     Listens for ZeroMQ messages with image data to display.
@@ -410,6 +539,7 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
         port: ZMQ port to listen on
         viewer_title: Title for the napari viewer window
         replace_layers: If True, replace existing layers; if False, add new layers with unique names
+        log_file_path: Path to log file (for client discovery via ping/pong)
     """
     try:
         import zmq
@@ -417,46 +547,27 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
         import numpy as np
         import pickle
 
-        # Set up ZeroMQ communication
-        context = zmq.Context()
+        # Create ZMQ server instance (inherits from ZMQServer ABC)
+        server = NapariViewerServer(port, viewer_title, replace_layers, log_file_path)
 
-        # Data channel: SUB socket for receiving images
-        data_socket = context.socket(zmq.SUB)
-        # CRITICAL: Set LINGER to 0 so socket closes immediately and frees port
-        data_socket.setsockopt(zmq.LINGER, 0)
-        data_socket.bind(f"tcp://*:{port}")
-        data_socket.setsockopt(zmq.SUBSCRIBE, b"")  # Subscribe to all messages
-
-        # Control channel: REP socket for handshake
-        control_port = port + 1000  # Use port+1000 for control
-        control_socket = context.socket(zmq.REP)
-        # CRITICAL: Set LINGER to 0 so socket closes immediately and frees port
-        control_socket.setsockopt(zmq.LINGER, 0)
-        control_socket.bind(f"tcp://*:{control_port}")
+        # Start the server (binds sockets)
+        server.start()
 
         # Create napari viewer in this process (main thread)
         viewer = napari.Viewer(title=viewer_title, show=True)
+        server.viewer = viewer
 
         # Initialize layers dictionary with existing layers (for reconnection scenarios)
-        layers = {}
         for layer in viewer.layers:
-            layers[layer.name] = layer
+            server.layers[layer.name] = layer
 
-        napari_ready = False  # Track readiness state
-
-        # Component grouping for stacking (following OpenHCS pattern)
-        component_groups = {}  # {component_type: {group_key: [images]}}
-        display_config = None  # Store display config for component mode decisions
-
-        logger.info(f"🔬 NAPARI PROCESS: Viewer started on data port {port}, control port {control_port}")
+        logger.info(f"🔬 NAPARI PROCESS: Viewer started on data port {port}, control port {server.control_port}")
 
         # Add cleanup handler for when viewer is closed
         def cleanup_and_exit():
             logger.info("🔬 NAPARI PROCESS: Viewer closed, cleaning up and exiting...")
             try:
-                data_socket.close()
-                control_socket.close()
-                context.term()
+                server.stop()
             except:
                 pass
             sys.exit(0)
@@ -488,123 +599,19 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
         timer = QtCore.QTimer()
 
         def process_messages():
-            nonlocal napari_ready
-            # Handle control messages (handshake) first
-            try:
-                control_message = control_socket.recv(zmq.NOBLOCK)
-                control_data = pickle.loads(control_message)
+            # Process control messages (ping/pong handled by ABC)
+            server.process_messages()
 
-                if control_data.get('type') == 'ping':
-                    # Client is checking if we're ready
-                    if not napari_ready:
-                        # Mark as ready after first ping (GUI should be loaded by now)
-                        napari_ready = True
-                        logger.info(f"🔬 NAPARI PROCESS: Marked as ready after ping")
-
-                    response = {'type': 'pong', 'ready': napari_ready, 'viewer': 'napari', 'openhcs': True}
-                    control_socket.send(pickle.dumps(response))
-                    logger.debug(f"🔬 NAPARI PROCESS: Responded to ping with ready={napari_ready}")
-
-            except zmq.Again:
-                pass  # No control messages
-
-            # Debug: Print current layer count (only when layers change)
-            # Removed continuous debug printing to avoid terminal spam
-
-            # Process data messages only if ready
-            if napari_ready:
+            # Process data messages (images) if ready
+            if server._ready:
                 # Process multiple messages per timer tick for better throughput
                 for _ in range(10):  # Process up to 10 messages per tick
                     try:
-                        message = data_socket.recv(zmq.NOBLOCK)
-
-                        # Try to parse as JSON first (from NapariStreamingBackend)
-                        import json
-                        data = json.loads(message.decode('utf-8'))
-
-                        # Check if this is a batch message
-                        if data.get('type') == 'batch':
-                            # Handle batch of images
-                            images = data.get('images', [])
-                            display_config_dict = data.get('display_config')
-
-                            # Use display_config_dict directly - no need to store globally
-
-                                # Process all images in the batch together
-                            for image_info in images:
-                                path = image_info.get('path', 'unknown')
-                                shape = image_info.get('shape')
-                                dtype = image_info.get('dtype')
-                                shm_name = image_info.get('shm_name')
-                                component_metadata = image_info.get('component_metadata', {})
-
-                                # Add step information to component metadata
-                                component_metadata['step_index'] = image_info.get('step_index', 0)
-                                component_metadata['step_name'] = image_info.get('step_name', 'unknown_step')
-
-                                # Load from shared memory
-                                from multiprocessing import shared_memory
-                                shm = shared_memory.SharedMemory(name=shm_name)
-                                image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
-                                shm.close()  # Close our reference
-
-                                # Extract colormap from display config
-                                colormap = 'viridis'  # Default
-                                if display_config_dict and 'colormap' in display_config_dict:
-                                    colormap = display_config_dict['colormap']
-
-                                # Component-aware layer management (following OpenHCS pattern)
-                                _handle_component_aware_display(
-                                    viewer, layers, component_groups, image_data, path,
-                                    colormap, display_config_dict or {}, replace_layers, component_metadata
-                                )
-                        else:
-                            # Handle single image format
-                            path = data.get('path', 'unknown')
-                            shape = data.get('shape')
-                            dtype = data.get('dtype')
-                            shm_name = data.get('shm_name')
-                            direct_data = data.get('data')
-                            display_config_dict = data.get('display_config')
-                            component_metadata = data.get('component_metadata', {})
-
-                            # Add step information to component metadata
-                            component_metadata['step_index'] = data.get('step_index', 0)
-                            component_metadata['step_name'] = data.get('step_name', 'unknown_step')
-
-                            # Use display_config_dict directly - no need to store globally
-
-                            if shm_name:
-                                # Load from shared memory
-                                from multiprocessing import shared_memory
-                                shm = shared_memory.SharedMemory(name=shm_name)
-                                image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
-                                shm.close()  # Close our reference
-                            elif direct_data:
-                                # Load from direct data (fallback)
-                                image_data = np.array(direct_data, dtype=dtype).reshape(shape)
-                            else:
-                                logger.warning(f"🔬 NAPARI PROCESS: No image data in message")
-                                continue
-
-                            # Extract colormap from display config
-                            colormap = 'viridis'  # Default
-                            if display_config_dict and 'colormap' in display_config_dict:
-                                colormap = display_config_dict['colormap']
-
-                            # Component-aware layer management (following OpenHCS pattern)
-                            _handle_component_aware_display(
-                                viewer, layers, component_groups, image_data, path,
-                                colormap, display_config_dict or {}, replace_layers, component_metadata
-                            )
-
-
-
+                        message = server.data_socket.recv(zmq.NOBLOCK)
+                        server.process_image_message(message)
                     except zmq.Again:
                         # No more messages available
                         break
-
-
 
         # Connect timer to message processing
         timer.timeout.connect(process_messages)
@@ -619,10 +626,8 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
         logger.error(f"🔬 NAPARI PROCESS: Fatal error: {e}")
     finally:
         logger.info("🔬 NAPARI PROCESS: Shutting down")
-        if 'socket' in locals():
-            socket.close()
-        if 'context' in locals():
-            context.term()
+        if 'server' in locals():
+            server.stop()
 
 
 def _spawn_detached_napari_process(port: int, viewer_title: str, replace_layers: bool = False) -> subprocess.Popen:
@@ -653,7 +658,7 @@ sys.path.insert(0, "{current_dir}")
 
 try:
     from openhcs.runtime.napari_stream_visualizer import _napari_viewer_process
-    _napari_viewer_process({port}, "{viewer_title}", {replace_layers})
+    _napari_viewer_process({port}, "{viewer_title}", {replace_layers}, "{current_dir}/.napari_log_path_placeholder")
 except Exception as e:
     import logging
     logger = logging.getLogger("openhcs.runtime.napari_detached")
@@ -669,6 +674,9 @@ except Exception as e:
         log_dir = os.path.expanduser("~/.local/share/openhcs/logs")
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"napari_detached_port_{port}.log")
+
+        # Replace placeholder with actual log file path in python code
+        python_code = python_code.replace(f"{current_dir}/.napari_log_path_placeholder", log_file)
 
         # Use subprocess.Popen with detachment flags
         if sys.platform == "win32":
@@ -701,7 +709,8 @@ except Exception as e:
                 env=env,
                 cwd=os.getcwd(),
                 stdout=log_f,
-                stderr=subprocess.STDOUT
+                stderr=subprocess.STDOUT,
+                start_new_session=True  # CRITICAL: Detach from parent process group
             )
 
         logger.info(f"🔬 VISUALIZER: Detached napari process started (PID: {process.pid}), logging to {log_file}")
@@ -822,9 +831,10 @@ class NapariStreamVisualizer:
                 else:
                     # Existing viewer is unresponsive - kill it and start fresh
                     logger.info(f"🔬 VISUALIZER: Existing viewer on port {self.napari_port} is unresponsive, killing and restarting...")
-                    self._kill_processes_on_port(self.napari_port)
-                    # Also kill control port
-                    self._kill_processes_on_port(self.napari_port + 1000)
+                    # Use shared method from ZMQServer ABC
+                    from openhcs.runtime.zmq_base import ZMQServer
+                    ZMQServer.kill_processes_on_port(self.napari_port)
+                    ZMQServer.kill_processes_on_port(self.napari_port + 1000)
                     # Wait a moment for ports to be freed
                     import time
                     time.sleep(0.5)
@@ -847,7 +857,7 @@ class NapariStreamVisualizer:
                 logger.info("🔬 VISUALIZER: Creating non-persistent napari viewer")
                 self.process = multiprocessing.Process(
                     target=_napari_viewer_process,
-                    args=(self.port, self.viewer_title, self.replace_layers),
+                    args=(self.port, self.viewer_title, self.replace_layers, None),  # No log file for non-persistent
                     daemon=False
                 )
                 self.process.start()
@@ -930,58 +940,7 @@ class NapariStreamVisualizer:
                 except:
                     pass
 
-    def _kill_processes_on_port(self, port: int) -> None:
-        """
-        Kill only the process LISTENING on the specified port (the Napari viewer).
 
-        Does NOT kill client processes that are merely connected to the port.
-        """
-        import subprocess
-        import platform
-
-        try:
-            system = platform.system()
-
-            if system == "Linux" or system == "Darwin":
-                # Use lsof with -sTCP:LISTEN to find only LISTENING processes
-                # This excludes client connections and only targets the server (Napari viewer)
-                result = subprocess.run(
-                    ['lsof', '-ti', f'TCP:{port}', '-sTCP:LISTEN'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
-                if result.returncode == 0 and result.stdout.strip():
-                    pids = result.stdout.strip().split('\n')
-                    for pid in pids:
-                        try:
-                            subprocess.run(['kill', '-9', pid], timeout=1)
-                            logger.info(f"🔬 VISUALIZER: Killed process {pid} listening on port {port}")
-                        except Exception as e:
-                            logger.warning(f"Failed to kill process {pid}: {e}")
-
-            elif system == "Windows":
-                # Use netstat to find processes LISTENING on the port
-                result = subprocess.run(
-                    ['netstat', '-ano'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-
-                for line in result.stdout.split('\n'):
-                    if f':{port}' in line and 'LISTENING' in line:
-                        parts = line.split()
-                        pid = parts[-1]
-                        try:
-                            subprocess.run(['taskkill', '/F', '/PID', pid], timeout=1)
-                            logger.info(f"🔬 VISUALIZER: Killed process {pid} listening on port {port}")
-                        except Exception as e:
-                            logger.warning(f"Failed to kill process {pid}: {e}")
-
-        except Exception as e:
-            logger.warning(f"Failed to kill processes on port {port}: {e}")
 
     def _is_port_in_use(self, port: int) -> bool:
         """Check if a port is already in use (indicating existing napari viewer)."""

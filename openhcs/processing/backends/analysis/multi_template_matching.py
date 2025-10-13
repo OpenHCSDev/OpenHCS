@@ -36,7 +36,7 @@ class TemplateMatchResult:
     best_rotation_angle: float  # Angle of best matching template
     error_message: Optional[str] = None
 
-def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, filemanager) -> str:
+def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, filemanager, backend: str) -> str:
     """Materialize MTM match results as analysis-ready CSV with confidence analysis."""
     csv_path = path.replace('.pkl', '_mtm_matches.csv')
 
@@ -112,8 +112,10 @@ def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, fi
                     df['spatial_cluster'] = 0
 
         csv_content = df.to_csv(index=False)
-        filemanager.ensure_directory(Path(csv_path).parent, Backend.DISK.value)
-        filemanager.save(csv_content, csv_path, Backend.DISK.value)
+        # Ensure output directory exists for disk backend
+        if backend == Backend.DISK.value:
+            filemanager.ensure_directory(Path(csv_path).parent, backend)
+        filemanager.save(csv_content, csv_path, backend)
 
     return csv_path
 

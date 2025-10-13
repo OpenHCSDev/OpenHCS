@@ -36,6 +36,7 @@ extras_require = {
         "coverage>=7.3.2",
         "genbadge[coverage]",
         "pytest-asyncio>=0.21.0",
+        "pyzmq>=26.0.0",  # Required for ZMQ execution and OMERO integration tests
     ],
 
     # GUI testing dependencies
@@ -60,6 +61,12 @@ extras_require = {
     # Optional visualization tools
     "viz": [
         "napari",  # Optional real-time visualization during pipeline execution
+    ],
+
+    # Remote execution and OMERO integration
+    "remote": [
+        "pyzmq>=26.0.0",  # ZMQ-based remote execution and streaming
+        "omero-py>=5.19.0",  # OMERO Python bindings for OMERO backend
     ],
 
     # GPU acceleration dependencies

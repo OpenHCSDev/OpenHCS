@@ -130,6 +130,27 @@ def classify_log_file(log_path: Path, base_log_path: Optional[str] = None, inclu
         except RuntimeError:
             pass  # TUI log not found, continue with other classification
 
+    # Check for ZMQ server logs (openhcs_zmq_server_port_{port}_{timestamp}.log)
+    if file_name.startswith('openhcs_zmq_server_port_'):
+        # Extract port from filename
+        parts = file_name.replace('openhcs_zmq_server_port_', '').replace('.log', '').split('_')
+        port = parts[0] if parts else 'unknown'
+        return LogFileInfo(log_path, "zmq_server", display_name=f"ZMQ Server (port {port})")
+
+    # Check for ZMQ worker logs
+    if file_name.startswith('zmq_worker_exec_'):
+        # Extract execution ID and worker PID
+        parts = file_name.replace('zmq_worker_exec_', '').replace('.log', '').split('_worker_')
+        if len(parts) == 2:
+            exec_id_short = parts[0][:8]  # First 8 chars of UUID
+            worker_pid = parts[1].split('_')[0]  # PID is first part after _worker_
+            return LogFileInfo(log_path, "zmq_worker", worker_pid, display_name=f"ZMQ Worker {worker_pid}")
+
+    # Check for Napari viewer logs
+    if file_name.startswith('napari_detached_port_'):
+        port = file_name.replace('napari_detached_port_', '').replace('.log', '')
+        return LogFileInfo(log_path, "napari", display_name=f"Napari Viewer (port {port})")
+
     # Check subprocess logs if base_log_path is provided
     if base_log_path:
         base_name = Path(base_log_path).name
@@ -191,8 +212,23 @@ def is_openhcs_log_file(file_path: Path) -> bool:
         return False
 
     file_name = file_path.name
-    return (file_name.startswith('openhcs_') and
-            ('unified_' in file_name or 'subprocess_' in file_name))
+
+    # OpenHCS log patterns:
+    # - openhcs_unified_*.log (main UI process)
+    # - openhcs_subprocess_*.log (subprocess runner)
+    # - openhcs_zmq_server_port_*.log (ZMQ execution server)
+    # - pyqt_gui_subprocess_*.log (PyQt subprocess runner)
+    # - zmq_worker_exec_*.log (ZMQ worker processes)
+    # - napari_detached_port_*.log (Napari viewer)
+
+    openhcs_patterns = [
+        'openhcs_',
+        'pyqt_gui_subprocess_',
+        'zmq_worker_',
+        'napari_detached_'
+    ]
+
+    return any(file_name.startswith(pattern) for pattern in openhcs_patterns)
 
 
 def infer_base_log_path(file_path: Path) -> str:

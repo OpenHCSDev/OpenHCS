@@ -60,9 +60,12 @@ class OpenHCSMainWindow(QMainWindow):
         
         # Floating windows registry (replaces dock widgets)
         self.floating_windows: Dict[str, QDialog] = {}
-        
+
         # Settings for window state persistence
         self.settings = QSettings("OpenHCS", "PyQt6GUI")
+
+        # Initialize Log Viewer on startup (hidden) for continuous log monitoring
+        self._initialize_log_viewer()
         
         # Initialize UI
         self.setup_ui()
@@ -255,39 +258,101 @@ class OpenHCSMainWindow(QMainWindow):
         self.floating_windows["image_browser"].raise_()
         self.floating_windows["image_browser"].activateWindow()
 
+    def _initialize_log_viewer(self):
+        """
+        Initialize Log Viewer on startup (hidden) for continuous log monitoring.
+
+        This ensures all server logs are captured regardless of when the
+        Log Viewer window is opened by the user.
+        """
+        from openhcs.pyqt_gui.widgets.log_viewer import LogViewerWindow
+
+        # Create floating window (hidden)
+        window = QDialog(self)
+        window.setWindowTitle("Log Viewer")
+        window.setModal(False)
+        window.resize(900, 700)
+
+        # Add widget to window
+        layout = QVBoxLayout(window)
+        log_viewer_widget = LogViewerWindow(self.file_manager, self.service_adapter)
+        layout.addWidget(log_viewer_widget)
+
+        self.floating_windows["log_viewer"] = window
+
+        # Window stays hidden until user opens it
+        logger.info("Log Viewer initialized (hidden) - monitoring for new logs")
+
     def show_log_viewer(self):
         """Show log viewer window (mirrors Textual TUI pattern)."""
-        if "log_viewer" not in self.floating_windows:
-            from openhcs.pyqt_gui.widgets.log_viewer import LogViewerWindow
-            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+        # Log viewer is already initialized on startup, just show it
+        if "log_viewer" in self.floating_windows:
+            self.floating_windows["log_viewer"].show()
+            self.floating_windows["log_viewer"].raise_()
+            self.floating_windows["log_viewer"].activateWindow()
+        else:
+            # Fallback: initialize if somehow not created
+            self._initialize_log_viewer()
+            self.show_log_viewer()
+
+    def show_zmq_server_manager(self):
+        """Show ZMQ server manager window."""
+        if "zmq_server_manager" not in self.floating_windows:
+            from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import ZMQServerManagerWidget
+            from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
 
             # Create floating window
             window = QDialog(self)
-            window.setWindowTitle("Log Viewer")
+            window.setWindowTitle("ZMQ Server Manager")
             window.setModal(False)
-            window.resize(900, 700)
+            window.resize(600, 400)
 
             # Add widget to window
             layout = QVBoxLayout(window)
-            log_viewer_widget = LogViewerWindow(self.file_manager, self.service_adapter)
-            layout.addWidget(log_viewer_widget)
 
-            self.floating_windows["log_viewer"] = window
+            # Scan common ports:
+            # - 7777: Default ZMQ execution server
+            # - 5555-5564: Napari viewers (10 ports)
+            ports_to_scan = [7777] + [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]
 
-            # Connect to plate manager signals if it exists
-            if "plate_manager" in self.floating_windows:
-                plate_dialog = self.floating_windows["plate_manager"]
-                # Find the PlateManagerWidget inside the dialog
-                plate_widget = plate_dialog.findChild(PlateManagerWidget)
-                if plate_widget and hasattr(plate_widget, 'clear_subprocess_logs'):
-                    plate_widget.clear_subprocess_logs.connect(log_viewer_widget.clear_subprocess_logs)
-                    plate_widget.subprocess_log_started.connect(log_viewer_widget.start_monitoring)
-                    plate_widget.subprocess_log_stopped.connect(log_viewer_widget.stop_monitoring)
+            zmq_manager_widget = ZMQServerManagerWidget(
+                ports_to_scan=ports_to_scan,
+                title="ZMQ Servers (Execution + Napari)",
+                style_generator=self.service_adapter.get_style_generator()
+            )
 
-        # Show the window
-        self.floating_windows["log_viewer"].show()
-        self.floating_windows["log_viewer"].raise_()
-        self.floating_windows["log_viewer"].activateWindow()
+            # Connect log file opened signal to log viewer
+            zmq_manager_widget.log_file_opened.connect(self._open_log_file_in_viewer)
+
+            layout.addWidget(zmq_manager_widget)
+
+            self.floating_windows["zmq_server_manager"] = window
+
+        # Show window
+        self.floating_windows["zmq_server_manager"].show()
+        self.floating_windows["zmq_server_manager"].raise_()
+        self.floating_windows["zmq_server_manager"].activateWindow()
+
+    def _open_log_file_in_viewer(self, log_file_path: str):
+        """
+        Open a log file in the log viewer.
+
+        Args:
+            log_file_path: Path to log file to open
+        """
+        # Show log viewer if not already open
+        self.show_log_viewer()
+
+        # Switch to the log file
+        if "log_viewer" in self.floating_windows:
+            log_dialog = self.floating_windows["log_viewer"]
+            from openhcs.pyqt_gui.widgets.log_viewer import LogViewerWindow
+            log_viewer_widget = log_dialog.findChild(LogViewerWindow)
+            if log_viewer_widget:
+                # Switch to the log file
+                from pathlib import Path
+                log_viewer_widget.switch_to_log(Path(log_file_path))
+                logger.info(f"Switched log viewer to: {log_file_path}")
 
     def setup_menu_bar(self):
         """Setup application menu bar."""
@@ -355,7 +420,13 @@ class OpenHCSMainWindow(QMainWindow):
         log_action.setShortcut("Ctrl+L")
         log_action.triggered.connect(self.show_log_viewer)
         view_menu.addAction(log_action)
-        
+
+        # ZMQ Server Manager window
+        zmq_server_action = QAction("&ZMQ Server Manager", self)
+        zmq_server_action.setShortcut("Ctrl+Z")
+        zmq_server_action.triggered.connect(self.show_zmq_server_manager)
+        view_menu.addAction(zmq_server_action)
+
         # Configuration action
         config_action = QAction("&Global Configuration", self)
         config_action.setShortcut("Ctrl+G")

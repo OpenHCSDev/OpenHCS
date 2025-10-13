@@ -6,7 +6,8 @@ in OpenHCS pipelines, replacing the hardcoded Well-based multiprocessing and fix
 4-component assumptions.
 """
 
-from .framework import ComponentConfiguration, ComponentConfigurationFactory
+# Import from the new location (framework.py moved to openhcs/components/)
+from openhcs.components.framework import ComponentConfiguration, ComponentConfigurationFactory
 from .multiprocessing import MultiprocessingCoordinator
 from .validation import GenericValidator
 from .parser_metaprogramming import GenericFilenameParser, ParserInterfaceGenerator, parser_interface_generator

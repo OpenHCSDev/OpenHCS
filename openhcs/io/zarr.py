@@ -142,6 +142,17 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             FileExistsError: If destination key already exists
             StorageResolutionError: If creation fails
         """
+        # Passthrough to disk backend for text files (JSON, CSV, TXT)
+        # Zarr only supports array data, not text files
+        path_str = str(output_path)
+        if path_str.endswith(('.json', '.csv', '.txt')):
+            from openhcs.io.backend_registry import get_backend_instance
+            disk_backend = get_backend_instance(Backend.DISK.value)
+            # Ensure parent directory exists before saving
+            parent_dir = Path(output_path).parent
+            disk_backend.ensure_directory(parent_dir)
+            return disk_backend.save(data, output_path, **kwargs)
+
         store, key = self._split_store_and_key(output_path)
         group = zarr.group(store=store)
 
@@ -643,6 +654,13 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         import shutil
         import os
 
+        # Passthrough to disk backend for text files (JSON, CSV, TXT)
+        path_str = str(path)
+        if path_str.endswith(('.json', '.csv', '.txt')):
+            from openhcs.io.backend_registry import get_backend_instance
+            disk_backend = get_backend_instance(Backend.DISK.value)
+            return disk_backend.delete(path)
+
         path = str(path)
 
         if not os.path.exists(path):
@@ -697,6 +715,13 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             raise StorageResolutionError(f"Failed to recursively delete Zarr path: {path}") from e
 
     def exists(self, path: Union[str, Path]) -> bool:
+        # Passthrough to disk backend for text files (JSON, CSV, TXT)
+        path_str = str(path)
+        if path_str.endswith(('.json', '.csv', '.txt')):
+            from openhcs.io.backend_registry import get_backend_instance
+            disk_backend = get_backend_instance(Backend.DISK.value)
+            return disk_backend.exists(path)
+
         path = Path(path)
 
         # If path has no file extension, treat as directory existence check

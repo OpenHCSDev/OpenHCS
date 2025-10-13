@@ -20,7 +20,7 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union, Set
 
-from openhcs.constants.constants import Backend, DEFAULT_WORKSPACE_DIR_SUFFIX, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
+from openhcs.constants.constants import Backend, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.config_framework.global_config import set_current_global_config, get_current_global_config
@@ -143,6 +143,11 @@ def _execute_single_axis_static(
 
     This function is identical to PipelineOrchestrator._execute_single_axis but doesn't
     require an orchestrator instance, making it safe for pickling in ProcessPoolExecutor.
+
+    Args:
+        pipeline_definition: List of pipeline steps to execute
+        frozen_context: Frozen processing context for this axis
+        visualizer: Optional Napari visualizer (not used in multiprocessing)
     """
     axis_id = frozen_context.axis_id
     logger.info(f"🔥 SINGLE_AXIS: Starting execution for axis {axis_id}")
@@ -192,7 +197,10 @@ def _execute_single_axis_static(
                     logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
 
     logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
-    return {"status": "success", "axis_id": axis_id}
+    result = {"status": "success", "axis_id": axis_id}
+    logger.info(f"🔥 SINGLE_AXIS: Returning result: {result}")
+    logger.info(f"🔥 SINGLE_AXIS: Result type check - status: {type(result['status'])}, axis_id: {type(result['axis_id'])}")
+    return result
 
 
 def _configure_worker_logging(log_file_base: str):
@@ -339,6 +347,7 @@ class PipelineOrchestrator(ContextProvider):
         *,
         pipeline_config: Optional['PipelineConfig'] = None,
         storage_registry: Optional[Any] = None,
+        progress_callback: Optional[Callable[[str, str, str, Dict[str, Any]], None]] = None,
     ):
         # Lock removed - was orphaned code never used
 
@@ -348,6 +357,9 @@ class PipelineOrchestrator(ContextProvider):
                 "No global configuration context found. "
                 "Ensure application startup has called ensure_global_config_context()."
             )
+
+        # Track executor for cancellation support
+        self._executor = None
 
         # Initialize auto-sync control for pipeline config
         self._pipeline_config = None
@@ -381,17 +393,18 @@ class PipelineOrchestrator(ContextProvider):
         # The orchestrator should not modify thread-local storage during initialization
         # Global config is already available through the dual-axis resolver fallback
 
-        # Validate plate_path if provided
+        # Convert to Path and validate
         if plate_path:
             plate_path = Path(plate_path)
 
-        if plate_path:
-            if not plate_path.is_absolute():
-                raise ValueError(f"Plate path must be absolute: {plate_path}")
-            if not plate_path.exists():
-                raise FileNotFoundError(f"Plate path does not exist: {plate_path}")
-            if not plate_path.is_dir():
-                raise NotADirectoryError(f"Plate path is not a directory: {plate_path}")
+            # Validate filesystem paths (skip for OMERO virtual paths)
+            if not str(plate_path).startswith("/omero/"):
+                if not plate_path.is_absolute():
+                    raise ValueError(f"Plate path must be absolute: {plate_path}")
+                if not plate_path.exists():
+                    raise FileNotFoundError(f"Plate path does not exist: {plate_path}")
+                if not plate_path.is_dir():
+                    raise NotADirectoryError(f"Plate path is not a directory: {plate_path}")
 
         # Initialize _plate_path_frozen first to allow plate_path to be set during initialization
         object.__setattr__(self, '_plate_path_frozen', False)
@@ -429,14 +442,16 @@ class PipelineOrchestrator(ContextProvider):
         self._initialized: bool = False
         self._state: OrchestratorState = OrchestratorState.CREATED
 
+        # Progress callback for real-time execution updates
+        self.progress_callback = progress_callback
+        if progress_callback:
+            logger.info("PipelineOrchestrator initialized with progress callback")
+
         # Component keys cache for fast access - uses AllComponents (includes multiprocessing axis)
         self._component_keys_cache: Dict['AllComponents', List[str]] = {}
 
         # Metadata cache service
         self._metadata_cache_service = get_metadata_cache()
-
-
-
 
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -507,12 +522,13 @@ class PipelineOrchestrator(ContextProvider):
             )
 
             # Use the actual image directory returned by the microscope handler
+            # All handlers now return Path (including OMERO with virtual paths)
             self.input_dir = Path(actual_image_dir)
             logger.info(f"Set input directory to: {self.input_dir}")
 
             # Set workspace_path based on what the handler returned
             if actual_image_dir != self.plate_path:
-                # Handler created a workspace
+                # Handler created a workspace (or virtual path for OMERO)
                 self.workspace_path = Path(actual_image_dir).parent if Path(actual_image_dir).name != "workspace" else Path(actual_image_dir)
             else:
                 # Handler used plate directly (like OpenHCS)
@@ -588,6 +604,15 @@ class PipelineOrchestrator(ContextProvider):
         axis_id = frozen_context.axis_id
         logger.info(f"🔥 SINGLE_AXIS: Starting execution for axis {axis_id}")
 
+        # Send progress: axis started
+        if self.progress_callback:
+            try:
+                self.progress_callback(axis_id, 'pipeline', 'started', {
+                    'total_steps': len(pipeline_definition)
+                })
+            except Exception as e:
+                logger.warning(f"Progress callback failed for axis {axis_id} start: {e}")
+
         # NUCLEAR VALIDATION
         if not frozen_context.is_frozen():
             error_msg = f"🔥 SINGLE_AXIS ERROR: Context for axis {axis_id} is not frozen before execution"
@@ -608,6 +633,16 @@ class PipelineOrchestrator(ContextProvider):
 
             logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
+            # Send progress: step started
+            if self.progress_callback:
+                try:
+                    self.progress_callback(axis_id, step_name, 'started', {
+                        'step_index': step_index,
+                        'total_steps': len(pipeline_definition)
+                    })
+                except Exception as e:
+                    logger.warning(f"Progress callback failed for axis {axis_id} step {step_name} start: {e}")
+
             # Verify step has process method (should always be true for AbstractStep subclasses)
             if not hasattr(step, 'process'):
                 error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} missing process method for axis {axis_id}"
@@ -617,6 +652,16 @@ class PipelineOrchestrator(ContextProvider):
             # Call process method on step instance
             step.process(frozen_context, step_index)
             logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
+
+            # Send progress: step completed
+            if self.progress_callback:
+                try:
+                    self.progress_callback(axis_id, step_name, 'completed', {
+                        'step_index': step_index,
+                        'total_steps': len(pipeline_definition)
+                    })
+                except Exception as e:
+                    logger.warning(f"Progress callback failed for axis {axis_id} step {step_name} completion: {e}")
 
     #        except Exception as step_error:
     #            import traceback
@@ -643,7 +688,32 @@ class PipelineOrchestrator(ContextProvider):
                         logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
         
         logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
+
+        # Send progress: axis completed
+        if self.progress_callback:
+            try:
+                self.progress_callback(axis_id, 'pipeline', 'completed', {
+                    'total_steps': len(pipeline_definition)
+                })
+            except Exception as e:
+                logger.warning(f"Progress callback failed for axis {axis_id} completion: {e}")
+
         return {"status": "success", "axis_id": axis_id}
+
+    def cancel_execution(self):
+        """
+        Cancel ongoing execution by shutting down the executor.
+
+        This gracefully cancels pending futures and shuts down worker processes
+        without killing all child processes (preserving Napari viewers, etc.).
+        """
+        if self._executor:
+            try:
+                logger.info("🔥 ORCHESTRATOR: Cancelling execution - shutting down executor")
+                self._executor.shutdown(wait=False, cancel_futures=True)
+                logger.info("🔥 ORCHESTRATOR: Executor shutdown initiated")
+            except Exception as e:
+                logger.warning(f"🔥 ORCHESTRATOR: Failed to cancel executor: {e}")
 
     def execute_compiled_plate(
         self,
@@ -819,7 +889,6 @@ class PipelineOrchestrator(ContextProvider):
                 logger.info("🔥 PRODUCTION MODE: Using ProcessPoolExecutor for true parallelism")
                 # CRITICAL FIX: Use _configure_worker_with_gpu to ensure workers have function registry
                 # Workers need the function registry to access decorated functions with memory types
-                from openhcs.config_framework.global_config import get_current_global_config
                 global_config = get_current_global_config(GlobalPipelineConfig)
                 global_config_dict = global_config.__dict__ if global_config else {}
 
@@ -839,6 +908,8 @@ class PipelineOrchestrator(ContextProvider):
                     )
 
             logger.info(f"🔥 DEATH_MARKER: ENTERING_{executor_type.upper()}_CONTEXT")
+            # Store executor for cancellation support
+            self._executor = executor
             with executor:
                 logger.info(f"🔥 DEATH_MARKER: {executor_type.upper()}_CREATED_SUCCESSFULLY")
                 logger.info(f"🔥 ORCHESTRATOR: {executor_type} created, submitting {len(compiled_contexts)} tasks")
@@ -870,7 +941,12 @@ class PipelineOrchestrator(ContextProvider):
                         # Use static function to avoid pickling the orchestrator instance
                         # Note: Use original pipeline_definition to preserve collision-resolved configs
                         # Don't pass visualizer to worker processes - they communicate via ZeroMQ
-                        future = executor.submit(_execute_single_axis_static, pipeline_definition, resolved_context, None)
+                        future = executor.submit(
+                            _execute_single_axis_static,
+                            pipeline_definition,
+                            resolved_context,
+                            None  # visualizer
+                        )
                         future_to_axis_id[future] = axis_id
                         logger.info(f"🔥 ORCHESTRATOR: Task submitted for {axis_name} {axis_id}")
                         logger.info(f"🔥 DEATH_MARKER: TASK_SUBMITTED_FOR_{axis_name.upper()}_{axis_id}")

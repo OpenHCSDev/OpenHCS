@@ -82,10 +82,10 @@ class MultiChannelResult:
     overlap_positions: List[Tuple[float, float]]
 
 
-def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult]], path: str, filemanager) -> str:
+def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult]], path: str, filemanager, backend: str) -> str:
     """Materialize cell counting results as analysis-ready CSV and JSON formats."""
 
-    logger.info(f"🔬 CELL_COUNT_MATERIALIZE: Called with path={path}, data_length={len(data) if data else 0}")
+    logger.info(f"🔬 CELL_COUNT_MATERIALIZE: Called with path={path}, data_length={len(data) if data else 0}, backend={backend}")
 
     # Convert CLE binary_mask to NumPy if present
     if data:
@@ -107,12 +107,12 @@ def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult
     logger.info(f"🔬 CELL_COUNT_MATERIALIZE: is_multi_channel={is_multi_channel}")
 
     if is_multi_channel:
-        return _materialize_multi_channel_results(data, path, filemanager)
+        return _materialize_multi_channel_results(data, path, filemanager, backend)
     else:
-        return _materialize_single_channel_results(data, path, filemanager)
+        return _materialize_single_channel_results(data, path, filemanager, backend)
 
 
-def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanager) -> str:
+def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanager, backend: str) -> str:
     """Materialize segmentation masks as individual TIFF files."""
 
     logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Called with path={path}, masks_count={len(data) if data else 0}")
@@ -459,7 +459,7 @@ def count_cells_multi_channel(
     return output_stack, multi_results
 
 
-def _materialize_single_channel_results(data: List[CellCountResult], path: str, filemanager) -> str:
+def _materialize_single_channel_results(data: List[CellCountResult], path: str, filemanager, backend: str) -> str:
     """Materialize single-channel cell counting results."""
     # Generate output file paths based on the input path
     # Use clean naming: preserve namespaced path structure, don't duplicate special output key
@@ -469,8 +469,10 @@ def _materialize_single_channel_results(data: List[CellCountResult], path: str, 
 
     # Ensure output directory exists for disk backend
     from pathlib import Path
+    from openhcs.constants.constants import Backend
     output_dir = Path(json_path).parent
-    filemanager.ensure_directory(str(output_dir), Backend.DISK.value)
+    if backend == Backend.DISK.value:
+        filemanager.ensure_directory(str(output_dir), backend)
 
     summary = {
         "analysis_type": "single_channel_cell_counting",
@@ -531,7 +533,7 @@ def _materialize_single_channel_results(data: List[CellCountResult], path: str, 
     return json_path
 
 
-def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str, filemanager) -> str:
+def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str, filemanager, backend: str) -> str:
     """Materialize multi-channel cell counting and colocalization results."""
     # Generate output file paths based on the input path
     # Use clean naming: preserve namespaced path structure, don't duplicate special output key
@@ -541,8 +543,10 @@ def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str
 
     # Ensure output directory exists for disk backend
     from pathlib import Path
+    from openhcs.constants.constants import Backend
     output_dir = Path(json_path).parent
-    filemanager.ensure_directory(str(output_dir), Backend.DISK.value)
+    if backend == Backend.DISK.value:
+        filemanager.ensure_directory(str(output_dir), backend)
 
     summary = {
         "analysis_type": "multi_channel_cell_counting_colocalization",

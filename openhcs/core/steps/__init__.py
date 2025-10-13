@@ -24,5 +24,10 @@ __all__ = [
     ]
 
 # PERFORMANCE OPTIMIZATION: Pre-warm step editor cache at import time
-from openhcs.config_framework import prewarm_callable_analysis_cache
-prewarm_callable_analysis_cache(AbstractStep.__init__)
+try:
+    from openhcs.config_framework import prewarm_callable_analysis_cache
+    prewarm_callable_analysis_cache(AbstractStep.__init__)
+except ImportError:
+    # Circular import during subprocess initialization - cache warming not needed
+    # for non-UI execution contexts (ZMQ server, workers, etc.)
+    pass
