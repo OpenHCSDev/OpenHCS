@@ -120,9 +120,21 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         try:
             publisher.send_json(message, flags=zmq.NOBLOCK)
             logger.debug(f"Streamed batch of {len(batch_images)} images to Fiji on port {fiji_port}")
+
+            # Clean up publisher's handles after successful send
+            # Receiver will unlink the shared memory after copying the data
+            for img in batch_images:
+                shm_name = img['shm_name']
+                if shm_name in self._shared_memory_blocks:
+                    try:
+                        shm = self._shared_memory_blocks.pop(shm_name)
+                        shm.close()  # Close our handle, but don't unlink - receiver will do that
+                    except Exception as e:
+                        logger.warning(f"Failed to close shared memory handle {shm_name}: {e}")
+
         except zmq.Again:
             logger.warning(f"Fiji viewer busy, dropped batch of {len(batch_images)} images (port {fiji_port})")
-            # Clean up shared memory for dropped images
+            # Clean up shared memory for dropped images (both close and unlink since receiver never got them)
             for img in batch_images:
                 shm_name = img['shm_name']
                 if shm_name in self._shared_memory_blocks:
