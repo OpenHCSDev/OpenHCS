@@ -159,6 +159,20 @@ def _headless_mode() -> bool:
         pass
     return False
 
+
+def _napari_enabled() -> bool:
+    """Check if Napari streaming should be enabled."""
+    if _headless_mode():
+        return False
+    return os.getenv('OPENHCS_DISABLE_NAPARI', 'false').lower() != 'true'
+
+
+def _fiji_enabled() -> bool:
+    """Check if Fiji streaming should be enabled."""
+    if _headless_mode():
+        return False
+    return os.getenv('OPENHCS_DISABLE_FIJI', 'false').lower() != 'true'
+
 @pytest.fixture
 def test_function_dir(base_test_dir, microscope_config, request):
     """Create test directory for a specific test function."""
@@ -167,7 +181,7 @@ def test_function_dir(base_test_dir, microscope_config, request):
     test_dir.mkdir(parents=True, exist_ok=True)
     yield test_dir
 
-def create_test_pipeline() -> Pipeline:
+def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False) -> Pipeline:
     """Create test pipeline with materialization configuration."""
     cpu_only_mode = os.getenv('OPENHCS_CPU_ONLY', 'false').lower() == 'true'
     if cpu_only_mode:
@@ -181,9 +195,6 @@ def create_test_pipeline() -> Pipeline:
             os.environ['OPENHCS_CPU_ONLY'] = 'true'
             position_func = ashlar_compute_tile_positions_cpu
 
-    # Suppress visualizer configs entirely when headless
-    streaming_cfg = None if _headless_mode() else LazyNapariStreamingConfig()
-
     return Pipeline(
         steps=[
             Step(
@@ -191,14 +202,14 @@ def create_test_pipeline() -> Pipeline:
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
                 step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
                 step_materialization_config=LazyStepMaterializationConfig(),
-                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5555) if not _headless_mode() else None,
-                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5556) if not _headless_mode() else None
+                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5555) if enable_napari else None,
+                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5556) if enable_fiji else None
             ),
             Step(
                 func=create_composite,
                 variable_components=[VariableComponents.CHANNEL],
-                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5557) if not _headless_mode() else None,
-                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5558) if not _headless_mode() else None
+                napari_streaming_config=LazyNapariStreamingConfig(napari_port=5557) if enable_napari else None,
+                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5558) if enable_fiji else None
             ),
             Step(
                 name="Z-Stack Flattening",
@@ -234,8 +245,8 @@ def create_test_pipeline() -> Pipeline:
                 napari_streaming_config=LazyNapariStreamingConfig(
                     napari_port=5559,
                     variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX
-                ) if not _headless_mode() else None,
-                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5560) if not _headless_mode() else None
+                ) if enable_napari else None,
+                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5560) if enable_fiji else None
             ),
         ],
         name=f"Multi-Subdirectory Test Pipeline{' (CPU-Only)' if cpu_only_mode else ''}",
@@ -577,7 +588,7 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
         return _execute_pipeline_phases(orchestrator, pipeline)
 
 
-def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict):
+def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict, enable_napari: bool, enable_fiji: bool):
     """Unified test for all combinations of microscope types, backends, data types, and execution modes."""
     # Handle both Path and int (OMERO plate_id)
     if isinstance(plate_dir, int):
@@ -597,7 +608,7 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
 
     print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, microscope: {microscope_config['format']}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
 
-    pipeline = create_test_pipeline()
+    pipeline = create_test_pipeline(enable_napari=enable_napari, enable_fiji=enable_fiji)
 
     # Export pipeline to Python file (skip for OMERO - no filesystem)
     if not test_config.is_omero:

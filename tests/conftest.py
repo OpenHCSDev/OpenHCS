@@ -46,6 +46,20 @@ def pytest_addoption(parser):
     )
 
     parser.addoption(
+        "--enable-napari",
+        action="store_true",
+        default=False,
+        help="Enable Napari streaming in tests (default: disabled)"
+    )
+
+    parser.addoption(
+        "--enable-fiji",
+        action="store_true",
+        default=False,
+        help="Enable Fiji streaming in tests (default: disabled)"
+    )
+
+    parser.addoption(
         "--it-zmq-mode",
         action="store",
         default=env_default("IT_ZMQ_MODE", "direct"),
@@ -159,6 +173,18 @@ def pytest_generate_tests(metafunc):
             selected_choices = _get_config_option(metafunc.config, config['option'], config['choices'])
             values = [config['value_mapper'](choice) for choice in selected_choices]
             metafunc.parametrize(fixture_name, values, ids=selected_choices, scope="module")
+
+
+@pytest.fixture
+def enable_napari(request):
+    """Fixture to control Napari streaming in tests."""
+    return request.config.getoption("--enable-napari")
+
+
+@pytest.fixture
+def enable_fiji(request):
+    """Fixture to control Fiji streaming in tests."""
+    return request.config.getoption("--enable-fiji")
 
 
 @pytest.fixture(autouse=True)
