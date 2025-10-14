@@ -565,6 +565,7 @@ class LogViewerWindow(QMainWindow):
     """Main log viewer window with dropdown, search, and real-time tailing."""
 
     window_closed = pyqtSignal()
+    _subprocess_scan_complete = pyqtSignal(list)  # Internal signal for async subprocess scan
     _server_scan_complete = pyqtSignal(list)  # Internal signal for async server scan
 
     def __init__(self, file_manager: FileManager, service_adapter, parent=None):
@@ -597,6 +598,14 @@ class LogViewerWindow(QMainWindow):
         self.process_tracker = ProcessTracker()
         self.process_update_timer: QTimer = None
         self.show_alive_only: bool = False  # Filter to show only logs from running processes
+
+        # Master list of all discovered logs (single source of truth)
+        # Dropdown is a filtered VIEW of this list
+        self._all_discovered_logs: List[LogFileInfo] = []
+
+        # Track session start time to filter out old logs from previous sessions
+        # Use current process start time, not log viewer init time
+        self._session_start_time = self._get_process_start_time()
 
         self.setup_ui()
         self.setup_connections()
@@ -707,6 +716,7 @@ class LogViewerWindow(QMainWindow):
         self.show_alive_only_cb.stateChanged.connect(self.on_filter_changed)
 
         # Internal signals
+        self._subprocess_scan_complete.connect(self._on_subprocess_scan_complete)
         self._server_scan_complete.connect(self._on_server_scan_complete)
 
         logger.debug("LogViewerWindow connections setup complete")
@@ -721,8 +731,8 @@ class LogViewerWindow(QMainWindow):
             self._pending_log_to_load = None
 
     def initialize_logs(self) -> None:
-        """Initialize with main process log only and start monitoring (async)."""
-        # Only discover the current main process log, not old logs
+        """Initialize with main log only, then scan for subprocess logs in background."""
+        # Only discover the main log initially (fast startup)
         initial_logs = []
         try:
             from openhcs.core.log_utils import get_current_log_file_path, classify_log_file
@@ -733,9 +743,14 @@ class LogViewerWindow(QMainWindow):
             if main_log.exists():
                 log_info = classify_log_file(main_log, None, True)
                 initial_logs.append(log_info)
-        except Exception:
-            # Main log not available, continue without it
+                logger.debug("Discovered main log")
+        except Exception as e:
+            logger.warning(f"Error discovering main log: {e}")
+            # Continue without main log
             pass
+
+        # Store main log in master list
+        self._all_discovered_logs = initial_logs.copy()
 
         # Populate dropdown with main log immediately (fast)
         if initial_logs:
@@ -746,8 +761,25 @@ class LogViewerWindow(QMainWindow):
         # Start monitoring for new logs
         self.start_monitoring()
 
+        # Scan for existing subprocess logs in background (async - doesn't block)
+        self._scan_subprocess_logs_async()
+
         # Scan for servers in background (async - doesn't block)
         self._scan_servers_async()
+
+    def _scan_subprocess_logs_async(self) -> None:
+        """Scan for existing subprocess logs in background thread (non-blocking)."""
+        import threading
+
+        def scan_and_update():
+            """Background thread function."""
+            subprocess_logs = self._scan_for_subprocess_logs()
+            # Emit signal to update UI on main thread
+            self._subprocess_scan_complete.emit(subprocess_logs)
+
+        thread = threading.Thread(target=scan_and_update, daemon=True)
+        thread.start()
+        logger.debug("Started async subprocess log scan in background")
 
     def _scan_servers_async(self) -> None:
         """Scan for ZMQ servers in background thread (non-blocking)."""
@@ -764,26 +796,111 @@ class LogViewerWindow(QMainWindow):
         logger.debug("Started async server scan in background")
 
     @pyqtSlot(list)
+    def _on_subprocess_scan_complete(self, subprocess_logs: List[LogFileInfo]) -> None:
+        """Handle subprocess scan completion on UI thread."""
+        if not subprocess_logs:
+            logger.debug("No subprocess logs found during scan")
+            return
+
+        # Add subprocess logs to master list (avoid duplicates by path)
+        existing_paths = {log.path for log in self._all_discovered_logs}
+        new_logs_added = 0
+        for subprocess_log in subprocess_logs:
+            if subprocess_log.path not in existing_paths:
+                self._all_discovered_logs.append(subprocess_log)
+                new_logs_added += 1
+
+        # Repopulate dropdown from master list
+        self.populate_log_dropdown(self._all_discovered_logs)
+
+        logger.info(f"Added {new_logs_added} subprocess logs from current session "
+                   f"(scanned {len(subprocess_logs)} total)")
+
+    @pyqtSlot(list)
     def _on_server_scan_complete(self, server_logs: List[LogFileInfo]) -> None:
         """Handle server scan completion on UI thread."""
         if not server_logs:
             logger.debug("No server logs found during scan")
             return
 
-        # Get current logs from dropdown
-        current_logs = []
-        for i in range(self.log_selector.count()):
-            log_info = self.log_selector.itemData(i)
-            if log_info:
-                current_logs.append(log_info)
+        # Add server logs to master list (avoid duplicates by path)
+        existing_paths = {log.path for log in self._all_discovered_logs}
+        new_logs_added = 0
+        for server_log in server_logs:
+            if server_log.path not in existing_paths:
+                self._all_discovered_logs.append(server_log)
+                new_logs_added += 1
 
-        # Add server logs
-        current_logs.extend(server_logs)
+        # Repopulate dropdown from master list
+        self.populate_log_dropdown(self._all_discovered_logs)
 
-        # Repopulate dropdown with all logs
-        self.populate_log_dropdown(current_logs)
+        logger.info(f"Added {new_logs_added} new server logs to dropdown (scanned {len(server_logs)} total)")
 
-        logger.info(f"Added {len(server_logs)} server logs to dropdown")
+    def _scan_for_subprocess_logs(self) -> List[LogFileInfo]:
+        """
+        Efficiently scan log directory for subprocess logs from current session.
+        Uses os.scandir() and filters by mtime FIRST before parsing.
+        Returns list of LogFileInfo for discovered subprocess log files.
+        """
+        from openhcs.core.log_utils import classify_log_file, is_openhcs_log_file
+        from pathlib import Path
+        import os
+
+        logger.debug("Scanning for subprocess logs from current session...")
+
+        try:
+            # Get log directory
+            log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
+
+            if not log_dir.exists():
+                return []
+
+            # Use os.scandir() for efficiency - it's faster than glob and gives us stat info
+            session_logs = []
+            total_scanned = 0
+            filtered_by_time = 0
+
+            # Calculate cutoff time (session start - 5 second buffer)
+            cutoff_time = self._session_start_time - 5.0
+
+            # Scan directory efficiently
+            with os.scandir(log_dir) as entries:
+                for entry in entries:
+                    total_scanned += 1
+
+                    # Skip non-.log files immediately
+                    if not entry.name.endswith('.log'):
+                        continue
+
+                    # Filter by mtime FIRST (cheap filesystem check)
+                    # This avoids parsing thousands of old log files
+                    try:
+                        stat_info = entry.stat()
+                        if stat_info.st_mtime < cutoff_time:
+                            filtered_by_time += 1
+                            continue
+                    except OSError:
+                        continue
+
+                    # Now check if it's an OpenHCS log (still just filename check, no file I/O)
+                    log_path = Path(entry.path)
+                    if not is_openhcs_log_file(log_path):
+                        continue
+
+                    # Finally, classify it (this is the expensive part, but we only do it for recent files)
+                    try:
+                        log_info = classify_log_file(log_path, None, include_tui_log=False)
+                        session_logs.append(log_info)
+                    except Exception as e:
+                        logger.debug(f"Failed to classify {log_path}: {e}")
+
+            logger.info(f"Found {len(session_logs)} subprocess logs from current session "
+                       f"(scanned {total_scanned} files, filtered {filtered_by_time} by time)")
+
+            return session_logs
+        except Exception as e:
+            logger.warning(f"Error scanning for subprocess logs: {e}")
+            return []
 
     def _scan_for_server_logs(self) -> List[LogFileInfo]:
         """
@@ -933,20 +1050,17 @@ class LogViewerWindow(QMainWindow):
         Args:
             log_file_info: New LogFileInfo to add
         """
-        # Get current logs
-        current_logs = []
-        for i in range(self.log_selector.count()):
-            log_info = self.log_selector.itemData(i)
-            if log_info:
-                current_logs.append(log_info)
+        # Add to master list (avoid duplicates by path)
+        existing_paths = {log.path for log in self._all_discovered_logs}
+        if log_file_info.path not in existing_paths:
+            self._all_discovered_logs.append(log_file_info)
 
-        # Add new log
-        current_logs.append(log_file_info)
+            # Repopulate dropdown from master list
+            self.populate_log_dropdown(self._all_discovered_logs)
 
-        # Repopulate with updated list
-        self.populate_log_dropdown(current_logs)
-
-        logger.info(f"Added new log to dropdown: {log_file_info.display_name}")
+            logger.info(f"Added new log to dropdown: {log_file_info.display_name}")
+        else:
+            logger.debug(f"Log already exists, skipping: {log_file_info.display_name}")
 
     def on_log_selection_changed(self, index: int) -> None:
         """
@@ -1294,13 +1408,6 @@ class LogViewerWindow(QMainWindow):
         # Refresh dropdown to update status indicators
         # Only if we have logs loaded
         if self.log_selector.count() > 0:
-            # Get current logs from dropdown
-            current_logs = []
-            for i in range(self.log_selector.count()):
-                log_info = self.log_selector.itemData(i)
-                if log_info:
-                    current_logs.append(log_info)
-
             # Remember current selection
             current_index = self.log_selector.currentIndex()
             current_log_info = self.log_selector.itemData(current_index) if current_index >= 0 else None
@@ -1309,8 +1416,8 @@ class LogViewerWindow(QMainWindow):
             self.log_selector.currentIndexChanged.disconnect(self.on_log_selection_changed)
 
             try:
-                # Repopulate with updated status indicators
-                self.populate_log_dropdown(current_logs)
+                # Repopulate from master list with updated status indicators
+                self.populate_log_dropdown(self._all_discovered_logs)
 
                 # Restore selection if possible
                 if current_log_info:
@@ -1323,6 +1430,43 @@ class LogViewerWindow(QMainWindow):
             finally:
                 # Reconnect signal
                 self.log_selector.currentIndexChanged.connect(self.on_log_selection_changed)
+
+    def _get_process_start_time(self) -> float:
+        """
+        Get the start time of the current process.
+
+        Returns:
+            float: Process start time as Unix timestamp
+        """
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            return process.create_time()
+        except Exception as e:
+            logger.warning(f"Failed to get process start time: {e}")
+            # Fallback to current time
+            import time
+            return time.time()
+
+    def _is_log_from_current_session(self, log_info: LogFileInfo) -> bool:
+        """
+        Check if a log file was created during the current session.
+
+        Args:
+            log_info: LogFileInfo to check
+
+        Returns:
+            bool: True if log was created after session start time
+        """
+        try:
+            # Get file modification time (when log was created/last written)
+            mtime = log_info.path.stat().st_mtime
+            # Allow a small buffer (5 seconds) to account for timing differences
+            return mtime >= (self._session_start_time - 5.0)
+        except (OSError, FileNotFoundError):
+            # If we can't stat the file, exclude it
+            return False
 
     def _is_log_from_alive_process(self, log_info: LogFileInfo) -> bool:
         """
@@ -1350,16 +1494,10 @@ class LogViewerWindow(QMainWindow):
         self.show_alive_only = (state == Qt.CheckState.Checked.value)
 
         # Refresh dropdown with filter applied
-        # Get all logs from current dropdown
-        all_logs = []
-        for i in range(self.log_selector.count()):
-            log_info = self.log_selector.itemData(i)
-            if log_info:
-                all_logs.append(log_info)
-
-        # If we have logs, repopulate
-        if all_logs:
-            self.populate_log_dropdown(all_logs)
+        # Always use master list as source, not the current dropdown
+        # This ensures all logs are available when filter is toggled off
+        if self._all_discovered_logs:
+            self.populate_log_dropdown(self._all_discovered_logs)
 
         logger.debug(f"Filter changed: show_alive_only={self.show_alive_only}")
 
