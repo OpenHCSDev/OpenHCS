@@ -53,31 +53,44 @@ Integrated napari viewers provide immediate visualization of processing results.
 
 ## Installation
 
-OpenHCS is available on PyPI and requires Python 3.12+ with optional GPU acceleration support for CUDA 12.x.
+OpenHCS is available on PyPI and requires Python 3.9+ with optional GPU acceleration support for CUDA 12.x.
 
-### PyPI Installation (Recommended)
+### Quick Start
 
 ```bash
-# Headless installation (for servers, CI, or programmatic use)
-pip install openhcs
-
-# With desktop GUI
+# Desktop GUI (recommended for most users)
 pip install openhcs[gui]
 
-# With Napari viewer
-pip install openhcs[napari]
+# Then launch the application
+openhcs
+```
 
-# With Fiji/ImageJ viewer
-pip install openhcs[fiji]
+### Installation Options
 
-# With both viewers
-pip install openhcs[viz]
+```bash
+# Headless (servers, CI, programmatic use - no GUI)
+pip install openhcs
 
-# With GPU acceleration
-pip install openhcs[gpu]
+# Desktop GUI only
+pip install openhcs[gui]
+
+# GUI + Napari viewer
+pip install openhcs[gui,napari]
+
+# GUI + Fiji/ImageJ viewer
+pip install openhcs[gui,fiji]
+
+# GUI + both viewers
+pip install openhcs[gui,viz]
 
 # Full installation (GUI + viewers + GPU)
 pip install openhcs[gui,viz,gpu]
+
+# Headless with GPU (server processing)
+pip install openhcs[gpu]
+
+# OMERO integration
+pip install openhcs[omero]
 ```
 
 **Optional Advanced Features**:
@@ -112,21 +125,24 @@ pip install openhcs[gui]
 
 ### Launch Application
 
-After installation, launch the desktop interface:
+After installing with `[gui]`, launch the desktop interface:
 
 ```bash
-# Desktop GUI application (PyPI installation)
+# Launch GUI (requires openhcs[gui])
 openhcs
 
-# Or explicitly
-openhcs-gui
-
-# Development installation
-python -m openhcs.pyqt_gui
+# Alternative commands
+openhcs-gui                    # Same as 'openhcs'
+python -m openhcs.pyqt_gui     # Module invocation
 
 # With debug logging
 openhcs --log-level DEBUG
+
+# Show help
+openhcs --help
 ```
+
+**Note**: The `openhcs` command requires GUI dependencies. If you installed headless (`pip install openhcs`), you'll get a helpful error message telling you to install `openhcs[gui]`.
 
 ## Basic Usage
 
