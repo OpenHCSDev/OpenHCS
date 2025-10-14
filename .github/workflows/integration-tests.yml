@@ -119,7 +119,7 @@ jobs:
                 --it-dims 3d \
                 --it-exec-mode multiprocessing \
                 --it-visualizers none \
-                -v --tb=short
+                -v --tb=short -s --log-cli-level=INFO
         timeout-minutes: 15
 
       - name: Show OMERO logs on failure
