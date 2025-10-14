@@ -26,7 +26,8 @@ from typing import Any, Dict, Optional
 from openhcs.io.filemanager import FileManager
 from openhcs.utils.import_utils import optional_import
 from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
-from openhcs.runtime.zmq_base import ZMQServer
+from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT
+from openhcs.runtime.zmq_messages import ImageAck
 
 # Optional napari import - this module should only be imported if napari is available
 napari = optional_import("napari")
@@ -430,6 +431,47 @@ class NapariViewerServer(ZMQServer):
         self.layers = {}
         self.component_groups = {}
 
+        # Create PUSH socket for sending acknowledgments to shared ack port
+        self.ack_socket = None
+        self._setup_ack_socket()
+
+    def _setup_ack_socket(self):
+        """Setup PUSH socket for sending acknowledgments."""
+        import zmq
+        try:
+            context = zmq.Context.instance()
+            self.ack_socket = context.socket(zmq.PUSH)
+            self.ack_socket.connect(f"tcp://localhost:{SHARED_ACK_PORT}")
+            logger.info(f"🔬 NAPARI SERVER: Connected ack socket to port {SHARED_ACK_PORT}")
+        except Exception as e:
+            logger.warning(f"🔬 NAPARI SERVER: Failed to setup ack socket: {e}")
+            self.ack_socket = None
+
+    def _send_ack(self, image_id: str, status: str = 'success', error: str = None):
+        """Send acknowledgment that an image was processed.
+
+        Args:
+            image_id: UUID of the processed image
+            status: 'success' or 'error'
+            error: Error message if status='error'
+        """
+        if not self.ack_socket:
+            return
+
+        try:
+            ack = ImageAck(
+                image_id=image_id,
+                viewer_port=self.port,
+                viewer_type='napari',
+                status=status,
+                timestamp=time.time(),
+                error=error
+            )
+            self.ack_socket.send_json(ack.to_dict())
+            logger.debug(f"🔬 NAPARI SERVER: Sent ack for image {image_id}")
+        except Exception as e:
+            logger.warning(f"🔬 NAPARI SERVER: Failed to send ack for {image_id}: {e}")
+
     def _create_pong_response(self) -> Dict[str, Any]:
         """Override to add Napari-specific fields."""
         response = super()._create_pong_response()
@@ -451,6 +493,13 @@ class NapariViewerServer(ZMQServer):
         if msg_type == 'shutdown' or msg_type == 'force_shutdown':
             logger.info(f"🔬 NAPARI SERVER: {msg_type} requested, closing viewer")
             self.request_shutdown()
+
+            # Schedule viewer close on Qt event loop to trigger application exit
+            # This must be done after sending the response, so we use QTimer.singleShot
+            if self.viewer is not None:
+                from qtpy import QtCore
+                QtCore.QTimer.singleShot(100, self.viewer.close)
+
             return {
                 'type': 'shutdown_ack',
                 'status': 'success',
@@ -495,6 +544,7 @@ class NapariViewerServer(ZMQServer):
         import numpy as np
 
         path = image_info.get('path', 'unknown')
+        image_id = image_info.get('image_id')  # UUID for acknowledgment
         shape = image_info.get('shape')
         dtype = image_info.get('dtype')
         shm_name = image_info.get('shm_name')
@@ -505,28 +555,41 @@ class NapariViewerServer(ZMQServer):
         component_metadata['step_index'] = image_info.get('step_index', 0)
         component_metadata['step_name'] = image_info.get('step_name', 'unknown_step')
 
-        # Load image data
-        if shm_name:
-            from multiprocessing import shared_memory
-            shm = shared_memory.SharedMemory(name=shm_name)
-            image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
-            shm.close()
-        elif direct_data:
-            image_data = np.array(direct_data, dtype=dtype).reshape(shape)
-        else:
-            logger.warning(f"🔬 NAPARI PROCESS: No image data in message")
-            return
+        try:
+            # Load image data
+            if shm_name:
+                from multiprocessing import shared_memory
+                shm = shared_memory.SharedMemory(name=shm_name)
+                image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                shm.close()
+            elif direct_data:
+                image_data = np.array(direct_data, dtype=dtype).reshape(shape)
+            else:
+                logger.warning(f"🔬 NAPARI PROCESS: No image data in message")
+                if image_id:
+                    self._send_ack(image_id, status='error', error='No image data in message')
+                return
 
-        # Extract colormap
-        colormap = 'viridis'
-        if display_config_dict and 'colormap' in display_config_dict:
-            colormap = display_config_dict['colormap']
+            # Extract colormap
+            colormap = 'viridis'
+            if display_config_dict and 'colormap' in display_config_dict:
+                colormap = display_config_dict['colormap']
 
-        # Component-aware layer management
-        _handle_component_aware_display(
-            self.viewer, self.layers, self.component_groups, image_data, path,
-            colormap, display_config_dict or {}, self.replace_layers, component_metadata
-        )
+            # Component-aware layer management
+            _handle_component_aware_display(
+                self.viewer, self.layers, self.component_groups, image_data, path,
+                colormap, display_config_dict or {}, self.replace_layers, component_metadata
+            )
+
+            # Send acknowledgment that image was successfully displayed
+            if image_id:
+                self._send_ack(image_id, status='success')
+
+        except Exception as e:
+            logger.error(f"🔬 NAPARI PROCESS: Failed to process image {path}: {e}")
+            if image_id:
+                self._send_ack(image_id, status='error', error=str(e))
+            raise  # Fail loud
 
 
 def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = False, log_file_path: str = None):
@@ -757,10 +820,15 @@ class NapariStreamVisualizer:
         if not self._is_running:
             return False
 
-        # If we connected to an existing viewer (we didn't create the process),
-        # we can't check process status, so just return the flag
+        # If we connected to an existing viewer, verify it's still responsive
         if self._connected_to_existing:
-            return self._is_running
+            # Quick ping check to verify viewer is still alive
+            if not self._quick_ping_check():
+                logger.debug(f"🔬 VISUALIZER: Connected viewer on port {self.napari_port} is no longer responsive")
+                self._is_running = False
+                self._connected_to_existing = False
+                return False
+            return True
 
         if self.process is None:
             self._is_running = False
@@ -784,6 +852,40 @@ class NapariStreamVisualizer:
             logger.warning(f"🔬 VISUALIZER: Error checking process status: {e}")
             self._is_running = False
             return False
+
+    def _quick_ping_check(self) -> bool:
+        """Quick ping check to verify viewer is responsive (for connected viewers)."""
+        import zmq
+        import pickle
+
+        try:
+            ctx = zmq.Context()
+            sock = ctx.socket(zmq.REQ)
+            sock.setsockopt(zmq.LINGER, 0)
+            sock.setsockopt(zmq.RCVTIMEO, 200)  # 200ms timeout for quick check
+            sock.connect(f"tcp://localhost:{self.napari_port + 1000}")
+            sock.send(pickle.dumps({'type': 'ping'}))
+            response = pickle.loads(sock.recv())
+            sock.close()
+            ctx.term()
+            return response.get('type') == 'pong'
+        except:
+            return False
+
+    def wait_for_ready(self, timeout: float = 10.0) -> bool:
+        """
+        Wait for the viewer to be ready to receive images.
+
+        This method blocks until the viewer is responsive or the timeout expires.
+        Should be called after start_viewer() when using async_mode=True.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            True if viewer is ready, False if timeout
+        """
+        return self._wait_for_viewer_ready(timeout=timeout)
 
     def _find_free_port(self) -> int:
         """Find a free port for ZeroMQ communication."""

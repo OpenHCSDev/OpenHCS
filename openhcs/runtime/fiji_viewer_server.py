@@ -10,7 +10,8 @@ import time
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
-from openhcs.runtime.zmq_base import ZMQServer
+from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT
+from openhcs.runtime.zmq_messages import ImageAck
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,47 @@ class FijiViewerServer(ZMQServer):
         self.hyperstacks = {}  # Track hyperstacks by (step_name, well) key
         self.hyperstack_metadata = {}  # Track original image metadata for each hyperstack
         self._shutdown_requested = False
+
+        # Create PUSH socket for sending acknowledgments to shared ack port
+        self.ack_socket = None
+        self._setup_ack_socket()
+
+    def _setup_ack_socket(self):
+        """Setup PUSH socket for sending acknowledgments."""
+        import zmq
+        try:
+            context = zmq.Context.instance()
+            self.ack_socket = context.socket(zmq.PUSH)
+            self.ack_socket.connect(f"tcp://localhost:{SHARED_ACK_PORT}")
+            logger.info(f"🔬 FIJI SERVER: Connected ack socket to port {SHARED_ACK_PORT}")
+        except Exception as e:
+            logger.warning(f"🔬 FIJI SERVER: Failed to setup ack socket: {e}")
+            self.ack_socket = None
+
+    def _send_ack(self, image_id: str, status: str = 'success', error: str = None):
+        """Send acknowledgment that an image was processed.
+
+        Args:
+            image_id: UUID of the processed image
+            status: 'success' or 'error'
+            error: Error message if status='error'
+        """
+        if not self.ack_socket:
+            return
+
+        try:
+            ack = ImageAck(
+                image_id=image_id,
+                viewer_port=self.port,
+                viewer_type='fiji',
+                status=status,
+                timestamp=time.time(),
+                error=error
+            )
+            self.ack_socket.send_json(ack.to_dict())
+            logger.debug(f"🔬 FIJI SERVER: Sent ack for image {image_id}")
+        except Exception as e:
+            logger.warning(f"🔬 FIJI SERVER: Failed to send ack for {image_id}: {e}")
     
     def start(self):
         """Start server and initialize PyImageJ."""
@@ -65,22 +107,23 @@ class FijiViewerServer(ZMQServer):
     def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle control messages beyond ping/pong.
-        
+
         Supported message types:
         - shutdown: Graceful shutdown (closes viewer)
         - force_shutdown: Force shutdown (same as shutdown for Fiji)
         """
         msg_type = message.get('type')
-        
+
         if msg_type == 'shutdown' or msg_type == 'force_shutdown':
-            logger.info(f"🔬 FIJI SERVER: {msg_type} requested, closing viewer")
-            self.request_shutdown()
+            logger.info(f"🔬 FIJI SERVER: {msg_type} requested, will close after sending acknowledgment")
+            # Set shutdown flag but don't call stop() yet - let the response be sent first
+            self._shutdown_requested = True
             return {
                 'type': 'shutdown_ack',
                 'status': 'success',
                 'message': 'Fiji viewer shutting down'
             }
-        
+
         return {'status': 'ok'}
     
     def handle_data_message(self, message: Dict[str, Any]):
@@ -162,6 +205,7 @@ class FijiViewerServer(ZMQServer):
             shape = tuple(image_info.get('shape'))
             dtype = np.dtype(image_info.get('dtype'))
             component_metadata = image_info.get('component_metadata', {})
+            image_id = image_info.get('image_id')  # UUID for acknowledgment
 
             try:
                 shm = shared_memory.SharedMemory(name=shm_name)
@@ -171,10 +215,14 @@ class FijiViewerServer(ZMQServer):
 
                 image_data_list.append({
                     'data': np_data,
-                    'metadata': component_metadata
+                    'metadata': component_metadata,
+                    'image_id': image_id  # Preserve image_id for ack
                 })
             except Exception as e:
                 logger.error(f"🔬 FIJI SERVER: Failed to read shared memory {shm_name}: {e}")
+                # Send error ack
+                if image_id:
+                    self._send_ack(image_id, status='error', error=f"Failed to read shared memory: {e}")
                 continue
 
         if not image_data_list:
@@ -386,6 +434,12 @@ class FijiViewerServer(ZMQServer):
         self.hyperstack_metadata[window_key] = all_images
 
         logger.info(f"🔬 FIJI SERVER: Displayed hyperstack '{window_key}' with {stack.getSize()} slices ({len(all_images)} unique images)")
+
+        # Send acknowledgments for all successfully displayed images
+        for img_data in all_images:
+            image_id = img_data.get('image_id')
+            if image_id:
+                self._send_ack(image_id, status='success')
 
     def _collect_dimension_values(self, images: List[Dict[str, Any]], components: List[str]) -> List[tuple]:
         """
