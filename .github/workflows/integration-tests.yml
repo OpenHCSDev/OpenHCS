@@ -63,15 +63,18 @@ jobs:
   integration-tests-focused:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
@@ -89,19 +92,22 @@ jobs:
                 --it-exec-mode multiprocessing \
                 -v --tb=short
 
-  # Test PyPI-style installation (build wheel and install from it)
+  # Test PyPI-style installation across Python versions
   pypi-installation-test:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Build wheel
         run: |
