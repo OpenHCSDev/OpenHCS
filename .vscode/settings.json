@@ -1,0 +1,20 @@
+{
+    "python.testing.pytestArgs": [
+        "tests",
+        // Include all microscope types (ImageXpress, OperaPhenix, OMERO) for VSCode test discovery
+        "--it-microscopes=ImageXpress,OperaPhenix,OMERO",
+        // Keep default backends (disk, zarr) - add more if needed
+        "--it-backends=disk,zarr",
+        // Keep default execution mode
+        "--it-exec-mode=multiprocessing",
+        // Keep default data types
+        "--it-dims=3d",
+        // Keep default ZMQ mode
+        "--it-zmq-mode=direct",
+        // Include all visualizer options (none, napari, fiji, napari+fiji) for VSCode test discovery
+        "--it-visualizers=none,napari,fiji,napari+fiji"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "esbonio.server.enabled": false
+}

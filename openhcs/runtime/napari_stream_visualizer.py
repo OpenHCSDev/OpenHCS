@@ -145,11 +145,10 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
                 else:
                     component_modes[component] = 'slice' if component == 'channel' else 'stack'
 
-        # Create layer grouping key: step_prefix + optionally well + slice_components
-        # Each unique combination gets its own layer
-        layer_key_parts = [step_prefix]
-        if component_modes.get('well', 'stack') == 'slice':
-            layer_key_parts.append(well_id)
+        # Create layer grouping key: step_prefix + well + slice_components
+        # CRITICAL: Always include well_id to prevent cross-contamination between wells
+        # in multiprocessing scenarios. The display mode affects visualization, not grouping.
+        layer_key_parts = [step_prefix, well_id]
 
         # Add slice components to layer key (these create separate layers)
         for component_name, mode in component_modes.items():

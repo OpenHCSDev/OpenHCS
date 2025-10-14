@@ -49,14 +49,21 @@ def pytest_addoption(parser):
         "--enable-napari",
         action="store_true",
         default=False,
-        help="Enable Napari streaming in tests (default: disabled)"
+        help="Enable Napari streaming in tests (default: disabled). DEPRECATED: Use --it-visualizers instead."
     )
 
     parser.addoption(
         "--enable-fiji",
         action="store_true",
         default=False,
-        help="Enable Fiji streaming in tests (default: disabled)"
+        help="Enable Fiji streaming in tests (default: disabled). DEPRECATED: Use --it-visualizers instead."
+    )
+
+    parser.addoption(
+        "--it-visualizers",
+        action="store",
+        default=env_default("IT_VISUALIZERS", "none"),
+        help="Comma-separated list of visualizers to enable (default: none). Options: none,napari,fiji,napari+fiji. Use 'all' for full coverage."
     )
 
     parser.addoption(
@@ -119,6 +126,14 @@ from tests.integration.helpers.fixture_utils import (
     EXECUTION_MODE_CONFIGS, ZMQ_EXECUTION_MODE_CONFIGS
 )
 
+# Visualizer configurations for parametrized testing
+VISUALIZER_CONFIGS = {
+    "none": {"enable_napari": False, "enable_fiji": False},
+    "napari": {"enable_napari": True, "enable_fiji": False},
+    "fiji": {"enable_napari": False, "enable_fiji": True},
+    "napari+fiji": {"enable_napari": True, "enable_fiji": True}
+}
+
 # Extensible configuration mapping for pytest_generate_tests
 INTEGRATION_TEST_CONFIG = {
     'backend_config': {
@@ -150,6 +165,11 @@ INTEGRATION_TEST_CONFIG = {
         'option': '--it-processing-axis',
         'choices': ['well'],
         'value_mapper': lambda x: x  # Return axis name as-is
+    },
+    'visualizer_config': {
+        'option': '--it-visualizers',
+        'choices': list(VISUALIZER_CONFIGS.keys()),
+        'value_mapper': lambda name: VISUALIZER_CONFIGS[name]  # Map name to config dict
     }
 }
 
@@ -176,15 +196,35 @@ def pytest_generate_tests(metafunc):
 
 
 @pytest.fixture
-def enable_napari(request):
-    """Fixture to control Napari streaming in tests."""
-    return request.config.getoption("--enable-napari")
+def enable_napari(request, visualizer_config):
+    """
+    Fixture to control Napari streaming in tests.
+
+    Supports both legacy --enable-napari flag and new --it-visualizers parametrization.
+    """
+    # Check legacy flag first (for backward compatibility)
+    legacy_flag = request.config.getoption("--enable-napari")
+    if legacy_flag:
+        return True
+
+    # Use parametrized visualizer_config
+    return visualizer_config.get("enable_napari", False)
 
 
 @pytest.fixture
-def enable_fiji(request):
-    """Fixture to control Fiji streaming in tests."""
-    return request.config.getoption("--enable-fiji")
+def enable_fiji(request, visualizer_config):
+    """
+    Fixture to control Fiji streaming in tests.
+
+    Supports both legacy --enable-fiji flag and new --it-visualizers parametrization.
+    """
+    # Check legacy flag first (for backward compatibility)
+    legacy_flag = request.config.getoption("--enable-fiji")
+    if legacy_flag:
+        return True
+
+    # Use parametrized visualizer_config
+    return visualizer_config.get("enable_fiji", False)
 
 
 @pytest.fixture(autouse=True)

@@ -52,6 +52,7 @@ File management, memory types, and backend systems.
    storage_and_memory_system
    memory_type_system
    napari_streaming_system
+   fiji_streaming_system
    omero_backend_system
    zmq_execution_system
 
@@ -65,6 +66,7 @@ Integration with external tools and platforms (Napari, OMERO, Fiji).
 
    external_integrations_overview
    napari_integration_architecture
+   fiji_streaming_system
 
 System Integration
 ==================
@@ -144,11 +146,11 @@ Quick Start Paths
 
 **Configuration Systems?** Focus on :doc:`lazy_class_system` → :doc:`configuration_resolution` → :doc:`composition_detection_system` → :doc:`context_management_system`
 
-**Real-Time Visualization?** Begin with :doc:`napari_integration_architecture` → :doc:`napari_streaming_system` → :doc:`storage_and_memory_system`
+**Real-Time Visualization?** Begin with :doc:`napari_integration_architecture` → :doc:`napari_streaming_system` → :doc:`fiji_streaming_system` → :doc:`storage_and_memory_system`
 
 **OMERO Integration?** Start with :doc:`omero_backend_system` → :doc:`zmq_execution_system` → :doc:`storage_and_memory_system`
 
-**External Integrations?** Start with :doc:`external_integrations_overview` → :doc:`napari_integration_architecture` → :doc:`omero_backend_system`
+**External Integrations?** Start with :doc:`external_integrations_overview` → :doc:`napari_integration_architecture` → :doc:`fiji_streaming_system` → :doc:`omero_backend_system`
 
 **UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`placeholder_resolution_system` → :doc:`tui_system` → :doc:`code_ui_interconversion`
 

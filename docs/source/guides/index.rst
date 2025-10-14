@@ -25,6 +25,8 @@ System Integration Guides
    pipeline_compilation_workflow
    omero_integration
    napari_viewer_management
+   fiji_viewer_management
+   testing_guide
 
 Memory Type Integration
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -53,6 +55,20 @@ Napari Viewer Management
 Learn how to manage Napari viewer processes across OpenHCS components. Understand viewer reuse, parallel startup, persistent viewers, and automatic reconnection for real-time visualization workflows.
 
 :doc:`napari_viewer_management`
+
+Fiji Viewer Management
+^^^^^^^^^^^^^^^^^^^^^^
+
+Learn how to manage Fiji/ImageJ viewer processes for OpenHCS visualization. Understand PyImageJ integration, automatic hyperstack building, persistent viewers, and ZMQ-based streaming for leveraging the ImageJ ecosystem.
+
+:doc:`fiji_viewer_management`
+
+Testing Guide
+^^^^^^^^^^^^^
+
+Comprehensive guide for running OpenHCS integration tests with different configurations. Learn how to test with Napari/Fiji visualizers, OMERO backend, and various execution modes using VSCode test discovery or command-line.
+
+:doc:`testing_guide`
 
 Quick Reference
 ---------------

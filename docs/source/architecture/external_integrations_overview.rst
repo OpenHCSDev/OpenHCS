@@ -103,16 +103,24 @@ Fiji Integration
 
 **Purpose**: Interoperability with ImageJ/Fiji ecosystem
 
-**Architecture**: Streaming backend (similar to Napari)
+**Architecture**: Streaming backend + PyImageJ integration
 
 **Key Features**:
 
-- Stream processed images to Fiji
-- Leverage Fiji's plugin ecosystem
-- Bidirectional data exchange
-- Macro scripting integration
+- Zero-copy shared memory transfer
+- Automatic hyperstack building from component metadata
+- PyImageJ integration for native Fiji functionality
+- Persistent viewers across pipeline runs
+- Multi-instance support (multiple viewers on different ports)
 
-**Status**: Implemented using same ZMQ pattern as Napari
+**Use Cases**:
+
+- Leveraging ImageJ/Fiji plugin ecosystem
+- Macro scripting integration
+- CZT-based visualization workflows
+- Cross-platform bioimage analysis
+
+**Documentation**: See :doc:`fiji_streaming_system`
 
 Architectural Patterns
 ----------------------
@@ -377,8 +385,10 @@ See Also
 --------
 
 - :doc:`napari_integration_architecture` - Napari integration details
+- :doc:`fiji_streaming_system` - Fiji streaming architecture
 - :doc:`omero_backend_system` - OMERO backend architecture
 - :doc:`zmq_execution_system` - ZMQ execution pattern
 - :doc:`../guides/omero_integration` - OMERO integration guide
 - :doc:`../guides/napari_viewer_management` - Napari viewer management
+- :doc:`../guides/fiji_viewer_management` - Fiji viewer management
 
