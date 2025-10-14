@@ -272,7 +272,9 @@ class PathPlanner:
         if io_type == 'output' and items:  # Special outputs
             results_path = self._get_results_path()
             for key in sorted(items):
-                filename = PipelinePathPlanner._build_axis_filename(self.ctx.axis_id, key)
+                # Include step index in filename to prevent collisions when multiple steps
+                # produce the same special output (e.g., two crop_device steps both producing match_results)
+                filename = PipelinePathPlanner._build_axis_filename(self.ctx.axis_id, key, step_index=sid)
                 path = results_path / filename
                 result[key] = {
                     'path': str(path),
@@ -418,8 +420,21 @@ class PipelinePathPlanner:
         return PathPlanner(context, pipeline_config).plan(pipeline_definition)
 
     @staticmethod
-    def _build_axis_filename(axis_id: str, key: str, extension: str = "pkl") -> str:
-        """Build standardized axis-based filename."""
+    def _build_axis_filename(axis_id: str, key: str, extension: str = "pkl", step_index: Optional[int] = None) -> str:
+        """Build standardized axis-based filename with optional step index.
+
+        Args:
+            axis_id: Well/axis identifier (e.g., "R02C02")
+            key: Special output key (e.g., "match_results")
+            extension: File extension (default: "pkl")
+            step_index: Optional step index to prevent collisions when multiple steps
+                       produce the same special output
+
+        Returns:
+            Filename string (e.g., "R02C02_match_results_step3.pkl")
+        """
+        if step_index is not None:
+            return f"{axis_id}_{key}_step{step_index}.{extension}"
         return f"{axis_id}_{key}.{extension}"
 
 
