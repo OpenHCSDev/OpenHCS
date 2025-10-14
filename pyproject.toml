@@ -90,7 +90,12 @@ gui = [
 
 # Optional visualization tools
 viz = [
-    "napari",
+    # Napari viewer
+    "napari>=0.4.18",
+
+    # Fiji/ImageJ integration
+    "pyimagej>=1.4.1",
+    "scyjava>=1.9.1",
 ]
 
 # OMERO integration dependencies
@@ -137,10 +142,12 @@ all = [
     "PyQt6>=6.9.1",
     "PyQt6-QScintilla>=2.14.1",
     "pyqtgraph>=0.13.7",
-    
+
     # Viz
-    "napari",
-    
+    "napari>=0.4.18",
+    "pyimagej>=1.4.1",
+    "scyjava>=1.9.1",
+
     # GPU
     "torch>=2.6.0,<2.8.0",
     "torchvision>=0.21.0,<0.23.0",
