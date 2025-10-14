@@ -41,21 +41,17 @@ class ImageBrowserWidget(QWidget):
     
     def __init__(self, orchestrator=None, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
         super().__init__(parent)
-        
+
         self.orchestrator = orchestrator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
         self.filemanager = FileManager(storage_registry)
 
-        # Napari viewer tracking
-        self.napari_viewers = {}  # port -> NapariStreamVisualizer instance
-
-        # Image queue for pending napari streams
-        self.pending_napari_queue = []  # List of (filename, image_data, config) tuples
-
-        # Lazy Napari config widget (will be created in init_ui)
+        # Lazy config widgets (will be created in init_ui)
         self.napari_config_form = None
         self.lazy_napari_config = None
+        self.fiji_config_form = None
+        self.lazy_fiji_config = None
 
         # Image data tracking
         self.all_images = {}  # filename -> metadata dict
@@ -151,20 +147,26 @@ class ImageBrowserWidget(QWidget):
 
         # Action buttons
         button_layout = QHBoxLayout()
-        
+
         self.view_napari_btn = QPushButton("View in Napari")
         self.view_napari_btn.clicked.connect(self.view_selected_in_napari)
         self.view_napari_btn.setStyleSheet(self.style_gen.generate_button_style())
         self.view_napari_btn.setEnabled(False)
         button_layout.addWidget(self.view_napari_btn)
-        
+
+        self.view_fiji_btn = QPushButton("View in Fiji")
+        self.view_fiji_btn.clicked.connect(self.view_selected_in_fiji)
+        self.view_fiji_btn.setStyleSheet(self.style_gen.generate_button_style())
+        self.view_fiji_btn.setEnabled(False)
+        button_layout.addWidget(self.view_fiji_btn)
+
         button_layout.addStretch()
-        
+
         # Info label
         self.info_label = QLabel("No images loaded")
         self.info_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
         button_layout.addWidget(self.info_label)
-        
+
         layout.addLayout(button_layout)
         
         # Connect selection change
@@ -212,7 +214,7 @@ class ImageBrowserWidget(QWidget):
         # Apply styling
         self.image_table.setStyleSheet(self.style_gen.generate_table_widget_style())
 
-        # Connect double-click to view in Napari
+        # Connect double-click to view in enabled viewer(s)
         self.image_table.cellDoubleClicked.connect(self.on_image_double_clicked)
 
         layout.addWidget(self.image_table)
@@ -225,28 +227,40 @@ class ImageBrowserWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
 
-        # Napari config panel
-        config_panel = self._create_napari_config_panel()
-        layout.addWidget(config_panel, 3)  # 60% of space
+        # Napari config panel (with enable checkbox)
+        napari_panel = self._create_napari_config_panel()
+        layout.addWidget(napari_panel, 3)  # 30% of space
+
+        # Fiji config panel (with enable checkbox)
+        fiji_panel = self._create_fiji_config_panel()
+        layout.addWidget(fiji_panel, 3)  # 30% of space
 
         # Instance manager panel
         instance_panel = self._create_instance_manager_panel()
-        layout.addWidget(instance_panel, 2)  # 40% of space
+        layout.addWidget(instance_panel, 4)  # 40% of space
 
         return container
 
     def _create_napari_config_panel(self):
-        """Create the Napari configuration panel with lazy config widget."""
-        panel = QGroupBox("Napari Display Settings")
+        """Create the Napari configuration panel with enable checkbox and lazy config widget."""
+        from PyQt6.QtWidgets import QCheckBox
+
+        panel = QGroupBox()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        # Enable checkbox in header
+        self.napari_enable_checkbox = QCheckBox("Enable Napari Streaming")
+        self.napari_enable_checkbox.setChecked(True)  # Enabled by default
+        self.napari_enable_checkbox.toggled.connect(self._on_napari_enable_toggled)
+        layout.addWidget(self.napari_enable_checkbox)
 
         # Create lazy Napari config instance
         from openhcs.core.config import LazyNapariStreamingConfig
         self.lazy_napari_config = LazyNapariStreamingConfig()
 
         # Create parameter form for the lazy config
-        # Use pipeline_config as context for placeholder resolution
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 
         # Set up context for placeholder resolution
@@ -269,6 +283,62 @@ class ImageBrowserWidget(QWidget):
         layout.addWidget(scroll)
 
         return panel
+
+    def _create_fiji_config_panel(self):
+        """Create the Fiji configuration panel with enable checkbox and lazy config widget."""
+        from PyQt6.QtWidgets import QCheckBox
+
+        panel = QGroupBox()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        # Enable checkbox in header
+        self.fiji_enable_checkbox = QCheckBox("Enable Fiji Streaming")
+        self.fiji_enable_checkbox.setChecked(False)  # Disabled by default
+        self.fiji_enable_checkbox.toggled.connect(self._on_fiji_enable_toggled)
+        layout.addWidget(self.fiji_enable_checkbox)
+
+        # Create lazy Fiji config instance
+        from openhcs.config_framework.lazy_factory import LazyFijiStreamingConfig
+        self.lazy_fiji_config = LazyFijiStreamingConfig()
+
+        # Create parameter form for the lazy config
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        # Set up context for placeholder resolution
+        if self.orchestrator:
+            context_obj = self.orchestrator.pipeline_config
+        else:
+            context_obj = None
+
+        self.fiji_config_form = ParameterFormManager(
+            object_instance=self.lazy_fiji_config,
+            field_id="fiji_config",
+            parent=panel,
+            context_obj=context_obj
+        )
+
+        # Wrap in scroll area for long forms
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.fiji_config_form)
+        layout.addWidget(scroll)
+
+        # Initially disable the form (checkbox is unchecked by default)
+        self.fiji_config_form.setEnabled(False)
+
+        return panel
+
+    def _on_napari_enable_toggled(self, checked: bool):
+        """Handle Napari enable checkbox toggle."""
+        self.napari_config_form.setEnabled(checked)
+        self.view_napari_btn.setEnabled(checked and len(self.image_table.selectedItems()) > 0)
+
+    def _on_fiji_enable_toggled(self, checked: bool):
+        """Handle Fiji enable checkbox toggle."""
+        self.fiji_config_form.setEnabled(checked)
+        self.view_fiji_btn.setEnabled(checked and len(self.image_table.selectedItems()) > 0)
 
     def _create_instance_manager_panel(self):
         """Create the Napari instance manager panel."""
@@ -307,11 +377,15 @@ class ImageBrowserWidget(QWidget):
         """Set the orchestrator and load images."""
         self.orchestrator = orchestrator
 
-        # Update napari config form context to use new pipeline_config
+        # Update config form contexts to use new pipeline_config
         if self.napari_config_form and orchestrator:
             self.napari_config_form.context_obj = orchestrator.pipeline_config
             # Refresh placeholders with new context (uses private method)
             self.napari_config_form._refresh_all_placeholders()
+
+        if self.fiji_config_form and orchestrator:
+            self.fiji_config_form.context_obj = orchestrator.pipeline_config
+            self.fiji_config_form._refresh_all_placeholders()
 
         self.load_images()
 
@@ -388,24 +462,35 @@ class ImageBrowserWidget(QWidget):
             self.image_count_label.setText(f"Images: {len(self.all_images)}")
 
     def refresh_napari_instances(self):
-        """Refresh the list of Napari instances with status and queue info."""
+        """Refresh the list of Napari and Fiji instances with status."""
+        if not self.orchestrator:
+            return
+
+        # Get tracked viewers from orchestrator
+        tracked_ports = set()
+        for key, viewer in self.orchestrator._visualizers.items():
+            if key[0] == 'napari':
+                tracked_ports.add(key[1])
+            elif key[0] == 'fiji':
+                tracked_ports.add(key[1])
+
         # First, immediately show tracked viewers (synchronous)
-        tracked_ports = set(self.napari_viewers.keys())
         self._update_instance_list(tracked_ports)
 
         # Then start async scan for external viewers in background
         import threading
 
         def scan_and_update():
-            # Scan for all Napari viewers on common ports (including external ones)
+            # Scan for all viewers on common ports (including external ones)
             from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
-            common_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]  # Scan ports 5555-5564
+            napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]  # 5555-5564
+            fiji_ports = [5556 + i for i in range(10)]  # 5556-5565
+            common_ports = napari_ports + fiji_ports
 
             detected_ports = set()
 
-            # First, add ALL tracked viewers (even if not running yet - to show "Starting...")
-            for port in self.napari_viewers.keys():
-                detected_ports.add(port)
+            # First, add ALL tracked viewers from orchestrator
+            detected_ports.update(tracked_ports)
 
             # Then, scan for external viewers by pinging them in parallel
             external_ports = self._scan_ports_parallel([p for p in common_ports if p not in detected_ports])
@@ -443,36 +528,40 @@ class ImageBrowserWidget(QWidget):
     @pyqtSlot(object)
     def _update_instance_list(self, detected_ports: set):
         """Update instance list on UI thread (called via QMetaObject.invokeMethod)."""
+        if not self.orchestrator:
+            return
+
         self.instance_list.clear()
 
         # Display all detected viewers with status
         for port in sorted(detected_ports):
-            viewer = self.napari_viewers.get(port)
-            queue_count = len([1 for f, d, c, p in self.pending_napari_queue if p == port])
+            # Check if this port is tracked by orchestrator
+            viewer = None
+            viewer_type = "Unknown"
+            for key, vis in self.orchestrator._visualizers.items():
+                if len(key) > 1 and key[1] == port:
+                    viewer = vis
+                    viewer_type = key[0].capitalize()
+                    break
 
             # Determine status
             if viewer is not None:
                 # Tracked viewer - show detailed status
                 if not viewer.is_running:
-                    if queue_count > 0:
-                        status = f"🚀 Starting ({queue_count} queued)"
-                    else:
-                        status = "🚀 Starting..."
-                elif queue_count > 0:
-                    status = f"⏳ {queue_count} queued"
+                    status = "🚀 Starting..."
                 else:
                     status = "✅ Ready"
+                label = f"{viewer_type} Port {port} - {status}"
             else:
                 # External viewer - just show ready
                 status = "✅ Ready"
+                label = f"Port {port} - {status}"
 
-            item = QListWidgetItem(f"Port {port} - {status}")
+            item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, port)
             self.instance_list.addItem(item)
 
-        # Don't clean up tracked viewers - keep them even if not running yet
-        # This allows us to show "Starting..." status
-        logger.debug(f"Found {len(detected_ports)} Napari instances")
+        logger.debug(f"Found {len(detected_ports)} viewer instances")
 
     def _ping_napari_viewer(self, port: int) -> bool:
         """
@@ -606,9 +695,19 @@ class ImageBrowserWidget(QWidget):
 
     def _kill_viewer_on_port(self, port: int):
         """Kill viewer on specified port (internal helper)."""
-        # If we have a tracked viewer, clean up ZMQ first
-        if port in self.napari_viewers:
-            viewer = self.napari_viewers[port]
+        if not self.orchestrator:
+            return
+
+        # If we have a tracked viewer in orchestrator, clean up ZMQ first
+        viewer = None
+        viewer_key = None
+        for key, vis in self.orchestrator._visualizers.items():
+            if len(key) > 1 and key[1] == port:
+                viewer = vis
+                viewer_key = key
+                break
+
+        if viewer is not None:
             if hasattr(viewer, '_cleanup_zmq'):
                 viewer._cleanup_zmq()
                 logger.debug(f"Cleaned up ZMQ for port {port}")
@@ -616,8 +715,8 @@ class ImageBrowserWidget(QWidget):
             # Mark as not running
             viewer._is_running = False
 
-            # Remove from tracking
-            del self.napari_viewers[port]
+            # Remove from orchestrator tracking
+            del self.orchestrator._visualizers[viewer_key]
 
         # Kill all processes on this port
         from openhcs.runtime.napari_stream_visualizer import NapariStreamVisualizer
@@ -782,212 +881,178 @@ class ImageBrowserWidget(QWidget):
     def on_selection_changed(self):
         """Handle selection change in the table."""
         has_selection = len(self.image_table.selectedItems()) > 0
-        self.view_napari_btn.setEnabled(has_selection)
+        # Enable buttons based on selection AND checkbox state
+        self.view_napari_btn.setEnabled(has_selection and self.napari_enable_checkbox.isChecked())
+        self.view_fiji_btn.setEnabled(has_selection and self.fiji_enable_checkbox.isChecked())
     
     def on_image_double_clicked(self, row: int, column: int):
-        """Handle double-click on an image row."""
-        self.view_selected_in_napari()
+        """Handle double-click on an image row - stream to enabled viewer(s)."""
+        napari_enabled = self.napari_enable_checkbox.isChecked()
+        fiji_enabled = self.fiji_enable_checkbox.isChecked()
+
+        # Stream to whichever viewer(s) are enabled
+        if napari_enabled and fiji_enabled:
+            # Both enabled - stream to both
+            self.view_selected_in_napari()
+            self.view_selected_in_fiji()
+        elif napari_enabled:
+            # Only Napari enabled
+            self.view_selected_in_napari()
+        elif fiji_enabled:
+            # Only Fiji enabled
+            self.view_selected_in_fiji()
+        else:
+            # Neither enabled - show message
+            QMessageBox.information(
+                self,
+                "No Viewer Enabled",
+                "Please enable Napari or Fiji streaming to view images."
+            )
     
     def view_selected_in_napari(self):
-        """View all selected images in Napari."""
+        """View all selected images in Napari as a batch (builds hyperstack)."""
         selected_rows = self.image_table.selectionModel().selectedRows()
         if not selected_rows:
             return
 
-        # Stream all selected images
+        # Collect all filenames
+        filenames = []
         for row_index in selected_rows:
             row = row_index.row()
             filename_item = self.image_table.item(row, 0)
             filename = filename_item.data(Qt.ItemDataRole.UserRole)
+            filenames.append(filename)
 
-            try:
-                self._load_and_stream_to_napari(filename)
-            except Exception as e:
-                logger.error(f"Failed to view image {filename} in Napari: {e}")
-                QMessageBox.warning(self, "Error", f"Failed to view image {filename} in Napari: {e}")
-                break  # Stop on first error
+        try:
+            # Stream all images as a batch
+            self._load_and_stream_batch_to_napari(filenames)
+        except Exception as e:
+            logger.error(f"Failed to view images in Napari: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to view images in Napari: {e}")
+
+    def view_selected_in_fiji(self):
+        """View all selected images in Fiji as a batch (builds hyperstack)."""
+        selected_rows = self.image_table.selectionModel().selectedRows()
+        if not selected_rows:
+            return
+
+        # Collect all filenames
+        filenames = []
+        for row_index in selected_rows:
+            row = row_index.row()
+            filename_item = self.image_table.item(row, 0)
+            filename = filename_item.data(Qt.ItemDataRole.UserRole)
+            filenames.append(filename)
+
+        try:
+            # Stream all images as a batch
+            self._load_and_stream_batch_to_fiji(filenames)
+        except Exception as e:
+            logger.error(f"Failed to view images in Fiji: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to view images in Fiji: {e}")
     
-    def _load_and_stream_to_napari(self, filename: str):
-        """Load image into memory and stream to Napari using live config widget values."""
+    def _load_and_stream_batch_to_napari(self, filenames: list):
+        """Load multiple images and stream as batch to Napari (builds hyperstack)."""
         if not self.orchestrator:
             raise RuntimeError("No orchestrator set")
 
-        # Get the full path to the image
-        # Filename is already a path relative to plate_path (from metadata_handler.get_image_files)
+        # Get plate path
         plate_path = Path(self.orchestrator.plate_path)
-        image_path = plate_path / filename
 
-        # Load image using FileManager with VFS config's read_backend
-        # Use AUTO backend to respect VFS config (will auto-detect zarr vs disk)
+        # Resolve backend
         from openhcs.config_framework.lazy_factory import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         global_config = get_current_global_config(GlobalPipelineConfig)
-        read_backend = global_config.vfs_config.read_backend.value
 
-        image_data = self.filemanager.load(str(image_path), read_backend)
+        if global_config.vfs_config.read_backend != Backend.AUTO:
+            read_backend = global_config.vfs_config.read_backend.value
+        else:
+            read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path)
 
-        # Resolve Napari config using compiler pattern:
-        # 1. Get current widget values
-        # 2. Create a temporary dataclass instance with those values
-        # 3. Set up nested context: pipeline_config -> widget_instance
-        # 4. Resolve to get final merged config
+        # Load all images
+        image_data_list = []
+        file_paths = []
+        for filename in filenames:
+            image_path = plate_path / filename
+            image_data = self.filemanager.load(str(image_path), read_backend)
+            image_data_list.append(image_data)
+            file_paths.append(filename)
+
+        # Resolve Napari config
         from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-        from openhcs.core.config import LazyNapariStreamingConfig
-        from dataclasses import replace
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyNapariStreamingConfig
 
-        # Get current widget values
         current_values = self.napari_config_form.get_current_values()
-
-        # Create a temporary lazy config instance with current widget values
-        # This preserves None for unmodified fields (for lazy resolution)
         temp_config = LazyNapariStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
 
-        # Resolve with nested context (same as compiler does for steps)
         with config_context(self.orchestrator.pipeline_config):
             with config_context(temp_config):
-                # Resolve the temp config to get final merged values
                 napari_config = resolve_lazy_configurations_for_serialization(temp_config)
 
-        # Get or create Napari viewer for this port
-        napari_port = napari_config.napari_port
-        viewer = self._get_or_create_napari_viewer(napari_port, napari_config)
+        # Get or create viewer
+        viewer = self.orchestrator.get_or_create_visualizer(napari_config)
 
-        # Stream image to Napari
-        self._stream_image_to_viewer(viewer, image_data, filename, napari_config)
+        # Stream batch to Napari
+        self._stream_batch_to_napari(viewer, image_data_list, file_paths, napari_config)
 
-        logger.info(f"Streamed {filename} to Napari viewer on port {napari_port}")
-    
-    def _get_or_create_napari_viewer(self, port: int, config):
-        """Get existing Napari viewer or create a new one, reconnecting if needed."""
-        from openhcs.runtime.napari_stream_visualizer import NapariStreamVisualizer
+        logger.info(f"Streamed batch of {len(filenames)} images to Napari viewer on port {napari_config.napari_port}")
 
-        # Check if we have a viewer for this port
-        if port in self.napari_viewers:
-            viewer = self.napari_viewers[port]
-            # Check if viewer is still running
-            if viewer.is_running:
-                return viewer
-            else:
-                # Viewer was closed, remove it and create a new one
-                logger.info(f"Napari viewer on port {port} was closed, creating new instance")
-                del self.napari_viewers[port]
+    def _load_and_stream_batch_to_fiji(self, filenames: list):
+        """Load multiple images and stream as batch to Fiji (builds hyperstack)."""
+        if not self.orchestrator:
+            raise RuntimeError("No orchestrator set")
 
-        # Create new viewer instance
-        # Note: If a viewer already exists on this port (e.g., from pipeline execution),
-        # start_viewer() will detect it and connect to it instead of killing it
-        viewer = NapariStreamVisualizer(
-            filemanager=self.filemanager,
-            visualizer_config=config,
-            viewer_title=f"OpenHCS Image Browser - Port {port}",
-            persistent=True,
-            napari_port=port,
-            display_config=config
-        )
-        # Start viewer asynchronously (non-blocking)
-        # This will reuse existing viewer if one is already running on this port
-        viewer.start_viewer(async_mode=True)
-        self.napari_viewers[port] = viewer
+        # Get plate path
+        plate_path = Path(self.orchestrator.plate_path)
 
-        logger.info(f"Napari viewer starting asynchronously on port {port}")
+        # Resolve backend
+        from openhcs.config_framework.lazy_factory import get_current_global_config
+        from openhcs.core.config import GlobalPipelineConfig
+        global_config = get_current_global_config(GlobalPipelineConfig)
 
-        # Refresh instance list to show starting status
-        self.refresh_napari_instances()
+        if global_config.vfs_config.read_backend != Backend.AUTO:
+            read_backend = global_config.vfs_config.read_backend.value
+        else:
+            read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path)
 
-        # Schedule refresh and queue processing after viewer is ready
-        self._schedule_post_viewer_startup(viewer, port)
+        # Load all images
+        image_data_list = []
+        file_paths = []
+        for filename in filenames:
+            image_path = plate_path / filename
+            image_data = self.filemanager.load(str(image_path), read_backend)
+            image_data_list.append(image_data)
+            file_paths.append(filename)
 
-        return viewer
+        # Resolve Fiji config
+        from openhcs.config_framework.context_manager import config_context
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyFijiStreamingConfig
 
-    def _schedule_post_viewer_startup(self, viewer, port: int):
-        """Schedule refresh and queue processing after viewer startup."""
-        import threading
+        current_values = self.fiji_config_form.get_current_values()
+        temp_config = LazyFijiStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
 
-        def wait_and_process():
-            import time
-            # Wait for viewer to be ready
-            max_wait = 15
-            start_time = time.time()
+        with config_context(self.orchestrator.pipeline_config):
+            with config_context(temp_config):
+                fiji_config = resolve_lazy_configurations_for_serialization(temp_config)
 
-            while not viewer.is_running and (time.time() - start_time) < max_wait:
-                time.sleep(0.5)
+        # Get or create viewer
+        viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
 
-            if viewer.is_running:
-                # Refresh instance list on UI thread
-                from PyQt6.QtCore import QMetaObject, Qt as QtCore, Q_ARG
-                QMetaObject.invokeMethod(
-                    self,
-                    "_on_viewer_ready",
-                    QtCore.ConnectionType.QueuedConnection,
-                    Q_ARG(int, port)
-                )
-            else:
-                logger.error(f"Napari viewer on port {port} failed to start within {max_wait} seconds")
+        # Stream batch to Fiji
+        self._stream_batch_to_fiji(viewer, image_data_list, file_paths, fiji_config)
 
-        thread = threading.Thread(target=wait_and_process, daemon=True)
-        thread.start()
+        logger.info(f"Streamed batch of {len(filenames)} images to Fiji viewer on port {fiji_config.fiji_port}")
 
-    @pyqtSlot(int)
-    def _on_viewer_ready(self, port: int):
-        """Called when a new viewer is ready - refresh list and process queue."""
-        logger.info(f"✅ Napari viewer on port {port} is ready")
 
-        # Refresh instance list to show viewer is ready
-        self.refresh_napari_instances()
 
-        # Process any queued images for this port
-        self._process_pending_queue(port)
-
-        # Refresh again after processing to clear queue count
-        self.refresh_napari_instances()
-
-    def _process_pending_queue(self, port: int):
-        """Process all queued images for the specified port."""
-        if not self.pending_napari_queue:
-            return
-
-        # Get viewer for this port
-        if port not in self.napari_viewers:
-            logger.warning(f"No viewer found for port {port}, cannot process queue")
-            return
-
-        viewer = self.napari_viewers[port]
-
-        # Verify viewer is actually running before processing queue
-        if not viewer.is_running:
-            logger.warning(f"Viewer on port {port} is not running yet, keeping queue")
-            return
-
-        # Filter queue for this port
-        port_queue = [(f, d, c) for f, d, c, p in self.pending_napari_queue if p == port]
-
-        # Remove processed items from queue
-        self.pending_napari_queue = [(f, d, c, p) for f, d, c, p in self.pending_napari_queue if p != port]
-
-        # Stream all queued images (skip is_running check since we already verified)
-        logger.info(f"Processing {len(port_queue)} queued images for port {port}")
-        for filename, image_data, config in port_queue:
-            self._stream_image_to_viewer(viewer, image_data, filename, config, skip_running_check=True)
-    
-    def _stream_image_to_viewer(self, viewer, image_data, filename: str, config, skip_running_check=False):
-        """Stream image data to Napari viewer asynchronously."""
-        # If viewer isn't ready yet, queue the image (unless we're processing the queue)
-        if not skip_running_check and not viewer.is_running:
-            logger.info(f"Viewer not ready, queuing {filename} for port {viewer.napari_port}")
-            self.pending_napari_queue.append((filename, image_data, config, viewer.napari_port))
-
-            # Refresh instance list to show updated queue count
-            self.refresh_napari_instances()
-            return
-
+    def _stream_batch_to_napari(self, viewer, image_data_list: list, file_paths: list, config):
+        """Stream batch of images to Napari viewer asynchronously (builds hyperstack)."""
         # Stream in background thread to avoid blocking UI
         import threading
 
         def stream_async():
             try:
-                # Viewer is already running, stream immediately
-
-                # Use the napari streaming backend to send the image
+                # Use the napari streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
                 # Prepare metadata for streaming
@@ -999,16 +1064,16 @@ class ImageBrowserWidget(QWidget):
                     'step_name': 'image_browser'
                 }
 
-                # Stream to Napari
+                # Stream batch to Napari
                 self.filemanager.save_batch(
-                    [image_data],
-                    [filename],
+                    image_data_list,
+                    file_paths,
                     BackendEnum.NAPARI_STREAM.value,
                     **metadata
                 )
-                logger.info(f"Successfully streamed {filename} to Napari on port {viewer.napari_port}")
+                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Napari on port {viewer.napari_port}")
             except Exception as e:
-                logger.error(f"Failed to stream image to Napari: {e}")
+                logger.error(f"Failed to stream batch to Napari: {e}")
                 # Show error in UI thread
                 from PyQt6.QtCore import QMetaObject, Qt
                 QMetaObject.invokeMethod(
@@ -1020,19 +1085,62 @@ class ImageBrowserWidget(QWidget):
         # Start streaming in background thread
         thread = threading.Thread(target=stream_async, daemon=True)
         thread.start()
-        logger.info(f"Streaming {filename} to Napari asynchronously...")
+        logger.info(f"Streaming batch of {len(file_paths)} images to Napari asynchronously...")
 
     @pyqtSlot(str)
     def _show_streaming_error(self, error_msg: str):
         """Show streaming error in UI thread (called via QMetaObject.invokeMethod)."""
-        QMessageBox.warning(self, "Streaming Error", f"Failed to stream image to Napari: {error_msg}")
-    
-    def cleanup(self):
-        """Clean up Napari viewers."""
-        for viewer in self.napari_viewers.values():
+        QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Napari: {error_msg}")
+
+    def _stream_batch_to_fiji(self, viewer, image_data_list: list, file_paths: list, config):
+        """Stream batch of images to Fiji viewer asynchronously (builds hyperstack)."""
+        # Stream in background thread to avoid blocking UI
+        import threading
+
+        def stream_async():
             try:
-                viewer.stop_viewer()
-            except:
-                pass
-        self.napari_viewers.clear()
+                # Use the Fiji streaming backend to send the batch
+                from openhcs.constants.constants import Backend as BackendEnum
+
+                # Prepare metadata for streaming
+                metadata = {
+                    'fiji_port': viewer.fiji_port,
+                    'display_config': config,
+                    'microscope_handler': self.orchestrator.microscope_handler,
+                    'step_index': 0,
+                    'step_name': 'image_browser'
+                }
+
+                # Stream batch to Fiji
+                self.filemanager.save_batch(
+                    image_data_list,
+                    file_paths,
+                    BackendEnum.FIJI_STREAM.value,
+                    **metadata
+                )
+                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.fiji_port}")
+            except Exception as e:
+                logger.error(f"Failed to stream batch to Fiji: {e}")
+                # Show error in UI thread
+                from PyQt6.QtCore import QMetaObject, Qt
+                QMetaObject.invokeMethod(
+                    self, "_show_fiji_streaming_error",
+                    Qt.ConnectionType.QueuedConnection,
+                    str(e)
+                )
+
+        # Start streaming in background thread
+        thread = threading.Thread(target=stream_async, daemon=True)
+        thread.start()
+        logger.info(f"Streaming batch of {len(file_paths)} images to Fiji asynchronously...")
+
+    @pyqtSlot(str)
+    def _show_fiji_streaming_error(self, error_msg: str):
+        """Show Fiji streaming error in UI thread."""
+        QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Fiji: {error_msg}")
+
+    def cleanup(self):
+        """Clean up viewers - orchestrator manages viewer lifecycle."""
+        # Viewers are managed by orchestrator, no cleanup needed here
+        pass
 

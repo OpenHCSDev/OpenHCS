@@ -174,6 +174,14 @@ class PlateViewerWindow(QDialog):
                 # Convert raw dicts to OpenHCSMetadata instances
                 subdirs_instances = {}
                 for subdir_name, subdir_data in subdirs_dict.items():
+                    # Ensure all optional fields have explicit None if missing
+                    # (OpenHCSMetadata requires all fields to be provided, even if Optional)
+                    subdir_data.setdefault('timepoints', None)
+                    subdir_data.setdefault('channels', None)
+                    subdir_data.setdefault('wells', None)
+                    subdir_data.setdefault('sites', None)
+                    subdir_data.setdefault('z_indexes', None)
+
                     # Create OpenHCSMetadata from the subdirectory data
                     subdirs_instances[subdir_name] = OpenHCSMetadata(**subdir_data)
 

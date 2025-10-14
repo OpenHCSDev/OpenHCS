@@ -43,6 +43,7 @@ class FijiViewerServer(ZMQServer):
         self.display_config = display_config
         self.ij = None  # PyImageJ instance
         self.hyperstacks = {}  # Track hyperstacks by (step_name, well) key
+        self.hyperstack_metadata = {}  # Track original image metadata for each hyperstack
         self._shutdown_requested = False
     
     def start(self):
@@ -229,11 +230,14 @@ class FijiViewerServer(ZMQServer):
                                   slice_components: List[str],
                                   frame_components: List[str]):
         """
-        Build a single ImageJ hyperstack from images.
+        Build or update a single ImageJ hyperstack from images.
+
+        If a hyperstack already exists for this window_key, merge new images into it.
+        Otherwise, create a new hyperstack.
 
         Args:
             window_key: Unique key for this window
-            images: List of image data dicts
+            images: List of image data dicts (new images to add)
             display_config_dict: Display configuration
             channel_components: Components mapped to Channel dimension
             slice_components: Components mapped to Slice dimension
@@ -248,10 +252,40 @@ class FijiViewerServer(ZMQServer):
         CompositeImage = sj.jimport('ij.CompositeImage')
         ShortProcessor = sj.jimport('ij.process.ShortProcessor')
 
-        # Collect unique values for each dimension
-        channel_values = self._collect_dimension_values(images, channel_components)
-        slice_values = self._collect_dimension_values(images, slice_components)
-        frame_values = self._collect_dimension_values(images, frame_components)
+        # Check if we have an existing hyperstack to merge into
+        existing_imp = self.hyperstacks.get(window_key)
+
+        # If existing hyperstack, merge with stored metadata
+        if existing_imp is not None and window_key in self.hyperstack_metadata:
+            logger.info(f"🔬 FIJI SERVER: Merging {len(images)} new images into existing hyperstack '{window_key}'")
+            existing_images = self.hyperstack_metadata[window_key]
+
+            # Build lookup of existing images by coordinates
+            existing_lookup = {}
+            for img_data in existing_images:
+                meta = img_data['metadata']
+                c_key = tuple(meta.get(comp, 1) for comp in channel_components)
+                z_key = tuple(meta.get(comp, 1) for comp in slice_components)
+                t_key = tuple(meta.get(comp, 1) for comp in frame_components)
+                existing_lookup[(c_key, z_key, t_key)] = img_data
+
+            # Add new images (override existing at same coordinates)
+            for img_data in images:
+                meta = img_data['metadata']
+                c_key = tuple(meta.get(comp, 1) for comp in channel_components)
+                z_key = tuple(meta.get(comp, 1) for comp in slice_components)
+                t_key = tuple(meta.get(comp, 1) for comp in frame_components)
+                existing_lookup[(c_key, z_key, t_key)] = img_data
+
+            # Convert back to list
+            all_images = list(existing_lookup.values())
+        else:
+            all_images = images
+
+        # Collect unique values for each dimension (from all images)
+        channel_values = self._collect_dimension_values(all_images, channel_components)
+        slice_values = self._collect_dimension_values(all_images, slice_components)
+        frame_values = self._collect_dimension_values(all_images, frame_components)
 
         nChannels = len(channel_values)
         nSlices = len(slice_values)
@@ -264,15 +298,15 @@ class FijiViewerServer(ZMQServer):
         logger.info(f"  Frame components: {frame_components}")
 
         # Get spatial dimensions
-        first_img = images[0]['data']
+        first_img = all_images[0]['data']
         height, width = first_img.shape[-2:]
 
         # Create ImageStack
         stack = ImageStack(width, height)
 
-        # Build lookup dict
+        # Build lookup dict (new images override existing at same coordinates)
         image_lookup = {}
-        for img_data in images:
+        for img_data in all_images:
             meta = img_data['metadata']
             c_key = tuple(meta.get(comp, 1) for comp in channel_components)
             z_key = tuple(meta.get(comp, 1) for comp in slice_components)
@@ -348,7 +382,10 @@ class FijiViewerServer(ZMQServer):
         imp.show()
         self.hyperstacks[window_key] = imp
 
-        logger.info(f"🔬 FIJI SERVER: Displayed hyperstack '{window_key}' with {stack.getSize()} slices")
+        # Store metadata for future merging
+        self.hyperstack_metadata[window_key] = all_images
+
+        logger.info(f"🔬 FIJI SERVER: Displayed hyperstack '{window_key}' with {stack.getSize()} slices ({len(all_images)} unique images)")
 
     def _collect_dimension_values(self, images: List[Dict[str, Any]], components: List[str]) -> List[tuple]:
         """
@@ -371,6 +408,8 @@ class FijiViewerServer(ZMQServer):
             values.add(value_tuple)
 
         return sorted(values)
+
+
 
     
     def request_shutdown(self):

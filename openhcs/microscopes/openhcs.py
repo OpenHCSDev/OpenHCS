@@ -120,7 +120,12 @@ class OpenHCSMetadataHandler(MetadataHandler):
 
         try:
             content = self.filemanager.load(str(metadata_file_path), Backend.DISK.value)
-            metadata_dict = json.loads(content.decode('utf-8') if isinstance(content, bytes) else content)
+            # Backend may return already-parsed dict (disk backend auto-parses JSON)
+            if isinstance(content, dict):
+                metadata_dict = content
+            else:
+                # Otherwise parse raw bytes/string
+                metadata_dict = json.loads(content.decode('utf-8') if isinstance(content, bytes) else content)
 
             # Handle subdirectory-keyed format
             if subdirs := metadata_dict.get(FIELDS.SUBDIRECTORIES):

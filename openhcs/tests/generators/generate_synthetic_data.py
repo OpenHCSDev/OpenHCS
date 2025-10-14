@@ -25,6 +25,7 @@ Usage:
     generator.generate_dataset()
 """
 
+import json
 import random
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +33,9 @@ from pathlib import Path
 import numpy as np
 import tifffile
 from skimage import draw, filters
+
+from openhcs.microscopes.imagexpress import ImageXpressFilenameParser
+from openhcs.microscopes.opera_phenix import OperaPhenixFilenameParser
 
 
 class SyntheticMicroscopyGenerator:
@@ -60,7 +64,8 @@ class SyntheticMicroscopyGenerator:
                  wells=['A01'],  # List of wells to generate
                  format='ImageXpress',  # Format of the filenames ('ImageXpress' or 'OperaPhenix')
                  auto_image_size=True,  # Automatically calculate image size based on grid and tile size
-                 random_seed=None):
+                 random_seed=None,
+                 include_all_components=False):  # Include all filename components (for OpenHCS)
         """
         Initialize the synthetic microscopy generator.
 
@@ -109,12 +114,18 @@ class SyntheticMicroscopyGenerator:
             format: Format of the filenames ('ImageXpress' or 'OperaPhenix')
             auto_image_size: If True, automatically calculate image size based on grid and tile parameters
             random_seed: Random seed for reproducibility
+            include_all_components: If True, include all filename components (timepoint, z-index) even for flat plates
         """
         self.output_dir = Path(output_dir)
         self.grid_size = grid_size
         self.tile_size = tile_size
         self.overlap_percent = overlap_percent
         self.stage_error_px = stage_error_px
+        self.include_all_components = include_all_components
+
+        # Create parser instances for filename construction
+        self.imagexpress_parser = ImageXpressFilenameParser()
+        self.operaphenix_parser = OperaPhenixFilenameParser()
 
         # Calculate image size if auto_image_size is True
         if auto_image_size:
@@ -783,10 +794,25 @@ class SyntheticMicroscopyGenerator:
 
                                 # Create filename based on format
                                 if self.format == 'ImageXpress':
-                                    # ImageXpress format: WellID_sXXX_wY.tif (Z-level is indicated by the ZStep folder)
-                                    # Create filename without zero-padding site indices
-                                    # This tests the padding functionality in the stitcher
-                                    filename = f"{well}_s{site_index}_w{wavelength}.tif"
+                                    # Use parser to construct filename
+                                    if self.include_all_components:
+                                        # Include all components for OpenHCS (use parser defaults for padding)
+                                        filename = self.imagexpress_parser.construct_filename(
+                                            well=well,
+                                            site=site_index,
+                                            channel=wavelength,
+                                            z_index=z_level,
+                                            timepoint=1,
+                                            extension='.tif'
+                                        )
+                                    else:
+                                        # Legacy mode without all components
+                                        filename = self.imagexpress_parser.construct_filename(
+                                            well=well,
+                                            site=site_index,
+                                            channel=wavelength,
+                                            extension='.tif'
+                                        )
                                 else:  # OperaPhenix
                                     # Opera Phenix format: rXXcYYfZZZpWW-chVskNfkNflN.tiff
                                     # Extract row and column from well ID (e.g., 'A01' -> row=1, col=1)
@@ -826,10 +852,25 @@ class SyntheticMicroscopyGenerator:
 
                             # Create filename based on format
                             if self.format == 'ImageXpress':
-                                # ImageXpress format: WellID_sXXX_wY.tif
-                                # Create filename without Z-index and without zero-padding site indices
-                                # This tests the padding functionality in the stitcher
-                                filename = f"{well}_s{site_index}_w{wavelength}.tif"
+                                # Use parser to construct filename
+                                if self.include_all_components:
+                                    # Include all components for OpenHCS (use parser defaults for padding)
+                                    filename = self.imagexpress_parser.construct_filename(
+                                        well=well,
+                                        site=site_index,
+                                        channel=wavelength,
+                                        z_index=1,  # Always include z_index, default to 1 for flat plates
+                                        timepoint=1,
+                                        extension='.tif'
+                                    )
+                                else:
+                                    # Legacy mode without all components
+                                    filename = self.imagexpress_parser.construct_filename(
+                                        well=well,
+                                        site=site_index,
+                                        channel=wavelength,
+                                        extension='.tif'
+                                    )
                             else:  # OperaPhenix
                                 # Opera Phenix format: rXXcYYfZZZpWW-chVskNfkNflN.tiff
                                 # Extract row and column from well ID (e.g., 'A01' -> row=1, col=1)
@@ -846,3 +887,97 @@ class SyntheticMicroscopyGenerator:
                             site_index += 1
 
         print("Dataset generation complete!")
+
+    def generate_openhcs_metadata(self, sub_dir: str = "images", pixel_size: float = 0.65):
+        """
+        Generate OpenHCS metadata file for the synthetic dataset.
+
+        This converts the generated ImageXpress or OperaPhenix data into OpenHCS format
+        by adding an openhcs_metadata.json file with the subdirectory-keyed structure.
+
+        Args:
+            sub_dir: Subdirectory name where images are located (default: "images")
+            pixel_size: Pixel size in microns (default: 0.65)
+        """
+        print(f"\nGenerating OpenHCS metadata...")
+
+        # Collect all image files
+        image_files = []
+        if self.format == 'ImageXpress':
+            # ImageXpress stores images in TimePoint_1/ZStep_X/ or TimePoint_1/ for flat plates
+            timepoint_dir = self.output_dir / "TimePoint_1"
+            if self.z_stack_levels > 1:
+                # Z-stack: images in ZStep folders
+                for z in range(1, self.z_stack_levels + 1):
+                    zstep_dir = timepoint_dir / f"ZStep_{z}"
+                    if zstep_dir.exists():
+                        for img_file in sorted(zstep_dir.glob("*.tif")):
+                            # Store relative path from plate root
+                            rel_path = f"{sub_dir}/{img_file.name}"
+                            image_files.append(rel_path)
+            else:
+                # Flat: images directly in TimePoint_1
+                if timepoint_dir.exists():
+                    for img_file in sorted(timepoint_dir.glob("*.tif")):
+                        rel_path = f"{sub_dir}/{img_file.name}"
+                        image_files.append(rel_path)
+        else:  # OperaPhenix
+            # OperaPhenix stores images in Images/ folder
+            images_dir = self.output_dir / "Images"
+            if images_dir.exists():
+                for img_file in sorted(images_dir.glob("*.tiff")):
+                    rel_path = f"{sub_dir}/{img_file.name}"
+                    image_files.append(rel_path)
+
+        # Build component metadata dictionaries
+        channels = {str(i): str(i) for i in range(1, self.wavelengths + 1)}
+        wells = {well: well for well in self.wells}
+
+        # Calculate number of sites from grid
+        num_sites = self.grid_size[0] * self.grid_size[1]
+        sites = {str(i): str(i) for i in range(1, num_sites + 1)}
+
+        # Z-indexes
+        z_indexes = {str(i): str(i) for i in range(1, self.z_stack_levels + 1)} if self.z_stack_levels > 1 else None
+
+        # Timepoints (always 1 for synthetic data)
+        timepoints = {"1": "1"}
+
+        # Determine parser name based on format
+        parser_name = "ImageXpressFilenameParser" if self.format == "ImageXpress" else "OperaPhenixFilenameParser"
+        microscope_handler = "imagexpress" if self.format == "ImageXpress" else "operaphenix"
+
+        # Build metadata structure
+        metadata = {
+            "subdirectories": {
+                sub_dir: {
+                    "microscope_handler_name": microscope_handler,
+                    "source_filename_parser_name": parser_name,
+                    "grid_dimensions": list(self.grid_size),
+                    "pixel_size": pixel_size,
+                    "image_files": image_files,
+                    "channels": channels,
+                    "wells": wells,
+                    "sites": sites,
+                    "z_indexes": z_indexes,
+                    "timepoints": timepoints,
+                    "available_backends": {"disk": True},
+                    "main": True
+                }
+            }
+        }
+
+        # Write metadata file
+        metadata_path = self.output_dir / "openhcs_metadata.json"
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        print(f"✓ Generated OpenHCS metadata: {metadata_path}")
+        print(f"  - {len(image_files)} image files")
+        print(f"  - {len(wells)} wells")
+        print(f"  - {len(channels)} channels")
+        print(f"  - {len(sites)} sites")
+        if z_indexes:
+            print(f"  - {len(z_indexes)} z-levels")
+
+        return metadata_path

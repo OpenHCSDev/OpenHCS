@@ -453,6 +453,9 @@ class PipelineOrchestrator(ContextProvider):
         # Metadata cache service
         self._metadata_cache_service = get_metadata_cache()
 
+        # Viewer management - shared between pipeline execution and image browser
+        self._visualizers = {}  # Dict[(backend_name, port)] -> visualizer instance
+
 
     def __setattr__(self, name: str, value: Any) -> None:
         """
@@ -477,6 +480,75 @@ class PipelineOrchestrator(ContextProvider):
     def state(self) -> OrchestratorState:
         """Get the current orchestrator state."""
         return self._state
+
+    def get_or_create_visualizer(self, config, vis_config=None):
+        """
+        Get existing visualizer or create a new one for the given config.
+
+        This method is shared between pipeline execution and image browser to avoid
+        duplicating viewer instances. Viewers are tracked by (backend_name, port) key.
+
+        Args:
+            config: Streaming config (NapariStreamingConfig or FijiStreamingConfig)
+            vis_config: Optional visualizer config (can be None for image browser)
+
+        Returns:
+            Visualizer instance (NapariStreamVisualizer or FijiStreamVisualizer)
+        """
+        from openhcs.core.config import NapariStreamingConfig, FijiStreamingConfig
+
+        # Determine key based on config type (use isinstance for type checking)
+        if isinstance(config, NapariStreamingConfig):
+            key = ('napari', config.napari_port)
+            port = config.napari_port
+        elif isinstance(config, FijiStreamingConfig):
+            key = ('fiji', config.fiji_port)
+            port = config.fiji_port
+        else:
+            backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
+            key = (backend_name,)
+            port = None
+
+        # Check if we already have a visualizer for this key
+        if key in self._visualizers:
+            vis = self._visualizers[key]
+            # Check if it's still running
+            if vis.is_running:
+                logger.info(f"🔬 ORCHESTRATOR: Reusing existing visualizer for {key}")
+                return vis
+            else:
+                logger.info(f"🔬 ORCHESTRATOR: Existing visualizer for {key} is not running, creating new one")
+                del self._visualizers[key]
+
+        # Create new visualizer
+        logger.info(f"🔬 ORCHESTRATOR: Creating new visualizer for {key} (persistent={config.persistent})")
+        vis = config.create_visualizer(self.filemanager, vis_config)
+
+        # Start viewer asynchronously for both Napari and Fiji
+        if isinstance(config, (NapariStreamingConfig, FijiStreamingConfig)):
+            logger.info(f"🔬 ORCHESTRATOR: Starting {key[0]} visualizer asynchronously on port {port}")
+            vis.start_viewer(async_mode=True)
+
+            # Ping the server to set it to ready state (required for Fiji to process data messages)
+            # Do this in a background thread to avoid blocking
+            import threading
+            def ping_server():
+                import time
+                time.sleep(1.0)  # Give server time to start
+                if hasattr(vis, '_wait_for_server_ready'):
+                    vis._wait_for_server_ready(timeout=10.0)
+                    logger.info(f"🔬 ORCHESTRATOR: {key[0]} visualizer on port {port} is ready")
+
+            thread = threading.Thread(target=ping_server, daemon=True)
+            thread.start()
+        else:
+            logger.info(f"🔬 ORCHESTRATOR: Starting visualizer: {vis}")
+            vis.start_viewer()
+
+        # Store in cache
+        self._visualizers[key] = vis
+
+        return vis
 
     def initialize_microscope_handler(self):
         """Initializes the microscope handler."""
@@ -806,23 +878,10 @@ class PipelineOrchestrator(ContextProvider):
                         if key not in unique_visualizer_configs:
                             unique_visualizer_configs[key] = (config, ctx.visualizer_config)
 
-            # Create and start all visualizers asynchronously (identical to image browser)
-            # This allows spawning multiple viewers at once without blocking
+            # Create and start all visualizers using shared infrastructure
             for key, (config, vis_config) in unique_visualizer_configs.items():
-                if hasattr(config, 'napari_port'):
-                    port = config.napari_port
-                    logger.info(f"🔬 ORCHESTRATOR: Creating napari visualizer for port {port} (persistent={config.persistent})")
-                    vis = config.create_visualizer(self.filemanager, vis_config)
-                    logger.info(f"🔬 ORCHESTRATOR: Starting napari visualizer asynchronously on port {port}")
-                    vis.start_viewer(async_mode=True)  # Start asynchronously (non-blocking)
-                    visualizers.append(vis)
-                else:
-                    # Non-napari visualizers (e.g., Fiji)
-                    logger.info(f"🔬 ORCHESTRATOR: Creating visualizer with config: {config}")
-                    vis = config.create_visualizer(self.filemanager, vis_config)
-                    logger.info(f"🔬 ORCHESTRATOR: Starting visualizer: {vis}")
-                    vis.start_viewer()
-                    visualizers.append(vis)
+                vis = self.get_or_create_visualizer(config, vis_config)
+                visualizers.append(vis)
 
             # Wait for all napari viewers to be ready before starting pipeline
             # This ensures viewers are available to receive images

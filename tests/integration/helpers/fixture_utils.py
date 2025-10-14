@@ -52,6 +52,13 @@ MICROSCOPE_CONFIGS = {
         "microscope_type": "auto",  # Explicitly specify type
         "auto_image_size": True
     },
+    "OpenHCS": {
+        "format": "OpenHCS",
+        "test_dir_name": "openhcs_pipeline",
+        "microscope_type": "auto",  # Use auto-detection (will detect openhcs_metadata.json)
+        "auto_image_size": True,
+        "base_format": "ImageXpress"  # Generate ImageXpress data then add OpenHCS metadata
+    },
     "OMERO": {
         "format": "OMERO",
         "test_dir_name": "omero_test_plate",  # Will be created dynamically
@@ -81,6 +88,10 @@ TEST_PARAMS = {
     "OperaPhenix": {
         "default": syn_data_params
         # Add test-specific overrides here if needed
+    },
+    "OpenHCS": {
+        "default": syn_data_params
+        # OpenHCS uses same params as base formats
     },
     "OMERO": {
         "default": {
@@ -237,6 +248,9 @@ def create_synthetic_plate_data(test_function_dir, microscope_config, test_param
     plate_dir = test_function_dir / plate_name
     plate_dir.mkdir(parents=True, exist_ok=True)
 
+    # For OpenHCS format, generate base format data first, then add metadata
+    generator_format = microscope_config.get("base_format", microscope_config["format"])
+
     # Suppress stdout and stderr to avoid microscopy data generator output
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
         # SyntheticMicroscopyGenerator requires a native disk path
@@ -249,14 +263,26 @@ def create_synthetic_plate_data(test_function_dir, microscope_config, test_param
             z_stack_levels=z_stack_levels,
             cell_size_range=test_params.get("cell_size_range", (5, 10)),
             wells=test_params.get("wells", ['A01']),
-            format=microscope_config["format"],
+            format=generator_format,  # Use base format for generation
             # Use test_params override if available
             auto_image_size=test_params.get(
                 "auto_image_size",
                 microscope_config["auto_image_size"]
-            )
+            ),
+            # For OpenHCS, include all filename components
+            include_all_components=(microscope_config["format"] == "OpenHCS")
         )
         generator.generate_dataset()
+
+        # If OpenHCS format, generate metadata file
+        if microscope_config["format"] == "OpenHCS":
+            # Determine subdirectory based on base format
+            if generator_format == "ImageXpress":
+                sub_dir = "TimePoint_1"
+            else:  # OperaPhenix
+                sub_dir = "Images"
+
+            generator.generate_openhcs_metadata(sub_dir=sub_dir, pixel_size=0.65)
 
     # Return the plate directory
     return plate_dir

@@ -27,8 +27,8 @@ def pytest_addoption(parser):
     parser.addoption(
         "--it-microscopes",
         action="store",
-        default=env_default("IT_MICROSCOPES", "ImageXpress,OperaPhenix"),
-        help="Comma-separated list of microscopes to test (default: ImageXpress,OperaPhenix). Options: ImageXpress,OperaPhenix,OMERO. Use 'all' for full coverage."
+        default=env_default("IT_MICROSCOPES", "ImageXpress,OperaPhenix,OpenHCS"),
+        help="Comma-separated list of microscopes to test (default: ImageXpress,OperaPhenix,OpenHCS). Options: ImageXpress,OperaPhenix,OpenHCS,OMERO. Use 'all' for full coverage."
     )
     
     parser.addoption(
@@ -83,11 +83,11 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     """Validate configuration options."""
-    
+
     # Define valid choices for each option
     valid_choices = {
         "backends": ["disk", "zarr"],
-        "microscopes": ["ImageXpress", "OperaPhenix", "OMERO"],
+        "microscopes": ["ImageXpress", "OperaPhenix", "OpenHCS", "OMERO"],
         "dims": ["2d", "3d"],
         "exec_modes": ["threading", "multiprocessing"],
         "zmq_modes": ["direct", "zmq"],

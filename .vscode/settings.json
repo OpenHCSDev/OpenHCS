@@ -1,8 +1,8 @@
 {
     "python.testing.pytestArgs": [
         "tests",
-        // Include all microscope types (ImageXpress, OperaPhenix, OMERO) for VSCode test discovery
-        "--it-microscopes=ImageXpress,OperaPhenix,OMERO",
+        // Include all microscope types (ImageXpress, OperaPhenix, OpenHCS, OMERO) for VSCode test discovery
+        "--it-microscopes=ImageXpress,OperaPhenix,OpenHCS,OMERO",
         // Keep default backends (disk, zarr) - add more if needed
         "--it-backends=disk,zarr",
         // Keep default execution mode
