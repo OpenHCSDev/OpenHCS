@@ -535,20 +535,7 @@ class ZMQServerManagerWidget(QWidget):
             QMessageBox.warning(self, "No Selection", "Please select servers to quit.")
             return
 
-        # Confirm with user
-        reply = QMessageBox.question(
-            self,
-            "Quit Confirmation",
-            f"Gracefully quit {len(selected_items)} server(s)?\n\n"
-            "For execution servers: kills workers only, server stays alive.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes
-        )
-
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        # Collect ports to kill (skip worker items, only kill servers)
+        # Collect ports to kill BEFORE showing dialog (items may be deleted by auto-refresh)
         ports_to_kill = []
         for item in selected_items:
             data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -558,6 +545,23 @@ class ZMQServerManagerWidget(QWidget):
             port = data.get('port') if data else None
             if port:
                 ports_to_kill.append(port)
+
+        if not ports_to_kill:
+            QMessageBox.warning(self, "No Servers", "No servers selected (only workers selected).")
+            return
+
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Quit Confirmation",
+            f"Gracefully quit {len(ports_to_kill)} server(s)?\n\n"
+            "For execution servers: kills workers only, server stays alive.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
 
         # Kill in background thread to avoid blocking UI
         import threading
@@ -596,21 +600,7 @@ class ZMQServerManagerWidget(QWidget):
             QMessageBox.warning(self, "No Selection", "Please select servers to force kill.")
             return
 
-        # Confirm with user
-        reply = QMessageBox.question(
-            self,
-            "Force Kill Confirmation",
-            f"Force kill {len(selected_items)} server(s)?\n\n"
-            "For execution servers: kills workers AND server.\n"
-            "For Napari viewers: kills the viewer process.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        # Collect ports to kill (skip worker items, only kill servers)
+        # Collect ports to kill BEFORE showing dialog (items may be deleted by auto-refresh)
         ports_to_kill = []
         for item in selected_items:
             data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -620,6 +610,24 @@ class ZMQServerManagerWidget(QWidget):
             port = data.get('port') if data else None
             if port:
                 ports_to_kill.append(port)
+
+        if not ports_to_kill:
+            QMessageBox.warning(self, "No Servers", "No servers selected (only workers selected).")
+            return
+
+        # Confirm with user
+        reply = QMessageBox.question(
+            self,
+            "Force Kill Confirmation",
+            f"Force kill {len(ports_to_kill)} server(s)?\n\n"
+            "For execution servers: kills workers AND server.\n"
+            "For Napari viewers: kills the viewer process.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
 
         # Kill in background thread to avoid blocking UI
         import threading
