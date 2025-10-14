@@ -10,7 +10,14 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
-import omero.model
+# Lazy import of omero.model - only imported when actually used
+# This allows the module to be imported even if omero-py is not installed
+try:
+    import omero.model
+    OMERO_AVAILABLE = True
+except ImportError:
+    OMERO_AVAILABLE = False
+    omero = None  # type: ignore
 
 from openhcs.constants.constants import AllComponents, Backend
 from openhcs.io.filemanager import FileManager
@@ -31,6 +38,8 @@ class OMEROMetadataHandler(MetadataHandler):
     """
 
     def __init__(self, filemanager: FileManager):
+        if not OMERO_AVAILABLE:
+            raise ImportError("omero-py is required for OMERO microscope handler. Install with: pip install omero-py")
         super().__init__()
         self.filemanager = filemanager
         self._metadata_cache: Dict[int, Dict[str, Dict[int, str]]] = {}  # plate_id → metadata
@@ -342,6 +351,8 @@ class OMEROHandler(MicroscopeHandler):
             filemanager: FileManager with OMERO backend in registry
             pattern_format: Unused for OMERO (included for interface compatibility)
         """
+        if not OMERO_AVAILABLE:
+            raise ImportError("omero-py is required for OMERO microscope handler. Install with: pip install omero-py")
         parser = OMEROFilenameParser()
         metadata_handler = OMEROMetadataHandler(filemanager)
         super().__init__(parser=parser, metadata_handler=metadata_handler)
