@@ -62,6 +62,10 @@ class ImageBrowserWidget(QWidget):
         self.plate_view_detached_window = None
         self.middle_splitter = None  # Reference to splitter for reattaching
 
+        # Start global ack listener for image acknowledgment tracking
+        from openhcs.runtime.zmq_base import start_global_ack_listener
+        start_global_ack_listener()
+
         self.init_ui()
 
         # Load images if orchestrator is provided
@@ -74,15 +78,8 @@ class ImageBrowserWidget(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
 
-        # Header
+        # Header with buttons only (no title - already visible in tab)
         header_layout = QHBoxLayout()
-
-        title_label = QLabel("Image Browser")
-        title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
-        header_layout.addWidget(title_label)
-
-        header_layout.addStretch()
 
         # Plate view toggle button
         self.plate_view_toggle_btn = QPushButton("Show Plate View")
@@ -97,9 +94,11 @@ class ImageBrowserWidget(QWidget):
         self.refresh_btn.setStyleSheet(self.style_gen.generate_button_style())
         header_layout.addWidget(self.refresh_btn)
 
+        header_layout.addStretch()
+
         layout.addLayout(header_layout)
 
-        # Search input row (separate from header, matches function selector)
+        # Search input row
         search_layout = QHBoxLayout()
 
         self.search_input = QLineEdit()
@@ -121,11 +120,6 @@ class ImageBrowserWidget(QWidget):
         search_layout.addWidget(self.search_input)
 
         layout.addLayout(search_layout)
-
-        # Image count label (below search)
-        self.image_count_label = QLabel("Images: 0")
-        self.image_count_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_secondary)};")
-        layout.addWidget(self.image_count_label)
 
         # Create main splitter (tree | table | config)
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -396,8 +390,10 @@ class ImageBrowserWidget(QWidget):
         from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
 
         # Scan Napari and Fiji ports
+        # Napari: 5555-5564 (10 ports)
+        # Fiji: 5565-5574 (10 ports, non-overlapping with Napari)
         napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]  # 5555-5564
-        fiji_ports = [5556 + i for i in range(10)]  # 5556-5565
+        fiji_ports = [5565 + i for i in range(10)]  # 5565-5574 (avoid overlap with Napari)
         ports_to_scan = napari_ports + fiji_ports
 
         # Create ZMQ server manager widget
@@ -503,12 +499,6 @@ class ImageBrowserWidget(QWidget):
         # Apply combined filters (search + folder selection)
         self._apply_combined_filters()
 
-        # Update count label
-        if len(search_term.strip()) >= SearchService.MIN_SEARCH_CHARS:
-            self.image_count_label.setText(f"Images: {len(self.filtered_images)}/{len(self.all_images)} (filtered)")
-        else:
-            self.image_count_label.setText(f"Images: {len(self.all_images)}")
-
     def load_images(self):
         """Load image files from the orchestrator's metadata."""
         if not self.orchestrator:
@@ -568,8 +558,7 @@ class ImageBrowserWidget(QWidget):
             # Populate table
             self._populate_table(self.filtered_images)
 
-            # Update count
-            self.image_count_label.setText(f"Images: {len(self.all_images)}")
+            # Update info label
             self.info_label.setText(f"{len(self.all_images)} images loaded")
 
             # Update plate view if visible
@@ -775,10 +764,10 @@ class ImageBrowserWidget(QWidget):
         # Get or create viewer
         viewer = self.orchestrator.get_or_create_visualizer(napari_config)
 
-        # Stream batch to Napari
+        # Stream batch to Napari (wait happens in background thread)
         self._stream_batch_to_napari(viewer, image_data_list, file_paths, napari_config)
 
-        logger.info(f"Streamed batch of {len(filenames)} images to Napari viewer on port {napari_config.napari_port}")
+        logger.info(f"Streaming batch of {len(filenames)} images to Napari viewer on port {napari_config.napari_port}...")
 
     def _load_and_stream_batch_to_fiji(self, filenames: list):
         """Load multiple images and stream as batch to Fiji (builds hyperstack)."""
@@ -821,10 +810,10 @@ class ImageBrowserWidget(QWidget):
         # Get or create viewer
         viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
 
-        # Stream batch to Fiji
+        # Stream batch to Fiji (wait happens in background thread)
         self._stream_batch_to_fiji(viewer, image_data_list, file_paths, fiji_config)
 
-        logger.info(f"Streamed batch of {len(filenames)} images to Fiji viewer on port {fiji_config.fiji_port}")
+        logger.info(f"Streaming batch of {len(filenames)} images to Fiji viewer on port {fiji_config.fiji_port}...")
 
 
 
@@ -835,6 +824,30 @@ class ImageBrowserWidget(QWidget):
 
         def stream_async():
             try:
+                from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
+                    register_launching_viewer, unregister_launching_viewer
+                )
+
+                # Check if viewer is already ready (quick ping with short timeout)
+                # If it responds immediately, it was already running - don't show as launching
+                is_already_running = viewer.wait_for_ready(timeout=0.1)
+
+                if not is_already_running:
+                    # Viewer is launching - register it and show in UI
+                    register_launching_viewer(viewer.napari_port, 'napari', len(file_paths))
+                    logger.info(f"Waiting for Napari viewer on port {viewer.napari_port} to be ready...")
+
+                    # Wait for viewer to be ready before streaming
+                    if not viewer.wait_for_ready(timeout=15.0):
+                        unregister_launching_viewer(viewer.napari_port)
+                        raise RuntimeError(f"Napari viewer on port {viewer.napari_port} failed to become ready")
+
+                    logger.info(f"Napari viewer on port {viewer.napari_port} is ready")
+                    # Unregister from launching registry (now ready)
+                    unregister_launching_viewer(viewer.napari_port)
+                else:
+                    logger.info(f"Napari viewer on port {viewer.napari_port} is already running")
+
                 # Use the napari streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
@@ -882,6 +895,30 @@ class ImageBrowserWidget(QWidget):
 
         def stream_async():
             try:
+                from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
+                    register_launching_viewer, unregister_launching_viewer
+                )
+
+                # Check if viewer is already ready (quick ping with short timeout)
+                # If it responds immediately, it was already running - don't show as launching
+                is_already_running = viewer.wait_for_ready(timeout=0.1)
+
+                if not is_already_running:
+                    # Viewer is launching - register it and show in UI
+                    register_launching_viewer(viewer.fiji_port, 'fiji', len(file_paths))
+                    logger.info(f"Waiting for Fiji viewer on port {viewer.fiji_port} to be ready...")
+
+                    # Wait for viewer to be ready before streaming
+                    if not viewer.wait_for_ready(timeout=15.0):
+                        unregister_launching_viewer(viewer.fiji_port)
+                        raise RuntimeError(f"Fiji viewer on port {viewer.fiji_port} failed to become ready")
+
+                    logger.info(f"Fiji viewer on port {viewer.fiji_port} is ready")
+                    # Unregister from launching registry (now ready)
+                    unregister_launching_viewer(viewer.fiji_port)
+                else:
+                    logger.info(f"Fiji viewer on port {viewer.fiji_port} is already running")
+
                 # Use the Fiji streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
@@ -1031,16 +1068,6 @@ class ImageBrowserWidget(QWidget):
         """Handle well selection from plate view."""
         self.selected_wells = well_ids
         self._apply_combined_filters()
-
-        # Update status label
-        if well_ids:
-            well_list = ', '.join(sorted(well_ids))
-            self.image_count_label.setText(
-                f"Images: {len(self.filtered_images)}/{len(self.all_images)} "
-                f"(wells: {well_list})"
-            )
-        else:
-            self.image_count_label.setText(f"Images: {len(self.filtered_images)}/{len(self.all_images)}")
 
     def _update_plate_view(self):
         """Update plate view with current image data."""

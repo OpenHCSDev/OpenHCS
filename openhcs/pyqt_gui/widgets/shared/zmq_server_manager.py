@@ -10,6 +10,7 @@ Features:
 - Graceful shutdown and force kill
 - Double-click to open log files
 - Works with ANY ZMQServer subclass
+- Tracks launching viewers with queued image counts
 """
 
 import logging
@@ -21,8 +22,107 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QThread
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+import threading
 
 logger = logging.getLogger(__name__)
+
+
+# Global registry for launching viewers
+# Format: {port: {'type': 'napari'|'fiji', 'queued_images': int, 'start_time': float}}
+_launching_viewers_lock = threading.Lock()
+_launching_viewers: Dict[int, Dict[str, Any]] = {}
+
+
+# Global reference to active ZMQ server manager widgets (for triggering refreshes)
+_active_managers_lock = threading.Lock()
+_active_managers: List['ZMQServerManagerWidget'] = []
+
+
+def register_launching_viewer(port: int, viewer_type: str, queued_images: int = 0):
+    """Register a viewer that is launching and trigger UI refresh.
+
+    If the viewer is already launching, accumulates the queue count instead of replacing it.
+    """
+    import time
+    with _launching_viewers_lock:
+        if port in _launching_viewers:
+            # Already launching - accumulate queue count
+            _launching_viewers[port]['queued_images'] += queued_images
+            logger.info(f"Updated launching {viewer_type} viewer on port {port}: added {queued_images} images (total: {_launching_viewers[port]['queued_images']})")
+        else:
+            # New launching viewer
+            _launching_viewers[port] = {
+                'type': viewer_type,
+                'queued_images': queued_images,
+                'start_time': time.time()
+            }
+            logger.info(f"Registered launching {viewer_type} viewer on port {port} with {queued_images} queued images")
+
+    # Trigger immediate refresh on all active managers (fast path - no port scan)
+    _trigger_manager_refresh_fast()
+
+
+def update_launching_viewer_queue(port: int, queued_images: int):
+    """Update the queued image count for a launching viewer and trigger UI refresh.
+
+    This SETS the queue count (doesn't accumulate). Use register_launching_viewer() to add images.
+    """
+    with _launching_viewers_lock:
+        if port in _launching_viewers:
+            _launching_viewers[port]['queued_images'] = queued_images
+            logger.debug(f"Updated launching viewer on port {port}: {queued_images} queued images")
+
+    # Trigger immediate refresh on all active managers (fast path - no port scan)
+    _trigger_manager_refresh_fast()
+
+
+def unregister_launching_viewer(port: int):
+    """Remove a viewer from the launching registry (it's now ready) and trigger UI refresh."""
+    with _launching_viewers_lock:
+        if port in _launching_viewers:
+            del _launching_viewers[port]
+            logger.info(f"Unregistered launching viewer on port {port} (now ready)")
+
+    # Trigger full refresh to pick up the now-ready viewer via port scan
+    _trigger_manager_refresh_full()
+
+
+def _trigger_manager_refresh_fast():
+    """Trigger fast refresh (launching viewers only, no port scan) on all active managers."""
+    with _active_managers_lock:
+        for manager in _active_managers:
+            try:
+                # Use QMetaObject to safely call from any thread
+                from PyQt6.QtCore import QMetaObject, Qt
+                QMetaObject.invokeMethod(
+                    manager,
+                    "_refresh_launching_viewers_only",
+                    Qt.ConnectionType.QueuedConnection
+                )
+            except Exception as e:
+                logger.debug(f"Failed to trigger fast refresh on manager: {e}")
+
+
+def _trigger_manager_refresh_full():
+    """Trigger full refresh (port scan + launching viewers) on all active managers."""
+    with _active_managers_lock:
+        for manager in _active_managers:
+            try:
+                # Use QMetaObject to safely call from any thread
+                from PyQt6.QtCore import QMetaObject, Qt
+                QMetaObject.invokeMethod(
+                    manager,
+                    "refresh_servers",
+                    Qt.ConnectionType.QueuedConnection
+                )
+            except Exception as e:
+                logger.debug(f"Failed to trigger full refresh on manager: {e}")
+
+
+def get_launching_viewers() -> Dict[int, Dict[str, Any]]:
+    """Get a copy of the launching viewers registry."""
+    with _launching_viewers_lock:
+        return dict(_launching_viewers)
 
 
 class ZMQServerManagerWidget(QWidget):
@@ -64,6 +164,10 @@ class ZMQServerManagerWidget(QWidget):
         # Server tracking
         self.servers: List[Dict[str, Any]] = []
 
+        # Register this manager for launching viewer updates
+        with _active_managers_lock:
+            _active_managers.append(self)
+
         # Connect internal signal for async scanning
         self._scan_complete.connect(self._update_server_list)
 
@@ -73,13 +177,20 @@ class ZMQServerManagerWidget(QWidget):
 
         self.setup_ui()
 
+    def __del__(self):
+        """Cleanup when widget is destroyed."""
+        # Unregister this manager
+        with _active_managers_lock:
+            if self in _active_managers:
+                _active_managers.remove(self)
+
     def showEvent(self, event):
         """Auto-scan for servers when widget is shown."""
         super().showEvent(event)
         # Scan for servers on first show
         self.refresh_servers()
-        # Start auto-refresh (10 second interval - async won't block UI)
-        self.refresh_timer.start(10000)
+        # Start auto-refresh (1 second interval - async scanning won't block UI)
+        self.refresh_timer.start(1000)
 
     def setup_ui(self):
         """Setup the user interface."""
@@ -183,7 +294,7 @@ class ZMQServerManagerWidget(QWidget):
             control_context = zmq.Context()
             control_socket = control_context.socket(zmq.REQ)
             control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 3000)  # 3 second timeout (servers may be busy during startup)
+            control_socket.setsockopt(zmq.RCVTIMEO, 300)  # 300ms timeout for fast scanning
             control_socket.connect(f"tcp://localhost:{control_port}")
 
             # Send ping
@@ -214,14 +325,84 @@ class ZMQServerManagerWidget(QWidget):
                 except:
                     pass
 
+    @pyqtSlot()
+    def _refresh_launching_viewers_only(self):
+        """Fast refresh: Update UI with launching viewers only (no port scan).
+
+        This is called when launching viewer state changes and provides instant feedback.
+        """
+        # Keep existing scanned servers, just update the tree display
+        self._update_server_list(self.servers)
+
     @pyqtSlot(list)
     def _update_server_list(self, servers: List[Dict[str, Any]]):
         """Update server tree on UI thread (called via signal)."""
+        from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+
         self.servers = servers
         self.server_tree.clear()
 
+        # Get queue tracker registry for progress info
+        registry = GlobalQueueTrackerRegistry()
+
+        # First, add launching viewers
+        launching_viewers = get_launching_viewers()
+        for port, info in launching_viewers.items():
+            viewer_type = info['type'].capitalize()
+            queued_images = info['queued_images']
+
+            display_text = f"Port {port} - {viewer_type} Viewer"
+            status_text = "🚀 Launching"
+            info_text = f"{queued_images} images queued" if queued_images > 0 else "Starting..."
+
+            item = QTreeWidgetItem([display_text, status_text, info_text])
+            item.setData(0, Qt.ItemDataRole.UserRole, {'port': port, 'launching': True})
+            self.server_tree.addTopLevelItem(item)
+
+        # Add servers that are processing images (even if they didn't respond to ping)
+        # This prevents busy servers from disappearing during image processing
+        scanned_ports = {server.get('port') for server in servers}
+        for tracker_port, tracker in registry.get_all_trackers().items():
+            if tracker_port in scanned_ports or tracker_port in launching_viewers:
+                continue  # Already in the list
+
+            # Check if this tracker has pending images (server is busy processing)
+            pending = tracker.get_pending_count()
+            if pending > 0:
+                # Server is busy processing - add it even though it didn't respond to ping
+                processed, total = tracker.get_progress()
+                viewer_type = tracker.viewer_type.capitalize()
+
+                display_text = f"Port {tracker_port} - {viewer_type}ViewerServer"
+                status_text = "⚙️"  # Busy icon
+                info_text = f"Processing: {processed}/{total} images"
+
+                # Check for stuck images
+                if tracker.has_stuck_images():
+                    status_text = "⚠️"
+                    stuck_images = tracker.get_stuck_images()
+                    info_text += f" (⚠️ {len(stuck_images)} stuck)"
+
+                # Create pseudo-server dict for consistency
+                pseudo_server = {
+                    'port': tracker_port,
+                    'server': f'{viewer_type}ViewerServer',
+                    'ready': True,
+                    'busy': True  # Mark as busy
+                }
+
+                item = QTreeWidgetItem([display_text, status_text, info_text])
+                item.setData(0, Qt.ItemDataRole.UserRole, pseudo_server)
+                self.server_tree.addTopLevelItem(item)
+
+        # Then add running servers
         for server in servers:
             port = server.get('port', 'unknown')
+
+            # Skip if this port is in launching registry (shouldn't happen, but be safe)
+            if port in launching_viewers:
+                continue
+
             server_type = server.get('server', 'Unknown')
             ready = server.get('ready', False)
 
@@ -270,10 +451,29 @@ class ZMQServerManagerWidget(QWidget):
                     server_item.setExpanded(True)
 
             else:
-                # Other server types (Napari, etc.) - show normally
+                # Other server types (Napari, Fiji viewers) - show with progress if available
                 display_text = f"Port {port} - {server_type}"
                 status_text = status_icon
                 info_text = ""
+
+                # Check if this is a viewer with pending images
+                tracker = registry.get_tracker(port)
+                if tracker:
+                    processed, total = tracker.get_progress()
+                    pending = tracker.get_pending_count()
+
+                    if pending > 0:
+                        # Still processing images
+                        info_text = f"Processing: {processed}/{total} images"
+
+                        # Check for stuck images
+                        if tracker.has_stuck_images():
+                            status_text = "⚠️"  # Warning icon for stuck
+                            stuck_images = tracker.get_stuck_images()
+                            info_text += f" (⚠️ {len(stuck_images)} stuck)"
+                    elif total > 0:
+                        # All images processed
+                        info_text = f"✅ Processed {total} images"
 
                 item = QTreeWidgetItem([display_text, status_text, info_text])
                 item.setData(0, Qt.ItemDataRole.UserRole, server)
@@ -329,16 +529,17 @@ class ZMQServerManagerWidget(QWidget):
 
             for port in ports_to_kill:
                 try:
+                    logger.info(f"Attempting to quit server on port {port}...")
                     success = ZMQClient.kill_server_on_port(port, graceful=True)
                     if success:
-                        logger.info(f"Quit server on port {port}")
+                        logger.info(f"✅ Successfully quit server on port {port}")
                         self.server_killed.emit(port)
                     else:
                         failed_ports.append(port)
-                        logger.warning(f"Failed to quit server on port {port}")
+                        logger.warning(f"❌ Failed to quit server on port {port} (kill_server_on_port returned False)")
                 except Exception as e:
                     failed_ports.append(port)
-                    logger.error(f"Error quitting server on port {port}: {e}")
+                    logger.error(f"❌ Error quitting server on port {port}: {e}")
 
             # Emit completion signal
             if failed_ports:

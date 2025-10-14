@@ -313,9 +313,9 @@ class OpenHCSMainWindow(QMainWindow):
             # Scan common ports:
             # - 7777: Default ZMQ execution server
             # - 5555-5564: Napari viewers (10 ports)
-            # - 5556-5565: Fiji viewers (10 ports, offset by 1 from Napari)
+            # - 5565-5574: Fiji viewers (10 ports, non-overlapping with Napari)
             napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]
-            fiji_ports = [5556 + i for i in range(10)]  # Fiji default port is 5556
+            fiji_ports = [5565 + i for i in range(10)]  # 5565-5574 (avoid overlap with Napari)
             ports_to_scan = [7777] + napari_ports + fiji_ports
 
             zmq_manager_widget = ZMQServerManagerWidget(
