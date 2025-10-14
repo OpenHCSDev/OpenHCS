@@ -596,15 +596,15 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
     else:
         test_config = TestConfig(Path(plate_dir), backend_config, execution_mode, microscope_config)
 
-    # For OMERO tests, verify OMERO is running before proceeding
+    # For OMERO tests, connect to OMERO (automatically starts if needed)
     if test_config.is_omero:
         from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
-        print("🔍 Checking OMERO server availability...")
+        print("� Connecting to OMERO (will auto-start if needed)...")
         omero_manager = OMEROInstanceManager()
-        if not omero_manager.connect(timeout=10):
-            pytest.skip("OMERO server not available - skipping OMERO tests. Start OMERO with: docker-compose up -d")
+        if not omero_manager.connect(timeout=120):  # Increased timeout for docker startup
+            pytest.skip("OMERO server not available and could not be started automatically. Check Docker installation.")
         omero_manager.close()
-        print("✅ OMERO server is running")
+        print("✅ OMERO server is ready")
 
     print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, microscope: {microscope_config['format']}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
 

@@ -275,10 +275,11 @@ def plate_dir(test_function_dir, microscope_config, test_params, data_type_confi
         import tempfile
         from pathlib import Path
 
-        # Connect to OMERO
+        # Connect to OMERO (automatically starts docker-compose if needed)
         omero_manager = OMEROInstanceManager()
-        if not omero_manager.connect(timeout=60):
-            pytest.skip("OMERO server not available - skipping OMERO tests")
+        print("🔄 Connecting to OMERO (will auto-start if needed)...")
+        if not omero_manager.connect(timeout=120):  # Increased timeout for docker startup
+            pytest.skip("OMERO server not available and could not be started automatically. Check Docker installation.")
 
         # Generate synthetic data using the SAME generator as disk-based tests
         # This ensures identical test data across all backends

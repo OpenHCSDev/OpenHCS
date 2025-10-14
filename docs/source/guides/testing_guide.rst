@@ -81,17 +81,31 @@ Testing with Visualizers
 Testing with OMERO
 -------------------
 
-Ensure OMERO is running first::
+**OMERO tests automatically start the OMERO server if needed** using docker-compose.
 
-    docker-compose up -d
-
-Run OMERO tests::
+Run OMERO tests (OMERO will auto-start if not running)::
 
     # Basic OMERO tests
     pytest tests/integration/test_main.py --it-microscopes=OMERO
 
     # OMERO tests with Napari
     pytest tests/integration/test_main.py --it-microscopes=OMERO --it-visualizers=napari
+
+**What happens automatically**:
+
+1. Test checks if OMERO is running
+2. If not running, automatically executes ``docker-compose up -d``
+3. Waits for OMERO to be ready (up to 120 seconds)
+4. Runs the test
+5. Leaves OMERO running for subsequent tests
+
+**Manual OMERO management** (optional)::
+
+    # Start OMERO manually
+    docker-compose up -d
+
+    # Stop OMERO manually
+    docker-compose down
 
 Testing Specific Combinations
 ------------------------------
@@ -208,10 +222,11 @@ Tips and Best Practices
 
 1. **Use VSCode test menu** for quick access to specific test combinations
 2. **Use command-line** for custom combinations not in VSCode menu
-3. **OMERO tests require OMERO server** - start with ``docker-compose up -d``
+3. **OMERO tests auto-start** - no manual setup required (requires Docker)
 4. **Visualizer tests are interactive** - they open viewer windows
 5. **CI only runs fast tests** - Napari/Fiji/OMERO are VSCode-only
 6. **Legacy flags still work** - ``--enable-napari`` and ``--enable-fiji`` are supported
+7. **First OMERO test is slower** - docker-compose startup takes ~60-90 seconds
 
 Troubleshooting
 ===============
@@ -221,9 +236,20 @@ OMERO tests skipped
 
 **Error**::
 
-    OMERO server not available - skipping OMERO tests
+    OMERO server not available and could not be started automatically
 
-**Solution**: Start OMERO with ``docker-compose up -d``
+**Possible causes**:
+
+1. **Docker not installed**: Install Docker and Docker Compose
+2. **Docker not running**: Start Docker daemon
+3. **docker-compose.yml not found**: Ensure ``openhcs/omero/docker-compose.yml`` exists
+4. **Permissions issue**: Docker may require sudo on Linux
+
+**Solutions**:
+
+- Check Docker is running: ``docker ps``
+- Manually start OMERO: ``cd openhcs/omero && docker-compose up -d``
+- Check Docker Compose installation: ``docker-compose --version``
 
 Napari/Fiji tests not showing in VSCode
 ----------------------------------------
