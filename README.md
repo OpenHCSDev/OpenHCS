@@ -64,11 +64,20 @@ pip install openhcs
 # With desktop GUI
 pip install openhcs[gui]
 
+# With Napari viewer
+pip install openhcs[napari]
+
+# With Fiji/ImageJ viewer
+pip install openhcs[fiji]
+
+# With both viewers
+pip install openhcs[viz]
+
 # With GPU acceleration
 pip install openhcs[gpu]
 
-# Full installation (GUI + GPU)
-pip install openhcs[gui,gpu]
+# Full installation (GUI + viewers + GPU)
+pip install openhcs[gui,viz,gpu]
 ```
 
 **Optional Advanced Features**:

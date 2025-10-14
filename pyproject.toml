@@ -88,12 +88,20 @@ gui = [
     "GPUtil>=1.4.0",
 ]
 
-# Optional visualization tools
-viz = [
-    # Napari viewer
+# Napari viewer
+napari = [
     "napari>=0.4.18",
+]
 
-    # Fiji/ImageJ integration
+# Fiji/ImageJ integration
+fiji = [
+    "pyimagej>=1.4.1",
+    "scyjava>=1.9.1",
+]
+
+# All visualization tools (napari + fiji)
+viz = [
+    "napari>=0.4.18",
     "pyimagej>=1.4.1",
     "scyjava>=1.9.1",
 ]
