@@ -107,16 +107,27 @@ class MetadataViewerDialog(QDialog):
                     # Single subdirectory - show OpenHCSMetadata directly
                     subdir_name = next(iter(subdirs_dict.keys()))
                     subdir_data = subdirs_dict[subdir_name]
+                    # Ensure all optional fields have explicit None if missing
+                    subdir_data.setdefault('timepoints', None)
+                    subdir_data.setdefault('channels', None)
+                    subdir_data.setdefault('wells', None)
+                    subdir_data.setdefault('sites', None)
+                    subdir_data.setdefault('z_indexes', None)
                     metadata_instance = OpenHCSMetadata(**subdir_data)
                     window_title = f"Metadata - {subdir_name}"
                     self._create_single_metadata_form(metadata_instance)
                 else:
                     # Multiple subdirectories - manually create forms for each
                     # ParameterFormManager can't handle Dict[str, dataclass], so we create forms manually
-                    subdirs_instances = {
-                        name: OpenHCSMetadata(**data)
-                        for name, data in subdirs_dict.items()
-                    }
+                    subdirs_instances = {}
+                    for name, data in subdirs_dict.items():
+                        # Ensure all optional fields have explicit None if missing
+                        data.setdefault('timepoints', None)
+                        data.setdefault('channels', None)
+                        data.setdefault('wells', None)
+                        data.setdefault('sites', None)
+                        data.setdefault('z_indexes', None)
+                        subdirs_instances[name] = OpenHCSMetadata(**data)
                     window_title = f"Metadata - {len(subdirs_dict)} subdirectories"
                     self._create_multi_subdirectory_forms(subdirs_instances)
             else:
@@ -140,7 +151,7 @@ class MetadataViewerDialog(QDialog):
                     wells=component_metadata.get('well'),
                     sites=component_metadata.get('site'),
                     z_indexes=component_metadata.get('z_index'),
-                    timepoints=component_metadata.get('timepoint'),  # Add missing timepoints
+                    timepoints=component_metadata.get('timepoint'),
                     available_backends={'disk': True},  # Assume disk backend
                     main=None
                 )

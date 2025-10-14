@@ -495,126 +495,75 @@ class ImageBrowserWidget(QWidget):
         self._apply_combined_filters()
 
     def load_images(self):
-        """Load image files from the orchestrator's metadata (async to prevent UI freeze)."""
+        """Load image files from the orchestrator's metadata."""
         if not self.orchestrator:
             self.info_label.setText("No plate loaded")
             return
 
-        # Show loading indicator
-        self.info_label.setText("Loading images...")
-        self.image_table.setEnabled(False)
-        self.folder_tree.setEnabled(False)
+        try:
+            # Get metadata handler from orchestrator
+            handler = self.orchestrator.microscope_handler
+            metadata_handler = handler.metadata_handler
 
-        # Run in background thread to prevent UI freeze
-        from concurrent.futures import ThreadPoolExecutor
-        import threading
+            # Get image files from metadata
+            plate_path = self.orchestrator.plate_path
+            image_files = metadata_handler.get_image_files(plate_path)
 
-        def load_async():
-            try:
-                # Get metadata handler from orchestrator
-                handler = self.orchestrator.microscope_handler
-                metadata_handler = handler.metadata_handler
+            if not image_files:
+                self.info_label.setText("No images found")
+                return
 
-                # Get image files from metadata (this can be slow for large plates)
-                plate_path = self.orchestrator.plate_path
-                image_files = metadata_handler.get_image_files(plate_path)
+            # Parse first file to determine columns
+            first_parsed = handler.parser.parse_filename(image_files[0])
 
-                if not image_files:
-                    return None, "No images found"
+            if first_parsed:
+                # Get metadata keys (excluding 'extension')
+                metadata_keys = [k for k in first_parsed.keys() if k != 'extension']
 
-                # Parse first file to determine columns
-                first_parsed = handler.parser.parse_filename(image_files[0])
-
-                if first_parsed:
-                    # Get metadata keys (excluding 'extension')
-                    metadata_keys = [k for k in first_parsed.keys() if k != 'extension']
-                    column_headers = ["Filename"] + [k.replace('_', ' ').title() for k in metadata_keys]
-                else:
-                    column_headers = ["Filename"]
-                    metadata_keys = []
-
-                # Build all_images dictionary
-                all_images = {}
-                for filename in image_files:
-                    parsed = handler.parser.parse_filename(filename)
-                    metadata = {'filename': filename}
-                    if parsed:
-                        metadata.update(parsed)
-                    all_images[filename] = metadata
-
-                return {
-                    'all_images': all_images,
-                    'column_headers': column_headers,
-                    'metadata_keys': metadata_keys
-                }, None
-
-            except Exception as e:
-                logger.error(f"Failed to load images: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-                return None, str(e)
-
-        def on_complete(future):
-            try:
-                result, error = future.result()
-
-                if error:
-                    QMessageBox.warning(self, "Error", f"Failed to load images: {error}")
-                    self.info_label.setText("Error loading images")
-                    self.image_table.setEnabled(True)
-                    self.folder_tree.setEnabled(True)
-                    return
-
-                if result is None:
-                    self.info_label.setText("No images found")
-                    self.image_table.setEnabled(True)
-                    self.folder_tree.setEnabled(True)
-                    return
-
-                # Update UI with results (on main thread)
-                self.all_images = result['all_images']
-                self.filtered_images = self.all_images.copy()
-
-                # Set up table columns
-                column_headers = result['column_headers']
+                # Set up table columns: Filename + metadata keys
+                column_headers = ["Filename"] + [k.replace('_', ' ').title() for k in metadata_keys]
                 self.image_table.setColumnCount(len(column_headers))
                 self.image_table.setHorizontalHeaderLabels(column_headers)
 
-                # Set all columns to Interactive resize mode
+                # Set all columns to Interactive resize mode (like function selector)
                 header = self.image_table.horizontalHeader()
                 for col in range(len(column_headers)):
                     header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+            else:
+                # Fallback if parsing fails
+                self.image_table.setColumnCount(1)
+                self.image_table.setHorizontalHeaderLabels(["Filename"])
+                metadata_keys = []
 
-                # Build folder tree from file paths
-                self._build_folder_tree()
+            # Build all_images dictionary
+            self.all_images = {}
+            for filename in image_files:
+                parsed = handler.parser.parse_filename(filename)
+                metadata = {'filename': filename}
+                if parsed:
+                    metadata.update(parsed)
+                self.all_images[filename] = metadata
 
-                # Populate table
-                self._populate_table(self.filtered_images)
+            # Initialize filtered images to all images
+            self.filtered_images = self.all_images.copy()
 
-                # Update info label
-                self.info_label.setText(f"{len(self.all_images)} images loaded")
+            # Build folder tree from file paths
+            self._build_folder_tree()
 
-                # Re-enable UI
-                self.image_table.setEnabled(True)
-                self.folder_tree.setEnabled(True)
+            # Populate table
+            self._populate_table(self.filtered_images)
 
-                # Update plate view if visible
-                if self.plate_view_widget and self.plate_view_widget.isVisible():
-                    self._update_plate_view()
+            # Update info label
+            self.info_label.setText(f"{len(self.all_images)} images loaded")
 
-            except Exception as e:
-                logger.error(f"Failed to process loaded images: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
-                QMessageBox.warning(self, "Error", f"Failed to process images: {e}")
-                self.info_label.setText("Error processing images")
-                self.image_table.setEnabled(True)
-                self.folder_tree.setEnabled(True)
+            # Update plate view if visible
+            if self.plate_view_widget and self.plate_view_widget.isVisible():
+                self._update_plate_view()
 
-        # Submit to thread pool
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(load_async)
-        future.add_done_callback(on_complete)
+        except Exception as e:
+            logger.error(f"Failed to load images: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to load images: {e}")
+            self.info_label.setText("Error loading images")
 
     def _populate_table(self, images_dict: Dict[str, Dict]):
         """Populate table with images from dictionary."""

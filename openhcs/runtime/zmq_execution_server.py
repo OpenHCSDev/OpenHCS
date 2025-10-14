@@ -219,13 +219,16 @@ class ZMQExecutionServer(ZMQServer):
         setup_global_gpu_registry(global_config=global_config)
         ensure_global_config_context(type(global_config), global_config)
 
-        omero_manager = OMEROInstanceManager()
-        if not omero_manager.connect(timeout=60):
-            raise RuntimeError("OMERO server not available")
-        storage_registry['omero_local'] = OMEROLocalBackend(omero_conn=omero_manager.conn)
+        # Only connect to OMERO if the plate path is an OMERO path
+        plate_path_str = str(plate_id)
+        if plate_path_str.startswith("/omero/"):
+            omero_manager = OMEROInstanceManager()
+            if not omero_manager.connect(timeout=60):
+                raise RuntimeError("OMERO server not available")
+            storage_registry['omero_local'] = OMEROLocalBackend(omero_conn=omero_manager.conn)
 
         orchestrator = PipelineOrchestrator(
-            plate_path=Path(f"/omero/plate_{plate_id}"),
+            plate_path=Path(plate_id),
             pipeline_config=pipeline_config,
             progress_callback=lambda axis_id, step, status, metadata: self.send_progress_update(axis_id, step, status)
         )
