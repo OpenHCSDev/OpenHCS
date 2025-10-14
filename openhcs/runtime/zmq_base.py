@@ -441,6 +441,18 @@ class ZMQClient(ABC):
 
     @staticmethod
     def kill_server_on_port(port, graceful=True, timeout=5.0):
+        """
+        Kill server on specified port.
+
+        Args:
+            port: Server port number
+            graceful: If True, kills workers only (server stays alive).
+                     If False, kills workers AND server (port becomes free).
+            timeout: Timeout in seconds for server response
+
+        Returns:
+            bool: True if operation succeeded
+        """
         import zmq
         msg_type = 'shutdown' if graceful else 'force_shutdown'
         shutdown_sent = False
@@ -473,36 +485,53 @@ class ZMQClient(ABC):
             ack = pickle.loads(sock.recv())
             if ack.get('type') == 'shutdown_ack':
                 shutdown_acknowledged = True
-                logger.info(f"✅ Server on port {port} acknowledged shutdown")
-                # Server acknowledged shutdown, wait for it to actually close
-                time.sleep(1.5)
-                # Verify port is actually closed
-                if is_port_free(port):
-                    logger.info(f"✅ Port {port} is now free")
+
+                if graceful:
+                    # Graceful shutdown: workers killed, server stays alive
+                    # Port should still be in use
+                    logger.info(f"✅ Server on port {port} acknowledged graceful shutdown (workers killed, server alive)")
                     return True
-                # Port still in use, but server acknowledged - give it more time
-                time.sleep(1.0)
-                # Check again
-                if is_port_free(port):
-                    logger.info(f"✅ Port {port} is now free (after extra wait)")
+                else:
+                    # Force shutdown: workers AND server killed
+                    # Port should become free
+                    logger.info(f"✅ Server on port {port} acknowledged force shutdown")
+                    # Wait for server to actually close
+                    time.sleep(1.5)
+                    # Verify port is actually closed
+                    if is_port_free(port):
+                        logger.info(f"✅ Port {port} is now free")
+                        return True
+                    # Port still in use, but server acknowledged - give it more time
+                    time.sleep(1.0)
+                    # Check again
+                    if is_port_free(port):
+                        logger.info(f"✅ Port {port} is now free (after extra wait)")
+                        return True
+                    # Server acknowledged but port still in use - consider it success anyway
+                    # (might be in TIME_WAIT state, or server is still cleaning up)
+                    logger.info(f"✅ Server on port {port} acknowledged shutdown but port still in use (may be TIME_WAIT) - considering success")
                     return True
-                # Server acknowledged but port still in use - consider it success anyway
-                # (might be in TIME_WAIT state, or server is still cleaning up)
-                logger.info(f"✅ Server on port {port} acknowledged shutdown but port still in use (may be TIME_WAIT) - considering success")
-                return True
         except Exception as e:
             # If we sent the shutdown message but got a timeout on response,
             # the server might still be shutting down - verify port status
-            if shutdown_sent and graceful:
-                logger.info(f"⚠️ Shutdown message sent to port {port}, but no response received: {e}")
-                time.sleep(2.0)  # Give server time to shut down
-                # Check if port is now free
-                if is_port_free(port):
-                    # Port is free, shutdown was successful despite timeout
-                    logger.info(f"✅ Port {port} is now free (shutdown succeeded despite timeout)")
+            if shutdown_sent:
+                if graceful:
+                    # Graceful shutdown timeout - server might have killed workers but didn't respond
+                    # This is OK, consider it success
+                    logger.info(f"⚠️ Graceful shutdown message sent to port {port}, but no response received: {e}")
+                    logger.info(f"✅ Considering graceful shutdown successful (workers likely killed)")
                     return True
-                # Port still in use - shutdown may have failed
-                logger.warning(f"❌ Port {port} still in use after shutdown timeout")
+                else:
+                    # Force shutdown timeout - check if port is free
+                    logger.info(f"⚠️ Force shutdown message sent to port {port}, but no response received: {e}")
+                    time.sleep(2.0)  # Give server time to shut down
+                    # Check if port is now free
+                    if is_port_free(port):
+                        # Port is free, shutdown was successful despite timeout
+                        logger.info(f"✅ Port {port} is now free (shutdown succeeded despite timeout)")
+                        return True
+                    # Port still in use - shutdown may have failed
+                    logger.warning(f"❌ Port {port} still in use after force shutdown timeout")
         finally:
             try:
                 sock.close()
@@ -517,6 +546,7 @@ class ZMQClient(ABC):
             return True
 
         if not graceful:
+            # Force shutdown failed via ZMQ, try killing processes directly
             killed = sum(ZMQServer.kill_processes_on_port(p) for p in [port, port + 1000])
             logger.info(f"Force killed {killed} processes on ports {port} and {port + 1000}")
             return killed > 0
