@@ -81,9 +81,9 @@ Testing with Visualizers
 Testing with OMERO
 -------------------
 
-**OMERO tests automatically start the OMERO server if needed** using docker-compose.
+**OMERO tests automatically start Docker and OMERO if needed** - zero manual setup required!
 
-Run OMERO tests (OMERO will auto-start if not running)::
+Run OMERO tests (Docker + OMERO will auto-start if not running)::
 
     # Basic OMERO tests
     pytest tests/integration/test_main.py --it-microscopes=OMERO
@@ -94,15 +94,25 @@ Run OMERO tests (OMERO will auto-start if not running)::
 **What happens automatically**:
 
 1. Test checks if OMERO is running
-2. If not running, automatically executes ``docker-compose up -d``
-3. Waits for OMERO to be ready (up to 120 seconds)
-4. Runs the test
-5. Leaves OMERO running for subsequent tests
+2. If not, checks if Docker daemon is running
+3. If Docker not running, **automatically starts Docker daemon**:
 
-**Manual OMERO management** (optional)::
+   - **Linux**: Uses ``sudo systemctl start docker``
+   - **macOS**: Opens Docker Desktop application
+   - **Windows**: Starts Docker Desktop application
+
+4. Executes ``docker-compose up -d`` to start OMERO
+5. Waits for OMERO to be ready (up to 120 seconds)
+6. Runs the test
+7. Leaves Docker and OMERO running for subsequent tests
+
+**Manual management** (optional)::
+
+    # Start Docker manually (Linux)
+    sudo systemctl start docker
 
     # Start OMERO manually
-    docker-compose up -d
+    cd openhcs/omero && docker-compose up -d
 
     # Stop OMERO manually
     docker-compose down
@@ -222,11 +232,12 @@ Tips and Best Practices
 
 1. **Use VSCode test menu** for quick access to specific test combinations
 2. **Use command-line** for custom combinations not in VSCode menu
-3. **OMERO tests auto-start** - no manual setup required (requires Docker)
+3. **OMERO tests auto-start everything** - Docker daemon + OMERO (zero manual setup)
 4. **Visualizer tests are interactive** - they open viewer windows
 5. **CI only runs fast tests** - Napari/Fiji/OMERO are VSCode-only
 6. **Legacy flags still work** - ``--enable-napari`` and ``--enable-fiji`` are supported
-7. **First OMERO test is slower** - docker-compose startup takes ~60-90 seconds
+7. **First OMERO test is slower** - Docker + OMERO startup takes ~60-120 seconds
+8. **Docker Desktop on macOS/Windows** - Auto-start opens the application (may require user interaction)
 
 Troubleshooting
 ===============
@@ -241,15 +252,20 @@ OMERO tests skipped
 **Possible causes**:
 
 1. **Docker not installed**: Install Docker and Docker Compose
-2. **Docker not running**: Start Docker daemon
+2. **Docker daemon failed to start**: Check Docker installation
 3. **docker-compose.yml not found**: Ensure ``openhcs/omero/docker-compose.yml`` exists
-4. **Permissions issue**: Docker may require sudo on Linux
+4. **Permissions issue**: Docker may require sudo on Linux (auto-start uses sudo)
+5. **Docker Desktop not installed** (macOS/Windows): Install Docker Desktop
 
 **Solutions**:
 
-- Check Docker is running: ``docker ps``
-- Manually start OMERO: ``cd openhcs/omero && docker-compose up -d``
-- Check Docker Compose installation: ``docker-compose --version``
+- **Check Docker installation**: ``docker --version``
+- **Check Docker is running**: ``docker ps``
+- **Check Docker Compose**: ``docker-compose --version``
+- **Manually start Docker** (Linux): ``sudo systemctl start docker``
+- **Manually start Docker Desktop** (macOS): Open Docker Desktop application
+- **Manually start OMERO**: ``cd openhcs/omero && docker-compose up -d``
+- **Check logs**: ``docker-compose logs`` in ``openhcs/omero/``
 
 Napari/Fiji tests not showing in VSCode
 ----------------------------------------
