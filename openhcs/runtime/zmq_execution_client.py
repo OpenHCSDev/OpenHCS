@@ -82,18 +82,45 @@ class ZMQExecutionClient(ZMQClient):
         response = self._send_control_request(request)
         if response.get('status') == 'accepted':
             execution_id = response.get('execution_id')
+            consecutive_errors = 0
+            max_consecutive_errors = 5
+
             while True:
                 time.sleep(0.5)
-                status_response = self.get_status(execution_id)
-                if status_response.get('status') == 'ok':
-                    execution = status_response.get('execution', {})
-                    exec_status = execution.get('status')
-                    if exec_status == 'complete':
-                        return {'status': 'complete', 'execution_id': execution_id, 'results': execution.get('results_summary', {})}
-                    elif exec_status == 'failed':
-                        return {'status': 'error', 'execution_id': execution_id, 'message': execution.get('error')}
-                    elif exec_status == 'cancelled':
-                        return {'status': 'cancelled', 'execution_id': execution_id, 'message': 'Execution was cancelled by server shutdown'}
+
+                try:
+                    status_response = self.get_status(execution_id)
+                    consecutive_errors = 0  # Reset error counter on success
+
+                    if status_response.get('status') == 'ok':
+                        execution = status_response.get('execution', {})
+                        exec_status = execution.get('status')
+                        if exec_status == 'complete':
+                            return {'status': 'complete', 'execution_id': execution_id, 'results': execution.get('results_summary', {})}
+                        elif exec_status == 'failed':
+                            return {'status': 'error', 'execution_id': execution_id, 'message': execution.get('error')}
+                        elif exec_status == 'cancelled':
+                            return {'status': 'cancelled', 'execution_id': execution_id, 'message': 'Execution was cancelled'}
+                    elif status_response.get('status') == 'error':
+                        # Server returned error status
+                        error_msg = status_response.get('message', 'Unknown error')
+                        logger.warning(f"Status check returned error: {error_msg}")
+                        return {'status': 'error', 'execution_id': execution_id, 'message': error_msg}
+
+                except Exception as e:
+                    # Handle ZMQ errors, connection issues, etc.
+                    consecutive_errors += 1
+                    logger.warning(f"Error checking execution status (attempt {consecutive_errors}/{max_consecutive_errors}): {e}")
+
+                    if consecutive_errors >= max_consecutive_errors:
+                        # Too many consecutive errors - assume execution failed or was cancelled
+                        logger.error(f"Failed to get execution status after {max_consecutive_errors} attempts, assuming execution was cancelled")
+                        return {'status': 'cancelled', 'execution_id': execution_id,
+                               'message': f'Lost connection to server (workers may have been killed)'}
+
+                    # Wait a bit longer before retrying after error
+                    time.sleep(1.0)
+
         return response
 
     def get_status(self, execution_id=None):
@@ -129,15 +156,32 @@ class ZMQExecutionClient(ZMQClient):
         except:
             return {'status': 'error', 'message': 'Failed'}
 
-    def _send_control_request(self, request):
+    def _send_control_request(self, request, timeout_ms=5000):
+        """
+        Send a control request to the server.
+
+        Args:
+            request: Request dictionary to send
+            timeout_ms: Timeout in milliseconds (default: 5000)
+
+        Returns:
+            Response dictionary from server
+
+        Raises:
+            Exception: If request fails or times out
+        """
         ctx = zmq.Context()
         sock = ctx.socket(zmq.REQ)
         sock.setsockopt(zmq.LINGER, 0)
+        sock.setsockopt(zmq.RCVTIMEO, timeout_ms)  # Set receive timeout
         sock.connect(f"tcp://{self.host}:{self.control_port}")
         try:
             sock.send(pickle.dumps(request))
-            return pickle.loads(sock.recv())
-
+            response = sock.recv()
+            return pickle.loads(response)
+        except zmq.Again:
+            # Timeout - server didn't respond
+            raise TimeoutError(f"Server did not respond to {request.get('type')} request within {timeout_ms}ms")
         finally:
             sock.close()
             ctx.term()
