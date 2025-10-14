@@ -460,14 +460,16 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_m
         if not func_obj:
             return "[]"
         items = [generate_readable_function_repr(item, indent, clean_mode, name_mappings, required_function_imports, required_enum_imports) for item in func_obj]
-        return f"[\n{next_indent_str}{f',\n{next_indent_str}'.join(items)}\n{indent_str}]"
+        separator = f',\n{next_indent_str}'
+        return f"[\n{next_indent_str}{separator.join(items)}\n{indent_str}]"
 
     elif isinstance(func_obj, dict):
         if not func_obj:
             return "{}"
         items = [f"{next_indent_str}'{k}': {generate_readable_function_repr(v, indent, clean_mode, name_mappings, required_function_imports, required_enum_imports)}"
                 for k, v in func_obj.items()]
-        return f"{{{',\n'.join(items)}\n{indent_str}}}"
+        separator = ',\n'
+        return f"{{{separator.join(items)}\n{indent_str}}}"
 
     else:
         return _value_to_repr(func_obj, required_imports=required_enum_imports, name_mappings=name_mappings)
