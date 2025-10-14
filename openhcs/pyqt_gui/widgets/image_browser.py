@@ -78,25 +78,7 @@ class ImageBrowserWidget(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
 
-        # Header with buttons only (no title - already visible in tab)
-        header_layout = QHBoxLayout()
 
-        # Plate view toggle button
-        self.plate_view_toggle_btn = QPushButton("Show Plate View")
-        self.plate_view_toggle_btn.setCheckable(True)
-        self.plate_view_toggle_btn.clicked.connect(self._toggle_plate_view)
-        self.plate_view_toggle_btn.setStyleSheet(self.style_gen.generate_button_style())
-        header_layout.addWidget(self.plate_view_toggle_btn)
-
-        # Refresh button
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self.load_images)
-        self.refresh_btn.setStyleSheet(self.style_gen.generate_button_style())
-        header_layout.addWidget(self.refresh_btn)
-
-        header_layout.addStretch()
-
-        layout.addLayout(header_layout)
 
         # Search input row
         search_layout = QHBoxLayout()
@@ -174,6 +156,19 @@ class ImageBrowserWidget(QWidget):
         button_layout.addWidget(self.view_fiji_btn)
 
         button_layout.addStretch()
+
+        # Plate view toggle button (moved from header for compact layout)
+        self.plate_view_toggle_btn = QPushButton("Show Plate View")
+        self.plate_view_toggle_btn.setCheckable(True)
+        self.plate_view_toggle_btn.clicked.connect(self._toggle_plate_view)
+        self.plate_view_toggle_btn.setStyleSheet(self.style_gen.generate_button_style())
+        button_layout.addWidget(self.plate_view_toggle_btn)
+
+        # Refresh button (moved from header for compact layout)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self.load_images)
+        self.refresh_btn.setStyleSheet(self.style_gen.generate_button_style())
+        button_layout.addWidget(self.refresh_btn)
 
         # Info label
         self.info_label = QLabel("No images loaded")

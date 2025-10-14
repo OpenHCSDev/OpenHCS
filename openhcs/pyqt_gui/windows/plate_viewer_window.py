@@ -209,6 +209,7 @@ class PlateViewerWindow(QDialog):
                     wells=component_metadata.get('well'),
                     sites=component_metadata.get('site'),
                     z_indexes=component_metadata.get('z_index'),
+                    timepoints=component_metadata.get('timepoint'),  # Add missing timepoints
                     available_backends={'disk': True},
                     main=None
                 )
