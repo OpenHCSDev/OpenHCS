@@ -39,6 +39,10 @@ class MessageFields:
     WELL_ID = "well_id"
     STEP = "step"
     TIMESTAMP = "timestamp"
+    # Acknowledgment message fields
+    IMAGE_ID = "image_id"
+    VIEWER_PORT = "viewer_port"
+    VIEWER_TYPE = "viewer_type"
 
 
 class ControlMessageType(Enum):
@@ -217,4 +221,44 @@ class ProgressUpdate:
     def to_dict(self):
         return {MessageFields.TYPE: "progress", MessageFields.WELL_ID: self.well_id,
                 MessageFields.STEP: self.step, MessageFields.STATUS: self.status, MessageFields.TIMESTAMP: self.timestamp}
+
+
+@dataclass(frozen=True)
+class ImageAck:
+    """Acknowledgment message sent by viewers after processing an image.
+
+    Sent via PUSH socket from viewer to shared ack port (7555).
+    Used to track real-time queue depth and show progress like '3/10 images processed'.
+    """
+    image_id: str          # UUID of the processed image
+    viewer_port: int       # Port of the viewer that processed it (for routing)
+    viewer_type: str       # 'napari' or 'fiji'
+    status: str = 'success'  # 'success', 'error', etc.
+    timestamp: float = None  # When it was processed
+    error: str = None      # Error message if status='error'
+
+    def to_dict(self):
+        result = {
+            MessageFields.TYPE: "image_ack",
+            MessageFields.IMAGE_ID: self.image_id,
+            MessageFields.VIEWER_PORT: self.viewer_port,
+            MessageFields.VIEWER_TYPE: self.viewer_type,
+            MessageFields.STATUS: self.status
+        }
+        if self.timestamp is not None:
+            result[MessageFields.TIMESTAMP] = self.timestamp
+        if self.error is not None:
+            result[MessageFields.ERROR] = self.error
+        return result
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            image_id=data[MessageFields.IMAGE_ID],
+            viewer_port=data[MessageFields.VIEWER_PORT],
+            viewer_type=data[MessageFields.VIEWER_TYPE],
+            status=data.get(MessageFields.STATUS, 'success'),
+            timestamp=data.get(MessageFields.TIMESTAMP),
+            error=data.get(MessageFields.ERROR)
+        )
 

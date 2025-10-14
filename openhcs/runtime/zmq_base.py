@@ -10,9 +10,115 @@ import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 import pickle
-from openhcs.runtime.zmq_messages import ControlMessageType, ResponseType, MessageFields, PongResponse, SocketType
+from openhcs.runtime.zmq_messages import ControlMessageType, ResponseType, MessageFields, PongResponse, SocketType, ImageAck
 
 logger = logging.getLogger(__name__)
+
+# Global shared acknowledgment port for all viewers
+# All viewers send acks to this port via PUSH sockets
+# Client listens on this port via PULL socket
+SHARED_ACK_PORT = 7555
+
+
+# Global ack listener singleton
+_ack_listener_thread = None
+_ack_listener_lock = threading.Lock()
+_ack_listener_running = False
+
+
+def start_global_ack_listener():
+    """Start the global ack listener thread (singleton).
+
+    This thread listens on SHARED_ACK_PORT for acknowledgments from all viewers
+    and routes them to the appropriate queue trackers.
+
+    Safe to call multiple times - only starts once.
+    """
+    global _ack_listener_thread, _ack_listener_running
+
+    with _ack_listener_lock:
+        if _ack_listener_running:
+            logger.debug("Ack listener already running")
+            return
+
+        logger.info(f"Starting global ack listener on port {SHARED_ACK_PORT}")
+        _ack_listener_running = True
+        _ack_listener_thread = threading.Thread(
+            target=_ack_listener_loop,
+            daemon=True,
+            name="AckListener"
+        )
+        _ack_listener_thread.start()
+
+
+def _ack_listener_loop():
+    """Main loop for ack listener thread.
+
+    Receives acks from all viewers and routes to queue trackers.
+    """
+    import zmq
+    from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+
+    registry = GlobalQueueTrackerRegistry()
+    context = zmq.Context()
+    socket = None
+
+    try:
+        socket = context.socket(zmq.PULL)
+        socket.bind(f"tcp://*:{SHARED_ACK_PORT}")
+        logger.info(f"✅ Ack listener bound to port {SHARED_ACK_PORT}")
+
+        while _ack_listener_running:
+            try:
+                # Receive ack message (with timeout to allow checking _ack_listener_running)
+                if socket.poll(timeout=1000):  # 1 second timeout
+                    ack_dict = socket.recv_json()
+
+                    # Parse ack message
+                    try:
+                        ack = ImageAck.from_dict(ack_dict)
+
+                        # Route to appropriate queue tracker
+                        tracker = registry.get_tracker(ack.viewer_port)
+                        if tracker:
+                            tracker.mark_processed(ack.image_id)
+                        else:
+                            logger.warning(f"Received ack for unknown viewer port {ack.viewer_port}: {ack.image_id}")
+
+                    except Exception as e:
+                        logger.error(f"Failed to parse ack message: {e}", exc_info=True)
+
+            except zmq.ZMQError as e:
+                if _ack_listener_running:
+                    logger.error(f"ZMQ error in ack listener: {e}")
+                    time.sleep(0.1)
+
+    except Exception as e:
+        logger.error(f"Fatal error in ack listener: {e}", exc_info=True)
+
+    finally:
+        if socket:
+            try:
+                socket.close()
+            except:
+                pass
+        try:
+            context.term()
+        except:
+            pass
+        logger.info("Ack listener stopped")
+
+
+def stop_global_ack_listener():
+    """Stop the global ack listener thread."""
+    global _ack_listener_running
+
+    with _ack_listener_lock:
+        if not _ack_listener_running:
+            return
+
+        logger.info("Stopping global ack listener")
+        _ack_listener_running = False
 
 
 class ZMQServer(ABC):
@@ -337,6 +443,25 @@ class ZMQClient(ABC):
     def kill_server_on_port(port, graceful=True, timeout=5.0):
         import zmq
         msg_type = 'shutdown' if graceful else 'force_shutdown'
+        shutdown_sent = False
+        shutdown_acknowledged = False
+
+        def is_port_free(port):
+            """Check if port is free (not in use)."""
+            sock_test = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock_test.settimeout(0.1)
+            try:
+                sock_test.bind(('localhost', port))
+                sock_test.close()
+                return True
+            except OSError:
+                return False
+            finally:
+                try:
+                    sock_test.close()
+                except:
+                    pass
+
         try:
             ctx = zmq.Context()
             sock = ctx.socket(zmq.REQ)
@@ -344,20 +469,59 @@ class ZMQClient(ABC):
             sock.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
             sock.connect(f"tcp://localhost:{port + 1000}")
             sock.send(pickle.dumps({'type': msg_type}))
+            shutdown_sent = True
             ack = pickle.loads(sock.recv())
             if ack.get('type') == 'shutdown_ack':
+                shutdown_acknowledged = True
+                logger.info(f"✅ Server on port {port} acknowledged shutdown")
+                # Server acknowledged shutdown, wait for it to actually close
+                time.sleep(1.5)
+                # Verify port is actually closed
+                if is_port_free(port):
+                    logger.info(f"✅ Port {port} is now free")
+                    return True
+                # Port still in use, but server acknowledged - give it more time
                 time.sleep(1.0)
+                # Check again
+                if is_port_free(port):
+                    logger.info(f"✅ Port {port} is now free (after extra wait)")
+                    return True
+                # Server acknowledged but port still in use - consider it success anyway
+                # (might be in TIME_WAIT state, or server is still cleaning up)
+                logger.info(f"✅ Server on port {port} acknowledged shutdown but port still in use (may be TIME_WAIT) - considering success")
                 return True
-        except:
-            pass
+        except Exception as e:
+            # If we sent the shutdown message but got a timeout on response,
+            # the server might still be shutting down - verify port status
+            if shutdown_sent and graceful:
+                logger.info(f"⚠️ Shutdown message sent to port {port}, but no response received: {e}")
+                time.sleep(2.0)  # Give server time to shut down
+                # Check if port is now free
+                if is_port_free(port):
+                    # Port is free, shutdown was successful despite timeout
+                    logger.info(f"✅ Port {port} is now free (shutdown succeeded despite timeout)")
+                    return True
+                # Port still in use - shutdown may have failed
+                logger.warning(f"❌ Port {port} still in use after shutdown timeout")
         finally:
             try:
                 sock.close()
                 ctx.term()
             except:
                 pass
+
+        # If shutdown was acknowledged, consider it a success even if we couldn't verify port closure
+        # (the server confirmed it's shutting down, which is good enough)
+        if shutdown_acknowledged:
+            logger.info(f"✅ Shutdown acknowledged for port {port}, considering it successful")
+            return True
+
         if not graceful:
-            return sum(ZMQServer.kill_processes_on_port(p) for p in [port, port + 1000]) > 0
+            killed = sum(ZMQServer.kill_processes_on_port(p) for p in [port, port + 1000])
+            logger.info(f"Force killed {killed} processes on ports {port} and {port + 1000}")
+            return killed > 0
+
+        logger.warning(f"❌ Failed to shutdown server on port {port} gracefully")
         return False
 
     @abstractmethod
