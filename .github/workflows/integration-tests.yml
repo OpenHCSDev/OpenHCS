@@ -63,7 +63,7 @@ jobs:
   integration-tests-focused:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'pull_request'
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -88,3 +88,50 @@ jobs:
                 --it-dims 3d \
                 --it-exec-mode multiprocessing \
                 -v --tb=short
+
+  omero-integration-tests:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run OMERO integration tests (auto-starts Docker + OMERO)
+        env:
+          OPENHCS_CPU_ONLY: true
+        run: |
+          python -m pytest tests/integration/ \
+                --it-backends disk \
+                --it-microscopes OMERO \
+                --it-dims 3d \
+                --it-exec-mode multiprocessing \
+                --it-visualizers none \
+                -v --tb=short
+        timeout-minutes: 15
+
+      - name: Show OMERO logs on failure
+        if: failure()
+        run: |
+          echo "=== OMERO Server Logs ==="
+          sudo docker-compose -f openhcs/omero/docker-compose.yml logs omeroserver || true
+          echo "=== OMERO Web Logs ==="
+          sudo docker-compose -f openhcs/omero/docker-compose.yml logs omeroweb || true
+          echo "=== Database Logs ==="
+          sudo docker-compose -f openhcs/omero/docker-compose.yml logs database || true
+
+      - name: Cleanup OMERO containers
+        if: always()
+        run: |
+          cd openhcs/omero
+          sudo docker-compose down -v || true
