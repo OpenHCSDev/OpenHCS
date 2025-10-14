@@ -52,6 +52,9 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                     self._context = zmq.Context()
 
                 publisher = self._context.socket(zmq.PUB)
+                # Set high water mark to allow more buffering (default is 1000)
+                # This prevents message loss during viewer startup (slow joiner problem)
+                publisher.setsockopt(zmq.SNDHWM, 10000)
                 publisher.connect(f"tcp://{napari_host}:{napari_port}")
                 logger.info(f"Napari streaming publisher connected to {napari_host}:{napari_port}")
 
@@ -99,7 +102,14 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
         # Prepare batch of images
         batch_images = []
+        image_ids = []  # Track image IDs for queue tracker registration
+
         for data, file_path in zip(data_list, file_paths):
+            # Generate unique ID for this image (for acknowledgment tracking)
+            import uuid
+            image_id = str(uuid.uuid4())
+            image_ids.append(image_id)
+
             # Convert to numpy
             if hasattr(data, 'cpu'):
                 np_data = data.cpu().numpy()
@@ -127,7 +137,8 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 'shm_name': shm_name,
                 'component_metadata': component_metadata,
                 'step_index': step_index,
-                'step_name': step_name
+                'step_name': step_name,
+                'image_id': image_id  # Add image ID for acknowledgment tracking
             })
 
         # Build component modes
@@ -156,6 +167,13 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         }
 
         publisher.send_json(message)
+
+        # Register sent images with queue tracker for acknowledgment tracking
+        from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+        registry = GlobalQueueTrackerRegistry()
+        tracker = registry.get_or_create_tracker(napari_port, 'napari')
+        for image_id in image_ids:
+            tracker.register_sent(image_id)
 
     # REMOVED: All file system methods (load, load_batch, exists, list_files, delete, etc.)
     # These are no longer inherited - clean interface!

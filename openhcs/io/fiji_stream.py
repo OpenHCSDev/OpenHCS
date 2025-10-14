@@ -69,7 +69,14 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
         # Prepare batch messages
         batch_images = []
+        image_ids = []  # Track image IDs for queue tracker registration
+
         for data, file_path in zip(data_list, file_paths):
+            # Generate unique ID for this image (for acknowledgment tracking)
+            import uuid
+            image_id = str(uuid.uuid4())
+            image_ids.append(image_id)
+
             # Convert to numpy
             np_data = data.cpu().numpy() if hasattr(data, 'cpu') else \
                       data.get() if hasattr(data, 'get') else np.asarray(data)
@@ -93,7 +100,8 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 'shm_name': shm_name,
                 'component_metadata': component_metadata,
                 'step_index': step_index,
-                'step_name': step_name
+                'step_name': step_name,
+                'image_id': image_id  # Add image ID for acknowledgment tracking
             })
 
         # Extract component modes from display config
@@ -120,6 +128,13 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         try:
             publisher.send_json(message, flags=zmq.NOBLOCK)
             logger.debug(f"Streamed batch of {len(batch_images)} images to Fiji on port {fiji_port}")
+
+            # Register sent images with queue tracker for acknowledgment tracking
+            from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+            registry = GlobalQueueTrackerRegistry()
+            tracker = registry.get_or_create_tracker(fiji_port, 'fiji')
+            for image_id in image_ids:
+                tracker.register_sent(image_id)
 
             # Clean up publisher's handles after successful send
             # Receiver will unlink the shared memory after copying the data
