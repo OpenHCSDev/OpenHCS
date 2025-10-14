@@ -37,8 +37,7 @@ class ImageBrowserWidget(QWidget):
     
     # Signals
     image_selected = pyqtSignal(str)  # Emitted when an image is selected
-    _instance_scan_complete = pyqtSignal(object)  # Internal signal for async scan completion
-    
+
     def __init__(self, orchestrator=None, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
         super().__init__(parent)
 
@@ -57,20 +56,11 @@ class ImageBrowserWidget(QWidget):
         self.all_images = {}  # filename -> metadata dict
         self.filtered_images = {}  # filename -> metadata dict (after search/filter)
 
-        # Connect internal signal for async instance scanning
-        self._instance_scan_complete.connect(self._update_instance_list)
-
         self.init_ui()
 
         # Load images if orchestrator is provided
         if self.orchestrator:
             self.load_images()
-
-    def showEvent(self, event):
-        """Auto-scan for Napari instances when window is shown."""
-        super().showEvent(event)
-        # Scan for instances on first show
-        self.refresh_napari_instances()
 
     def init_ui(self):
         """Initialize the user interface."""
@@ -227,17 +217,25 @@ class ImageBrowserWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
 
+        # Streaming configs side-by-side with resizable splitter
+        config_splitter = QSplitter(Qt.Orientation.Horizontal)
+
         # Napari config panel (with enable checkbox)
         napari_panel = self._create_napari_config_panel()
-        layout.addWidget(napari_panel, 3)  # 30% of space
+        config_splitter.addWidget(napari_panel)
 
         # Fiji config panel (with enable checkbox)
         fiji_panel = self._create_fiji_config_panel()
-        layout.addWidget(fiji_panel, 3)  # 30% of space
+        config_splitter.addWidget(fiji_panel)
+
+        # Set initial sizes (50/50 split)
+        config_splitter.setSizes([150, 150])
+
+        layout.addWidget(config_splitter, 3)  # 30% of vertical space
 
         # Instance manager panel
         instance_panel = self._create_instance_manager_panel()
-        layout.addWidget(instance_panel, 4)  # 40% of space
+        layout.addWidget(instance_panel, 7)  # 70% of vertical space
 
         return container
 
@@ -341,37 +339,24 @@ class ImageBrowserWidget(QWidget):
         self.view_fiji_btn.setEnabled(checked and len(self.image_table.selectedItems()) > 0)
 
     def _create_instance_manager_panel(self):
-        """Create the Napari instance manager panel."""
-        panel = QGroupBox("Napari Instances")
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(5, 5, 5, 5)
+        """Create the viewer instance manager panel using ZMQServerManagerWidget."""
+        from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import ZMQServerManagerWidget
+        from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
 
-        # Instance list
-        self.instance_list = QListWidget()
-        self.instance_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        layout.addWidget(self.instance_list)
+        # Scan Napari and Fiji ports
+        napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]  # 5555-5564
+        fiji_ports = [5556 + i for i in range(10)]  # 5556-5565
+        ports_to_scan = napari_ports + fiji_ports
 
-        # Buttons
-        button_layout = QHBoxLayout()
+        # Create ZMQ server manager widget
+        zmq_manager = ZMQServerManagerWidget(
+            ports_to_scan=ports_to_scan,
+            title="Viewer Instances",
+            style_generator=self.style_gen,
+            parent=self
+        )
 
-        refresh_instances_btn = QPushButton("Refresh")
-        refresh_instances_btn.clicked.connect(self.refresh_napari_instances)
-        refresh_instances_btn.setStyleSheet(self.style_gen.generate_button_style())
-        button_layout.addWidget(refresh_instances_btn)
-
-        quit_instances_btn = QPushButton("Quit Selected")
-        quit_instances_btn.clicked.connect(self.quit_selected_instances)
-        quit_instances_btn.setStyleSheet(self.style_gen.generate_button_style())
-        button_layout.addWidget(quit_instances_btn)
-
-        force_kill_instances_btn = QPushButton("Force Kill Selected")
-        force_kill_instances_btn.clicked.connect(self.force_kill_selected_instances)
-        force_kill_instances_btn.setStyleSheet(self.style_gen.generate_button_style())
-        button_layout.addWidget(force_kill_instances_btn)
-
-        layout.addLayout(button_layout)
-
-        return panel
+        return zmq_manager
 
     def set_orchestrator(self, orchestrator):
         """Set the orchestrator and load images."""
@@ -460,275 +445,6 @@ class ImageBrowserWidget(QWidget):
             self.image_count_label.setText(f"Images: {len(self.filtered_images)}/{len(self.all_images)} (filtered)")
         else:
             self.image_count_label.setText(f"Images: {len(self.all_images)}")
-
-    def refresh_napari_instances(self):
-        """Refresh the list of Napari and Fiji instances with status."""
-        if not self.orchestrator:
-            return
-
-        # Get tracked viewers from orchestrator
-        tracked_ports = set()
-        for key, viewer in self.orchestrator._visualizers.items():
-            if key[0] == 'napari':
-                tracked_ports.add(key[1])
-            elif key[0] == 'fiji':
-                tracked_ports.add(key[1])
-
-        # First, immediately show tracked viewers (synchronous)
-        self._update_instance_list(tracked_ports)
-
-        # Then start async scan for external viewers in background
-        import threading
-
-        def scan_and_update():
-            # Scan for all viewers on common ports (including external ones)
-            from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
-            napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]  # 5555-5564
-            fiji_ports = [5556 + i for i in range(10)]  # 5556-5565
-            common_ports = napari_ports + fiji_ports
-
-            detected_ports = set()
-
-            # First, add ALL tracked viewers from orchestrator
-            detected_ports.update(tracked_ports)
-
-            # Then, scan for external viewers by pinging them in parallel
-            external_ports = self._scan_ports_parallel([p for p in common_ports if p not in detected_ports])
-            detected_ports.update(external_ports)
-
-            # Update UI on main thread via signal
-            self._instance_scan_complete.emit(detected_ports)
-
-        # Start scan in background
-        thread = threading.Thread(target=scan_and_update, daemon=True)
-        thread.start()
-
-    def _scan_ports_parallel(self, ports: list) -> set:
-        """Scan multiple ports in parallel using thread pool."""
-        import concurrent.futures
-
-        detected = set()
-
-        # Use ThreadPoolExecutor to ping all ports in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            # Submit all ping tasks
-            future_to_port = {executor.submit(self._ping_napari_viewer, port): port for port in ports}
-
-            # Collect results as they complete
-            for future in concurrent.futures.as_completed(future_to_port):
-                port = future_to_port[future]
-                try:
-                    if future.result():
-                        detected.add(port)
-                except Exception as e:
-                    logger.debug(f"Error scanning port {port}: {e}")
-
-        return detected
-
-    @pyqtSlot(object)
-    def _update_instance_list(self, detected_ports: set):
-        """Update instance list on UI thread (called via QMetaObject.invokeMethod)."""
-        if not self.orchestrator:
-            return
-
-        self.instance_list.clear()
-
-        # Display all detected viewers with status
-        for port in sorted(detected_ports):
-            # Check if this port is tracked by orchestrator
-            viewer = None
-            viewer_type = "Unknown"
-            for key, vis in self.orchestrator._visualizers.items():
-                if len(key) > 1 and key[1] == port:
-                    viewer = vis
-                    viewer_type = key[0].capitalize()
-                    break
-
-            # Determine status
-            if viewer is not None:
-                # Tracked viewer - show detailed status
-                if not viewer.is_running:
-                    status = "🚀 Starting..."
-                else:
-                    status = "✅ Ready"
-                label = f"{viewer_type} Port {port} - {status}"
-            else:
-                # External viewer - just show ready
-                status = "✅ Ready"
-                label = f"Port {port} - {status}"
-
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, port)
-            self.instance_list.addItem(item)
-
-        logger.debug(f"Found {len(detected_ports)} viewer instances")
-
-    def _ping_napari_viewer(self, port: int) -> bool:
-        """
-        Ping a Napari viewer on the given port to check if it's responsive.
-
-        Returns True if viewer responds to ping, False otherwise.
-        """
-        response = self._ping_napari_viewer_detailed(port)
-        return response is not None and response.get('type') == 'pong' and response.get('ready')
-
-    def _ping_napari_viewer_detailed(self, port: int) -> dict | None:
-        """
-        Ping a Napari viewer and return the full pong response.
-
-        Returns the pong response dict if successful, None otherwise.
-        """
-        import zmq
-        import pickle
-
-        control_port = port + 1000
-        control_context = None
-        control_socket = None
-
-        try:
-            control_context = zmq.Context()
-            control_socket = control_context.socket(zmq.REQ)
-            control_socket.setsockopt(zmq.LINGER, 0)
-            control_socket.setsockopt(zmq.RCVTIMEO, 200)  # 200ms timeout (fast scan)
-            control_socket.connect(f"tcp://localhost:{control_port}")
-
-            # Send ping
-            ping_message = {'type': 'ping'}
-            control_socket.send(pickle.dumps(ping_message))
-
-            # Wait for pong
-            response = control_socket.recv()
-            response_data = pickle.loads(response)
-
-            return response_data
-
-        except Exception:
-            return None
-        finally:
-            if control_socket:
-                try:
-                    control_socket.close()
-                except:
-                    pass
-            if control_context:
-                try:
-                    control_context.term()
-                except:
-                    pass
-
-    def quit_selected_instances(self):
-        """
-        Gracefully quit selected Napari instances.
-
-        Verifies viewer is actually Napari via ping/pong before killing.
-        """
-        selected_items = self.instance_list.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "No Selection", "Please select Napari instances to quit.")
-            return
-
-        for item in selected_items:
-            port = item.data(Qt.ItemDataRole.UserRole)
-
-            try:
-                # Verify viewer is actually Napari by pinging
-                pong_response = self._ping_napari_viewer_detailed(port)
-                if not pong_response:
-                    logger.warning(f"No responsive viewer found on port {port}")
-                    QMessageBox.warning(self, "Not Responsive",
-                                      f"No responsive viewer on port {port}. Use Force Kill if needed.")
-                    continue
-
-                # Verify it's actually a Napari viewer from OpenHCS
-                if not (pong_response.get('viewer') == 'napari' and pong_response.get('openhcs')):
-                    logger.warning(f"Viewer on port {port} is not an OpenHCS Napari viewer: {pong_response}")
-                    QMessageBox.warning(self, "Not Napari",
-                                      f"Viewer on port {port} is not an OpenHCS Napari viewer. Use Force Kill if needed.")
-                    continue
-
-                # Confirmed Napari viewer - safe to kill
-                self._kill_viewer_on_port(port)
-                logger.info(f"Quit Napari instance on port {port}")
-
-            except Exception as e:
-                logger.error(f"Failed to quit Napari instance on port {port}: {e}", exc_info=True)
-
-        # Refresh the list
-        self.refresh_napari_instances()
-
-    def force_kill_selected_instances(self):
-        """
-        Force kill selected Napari instances without verification.
-
-        Immediately kills any process listening on the port.
-        Use with caution!
-        """
-        selected_items = self.instance_list.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "No Selection", "Please select Napari instances to force kill.")
-            return
-
-        # Confirm with user
-        reply = QMessageBox.question(
-            self,
-            "Force Kill Confirmation",
-            f"Force kill {len(selected_items)} viewer(s) without verification?\n\n"
-            "This will immediately kill any process listening on the selected ports.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        for item in selected_items:
-            port = item.data(Qt.ItemDataRole.UserRole)
-
-            try:
-                self._kill_viewer_on_port(port)
-                logger.info(f"Force killed viewer on port {port}")
-            except Exception as e:
-                logger.error(f"Failed to force kill viewer on port {port}: {e}", exc_info=True)
-
-        # Refresh the list
-        self.refresh_napari_instances()
-
-    def _kill_viewer_on_port(self, port: int):
-        """Kill viewer on specified port (internal helper)."""
-        if not self.orchestrator:
-            return
-
-        # If we have a tracked viewer in orchestrator, clean up ZMQ first
-        viewer = None
-        viewer_key = None
-        for key, vis in self.orchestrator._visualizers.items():
-            if len(key) > 1 and key[1] == port:
-                viewer = vis
-                viewer_key = key
-                break
-
-        if viewer is not None:
-            if hasattr(viewer, '_cleanup_zmq'):
-                viewer._cleanup_zmq()
-                logger.debug(f"Cleaned up ZMQ for port {port}")
-
-            # Mark as not running
-            viewer._is_running = False
-
-            # Remove from orchestrator tracking
-            del self.orchestrator._visualizers[viewer_key]
-
-        # Kill all processes on this port
-        from openhcs.runtime.napari_stream_visualizer import NapariStreamVisualizer
-        temp_vis = NapariStreamVisualizer(
-            filemanager=self.filemanager,
-            visualizer_config=None,
-            napari_port=port
-        )
-        logger.info(f"Killing processes on port {port}")
-        temp_vis._kill_processes_on_port(port)
-        # Also kill control port
-        temp_vis._kill_processes_on_port(port + 1000)
 
     def load_images(self):
         """Load image files from the orchestrator's metadata."""
