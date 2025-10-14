@@ -13,6 +13,12 @@ This document describes the technical architecture of OpenHCS's viewer streaming
 - **Automatic reuse**: Viewers are cached and reused across different contexts
 - **Type-safe configuration**: Uses ``isinstance()`` checks instead of ``hasattr()``
 - **Progressive building**: Images accumulate into hyperstacks instead of replacing
+- **Real-time progress tracking**: Acknowledgment system tracks image processing progress
+
+.. seealso::
+
+   :doc:`image_acknowledgment_system`
+      Detailed documentation of the real-time image acknowledgment system
 
 Architecture Components
 -----------------------
@@ -31,7 +37,7 @@ Orchestrator
    # Viewers tracked by (backend_name, port) key
    self._visualizers = {
        ('napari', 5555): NapariStreamVisualizer(...),
-       ('fiji', 5556): FijiStreamVisualizer(...),
+       ('fiji', 5565): FijiStreamVisualizer(...),  # Non-overlapping with Napari
    }
 
 **Key Method**:

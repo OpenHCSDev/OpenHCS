@@ -53,6 +53,7 @@ File management, memory types, and backend systems.
    memory_type_system
    napari_streaming_system
    fiji_streaming_system
+   image_acknowledgment_system
    omero_backend_system
    zmq_execution_system
 
