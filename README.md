@@ -58,10 +58,16 @@ OpenHCS is available on PyPI and requires Python 3.12+ with optional GPU acceler
 ### PyPI Installation (Recommended)
 
 ```bash
-# Install OpenHCS with GUI
+# Headless installation (for servers, CI, or programmatic use)
+pip install openhcs
+
+# With desktop GUI
 pip install openhcs[gui]
 
-# Or with GPU acceleration
+# With GPU acceleration
+pip install openhcs[gpu]
+
+# Full installation (GUI + GPU)
 pip install openhcs[gui,gpu]
 ```
 

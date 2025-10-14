@@ -108,34 +108,35 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build
 
-      - name: Test base installation (no extras)
+      - name: Test headless installation (base - no extras)
         run: |
-          python -m venv test_base
-          source test_base/bin/activate
+          python -m venv test_headless
+          source test_headless/bin/activate
           WHEEL=$(ls dist/*.whl)
           pip install "$WHEEL"
-          python -c "import openhcs; print(f'OpenHCS {openhcs.__version__} imported successfully')"
+          # Verify core OpenHCS works without GUI
+          python -c "import openhcs; from openhcs.core.pipeline import Pipeline; print(f'✓ OpenHCS {openhcs.__version__} headless installation OK')"
           deactivate
-          rm -rf test_base
+          rm -rf test_headless
 
-      - name: Test GUI installation (dependencies only)
+      - name: Test GUI dependencies installation
         run: |
           python -m venv test_gui
           source test_gui/bin/activate
           WHEEL=$(ls dist/*.whl)
           pip install "${WHEEL}[gui]"
-          # Just verify dependencies installed, can't test GUI imports without X11/EGL
-          python -c "import openhcs; print(f'OpenHCS {openhcs.__version__} with GUI dependencies installed')"
+          # Verify GUI dependencies installed (can't import PyQt6 without X11/EGL in CI)
+          python -c "import openhcs; import psutil; import GPUtil; print(f'✓ OpenHCS {openhcs.__version__} GUI dependencies installed')"
           deactivate
           rm -rf test_gui
 
-      - name: Test dev installation
+      - name: Test dev dependencies installation
         run: |
           python -m venv test_dev
           source test_dev/bin/activate
           WHEEL=$(ls dist/*.whl)
           pip install "${WHEEL}[dev]"
-          python -c "import pytest; import openhcs; print('Dev dependencies OK')"
+          python -c "import pytest; import openhcs; print('✓ Dev dependencies OK')"
           deactivate
           rm -rf test_dev
 
