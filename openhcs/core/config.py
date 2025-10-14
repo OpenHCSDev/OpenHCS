@@ -507,7 +507,7 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
     Inherits from both StreamingConfig and FijiDisplayConfig to provide
     feature parity with NapariStreamingConfig.
     """
-    fiji_port: int = 5556
+    fiji_port: int = 5565  # Non-overlapping with Napari (5555-5564)
     """Port for Fiji streaming communication (different default from Napari)."""
 
     fiji_host: str = 'localhost'

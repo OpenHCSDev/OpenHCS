@@ -195,8 +195,9 @@ DEFAULT_PATCH_SIZE = 128
 DEFAULT_SEARCH_RADIUS = 20
 # Consolidated definition for CPU thread count
 
-# Napari streaming constants
+# Streaming viewer constants
 DEFAULT_NAPARI_STREAM_PORT = 5555
+DEFAULT_FIJI_STREAM_PORT = 5565  # Non-overlapping with Napari (5555-5564)
 
 
 # Memory-related constants
