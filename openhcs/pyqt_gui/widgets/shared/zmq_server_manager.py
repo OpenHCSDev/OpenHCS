@@ -230,12 +230,35 @@ class ZMQServerManagerWidget(QWidget):
         
         layout.addWidget(group_box)
 
-        # Apply styling - tree widget inherits global theme automatically
-        # Only apply button styles if style generator is provided
+        # Apply styling
         if self.style_generator:
+            # Apply button styles
             self.refresh_btn.setStyleSheet(self.style_generator.generate_button_style())
             self.quit_btn.setStyleSheet(self.style_generator.generate_button_style())
             self.force_kill_btn.setStyleSheet(self.style_generator.generate_button_style())
+
+            # Apply tree widget style (uses existing method)
+            self.server_tree.setStyleSheet(self.style_generator.generate_tree_widget_style())
+
+            # Apply group box style
+            cs = self.style_generator.color_scheme
+            group_box.setStyleSheet(f"""
+                QGroupBox {{
+                    background-color: {cs.to_hex(cs.panel_bg)};
+                    border: 1px solid {cs.to_hex(cs.border_color)};
+                    border-radius: 4px;
+                    margin-top: 8px;
+                    padding-top: 8px;
+                    font-weight: bold;
+                    color: {cs.to_hex(cs.text_accent)};
+                }}
+                QGroupBox::title {{
+                    subcontrol-origin: margin;
+                    subcontrol-position: top left;
+                    padding: 2px 5px;
+                    color: {cs.to_hex(cs.text_accent)};
+                }}
+            """)
 
         # Connect internal signals
         self._scan_complete.connect(self._update_server_list)
@@ -340,6 +363,14 @@ class ZMQServerManagerWidget(QWidget):
         from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
 
         self.servers = servers
+
+        # Save current selection (by port) before clearing
+        selected_ports = set()
+        for item in self.server_tree.selectedItems():
+            server_data = item.data(0, Qt.ItemDataRole.UserRole)
+            if server_data and 'port' in server_data:
+                selected_ports.add(server_data['port'])
+
         self.server_tree.clear()
 
         # Get queue tracker registry for progress info
@@ -478,6 +509,14 @@ class ZMQServerManagerWidget(QWidget):
                 item = QTreeWidgetItem([display_text, status_text, info_text])
                 item.setData(0, Qt.ItemDataRole.UserRole, server)
                 self.server_tree.addTopLevelItem(item)
+
+        # Restore selection after refresh
+        if selected_ports:
+            for i in range(self.server_tree.topLevelItemCount()):
+                item = self.server_tree.topLevelItem(i)
+                server_data = item.data(0, Qt.ItemDataRole.UserRole)
+                if server_data and server_data.get('port') in selected_ports:
+                    item.setSelected(True)
 
         logger.debug(f"Found {len(servers)} ZMQ servers")
 
