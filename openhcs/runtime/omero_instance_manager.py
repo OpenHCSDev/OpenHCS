@@ -86,8 +86,19 @@ class OMEROInstanceManager:
             True if Docker daemon is responsive
         """
         try:
+            # Try without sudo first
             result = subprocess.run(
                 ['docker', 'info'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return True
+
+            # If failed, try with sudo (Linux may require it)
+            result = subprocess.run(
+                ['sudo', 'docker', 'info'],
                 capture_output=True,
                 text=True,
                 timeout=5
@@ -314,7 +325,7 @@ class OMEROInstanceManager:
             # Only builds if Dockerfile has changed or image doesn't exist
             logger.info("Building OMERO.web with OpenHCS plugin (if needed)...")
             build_result = subprocess.run(
-                ['docker-compose', 'build'],
+                ['sudo', 'docker-compose', 'build'],
                 cwd=self.docker_compose_path.parent,
                 capture_output=True,
                 text=True,
@@ -327,7 +338,7 @@ class OMEROInstanceManager:
 
             # Run docker-compose up -d
             result = subprocess.run(
-                ['docker-compose', 'up', '-d'],
+                ['sudo', 'docker-compose', 'up', '-d'],
                 cwd=self.docker_compose_path.parent,
                 capture_output=True,
                 text=True,
