@@ -55,6 +55,12 @@ class ImageBrowserWidget(QWidget):
         # Image data tracking
         self.all_images = {}  # filename -> metadata dict
         self.filtered_images = {}  # filename -> metadata dict (after search/filter)
+        self.selected_wells = set()  # Selected wells for filtering
+
+        # Plate view widget (will be created in init_ui)
+        self.plate_view_widget = None
+        self.plate_view_detached_window = None
+        self.middle_splitter = None  # Reference to splitter for reattaching
 
         self.init_ui()
 
@@ -77,6 +83,13 @@ class ImageBrowserWidget(QWidget):
         header_layout.addWidget(title_label)
 
         header_layout.addStretch()
+
+        # Plate view toggle button
+        self.plate_view_toggle_btn = QPushButton("Show Plate View")
+        self.plate_view_toggle_btn.setCheckable(True)
+        self.plate_view_toggle_btn.clicked.connect(self._toggle_plate_view)
+        self.plate_view_toggle_btn.setStyleSheet(self.style_gen.generate_button_style())
+        header_layout.addWidget(self.plate_view_toggle_btn)
 
         # Refresh button
         self.refresh_btn = QPushButton("Refresh")
@@ -121,15 +134,31 @@ class ImageBrowserWidget(QWidget):
         tree_widget = self._create_folder_tree()
         main_splitter.addWidget(tree_widget)
 
-        # Middle: Image table
+        # Middle: Vertical splitter for plate view and table
+        self.middle_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Plate view (initially hidden)
+        from openhcs.pyqt_gui.widgets.shared.plate_view_widget import PlateViewWidget
+        self.plate_view_widget = PlateViewWidget(color_scheme=self.color_scheme, parent=self)
+        self.plate_view_widget.wells_selected.connect(self._on_wells_selected)
+        self.plate_view_widget.detach_requested.connect(self._detach_plate_view)
+        self.plate_view_widget.setVisible(False)
+        self.middle_splitter.addWidget(self.plate_view_widget)
+
+        # Image table
         table_widget = self._create_table_widget()
-        main_splitter.addWidget(table_widget)
+        self.middle_splitter.addWidget(table_widget)
+
+        # Set initial sizes (30% plate view, 70% table when visible)
+        self.middle_splitter.setSizes([150, 350])
+
+        main_splitter.addWidget(self.middle_splitter)
 
         # Right: Napari config panel + instance manager
         right_panel = self._create_right_panel()
         main_splitter.addWidget(right_panel)
 
-        # Set initial splitter sizes (20% tree, 50% table, 30% config)
+        # Set initial splitter sizes (20% tree, 50% middle, 30% config)
         main_splitter.setSizes([200, 500, 300])
 
         # Add splitter with stretch factor to fill vertical space
@@ -211,31 +240,41 @@ class ImageBrowserWidget(QWidget):
         return table_container
 
     def _create_right_panel(self):
-        """Create the right panel with config and instance manager."""
+        """Create the right panel with config tabs and instance manager."""
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(5)
+        layout.setSpacing(0)
 
-        # Streaming configs side-by-side with resizable splitter
-        config_splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Vertical splitter for configs and instance manager
+        vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Tab widget for streaming configs
+        from PyQt6.QtWidgets import QTabWidget
+        self.streaming_tabs = QTabWidget()
+        self.streaming_tabs.setStyleSheet(self.style_gen.generate_tab_widget_style())
 
         # Napari config panel (with enable checkbox)
         napari_panel = self._create_napari_config_panel()
-        config_splitter.addWidget(napari_panel)
+        self.napari_tab_index = self.streaming_tabs.addTab(napari_panel, "Napari")
 
         # Fiji config panel (with enable checkbox)
         fiji_panel = self._create_fiji_config_panel()
-        config_splitter.addWidget(fiji_panel)
+        self.fiji_tab_index = self.streaming_tabs.addTab(fiji_panel, "Fiji")
 
-        # Set initial sizes (50/50 split)
-        config_splitter.setSizes([150, 150])
+        # Update tab text when configs are enabled/disabled
+        self._update_tab_labels()
 
-        layout.addWidget(config_splitter, 3)  # 30% of vertical space
+        vertical_splitter.addWidget(self.streaming_tabs)
 
         # Instance manager panel
         instance_panel = self._create_instance_manager_panel()
-        layout.addWidget(instance_panel, 7)  # 70% of vertical space
+        vertical_splitter.addWidget(instance_panel)
+
+        # Set initial sizes (30% configs, 70% instance manager)
+        vertical_splitter.setSizes([150, 350])
+
+        layout.addWidget(vertical_splitter)
 
         return container
 
@@ -328,15 +367,28 @@ class ImageBrowserWidget(QWidget):
 
         return panel
 
+    def _update_tab_labels(self):
+        """Update tab labels to show enabled/disabled status."""
+        napari_enabled = self.napari_enable_checkbox.isChecked()
+        fiji_enabled = self.fiji_enable_checkbox.isChecked()
+
+        napari_label = "Napari ✓" if napari_enabled else "Napari"
+        fiji_label = "Fiji ✓" if fiji_enabled else "Fiji"
+
+        self.streaming_tabs.setTabText(self.napari_tab_index, napari_label)
+        self.streaming_tabs.setTabText(self.fiji_tab_index, fiji_label)
+
     def _on_napari_enable_toggled(self, checked: bool):
         """Handle Napari enable checkbox toggle."""
         self.napari_config_form.setEnabled(checked)
         self.view_napari_btn.setEnabled(checked and len(self.image_table.selectedItems()) > 0)
+        self._update_tab_labels()
 
     def _on_fiji_enable_toggled(self, checked: bool):
         """Handle Fiji enable checkbox toggle."""
         self.fiji_config_form.setEnabled(checked)
         self.view_fiji_btn.setEnabled(checked and len(self.image_table.selectedItems()) > 0)
+        self._update_tab_labels()
 
     def _create_instance_manager_panel(self):
         """Create the viewer instance manager panel using ZMQServerManagerWidget."""
@@ -390,8 +442,12 @@ class ImageBrowserWidget(QWidget):
         # Apply folder filter on top of search filter
         self._apply_combined_filters()
 
+        # Update plate view for new folder
+        if self.plate_view_widget and self.plate_view_widget.isVisible():
+            self._update_plate_view()
+
     def _apply_combined_filters(self):
-        """Apply both search and folder filters together."""
+        """Apply search, folder, and well filters together."""
         # Start with search-filtered images
         result = self.filtered_images.copy()
 
@@ -405,6 +461,13 @@ class ImageBrowserWidget(QWidget):
                     filename: metadata for filename, metadata in result.items()
                     if str(Path(filename).parent) == folder_path or filename.startswith(folder_path + "/")
                 }
+
+        # Apply well filter if wells are selected
+        if self.selected_wells:
+            result = {
+                filename: metadata for filename, metadata in result.items()
+                if self._matches_wells(filename, metadata)
+            }
 
         # Update table with combined filters
         self._populate_table(result)
@@ -508,6 +571,10 @@ class ImageBrowserWidget(QWidget):
             # Update count
             self.image_count_label.setText(f"Images: {len(self.all_images)}")
             self.info_label.setText(f"{len(self.all_images)} images loaded")
+
+            # Update plate view if visible
+            if self.plate_view_widget and self.plate_view_widget.isVisible():
+                self._update_plate_view()
 
         except Exception as e:
             logger.error(f"Failed to load images: {e}")
@@ -859,4 +926,255 @@ class ImageBrowserWidget(QWidget):
         """Clean up viewers - orchestrator manages viewer lifecycle."""
         # Viewers are managed by orchestrator, no cleanup needed here
         pass
+
+    # ========== Plate View Methods ==========
+
+    def _toggle_plate_view(self, checked: bool):
+        """Toggle plate view visibility."""
+        # If detached, just show/hide the window
+        if self.plate_view_detached_window:
+            self.plate_view_detached_window.setVisible(checked)
+            if checked:
+                self.plate_view_toggle_btn.setText("Hide Plate View")
+            else:
+                self.plate_view_toggle_btn.setText("Show Plate View")
+            return
+
+        # Otherwise toggle in main layout
+        self.plate_view_widget.setVisible(checked)
+
+        if checked:
+            self.plate_view_toggle_btn.setText("Hide Plate View")
+            # Update plate view with current images
+            self._update_plate_view()
+        else:
+            self.plate_view_toggle_btn.setText("Show Plate View")
+
+    def _detach_plate_view(self):
+        """Detach plate view to external window."""
+        if self.plate_view_detached_window:
+            # Already detached, just show it
+            self.plate_view_detached_window.show()
+            self.plate_view_detached_window.raise_()
+            return
+
+        from PyQt6.QtWidgets import QDialog
+
+        # Create detached window
+        self.plate_view_detached_window = QDialog(self)
+        self.plate_view_detached_window.setWindowTitle("Plate View")
+        self.plate_view_detached_window.setWindowFlags(Qt.WindowType.Dialog)
+        self.plate_view_detached_window.setMinimumSize(600, 400)
+        self.plate_view_detached_window.resize(800, 600)
+
+        # Create layout for window
+        window_layout = QVBoxLayout(self.plate_view_detached_window)
+        window_layout.setContentsMargins(10, 10, 10, 10)
+
+        # Add reattach button
+        reattach_btn = QPushButton("⬅ Reattach to Main Window")
+        reattach_btn.setStyleSheet(self.style_gen.generate_button_style())
+        reattach_btn.clicked.connect(self._reattach_plate_view)
+        window_layout.addWidget(reattach_btn)
+
+        # Move plate view widget to window
+        self.plate_view_widget.setParent(self.plate_view_detached_window)
+        self.plate_view_widget.setVisible(True)
+        window_layout.addWidget(self.plate_view_widget)
+
+        # Connect close event to reattach
+        self.plate_view_detached_window.closeEvent = lambda event: self._on_detached_window_closed(event)
+
+        # Show window
+        self.plate_view_detached_window.show()
+
+        logger.info("Plate view detached to external window")
+
+    def _reattach_plate_view(self):
+        """Reattach plate view to main layout."""
+        if not self.plate_view_detached_window:
+            return
+
+        # Store reference before clearing
+        window = self.plate_view_detached_window
+        self.plate_view_detached_window = None
+
+        # Move plate view widget back to splitter
+        self.plate_view_widget.setParent(self)
+        self.middle_splitter.insertWidget(0, self.plate_view_widget)
+        self.plate_view_widget.setVisible(self.plate_view_toggle_btn.isChecked())
+
+        # Close and cleanup detached window
+        window.close()
+        window.deleteLater()
+
+        logger.info("Plate view reattached to main window")
+
+    def _on_detached_window_closed(self, event):
+        """Handle detached window close event - reattach automatically."""
+        # Only reattach if window still exists (not already reattached)
+        if self.plate_view_detached_window:
+            # Clear reference first to prevent double-close
+            window = self.plate_view_detached_window
+            self.plate_view_detached_window = None
+
+            # Move plate view widget back to splitter
+            self.plate_view_widget.setParent(self)
+            self.middle_splitter.insertWidget(0, self.plate_view_widget)
+            self.plate_view_widget.setVisible(self.plate_view_toggle_btn.isChecked())
+
+            logger.info("Plate view reattached to main window (window closed)")
+
+        event.accept()
+
+    def _on_wells_selected(self, well_ids: Set[str]):
+        """Handle well selection from plate view."""
+        self.selected_wells = well_ids
+        self._apply_combined_filters()
+
+        # Update status label
+        if well_ids:
+            well_list = ', '.join(sorted(well_ids))
+            self.image_count_label.setText(
+                f"Images: {len(self.filtered_images)}/{len(self.all_images)} "
+                f"(wells: {well_list})"
+            )
+        else:
+            self.image_count_label.setText(f"Images: {len(self.filtered_images)}/{len(self.all_images)}")
+
+    def _update_plate_view(self):
+        """Update plate view with current image data."""
+        # Extract all well IDs from current images (filter out failures)
+        well_ids = set()
+        for filename, metadata in self.all_images.items():
+            try:
+                well_id = self._extract_well_id(metadata)
+                well_ids.add(well_id)
+            except (KeyError, ValueError):
+                # Skip images without well metadata (e.g., plate-level files)
+                pass
+
+        # Update plate view
+        self.plate_view_widget.set_available_wells(well_ids)
+
+        # Handle subdirectory selection
+        current_folder = self._get_current_folder()
+        subdirs = self._detect_plate_subdirs(current_folder)
+        self.plate_view_widget.set_subdirectories(subdirs)
+
+    def _matches_wells(self, filename: str, metadata: dict) -> bool:
+        """Check if image matches selected wells."""
+        try:
+            well_id = self._extract_well_id(metadata)
+            return well_id in self.selected_wells
+        except (KeyError, ValueError):
+            # Image has no well metadata, doesn't match well filter
+            return False
+
+    def _get_current_folder(self) -> Optional[str]:
+        """Get currently selected folder path from tree."""
+        selected_items = self.folder_tree.selectedItems()
+        if selected_items:
+            folder_path = selected_items[0].data(0, Qt.ItemDataRole.UserRole)
+            return folder_path
+        return None
+
+    def _detect_plate_subdirs(self, current_folder: Optional[str]) -> List[str]:
+        """
+        Detect plate output subdirectories.
+
+        Logic:
+        - If at plate root (no folder selected or root selected), look for subdirs with well images
+        - If in a subdir, return empty list (already in a plate output)
+
+        Returns list of subdirectory names (not full paths).
+        """
+        if not self.orchestrator:
+            return []
+
+        plate_path = self.orchestrator.plate_path
+
+        # If no folder selected or root selected, we're at plate root
+        if current_folder is None:
+            base_path = plate_path
+        else:
+            # Check if current folder is plate root
+            if str(Path(current_folder)) == str(plate_path):
+                base_path = plate_path
+            else:
+                # Already in a subdirectory, no subdirs to show
+                return []
+
+        # Find immediate subdirectories that contain well images
+        subdirs_with_wells = set()
+
+        for filename in self.all_images.keys():
+            file_path = Path(filename)
+
+            # Check if file is in a subdirectory of base_path
+            try:
+                relative = file_path.relative_to(base_path)
+                parts = relative.parts
+
+                # If file is in a subdirectory (not directly in base_path)
+                if len(parts) > 1:
+                    subdir_name = parts[0]
+
+                    # Check if this file has well metadata
+                    metadata = self.all_images[filename]
+                    try:
+                        self._extract_well_id(metadata)
+                        # Has well metadata, add subdir
+                        subdirs_with_wells.add(subdir_name)
+                    except (KeyError, ValueError):
+                        # No well metadata, skip
+                        pass
+            except ValueError:
+                # File not relative to base_path, skip
+                pass
+
+        return sorted(list(subdirs_with_wells))
+
+    # ========== Plate View Helper Methods ==========
+
+    def _extract_well_id(self, metadata: dict) -> str:
+        """
+        Extract well ID from metadata.
+
+        Returns well ID like 'A01', 'B03', 'R01C03', etc.
+        Raises KeyError if metadata missing 'well' component.
+        """
+        # Well ID is a single component in metadata
+        return str(metadata['well'])
+
+    def _detect_plate_dimensions(self, well_ids: Set[str]) -> tuple[int, int]:
+        """
+        Auto-detect plate dimensions from well IDs.
+
+        Uses existing infrastructure:
+        - FilenameParser.extract_component_coordinates() to parse each well ID
+        - Determines max row/col from parsed coordinates
+
+        Returns (rows, cols) tuple.
+        Raises ValueError if well IDs are invalid format.
+        """
+        parser = self.orchestrator.microscope_handler.parser
+
+        rows = set()
+        cols = set()
+
+        for well_id in well_ids:
+            # REUSE: Parser's extract_component_coordinates (fail loud if invalid)
+            row, col = parser.extract_component_coordinates(well_id)
+            rows.add(row)
+            cols.add(int(col))
+
+        # Convert row letters to indices (A=1, B=2, AA=27, etc.)
+        row_indices = [
+            sum((ord(c.upper()) - ord('A') + 1) * (26 ** i)
+                for i, c in enumerate(reversed(row)))
+            for row in rows
+        ]
+
+        return (max(row_indices), max(cols))
 

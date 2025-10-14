@@ -147,7 +147,7 @@ class ParameterFormManager(QWidget):
     # Performance optimization: Async widget creation for large forms
     ASYNC_WIDGET_CREATION = True  # Create widgets progressively to avoid UI blocking
 
-    def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None):
+    def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None, read_only: bool = False):
         """
         Initialize PyQt parameter form manager with generic object introspection.
 
@@ -159,6 +159,7 @@ class ParameterFormManager(QWidget):
             exclude_params: Optional list of parameter names to exclude from the form
             initial_values: Optional dict of parameter values to use instead of extracted defaults
             parent_manager: Optional parent ParameterFormManager (for nested configs)
+            read_only: If True, make all widgets read-only and hide reset buttons
         """
         with timer(f"ParameterFormManager.__init__ ({field_id})", threshold_ms=5.0):
             QWidget.__init__(self, parent)
@@ -168,6 +169,7 @@ class ParameterFormManager(QWidget):
             self.field_id = field_id
             self.context_obj = context_obj
             self.exclude_params = exclude_params or []
+            self.read_only = read_only
 
             # OPTIMIZATION: Store parent manager reference early so setup_ui() can detect nested configs
             self._parent_manager = parent_manager
@@ -612,14 +614,16 @@ class ParameterFormManager(QWidget):
             widget.setObjectName(field_ids['widget_id'])
             layout.addWidget(widget, 1)
 
-        # Reset button (optimized factory)
-        with timer(f"          Create reset button", threshold_ms=0.5):
-            reset_button = _create_optimized_reset_button(
-                self.config.field_id,
-                param_info.name,
-                lambda: self.reset_parameter(param_info.name)
-            )
-            layout.addWidget(reset_button)
+        # Reset button (optimized factory) - skip if read-only
+        if not self.read_only:
+            with timer(f"          Create reset button", threshold_ms=0.5):
+                reset_button = _create_optimized_reset_button(
+                    self.config.field_id,
+                    param_info.name,
+                    lambda: self.reset_parameter(param_info.name)
+                )
+                layout.addWidget(reset_button)
+                self.reset_buttons[param_info.name] = reset_button
 
         # Store widgets and connect signals
         with timer(f"          Store and connect signals", threshold_ms=0.5):
@@ -630,6 +634,10 @@ class ParameterFormManager(QWidget):
         with timer(f"          Apply context behavior", threshold_ms=0.5):
             current_value = self.parameters.get(param_info.name)
             self._apply_context_behavior(widget, current_value, param_info.name)
+
+        # Make widget read-only if in read-only mode
+        if self.read_only:
+            self._make_widget_readonly(widget)
 
         return container
 
@@ -1511,3 +1519,34 @@ class ParameterFormManager(QWidget):
                 inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
                 current_values[name] = inner_type()  # Create with defaults
 
+    def _make_widget_readonly(self, widget: QWidget):
+        """
+        Make a widget read-only without greying it out.
+
+        Args:
+            widget: Widget to make read-only
+        """
+        from PyQt6.QtWidgets import QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QTextEdit, QAbstractSpinBox
+
+        if isinstance(widget, (QLineEdit, QTextEdit)):
+            widget.setReadOnly(True)
+            # Keep normal text color
+            widget.setStyleSheet(f"color: {self.config.color_scheme.to_hex(self.config.color_scheme.text_primary)};")
+        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+            widget.setReadOnly(True)
+            widget.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+            # Keep normal text color
+            widget.setStyleSheet(f"color: {self.config.color_scheme.to_hex(self.config.color_scheme.text_primary)};")
+        elif isinstance(widget, QComboBox):
+            # Disable but keep normal appearance
+            widget.setEnabled(False)
+            widget.setStyleSheet(f"""
+                QComboBox:disabled {{
+                    color: {self.config.color_scheme.to_hex(self.config.color_scheme.text_primary)};
+                    background-color: {self.config.color_scheme.to_hex(self.config.color_scheme.input_bg)};
+                }}
+            """)
+        elif isinstance(widget, QCheckBox):
+            # Make non-interactive but keep normal appearance
+            widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)

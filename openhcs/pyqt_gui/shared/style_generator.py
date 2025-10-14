@@ -243,7 +243,7 @@ class StyleSheetGenerator:
     def generate_frame_style(self) -> str:
         """
         Generate QStyleSheet for frames and panels.
-        
+
         Returns:
             str: Complete QStyleSheet for frame styling
         """
@@ -254,6 +254,39 @@ class StyleSheetGenerator:
                 border: none;
                 border-radius: 3px;
                 padding: 5px;
+            }}
+        """
+
+    def generate_tab_widget_style(self) -> str:
+        """
+        Generate QStyleSheet for tab widgets.
+
+        Returns:
+            str: Complete QStyleSheet for tab widget styling
+        """
+        cs = self.color_scheme
+        return f"""
+            QTabWidget::pane {{
+                border: 1px solid {cs.to_hex(cs.border_color)};
+                border-radius: 3px;
+                background-color: {cs.to_hex(cs.panel_bg)};
+            }}
+            QTabBar::tab {{
+                background-color: {cs.to_hex(cs.button_normal_bg)};
+                color: {cs.to_hex(cs.text_secondary)};
+                border: none;
+                border-top-left-radius: 3px;
+                border-top-right-radius: 3px;
+                padding: 8px 16px;
+                margin-right: 2px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {cs.to_hex(cs.selection_bg)};
+                color: {cs.to_hex(cs.selection_text)};
+                font-weight: bold;
+            }}
+            QTabBar::tab:hover {{
+                background-color: {cs.to_hex(cs.button_hover_bg)};
             }}
         """
     

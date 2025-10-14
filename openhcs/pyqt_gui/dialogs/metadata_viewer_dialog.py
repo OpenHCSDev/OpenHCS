@@ -167,15 +167,13 @@ class MetadataViewerDialog(QDialog):
         form_layout = QVBoxLayout(self.form_container)
         form_layout.setContentsMargins(5, 5, 5, 5)
 
-        # Create ParameterFormManager with the metadata instance
+        # Create ParameterFormManager with the metadata instance in read-only mode
         metadata_form = ParameterFormManager(
             object_instance=metadata_instance,
             field_id="metadata_viewer",
-            parent=self.form_container
+            parent=self.form_container,
+            read_only=True
         )
-
-        # Make the entire form read-only
-        metadata_form.setEnabled(False)
 
         form_layout.addWidget(metadata_form)
         form_layout.addStretch()
@@ -212,15 +210,13 @@ class MetadataViewerDialog(QDialog):
             group_layout = QVBoxLayout(group_box)
             group_layout.setContentsMargins(10, 10, 10, 10)
 
-            # Create ParameterFormManager for this subdirectory's metadata
+            # Create ParameterFormManager for this subdirectory's metadata in read-only mode
             metadata_form = ParameterFormManager(
                 object_instance=metadata_instance,
                 field_id=f"metadata_viewer_{subdir_name}",
-                parent=group_box
+                parent=group_box,
+                read_only=True
             )
-
-            # Make the form read-only
-            metadata_form.setEnabled(False)
 
             group_layout.addWidget(metadata_form)
             form_layout.addWidget(group_box)

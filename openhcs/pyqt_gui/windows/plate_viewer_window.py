@@ -235,52 +235,30 @@ class PlateViewerWindow(QDialog):
         metadata_form = ParameterFormManager(
             object_instance=metadata_instance,
             field_id="metadata_viewer",
-            parent=None
+            parent=None,
+            read_only=True
         )
-        self._make_form_readonly(metadata_form)
         layout.addWidget(metadata_form)
     
     def _create_multi_subdirectory_forms(self, layout, subdirs_instances):
         """Create forms for multiple subdirectories."""
         from PyQt6.QtWidgets import QGroupBox, QScrollArea
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        
+
         for subdir_name, metadata_instance in subdirs_instances.items():
             group_box = QGroupBox(f"Subdirectory: {subdir_name}")
             group_layout = QVBoxLayout(group_box)
-            
+
             metadata_form = ParameterFormManager(
                 object_instance=metadata_instance,
                 field_id=f"metadata_{subdir_name}",
-                parent=None
+                parent=None,
+                read_only=True
             )
-            self._make_form_readonly(metadata_form)
             group_layout.addWidget(metadata_form)
 
             layout.addWidget(group_box)
 
-    def _make_form_readonly(self, form_widget):
-        """Make all input widgets in a form read-only without greying them out."""
-        from PyQt6.QtWidgets import QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QTextEdit, QAbstractSpinBox
-
-        # Find all input widgets and make them read-only
-        for widget in form_widget.findChildren(QWidget):
-            if isinstance(widget, (QLineEdit, QTextEdit)):
-                widget.setReadOnly(True)
-                # Keep normal appearance
-                widget.setStyleSheet("")
-            elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-                widget.setReadOnly(True)
-                widget.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-            elif isinstance(widget, QComboBox):
-                # Disable interaction but keep normal appearance
-                widget.setEnabled(False)
-                widget.setStyleSheet("QComboBox:disabled { color: white; background-color: #2b2b2b; }")
-            elif isinstance(widget, QCheckBox):
-                # Make checkbox non-interactive but keep normal appearance
-                widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-                widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-    
     def cleanup(self):
         """Clean up resources."""
         if hasattr(self, 'image_browser'):
