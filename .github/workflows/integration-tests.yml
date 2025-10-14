@@ -126,14 +126,14 @@ jobs:
         if: failure()
         run: |
           echo "=== OMERO Server Logs ==="
-          sudo docker-compose -f openhcs/omero/docker-compose.yml logs omeroserver || true
+          sudo docker compose -f openhcs/omero/docker-compose.yml logs omeroserver || true
           echo "=== OMERO Web Logs ==="
-          sudo docker-compose -f openhcs/omero/docker-compose.yml logs omeroweb || true
+          sudo docker compose -f openhcs/omero/docker-compose.yml logs omeroweb || true
           echo "=== Database Logs ==="
-          sudo docker-compose -f openhcs/omero/docker-compose.yml logs database || true
+          sudo docker compose -f openhcs/omero/docker-compose.yml logs database || true
 
       - name: Cleanup OMERO containers
         if: always()
         run: |
           cd openhcs/omero
-          sudo docker-compose down -v || true
+          sudo docker compose down -v || true

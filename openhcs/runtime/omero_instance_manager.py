@@ -218,7 +218,9 @@ class OMEROInstanceManager:
             return False
             
         except Exception as e:
-            logger.debug(f"OMERO not running: {e}")
+            logger.warning(f"OMERO not running or cannot connect: {e}")
+            import traceback
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
             return False
     
     def connect(self, timeout: int = 30) -> bool:
@@ -319,13 +321,13 @@ class OMEROInstanceManager:
             return False
 
         try:
-            logger.info(f"Starting OMERO via docker-compose at {self.docker_compose_path.parent}")
+            logger.info(f"Starting OMERO via docker compose at {self.docker_compose_path.parent}")
 
             # Build images first (this will build the OpenHCS-enabled OMERO.web image)
             # Only builds if Dockerfile has changed or image doesn't exist
             logger.info("Building OMERO.web with OpenHCS plugin (if needed)...")
             build_result = subprocess.run(
-                ['sudo', 'docker-compose', 'build'],
+                ['sudo', 'docker', 'compose', 'build'],
                 cwd=self.docker_compose_path.parent,
                 capture_output=True,
                 text=True,
@@ -333,28 +335,28 @@ class OMEROInstanceManager:
             )
 
             if build_result.returncode != 0:
-                logger.warning(f"docker-compose build had issues: {build_result.stderr}")
+                logger.warning(f"docker compose build had issues: {build_result.stderr}")
                 # Continue anyway - might be using pre-built images
 
-            # Run docker-compose up -d
+            # Run docker compose up -d
             result = subprocess.run(
-                ['sudo', 'docker-compose', 'up', '-d'],
+                ['sudo', 'docker', 'compose', 'up', '-d'],
                 cwd=self.docker_compose_path.parent,
                 capture_output=True,
                 text=True,
-                timeout=120  # 2 minute timeout for docker-compose
+                timeout=120  # 2 minute timeout for docker compose
             )
 
             if result.returncode == 0:
-                logger.info("✓ docker-compose up completed")
+                logger.info("✓ docker compose up completed")
                 self._started_by_us = True
                 return True
             else:
-                logger.error(f"docker-compose failed: {result.stderr}")
+                logger.error(f"docker compose failed: {result.stderr}")
                 return False
 
         except subprocess.TimeoutExpired:
-            logger.error("docker-compose up timed out")
+            logger.error("docker compose up timed out")
             return False
         except FileNotFoundError:
             logger.error("docker-compose command not found. Install Docker Compose.")
