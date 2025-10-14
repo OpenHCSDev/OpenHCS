@@ -271,32 +271,64 @@ class ZMQExecutionServer(ZMQServer):
             return []
 
     def _kill_worker_processes(self):
-        killed = sum(1 for eid, r in self.active_executions.items()
-                    if 'orchestrator' in r and not (logger.info(f"[{eid}] Cancelling") or
-                    (r['orchestrator'].cancel_execution() if not Exception else logger.warning(f"[{eid}] Cancel failed"))))
-        if killed:
-            return killed
+        """
+        Kill all worker processes.
 
+        First attempts graceful cancellation via orchestrator.cancel_execution(),
+        then forcefully kills worker processes using psutil.
+
+        Returns:
+            int: Number of worker processes killed
+        """
+        # Step 1: Try graceful cancellation via orchestrator
+        for eid, r in self.active_executions.items():
+            if 'orchestrator' in r:
+                try:
+                    logger.info(f"[{eid}] Requesting graceful cancellation...")
+                    r['orchestrator'].cancel_execution()
+                except Exception as e:
+                    logger.warning(f"[{eid}] Graceful cancellation failed: {e}")
+
+        # Step 2: Forcefully kill worker processes using psutil
+        # This ALWAYS runs, regardless of graceful cancellation
         try:
             import psutil
+
+            # Find all child processes that are Python workers (exclude Napari viewers)
             workers = [c for c in psutil.Process(os.getpid()).children(recursive=False)
                       if (cmd := c.cmdline()) and 'python' in cmd[0].lower() and 'napari' not in ' '.join(cmd).lower()]
+
             if not workers:
+                logger.info("No worker processes found to kill")
                 return 0
+
+            logger.info(f"Found {len(workers)} worker processes to kill: {[w.pid for w in workers]}")
+
+            # First try SIGTERM (graceful)
             for w in workers:
                 try:
+                    logger.info(f"Sending SIGTERM to worker PID {w.pid}")
                     w.terminate()
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to terminate worker PID {w.pid}: {e}")
+
+            # Wait up to 3 seconds for graceful shutdown
             gone, alive = psutil.wait_procs(workers, timeout=3)
+            logger.info(f"After SIGTERM: {len(gone)} workers exited, {len(alive)} still alive")
+
+            # Force kill any survivors with SIGKILL
             for w in alive:
                 try:
+                    logger.info(f"Force killing worker PID {w.pid} with SIGKILL")
                     w.kill()
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to kill worker PID {w.pid}: {e}")
+
+            logger.info(f"Successfully killed {len(workers)} worker processes")
             return len(workers)
+
         except (ImportError, Exception) as e:
-            logger.error(f"Kill workers failed: {e}")
+            logger.error(f"Failed to kill worker processes: {e}")
             return 0
 
     def _handle_force_shutdown(self, msg):
