@@ -58,9 +58,6 @@ dependencies = [
     # Core utilities
     "setuptools",
     "watchdog>=6.0.0",
-    
-    # Note: BaSiCPy is required but must be installed separately from our fork:
-    # pip install git+https://github.com/trissim/BaSiCPy.git
 ]
 
 [project.optional-dependencies]

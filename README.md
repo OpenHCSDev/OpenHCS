@@ -58,24 +58,21 @@ OpenHCS is available on PyPI and requires Python 3.12+ with optional GPU acceler
 ### PyPI Installation (Recommended)
 
 ```bash
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate
+# Install OpenHCS with GUI
+pip install openhcs[gui]
 
-# Install required fork dependencies (not available on PyPI)
-pip install git+https://github.com/trissim/BaSiCPy.git
-
-# Install OpenHCS from PyPI
-pip install openhcs[gui]  # Desktop GUI interface
-
-# Optional: Install with GPU acceleration
+# Or with GPU acceleration
 pip install openhcs[gui,gpu]
-
-# Optional: Install torbi for GPU-accelerated Viterbi decoding
-pip install git+https://github.com/trissim/torbi.git
 ```
 
-**Note**: BaSiCPy and torbi are custom forks with OpenHCS-specific patches and must be installed separately before installing OpenHCS.
+**Optional Advanced Features**:
+```bash
+# GPU-accelerated Viterbi decoding for neurite tracing
+pip install git+https://github.com/trissim/torbi.git
+
+# JAX-based BaSiC illumination correction (optional, numpy/cupy versions included)
+pip install basicpy
+```
 
 ### Development Installation
 
@@ -84,18 +81,8 @@ pip install git+https://github.com/trissim/torbi.git
 git clone https://github.com/trissim/openhcs.git
 cd openhcs
 
-# Create and activate virtual environment
-python -m venv .venv
-source .venv/bin/activate
-
-# Install required fork dependencies
-pip install git+https://github.com/trissim/BaSiCPy.git
-
 # Install with all features for development
 pip install -e ".[all]"
-
-# Optional: Install torbi for GPU-accelerated Viterbi decoding
-pip install git+https://github.com/trissim/torbi.git
 ```
 
 ### GPU Requirements
@@ -105,7 +92,7 @@ GPU acceleration requires CUDA 12.x. For CPU-only operation:
 ```bash
 # Skip GPU dependencies entirely
 export OPENHCS_CPU_ONLY=true
-pip install -e ".[gui]"
+pip install openhcs[gui]
 ```
 
 ### Launch Application

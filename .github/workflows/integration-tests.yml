@@ -89,6 +89,55 @@ jobs:
                 --it-exec-mode multiprocessing \
                 -v --tb=short
 
+  # Test PyPI-style installation (build wheel and install from it)
+  pypi-installation-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Test base installation (no extras)
+        run: |
+          python -m venv test_base
+          source test_base/bin/activate
+          WHEEL=$(ls dist/*.whl)
+          pip install "$WHEEL"
+          python -c "import openhcs; print(f'OpenHCS {openhcs.__version__} imported successfully')"
+          deactivate
+          rm -rf test_base
+
+      - name: Test GUI installation
+        run: |
+          python -m venv test_gui
+          source test_gui/bin/activate
+          WHEEL=$(ls dist/*.whl)
+          pip install "${WHEEL}[gui]"
+          python -c "import openhcs; from openhcs.pyqt_gui.app import OpenHCSApp; print('GUI imports OK')"
+          deactivate
+          rm -rf test_gui
+
+      - name: Test dev installation
+        run: |
+          python -m venv test_dev
+          source test_dev/bin/activate
+          WHEEL=$(ls dist/*.whl)
+          pip install "${WHEEL}[dev]"
+          python -c "import pytest; import openhcs; print('Dev dependencies OK')"
+          deactivate
+          rm -rf test_dev
+
   omero-integration-tests:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'pull_request'
