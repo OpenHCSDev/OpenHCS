@@ -53,7 +53,7 @@ Integrated napari viewers provide immediate visualization of processing results.
 
 ## Installation
 
-OpenHCS is available on PyPI and requires Python 3.9+ with optional GPU acceleration support for CUDA 12.x.
+OpenHCS is available on PyPI and requires Python 3.10+ with optional GPU acceleration support for CUDA 12.x.
 
 ### Quick Start
 
