@@ -25,17 +25,19 @@ class NonCompressingSplitter(QSplitter):
     """
     A QSplitter that maintains its size based on widget sizes, not available space.
 
-    When handles are moved, this splitter sets its own fixed height to the sum
+    When handles are moved, this splitter updates its minimum height to the sum
     of widget sizes, forcing the scroll area to scroll instead of compress.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Connect to splitter moved to update fixed height
+        # Connect to splitter moved to update minimum height
         self.splitterMoved.connect(self._on_splitter_moved)
+        # Remove maximum height constraint
+        self.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
 
     def _on_splitter_moved(self, pos, index):
-        """When splitter moves, set fixed height to sum of widget sizes."""
+        """When splitter moves, update minimum height to sum of widget sizes."""
         # Calculate total height needed
         sizes = self.sizes()
         total_height = sum(sizes) if sizes else 200
@@ -44,9 +46,12 @@ class NonCompressingSplitter(QSplitter):
         num_handles = max(0, self.count() - 1)
         total_height += num_handles * self.handleWidth()
 
-        # Set minimum and maximum height to lock the size
+        # Set minimum height to prevent compression
+        # Don't set maximum - let it grow freely
         self.setMinimumHeight(total_height)
-        self.setMaximumHeight(total_height)
+
+        # Resize to the calculated height
+        self.resize(self.width(), total_height)
 
 
 class ColumnFilterWidget(QFrame):
@@ -290,12 +295,14 @@ class MultiColumnFilterPanel(QWidget):
             sizes = [200] * num_filters
             self.splitter.setSizes(sizes)
 
-            # Set initial fixed height
+            # Set initial minimum height
             total_height = sum(sizes)
             num_handles = max(0, num_filters - 1)
             total_height += num_handles * self.splitter.handleWidth()
             self.splitter.setMinimumHeight(total_height)
-            self.splitter.setMaximumHeight(total_height)
+
+            # Resize to the calculated height
+            self.splitter.resize(self.splitter.width(), total_height)
 
     def remove_column_filter(self, column_name: str):
         """Remove a column filter."""
