@@ -50,103 +50,78 @@ class ColumnFilterWidget(QFrame):
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
 
-        # Apply frame styling
-        self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
-                border-radius: 3px;
-            }}
-        """)
+        # Minimal styling - no frame, no borders
+        self.setFrameStyle(QFrame.Shape.NoFrame)
 
         self._init_ui()
     
     def _init_ui(self):
-        """Initialize the UI with compact styling matching parameter form manager."""
+        """Initialize the UI with minimal spacing."""
+        from PyQt6.QtWidgets import QSizePolicy
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(*COMPACT_LAYOUT.main_layout_margins)
-        layout.setSpacing(COMPACT_LAYOUT.main_layout_spacing)
+        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(2)
 
         # Header: Column title on left, buttons on right (same row)
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.setSpacing(COMPACT_LAYOUT.parameter_row_spacing)
+        header_layout.setSpacing(4)
 
-        # Column title label (bold, accent color)
+        # Column title label (bold, accent color, minimal)
         title_label = QLabel(self.column_name)
         title_label.setStyleSheet(f"""
             QLabel {{
                 font-weight: bold;
                 color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};
-                font-size: 11px;
             }}
         """)
         header_layout.addWidget(title_label)
 
         header_layout.addStretch()
 
-        # All/None buttons (compact, matching parameter form buttons)
+        # All/None buttons (minimal)
         select_all_btn = QPushButton("All")
-        select_all_btn.setMaximumWidth(35)
-        select_all_btn.setMaximumHeight(20)
-        select_all_btn.setStyleSheet(self.style_gen.generate_button_style())
+        select_all_btn.setMaximumWidth(30)
         select_all_btn.clicked.connect(self.select_all)
         header_layout.addWidget(select_all_btn)
 
         select_none_btn = QPushButton("None")
         select_none_btn.setMaximumWidth(35)
-        select_none_btn.setMaximumHeight(20)
-        select_none_btn.setStyleSheet(self.style_gen.generate_button_style())
         select_none_btn.clicked.connect(self.select_none)
         header_layout.addWidget(select_none_btn)
 
         layout.addLayout(header_layout)
 
-        # Scrollable checkbox list
+        # Scrollable checkbox list - CRITICAL: proper size policy for splitter
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(60)  # Minimum to show a few items
-        scroll_area.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
-                border: none;
-            }}
-        """)
+        scroll_area.setMinimumHeight(40)
+        scroll_area.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
 
         checkbox_container = QWidget()
         checkbox_layout = QVBoxLayout(checkbox_container)
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
-        checkbox_layout.setSpacing(COMPACT_LAYOUT.content_layout_spacing)
+        checkbox_layout.setSpacing(0)
 
-        # Create checkbox for each unique value (compact styling)
+        # Create checkbox for each unique value (minimal styling)
         for value in self.unique_values:
             checkbox = QCheckBox(str(value))
             checkbox.setChecked(True)  # Start with all selected
-            checkbox.setStyleSheet(f"""
-                QCheckBox {{
-                    color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
-                    spacing: 4px;
-                    font-size: 11px;
-                }}
-                QCheckBox::indicator {{
-                    width: 14px;
-                    height: 14px;
-                }}
-            """)
             checkbox.stateChanged.connect(self._on_checkbox_changed)
             self.checkboxes[value] = checkbox
             checkbox_layout.addWidget(checkbox)
 
         checkbox_layout.addStretch()
         scroll_area.setWidget(checkbox_container)
-        layout.addWidget(scroll_area)
+        layout.addWidget(scroll_area, 1)  # Stretch factor 1 for resizing
 
-        # Count label (compact, secondary text color)
+        # Count label (minimal)
         self.count_label = QLabel()
         self.count_label.setStyleSheet(f"""
             QLabel {{
-                font-size: 10px;
+                font-size: 9px;
                 color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};
             }}
         """)
@@ -206,9 +181,15 @@ class MultiColumnFilterPanel(QWidget):
 
     def _init_ui(self):
         """Initialize the UI with vertical splitter for resizable filters."""
+        from PyQt6.QtWidgets import QSizePolicy
+
         # Use vertical splitter so each filter can be resized
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.splitter.setChildrenCollapsible(False)  # Prevent filters from collapsing
+        self.splitter.setHandleWidth(3)  # Thinner splitter handle
+
+        # CRITICAL: Proper size policy for splitter to work correctly
+        self.splitter.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -223,6 +204,8 @@ class MultiColumnFilterPanel(QWidget):
             column_name: Name of the column
             unique_values: List of unique values in this column
         """
+        from PyQt6.QtWidgets import QSizePolicy
+
         if column_name in self.column_filters:
             # Remove existing filter
             self.remove_column_filter(column_name)
@@ -231,8 +214,15 @@ class MultiColumnFilterPanel(QWidget):
         filter_widget = ColumnFilterWidget(column_name, unique_values, self.color_scheme)
         filter_widget.filter_changed.connect(self._on_filter_changed)
 
+        # CRITICAL: Set size policy for proper splitter behavior
+        filter_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+
         # Add to splitter (each filter is independently resizable)
         self.splitter.addWidget(filter_widget)
+
+        # Set initial stretch factor (equal for all filters)
+        index = self.splitter.indexOf(filter_widget)
+        self.splitter.setStretchFactor(index, 1)
 
         self.column_filters[column_name] = filter_widget
     
