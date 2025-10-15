@@ -46,35 +46,35 @@ class ColumnFilterWidget(QWidget):
     def _init_ui(self):
         """Initialize the UI."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
-        
+        layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(3)
+
         # Header with select all/none buttons
         header_layout = QHBoxLayout()
-        
+
         select_all_btn = QPushButton("All")
-        select_all_btn.setMaximumWidth(50)
+        select_all_btn.setMaximumWidth(40)
         select_all_btn.clicked.connect(self.select_all)
         header_layout.addWidget(select_all_btn)
-        
+
         select_none_btn = QPushButton("None")
-        select_none_btn.setMaximumWidth(50)
+        select_none_btn.setMaximumWidth(40)
         select_none_btn.clicked.connect(self.select_none)
         header_layout.addWidget(select_none_btn)
-        
+
         header_layout.addStretch()
         layout.addLayout(header_layout)
-        
-        # Scrollable checkbox list
+
+        # Scrollable checkbox list (no max height - let parent scroll area handle it)
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMaximumHeight(300)  # Limit height for many values
-        
+        scroll_area.setMinimumHeight(80)  # Minimum to show a few items
+
         checkbox_container = QWidget()
         checkbox_layout = QVBoxLayout(checkbox_container)
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
-        checkbox_layout.setSpacing(2)
-        
+        checkbox_layout.setSpacing(1)
+
         # Create checkbox for each unique value
         for value in self.unique_values:
             checkbox = QCheckBox(str(value))
@@ -82,13 +82,14 @@ class ColumnFilterWidget(QWidget):
             checkbox.stateChanged.connect(self._on_checkbox_changed)
             self.checkboxes[value] = checkbox
             checkbox_layout.addWidget(checkbox)
-        
+
         checkbox_layout.addStretch()
         scroll_area.setWidget(checkbox_container)
         layout.addWidget(scroll_area)
-        
+
         # Count label
         self.count_label = QLabel()
+        self.count_label.setStyleSheet("font-size: 10px; color: gray;")
         self._update_count_label()
         layout.addWidget(self.count_label)
     
@@ -126,28 +127,28 @@ class ColumnFilterWidget(QWidget):
 class MultiColumnFilterPanel(QWidget):
     """
     Panel containing filters for multiple columns.
-    
+
     Provides column-based filtering with AND logic across columns.
-    
+
     Signals:
         filters_changed: Emitted when any filter changes
     """
-    
+
     filters_changed = pyqtSignal()
-    
+
     def __init__(self, parent=None):
         """Initialize multi-column filter panel."""
         super().__init__(parent)
         self.column_filters: Dict[str, ColumnFilterWidget] = {}
         self._init_ui()
-    
+
     def _init_ui(self):
         """Initialize the UI."""
-        self.main_layout = QHBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(5, 5, 5, 5)
         self.main_layout.setSpacing(10)
-        
-        # Add stretch at the end to left-align filters
+
+        # Add stretch at the end to top-align filters
         self.main_layout.addStretch()
     
     def add_column_filter(self, column_name: str, unique_values: List[str]):

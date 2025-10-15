@@ -107,25 +107,36 @@ class ImageBrowserWidget(QWidget):
 
         layout.addLayout(search_layout)
 
+        # Create main splitter (tree+filters | table | config)
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left panel: Folder tree + Column filters (vertical layout)
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(5)
+
+        # Folder tree
+        tree_widget = self._create_folder_tree()
+        left_layout.addWidget(tree_widget)
+
         # Column filter panel (initially empty, populated when images load)
         self.column_filter_panel = MultiColumnFilterPanel()
         self.column_filter_panel.filters_changed.connect(self._on_column_filters_changed)
 
-        # Wrap in scroll area for horizontal scrolling when many columns
+        # Wrap in scroll area for vertical scrolling when many filters
         filter_scroll = QScrollArea()
         filter_scroll.setWidgetResizable(True)
-        filter_scroll.setMaximumHeight(200)  # Limit vertical space
         filter_scroll.setWidget(self.column_filter_panel)
         filter_scroll.setVisible(False)  # Hidden until images load
         self.filter_scroll_area = filter_scroll
-        layout.addWidget(filter_scroll)
+        left_layout.addWidget(filter_scroll)
 
-        # Create main splitter (tree | table | config)
-        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        # Set proportions: tree takes more space initially
+        left_layout.setStretch(0, 3)  # Tree
+        left_layout.setStretch(1, 2)  # Filters
 
-        # Left: Folder tree
-        tree_widget = self._create_folder_tree()
-        main_splitter.addWidget(tree_widget)
+        main_splitter.addWidget(left_panel)
 
         # Middle: Vertical splitter for plate view and table
         self.middle_splitter = QSplitter(Qt.Orientation.Vertical)
