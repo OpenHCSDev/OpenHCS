@@ -1023,19 +1023,23 @@ class FunctionStep(AbstractStep):
                     sub_dir=step_plan['sub_dir']
                 )
 
-                # 📄 MATERIALIZED METADATA: Create metadata for materialized directory if it exists
-                if 'materialized_output_dir' in step_plan:
-                    materialized_backend = step_plan['materialized_backend']
-                    # Only create metadata if materialized backend is also disk/zarr
-                    if materialized_backend not in [Backend.OMERO_LOCAL.value, Backend.MEMORY.value]:
-                        metadata_generator.create_metadata(
-                            context,
-                            step_plan['materialized_output_dir'],
-                            materialized_backend,
-                            is_main=False,
-                            plate_root=step_plan['materialized_plate_root'],
-                            sub_dir=step_plan['materialized_sub_dir']
-                        )
+            # 📄 MATERIALIZED METADATA: Create metadata for materialized directory if it exists
+            # This must be OUTSIDE the main write_backend check because materializations
+            # can happen even when the main step writes to memory
+            if 'materialized_output_dir' in step_plan:
+                materialized_backend = step_plan['materialized_backend']
+                # Only create metadata if materialized backend is also disk/zarr
+                if materialized_backend not in [Backend.OMERO_LOCAL.value, Backend.MEMORY.value]:
+                    from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
+                    metadata_generator = OpenHCSMetadataGenerator(context.filemanager)
+                    metadata_generator.create_metadata(
+                        context,
+                        step_plan['materialized_output_dir'],
+                        materialized_backend,
+                        is_main=False,
+                        plate_root=step_plan['materialized_plate_root'],
+                        sub_dir=step_plan['materialized_sub_dir']
+                    )
 
             #  SPECIAL DATA MATERIALIZATION
             special_outputs = step_plan.get('special_outputs', {})
