@@ -150,34 +150,111 @@ class FijiViewerServer(ZMQServer):
             images = data.get('images', [])
             display_config_dict = data.get('display_config', {})
 
+            logger.info(f"📨 FIJI SERVER: Received batch message with {len(images)} images")
+
             if not images:
                 return
 
-            # Group images by (step_name, well) for hyperstack creation
+            # Get step name from first image
             step_name = images[0].get('step_name', 'unknown_step')
-            images_by_well = {}
 
-            for image_info in images:
-                component_metadata = image_info.get('component_metadata', {})
-                well = component_metadata.get('well', 'unknown_well')
-
-                if well not in images_by_well:
-                    images_by_well[well] = []
-                images_by_well[well].append(image_info)
-
-            # Process each well's images into a hyperstack
-            for well, well_images in images_by_well.items():
-                self._add_images_to_hyperstack(step_name, well, well_images, display_config_dict)
+            # Process ALL images together - let _add_images_to_hyperstack group by window
+            # Don't group by well here - that causes sequential processing!
+            self._add_images_to_hyperstack(step_name, images, display_config_dict)
         else:
             # Single image message (fallback)
             self._add_images_to_hyperstack(
                 data.get('step_name', 'unknown_step'),
-                data.get('component_metadata', {}).get('well', 'unknown_well'),
                 [data],
                 data.get('display_config', {})
             )
 
-    def _add_images_to_hyperstack(self, step_name: str, well: str, images: List[Dict[str, Any]],
+    def _add_slices_to_existing_hyperstack(self, existing_imp, new_images: List[Dict[str, Any]],
+                                             window_key: str, channel_components: List[str],
+                                             slice_components: List[str], frame_components: List[str],
+                                             display_config_dict: Dict[str, Any]):
+        """
+        Incrementally add new slices to an existing hyperstack WITHOUT rebuilding.
+
+        This avoids the expensive min/max recalculation that happens when rebuilding.
+        """
+        import numpy as np
+        from multiprocessing import shared_memory
+        import scyjava as sj
+
+        # Import ImageJ classes
+        ShortProcessor = sj.jimport('ij.process.ShortProcessor')
+
+        # Get existing metadata
+        existing_images = self.hyperstack_metadata[window_key]
+
+        # Build lookup of existing images by coordinates
+        existing_lookup = {}
+        for img_data in existing_images:
+            meta = img_data['metadata']
+            c_key = tuple(meta.get(comp, 1) for comp in channel_components)
+            z_key = tuple(meta.get(comp, 1) for comp in slice_components)
+            t_key = tuple(meta.get(comp, 1) for comp in frame_components)
+            existing_lookup[(c_key, z_key, t_key)] = img_data
+
+        # Get existing stack and dimensions
+        stack = existing_imp.getStack()
+        old_nChannels = existing_imp.getNChannels()
+        old_nSlices = existing_imp.getNSlices()
+        old_nFrames = existing_imp.getNFrames()
+
+        # Collect dimension values from existing images
+        existing_channel_values = self._collect_dimension_values(existing_images, channel_components)
+        existing_slice_values = self._collect_dimension_values(existing_images, slice_components)
+        existing_frame_values = self._collect_dimension_values(existing_images, frame_components)
+
+        # Process new images and check if dimensions changed
+        new_coords_added = []
+        for img_data in new_images:
+            meta = img_data['metadata']
+            c_key = tuple(meta.get(comp, 1) for comp in channel_components)
+            z_key = tuple(meta.get(comp, 1) for comp in slice_components)
+            t_key = tuple(meta.get(comp, 1) for comp in frame_components)
+
+            coord = (c_key, z_key, t_key)
+
+            # Check if this is a new coordinate or replacement
+            if coord not in existing_lookup:
+                new_coords_added.append(coord)
+
+            # Update lookup (new images override existing at same coordinates)
+            existing_lookup[coord] = img_data
+
+        # ImageJ hyperstacks have fixed dimensions - we need to rebuild when adding new slices
+        # But we can preserve display ranges to avoid expensive min/max recalculation
+        all_images = list(existing_lookup.values())
+
+        logger.info(f"🔬 FIJI SERVER: 🔄 REBUILDING: Merging {len(new_images)} new images into '{window_key}' (total: {len(all_images)} images, existing had {len(existing_images)})")
+
+        # Store display range before rebuilding
+        display_ranges = []
+        if old_nChannels > 0:
+            for c in range(1, old_nChannels + 1):
+                try:
+                    existing_imp.setC(c)
+                    display_ranges.append((existing_imp.getDisplayRangeMin(), existing_imp.getDisplayRangeMax()))
+                except Exception as e:
+                    logger.warning(f"Failed to get display range for channel {c}: {e}")
+                    # Use default range if we can't get it
+                    display_ranges.append((0, 255))
+
+        # Close old hyperstack
+        existing_imp.close()
+
+        # Build new hyperstack with all images (old + new)
+        # Pass is_new=False and preserved_display_ranges to avoid recalculation
+        self._build_new_hyperstack(
+            all_images, window_key, channel_components, slice_components,
+            frame_components, display_config_dict, is_new=False,
+            preserved_display_ranges=display_ranges
+        )
+
+    def _add_images_to_hyperstack(self, step_name: str, images: List[Dict[str, Any]],
                                     display_config_dict: Dict[str, Any]):
         """
         Add images to ImageJ hyperstacks using configurable dimension mapping.
@@ -190,7 +267,6 @@ class FijiViewerServer(ZMQServer):
 
         Args:
             step_name: Name of the processing step
-            well: Well identifier
             images: List of image info dicts with metadata and shared memory names
             display_config_dict: Display configuration with component_modes
         """
@@ -230,6 +306,8 @@ class FijiViewerServer(ZMQServer):
         # Get component modes from display config
         component_modes = display_config_dict.get('component_modes', {})
 
+        logger.info(f"🎛️  FIJI SERVER: Component modes from display config: {component_modes}")
+
         # Organize dimensions by their mode
         window_components = []  # Components that create separate windows
         channel_components = []  # Components mapped to ImageJ Channels
@@ -248,15 +326,24 @@ class FijiViewerServer(ZMQServer):
             elif mode == 'frame':
                 frame_components.append(comp_name)
 
+        logger.info(f"🗂️  FIJI SERVER: Dimension mapping:")
+        logger.info(f"  WINDOW: {window_components}")
+        logger.info(f"  CHANNEL: {channel_components}")
+        logger.info(f"  SLICE: {slice_components}")
+        logger.info(f"  FRAME: {frame_components}")
+
         # Group images by window components
+        # Components in WINDOW mode create separate windows
+        # Components in CHANNEL/SLICE/FRAME modes are combined into the same hyperstack
         windows = {}
         for img_data in image_data_list:
             meta = img_data['metadata']
 
-            # Build window key from window components
-            window_key_parts = [step_name, well]
+            # Build window key from step name and window components
+            # This now includes well only if it's in WINDOW mode
+            window_key_parts = [step_name]
             for comp in window_components:
-                if comp in meta and comp != 'well':  # well already in key
+                if comp in meta:
                     window_key_parts.append(f"{comp}={meta[comp]}")
             window_key = "_".join(window_key_parts)
 
@@ -300,33 +387,51 @@ class FijiViewerServer(ZMQServer):
 
         # Check if we have an existing hyperstack to merge into
         existing_imp = self.hyperstacks.get(window_key)
+        is_new_hyperstack = existing_imp is None
 
-        # If existing hyperstack, merge with stored metadata
-        if existing_imp is not None and window_key in self.hyperstack_metadata:
-            logger.info(f"🔬 FIJI SERVER: Merging {len(images)} new images into existing hyperstack '{window_key}'")
-            existing_images = self.hyperstack_metadata[window_key]
+        if not is_new_hyperstack:
+            # INCREMENTAL UPDATE: Add only new slices to existing hyperstack
+            logger.info(f"🔬 FIJI SERVER: ⚡ BATCH UPDATE: Adding {len(images)} new images to existing hyperstack '{window_key}'")
+            self._add_slices_to_existing_hyperstack(
+                existing_imp, images, window_key,
+                channel_components, slice_components, frame_components,
+                display_config_dict
+            )
+            return
 
-            # Build lookup of existing images by coordinates
-            existing_lookup = {}
-            for img_data in existing_images:
-                meta = img_data['metadata']
-                c_key = tuple(meta.get(comp, 1) for comp in channel_components)
-                z_key = tuple(meta.get(comp, 1) for comp in slice_components)
-                t_key = tuple(meta.get(comp, 1) for comp in frame_components)
-                existing_lookup[(c_key, z_key, t_key)] = img_data
+        # NEW HYPERSTACK: Build from scratch
+        logger.info(f"🔬 FIJI SERVER: ✨ NEW HYPERSTACK: Creating '{window_key}' with {len(images)} images")
+        self._build_new_hyperstack(
+            images, window_key, channel_components, slice_components,
+            frame_components, display_config_dict, is_new=True
+        )
 
-            # Add new images (override existing at same coordinates)
-            for img_data in images:
-                meta = img_data['metadata']
-                c_key = tuple(meta.get(comp, 1) for comp in channel_components)
-                z_key = tuple(meta.get(comp, 1) for comp in slice_components)
-                t_key = tuple(meta.get(comp, 1) for comp in frame_components)
-                existing_lookup[(c_key, z_key, t_key)] = img_data
+    def _build_new_hyperstack(self, all_images: List[Dict[str, Any]], window_key: str,
+                               channel_components: List[str], slice_components: List[str],
+                               frame_components: List[str], display_config_dict: Dict[str, Any],
+                               is_new: bool, preserved_display_ranges: List[tuple] = None):
+        """
+        Build a new hyperstack from scratch.
 
-            # Convert back to list
-            all_images = list(existing_lookup.values())
-        else:
-            all_images = images
+        Args:
+            all_images: List of all images to include
+            window_key: Window identifier
+            channel_components: Components mapped to channel dimension
+            slice_components: Components mapped to slice dimension
+            frame_components: Components mapped to frame dimension
+            display_config_dict: Display configuration
+            is_new: True if this is a brand new hyperstack, False if rebuilding existing
+            preserved_display_ranges: List of (min, max) tuples per channel to preserve
+        """
+        import numpy as np
+        from multiprocessing import shared_memory
+        import scyjava as sj
+
+        # Import ImageJ classes
+        ImageStack = sj.jimport('ij.ImageStack')
+        ImagePlus = sj.jimport('ij.ImagePlus')
+        CompositeImage = sj.jimport('ij.CompositeImage')
+        ShortProcessor = sj.jimport('ij.process.ShortProcessor')
 
         # Collect unique values for each dimension (from all images)
         channel_values = self._collect_dimension_values(all_images, channel_components)
@@ -342,6 +447,11 @@ class FijiViewerServer(ZMQServer):
         logger.info(f"  Channel components: {channel_components}")
         logger.info(f"  Slice components: {slice_components}")
         logger.info(f"  Frame components: {frame_components}")
+
+        # Images should already have 'data' key (loaded from shared memory earlier)
+        if not all_images:
+            logger.error(f"🔬 FIJI SERVER: No images provided for '{window_key}'")
+            return
 
         # Get spatial dimensions
         first_img = all_images[0]['data']
@@ -404,29 +514,53 @@ class FijiViewerServer(ZMQServer):
             comp.setTitle(window_key)
             imp = comp
 
-        # Apply LUT and auto-contrast
+        # Apply LUT and display settings
         lut_name = display_config_dict.get('lut', 'Grays')
         auto_contrast = display_config_dict.get('auto_contrast', True)
 
-        if lut_name not in ['Grays', 'grays'] and nChannels == 1:
-            try:
-                self.ij.IJ.run(imp, lut_name, "")
-            except Exception as e:
-                logger.warning(f"🔬 FIJI SERVER: Failed to apply LUT {lut_name}: {e}")
+        if is_new:
+            # Brand new hyperstack - apply LUT and auto-contrast
+            if lut_name not in ['Grays', 'grays'] and nChannels == 1:
+                try:
+                    self.ij.IJ.run(imp, lut_name, "")
+                except Exception as e:
+                    logger.warning(f"🔬 FIJI SERVER: Failed to apply LUT {lut_name}: {e}")
 
-        if auto_contrast:
-            try:
-                self.ij.IJ.run(imp, "Enhance Contrast", "saturated=0.35")
-            except Exception as e:
-                logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
+            if auto_contrast:
+                try:
+                    # Only run expensive "Enhance Contrast" on brand new hyperstacks
+                    # This recalculates min/max across ALL slices, which gets slower as stack grows
+                    self.ij.IJ.run(imp, "Enhance Contrast", "saturated=0.35")
+                    logger.debug(f"🔬 FIJI SERVER: Applied auto-contrast to new hyperstack '{window_key}'")
+                except Exception as e:
+                    logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
 
-        # Show or update
-        if window_key in self.hyperstacks:
-            old_imp = self.hyperstacks[window_key]
-            old_imp.close()
+            # Show new hyperstack
+            imp.show()
+            self.hyperstacks[window_key] = imp
 
-        imp.show()
-        self.hyperstacks[window_key] = imp
+        else:
+            # Rebuilt hyperstack - restore preserved display ranges BEFORE showing
+            # This prevents ImageJ from auto-calculating display range
+            if preserved_display_ranges:
+                try:
+                    for c in range(1, min(nChannels, len(preserved_display_ranges)) + 1):
+                        min_val, max_val = preserved_display_ranges[c - 1]
+                        imp.setC(c)
+                        imp.setDisplayRange(min_val, max_val)
+
+                    logger.debug(f"🔬 FIJI SERVER: Restored preserved display ranges for '{window_key}'")
+                except Exception as e:
+                    logger.warning(f"🔬 FIJI SERVER: Failed to restore display ranges: {e}")
+
+            # Close old hyperstack and show new one
+            # Display ranges are already set, so show() won't recalculate
+            if window_key in self.hyperstacks:
+                old_imp = self.hyperstacks[window_key]
+                old_imp.close()
+
+            imp.show()
+            self.hyperstacks[window_key] = imp
 
         # Store metadata for future merging
         self.hyperstack_metadata[window_key] = all_images

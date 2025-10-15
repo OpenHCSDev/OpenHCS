@@ -37,6 +37,7 @@ class ImageBrowserWidget(QWidget):
     
     # Signals
     image_selected = pyqtSignal(str)  # Emitted when an image is selected
+    _status_update_signal = pyqtSignal(str)  # Internal signal for thread-safe status updates
 
     def __init__(self, orchestrator=None, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
         super().__init__(parent)
@@ -71,6 +72,9 @@ class ImageBrowserWidget(QWidget):
         start_global_ack_listener()
 
         self.init_ui()
+
+        # Connect internal signal for thread-safe status updates
+        self._status_update_signal.connect(self._update_status_label)
 
         # Load images if orchestrator is provided
         if self.orchestrator:
@@ -788,6 +792,9 @@ class ImageBrowserWidget(QWidget):
             filename = filename_item.data(Qt.ItemDataRole.UserRole)
             filenames.append(filename)
 
+        logger.info(f"🎯 IMAGE BROWSER: User selected {len(filenames)} images to view in Fiji")
+        logger.info(f"🎯 IMAGE BROWSER: Filenames: {filenames[:5]}{'...' if len(filenames) > 5 else ''}")
+
         try:
             # Stream all images as a batch
             self._load_and_stream_batch_to_fiji(filenames)
@@ -880,18 +887,7 @@ class ImageBrowserWidget(QWidget):
 
         def load_and_stream():
             try:
-                # HEAVY OPERATION: Load all images (runs in background thread)
-                image_data_list = []
-                file_paths = []
-                for filename in filenames:
-                    image_path = plate_path / filename
-                    image_data = self.filemanager.load(str(image_path), read_backend)
-                    image_data_list.append(image_data)
-                    file_paths.append(filename)
-
-                logger.info(f"Loaded {len(image_data_list)} images in background thread")
-
-                # Register that we're launching a viewer
+                # Register that we're launching a viewer BEFORE loading (so UI shows it immediately)
                 from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
                     register_launching_viewer, unregister_launching_viewer
                 )
@@ -900,8 +896,30 @@ class ImageBrowserWidget(QWidget):
                 is_already_running = viewer.wait_for_ready(timeout=0.1)
 
                 if not is_already_running:
-                    # Viewer is launching - register it and show in UI
-                    register_launching_viewer(viewer.napari_port, 'napari', len(file_paths))
+                    # Viewer is launching - register it immediately so UI shows it
+                    register_launching_viewer(viewer.napari_port, 'napari', len(filenames))
+                    logger.info(f"Registered launching Napari viewer on port {viewer.napari_port} with {len(filenames)} queued images")
+
+                # Show loading status
+                self._update_status_threadsafe(f"Loading {len(filenames)} images from disk...")
+
+                # HEAVY OPERATION: Load all images (runs in background thread)
+                image_data_list = []
+                file_paths = []
+                for i, filename in enumerate(filenames, 1):
+                    image_path = plate_path / filename
+                    image_data = self.filemanager.load(str(image_path), read_backend)
+                    image_data_list.append(image_data)
+                    file_paths.append(filename)
+
+                    # Update progress every 5 images
+                    if i % 5 == 0 or i == len(filenames):
+                        self._update_status_threadsafe(f"Loading images: {i}/{len(filenames)}...")
+
+                logger.info(f"Loaded {len(image_data_list)} images in background thread")
+
+                if not is_already_running:
+                    # Viewer is launching - wait for it to be ready before streaming
                     logger.info(f"Waiting for Napari viewer on port {viewer.napari_port} to be ready...")
 
                     # Wait for viewer to be ready before streaming
@@ -1028,18 +1046,7 @@ class ImageBrowserWidget(QWidget):
 
         def load_and_stream():
             try:
-                # HEAVY OPERATION: Load all images (runs in background thread)
-                image_data_list = []
-                file_paths = []
-                for filename in filenames:
-                    image_path = plate_path / filename
-                    image_data = self.filemanager.load(str(image_path), read_backend)
-                    image_data_list.append(image_data)
-                    file_paths.append(filename)
-
-                logger.info(f"Loaded {len(image_data_list)} images in background thread")
-
-                # Register that we're launching a viewer
+                # Register that we're launching a viewer BEFORE loading (so UI shows it immediately)
                 from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
                     register_launching_viewer, unregister_launching_viewer
                 )
@@ -1048,8 +1055,30 @@ class ImageBrowserWidget(QWidget):
                 is_already_running = viewer.wait_for_ready(timeout=0.1)
 
                 if not is_already_running:
-                    # Viewer is launching - register it and show in UI
-                    register_launching_viewer(viewer.fiji_port, 'fiji', len(file_paths))
+                    # Viewer is launching - register it immediately so UI shows it
+                    register_launching_viewer(viewer.fiji_port, 'fiji', len(filenames))
+                    logger.info(f"Registered launching Fiji viewer on port {viewer.fiji_port} with {len(filenames)} queued images")
+
+                # Show loading status
+                self._update_status_threadsafe(f"Loading {len(filenames)} images from disk...")
+
+                # HEAVY OPERATION: Load all images (runs in background thread)
+                image_data_list = []
+                file_paths = []
+                for i, filename in enumerate(filenames, 1):
+                    image_path = plate_path / filename
+                    image_data = self.filemanager.load(str(image_path), read_backend)
+                    image_data_list.append(image_data)
+                    file_paths.append(filename)
+
+                    # Update progress every 5 images
+                    if i % 5 == 0 or i == len(filenames):
+                        self._update_status_threadsafe(f"Loading images: {i}/{len(filenames)}...")
+
+                logger.info(f"Loaded {len(image_data_list)} images in background thread")
+
+                if not is_already_running:
+                    # Viewer is launching - wait for it to be ready before streaming
                     logger.info(f"Waiting for Fiji viewer on port {viewer.fiji_port} to be ready...")
 
                     # Wait for viewer to be ready before streaming
@@ -1076,13 +1105,14 @@ class ImageBrowserWidget(QWidget):
                 }
 
                 # Stream batch to Fiji
+                logger.info(f"🚀 IMAGE BROWSER: Calling save_batch with {len(image_data_list)} images")
                 self.filemanager.save_batch(
                     image_data_list,
                     file_paths,
                     BackendEnum.FIJI_STREAM.value,
                     **metadata
                 )
-                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.fiji_port}")
+                logger.info(f"✅ IMAGE BROWSER: Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.fiji_port}")
             except Exception as e:
                 logger.error(f"Failed to load/stream batch to Fiji: {e}")
                 # Show error in UI thread
@@ -1170,9 +1200,14 @@ class ImageBrowserWidget(QWidget):
         QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Fiji: {error_msg}")
 
     def cleanup(self):
-        """Clean up viewers - orchestrator manages viewer lifecycle."""
-        # Viewers are managed by orchestrator, no cleanup needed here
-        pass
+        """Clean up resources before widget destruction."""
+        # Stop global ack listener thread
+        from openhcs.runtime.zmq_base import stop_global_ack_listener
+        stop_global_ack_listener()
+
+        # Cleanup ZMQ server manager widget
+        if hasattr(self, 'zmq_manager') and self.zmq_manager:
+            self.zmq_manager.cleanup()
 
     # ========== Plate View Methods ==========
 
@@ -1414,4 +1449,17 @@ class ImageBrowserWidget(QWidget):
         ]
 
         return (max(row_indices), max(cols))
+
+    def _update_status_threadsafe(self, message: str):
+        """Update status label from any thread (thread-safe).
+
+        Args:
+            message: Status message to display
+        """
+        self._status_update_signal.emit(message)
+
+    @pyqtSlot(str)
+    def _update_status_label(self, message: str):
+        """Update status label (called on main thread via signal)."""
+        self.info_label.setText(message)
 

@@ -257,32 +257,14 @@ class FijiStreamVisualizer:
 
             logger.info(f"🔬 FIJI VISUALIZER: Starting Fiji viewer server on port {self.fiji_port} (persistent={self.persistent})")
 
-            if self.persistent:
-                # For persistent viewers, use detached subprocess that truly survives parent termination
-                logger.info("🔬 FIJI VISUALIZER: Creating detached persistent Fiji viewer")
-                self.process = _spawn_detached_fiji_process(self.fiji_port, self.viewer_title, self.display_config)
-                # DON'T track persistent viewers in global variable - they should survive test cleanup
-            else:
-                # For non-persistent viewers, use multiprocessing.Process
-                logger.info("🔬 FIJI VISUALIZER: Creating non-persistent Fiji viewer")
+            # ALL viewers (persistent and non-persistent) should be detached subprocess
+            # so they don't block parent process exit. The difference is only whether
+            # we terminate them during cleanup.
+            logger.info(f"🔬 FIJI VISUALIZER: Creating {'persistent' if self.persistent else 'non-persistent'} Fiji viewer (detached)")
+            self.process = _spawn_detached_fiji_process(self.fiji_port, self.viewer_title, self.display_config)
 
-                # Create log file path for ZMQ discovery
-                import tempfile
-                log_dir = Path(tempfile.gettempdir()) / "openhcs_fiji_logs"
-                log_dir.mkdir(exist_ok=True)
-                log_file_path = str(log_dir / f"fiji_viewer_{self.fiji_port}.log")
-
-                # Import server process function
-                from openhcs.runtime.fiji_viewer_server import _fiji_viewer_server_process
-
-                self.process = multiprocessing.Process(
-                    target=_fiji_viewer_server_process,
-                    args=(self.fiji_port, self.viewer_title, self.display_config, log_file_path),
-                    daemon=False
-                )
-                self.process.start()
-
-                # Only track non-persistent viewers in global variable for test cleanup
+            # Only track non-persistent viewers in global variable for test cleanup
+            if not self.persistent:
                 with _global_fiji_lock:
                     _global_fiji_process = self.process
 

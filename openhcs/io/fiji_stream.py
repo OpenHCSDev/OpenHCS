@@ -58,6 +58,8 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         if len(data_list) != len(file_paths):
             raise ValueError("data_list and file_paths must have same length")
 
+        logger.info(f"📦 FIJI BACKEND: save_batch called with {len(data_list)} images")
+
         # Extract required kwargs
         fiji_host = kwargs.get('fiji_host', 'localhost')
         fiji_port = kwargs['fiji_port']
@@ -104,11 +106,11 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 'image_id': image_id  # Add image ID for acknowledgment tracking
             })
 
-        # Extract component modes from display config
-        from openhcs.constants import VariableComponents
+        # Extract component modes from display config for all dimensions (including multiprocessing axis)
+        from openhcs.constants import AllComponents
         component_modes = {
             comp.value: display_config.get_dimension_mode(comp).value
-            for comp in VariableComponents
+            for comp in AllComponents
         }
 
         # Send batch message
@@ -123,11 +125,13 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             'timestamp': time.time()
         }
 
+        logger.info(f"📤 FIJI BACKEND: Sending batch message with {len(batch_images)} images to port {fiji_port}")
+
         # Send non-blocking to prevent hanging if Fiji is slow to process
         import zmq
         try:
             publisher.send_json(message, flags=zmq.NOBLOCK)
-            logger.debug(f"Streamed batch of {len(batch_images)} images to Fiji on port {fiji_port}")
+            logger.info(f"✅ FIJI BACKEND: Sent batch of {len(batch_images)} images to Fiji on port {fiji_port}")
 
             # Register sent images with queue tracker for acknowledgment tracking
             from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
