@@ -329,7 +329,8 @@ class OMEROInstanceManager:
             build_result = subprocess.run(
                 ['sudo', 'docker', 'compose', 'build'],
                 cwd=self.docker_compose_path.parent,
-                capture_output=True,
+                stdout=None,  # Inherit stdout to show build output in real-time
+                stderr=None,  # Inherit stderr to show build errors in real-time
                 text=True,
                 timeout=300  # 5 minute timeout for build
             )
@@ -342,9 +343,10 @@ class OMEROInstanceManager:
             result = subprocess.run(
                 ['sudo', 'docker', 'compose', 'up', '-d'],
                 cwd=self.docker_compose_path.parent,
-                capture_output=True,
+                stdout=None,  # Inherit stdout to show startup output in real-time
+                stderr=None,  # Inherit stderr to show startup errors in real-time
                 text=True,
-                timeout=120  # 2 minute timeout for docker compose
+                timeout=600  # 10 minute timeout for docker compose (OMERO server takes time to start)
             )
 
             if result.returncode == 0:
@@ -365,7 +367,7 @@ class OMEROInstanceManager:
             logger.error(f"Failed to start docker-compose: {e}")
             return False
     
-    def _wait_for_omero_ready(self, timeout: int = 30) -> bool:
+    def _wait_for_omero_ready(self, timeout: int = 180) -> bool:
         """
         Wait for OMERO to be ready to accept connections.
         
