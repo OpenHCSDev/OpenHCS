@@ -25,9 +25,20 @@ class NonCompressingSplitter(QSplitter):
     """
     A QSplitter that maintains its size based on widget sizes, not available space.
 
-    This splitter overrides sizeHint() to return the sum of its widget sizes,
-    preventing it from being compressed when the parent window shrinks.
+    This splitter overrides sizeHint() and minimumSizeHint() to return the sum
+    of its widget sizes, preventing it from being compressed when the parent
+    window shrinks.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Connect to splitter moved to update geometry
+        self.splitterMoved.connect(self._on_splitter_moved)
+
+    def _on_splitter_moved(self, pos, index):
+        """When splitter moves, update our size hint."""
+        # Force the widget to recalculate its size
+        self.updateGeometry()
 
     def sizeHint(self):
         """Return size hint based on sum of widget sizes."""
@@ -35,9 +46,17 @@ class NonCompressingSplitter(QSplitter):
         sizes = self.sizes()
         total_height = sum(sizes) if sizes else 200
 
+        # Add handle heights
+        num_handles = max(0, self.count() - 1)
+        total_height += num_handles * self.handleWidth()
+
         # Return a size hint with the total height
-        # Width doesn't matter for vertical splitter
         return QSize(200, total_height)
+
+    def minimumSizeHint(self):
+        """Return minimum size hint based on sum of widget sizes."""
+        # Same as sizeHint - we want to maintain our size
+        return self.sizeHint()
 
 
 class ColumnFilterWidget(QFrame):
