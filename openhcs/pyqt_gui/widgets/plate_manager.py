@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QLabel, QProgressBar,
     QSplitter
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QFont
 
 from openhcs.core.config import GlobalPipelineConfig
@@ -1159,19 +1159,38 @@ class PlateManagerWidget(QWidget):
                 self.zmq_client = None
 
     def _on_zmq_progress(self, message):
-        """Handle progress updates from ZMQ execution server."""
+        """
+        Handle progress updates from ZMQ execution server.
+
+        This is called from the progress listener thread (background thread),
+        so we must use QMetaObject.invokeMethod to safely emit signals from the main thread.
+        """
         try:
             well_id = message.get('well_id', 'unknown')
             step = message.get('step', 'unknown')
             status = message.get('status', 'unknown')
 
-            # Emit progress message to UI
+            # Emit progress message to UI (thread-safe)
             progress_text = f"[{well_id}] {step}: {status}"
-            self.status_message.emit(progress_text)
+
+            # Use QMetaObject.invokeMethod to emit signal from main thread
+            from PyQt6.QtCore import QMetaObject, Qt
+            QMetaObject.invokeMethod(
+                self,
+                "_emit_status_message",
+                Qt.ConnectionType.QueuedConnection,
+                progress_text
+            )
+
             logger.debug(f"Progress: {progress_text}")
 
         except Exception as e:
             logger.warning(f"Failed to handle progress update: {e}")
+
+    @pyqtSlot(str)
+    def _emit_status_message(self, message: str):
+        """Emit status message from main thread (called via QMetaObject.invokeMethod)."""
+        self.status_message.emit(message)
 
     async def action_stop_execution(self):
         """Handle Stop Execution - cancel ZMQ execution or terminate subprocess."""

@@ -52,7 +52,7 @@ class QueueTracker:
     
     def mark_processed(self, image_id: str):
         """Mark an image as processed (ack received).
-        
+
         Args:
             image_id: UUID of the processed image
         """
@@ -63,6 +63,13 @@ class QueueTracker:
                 self._processed.add(image_id)
                 self._total_processed += 1
                 logger.debug(f"[{self.viewer_type}:{self.viewer_port}] Marked processed {image_id} (took {elapsed:.2f}s, pending: {len(self._pending)})")
+
+                # Auto-clear when all images are processed
+                if len(self._pending) == 0 and self._total_sent > 0:
+                    logger.info(f"[{self.viewer_type}:{self.viewer_port}] All {self._total_sent} images processed - auto-clearing tracker")
+                    self._processed.clear()
+                    self._total_sent = 0
+                    self._total_processed = 0
             else:
                 logger.warning(f"[{self.viewer_type}:{self.viewer_port}] Received ack for unknown image {image_id}")
     

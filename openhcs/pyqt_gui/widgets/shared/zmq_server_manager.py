@@ -175,22 +175,51 @@ class ZMQServerManagerWidget(QWidget):
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.refresh_servers)
 
+        # Cleanup flag to prevent operations after cleanup
+        self._is_cleaning_up = False
+
         self.setup_ui()
 
-    def __del__(self):
-        """Cleanup when widget is destroyed."""
-        # Unregister this manager
+    def cleanup(self):
+        """Cleanup resources before widget destruction."""
+        if self._is_cleaning_up:
+            return
+
+        self._is_cleaning_up = True
+
+        # Stop refresh timer first to prevent new refresh calls
+        if hasattr(self, 'refresh_timer') and self.refresh_timer:
+            self.refresh_timer.stop()
+            self.refresh_timer.deleteLater()
+            self.refresh_timer = None
+
+        # Unregister this manager from global list
         with _active_managers_lock:
             if self in _active_managers:
                 _active_managers.remove(self)
 
+        logger.debug("ZMQServerManagerWidget cleanup completed")
+
+    def __del__(self):
+        """Cleanup when widget is destroyed."""
+        self.cleanup()
+
     def showEvent(self, event):
         """Auto-scan for servers when widget is shown."""
         super().showEvent(event)
-        # Scan for servers on first show
-        self.refresh_servers()
-        # Start auto-refresh (1 second interval - async scanning won't block UI)
-        self.refresh_timer.start(1000)
+        if not self._is_cleaning_up:
+            # Scan for servers on first show
+            self.refresh_servers()
+            # Start auto-refresh (1 second interval - async scanning won't block UI)
+            if self.refresh_timer:
+                self.refresh_timer.start(1000)
+
+    def hideEvent(self, event):
+        """Stop auto-refresh when widget is hidden."""
+        super().hideEvent(event)
+        # Stop timer to prevent unnecessary background work
+        if hasattr(self, 'refresh_timer') and self.refresh_timer:
+            self.refresh_timer.stop()
 
     def setup_ui(self):
         """Setup the user interface."""
@@ -266,6 +295,10 @@ class ZMQServerManagerWidget(QWidget):
     
     def refresh_servers(self):
         """Scan ports and refresh server list (async in background)."""
+        # Guard against calls after cleanup
+        if self._is_cleaning_up:
+            return
+
         import threading
 
         def scan_and_update():
@@ -353,6 +386,10 @@ class ZMQServerManagerWidget(QWidget):
 
         This is called when launching viewer state changes and provides instant feedback.
         """
+        # Guard against calls after cleanup
+        if self._is_cleaning_up:
+            return
+
         # Keep existing scanned servers, just update the tree display
         self._update_server_list(self.servers)
 
@@ -567,7 +604,9 @@ class ZMQServerManagerWidget(QWidget):
 
         def kill_servers():
             from openhcs.runtime.zmq_base import ZMQClient
+            from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
             failed_ports = []
+            registry = GlobalQueueTrackerRegistry()
 
             for port in ports_to_kill:
                 try:
@@ -575,6 +614,8 @@ class ZMQServerManagerWidget(QWidget):
                     success = ZMQClient.kill_server_on_port(port, graceful=True)
                     if success:
                         logger.info(f"✅ Successfully quit server on port {port}")
+                        # Clear queue tracker for this viewer
+                        registry.remove_tracker(port)
                         self.server_killed.emit(port)
                     else:
                         failed_ports.append(port)
@@ -632,21 +673,31 @@ class ZMQServerManagerWidget(QWidget):
         import threading
 
         def kill_servers():
-            from openhcs.runtime.zmq_base import ZMQClient
+            from openhcs.runtime.zmq_base import ZMQServer
+            from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
             failed_ports = []
+            registry = GlobalQueueTrackerRegistry()
 
             for port in ports_to_kill:
                 try:
-                    success = ZMQClient.kill_server_on_port(port, graceful=False)
-                    if success:
-                        logger.info(f"Force killed server on port {port}")
+                    logger.info(f"🔥 FORCE KILL: Killing processes on port {port} (nuclear option - no ZMQ, direct process kill)")
+                    # Force kill: Skip ZMQ entirely, go straight to process killing
+                    # This is the nuclear option - it ALWAYS works
+                    killed = ZMQServer.kill_processes_on_port(port)
+                    # Also try port+1000 (data port for execution servers)
+                    killed += ZMQServer.kill_processes_on_port(port + 1000)
+
+                    if killed > 0:
+                        logger.info(f"✅ Force killed {killed} process(es) on port {port}")
+                        # Clear queue tracker for this viewer
+                        registry.remove_tracker(port)
                         self.server_killed.emit(port)
                     else:
                         failed_ports.append(port)
-                        logger.warning(f"Failed to force kill server on port {port}")
+                        logger.warning(f"❌ No processes found on port {port}")
                 except Exception as e:
                     failed_ports.append(port)
-                    logger.error(f"Error force killing server on port {port}: {e}")
+                    logger.error(f"❌ Error force killing server on port {port}: {e}")
 
             # Emit completion signal
             if failed_ports:

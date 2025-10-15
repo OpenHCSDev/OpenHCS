@@ -82,6 +82,14 @@ def _ack_listener_loop():
                         tracker = registry.get_tracker(ack.viewer_port)
                         if tracker:
                             tracker.mark_processed(ack.image_id)
+
+                            # Trigger UI refresh to show updated progress immediately
+                            try:
+                                from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import _trigger_manager_refresh_fast
+                                _trigger_manager_refresh_fast()
+                            except ImportError:
+                                # PyQt not available (e.g., in TUI mode) - skip UI refresh
+                                pass
                         else:
                             logger.warning(f"Received ack for unknown viewer port {ack.viewer_port}: {ack.image_id}")
 

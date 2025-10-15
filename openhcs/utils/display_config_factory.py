@@ -22,7 +22,7 @@ def create_display_config(
 
     Creates a frozen dataclass with:
     - Base fields (e.g., colormap, variable_size_handling)
-    - Component-specific mode fields (e.g., channel_mode, z_index_mode)
+    - Component-specific mode fields (e.g., channel_mode, z_index_mode, well_mode)
     - Custom methods (e.g., get_dimension_mode, get_colormap_name)
 
     Args:
@@ -48,9 +48,13 @@ def create_display_config(
         ...     methods={'get_colormap_name': lambda self: self.colormap.value}
         ... )
     """
-    from openhcs.constants import VariableComponents
+    from openhcs.constants import AllComponents
 
-    variable_components = list(VariableComponents)
+    # Use AllComponents instead of VariableComponents so display configs include ALL dimensions
+    # (including the multiprocessing axis). Display configuration should be independent of
+    # multiprocessing axis choice - users should be able to control how wells/any dimension
+    # are displayed regardless of which dimension is used for parallelization.
+    all_components = list(AllComponents)
     component_defaults = component_defaults or {}
 
     annotations = {}
@@ -60,7 +64,7 @@ def create_display_config(
         annotations[field_name] = field_type
         defaults[field_name] = default_value
 
-    for component in variable_components:
+    for component in all_components:
         field_name = f"{component.value}_mode"
         annotations[field_name] = component_mode_enum
         defaults[field_name] = component_defaults.get(component.value, list(component_mode_enum)[1])
@@ -143,9 +147,12 @@ def create_napari_display_config(
         },
         docstring="""Configuration for napari display behavior for all OpenHCS components.
 
-        This class is dynamically generated with individual fields for each variable component.
+        This class is dynamically generated with individual fields for each component dimension.
         Each component has a corresponding {component}_mode field that controls whether
         it's displayed as a slice or stack in napari.
+
+        Includes ALL dimensions (site, channel, z_index, timepoint, well) regardless of
+        which dimension is used as the multiprocessing axis.
         """
     )
 
@@ -219,9 +226,12 @@ def create_fiji_display_config(
         },
         docstring="""Configuration for Fiji display behavior for all OpenHCS components.
 
-        This class is dynamically generated with individual fields for each variable component.
+        This class is dynamically generated with individual fields for each component dimension.
         Each component has a corresponding {component}_mode field that controls how it maps
         to ImageJ hyperstack dimensions (WINDOW/CHANNEL/SLICE/FRAME).
+
+        Includes ALL dimensions (site, channel, z_index, timepoint, well) regardless of
+        which dimension is used as the multiprocessing axis.
 
         ImageJ hyperstacks have 3 dimensions:
         - Channels (C): Color channels or sites

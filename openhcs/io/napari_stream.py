@@ -139,18 +139,13 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 'image_id': image_id  # Add image ID for acknowledgment tracking
             })
 
-        # Build component modes
-        from openhcs.constants import VariableComponents
+        # Build component modes for all dimensions (including multiprocessing axis)
+        from openhcs.constants import AllComponents
         component_modes = {}
-        for component in VariableComponents:
+        for component in AllComponents:
             field_name = f"{component.value}_mode"
             mode = getattr(display_config, field_name)
             component_modes[component.value] = mode.value
-
-
-        # Include well if available on the display config (not always part of VariableComponents)
-        if hasattr(display_config, 'well_mode'):
-            component_modes['well'] = display_config.well_mode.value
 
         # Send batch message
         message = {

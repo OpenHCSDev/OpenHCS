@@ -144,14 +144,15 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
                 else:
                     component_modes[component] = 'slice' if component == 'channel' else 'stack'
 
-        # Create layer grouping key: step_prefix + well + slice_components
-        # CRITICAL: Always include well_id to prevent cross-contamination between wells
-        # in multiprocessing scenarios. The display mode affects visualization, not grouping.
-        layer_key_parts = [step_prefix, well_id]
+        # Create layer grouping key: step_prefix + slice_components
+        # Components in SLICE mode create separate layers
+        # Components in STACK mode are combined into the same layer
+        layer_key_parts = [step_prefix]
 
         # Add slice components to layer key (these create separate layers)
+        # This now includes ALL components (including well) based on their mode
         for component_name, mode in component_modes.items():
-            if mode == 'slice' and component_name in component_info and component_name != 'well':
+            if mode == 'slice' and component_name in component_info:
                 layer_key_parts.append(f"{component_name}_{component_info[component_name]}")
 
         layer_key = "_".join(layer_key_parts)
@@ -942,22 +943,14 @@ class NapariStreamVisualizer:
             self.port = self.napari_port
             logger.info(f"🔬 VISUALIZER: Starting napari viewer process on port {self.port}")
 
-            if self.persistent:
-                # For persistent viewers, use detached subprocess that truly survives parent termination
-                logger.info("🔬 VISUALIZER: Creating detached persistent napari viewer")
-                self.process = _spawn_detached_napari_process(self.port, self.viewer_title, self.replace_layers)
-                # DON'T track persistent viewers in global variable - they should survive test cleanup
-            else:
-                # For non-persistent viewers, use multiprocessing.Process
-                logger.info("🔬 VISUALIZER: Creating non-persistent napari viewer")
-                self.process = multiprocessing.Process(
-                    target=_napari_viewer_process,
-                    args=(self.port, self.viewer_title, self.replace_layers, None),  # No log file for non-persistent
-                    daemon=False
-                )
-                self.process.start()
+            # ALL viewers (persistent and non-persistent) should be detached subprocess
+            # so they don't block parent process exit. The difference is only whether
+            # we terminate them during cleanup.
+            logger.info(f"🔬 VISUALIZER: Creating {'persistent' if self.persistent else 'non-persistent'} napari viewer (detached)")
+            self.process = _spawn_detached_napari_process(self.port, self.viewer_title, self.replace_layers)
 
-                # Only track non-persistent viewers in global variable for test cleanup
+            # Only track non-persistent viewers in global variable for test cleanup
+            if not self.persistent:
                 with _global_process_lock:
                     _global_viewer_process = self.process
                     _global_viewer_port = self.port
@@ -1222,10 +1215,10 @@ class NapariStreamVisualizer:
             if display_config:
                 # Check if any component mode is set to SLICE
                 from openhcs.core.config import NapariDimensionMode
-                from openhcs.constants import VariableComponents
+                from openhcs.constants import AllComponents
 
-                # Check individual component mode fields
-                for component in VariableComponents:
+                # Check individual component mode fields for all dimensions
+                for component in AllComponents:
                     field_name = f"{component.value}_mode"
                     if hasattr(display_config, field_name):
                         mode = getattr(display_config, field_name)
