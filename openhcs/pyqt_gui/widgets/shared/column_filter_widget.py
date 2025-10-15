@@ -12,13 +12,32 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QPushButton,
     QScrollArea, QLabel, QFrame, QSplitter
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QSize
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.widgets.shared.layout_constants import COMPACT_LAYOUT
 
 logger = logging.getLogger(__name__)
+
+
+class NonCompressingSplitter(QSplitter):
+    """
+    A QSplitter that maintains its size based on widget sizes, not available space.
+
+    This splitter overrides sizeHint() to return the sum of its widget sizes,
+    preventing it from being compressed when the parent window shrinks.
+    """
+
+    def sizeHint(self):
+        """Return size hint based on sum of widget sizes."""
+        # Get the sum of all widget sizes
+        sizes = self.sizes()
+        total_height = sum(sizes) if sizes else 200
+
+        # Return a size hint with the total height
+        # Width doesn't matter for vertical splitter
+        return QSize(200, total_height)
 
 
 class ColumnFilterWidget(QFrame):
@@ -212,24 +231,15 @@ class MultiColumnFilterPanel(QWidget):
         """Initialize the UI with vertical splitter for resizable filters in a scroll area."""
         from PyQt6.QtWidgets import QSizePolicy, QScrollArea
 
-        # Container widget to hold the splitter
-        # This allows us to control the size independently of the scroll area
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(0)
-
-        # Use vertical splitter so each filter can be resized
-        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        # Use custom non-compressing splitter so each filter can be resized
+        self.splitter = NonCompressingSplitter(Qt.Orientation.Vertical)
         self.splitter.setChildrenCollapsible(False)  # Prevent filters from collapsing
         self.splitter.setHandleWidth(5)  # Make handle more visible and easier to grab
 
-        container_layout.addWidget(self.splitter)
-
-        # Wrap container in scroll area so the whole group can scroll
+        # Wrap splitter in scroll area so the whole group can scroll
         scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(False)  # CRITICAL: Let container control its own size
-        scroll_area.setWidget(container)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(self.splitter)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
