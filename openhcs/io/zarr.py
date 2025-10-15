@@ -534,9 +534,34 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
 
 
     def load(self, file_path: Union[str, Path], **kwargs) -> Any:
+        """
+        Load a single file from zarr store.
+
+        For OME-ZARR structure with filename mapping, delegates to load_batch.
+        For legacy flat structure or direct keys, uses direct key lookup.
+
+        Args:
+            file_path: Path to file to load
+            **kwargs: Additional arguments
+
+        Returns:
+            Loaded array data
+
+        Raises:
+            FileNotFoundError: If file not found in zarr store
+        """
         store, key = self._split_store_and_key(file_path)
         group = zarr.group(store=store)
 
+        # Check if this is OME-ZARR structure with filename mapping
+        if "plate" in group.attrs:
+            # OME-ZARR structure: use load_batch which understands filename mapping
+            result = self.load_batch([file_path], **kwargs)
+            if not result:
+                raise FileNotFoundError(f"File not found in OME-ZARR store: {file_path}")
+            return result[0]
+
+        # Legacy flat structure: direct key lookup with symlink resolution
         visited = set()
         while self.is_symlink(key):
             if key in visited:

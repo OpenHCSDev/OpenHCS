@@ -64,7 +64,8 @@ class SyntheticMicroscopyGenerator:
                  format='ImageXpress',  # Format of the filenames ('ImageXpress' or 'OperaPhenix')
                  auto_image_size=True,  # Automatically calculate image size based on grid and tile size
                  random_seed=None,
-                 include_all_components=False):  # Include all filename components (for OpenHCS)
+                 include_all_components=False,  # Include all filename components (for OpenHCS)
+                 skip_files=None):  # List of filenames to skip (for testing missing image handling)
         """
         Initialize the synthetic microscopy generator.
 
@@ -114,8 +115,10 @@ class SyntheticMicroscopyGenerator:
             auto_image_size: If True, automatically calculate image size based on grid and tile parameters
             random_seed: Random seed for reproducibility
             include_all_components: If True, include all filename components (timepoint, z-index) even for flat plates
+            skip_files: List of filenames to skip during generation (for testing missing image handling)
         """
         self.output_dir = Path(output_dir)
+        self.skip_files = set(skip_files) if skip_files else set()
         self.grid_size = grid_size
         self.tile_size = tile_size
         self.overlap_percent = overlap_percent
@@ -820,6 +823,12 @@ class SyntheticMicroscopyGenerator:
                                     filename = f"r{row:02d}c{col:02d}f{site_index}p{z_level:02d}-ch{wavelength}sk1fk1fl1.tiff"
                                 filepath = target_dir / filename
 
+                                # Skip this file if it's in the skip list
+                                if filename in self.skip_files:
+                                    print(f"  Skipped tile: {filename} (simulating missing image)")
+                                    site_index += 1
+                                    continue
+
                                 # Save image without compression
                                 tifffile.imwrite(filepath, tile, compression=None)
 
@@ -877,6 +886,12 @@ class SyntheticMicroscopyGenerator:
                                 col = int(well[1:3])
                                 filename = f"r{row:02d}c{col:02d}f{site_index}p01-ch{wavelength}sk1fk1fl1.tiff"
                             filepath = self.timepoint_dir / filename
+
+                            # Skip this file if it's in the skip list
+                            if filename in self.skip_files:
+                                print(f"  Skipped tile: {filename} (simulating missing image)")
+                                site_index += 1
+                                continue
 
                             # Save image without compression
                             tifffile.imwrite(filepath, tile, compression=None)

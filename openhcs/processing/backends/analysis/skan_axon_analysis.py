@@ -241,7 +241,7 @@ def skan_axon_skeletonize_and_analyze(
         raise ValueError(f"Invalid analysis_dimension: {analysis_dimension}")
     
     # Step 5: Filter results
-    if min_branch_length > 0:
+    if min_branch_length > 0 and len(branch_data) > 0 and 'branch_distance' in branch_data.columns:
         branch_data = branch_data[branch_data['branch_distance'] >= min_branch_length]
 
     # Step 6: Generate skeleton visualizations if requested

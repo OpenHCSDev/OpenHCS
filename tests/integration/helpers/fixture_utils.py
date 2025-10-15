@@ -86,8 +86,18 @@ TEST_PARAMS = {
         # Add test-specific overrides here if needed
     },
     "OperaPhenix": {
-        "default": syn_data_params
-        # Add test-specific overrides here if needed
+        "default": {
+            **syn_data_params,
+            # Always skip some files to test missing images feature (autofocus failures)
+            # Note: Synthetic data generator creates files with ORIGINAL Opera Phenix format:
+            # 1-digit site padding (f2) and 2-digit z-index padding (p01)
+            # These will be remapped to 3-digit padding during workspace preparation
+            "skip_files": [
+                "r01c01f2p01-ch1sk1fk1fl1.tiff",  # A01, site 2, z=1, channel 1
+                "r02c02f1p01-ch1sk1fk1fl1.tiff",  # B02, site 1, z=1, channel 1
+                "r02c02f1p01-ch2sk1fk1fl1.tiff",  # B02, site 1, z=1, channel 2
+            ]
+        }
     },
     "OpenHCS": {
         "default": syn_data_params
@@ -270,7 +280,9 @@ def create_synthetic_plate_data(test_function_dir, microscope_config, test_param
                 microscope_config["auto_image_size"]
             ),
             # For OpenHCS, include all filename components
-            include_all_components=(microscope_config["format"] == "OpenHCS")
+            include_all_components=(microscope_config["format"] == "OpenHCS"),
+            # Skip files if specified (for testing missing image handling)
+            skip_files=test_params.get("skip_files", None)
         )
         generator.generate_dataset()
 
@@ -295,6 +307,8 @@ def plate_dir(test_function_dir, microscope_config, test_params, data_type_confi
     For disk-based microscopes: Returns Path to plate directory
     For OMERO: Returns plate_id (int) after uploading to OMERO
     """
+    import shutil
+
     # Handle OMERO specially
     if microscope_config.get("is_virtual") and microscope_config.get("requires_connection"):
         from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
@@ -357,6 +371,13 @@ def plate_dir(test_function_dir, microscope_config, test_params, data_type_confi
             plate_name=data_type_config["name"],
             z_stack_levels=data_type_config["z_stack_levels"]
         )
+
+        # Clean up workspace directory if it exists from previous runs
+        # This ensures _prepare_workspace() is called, which creates missing images for Opera Phenix
+        workspace_path = plate_path / "workspace"
+        if workspace_path.exists():
+            shutil.rmtree(workspace_path, ignore_errors=True)
+
         yield plate_path
 
 # Keep legacy fixtures for backward compatibility

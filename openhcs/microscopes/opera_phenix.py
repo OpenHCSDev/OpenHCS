@@ -344,7 +344,128 @@ class OperaPhenixHandler(MicroscopeHandler):
             # Non-fatal error, just log it
             logger.warning("Failed to remove temporary directory %s: %s", temp_dir, e)
 
+        # Fill in missing images with black pixels (Opera Phenix autofocus failures)
+        if index_xml:
+            try:
+                xml_parser = OperaPhenixXmlParser(index_xml)
+                missing_count = self._fill_missing_images(image_dir, xml_parser, filemanager)
+                if missing_count > 0:
+                    logger.info(f"✅ Created {missing_count} missing images with black pixels")
+            except Exception as e:
+                logger.warning(f"Failed to fill missing images: {e}")
+
         return image_dir
+
+    def _fill_missing_images(
+        self,
+        image_dir: Path,
+        xml_parser: OperaPhenixXmlParser,
+        filemanager: FileManager
+    ) -> int:
+        """
+        Fill in missing images with black pixels for wells where autofocus failed.
+
+        Opera Phenix autofocus failures result in missing images. This method:
+        1. Extracts expected image structure from Index.xml
+        2. Compares with actual files in workspace
+        3. Creates black (zero-filled) images for missing files
+
+        Args:
+            image_dir: Path to the image directory
+            xml_parser: Parsed Index.xml
+            filemanager: FileManager for file operations
+
+        Returns:
+            Number of missing images created
+        """
+        import numpy as np
+
+        logger.debug("Checking for missing images in Opera Phenix workspace")
+
+        # 1. Get expected images from XML
+        try:
+            image_info = xml_parser.get_image_info()
+            field_mapping = xml_parser.get_field_id_mapping()
+        except Exception as e:
+            logger.warning(f"Could not extract image info from XML: {e}")
+            return 0
+
+        # 2. Build set of expected filenames (with remapped field IDs)
+        expected_files = set()
+        for img_id, img_data in image_info.items():
+            # Remap field ID
+            original_field = img_data['field_id']
+            remapped_field = xml_parser.remap_field_id(original_field, field_mapping)
+
+            # Construct filename
+            well = f"R{img_data['row']:02d}C{img_data['col']:02d}"
+
+            # Note: plane_id in XML corresponds to z_index in filenames
+            # For timepoint, we default to 1 as XML doesn't always have explicit timepoint info
+            filename = self.parser.construct_filename(
+                well=well,
+                site=remapped_field,
+                channel=img_data['channel_id'],
+                z_index=img_data['plane_id'],
+                timepoint=1,  # Default timepoint
+                extension='.tiff'
+            )
+            expected_files.add(filename)
+
+        # 3. Get actual files (excluding broken symlinks)
+        # Clause 245: Workspace operations are disk-only by design
+        actual_file_paths = filemanager.list_image_files(image_dir, Backend.DISK.value)
+        actual_files = set()
+        for file_path in actual_file_paths:
+            # Check if file is a broken symlink
+            file_path_obj = Path(file_path)
+            if file_path_obj.is_symlink() and not file_path_obj.exists():
+                # Broken symlink - treat as missing
+                logger.debug(f"Found broken symlink (will be replaced): {file_path}")
+                continue
+            actual_files.add(os.path.basename(file_path))
+
+        # 4. Find missing files
+        missing_files = expected_files - actual_files
+
+        if not missing_files:
+            logger.debug("No missing images detected")
+            return 0
+
+        logger.info(f"Found {len(missing_files)} missing images (likely autofocus failures)")
+
+        # 5. Get image dimensions from first existing image
+        if actual_file_paths:
+            try:
+                first_image_path = actual_file_paths[0]
+                # Clause 245: Workspace operations are disk-only by design
+                first_image = filemanager.load(first_image_path, Backend.DISK.value)
+                height, width = first_image.shape
+                dtype = first_image.dtype
+                logger.debug(f"Using dimensions from existing image: {height}x{width}, dtype={dtype}")
+            except Exception as e:
+                logger.warning(f"Could not load existing image for dimensions: {e}")
+                # Default dimensions for Opera Phenix
+                height, width = 2160, 2160
+                dtype = np.uint16
+                logger.debug(f"Using default dimensions: {height}x{width}, dtype={dtype}")
+        else:
+            # Default dimensions for Opera Phenix
+            height, width = 2160, 2160
+            dtype = np.uint16
+            logger.debug(f"No existing images, using default dimensions: {height}x{width}, dtype={dtype}")
+
+        # 6. Create black images for missing files
+        black_image = np.zeros((height, width), dtype=dtype)
+
+        for filename in missing_files:
+            output_path = image_dir / filename
+            # Clause 245: Workspace operations are disk-only by design
+            filemanager.save(black_image, output_path, Backend.DISK.value)
+            logger.debug(f"Created missing image: {filename}")
+
+        logger.info(f"Successfully created {len(missing_files)} missing images with black pixels")
+        return len(missing_files)
 
 
 class OperaPhenixFilenameParser(FilenameParser):
