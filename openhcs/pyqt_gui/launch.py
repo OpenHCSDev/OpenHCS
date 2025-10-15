@@ -24,6 +24,7 @@ except ImportError:
     
 
 from openhcs.pyqt_gui.app import OpenHCSPyQtApp
+from openhcs.pyqt_gui.utils.window_utils import install_global_window_bounds_filter
 
 
 def is_wsl() -> bool:
@@ -257,6 +258,7 @@ def main():
         # Create and run application
         logging.info("Initializing PyQt6 application...")
         app = OpenHCSPyQtApp(sys.argv, config)
+        install_global_window_bounds_filter(app)  # install once, early
         
         logging.info("Starting application event loop...")
         exit_code = app.run()
