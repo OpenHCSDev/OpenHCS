@@ -19,11 +19,9 @@ Usage:
 """
 
 import logging
-import sys
 from pathlib import Path
 from typing import Any, List, Dict, Optional
 import dill as pickle
-import io
 
 logger = logging.getLogger(__name__)
 
@@ -222,7 +220,7 @@ def migrate_pipeline_file(pipeline_path: Path, backup_suffix: str = ".backup") -
         # Restore backup
         try:
             backup_file.rename(pipeline_path)
-            logger.info(f"Restored original file from backup")
+            logger.info("Restored original file from backup")
         except OSError:
             logger.error(f"Failed to restore backup - original file is at {backup_file}")
         return False
@@ -316,7 +314,7 @@ def load_pipeline_with_migration(pipeline_path: Path) -> Optional[List[Any]]:
             
             # Optionally save the migrated version back to file
             # For now, just return the migrated steps without saving
-            logger.info(f"Pipeline migrated in-memory. Use migrate_pipeline_file() to save changes.")
+            logger.info("Pipeline migrated in-memory. Use migrate_pipeline_file() to save changes.")
             return migrated_steps
         
         return steps

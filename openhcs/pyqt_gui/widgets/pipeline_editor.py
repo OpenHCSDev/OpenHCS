@@ -6,24 +6,20 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 """
 
 import logging
-import asyncio
 import inspect
-import contextlib
 from typing import List, Dict, Optional, Callable, Tuple
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
-    QListWidgetItem, QLabel, QMessageBox, QFileDialog, QFrame,
-    QSplitter, QTextEdit, QScrollArea, QStyledItemDelegate, QStyle,
+    QListWidgetItem, QLabel, QSplitter, QStyledItemDelegate, QStyle,
     QStyleOptionViewItem, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData
-from PyQt6.QtGui import QFont, QDrag, QPainter, QColor, QPen, QFontMetrics
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QPainter, QColor, QPen, QFontMetrics
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.config_framework.global_config import set_current_global_config, get_current_global_config
 from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.pyqt_gui.widgets.mixins import (

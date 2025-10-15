@@ -28,7 +28,6 @@ from typing import Dict, List, Optional
 
 # DEFAULT_NUM_WORKERS removed
 from openhcs.core.memory.gpu_utils import (check_cupy_gpu_available,
-                                               check_jax_gpu_available,
                                                check_tf_gpu_available,
                                                check_torch_gpu_available)
 # Import necessary config classes

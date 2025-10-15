@@ -6,7 +6,6 @@ Shows live log messages from OpenHCS operations.
 """
 
 import logging
-import os
 import time
 from datetime import datetime
 from collections import deque

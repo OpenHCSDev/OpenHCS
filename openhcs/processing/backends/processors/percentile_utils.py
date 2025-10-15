@@ -6,7 +6,7 @@ between NumPy, CuPy, PyTorch, JAX, TensorFlow, and other implementations.
 """
 
 import numpy as np
-from typing import Tuple, Any, Union
+from typing import Tuple, Union
 
 
 def get_dtype_range(dtype) -> Tuple[Union[int, float], Union[int, float]]:

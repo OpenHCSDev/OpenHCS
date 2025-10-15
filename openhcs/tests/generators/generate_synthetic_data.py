@@ -1,4 +1,3 @@
-from typing import Optional, List, Dict, Tuple
 #!/usr/bin/env python3
 """
 Generate synthetic microscopy images for testing openhcs.
@@ -899,7 +898,7 @@ class SyntheticMicroscopyGenerator:
             sub_dir: Subdirectory name where images are located (default: "images")
             pixel_size: Pixel size in microns (default: 0.65)
         """
-        print(f"\nGenerating OpenHCS metadata...")
+        print("\nGenerating OpenHCS metadata...")
 
         # Collect all image files
         image_files = []

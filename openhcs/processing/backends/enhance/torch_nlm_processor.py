@@ -18,7 +18,6 @@ Doctrinal Clauses:
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from openhcs.utils.import_utils import optional_import
 from openhcs.core.memory.decorators import torch as torch_func

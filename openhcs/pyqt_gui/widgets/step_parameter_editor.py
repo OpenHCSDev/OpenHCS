@@ -8,11 +8,10 @@ Handles FunctionStep parameter editing with nested dataclass support.
 import logging
 from typing import Any, Optional
 from pathlib import Path
-from contextlib import contextmanager
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QScrollArea, QFrame, QSizePolicy
+    QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -23,7 +22,6 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 # REMOVED: LazyDataclassFactory import - no longer needed since step editor
 # uses existing lazy dataclass instances from the step
-from openhcs.core.config import GlobalPipelineConfig
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
 logger = logging.getLogger(__name__)
@@ -92,7 +90,6 @@ class StepParameterEditorWidget(QWidget):
             parameter_types[name] = info.param_type
         
         # SIMPLIFIED: Create parameter form manager using dual-axis resolution
-        from openhcs.core.config import GlobalPipelineConfig
 
         # CRITICAL FIX: Use pipeline_config as context_obj (parent for inheritance)
         # The step is the overlay (what's being edited), not the parent context
@@ -122,9 +119,6 @@ class StepParameterEditorWidget(QWidget):
 
         No manual mappings needed - uses type-based discovery.
         """
-        from openhcs.core.config import PipelineConfig
-        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-        import dataclasses
 
         # Check if parameter is Optional[dataclass]
         if not ParameterTypeUtils.is_optional_dataclass(param_type):

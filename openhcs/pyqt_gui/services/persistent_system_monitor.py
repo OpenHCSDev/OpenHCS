@@ -10,7 +10,7 @@ import time
 import logging
 import subprocess
 import platform
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from collections import deque
 
 from PyQt6.QtCore import QThread, pyqtSignal, QMutex, QMutexLocker

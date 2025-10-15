@@ -1,9 +1,6 @@
 """Base window class for OpenHCS TUI windows."""
 
 from textual_window import Window
-from textual.app import ComposeResult
-from textual.widgets import Button
-from textual.containers import Container
 
 
 class BaseOpenHCSWindow(Window):

@@ -9,12 +9,11 @@ import logging
 import time
 from typing import Optional
 from datetime import datetime
-from collections import deque
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout, QSizePolicy, QPushButton
 )
-from PyQt6.QtCore import QTimer, pyqtSignal, QThread, Qt, QSize
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QResizeEvent
 
 # Import PyQtGraph for high-performance plotting
@@ -29,7 +28,7 @@ from openhcs.textual_tui.services.system_monitor import SystemMonitor
 from openhcs.pyqt_gui.services.persistent_system_monitor import PersistentSystemMonitor
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
-from openhcs.pyqt_gui.config import PyQtGUIConfig, PerformanceMonitorConfig, get_default_pyqt_gui_config
+from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +267,6 @@ class SystemMonitorWidget(QWidget):
         layout.addStretch()
 
         # Schedule initial font size update after panel is shown
-        from PyQt6.QtCore import QTimer
         QTimer.singleShot(100, self._update_font_sizes_from_panel)
 
         return panel

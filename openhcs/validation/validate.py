@@ -7,7 +7,6 @@ principles using static AST-based analysis.
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 from typing import List, Optional, Set

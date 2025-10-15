@@ -10,7 +10,6 @@ import cv2
 from typing import Tuple, List, Dict, Any, Optional
 from dataclasses import dataclass
 import logging
-import json
 import pandas as pd
 from openhcs.constants.constants import Backend
 from pathlib import Path

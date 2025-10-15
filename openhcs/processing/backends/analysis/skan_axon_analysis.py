@@ -11,7 +11,7 @@ import pandas as pd
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional, Union, List
+from typing import Dict, Any, Tuple, Optional, List
 import logging
 
 # OpenHCS imports
@@ -69,7 +69,6 @@ def materialize_axon_analysis(
     """
     logger.info(f"🔬 SKAN_MATERIALIZE: Called with path={path}, backend={backend}, data_keys={list(axon_analysis_data.keys()) if axon_analysis_data else 'None'}")
     import json
-    from pathlib import Path
     from openhcs.constants.constants import Backend
 
     # Generate output file paths based on the input path
@@ -125,7 +124,7 @@ def materialize_axon_analysis(
         logger.info(f"Created Excel file: {excel_path}")
 
     # 4. Log materialization
-    logger.info(f"Materialized axon analysis:")
+    logger.info("Materialized axon analysis:")
     logger.info(f"  - Summary: {json_path}")
     logger.info(f"  - Branch data: {csv_path}")
 

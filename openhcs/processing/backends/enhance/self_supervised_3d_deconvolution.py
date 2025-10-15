@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from typing import Optional, Tuple, Tuple
+from typing import Optional, Tuple
 
 # Import torch decorator and optional_import utility
 from openhcs.utils.import_utils import optional_import, create_placeholder_class

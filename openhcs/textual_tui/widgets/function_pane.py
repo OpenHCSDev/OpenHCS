@@ -1,7 +1,7 @@
 """Individual function pane widget with parameter editing."""
 
-from typing import Tuple, Any, Callable, Dict
-from textual.containers import Container, Horizontal, Vertical
+from typing import Tuple, Any, Callable
+from textual.containers import Container, Horizontal
 from textual.widgets import Button, Static
 from textual.app import ComposeResult
 from textual.message import Message

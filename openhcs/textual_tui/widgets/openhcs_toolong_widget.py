@@ -12,12 +12,11 @@ import logging
 import os
 import re
 import threading
-import time
 from pathlib import Path
 from typing import List, Optional
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal
+from textual.containers import Horizontal
 from textual.lazy import Lazy
 from textual.reactive import reactive
 from textual.widget import Widget
@@ -31,7 +30,7 @@ from toolong.watcher import get_watcher
 
 # Import file system watching
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileCreatedEvent
+from watchdog.events import FileSystemEventHandler
 
 logger = logging.getLogger(__name__)
 
@@ -435,7 +434,7 @@ class OpenHCSToolongWidget(Widget):
                             )
                         )
 
-        logger.debug(f"OpenHCSToolongWidget compose() completed")
+        logger.debug("OpenHCSToolongWidget compose() completed")
 
     def _create_friendly_tab_name(self, path: str) -> str:
         """Create a friendly display name for a log file path."""
@@ -524,7 +523,7 @@ class OpenHCSToolongWidget(Widget):
                             import traceback
                             traceback.print_exc()
                     else:
-                        logger.debug(f"⏰ File not opened yet, tailing will start after scan completes")
+                        logger.debug("⏰ File not opened yet, tailing will start after scan completes")
                 else:
                     logger.warning(f"⚠️ Cannot start tailing: has_start_tail={hasattr(log_lines, 'start_tail')}, log_files={len(getattr(log_lines, 'log_files', []))}")
 
@@ -1050,7 +1049,7 @@ class OpenHCSToolongWidget(Widget):
 
                     # Remove the tab pane
                     tab_pane.remove()
-                    logger.debug(f"Removed tab pane")
+                    logger.debug("Removed tab pane")
 
                 except Exception as e:
                     logger.warning(f"Error cleaning up tab resources: {e}")

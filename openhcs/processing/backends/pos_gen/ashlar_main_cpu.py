@@ -17,7 +17,6 @@ import pandas as pd
 
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.core.memory.decorators import numpy as numpy_func
-from openhcs.core.utils import optional_import
 
 import warnings
 
@@ -136,7 +135,7 @@ def ashlar_register_no_preprocessing(img1, img2, upsample=10):
     except Exception as e:
         # If phase correlation fails, return large error
         logger.error(f"Ashlar CPU: PHASE CORRELATION FAILED - Exception: {e}")
-        logger.error(f"  Returning infinite error")
+        logger.error("  Returning infinite error")
         return np.array([0.0, 0.0]), np.inf
 
     # At this point we may have a shift in the wrong quadrant since the FFT
@@ -156,7 +155,7 @@ def ashlar_register_no_preprocessing(img1, img2, upsample=10):
             correlations.append(0.0)
 
     if not correlations or max(correlations) == 0:
-        logger.warning(f"Ashlar CPU: NO VALID CORRELATIONS - All correlations failed or zero")
+        logger.warning("Ashlar CPU: NO VALID CORRELATIONS - All correlations failed or zero")
         return np.array([0.0, 0.0]), np.inf
 
     idx = np.argmax(correlations)
@@ -171,7 +170,7 @@ def ashlar_register_no_preprocessing(img1, img2, upsample=10):
     # Log all correlation results at INFO level for user visibility
     if error > 1.0:  # High error threshold for Ashlar
         logger.warning(f"Ashlar CPU: HIGH CORRELATION ERROR - Error={error:.4f}, Shift=({shift[0]:.2f}, {shift[1]:.2f})")
-        logger.warning(f"  This indicates poor overlap or image quality between tiles")
+        logger.warning("  This indicates poor overlap or image quality between tiles")
     else:
         logger.info(f"Ashlar CPU: Correlation - Error={error:.4f}, Shift=({shift[0]:.2f}, {shift[1]:.2f})")
 
@@ -227,7 +226,7 @@ def ashlar_nccw_no_preprocessing(img1, img2):
     # Log all NCCW results at INFO level for user visibility
     if error > 10.0:  # High NCCW error threshold
         logger.warning(f"Ashlar CPU: HIGH NCCW ERROR - Error={error:.4f}")
-        logger.warning(f"  This indicates poor image correlation between tiles")
+        logger.warning("  This indicates poor image correlation between tiles")
     else:
         logger.info(f"Ashlar CPU: NCCW - Error={error:.4f}")
 

@@ -1,9 +1,6 @@
 # Edit this pipeline and save to apply changes
 
 # Automatically collected imports
-from openhcs.constants.constants import GroupBy, VariableComponents
-from openhcs.constants.input_source import InputSource
-from openhcs.core.config import NapariColormap, NapariDimensionMode, WellFilterMode
 from openhcs.core.config import LazyNapariStreamingConfig
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.processing.backends.processors.cupy_processor import stack_percentile_normalize

@@ -11,7 +11,7 @@ from typing import Type, Any, Callable, Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QScrollArea, QWidget, QFrame, QSplitter, QTreeWidget, QTreeWidgetItem,
+    QScrollArea, QWidget, QSplitter, QTreeWidget, QTreeWidgetItem,
     QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -24,7 +24,6 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.core.config import GlobalPipelineConfig
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-from openhcs.config_framework.context_manager import config_context
 
 
 
@@ -223,7 +222,6 @@ class ConfigWindow(QDialog):
     def _add_ui_visible_dataclasses_to_tree(self, parent_item: QTreeWidgetItem, dataclass_type):
         """Add only dataclasses that are visible in the UI form."""
         import dataclasses
-        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
         # Get all fields from this dataclass
         fields = dataclasses.fields(dataclass_type)
@@ -659,7 +657,7 @@ class ConfigWindow(QDialog):
             self.form_manager._refresh_all_placeholders()
             self.form_manager._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
-            logger.info(f"Updated config from edited code and refreshed placeholders")
+            logger.info("Updated config from edited code and refreshed placeholders")
 
         except Exception as e:
             logger.error(f"Failed to apply edited config code: {e}")

@@ -8,9 +8,8 @@ assumptions about component names and makes the parser system truly generic.
 
 import logging
 from abc import ABC, ABCMeta, abstractmethod
-from typing import Any, Dict, Type, TypeVar, Optional, Union, Tuple
+from typing import Any, Dict, Type, TypeVar, Optional, Tuple
 from enum import Enum
-import inspect
 
 logger = logging.getLogger(__name__)
 

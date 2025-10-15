@@ -2,10 +2,9 @@
 
 import dataclasses
 from enum import Enum
-from typing import get_origin, get_args, Any, Optional
+from typing import get_origin, get_args
 from textual.widgets import Input, Checkbox, Collapsible
 from .enum_radio_set import EnumRadioSet
-from ..different_values_wrapper import create_different_values_widget
 
 class TypedWidgetFactory:
     """Simple type → widget mapping with universal 'DIFFERENT VALUES' support."""

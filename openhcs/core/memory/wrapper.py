@@ -13,7 +13,7 @@ from openhcs.constants.constants import MemoryType
 from .converters import (convert_memory, validate_data_compatibility,
                          validate_memory_type)
 from .exceptions import MemoryConversionError
-from .utils import _ensure_module, _get_device_id
+from .utils import _get_device_id
 
 
 class MemoryWrapper:

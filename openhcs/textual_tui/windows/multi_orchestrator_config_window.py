@@ -1,9 +1,9 @@
 """Multi-orchestrator configuration window for OpenHCS Textual TUI."""
 
-from typing import Type, Any, Callable, Optional, List, Dict
+from typing import Any, Callable, Optional, List, Dict
 from textual.app import ComposeResult
 from textual.widgets import Button, Static
-from textual.containers import Container, Horizontal, ScrollableContainer
+from textual.containers import Horizontal, ScrollableContainer
 import dataclasses
 
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow

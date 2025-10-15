@@ -7,12 +7,10 @@ manages global configuration and services.
 
 import sys
 import logging
-import asyncio
 from typing import Optional
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QIcon
 
 from openhcs.core.config import GlobalPipelineConfig

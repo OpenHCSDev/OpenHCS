@@ -1,7 +1,7 @@
 """Config form widget with reactive properties."""
 
-from typing import List, Dict, Any, Callable, Optional
-from textual.containers import Container, Vertical, ScrollableContainer
+from typing import Dict, Any
+from textual.containers import ScrollableContainer
 from textual.widgets import Static
 from textual.app import ComposeResult
 from textual.reactive import reactive

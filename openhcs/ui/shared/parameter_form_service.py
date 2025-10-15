@@ -14,7 +14,7 @@ from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 # Old field path detection removed - using simple field name matching
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-from openhcs.ui.shared.ui_utils import debug_param, format_field_id, format_param_name, format_reset_button_id
+from openhcs.ui.shared.ui_utils import debug_param, format_param_name
 
 
 @dataclass

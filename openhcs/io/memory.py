@@ -11,12 +11,9 @@ Clause 251 (Declarative Memory Conversion Interface) by requiring explicit
 memory type declarations and providing declarative conversion methods.
 """
 
-import fnmatch
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Set, Union
-from os import PathLike
-import copy as pycopy
+from typing import Any, Dict, List, Optional, Set, Union
 
 from openhcs.io.base import StorageBackend
 from openhcs.io.backend_registry import StorageBackendMeta
@@ -594,7 +591,7 @@ class MemoryStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             try:
                 from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
                 cleanup_all_gpu_frameworks()
-                logger.debug(f"🔥 GPU CLEANUP: Triggered comprehensive GPU cleanup after memory backend clear")
+                logger.debug("🔥 GPU CLEANUP: Triggered comprehensive GPU cleanup after memory backend clear")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to trigger GPU cleanup after memory backend clear: {cleanup_error}")
 
@@ -602,7 +599,7 @@ class MemoryStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
                         f"preserved {len(self._memory_store)} directories, collected {collected} objects")
 
         except Exception as e:
-            raise StorageResolutionError(f"Failed to clear files from memory store") from e
+            raise StorageResolutionError("Failed to clear files from memory store") from e
 
     def _is_gpu_object(self, obj: Any) -> bool:
         """

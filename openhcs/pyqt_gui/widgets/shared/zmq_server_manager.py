@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
     QPushButton, QGroupBox, QMessageBox, QAbstractItemView
 )
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer, QThread
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 import threading
 
@@ -270,7 +270,6 @@ class ZMQServerManagerWidget(QWidget):
 
         def scan_and_update():
             """Background thread to scan ports without blocking UI."""
-            from openhcs.runtime.zmq_base import ZMQClient
             import concurrent.futures
 
             # Scan ports in parallel using thread pool (like Napari implementation)

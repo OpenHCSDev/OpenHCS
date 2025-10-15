@@ -6,7 +6,6 @@ Combines image browsing and metadata viewing in a single window with tabs.
 
 import logging
 from typing import Optional
-from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -242,7 +241,7 @@ class PlateViewerWindow(QDialog):
     
     def _create_multi_subdirectory_forms(self, layout, subdirs_instances):
         """Create forms for multiple subdirectories."""
-        from PyQt6.QtWidgets import QGroupBox, QScrollArea
+        from PyQt6.QtWidgets import QGroupBox
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 
         for subdir_name, metadata_instance in subdirs_instances.items():

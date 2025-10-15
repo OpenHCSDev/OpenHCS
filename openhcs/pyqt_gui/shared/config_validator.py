@@ -7,7 +7,7 @@ and semantic correctness. Provides hot-reload capability and error reporting.
 
 import json
 import logging
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Any
 from pathlib import Path
 from dataclasses import fields
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme

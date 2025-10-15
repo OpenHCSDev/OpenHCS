@@ -3,7 +3,6 @@
 from typing import Any, Optional, Type
 from textual.widget import Widget
 from textual.events import Click
-from textual import on
 
 
 class DifferentValuesWrapper:

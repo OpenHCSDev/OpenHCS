@@ -8,19 +8,15 @@ This is the main application class that orchestrates the entire TUI.
 import asyncio
 import logging
 import traceback
-from pathlib import Path
 from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
-from textual.screen import ModalScreen
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container
 from textual.widgets import Static, Button, TextArea
-from rich.syntax import Syntax
 
 # OpenHCS imports
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.io.base import storage_registry
 from openhcs.io.filemanager import FileManager
 
@@ -31,7 +27,6 @@ from .widgets.status_bar import StatusBar
 # Textual-window imports
 from textual_window import Window, WindowSwitcher, window_manager, TilingLayout
 from openhcs.textual_tui.widgets.custom_window_bar import CustomWindowBar
-from openhcs.textual_tui.windows import HelpWindow, ConfigWindow, DualEditorWindow, PipelinePlateWindow
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
 
 

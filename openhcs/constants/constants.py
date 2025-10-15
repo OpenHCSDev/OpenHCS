@@ -7,7 +7,7 @@ These constants are governed by various doctrinal clauses.
 
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional, Set, Type, TypeVar
+from typing import Any, Callable, Set, TypeVar
 
 
 class Microscope(Enum):

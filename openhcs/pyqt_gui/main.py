@@ -6,17 +6,16 @@ textual-window floating windows with native Qt docking.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict
 from pathlib import Path
 import webbrowser
 
 from PyQt6.QtWidgets import (
-    QMainWindow, QApplication, QDockWidget, QWidget, QVBoxLayout,
-    QHBoxLayout, QMenuBar, QStatusBar, QToolBar, QSplitter,
+    QMainWindow, QWidget, QVBoxLayout,
     QMessageBox, QFileDialog, QDialog
 )
 from PyQt6.QtCore import Qt, QSettings, QTimer, pyqtSignal, QUrl
-from PyQt6.QtGui import QAction, QIcon, QKeySequence, QDesktopServices
+from PyQt6.QtGui import QAction, QKeySequence, QDesktopServices
 
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.io.filemanager import FileManager
@@ -92,7 +91,6 @@ class OpenHCSMainWindow(QMainWindow):
         self.setMinimumSize(640, 480)
 
         # Make main window floating (not tiled) like other OpenHCS components
-        from PyQt6.QtCore import Qt
         self.setWindowFlags(Qt.WindowType.Dialog)
         
         # Central widget with system monitor background
@@ -629,7 +627,6 @@ class OpenHCSMainWindow(QMainWindow):
     def show_help(self):
         """Opens documentation URL in default web browser."""
         from openhcs.constants.constants import DOCUMENTATION_URL
-        import webbrowser
         
         url =  (DOCUMENTATION_URL)
         if not QDesktopServices.openUrl(QUrl.fromUserInput(url)):

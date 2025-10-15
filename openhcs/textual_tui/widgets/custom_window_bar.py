@@ -5,11 +5,9 @@ Extends textual-window WindowBar to customize button layout and appearance.
 """
 
 import logging
-from typing import Any
 
 from textual import work
 from textual.app import ComposeResult
-from textual.widgets import Static
 from textual_window import WindowBar
 from textual_window.windowbar import WindowBarAllButton, WindowBarButton
 from textual_window.window import Window

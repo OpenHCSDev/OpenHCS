@@ -6,7 +6,7 @@ by both PyQt and Textual implementations to ensure consistent search behavior
 across the application.
 """
 
-from typing import Dict, Any, Callable, TypeVar, Generic
+from typing import Dict, Callable, TypeVar, Generic
 import logging
 
 logger = logging.getLogger(__name__)

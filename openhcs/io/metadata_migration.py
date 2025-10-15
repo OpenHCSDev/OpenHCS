@@ -26,10 +26,9 @@ Usage as script:
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from .metadata_writer import METADATA_CONFIG
 
@@ -229,7 +228,7 @@ def migrate_plate_metadata(plate_dir: Path, dry_run: bool = False, backup_suffix
         # Restore backup
         try:
             backup_file.rename(metadata_file)
-            logger.info(f"Restored original file from backup")
+            logger.info("Restored original file from backup")
         except OSError:
             logger.error(f"Failed to restore backup - original file is at {backup_file}")
         return False

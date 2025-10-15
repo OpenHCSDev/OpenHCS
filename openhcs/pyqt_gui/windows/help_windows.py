@@ -6,11 +6,10 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QTextEdit, QScrollArea, QWidget, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt
 
 # REUSE the actual working Textual TUI help components
-from openhcs.ui.shared.signature_analyzer import DocstringExtractor, SignatureAnalyzer
+from openhcs.ui.shared.signature_analyzer import DocstringExtractor
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 

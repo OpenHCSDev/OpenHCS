@@ -3,8 +3,6 @@
 import dataclasses
 from dataclasses import dataclass, fields
 from typing import Any, List, Optional, get_origin, get_args, Union as TypingUnion
-from pathlib import Path
-from enum import Enum
 
 
 @dataclass

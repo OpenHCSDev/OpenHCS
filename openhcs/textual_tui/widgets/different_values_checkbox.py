@@ -1,6 +1,5 @@
 """Simple checkbox widget for handling different values across multiple configurations."""
 
-from typing import Any
 from textual.widgets import Checkbox
 from textual.events import Click
 

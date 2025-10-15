@@ -6,7 +6,6 @@ Generated: 2025-07-21 13:37:01.538763
 
 import sys
 import os
-from pathlib import Path
 
 # Add OpenHCS to path
 sys.path.insert(0, "/home/ts/code/projects/openhcs")
@@ -188,7 +187,6 @@ def setup_signal_handlers():
     """Setup signal handlers to kill all child processes and threads on Ctrl+C."""
     import signal
     import os
-    import sys
 
     def cleanup_and_exit(signum, frame):
         print(f"\n🔥 Signal {signum} received! Cleaning up all processes and threads...")

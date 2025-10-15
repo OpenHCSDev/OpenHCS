@@ -3,11 +3,9 @@
 import ast
 import inspect
 import importlib
-import pkgutil
-from typing import Dict, List, Any, Optional, Type, Union
-from pathlib import Path
+from typing import Dict, Any, Optional
 from textual.app import ComposeResult
-from textual.widgets import Static, Tree, Button, Select, TextArea, Input, Label
+from textual.widgets import Static, Tree, Button, Input, Label
 from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual.reactive import reactive
 
@@ -488,7 +486,7 @@ class DebugClassExplorerWindow(BaseOpenHCSWindow):
                 "• Enter a custom module name and click 'Analyze'\n"
                 "• Click any node in the AST tree to see detailed information\n"
                 "• Use 🏠 Home or ⬅️ Back buttons to navigate\n\n"
-                f"[green]Available Categories:[/green]\n" +
+                "[green]Available Categories:[/green]\n" +
                 "\n".join(f"• {name}: {len(modules)} modules" for name, modules in self.categories.items())
             )
         except:

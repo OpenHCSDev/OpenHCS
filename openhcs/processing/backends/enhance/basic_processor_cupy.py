@@ -27,7 +27,6 @@ from openhcs.core.utils import optional_import
 # For type checking only
 if TYPE_CHECKING:
     import cupy as cp
-    from cupyx.scipy import linalg
 
 # Import CuPy as an optional dependency
 cp = optional_import("cupy")
@@ -216,7 +215,7 @@ def _chunked_low_rank_approximation(matrix: "cp.ndarray", rank: int, max_memory_
                     low_rank_chunk = cp.asarray(low_rank_chunk_cpu)
                     low_rank_chunks.append(low_rank_chunk)
 
-                    logger.debug(f"🔧 ADAPTIVE CHUNKING: Successfully processed chunk on CPU")
+                    logger.debug("🔧 ADAPTIVE CHUNKING: Successfully processed chunk on CPU")
                     current_pos = end_pos
 
                 except Exception as cpu_error:
@@ -330,7 +329,7 @@ def basic_flatfield_correction_cupy(
         logger.info(f"🔧 CPU FALLBACK: GPU processing failed, switching to CPU for {z}×{y}×{x} image")
 
         # 🔧 CRITICAL: Delete ALL intermediate variables from failed GPU processing
-        logger.debug(f"🔧 CPU FALLBACK: Cleaning up intermediate GPU variables...")
+        logger.debug("🔧 CPU FALLBACK: Cleaning up intermediate GPU variables...")
         try:
             # These variables exist in _gpu_flatfield_correction scope, need to pass them out
             # For now, just do aggressive memory cleanup
@@ -469,7 +468,7 @@ def _gpu_flatfield_correction(
             cp.cuda.cublas.CUBLASError) as gpu_error:
 
         # 🔧 CRITICAL: Clean up ALL intermediate variables before re-raising
-        logger.debug(f"🔧 GPU PROCESSING: Cleaning up intermediate variables after OOM...")
+        logger.debug("🔧 GPU PROCESSING: Cleaning up intermediate variables after OOM...")
         try:
             # Delete all local intermediate variables
             if 'image_float' in locals() and image_float is not None:
@@ -489,7 +488,7 @@ def _gpu_flatfield_correction(
             import gc
             gc.collect()
 
-            logger.debug(f"🔧 GPU PROCESSING: Intermediate variables cleaned up")
+            logger.debug("🔧 GPU PROCESSING: Intermediate variables cleaned up")
 
         except Exception as cleanup_error:
             logger.warning(f"🔧 GPU PROCESSING: Variable cleanup warning: {cleanup_error}")
@@ -563,7 +562,7 @@ def _cpu_fallback_flatfield_correction(
         from openhcs.processing.backends.enhance.basic_processor_numpy import basic_flatfield_correction_numpy
 
         # 🔧 AGGRESSIVE GPU CLEANUP: Free as much GPU memory as possible before CPU conversion
-        logger.info(f"🔧 CPU FALLBACK: Clearing GPU memory before CPU conversion...")
+        logger.info("🔧 CPU FALLBACK: Clearing GPU memory before CPU conversion...")
         try:
             cp.get_default_memory_pool().free_all_blocks()
             cp.get_default_pinned_memory_pool().free_all_blocks()
@@ -572,7 +571,7 @@ def _cpu_fallback_flatfield_correction(
             pass
 
         # Convert CuPy array to NumPy in chunks to avoid large GPU allocation
-        logger.info(f"🔧 CPU FALLBACK: Converting CuPy array to NumPy in chunks...")
+        logger.info("🔧 CPU FALLBACK: Converting CuPy array to NumPy in chunks...")
         z, y, x = image.shape
 
         # Convert slice by slice to minimize GPU memory usage
@@ -623,7 +622,7 @@ def _cpu_fallback_flatfield_correction(
         )
 
         # 🔧 AGGRESSIVE GPU CLEANUP: Clear ALL intermediate data before converting result back
-        logger.info(f"🔧 CPU FALLBACK: Clearing all GPU memory before converting result back...")
+        logger.info("🔧 CPU FALLBACK: Clearing all GPU memory before converting result back...")
         try:
             # Clear all GPU memory pools
             cp.get_default_memory_pool().free_all_blocks()
@@ -642,16 +641,16 @@ def _cpu_fallback_flatfield_correction(
             import gc
             gc.collect()
 
-            logger.debug(f"🔧 CPU FALLBACK: GPU memory cleared, converting result back to CuPy...")
+            logger.debug("🔧 CPU FALLBACK: GPU memory cleared, converting result back to CuPy...")
 
         except Exception as cleanup_error:
             logger.warning(f"🔧 CPU FALLBACK: GPU cleanup warning: {cleanup_error}")
 
         # Convert result back to CuPy (should now have enough memory)
-        logger.info(f"🔧 CPU FALLBACK: Converting result back to CuPy...")
+        logger.info("🔧 CPU FALLBACK: Converting result back to CuPy...")
         corrected = cp.asarray(corrected_cpu)
 
-        logger.info(f"🔧 CPU FALLBACK: Successfully processed on CPU and converted back to GPU")
+        logger.info("🔧 CPU FALLBACK: Successfully processed on CPU and converted back to GPU")
         return corrected
 
     except Exception as cpu_error:

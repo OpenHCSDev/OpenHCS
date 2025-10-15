@@ -12,7 +12,7 @@ Doctrinal Clauses:
 from __future__ import annotations 
 
 import logging
-from typing import TYPE_CHECKING, Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import numpy as np
 from skimage import exposure, filters

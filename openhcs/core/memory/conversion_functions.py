@@ -360,12 +360,12 @@ def _cupy_to_torch(data: Any, allow_cpu_roundtrip: bool = False, device_id: Opti
     elif _supports_cuda_array_interface(data):
         print(f"🔥 CONVERSION DEBUG: CUDA Array Interface supported, data shape: {data.shape}")
         try:
-            print(f"🔥 CONVERSION DEBUG: About to call torch.as_tensor...")
+            print("🔥 CONVERSION DEBUG: About to call torch.as_tensor...")
             if device_id is not None:
                 result = torch.as_tensor(data, device=f"cuda:{device_id}")
             else:
                 result = torch.as_tensor(data, device="cuda")
-            print(f"🔥 CONVERSION DEBUG: torch.as_tensor completed successfully")
+            print("🔥 CONVERSION DEBUG: torch.as_tensor completed successfully")
             return result
         except Exception as e:
             print(f"🔥 CONVERSION DEBUG: torch.as_tensor failed with error: {e}")

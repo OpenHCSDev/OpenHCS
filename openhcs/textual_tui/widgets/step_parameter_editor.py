@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 from pathlib import Path
-from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
+from textual.containers import Horizontal, ScrollableContainer
 from textual.widgets import Button, Static
 from textual.app import ComposeResult
 from textual.message import Message

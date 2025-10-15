@@ -17,7 +17,7 @@ Doctrinal Clauses:
 - Clause 251 — Special Output Contract
 """
 
-from typing import Callable, Any, TypeVar, Set, Dict
+from typing import Callable, Any, TypeVar
 
 F = TypeVar('F', bound=Callable[..., Any])
 

@@ -6,7 +6,7 @@ converting async/await patterns to Qt signals/slots.
 """
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Callable
 import asyncio
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal

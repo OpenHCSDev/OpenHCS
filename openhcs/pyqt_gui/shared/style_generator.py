@@ -7,7 +7,6 @@ semantic color scheme references.
 """
 
 import logging
-from typing import Dict, Optional
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 
 logger = logging.getLogger(__name__)

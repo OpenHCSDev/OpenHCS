@@ -9,7 +9,6 @@ This is a convenience wrapper around the launch script.
 """
 
 import sys
-from pathlib import Path
 
 
 def main():

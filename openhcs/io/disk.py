@@ -6,13 +6,11 @@ This module provides a concrete implementation of the storage backend interfaces
 for local disk storage. It strictly enforces VFS boundaries and doctrinal clauses.
 """
 
-import fnmatch
 import logging
 import os
 import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Union
-from os import PathLike
 
 import numpy as np
 

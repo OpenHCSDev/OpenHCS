@@ -22,9 +22,8 @@ from scipy.spatial.distance import cdist
 from skimage.feature import blob_log, blob_dog, blob_doh, peak_local_max
 from skimage.filters import threshold_otsu, threshold_li, gaussian, median
 from skimage.segmentation import watershed, clear_border
-from skimage.morphology import remove_small_objects, disk, binary_erosion, binary_dilation
+from skimage.morphology import remove_small_objects, disk
 from skimage.measure import label, regionprops
-from skimage import exposure
 
 # OpenHCS imports
 from openhcs.core.memory.decorators import numpy as numpy_func
@@ -95,7 +94,7 @@ def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult
 
     # Determine if this is single-channel or multi-channel data
     if not data:
-        logger.warning(f"🔬 CELL_COUNT_MATERIALIZE: No data to materialize")
+        logger.warning("🔬 CELL_COUNT_MATERIALIZE: No data to materialize")
         return path
 
     is_multi_channel = isinstance(data[0], MultiChannelResult)
@@ -113,7 +112,7 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
     logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Called with path={path}, masks_count={len(data) if data else 0}, backend={backend}")
 
     if not data:
-        logger.info(f"🔬 SEGMENTATION_MATERIALIZE: No segmentation masks to materialize (return_segmentation_mask=False)")
+        logger.info("🔬 SEGMENTATION_MATERIALIZE: No segmentation masks to materialize (return_segmentation_mask=False)")
         # Create empty summary file to indicate no masks were generated
         summary_path = path.replace('.pkl', '_segmentation_summary.txt')
         summary_content = "No segmentation masks generated (return_segmentation_mask=False)\n"

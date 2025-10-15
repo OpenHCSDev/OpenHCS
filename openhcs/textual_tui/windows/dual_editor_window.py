@@ -1,12 +1,11 @@
 """DualEditor window - enhanced port of dual_editor_pane.py to Textual."""
 
 import logging
-from typing import Optional, Callable, Union, List, Dict
+from typing import Optional, Callable, Union, List
 # ModalScreen import removed - using BaseOpenHCSWindow instead
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
 from textual.message import Message
-from textual.widgets import Button, Static, TabbedContent, TabPane, Label, Input, Select
+from textual.widgets import Button, TabbedContent, TabPane, Input, Select
 from textual.reactive import reactive
 from textual.widgets._tabbed_content import ContentTabs, ContentSwitcher, ContentTab
 from textual.widgets._tabs import Tab
@@ -20,7 +19,6 @@ from openhcs.processing.backends.lib_registry.registry_service import RegistrySe
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
 # Updated import to get the message class as well
 from openhcs.textual_tui.widgets.step_parameter_editor import (
-    StepParameterEditorWidget,
     StepParameterEditorWidget)
 from openhcs.textual_tui.widgets.function_list_editor import FunctionListEditorWidget
 
@@ -340,7 +338,7 @@ class DualEditorWindow(BaseOpenHCSWindow):
                 for tab in tabs:
                     if hasattr(tab, 'button_id') and tab.button_id == "save":
                         tab.disabled = False  # Always enabled
-                        logger.debug(f"Save button always enabled (user preference)")
+                        logger.debug("Save button always enabled (user preference)")
                         break
             else:
                 logger.debug("No ButtonTab widgets found yet (widget still mounting?)")

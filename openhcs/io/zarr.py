@@ -10,7 +10,7 @@ for materializing data to disk when needed.
 import fnmatch
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import zarr
@@ -22,10 +22,9 @@ try:
 except ImportError:
     OME_ZARR_AVAILABLE = False
 
-from openhcs.constants.constants import Backend, DEFAULT_IMAGE_EXTENSIONS
+from openhcs.constants.constants import Backend
 from openhcs.io.base import StorageBackend
 from openhcs.io.backend_registry import StorageBackendMeta
-from openhcs.constants.constants import Backend
 from openhcs.io.exceptions import StorageResolutionError
 
 logger = logging.getLogger(__name__)

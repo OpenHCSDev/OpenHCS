@@ -12,7 +12,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, Type
 
-from openhcs.constants.constants import Backend, GroupBy, AllComponents, DEFAULT_IMAGE_EXTENSIONS
+from openhcs.constants.constants import Backend, GroupBy, AllComponents
 from openhcs.io.exceptions import MetadataNotFoundError
 from openhcs.io.filemanager import FileManager
 from openhcs.io.metadata_writer import AtomicMetadataWriter, MetadataWriteError, get_metadata_path, METADATA_CONFIG

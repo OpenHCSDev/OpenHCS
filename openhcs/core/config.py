@@ -8,11 +8,9 @@ Configuration is intended to be immutable and provided as Python objects.
 
 import logging
 import os # For a potentially more dynamic default for num_workers
-import threading
-import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Optional, Union, Dict, Any, List, Type
+from typing import Optional, Union, Any, List
 from enum import Enum
 from abc import ABC, abstractmethod
 from openhcs.constants import Microscope

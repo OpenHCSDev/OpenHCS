@@ -1,9 +1,8 @@
 """Terminal window for OpenHCS Textual TUI."""
 
-from pathlib import Path
 from textual.app import ComposeResult
-from textual.widgets import Button, Static
-from textual.containers import Container, Horizontal, Vertical
+from textual.widgets import Static
+from textual.containers import Vertical
 
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
 
@@ -102,9 +101,9 @@ try:
                     for match in cursor_visibility_pattern.finditer(chars):
                         visibility = match.group(1)
                         if visibility == 'l':  # hide cursor
-                            print(f"DEBUG: Cursor hidden")
+                            print("DEBUG: Cursor hidden")
                         elif visibility == 'h':  # show cursor
-                            print(f"DEBUG: Cursor shown")
+                            print("DEBUG: Cursor shown")
 
                     # Handle mouse tracking (from original)
                     _re_ansi_sequence = re.compile(r"(\x1b\[\??[\d;]*[a-zA-Z])")

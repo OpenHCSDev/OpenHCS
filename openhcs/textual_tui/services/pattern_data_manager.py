@@ -93,7 +93,7 @@ class PatternDataManager:
             print(f"🔍 PATTERN DATA MANAGER extract_func_and_kwargs: callable case - returning {result}")
             return result
         else:
-            print(f"🔍 PATTERN DATA MANAGER extract_func_and_kwargs: neither tuple nor callable - returning None, {{}}")
+            print("🔍 PATTERN DATA MANAGER extract_func_and_kwargs: neither tuple nor callable - returning None, {}")
             return None, {}
     
     @staticmethod

@@ -8,7 +8,7 @@ The resolver is completely generic and has no application-specific dependencies.
 """
 
 import logging
-from typing import Any, Dict, Type, Optional, List
+from typing import Any, Dict, Type, Optional
 from dataclasses import is_dataclass
 
 logger = logging.getLogger(__name__)

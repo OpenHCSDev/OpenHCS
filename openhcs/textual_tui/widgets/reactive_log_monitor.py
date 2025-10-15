@@ -11,22 +11,18 @@ Mathematical properties:
 """
 
 import logging
-import os
-import re
 from pathlib import Path
-from typing import Set, Dict, Optional, Callable, List
-from dataclasses import dataclass
+from typing import Set, Dict, List
 
 from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import Static, Select
 from textual.widget import Widget
 from textual.reactive import reactive
-from textual.containers import Horizontal, Vertical
 
 # Import file system watching
 from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifiedEvent
+from watchdog.events import FileSystemEventHandler
 
 # Import core log utilities
 from openhcs.core.log_utils import LogFileInfo, discover_logs, classify_log_file, is_relevant_log_file

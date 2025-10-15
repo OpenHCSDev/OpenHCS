@@ -1,6 +1,6 @@
 """Special input widget for handling different values across multiple configurations."""
 
-from typing import Any, Optional
+from typing import Any
 from textual.widgets import Input
 from textual.events import Click
 

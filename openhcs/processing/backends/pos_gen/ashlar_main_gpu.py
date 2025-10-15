@@ -164,7 +164,6 @@ def ashlar_register_gpu(img1, img2, upsample=10):
         img1, img2: Input images
         upsample: Upsampling factor for phase correlation
     """
-    import itertools
     import cucim.skimage.registration
 
     # Input validation (same as CPU version)
@@ -206,12 +205,12 @@ def ashlar_register_gpu(img1, img2, upsample=10):
         # Only log high errors to avoid spam
         if error > 1.0:  # High error threshold for Ashlar
             logger.warning(f"Ashlar GPU: HIGH CORRELATION ERROR - Error={error:.4f}, Shift=({shift[0]:.2f}, {shift[1]:.2f})")
-            logger.warning(f"  This indicates poor overlap or image quality between tiles")
+            logger.warning("  This indicates poor overlap or image quality between tiles")
 
     except Exception as e:
         # Fallback if correlation fails
         logger.error(f"Ashlar GPU: CORRELATION FAILED - Exception: {e}")
-        logger.error(f"  Returning infinite error")
+        logger.error("  Returning infinite error")
         shift = cp.array([0.0, 0.0])
         error = cp.inf
 
@@ -260,7 +259,7 @@ def ashlar_nccw_no_preprocessing_gpu(img1, img2):
     error_float = float(error)
     if error_float > 10.0:  # High NCCW error threshold
         logger.warning(f"Ashlar GPU: HIGH NCCW ERROR - Error={error_float:.4f}")
-        logger.warning(f"  This indicates poor image correlation between tiles")
+        logger.warning("  This indicates poor image correlation between tiles")
     else:
         logger.info(f"Ashlar GPU: NCCW - Error={error_float:.4f}")
 

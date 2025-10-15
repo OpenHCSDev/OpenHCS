@@ -19,9 +19,6 @@ from textual.reactive import reactive
 
 # Import modernized Toolong components (Textual 3.x compatible)
 from toolong.ui import UI
-from toolong.log_view import LogView
-from toolong.log_file import LogFile
-from toolong.watcher import get_watcher
 
 logger = logging.getLogger(__name__)
 

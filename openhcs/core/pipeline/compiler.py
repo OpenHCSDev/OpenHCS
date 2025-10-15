@@ -22,10 +22,9 @@ Doctrinal Clauses:
 
 import inspect
 import logging
-import json
 import dataclasses
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional
 from collections import OrderedDict # For special_outputs and special_inputs order (used by PathPlanner)
 
 from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES, READ_BACKEND, WRITE_BACKEND, Backend
@@ -41,7 +40,6 @@ from openhcs.core.pipeline.gpu_memory_validator import \
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.steps.function_step import FunctionStep # Used for isinstance check
 from dataclasses import dataclass
-from typing import Callable
 logger = logging.getLogger(__name__)
 
 
@@ -517,7 +515,6 @@ class PipelineCompiler:
             steps_definition: List of AbstractStep objects
             orchestrator: Orchestrator instance for accessing all wells
         """
-        from openhcs.constants.constants import Backend
         from openhcs.constants import MULTIPROCESSING_AXIS
 
         all_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
@@ -746,7 +743,7 @@ class PipelineCompiler:
             The input `pipeline_definition` list (of step objects) is modified in-place
             to become stateless.
         """
-        from openhcs.constants.constants import VariableComponents, OrchestratorState
+        from openhcs.constants.constants import OrchestratorState
         from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
 
         if not orchestrator.is_initialized():
@@ -837,7 +834,7 @@ class PipelineCompiler:
             # Log path planning summary once per plate
             if compiled_contexts:
                 first_context = next(iter(compiled_contexts.values()))
-                logger.info(f"📁 PATH PLANNING SUMMARY:")
+                logger.info("📁 PATH PLANNING SUMMARY:")
                 logger.info(f"   Main pipeline output: {first_context.output_plate_root}")
 
                 # Check for materialization steps in first context

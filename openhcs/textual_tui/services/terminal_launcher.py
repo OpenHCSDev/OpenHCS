@@ -7,7 +7,6 @@ TUI terminal infrastructure instead of external processes.
 
 import tempfile
 import os
-from pathlib import Path
 from typing import Optional, Callable
 import logging
 

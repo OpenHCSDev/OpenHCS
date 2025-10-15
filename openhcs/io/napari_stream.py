@@ -9,8 +9,7 @@ and shared memory for efficient data transfer.
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, Set
-from os import PathLike
+from typing import Any, List, Union
 import os
 
 import numpy as np
@@ -18,7 +17,6 @@ import numpy as np
 from openhcs.io.streaming import StreamingBackend
 from openhcs.io.backend_registry import StorageBackendMeta
 from openhcs.constants.constants import Backend
-from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
 
 logger = logging.getLogger(__name__)
 

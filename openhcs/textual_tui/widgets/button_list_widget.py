@@ -8,17 +8,14 @@ This widget implements two key patterns:
 Used by PlateManager and PipelineEditor for consistent behavior.
 """
 
-from typing import List, Dict, Any, Callable, Optional, Tuple, cast, Iterable
+from typing import List, Dict, Callable, Optional, Tuple
 from textual.app import ComposeResult
-from textual.containers import Vertical, Horizontal, ScrollableContainer
+from textual.containers import Vertical, Horizontal
 from textual.widget import Widget
-from textual.widgets import Button, SelectionList, Static
-from textual.widgets._selection_list import Selection
+from textual.widgets import Button, SelectionList
 from textual.reactive import reactive
 from textual.strip import Strip
 from textual.events import Click, Resize
-from rich.segment import Segment
-from rich.style import Style
 
 import logging
 from textual import on
@@ -339,7 +336,6 @@ class ButtonListWidget(Widget):
 
         # Notify callback if provided (support both sync and async callbacks)
         if self.on_button_pressed_callback:
-            import asyncio
             import inspect
 
             if inspect.iscoroutinefunction(self.on_button_pressed_callback):

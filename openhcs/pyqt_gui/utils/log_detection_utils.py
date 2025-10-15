@@ -7,12 +7,7 @@ All logic is now in openhcs.core.log_utils.
 
 # Re-export everything from core utilities
 from openhcs.core.log_utils import (
-    LogFileInfo,
     discover_logs,
-    classify_log_file,
-    is_relevant_log_file,
-    is_openhcs_log_file,
-    infer_base_log_path,
     get_current_log_file_path
 )
 from pathlib import Path

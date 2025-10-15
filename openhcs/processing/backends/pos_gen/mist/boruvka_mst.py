@@ -11,8 +11,7 @@ from openhcs.core.utils import optional_import
 from .gpu_kernels import (
     launch_reset_flatten_kernel,
     launch_find_minimum_edges_kernel, 
-    launch_union_components_kernel,
-    gpu_component_count
+    launch_union_components_kernel
 )
 
 # For type checking only

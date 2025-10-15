@@ -379,8 +379,6 @@ def natural_sort_inplace(items: List[Union[str, Path]]) -> None:
 
 # === WELL FILTERING UTILITIES ===
 
-import re
-import string
 from typing import List, Set, Union
 from openhcs.core.config import WellFilterMode
 

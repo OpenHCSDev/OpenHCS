@@ -10,7 +10,7 @@ from typing import Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QScrollArea, QTextEdit, QFrame, QWidget
+    QTextEdit, QFrame, QWidget
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont

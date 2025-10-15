@@ -2,22 +2,14 @@
 
 # Standard library imports
 import dataclasses
-import inspect
 import logging
 import re
-import threading
 import sys
-import weakref
 from abc import ABCMeta
-from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass, make_dataclass, MISSING, field
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 
 # OpenHCS imports
-from openhcs.config_framework.global_config import (
-    get_current_global_config,
-    set_current_global_config,
-)
 from openhcs.config_framework.placeholder import LazyDefaultPlaceholderService
 # Note: dual_axis_resolver_recursive and lazy_placeholder imports kept inline to avoid circular imports
 
@@ -456,7 +448,6 @@ def ensure_global_config_context(global_config_type: Type, global_config_instanc
 # Context provider registry and metaclass for automatic registration
 CONTEXT_PROVIDERS = {}
 
-from abc import ABCMeta
 
 class ContextProviderMeta(ABCMeta):
     """Metaclass for automatic registration of context provider classes."""

@@ -1,13 +1,10 @@
-from textual.app import App, ComposeResult
-from textual.widgets import Static, Header, Footer
-from textual.containers import Container, Horizontal, Vertical, Grid
-from typing import Optional
-from textual import events, work
+from textual.app import ComposeResult
+from textual.widgets import Static
+from textual.containers import Container, Horizontal, Grid
+from textual import work
 from textual.reactive import reactive
 from textual.worker import get_current_worker
 import asyncio
-import psutil
-from collections import deque
 import time
 
 # Use textual-plotext for proper Textual integration
@@ -183,7 +180,6 @@ class SystemMonitorTextual(Container):
     async def update_display(self) -> None:
         """Update the display with new system stats - for manual refresh only"""
         # Update metrics using the SystemMonitor from services - wrap in executor to avoid blocking
-        import asyncio
         await asyncio.get_event_loop().run_in_executor(None, self.monitor.update_metrics)
 
         # Update UI directly (this is for manual refresh)

@@ -7,8 +7,6 @@ Provides Qt-compatible interface for existing PyQt GUI code.
 from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QThreadPool
 from openhcs.core.config_cache import (
     load_cached_global_config_sync,
-    get_global_config_cache as get_core_config_cache,
-    QtExecutionStrategy,
     _sync_load_config,
     _sync_save_config
 )

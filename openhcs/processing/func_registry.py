@@ -29,7 +29,7 @@ import os
 import pkgutil
 import sys
 import threading
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,6 @@ _registry_initializing = False
 
 def _create_virtual_modules() -> None:
     """Create virtual modules that mirror external library structure under openhcs namespace."""
-    import sys
     import types
     from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 
@@ -323,7 +322,6 @@ def _apply_unified_decoration(original_func, func_name, memory_type, create_wrap
         The function to register (decorated if create_wrapper=True, original if not)
     """
     from openhcs.constants import MemoryType
-    import sys
 
     # Step 1: Direct decoration (for subprocess compatibility)
     original_func.input_memory_type = memory_type.value

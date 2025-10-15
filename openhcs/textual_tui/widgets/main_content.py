@@ -8,18 +8,13 @@ Matches the layout from the current prompt-toolkit TUI.
 import logging
 
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical
-from textual.widgets import Static
 from textual.widget import Widget
 from textual.css.query import NoMatches
-from textual.reactive import reactive
 
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.io.filemanager import FileManager
 from .system_monitor import SystemMonitorTextual
 
-from .plate_manager import PlateManagerWidget
-from .pipeline_editor import PipelineEditorWidget
 
 logger = logging.getLogger(__name__)
 

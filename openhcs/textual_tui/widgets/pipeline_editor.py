@@ -6,16 +6,12 @@ Matches the functionality from the current prompt-toolkit TUI.
 """
 
 import logging
-from typing import Dict, List, Optional, Any, Callable, Tuple
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
-from textual.app import ComposeResult
-from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.reactive import reactive
-from textual.widgets import Button, Static, SelectionList
-from textual.widget import Widget
+from textual.widgets import SelectionList
 from .button_list_widget import ButtonListWidget, ButtonConfig
-from textual import work
 
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.io.filemanager import FileManager
@@ -103,7 +99,6 @@ class PipelineEditorWidget(ButtonListWidget):
 
     async def _handle_button_press(self, button_id: str) -> None:
         """Handle button presses from ButtonListWidget (supports async actions)."""
-        import inspect
 
         if button_id == "add_step":
             await self.action_add_step()

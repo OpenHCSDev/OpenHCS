@@ -5,17 +5,14 @@ Uses the Gate One terminal emulator for advanced terminal functionality.
 This supersedes the basic terminal window with full VT-* emulation support.
 """
 
-import asyncio
 import logging
 import os
 import pty
 import subprocess
 import threading
-from pathlib import Path
 from typing import Optional
 
 from textual.app import ComposeResult
-from textual.containers import Container, Vertical
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static

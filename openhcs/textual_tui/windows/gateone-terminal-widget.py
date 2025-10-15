@@ -10,18 +10,14 @@ import struct
 import fcntl
 import termios
 import logging
-from typing import Optional, Tuple, List, Callable
+from typing import Optional, Tuple
 from pathlib import Path
 
-from rich.text import Text
 from rich.style import Style
-from rich.console import Console
 from rich.segment import Segment
-from rich.color import Color as RichColor
 
 from textual.widget import Widget
 from textual.reactive import reactive
-from textual.geometry import Size
 from textual import events
 from textual.strip import Strip
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional, Callable
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout,
-                             QMessageBox, QMenuBar, QMenu, QFileDialog)
+                             QMessageBox, QMenuBar, QFileDialog)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QAction, QKeySequence
 
@@ -231,7 +231,6 @@ class QScintillaCodeEditorDialog(QDialog):
 
     def _setup_menu_bar(self):
         """Setup menu bar with File, Edit, View menus."""
-        from PyQt6.QtWidgets import QMenuBar
 
         self.menu_bar = QMenuBar(self)
 
@@ -413,7 +412,6 @@ class QScintillaCodeEditorDialog(QDialog):
     def eventFilter(self, obj, event):
         """Filter events to trigger Jedi autocomplete on '.' """
         from PyQt6.QtCore import QEvent
-        from PyQt6.QtGui import QKeyEvent
 
         if obj == self.editor and event.type() == QEvent.Type.KeyPress:
             key_event = event
@@ -518,7 +516,7 @@ class QScintillaCodeEditorDialog(QDialog):
 
             # If no completions, try to get more info about what Jedi sees
             if len(completions) == 0:
-                logger.info(f"  ⚠️  No completions - Jedi may not be able to resolve the module")
+                logger.info("  ⚠️  No completions - Jedi may not be able to resolve the module")
                 logger.info(f"  💡 Project root: {project_root}")
 
             if completions:
@@ -528,7 +526,7 @@ class QScintillaCodeEditorDialog(QDialog):
 
                 # Check if autocomplete is already active
                 if self.editor.isListActive():
-                    logger.info(f"  ⚠️  Autocomplete list already active, canceling first")
+                    logger.info("  ⚠️  Autocomplete list already active, canceling first")
                     self.editor.cancelList()
 
                 # Build completion list
@@ -549,9 +547,9 @@ class QScintillaCodeEditorDialog(QDialog):
 
                 # Check if it's showing
                 if self.editor.isListActive():
-                    logger.info(f"  ✅ Autocomplete list is now active!")
+                    logger.info("  ✅ Autocomplete list is now active!")
                 else:
-                    logger.info(f"  ❌ Autocomplete list is NOT active")
+                    logger.info("  ❌ Autocomplete list is NOT active")
 
             else:
                 logger.info("  ⚠️  No Jedi completions - trying standard autocomplete")

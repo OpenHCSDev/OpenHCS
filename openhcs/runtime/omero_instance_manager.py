@@ -14,7 +14,7 @@ import platform
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +262,7 @@ class OMEROInstanceManager:
             return self._connect_to_omero()
 
         # No existing instance - check Docker and start OMERO
-        logger.info(f"No OMERO instance found, attempting to start one...")
+        logger.info("No OMERO instance found, attempting to start one...")
 
         # Ensure Docker daemon is running
         if not self._is_docker_running():

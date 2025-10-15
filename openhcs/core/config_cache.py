@@ -9,7 +9,7 @@ import logging
 import dill as pickle
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional, Callable, Any
+from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
 from openhcs.core.config import GlobalPipelineConfig

@@ -7,11 +7,11 @@ by leveraging the comprehensive shared infrastructure we've built.
 
 from typing import Any, Dict, Type, Optional
 from textual.containers import Vertical, Horizontal
-from textual.widgets import Static, Button, Collapsible
+from textual.widgets import Button
 from textual.app import ComposeResult
 
 # Import our comprehensive shared infrastructure
-from openhcs.ui.shared.parameter_form_base import ParameterFormManagerBase, ParameterFormConfig
+from openhcs.ui.shared.parameter_form_base import ParameterFormManagerBase
 from openhcs.ui.shared.parameter_form_service import ParameterFormService
 from openhcs.ui.shared.parameter_form_config_factory import textual_config
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
@@ -20,7 +20,6 @@ from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 # Import Textual-specific components
 from .typed_widget_factory import TypedWidgetFactory
 from .clickable_help_label import ClickableParameterLabel
-from ..different_values_input import DifferentValuesInput
 
 
 class ParameterFormManager(ParameterFormManagerBase):

@@ -1,4 +1,3 @@
-from typing import List, Dict
 
 
 def _resolve_function_references(func_value):
@@ -60,7 +59,7 @@ def prepare_patterns_and_functions(patterns, processing_funcs, component='defaul
     logger = logging.getLogger(__name__)
 
     # Debug: Log what we received
-    logger.debug(f"🔍 PATTERN DEBUG: prepare_patterns_and_functions called")
+    logger.debug("🔍 PATTERN DEBUG: prepare_patterns_and_functions called")
     logger.debug(f"🔍 PATTERN DEBUG: patterns type: {type(patterns)}")
     logger.debug(f"🔍 PATTERN DEBUG: patterns keys/content: {list(patterns.keys()) if isinstance(patterns, dict) else f'List with {len(patterns)} items'}")
     logger.debug(f"🔍 PATTERN DEBUG: processing_funcs type: {type(processing_funcs)}")
@@ -70,7 +69,7 @@ def prepare_patterns_and_functions(patterns, processing_funcs, component='defaul
     # CRITICAL: Resolve any FunctionReference objects to actual functions
     # This ensures worker processes get properly decorated functions from their registry
     processing_funcs = _resolve_function_references(processing_funcs)
-    logger.debug(f"🔧 FUNCTION RESOLUTION: Resolved FunctionReference objects in processing_funcs")
+    logger.debug("🔧 FUNCTION RESOLUTION: Resolved FunctionReference objects in processing_funcs")
 
     # Ensure patterns are in a dictionary format
     # If already a dict, use as is; otherwise wrap the list in a dictionary

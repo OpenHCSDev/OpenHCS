@@ -7,8 +7,7 @@ by leveraging the comprehensive shared infrastructure we've built.
 
 import dataclasses
 import logging
-from typing import Any, Dict, Type, Optional, Callable, Tuple
-from dataclasses import replace
+from typing import Any, Dict, Type, Optional, Tuple
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton, QLineEdit, QCheckBox, QComboBox, QGroupBox
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
@@ -38,12 +37,10 @@ WIDGET_GET_DISPATCH = [
 logger = logging.getLogger(__name__)
 
 # Import our comprehensive shared infrastructure
-from openhcs.ui.shared.parameter_form_service import ParameterFormService, ParameterInfo
+from openhcs.ui.shared.parameter_form_service import ParameterFormService
 from openhcs.ui.shared.parameter_form_config_factory import pyqt_config
-from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 
 from openhcs.ui.shared.widget_creation_registry import create_pyqt6_registry
-from openhcs.ui.shared.ui_utils import format_param_name, format_field_id, format_reset_button_id
 from .widget_strategies import PyQt6WidgetEnhancer
 
 # Import PyQt-specific components
@@ -52,7 +49,6 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from .layout_constants import CURRENT_LAYOUT
 
 # Import OpenHCS core components
-from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 # Old field path detection removed - using simple field name matching
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
@@ -370,7 +366,6 @@ class ParameterFormManager(QWidget):
         - For any object: constructor parameter defaults from class definition
         """
         from openhcs.ui.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
-        import dataclasses
 
         # CRITICAL FIX: For reset functionality, we need SIGNATURE defaults, not instance values
         # Analyze the CLASS/TYPE, not the instance, to get signature defaults
@@ -591,7 +586,7 @@ class ParameterFormManager(QWidget):
             display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
             field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
 
-        with timer(f"          Create container/layout", threshold_ms=0.5):
+        with timer("          Create container/layout", threshold_ms=0.5):
             container = QWidget()
             layout = QHBoxLayout(container)
             layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
@@ -616,7 +611,7 @@ class ParameterFormManager(QWidget):
 
         # Reset button (optimized factory) - skip if read-only
         if not self.read_only:
-            with timer(f"          Create reset button", threshold_ms=0.5):
+            with timer("          Create reset button", threshold_ms=0.5):
                 reset_button = _create_optimized_reset_button(
                     self.config.field_id,
                     param_info.name,
@@ -626,12 +621,12 @@ class ParameterFormManager(QWidget):
                 self.reset_buttons[param_info.name] = reset_button
 
         # Store widgets and connect signals
-        with timer(f"          Store and connect signals", threshold_ms=0.5):
+        with timer("          Store and connect signals", threshold_ms=0.5):
             self.widgets[param_info.name] = widget
             PyQt6WidgetEnhancer.connect_change_signal(widget, param_info.name, self._emit_parameter_change)
 
         # CRITICAL FIX: Apply placeholder behavior after widget creation
-        with timer(f"          Apply context behavior", threshold_ms=0.5):
+        with timer("          Apply context behavior", threshold_ms=0.5):
             current_value = self.parameters.get(param_info.name)
             self._apply_context_behavior(widget, current_value, param_info.name)
 
@@ -659,7 +654,6 @@ class ParameterFormManager(QWidget):
         layout.addWidget(checkbox)
 
         # Get inner type for the actual widget
-        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
         inner_type = ParameterTypeUtils.get_optional_inner_type(param_info.type)
 
         # Create the actual widget for the inner type
@@ -710,7 +704,6 @@ class ParameterFormManager(QWidget):
         display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
 
         # Always use the inner dataclass type for Optional[T] when wiring help/paths
-        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
         unwrapped_type = (
             ParameterTypeUtils.get_optional_inner_type(param_info.type)
             if ParameterTypeUtils.is_optional_dataclass(param_info.type)
@@ -738,7 +731,6 @@ class ParameterFormManager(QWidget):
         field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
 
         # Get the unwrapped type for the GroupBox
-        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
         unwrapped_type = ParameterTypeUtils.get_optional_inner_type(param_info.type)
 
         # Create GroupBox with custom title widget that includes checkbox
@@ -949,7 +941,7 @@ class ParameterFormManager(QWidget):
 
     def _clear_widget_to_default_state(self, widget: QWidget) -> None:
         """Clear widget to its default/empty state for reset operations."""
-        from PyQt6.QtWidgets import QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QTextEdit
+        from PyQt6.QtWidgets import QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit
 
         if isinstance(widget, QLineEdit):
             widget.clear()
@@ -1063,7 +1055,6 @@ class ParameterFormManager(QWidget):
             return False
 
         # Check if parameter exists in dataclass fields
-        import dataclasses
         if dataclasses.is_dataclass(self.dataclass_type):
             field_names = {field.name for field in dataclasses.fields(self.dataclass_type)}
             is_function_param = param_name not in field_names
@@ -1085,7 +1076,6 @@ class ParameterFormManager(QWidget):
 
     def _reset_parameter_impl(self, param_name: str) -> None:
         """Internal reset implementation."""
-        from openhcs.utils.performance_monitor import timer
         import logging
         logger = logging.getLogger(__name__)
 
@@ -1486,7 +1476,6 @@ class ParameterFormManager(QWidget):
 
         # Check if this is an Optional dataclass with a checkbox
         param_type = self.parameter_types.get(name)
-        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 
         if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
             # For Optional dataclasses, check if checkbox is enabled
@@ -1526,7 +1515,7 @@ class ParameterFormManager(QWidget):
         Args:
             widget: Widget to make read-only
         """
-        from PyQt6.QtWidgets import QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QTextEdit, QAbstractSpinBox
+        from PyQt6.QtWidgets import QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit, QAbstractSpinBox
 
         if isinstance(widget, (QLineEdit, QTextEdit)):
             widget.setReadOnly(True)

@@ -276,10 +276,10 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
 
         # Apply microscope-specific preparation logic (skip if workspace already existed)
         if skip_preparation:
-            logger.info(f"📁 SKIPPING PREPARATION: Workspace already existed - using as-is")
+            logger.info("📁 SKIPPING PREPARATION: Workspace already existed - using as-is")
             prepared_dir = workspace_path
         else:
-            logger.info(f"🔄 APPLYING PREPARATION: Processing new workspace")
+            logger.info("🔄 APPLYING PREPARATION: Processing new workspace")
             prepared_dir = self._prepare_workspace(workspace_path, filemanager)
 
         # Deterministically resolve the image directory based on common_dirs

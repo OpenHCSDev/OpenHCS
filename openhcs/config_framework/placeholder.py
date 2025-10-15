@@ -5,7 +5,7 @@ Provides placeholder text resolution for lazy configuration dataclasses
 using contextvars-based context management.
 """
 
-from typing import Any, Optional, Type
+from typing import Any, Optional
 import dataclasses
 import logging
 
@@ -154,7 +154,6 @@ class LazyDefaultPlaceholderService:
         """
         Format nested dataclass with all field values for user-friendly placeholders.
         """
-        import dataclasses
         
         class_name = dataclass_instance.__class__.__name__
         all_fields = [f.name for f in dataclasses.fields(dataclass_instance)]

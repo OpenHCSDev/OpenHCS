@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Tuple
 
-from openhcs.constants.constants import DEFAULT_PATCH_SIZE, DEFAULT_SEARCH_RADIUS
 from openhcs.core.utils import optional_import
 
 # For type checking only

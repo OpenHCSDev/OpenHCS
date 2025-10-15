@@ -25,15 +25,12 @@ Usage:
 """
 
 import sys
-import json
 import dill as pickle
 import logging
 import traceback
-import signal
 import atexit
 import os
-from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +233,7 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
             raise RuntimeError(error_msg)
 
         logger.info(f"🔥 SUBPROCESS: Pipeline has {len(pipeline_definition)} steps")
-        logger.info(f"🔥 SUBPROCESS: Using pre-compiled contexts from UI")
+        logger.info("🔥 SUBPROCESS: Using pre-compiled contexts from UI")
         logger.info(f"🔥 SUBPROCESS: EXECUTING plate {plate_path}")
         
         # Step 5: Execution phase with multiprocessing (like test_main.py but with processes)
@@ -588,7 +585,6 @@ def main():
         # Dump stack trace
         try:
             import traceback
-            import threading
             logger.error("🔥 SUBPROCESS: CRASH - Dumping all thread stacks...")
             for thread_id, frame in sys._current_frames().items():
                 logger.error(f"🔥 SUBPROCESS: CRASH Thread {thread_id}:")

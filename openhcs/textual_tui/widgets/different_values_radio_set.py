@@ -1,8 +1,8 @@
 """Simple radio set widget for handling different values across multiple configurations."""
 
-from typing import Any, Type
+from typing import Type
 from enum import Enum
-from textual.widgets import RadioSet, RadioButton
+from textual.widgets import RadioSet
 from textual.events import Click
 
 

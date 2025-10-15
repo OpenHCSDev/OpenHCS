@@ -13,7 +13,6 @@ Doctrinal Clauses:
 """
 
 import logging
-import contextlib
 import concurrent.futures
 import multiprocessing
 from dataclasses import fields
@@ -23,14 +22,13 @@ from typing import Any, Callable, Dict, List, Optional, Union, Set
 from openhcs.constants.constants import Backend, DEFAULT_IMAGE_EXTENSIONS, GroupBy, OrchestratorState, get_openhcs_config, AllComponents, VariableComponents
 from openhcs.constants import Microscope
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.config_framework.global_config import set_current_global_config, get_current_global_config
+from openhcs.config_framework.global_config import get_current_global_config
 from openhcs.config_framework.lazy_factory import ContextProvider
 
 
 from openhcs.core.metadata_cache import get_metadata_cache, MetadataCache
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.pipeline.compiler import PipelineCompiler
-from openhcs.core.pipeline.step_attribute_stripper import StepAttributeStripper
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.components.validation import convert_enum_by_value
 from openhcs.io.filemanager import FileManager
@@ -39,8 +37,6 @@ import os
 from openhcs.io.zarr import ZarrStorageBackend
 # PipelineConfig now imported directly above
 from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-from openhcs.io.exceptions import StorageWriteError
-from openhcs.io.base import storage_registry
 from openhcs.microscopes import create_microscope_handler
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 
@@ -54,7 +50,6 @@ else:
     from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
 
 # Import generic component system - required for orchestrator functionality
-from openhcs.core.components.multiprocessing import MultiprocessingCoordinator
 
 # Optional napari import for visualization
 try:
@@ -248,7 +243,7 @@ def _configure_worker_logging(log_file_base: str):
     worker_logger.info(f"🔥 WORKER: All logs writing to: {worker_log_file}")
 
     # Log import hook installation status
-    worker_logger.info(f"🔥 WORKER: Import hook installed for auto-discovered functions")
+    worker_logger.info("🔥 WORKER: Import hook installed for auto-discovered functions")
 
 
 def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
@@ -895,7 +890,7 @@ class PipelineOrchestrator(ContextProvider):
                 while time.time() - start_time < max_wait:
                     all_ready = all(v.is_running for v in napari_visualizers)
                     if all_ready:
-                        logger.info(f"🔬 ORCHESTRATOR: All napari viewers are ready!")
+                        logger.info("🔬 ORCHESTRATOR: All napari viewers are ready!")
                         break
                     time.sleep(0.2)  # Check every 200ms
                 else:
@@ -952,7 +947,7 @@ class PipelineOrchestrator(ContextProvider):
                 global_config_dict = global_config.__dict__ if global_config else {}
 
                 if log_file_base:
-                    logger.info(f"🔥 WORKER SETUP: Configuring worker processes with function registry and logging")
+                    logger.info("🔥 WORKER SETUP: Configuring worker processes with function registry and logging")
                     executor = concurrent.futures.ProcessPoolExecutor(
                         max_workers=actual_max_workers,
                         initializer=_configure_worker_with_gpu,
@@ -1059,7 +1054,7 @@ class PipelineOrchestrator(ContextProvider):
 
 
 
-            logger.info(f"🔥 ORCHESTRATOR: Plate execution completed, checking for analysis consolidation")
+            logger.info("🔥 ORCHESTRATOR: Plate execution completed, checking for analysis consolidation")
             # Run automatic analysis consolidation if enabled
             shared_context = get_current_global_config(GlobalPipelineConfig)
             if shared_context.analysis_consolidation_config.enabled:
@@ -1100,7 +1095,7 @@ class PipelineOrchestrator(ContextProvider):
                         else:
                             logger.info(f"⏭️ CONSOLIDATION: No CSV files found in {results_dir}, skipping")
                     else:
-                        logger.info(f"⏭️ CONSOLIDATION: No results directory found in compiled contexts")
+                        logger.info("⏭️ CONSOLIDATION: No results directory found in compiled contexts")
                 except Exception as e:
                     logger.error(f"❌ CONSOLIDATION: Failed: {e}")
             
@@ -1115,9 +1110,9 @@ class PipelineOrchestrator(ContextProvider):
                 try:
                     if not vis.persistent:
                         vis.stop_viewer()
-                        logger.info(f"🔬 ORCHESTRATOR: Stopped non-persistent visualizer")
+                        logger.info("🔬 ORCHESTRATOR: Stopped non-persistent visualizer")
                     else:
-                        logger.info(f"🔬 ORCHESTRATOR: Keeping persistent visualizer alive")
+                        logger.info("🔬 ORCHESTRATOR: Keeping persistent visualizer alive")
                         # Just cleanup ZMQ connection, leave process running
                         if hasattr(vis, '_cleanup_zmq'):
                             vis._cleanup_zmq()

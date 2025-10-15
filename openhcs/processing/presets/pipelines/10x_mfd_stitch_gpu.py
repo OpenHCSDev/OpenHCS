@@ -1,7 +1,7 @@
 # Edit this pipeline and save to apply changes
 
 # Automatically collected imports
-from openhcs.constants.constants import GroupBy, VariableComponents
+from openhcs.constants.constants import VariableComponents
 from openhcs.constants.input_source import InputSource
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.processing.backends.assemblers.assemble_stack_cupy import assemble_stack_cupy

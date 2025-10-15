@@ -259,7 +259,6 @@ def get_thread_gpu_context() -> ThreadGPUContext:
         _thread_gpu_contexts.gpu_context = ThreadGPUContext()
 
         # Register cleanup for when thread exits
-        import weakref
         def cleanup_on_thread_exit():
             if hasattr(_thread_gpu_contexts, 'gpu_context'):
                 _thread_gpu_contexts.gpu_context.cleanup()
@@ -769,7 +768,6 @@ def _create_numpy_dtype_preserving_wrapper(original_func, func_name):
     This wrapper ensures the output has the same dtype as the input and adds
     a slice_by_slice parameter to avoid cross-slice contamination in 3D arrays.
     """
-    import numpy as np
     import inspect
     from functools import wraps
 

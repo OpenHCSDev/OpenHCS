@@ -1,10 +1,9 @@
 # Edit this pipeline and save to apply changes
 
 # Automatically collected imports
-from openhcs.constants.constants import GroupBy, VariableComponents
+from openhcs.constants.constants import VariableComponents
 from openhcs.constants.input_source import InputSource
-from openhcs.core.config import NapariColormap, NapariDimensionMode, WellFilterMode
-from openhcs.core.config import LazyNapariStreamingConfig, LazyStepWellFilterConfig
+from openhcs.core.config import LazyNapariStreamingConfig
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.processing.backends.assemblers.assemble_stack_cupy import assemble_stack_cupy
 from openhcs.processing.backends.pos_gen.ashlar_main_cpu import ashlar_compute_tile_positions_cpu

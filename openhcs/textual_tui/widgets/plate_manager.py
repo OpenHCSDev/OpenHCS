@@ -9,45 +9,33 @@ import asyncio
 import copy
 import dataclasses
 import inspect
-import json
 import logging
 import numpy as np
 import os
-import pickle
 import re
 import signal
-import stat
 import subprocess
 import sys
 import tempfile
 import time
 import traceback
 from collections import defaultdict
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any, Tuple
 
 from openhcs.core.config import PipelineConfig
 
 from PIL import Image
-from textual.app import ComposeResult
-from textual.containers import Horizontal, ScrollableContainer
 from textual.reactive import reactive
-from textual.widgets import Button, Static, SelectionList
-from textual.widget import Widget
-from textual.css.query import NoMatches
 from .button_list_widget import ButtonListWidget, ButtonConfig
-from textual import work, on
+from textual import work
 
 from openhcs.core.config import GlobalPipelineConfig, VFSConfig, MaterializationBackend
 from openhcs.core.pipeline import Pipeline
 from openhcs.io.filemanager import FileManager
-from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
-from openhcs.io.base import storage_registry
-from openhcs.io.memory import MemoryStorageBackend
 from openhcs.io.zarr import ZarrStorageBackend
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-from openhcs.constants.constants import GroupBy, Backend, VariableComponents, OrchestratorState
+from openhcs.constants.constants import Backend, VariableComponents, OrchestratorState
 from openhcs.textual_tui.services.file_browser_service import SelectionMode
 from openhcs.textual_tui.services.window_service import WindowService
 from openhcs.core.path_cache import get_cached_browser_path, PathCacheKey, get_path_cache
@@ -649,7 +637,7 @@ class PlateManagerWidget(ButtonListWidget):
 
             logger.debug(f"🔥 Subprocess command: {sys.executable} {subprocess_script} {data_file.name} {log_file_base} {unique_id}")
             logger.debug(f"🔥 Subprocess logger will write to: {self.log_file_path}")
-            logger.debug(f"🔥 Subprocess stdout will be silenced (logger handles output)")
+            logger.debug("🔥 Subprocess stdout will be silenced (logger handles output)")
 
             # SIMPLE SUBPROCESS: Let subprocess log to its own file (single source of truth)
             # Wrap subprocess creation in executor to avoid blocking UI

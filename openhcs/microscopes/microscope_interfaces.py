@@ -25,7 +25,6 @@ class FilenameParser(GenericFilenameParser):
 
     def __init__(self):
         """Initialize the parser with AllComponents enum."""
-        from openhcs.constants.constants import AllComponents
         super().__init__(AllComponents)
 
     @classmethod

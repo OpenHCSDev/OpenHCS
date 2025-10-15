@@ -14,7 +14,7 @@ import dataclasses
 from typing import Dict, Union, Callable, Type, Any, Optional
 from dataclasses import dataclass
 
-from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer, ParameterInfo, DocstringExtractor
+from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer, ParameterInfo
 
 
 @dataclass
@@ -214,7 +214,7 @@ class UnifiedParameterAnalyzer:
             unified_params = UnifiedParameterAnalyzer._analyze_dataclass_type(dataclass_type)
 
         # Check if this specific instance is a lazy config - if so, use raw field values
-        with timer(f"      Check lazy config", threshold_ms=1.0):
+        with timer("      Check lazy config", threshold_ms=1.0):
             from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
             # CRITICAL FIX: Don't check class name - PipelineConfig is lazy but doesn't start with "Lazy"
             # get_base_type_for_lazy() is the authoritative check for lazy dataclasses

@@ -1,11 +1,9 @@
 """Function selector window for selecting functions from the registry."""
 
-from typing import Callable, Optional, List, Tuple, Dict, Any
+from typing import Callable, Optional, List, Dict
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Input, DataTable, Button, Static, Tree
-from textual.widgets.data_table import RowKey
-from textual.widgets.tree import TreeNode
 
 from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService

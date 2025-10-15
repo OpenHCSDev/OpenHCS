@@ -22,20 +22,16 @@ Architecture:
 
 import importlib
 import inspect
-import importlib
 import json
 import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum, auto
+from enum import Enum
 from functools import wraps
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Set
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import numpy as np
 
-from openhcs.core.utils import optional_import
 from openhcs.core.xdg_paths import get_cache_file_path
 from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
 
@@ -253,7 +249,6 @@ class LibraryRegistryBase(ABC):
                 break
 
         # Add dataclass parameters
-        from typing import Optional
         for param_name, type_hint, lazy_class in params_to_add:
             new_param = inspect.Parameter(
                 param_name,
@@ -313,7 +308,6 @@ class LibraryRegistryBase(ABC):
 
     def _execute_pure_2d(self, func, image, *args, **kwargs):
         """Execute 2D→2D function with unstack/restack wrapper."""
-        from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
         # Get memory type from the decorated function
         memory_type = func.output_memory_type
         slices = unstack_slices(image, memory_type, 0)
@@ -333,7 +327,6 @@ class LibraryRegistryBase(ABC):
 
     def _execute_volumetric_to_slice(self, func, image, *args, **kwargs):
         """Execute 3D→2D function returning slice 3D array."""
-        from openhcs.core.memory.stack_utils import stack_slices
         # Get memory type from the decorated function
         memory_type = func.output_memory_type
         result_2d = func(image, *args, **kwargs)
@@ -767,7 +760,7 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
                 logger.debug(f"       Classification: {contract.name if contract else contract}")
 
                 if not is_valid:
-                    logger.debug(f"       ❌ Rejected: Invalid classification")
+                    logger.debug("       ❌ Rejected: Invalid classification")
                     continue
 
                 doc_lines = (func.__doc__ or "").splitlines()

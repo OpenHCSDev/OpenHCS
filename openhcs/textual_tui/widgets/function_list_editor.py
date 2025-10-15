@@ -3,8 +3,8 @@
 import logging
 from pathlib import Path
 from typing import List, Union, Dict, Any, Optional, Callable # Added Optional, Callable
-from textual.containers import ScrollableContainer, Container, Horizontal, Center
-from textual.widgets import Button, Static, Select
+from textual.containers import ScrollableContainer, Container, Horizontal
+from textual.widgets import Button, Static
 from textual.app import ComposeResult
 from textual.reactive import reactive
 from textual.message import Message # Added Message
@@ -12,7 +12,7 @@ from textual.message import Message # Added Message
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
 from openhcs.textual_tui.widgets.function_pane import FunctionPaneWidget
-from openhcs.constants.constants import GroupBy, VariableComponents
+from openhcs.constants.constants import GroupBy
 
 logger = logging.getLogger(__name__)
 
@@ -301,25 +301,25 @@ class FunctionListEditorWidget(Container):
         logger.debug(f"🔍 BUTTON: Button pressed: {event.button.id}")
 
         if event.button.id == "add_function_btn":
-            logger.debug(f"🔍 BUTTON: Add function button pressed")
+            logger.debug("🔍 BUTTON: Add function button pressed")
             await self._add_function()
         elif event.button.id == "load_func_btn":
-            logger.debug(f"🔍 BUTTON: Load func button pressed - calling _load_func()")
+            logger.debug("🔍 BUTTON: Load func button pressed - calling _load_func()")
             await self._load_func()
         elif event.button.id == "save_func_as_btn":
-            logger.debug(f"🔍 BUTTON: Save func as button pressed")
+            logger.debug("🔍 BUTTON: Save func as button pressed")
             await self._save_func_as()
         elif event.button.id == "edit_vim_btn":
-            logger.debug(f"🔍 BUTTON: Edit vim button pressed")
+            logger.debug("🔍 BUTTON: Edit vim button pressed")
             self._edit_in_vim()
         elif event.button.id == "component_btn":
-            logger.debug(f"🔍 BUTTON: Component button pressed")
+            logger.debug("🔍 BUTTON: Component button pressed")
             await self._show_component_selection_dialog()
         elif event.button.id == "prev_channel_btn":
-            logger.debug(f"🔍 BUTTON: Previous channel button pressed")
+            logger.debug("🔍 BUTTON: Previous channel button pressed")
             self._navigate_channel(-1)
         elif event.button.id == "next_channel_btn":
-            logger.debug(f"🔍 BUTTON: Next channel button pressed")
+            logger.debug("🔍 BUTTON: Next channel button pressed")
             self._navigate_channel(1)
         else:
             logger.warning(f"🔍 BUTTON: Unknown button pressed: {event.button.id}")
@@ -399,7 +399,7 @@ class FunctionListEditorWidget(Container):
             insert_index = min(event.insert_index, len(self.functions))  # Clamp to valid range
             await self._add_function_at_index(insert_index)
         else:
-            logger.warning(f"Invalid add function event: missing insert_index")
+            logger.warning("Invalid add function event: missing insert_index")
 
     def on_function_pane_widget_move_function(self, event: Message) -> None:
         """Handle move function message from FunctionPaneWidget."""
@@ -491,7 +491,7 @@ class FunctionListEditorWidget(Container):
 
     async def _load_func(self) -> None:
         """Load function pattern from .func file."""
-        logger.debug(f"🔍 LOAD FUNC: _load_func() called - starting file browser...")
+        logger.debug("🔍 LOAD FUNC: _load_func() called - starting file browser...")
 
         from openhcs.textual_tui.windows import open_file_browser_window, BrowserMode
         from openhcs.constants.constants import Backend
@@ -519,7 +519,7 @@ class FunctionListEditorWidget(Container):
                 logger.warning(f"🔍 LOAD FUNC: No valid Path found in result: {result}")
 
         # Use window-based file browser
-        logger.debug(f"🔍 LOAD FUNC: Opening file browser window...")
+        logger.debug("🔍 LOAD FUNC: Opening file browser window...")
         from openhcs.textual_tui.services.file_browser_service import SelectionMode
         await open_file_browser_window(
             app=self.app,
@@ -533,7 +533,7 @@ class FunctionListEditorWidget(Container):
             cache_key=PathCacheKey.FUNCTION_PATTERNS,
             on_result_callback=handle_result
         )
-        logger.debug(f"🔍 LOAD FUNC: File browser window opened, waiting for user selection...")
+        logger.debug("🔍 LOAD FUNC: File browser window opened, waiting for user selection...")
 
     async def _save_func_as(self) -> None:
         """Save function pattern to .func file."""
@@ -569,7 +569,7 @@ class FunctionListEditorWidget(Container):
 
         import dill as pickle
         try:
-            logger.debug(f"🔍 LOAD FUNC: Opening file for reading...")
+            logger.debug("🔍 LOAD FUNC: Opening file for reading...")
             with open(file_path, 'rb') as f:
                 pattern = pickle.load(f)
             logger.debug(f"🔍 LOAD FUNC: Successfully loaded pattern from pickle: {pattern}")
@@ -630,32 +630,32 @@ class FunctionListEditorWidget(Container):
                 new_selected_channel = None
 
             # Assign NEW objects to reactive properties (like add button does)
-            logger.debug(f"🔍 LOAD FUNC: Assigning new values to reactive properties...")
+            logger.debug("🔍 LOAD FUNC: Assigning new values to reactive properties...")
             logger.debug(f"🔍 LOAD FUNC: new_pattern_data: {new_pattern_data}")
             logger.debug(f"🔍 LOAD FUNC: new_is_dict_mode: {new_is_dict_mode}")
             logger.debug(f"🔍 LOAD FUNC: new_functions: {len(new_functions)} items: {new_functions}")
             logger.debug(f"🔍 LOAD FUNC: new_selected_channel: {new_selected_channel}")
 
             self.pattern_data = new_pattern_data
-            logger.debug(f"🔍 LOAD FUNC: ✅ Assigned pattern_data")
+            logger.debug("🔍 LOAD FUNC: ✅ Assigned pattern_data")
 
             self.is_dict_mode = new_is_dict_mode
-            logger.debug(f"🔍 LOAD FUNC: ✅ Assigned is_dict_mode")
+            logger.debug("🔍 LOAD FUNC: ✅ Assigned is_dict_mode")
 
             self.functions = new_functions  # This triggers reactive system!
-            logger.debug(f"🔍 LOAD FUNC: ✅ Assigned functions - THIS SHOULD TRIGGER REACTIVE SYSTEM!")
+            logger.debug("🔍 LOAD FUNC: ✅ Assigned functions - THIS SHOULD TRIGGER REACTIVE SYSTEM!")
 
             self.selected_channel = new_selected_channel
-            logger.debug(f"🔍 LOAD FUNC: ✅ Assigned selected_channel")
+            logger.debug("🔍 LOAD FUNC: ✅ Assigned selected_channel")
 
-            logger.debug(f"🔍 LOAD FUNC: Calling _commit_and_notify...")
+            logger.debug("🔍 LOAD FUNC: Calling _commit_and_notify...")
             self._commit_and_notify()
 
             # Final state logging
             logger.debug(f"🔍 LOAD FUNC: FINAL - functions: {len(self.functions)} items")
             logger.debug(f"🔍 LOAD FUNC: FINAL - is_dict_mode: {self.is_dict_mode}")
             logger.debug(f"🔍 LOAD FUNC: FINAL - selected_channel: {self.selected_channel}")
-            logger.debug(f"🔍 LOAD FUNC: ✅ Successfully completed loading process!")
+            logger.debug("🔍 LOAD FUNC: ✅ Successfully completed loading process!")
 
         except Exception as e:
             logger.error(f"🔍 LOAD FUNC: ❌ ERROR - Failed to load pattern: {e}")
@@ -677,7 +677,6 @@ class FunctionListEditorWidget(Container):
 
         try:
             # Use debug module's pattern formatting with proper imports
-            from openhcs.debug.pickle_to_python import generate_readable_function_repr
             from openhcs.textual_tui.services.terminal_launcher import TerminalLauncher
 
             # Update pattern data first

@@ -116,7 +116,7 @@ class ZMQExecutionClient(ZMQClient):
                         # Too many consecutive errors - assume execution failed or was cancelled
                         logger.error(f"Failed to get execution status after {max_consecutive_errors} attempts, assuming execution was cancelled")
                         return {'status': 'cancelled', 'execution_id': execution_id,
-                               'message': f'Lost connection to server (workers may have been killed)'}
+                               'message': 'Lost connection to server (workers may have been killed)'}
 
                     # Wait a bit longer before retrying after error
                     time.sleep(1.0)
@@ -187,7 +187,6 @@ class ZMQExecutionClient(ZMQClient):
             ctx.term()
 
     def _spawn_server_process(self):
-        from pathlib import Path
         import time
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)

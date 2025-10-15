@@ -12,9 +12,7 @@ from collections import defaultdict
 from enum import Enum
 import dataclasses
 from dataclasses import is_dataclass, fields
-from typing import Callable
 
-from openhcs.core.config import GlobalPipelineConfig, PathPlanningConfig, VFSConfig, ZarrConfig
 from openhcs.core.steps.function_step import FunctionStep
 
 def collect_imports_from_data(data_obj):
@@ -78,7 +76,6 @@ def _get_function_library_name(func):
 
 def _create_openhcs_library_modules():
     """Create virtual modules that mirror external library structure under openhcs namespace."""
-    import sys
     import types
     from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 

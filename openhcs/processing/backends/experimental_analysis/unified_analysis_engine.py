@@ -6,12 +6,10 @@ system to process experimental data from multiple microscope formats following
 OpenHCS architectural principles.
 """
 
-import copy
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Tuple
-import pandas as pd
 
-from openhcs.core.config import ExperimentalAnalysisConfig, PlateMetadataConfig
+from openhcs.core.config import ExperimentalAnalysisConfig
 from .format_registry_service import FormatRegistryService
 from .format_registry import FormatDetectionError, DataProcessingError
 

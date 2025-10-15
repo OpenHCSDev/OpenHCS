@@ -6,9 +6,7 @@ Displays SubdirectoryKeyedMetadata or OpenHCSMetadata directly.
 """
 
 import logging
-from pathlib import Path
-from typing import Optional, Dict, Any
-from dataclasses import asdict
+from typing import Optional
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -16,7 +14,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-from openhcs.microscopes.openhcs import SubdirectoryKeyedMetadata, OpenHCSMetadata
+from openhcs.microscopes.openhcs import OpenHCSMetadata
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 

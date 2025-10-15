@@ -6,7 +6,6 @@ Generated: 2025-07-21 15:03:40.743459
 
 import sys
 import os
-from pathlib import Path
 
 # Add OpenHCS to path
 sys.path.insert(0, "/home/ts/code/projects/openhcs")
@@ -18,7 +17,6 @@ from openhcs.core.config import (GlobalPipelineConfig, PathPlanningConfig, VFSCo
 from openhcs.constants.constants import VariableComponents, Backend, Microscope
 
 # Function and Enum imports
-from openhcs.constants.constants import VariableComponents
 from openhcs.processing.backends.analysis.cell_counting_cpu import DetectionMethod, count_cells_single_channel
 from openhcs.processing.backends.analysis.skan_axon_analysis import AnalysisDimension, skan_axon_skeletonize_and_analyze
 from openhcs.processing.backends.assemblers.assemble_stack_cupy import assemble_stack_cupy
@@ -189,7 +187,6 @@ def setup_signal_handlers():
     """Setup signal handlers to kill all child processes and threads on Ctrl+C."""
     import signal
     import os
-    import sys
 
     def cleanup_and_exit(signum, frame):
         print(f"\n🔥 Signal {signum} received! Cleaning up all processes and threads...")

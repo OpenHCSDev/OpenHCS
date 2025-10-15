@@ -401,7 +401,7 @@ def unstack_slices(array: Any, memory_type: str, gpu_id: int, validate_slices: b
     if source_type != memory_type:
         logger.debug(f"🔄 UNSTACK_SLICES: Converted and extracted {len(slices)} slices")
     elif len(slices) == 0:
-        logger.warning(f"🔄 UNSTACK_SLICES: No slices extracted (empty array)")
+        logger.warning("🔄 UNSTACK_SLICES: No slices extracted (empty array)")
     # Silent success for no-conversion cases to reduce log pollution
 
     return slices

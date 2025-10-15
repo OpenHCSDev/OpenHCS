@@ -4,9 +4,9 @@ No-scroll spinbox widgets for PyQt6.
 Prevents accidental value changes from mouse wheel events.
 """
 
-from PyQt6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QStylePainter, QStyleOptionComboBox, QStyle
-from PyQt6.QtGui import QWheelEvent, QPalette, QFont, QColor, QPainter
-from PyQt6.QtCore import Qt, QRect
+from PyQt6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QStyleOptionComboBox, QStyle
+from PyQt6.QtGui import QWheelEvent, QFont, QColor, QPainter
+from PyQt6.QtCore import Qt
 
 
 class NoScrollSpinBox(QSpinBox):

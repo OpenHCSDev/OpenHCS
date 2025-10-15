@@ -295,7 +295,7 @@ class FijiStreamVisualizer:
                         self._is_running = True
                         logger.info(f"🔬 FIJI VISUALIZER: Fiji viewer server ready (PID: {self.process.pid if hasattr(self.process, 'pid') else 'unknown'})")
                     else:
-                        logger.error(f"🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready")
+                        logger.error("🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready")
 
                 thread = threading.Thread(target=wait_and_set_ready, daemon=True)
                 thread.start()
@@ -305,7 +305,7 @@ class FijiStreamVisualizer:
                     self._is_running = True
                     logger.info(f"🔬 FIJI VISUALIZER: Fiji viewer server ready (PID: {self.process.pid if hasattr(self.process, 'pid') else 'unknown'})")
                 else:
-                    logger.error(f"🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready")
+                    logger.error("🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready")
 
     def _is_port_in_use(self, port: int) -> bool:
         """Check if a port is in use."""

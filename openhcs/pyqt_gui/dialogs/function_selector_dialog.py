@@ -6,9 +6,7 @@ FunctionRegistryService and business logic.
 """
 
 import logging
-from dataclasses import dataclass
-from enum import Enum
-from typing import Callable, Optional, Dict, List, Tuple, Any
+from typing import Callable, Optional, Dict, Any
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QTableWidget,

@@ -1,6 +1,6 @@
 # openhcs/core/pipeline/pipeline_utils.py
 """Utility functions for the OpenHCS pipeline system."""
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, Optional
 
 def get_core_callable(func_pattern: Any) -> Optional[Callable[..., Any]]:
     """

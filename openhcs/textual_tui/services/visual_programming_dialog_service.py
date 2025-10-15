@@ -5,15 +5,11 @@ Handles creation and management of visual programming dialogs using DualEditorPa
 Separates dialog concerns from pipeline management.
 """
 import asyncio
-import copy
 import logging
 from typing import Any, List, Optional
 
-from prompt_toolkit.application import get_app
-from prompt_toolkit.widgets import Dialog, Button
-from prompt_toolkit.layout import HSplit
+from prompt_toolkit.widgets import Dialog
 
-from openhcs.constants.constants import Backend
 from openhcs.core.pipeline import Pipeline
 from openhcs.core.steps.function_step import FunctionStep
 # DualEditorPane injected via constructor to break circular dependency

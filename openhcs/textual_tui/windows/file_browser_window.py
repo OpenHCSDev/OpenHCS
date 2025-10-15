@@ -12,7 +12,7 @@ from enum import Enum
 
 from textual import on
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, Vertical, ScrollableContainer, VerticalScroll
+from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
 from textual.widgets import Button, DirectoryTree, Static, Checkbox, Input
 
 from openhcs.constants.constants import Backend
@@ -601,7 +601,7 @@ class FileBrowserWindow(BaseOpenHCSWindow):
             # Validate new name
             new_name = new_name.strip()
             if not new_name or new_name == original_name:
-                logger.debug(f"📝 EDIT CANCELLED: No change or empty name")
+                logger.debug("📝 EDIT CANCELLED: No change or empty name")
                 return
 
             # Create new path
@@ -808,7 +808,7 @@ class FileBrowserWindow(BaseOpenHCSWindow):
 
             # Create a simple editing container with proper Textual pattern
             from textual.containers import Container
-            from textual.widgets import Input, Static
+            from textual.widgets import Input
 
             # Create widgets first - compact inline editing with folder icon
             edit_input = Input(
@@ -1097,7 +1097,7 @@ class FileBrowserWindow(BaseOpenHCSWindow):
         # Create a simple confirmation window using BaseOpenHCSWindow
         from openhcs.textual_tui.windows.base_window import BaseOpenHCSWindow
         from textual.widgets import Static, Button
-        from textual.containers import Container, Horizontal
+        from textual.containers import Horizontal
         from textual.app import ComposeResult
 
         class OverwriteConfirmationWindow(BaseOpenHCSWindow):

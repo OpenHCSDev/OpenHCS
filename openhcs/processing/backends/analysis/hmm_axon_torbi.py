@@ -14,7 +14,7 @@ from enum import Enum
 from typing import Tuple, Dict, List, Optional, Any
 from skimage.feature import canny, blob_dog as local_max
 from skimage.filters import median, threshold_li
-from skimage.morphology import remove_small_objects, skeletonize
+from skimage.morphology import skeletonize
 from openhcs.core.memory.decorators import torch as torch_func
 from openhcs.core.pipeline.function_contracts import special_outputs
 

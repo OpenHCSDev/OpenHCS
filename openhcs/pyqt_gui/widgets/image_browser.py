@@ -7,16 +7,15 @@ view them in Napari with configurable display settings.
 
 import logging
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Set
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QHeaderView, QAbstractItemView, QMessageBox,
     QSplitter, QGroupBox, QTreeWidget, QTreeWidgetItem, QScrollArea,
-    QLineEdit, QListWidget, QListWidgetItem
+    QLineEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QFont
 
 from openhcs.constants.constants import Backend
 from openhcs.io.filemanager import FileManager

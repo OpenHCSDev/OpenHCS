@@ -5,7 +5,6 @@ This module provides abstract base classes for streaming data destinations
 that send data to external systems without persistent storage capabilities.
 """
 
-from abc import ABC
 from openhcs.io.base import DataSink
 
 

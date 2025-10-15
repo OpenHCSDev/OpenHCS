@@ -7,19 +7,18 @@ Displays a scrollable list of function panes with Add/Load/Save/Code controls.
 
 import logging
 import os
-from typing import List, Union, Dict, Any, Optional, Callable, Tuple
-from pathlib import Path
+from typing import List, Union, Dict, Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QScrollArea, QFrame
+    QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
-from openhcs.constants.constants import GroupBy, VariableComponents
+from openhcs.constants.constants import GroupBy
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.widgets.shared.widget_strategies import _get_enum_display_text
 
@@ -91,7 +90,7 @@ class FunctionListEditorWidget(QWidget):
             self.is_dict_mode = False
             self.functions = [initial_functions]
         elif isinstance(initial_functions, list):
-            print(f"🔍 FUNC LIST EDITOR: initial_functions is a list, calling _normalize_function_list")
+            print("🔍 FUNC LIST EDITOR: initial_functions is a list, calling _normalize_function_list")
             self.pattern_data = initial_functions
             self.is_dict_mode = False
             self.functions = self._normalize_function_list(initial_functions)

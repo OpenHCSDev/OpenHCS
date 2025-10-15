@@ -6,13 +6,13 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 """
 
 import logging
-from typing import Optional, Callable, Any, Dict
+from typing import Optional, Callable, Dict
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QTabWidget, QWidget, QFrame, QTextEdit, QScrollArea
+    QTabWidget, QWidget
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QFont
 
 from openhcs.core.steps.function_step import FunctionStep

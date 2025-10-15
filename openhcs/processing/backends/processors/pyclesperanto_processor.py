@@ -8,7 +8,7 @@ with OpenHCS patterns.
 
 import logging
 import os
-from typing import List, Optional, Union
+from typing import List, Optional
 
 # Import OpenHCS decorator
 from openhcs.core.memory.decorators import pyclesperanto as pyclesperanto_func

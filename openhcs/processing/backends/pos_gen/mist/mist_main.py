@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Tuple
 
-from openhcs.constants.constants import DEFAULT_PATCH_SIZE, DEFAULT_SEARCH_RADIUS
 from openhcs.core.memory.decorators import cupy as cupy_func
 from openhcs.core.pipeline.function_contracts import special_inputs, special_outputs
 from openhcs.core.utils import optional_import
@@ -19,8 +18,7 @@ from .quality_metrics import (
     compute_correlation_quality_gpu_aligned,
     compute_adaptive_quality_threshold,
     validate_translation_consistency,
-    log_coordinate_transformation,
-    debug_phase_correlation_matrix
+    log_coordinate_transformation
 )
 from .position_reconstruction import build_mst_gpu, rebuild_positions_from_mst_gpu
 
@@ -187,7 +185,7 @@ def _global_optimization_gpu_only(
     # Debug: Print expected displacements and coordinate validation
     print(f"🔥 EXPECTED DISPLACEMENTS: dx={float(expected_dx):.1f}, dy={float(expected_dy):.1f}")
     print(f"🔥 OVERLAP RATIO: {overlap_ratio}, H={H}, W={W}")
-    print(f"🔥 COORDINATE VALIDATION:")
+    print("🔥 COORDINATE VALIDATION:")
     print(f"   Expected tile spacing: dx={float(expected_dx):.1f}, dy={float(expected_dy):.1f}")
     print(f"   Overlap regions: H*ratio={H*overlap_ratio:.1f}, W*ratio={W*overlap_ratio:.1f}")
     print(f"   Actual overlap: H={H*overlap_ratio:.1f}, W={W*overlap_ratio:.1f} pixels")
@@ -226,7 +224,7 @@ def _global_optimization_gpu_only(
                     print(f"🔥 HORIZONTAL OVERLAP {conn_idx}: tiles {tile_idx}->{right_idx}")
                     print(f"   overlap_w={int(overlap_w)}, W={W}")
                     # Avoid .shape access which can cause GPU sync issues
-                    print(f"   Processing overlap regions (shapes not shown to avoid GPU sync)")
+                    print("   Processing overlap regions (shapes not shown to avoid GPU sync)")
 
                 if use_nist_robustness:
                     dy, dx, quality = phase_correlation_nist_gpu(
@@ -382,7 +380,7 @@ def _global_optimization_gpu_only(
 
         # Re-filter connections with adaptive threshold if it's different
         if adaptive_threshold != quality_threshold and adaptive_threshold < quality_threshold:
-            print(f"🔥 RE-FILTERING with adaptive threshold...")
+            print("🔥 RE-FILTERING with adaptive threshold...")
             # Note: In a full implementation, we'd re-process with the adaptive threshold
             # For now, we'll use the original threshold but log the adaptive one
 
@@ -416,7 +414,7 @@ def _global_optimization_gpu_only(
             if num_valid < len(translations) * consistency_threshold_percent:  # Less than threshold% valid
                 print(f"🔥 WARNING: Low translation consistency ({num_valid}/{len(translations)})")
                 print(f"🔥 Expected spacing: dx={expected_spacing[0]:.1f}, dy={expected_spacing[1]:.1f}")
-                print(f"🔥 Consider adjusting overlap_ratio or quality thresholds")
+                print("🔥 Consider adjusting overlap_ratio or quality thresholds")
 
     # Trim arrays to actual size (GPU)
     if conn_idx > 0:
@@ -909,7 +907,7 @@ def mist_compute_tile_positions(
     # Phase 3: Global optimization MST (GPU operations)
     print(f"🔥 PHASE 3: global_optimization={global_optimization}")
     if global_optimization:
-        print(f"🔥 STARTING MST GLOBAL OPTIMIZATION")
+        print("🔥 STARTING MST GLOBAL OPTIMIZATION")
         positions = _global_optimization_gpu_only(
             positions, tile_grid, num_rows, num_cols,
             expected_dx, expected_dy, overlap_ratio, subpixel,

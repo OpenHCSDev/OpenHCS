@@ -17,10 +17,10 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
-    QListWidgetItem, QLabel, QMessageBox, QFileDialog, QProgressBar,
-    QCheckBox, QFrame, QSplitter
+    QListWidgetItem, QLabel, QProgressBar,
+    QSplitter
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from openhcs.core.config import GlobalPipelineConfig
@@ -28,7 +28,7 @@ from openhcs.core.config import PipelineConfig
 from openhcs.io.filemanager import FileManager
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator, OrchestratorState
 from openhcs.core.pipeline import Pipeline
-from openhcs.constants.constants import VariableComponents, GroupBy
+from openhcs.constants.constants import VariableComponents
 from openhcs.pyqt_gui.widgets.mixins import (
     preserve_selection_during_update,
     handle_selection_change_with_prevention

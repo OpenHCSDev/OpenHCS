@@ -8,16 +8,14 @@ features while being properly integrated into the OpenHCS window system.
 
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from textual.app import ComposeResult
 from textual.widget import Widget
-from textual.widgets import TabbedContent, TabPane, Select
+from textual.widgets import Select
 from textual.lazy import Lazy
 
 # Import Toolong components
-from toolong.ui import LogScreen
-from toolong.watcher import get_watcher
 
 logger = logging.getLogger(__name__)
 

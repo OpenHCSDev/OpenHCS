@@ -6,9 +6,8 @@ shared between TUI and PyQt GUI implementations.
 """
 
 import logging
-import re
 from pathlib import Path
-from typing import Set, Dict, Optional, List
+from typing import Optional, List
 from dataclasses import dataclass
 
 from openhcs.textual_tui.widgets.plate_manager import get_current_log_file_path as _get_current_log_file_path

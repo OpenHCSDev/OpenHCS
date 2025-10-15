@@ -1,9 +1,8 @@
 # Edit this pipeline and save to apply changes
 
 # Automatically collected imports
-from openhcs.constants.constants import GroupBy, VariableComponents
+from openhcs.constants.constants import VariableComponents
 from openhcs.constants.input_source import InputSource
-from openhcs.core.config import WellFilterMode
 from openhcs.core.config import LazyStepMaterializationConfig
 from openhcs.core.memory.decorators import DtypeConversion
 from openhcs.core.steps.function_step import FunctionStep

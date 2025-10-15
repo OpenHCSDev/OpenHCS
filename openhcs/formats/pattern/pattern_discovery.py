@@ -8,12 +8,11 @@ in microscopy image files, separating this responsibility from FilenameParser.
 # Standard Library
 import logging
 import os
-import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSION, get_openhcs_config
+from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSION
 from openhcs.io.filemanager import FileManager
 # Core OpenHCS Interfaces
 from openhcs.microscopes.microscope_interfaces import FilenameParser
@@ -385,7 +384,7 @@ class PatternDiscoveryEngine:
             # 🔒 Clause 93 — Declarative Execution Enforcement
             # Ensure pattern generation succeeded
             if not pattern_args:
-                raise ValueError(f"Clause 93 Violation: No components found in template metadata for pattern generation")
+                raise ValueError("Clause 93 Violation: No components found in template metadata for pattern generation")
 
             # Use metaprogramming approach - pass all components dynamically
             extension = pattern_args.get('extension') or DEFAULT_IMAGE_EXTENSION

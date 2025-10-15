@@ -7,21 +7,17 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 
 import logging
 from typing import Any, Dict, Callable, Optional, Tuple
-from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QFrame, QScrollArea, QGroupBox, QFormLayout
+    QFrame, QScrollArea, QGroupBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
-from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
-from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
 
 # Import PyQt6 help components (using same pattern as Textual TUI)
-from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpIndicator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 
 logger = logging.getLogger(__name__)
@@ -258,9 +254,9 @@ class FunctionPaneWidget(QWidget):
         Returns:
             Widget for parameter editing or None
         """
-        from PyQt6.QtWidgets import QLineEdit, QCheckBox, QComboBox
+        from PyQt6.QtWidgets import QLineEdit
         from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import (
-            NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
+            NoScrollSpinBox, NoScrollDoubleSpinBox
         )
 
         # Boolean parameters
@@ -354,7 +350,7 @@ class FunctionPaneWidget(QWidget):
         logger.info(f"🔍 RESET: self.param_defaults = {self.param_defaults}")
 
         if not self.form_manager:
-            logger.warning(f"🔍 RESET: No form_manager found!")
+            logger.warning("🔍 RESET: No form_manager found!")
             return
 
         logger.info(f"🔍 RESET: form_manager.parameters = {self.form_manager.parameters}")

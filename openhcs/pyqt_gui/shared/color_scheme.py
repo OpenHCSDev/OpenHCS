@@ -8,7 +8,7 @@ JSON configuration, and WCAG accessibility compliance.
 
 import logging
 from dataclasses import dataclass
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict
 from pathlib import Path
 from PyQt6.QtGui import QColor
 

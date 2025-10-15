@@ -2,7 +2,6 @@
 
 import dataclasses
 import logging
-from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Type, Callable, Optional, Union
@@ -229,42 +228,42 @@ class MagicGuiWidgetFactory:
         """Create widget using functional registry dispatch."""
         from openhcs.utils.performance_monitor import timer
 
-        with timer(f"            resolve_optional", threshold_ms=0.1):
+        with timer("            resolve_optional", threshold_ms=0.1):
             resolved_type = resolve_optional(param_type)
 
         # Handle direct List[Enum] types - create multi-selection checkbox group
         if is_list_of_enums(resolved_type):
-            with timer(f"            create checkbox group", threshold_ms=0.5):
+            with timer("            create checkbox group", threshold_ms=0.5):
                 return self._create_checkbox_group_widget(param_name, resolved_type, current_value)
 
         # Extract enum from list wrapper for other cases
-        with timer(f"            extract enum value", threshold_ms=0.1):
+        with timer("            extract enum value", threshold_ms=0.1):
             extracted_value = (current_value[0] if isinstance(current_value, list) and
                               len(current_value) == 1 and isinstance(current_value[0], Enum)
                               else current_value)
 
         # Handle direct enum types
         if is_enum(resolved_type):
-            with timer(f"            create enum widget", threshold_ms=0.5):
+            with timer("            create enum widget", threshold_ms=0.5):
                 return create_enum_widget_unified(resolved_type, extracted_value)
 
         # OPTIMIZATION: Fast path for simple types - bypass magicgui overhead (~0.3ms per widget)
         # This saves ~36ms for 120 widgets
         if resolved_type == int:
-            with timer(f"            create int widget (fast path)", threshold_ms=0.5):
+            with timer("            create int widget (fast path)", threshold_ms=0.5):
                 return _create_direct_int_widget(extracted_value)
         elif resolved_type == float:
-            with timer(f"            create float widget (fast path)", threshold_ms=0.5):
+            with timer("            create float widget (fast path)", threshold_ms=0.5):
                 return _create_direct_float_widget(extracted_value)
         elif resolved_type == bool:
-            with timer(f"            create bool widget (fast path)", threshold_ms=0.5):
+            with timer("            create bool widget (fast path)", threshold_ms=0.5):
                 return _create_direct_bool_widget(extracted_value)
         elif resolved_type == str:
-            with timer(f"            create string widget (fast path)", threshold_ms=0.5):
+            with timer("            create string widget (fast path)", threshold_ms=0.5):
                 return create_string_fallback_widget(current_value=extracted_value)
 
         # Check for OpenHCS custom widget replacements
-        with timer(f"            registry lookup", threshold_ms=0.1):
+        with timer("            registry lookup", threshold_ms=0.1):
             replacement_factory = WIDGET_REPLACEMENT_REGISTRY.get(resolved_type)
 
         if replacement_factory:
@@ -278,7 +277,7 @@ class MagicGuiWidgetFactory:
             # Try magicgui for complex types, with string fallback for unsupported types
             try:
                 # Handle None values to prevent magicgui from converting None to literal "None" string
-                with timer(f"            prepare magicgui value", threshold_ms=0.1):
+                with timer("            prepare magicgui value", threshold_ms=0.1):
                     magicgui_value = extracted_value
                     if extracted_value is None:
                         # Use appropriate default values for magicgui to prevent "None" string conversion
@@ -299,7 +298,7 @@ class MagicGuiWidgetFactory:
                     widget = create_widget(annotation=resolved_type, value=magicgui_value)
 
                 # Check if magicgui returned a basic QWidget (which indicates failure)
-                with timer(f"            check magicgui result", threshold_ms=0.1):
+                with timer("            check magicgui result", threshold_ms=0.1):
                     if hasattr(widget, 'native') and type(widget.native).__name__ == 'QWidget':
                         logger.warning(f"magicgui returned basic QWidget for {param_name} ({resolved_type}), using fallback")
                         widget = create_string_fallback_widget(current_value=extracted_value)
@@ -326,7 +325,7 @@ class MagicGuiWidgetFactory:
                 widget = create_string_fallback_widget(current_value=extracted_value)
 
         # Functional configuration dispatch
-        with timer(f"            apply widget configuration", threshold_ms=0.1):
+        with timer("            apply widget configuration", threshold_ms=0.1):
             configurator = CONFIGURATION_REGISTRY.get(resolved_type, lambda w: w)
             configurator(widget)
 
@@ -334,7 +333,6 @@ class MagicGuiWidgetFactory:
 
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
         """Create multi-selection checkbox group for List[Enum] parameters."""
-        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout
         from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
 
         enum_type = get_enum_from_list(param_type)
@@ -514,7 +512,6 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
     This gives users a visual preview of what the value will be if they don't override it.
     """
     try:
-        from PyQt6.QtCore import Qt
         default_value = _extract_default_value(placeholder_text).lower() == 'true'
 
         # Block signals to prevent checkbox state changes from triggering parameter updates

@@ -18,10 +18,9 @@ Doctrinal Clauses:
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List
 
 from openhcs.constants.constants import READ_BACKEND, WRITE_BACKEND, Backend
-from openhcs.constants import Microscope
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.config import MaterializationBackend

@@ -7,8 +7,7 @@ via PyImageJ. Inherits from ZMQServer ABC for ping/pong handshake and dual-chann
 
 import logging
 import time
-from typing import Dict, Any, Optional, List
-from pathlib import Path
+from typing import Dict, Any, List
 
 from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT
 from openhcs.runtime.zmq_messages import ImageAck
@@ -100,7 +99,7 @@ class FijiViewerServer(ZMQServer):
 
             # Show Fiji UI so users can interact with images and menus
             self.ij.ui().showUI()
-            logger.info(f"🔬 FIJI SERVER: PyImageJ initialized and UI shown")
+            logger.info("🔬 FIJI SERVER: PyImageJ initialized and UI shown")
         except ImportError:
             raise ImportError("PyImageJ not available. Install with: pip install 'openhcs[viz]'")
     
@@ -291,7 +290,6 @@ class FijiViewerServer(ZMQServer):
             slice_components: Components mapped to Slice dimension
             frame_components: Components mapped to Frame dimension
         """
-        import numpy as np
         import scyjava as sj
 
         # Import ImageJ classes using scyjava
@@ -392,7 +390,7 @@ class FijiViewerServer(ZMQServer):
                     else:
                         # Add blank slice if missing
                         blank = ShortProcessor(width, height)
-                        stack.addSlice(f"BLANK", blank)
+                        stack.addSlice("BLANK", blank)
 
         # Create ImagePlus
         imp = ImagePlus(window_key, stack)
@@ -494,7 +492,7 @@ def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, lo
         server.start()
         
         logger.info(f"🔬 FIJI SERVER: Server started on port {port}, control port {port + 1000}")
-        logger.info(f"🔬 FIJI SERVER: Waiting for images...")
+        logger.info("🔬 FIJI SERVER: Waiting for images...")
         
         # Message processing loop
         while not server._shutdown_requested:

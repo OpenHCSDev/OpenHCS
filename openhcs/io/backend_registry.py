@@ -8,9 +8,8 @@ discovered and registered when their classes are defined.
 
 import logging
 from abc import ABCMeta
-from typing import Dict, Type, List, Optional
-from openhcs.io.base import DataSink, StorageBackend
-from openhcs.io.streaming import StreamingBackend
+from typing import Dict, Type
+from openhcs.io.base import DataSink
 
 logger = logging.getLogger(__name__)
 

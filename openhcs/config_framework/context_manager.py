@@ -22,7 +22,7 @@ import dataclasses
 import inspect
 import logging
 from contextlib import contextmanager
-from typing import Any, Dict, Optional, Type, Union
+from typing import Any, Dict, Union
 from dataclasses import fields, is_dataclass
 
 logger = logging.getLogger(__name__)

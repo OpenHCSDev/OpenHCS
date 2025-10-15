@@ -25,7 +25,6 @@ The script will:
 """
 
 import sys
-import logging
 from datetime import datetime
 
 # Toggle between legacy and unified registry systems
@@ -98,7 +97,7 @@ def recache_function_registry():
         migrate_all_legacy_cache_files()
 
         # Step 1: Clear function metadata caches for available libraries
-        print(f"\n🧹 Clearing function metadata caches for available libraries...")
+        print("\n🧹 Clearing function metadata caches for available libraries...")
         print(f"   Using {'unified' if USE_UNIFIED_REGISTRIES else 'legacy'} registry system")
 
         if USE_UNIFIED_REGISTRIES:

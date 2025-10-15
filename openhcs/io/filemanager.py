@@ -6,15 +6,12 @@ including directory listing, existence checking, mkdir, symlink, and mirror oper
 """
 
 import logging
-import os
 from pathlib import Path
-from typing import List, Set, Union, Tuple, Optional, Any
+from typing import List, Set, Union, Tuple, Any
 
 from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSIONS
 from openhcs.io.base import DataSink
-from openhcs.io.exceptions import PathMismatchError, StorageResolutionError
-from openhcs.validation import validate_path_types, validate_backend_parameter
-import traceback
+from openhcs.io.exceptions import StorageResolutionError
 
 logger = logging.getLogger(__name__)
 

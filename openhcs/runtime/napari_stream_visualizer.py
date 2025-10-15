@@ -14,7 +14,6 @@ Doctrinal Clauses:
 import logging
 import multiprocessing
 import os
-import queue
 import subprocess
 import sys
 import threading
@@ -37,7 +36,6 @@ if napari is None:
         "Install it with: pip install 'openhcs[viz]' or pip install napari"
     )
 
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -522,7 +520,6 @@ class NapariViewerServer(ZMQServer):
             message: Raw ZMQ message containing image data
         """
         import json
-        import numpy as np
 
         # Parse JSON message
         data = json.loads(message.decode('utf-8'))
@@ -565,7 +562,7 @@ class NapariViewerServer(ZMQServer):
             elif direct_data:
                 image_data = np.array(direct_data, dtype=dtype).reshape(shape)
             else:
-                logger.warning(f"🔬 NAPARI PROCESS: No image data in message")
+                logger.warning("🔬 NAPARI PROCESS: No image data in message")
                 if image_id:
                     self._send_ack(image_id, status='error', error='No image data in message')
                 return
@@ -606,8 +603,6 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
     try:
         import zmq
         import napari
-        import numpy as np
-        import pickle
 
         # Create ZMQ server instance (inherits from ZMQServer ABC)
         server = NapariViewerServer(port, viewer_title, replace_layers, log_file_path)
@@ -732,7 +727,6 @@ except Exception as e:
 
     try:
         # Create log file for detached process
-        import tempfile
         log_dir = os.path.expanduser("~/.local/share/openhcs/logs")
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, f"napari_detached_port_{port}.log")
@@ -1075,7 +1069,7 @@ class NapariStreamVisualizer:
                 break
             time.sleep(0.2)
         else:
-            logger.warning(f"🔬 VISUALIZER: Timeout waiting for ports to be bound")
+            logger.warning("🔬 VISUALIZER: Timeout waiting for ports to be bound")
             return False
 
         # Now use handshake protocol - create fresh socket for each attempt
@@ -1110,7 +1104,7 @@ class NapariStreamVisualizer:
 
             time.sleep(0.5)  # Wait before next ping
 
-        logger.warning(f"🔬 VISUALIZER: Timeout waiting for napari viewer handshake")
+        logger.warning("🔬 VISUALIZER: Timeout waiting for napari viewer handshake")
         return False
 
     def _setup_zmq_client(self):

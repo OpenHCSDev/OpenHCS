@@ -4,8 +4,7 @@ Processing Context for OpenHCS.
 This module defines the ProcessingContext class, which maintains state during pipeline execution.
 """
 
-from typing import Any, Dict, Optional, Union
-from pathlib import Path
+from typing import Any, Dict, Optional
 
 from openhcs.core.config import GlobalPipelineConfig, VFSConfig, PathPlanningConfig
 

@@ -5,8 +5,6 @@ Provides extensible type-to-widget dispatch using simple dicts and functions,
 eliminating class-based abstractions while maintaining clean extensibility.
 """
 
-import dataclasses
-from pathlib import Path
 from typing import Type, get_origin, get_args, Union
 from enum import Enum
 

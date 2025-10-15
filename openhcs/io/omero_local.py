@@ -468,9 +468,6 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
         plate_id = int(match.group(1))
 
         # Create FileAnnotation
-        import omero
-        from omero.gateway import FileAnnotationWrapper
-        from omero.model import OriginalFileI, FileAnnotationI
         import tempfile
 
         # Write content to temporary file

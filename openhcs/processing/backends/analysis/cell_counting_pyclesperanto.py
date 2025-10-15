@@ -9,7 +9,7 @@ methods and colocalization metrics.
 import numpy as np
 import logging
 import gc
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Dict, List, Tuple, Any, Union
 from dataclasses import dataclass
 from enum import Enum
 
@@ -100,7 +100,7 @@ def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult
 
     # Determine if this is single-channel or multi-channel data
     if not data:
-        logger.warning(f"🔬 CELL_COUNT_MATERIALIZE: No data to materialize")
+        logger.warning("🔬 CELL_COUNT_MATERIALIZE: No data to materialize")
         return path
 
     is_multi_channel = isinstance(data[0], MultiChannelResult)
@@ -122,7 +122,7 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
         data = [np.asarray(mask) for mask in data]
 
     if not data:
-        logger.info(f"🔬 SEGMENTATION_MATERIALIZE: No segmentation masks to materialize (return_segmentation_mask=False)")
+        logger.info("🔬 SEGMENTATION_MATERIALIZE: No segmentation masks to materialize (return_segmentation_mask=False)")
         # Create empty summary file to indicate no masks were generated
         summary_path = path.replace('.pkl', '_segmentation_summary.txt')
         summary_content = "No segmentation masks generated (return_segmentation_mask=False)\n"
@@ -469,7 +469,6 @@ def _materialize_single_channel_results(data: List[CellCountResult], path: str, 
 
     # Ensure output directory exists for disk backend
     from pathlib import Path
-    from openhcs.constants.constants import Backend
     output_dir = Path(json_path).parent
     if backend == Backend.DISK.value:
         filemanager.ensure_directory(str(output_dir), backend)
@@ -543,7 +542,6 @@ def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str
 
     # Ensure output directory exists for disk backend
     from pathlib import Path
-    from openhcs.constants.constants import Backend
     output_dir = Path(json_path).parent
     if backend == Backend.DISK.value:
         filemanager.ensure_directory(str(output_dir), backend)

@@ -10,8 +10,7 @@ that all storage backends must fulfill.
 import logging
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Type, Union, Callable
-from functools import wraps
+from typing import Any, Dict, List, Optional, Set, Union
 from openhcs.constants.constants import Backend
 from openhcs.io.exceptions import StorageResolutionError
 
@@ -527,7 +526,6 @@ def reset_memory_backend() -> None:
     Note:
         This only affects the memory backend. Other backends (disk, zarr) are not modified.
     """
-    from openhcs.constants.constants import Backend
 
     # Clear files from existing memory backend while preserving directories
     memory_backend = storage_registry[Backend.MEMORY.value]

@@ -1,6 +1,5 @@
 # File: openhcs/textual_tui/widgets/shared/enum_radio_set.py
 
-from enum import Enum
 from typing import Optional
 from textual.widgets import RadioSet, RadioButton
 from textual.app import ComposeResult

@@ -6,7 +6,7 @@ with Qt equivalents while preserving all business logic.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Optional
 from pathlib import Path
 
 from PyQt6.QtWidgets import QMessageBox, QFileDialog, QApplication, QWidget

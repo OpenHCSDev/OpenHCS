@@ -10,30 +10,22 @@ are retrieved from this step's entry in `context.step_plans`.
 import logging
 import os
 import time
-import gc
-import json
-import shutil
-from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, OrderedDict as TypingOrderedDict, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from openhcs.core.config import PathPlanningConfig
+    pass
 
-from openhcs.core.config import StreamingConfig
 
-from openhcs.constants.constants import (DEFAULT_IMAGE_EXTENSION,
-                                             DEFAULT_IMAGE_EXTENSIONS,
-                                             DEFAULT_SITE_PADDING, Backend,
-                                             MemoryType, VariableComponents, GroupBy)
-from openhcs.constants.input_source import InputSource
+from openhcs.constants.constants import (DEFAULT_IMAGE_EXTENSIONS,
+                                             Backend,
+                                             VariableComponents)
 from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.formats.func_arg_prep import prepare_patterns_and_functions
 from openhcs.core.memory.stack_utils import stack_slices, unstack_slices
 # OpenHCS imports moved to local imports to avoid circular dependencies
 
-from openhcs.core.components.validation import GenericValidator
 
 logger = logging.getLogger(__name__)
 
@@ -667,7 +659,7 @@ def _process_single_pattern_group(
             logger.debug(f"🔍 VALIDATION: processed_stack shape: {processed_stack.shape}")
 
         if not _is_3d(processed_stack):
-            logger.error(f"🔍 VALIDATION ERROR: processed_stack is not 3D")
+            logger.error("🔍 VALIDATION ERROR: processed_stack is not 3D")
             logger.error(f"🔍 VALIDATION ERROR: Type: {type(processed_stack)}")
             logger.error(f"🔍 VALIDATION ERROR: Shape: {getattr(processed_stack, 'shape', 'no shape attr')}")
             logger.error(f"🔍 VALIDATION ERROR: Has ndim: {hasattr(processed_stack, 'ndim')}")
@@ -1051,11 +1043,17 @@ class FunctionStep(AbstractStep):
             logger.debug(f"🔍 MATERIALIZATION: special_outputs is empty? {not special_outputs}")
             if special_outputs:
                 logger.info(f"🔬 MATERIALIZATION: Starting materialization for {len(special_outputs)} special outputs")
-                # Use actual_write_backend for special outputs (they go to same location as main output)
-                self._materialize_special_outputs(filemanager, step_plan, special_outputs, actual_write_backend)
-                logger.info(f"🔬 MATERIALIZATION: Completed materialization")
+                # Special outputs ALWAYS use the main materialization backend (disk/zarr),
+                # not the step's write backend (which may be memory for intermediate steps).
+                # This ensures analysis results are always persisted to disk.
+                from openhcs.core.pipeline.materialization_flag_planner import MaterializationFlagPlanner
+                vfs_config = context.get_vfs_config()
+                materialization_backend = MaterializationFlagPlanner._resolve_materialization_backend(context, vfs_config)
+                logger.debug(f"🔍 MATERIALIZATION: Using materialization backend '{materialization_backend}' for special outputs (step write backend is '{actual_write_backend}')")
+                self._materialize_special_outputs(filemanager, step_plan, special_outputs, materialization_backend)
+                logger.info("🔬 MATERIALIZATION: Completed materialization")
             else:
-                logger.debug(f"🔍 MATERIALIZATION: No special outputs to materialize")
+                logger.debug("🔍 MATERIALIZATION: No special outputs to materialize")
 
 
 
@@ -1186,7 +1184,7 @@ class FunctionStep(AbstractStep):
         except Exception as e:
             # Graceful degradation - log error but don't fail the step
             logger.warning(f"Failed to create OpenHCS metadata file: {e}")
-            logger.debug(f"OpenHCS metadata creation error details:", exc_info=True)
+            logger.debug("OpenHCS metadata creation error details:", exc_info=True)
 
     def _detect_available_backends(self, output_dir: Path) -> Dict[str, bool]:
         """Detect which storage backends are actually available based on output files."""
