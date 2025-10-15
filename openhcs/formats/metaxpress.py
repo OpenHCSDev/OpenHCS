@@ -89,7 +89,7 @@ def read_plate_layout(config_path):
             scope = row.iloc[0]
 
         #finished reading controls
-        if sanitize_compare(row.name,'plate group') and not ctrl_wells is None:
+        if sanitize_compare(row.name,'plate group') and ctrl_wells is not None:
             if ctrl_groups is None:
                 ctrl_groups = []
             ctrl_groups += row.dropna().tolist()
@@ -126,7 +126,7 @@ def read_plate_layout(config_path):
             # make control well dict
             ctrl_positions = {"N"+str(i+1):[] for i in range(N)}
             for i in range(len(ctrl_wells_aligned)):
-                if not ctrl_positions_replicates is None:
+                if ctrl_positions_replicates is not None:
                     ctrl_positions["N"+str(ctrl_positions_replicates[i])].append((ctrl_wells_aligned[i],ctrl_groups[i]))
                     ctrl_wells = None
                 else:
@@ -134,7 +134,7 @@ def read_plate_layout(config_path):
 
             #make dict[replicate][condition][dose]
             for i in range(N):
-                if not row.iloc[0] in layout["N"+str(i+1)].keys():
+                if row.iloc[0] not in layout["N"+str(i+1)].keys():
                     layout["N"+str(i+1)][row.iloc[0]]={}
             condition=row.iloc[0]
             conditions.append(condition)
@@ -157,13 +157,13 @@ def read_plate_layout(config_path):
                 for i in range(N):
                     for y in range(len(doses)):
                         #add to all Ns
-                        if not doses[y] in layout["N"+str(i+1)][condition].keys():
+                        if doses[y] not in layout["N"+str(i+1)][condition].keys():
                             layout["N"+str(i+1)][condition][doses[y]]=[]
                         layout["N"+str(i+1)][condition][doses[y]].append((wells[y],plate_groups[y]))
             else:
                 for y in range(len(doses)):
                     #add to specific N
-                    if not doses[y] in layout["N"+str(specific_N)][condition].keys():
+                    if doses[y] not in layout["N"+str(specific_N)][condition].keys():
                         layout["N"+str(specific_N)][condition][doses[y]]=[]
                     layout["N"+str(specific_N)][condition][doses[y]].append((wells[y],plate_groups[y]))
     return scope, layout, conditions, ctrl_positions
@@ -543,7 +543,7 @@ well_dict=create_well_dict(df,scope=scope)
 plates_dict=create_plates_dict(df,scope=scope)
 plates_dict = fill_plates_dict(df,plates_dict,scope=scope)
 experiment_dict_values=make_experiment_dict_values(plates_dict,experiment_dict_locations,features)
-if not ctrl_positions is None:
+if ctrl_positions is not None:
     experiment_dict_values=normalize_experiment(experiment_dict_values,ctrl_positions,features,plates_dict)
 feature_tables = create_all_feature_tables(experiment_dict_values,features)
 write_values_heat_map(plates_dict,features,heatmap_path)

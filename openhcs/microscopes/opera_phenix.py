@@ -330,7 +330,7 @@ class OperaPhenixHandler(MicroscopeHandler):
             logger.error("SAFETY VIOLATION: Attempted to delete temp directory outside workspace: %s", temp_dir)
             raise RuntimeError(f"Attempted to delete temp directory outside workspace: {temp_dir}")
             
-        if not "__opera_phenix_temp" in str(temp_dir):
+        if "__opera_phenix_temp" not in str(temp_dir):
             logger.error("SAFETY VIOLATION: Attempted to delete non-temp directory: %s", temp_dir)
             raise RuntimeError(f"Attempted to delete non-temp directory: {temp_dir}")
             

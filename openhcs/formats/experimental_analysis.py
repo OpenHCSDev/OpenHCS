@@ -157,7 +157,7 @@ def read_plate_layout(config_path):
             per_well_datapoints = value in ['true', '1', 'yes', 'on', 'enabled']
 
         #finished reading controls
-        if sanitize_compare(row.name,'plate group') and not ctrl_wells is None:
+        if sanitize_compare(row.name,'plate group') and ctrl_wells is not None:
             if ctrl_groups is None:
                 ctrl_groups = []
             ctrl_groups += row.dropna().tolist()
@@ -192,7 +192,7 @@ def read_plate_layout(config_path):
 
         #get plate group for excluded wells
         if ((sanitize_compare(row_content,'plate group') or sanitize_compare(row_name,'plate group')) and
-            not excluded_wells is None):
+            excluded_wells is not None):
             if excluded_groups is None:
                 excluded_groups = []
             excluded_groups += row.dropna().tolist()
@@ -200,7 +200,7 @@ def read_plate_layout(config_path):
 
         #get replicate for excluded well position
         if ((sanitize_compare(row_content,'group n') or sanitize_compare(row_name,'group n')) and
-            not excluded_wells is None):
+            excluded_wells is not None):
             if excluded_positions_replicates is None:
                 excluded_positions_replicates = []
             if excluded_wells_aligned is None:
@@ -227,7 +227,7 @@ def read_plate_layout(config_path):
             if ctrl_wells_aligned is not None:
                 ctrl_positions = {"N"+str(i+1):[] for i in range(N)}
                 for i in range(len(ctrl_wells_aligned)):
-                    if not ctrl_positions_replicates is None:
+                    if ctrl_positions_replicates is not None:
                         ctrl_positions["N"+str(ctrl_positions_replicates[i])].append((ctrl_wells_aligned[i],ctrl_groups[i]))
                         ctrl_wells = None
                     else:
@@ -259,7 +259,7 @@ def read_plate_layout(config_path):
 
             #make dict[replicate][condition][dose]
             for i in range(N):
-                if not row.iloc[0] in layout["N"+str(i+1)].keys():
+                if row.iloc[0] not in layout["N"+str(i+1)].keys():
                     layout["N"+str(i+1)][row.iloc[0]]={}
             condition=row.iloc[0]
             conditions.append(condition)
@@ -282,7 +282,7 @@ def read_plate_layout(config_path):
                 for i in range(N):
                     for y in range(len(doses)):
                         #add to all Ns
-                        if not doses[y] in layout["N"+str(i+1)][condition].keys():
+                        if doses[y] not in layout["N"+str(i+1)][condition].keys():
                             layout["N"+str(i+1)][condition][doses[y]]=[]
                         # Add ALL wells for this dose, not just wells[y]
                         for well_idx, well in enumerate(wells):
@@ -291,7 +291,7 @@ def read_plate_layout(config_path):
             else:
                 for y in range(len(doses)):
                     #add to specific N
-                    if not doses[y] in layout["N"+str(specific_N)][condition].keys():
+                    if doses[y] not in layout["N"+str(specific_N)][condition].keys():
                         layout["N"+str(specific_N)][condition][doses[y]]=[]
                     # Add ALL wells for this dose, not just wells[y]
                     for well_idx, well in enumerate(wells):
