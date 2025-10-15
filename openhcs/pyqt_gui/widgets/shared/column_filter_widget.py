@@ -216,13 +216,17 @@ class MultiColumnFilterPanel(QWidget):
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.splitter.setChildrenCollapsible(False)  # Prevent filters from collapsing
         self.splitter.setHandleWidth(5)  # Make handle more visible and easier to grab
-        # Set minimum width so splitter doesn't collapse horizontally
-        self.splitter.setMinimumWidth(200)
+
+        # CRITICAL: Set size policy to prevent splitter from shrinking
+        # This ensures splitter maintains its size and scroll area scrolls instead
+        self.splitter.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+
+        # Connect to splitter moved signal to update minimum size
+        self.splitter.splitterMoved.connect(self._on_splitter_moved)
 
         # Wrap splitter in scroll area so the whole group can scroll
-        # CRITICAL: setWidgetResizable(False) allows splitter to expand beyond visible area
         scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(False)  # Let splitter control its own size
+        scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(self.splitter)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -257,6 +261,13 @@ class MultiColumnFilterPanel(QWidget):
         # Update sizes after adding widget
         self._update_splitter_sizes()
     
+    def _on_splitter_moved(self, pos, index):
+        """Handle splitter movement - update minimum height to prevent shrinking."""
+        # Calculate total height needed for all widgets at their current sizes
+        total_height = sum(self.splitter.sizes())
+        # Set minimum height to current total so splitter doesn't shrink
+        self.splitter.setMinimumHeight(total_height)
+
     def _update_splitter_sizes(self):
         """Update splitter sizes to distribute space equally among filters."""
         num_filters = len(self.column_filters)
@@ -265,6 +276,8 @@ class MultiColumnFilterPanel(QWidget):
             # Splitter can resize freely without restrictions
             sizes = [200] * num_filters
             self.splitter.setSizes(sizes)
+            # Set initial minimum height
+            self.splitter.setMinimumHeight(sum(sizes))
 
     def remove_column_filter(self, column_name: str):
         """Remove a column filter."""
