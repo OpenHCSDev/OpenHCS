@@ -59,7 +59,7 @@ dependencies = [
 ]
 
 [project.scripts]
-openhcs-gui = "openhcs.pyqt_gui.__main__:main"
+openhcs = "openhcs.pyqt_gui.__main__:main"
 
 [project.optional-dependencies]
 # Development dependencies (CPU-only testing)
