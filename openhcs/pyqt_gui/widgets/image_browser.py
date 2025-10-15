@@ -808,7 +808,7 @@ class ImageBrowserWidget(QWidget):
         plate_path = Path(self.orchestrator.plate_path)
 
         # Resolve backend
-        from openhcs.config_framework.lazy_factory import get_current_global_config
+        from openhcs.config_framework.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         global_config = get_current_global_config(GlobalPipelineConfig)
 
@@ -854,7 +854,7 @@ class ImageBrowserWidget(QWidget):
         plate_path = Path(self.orchestrator.plate_path)
 
         # Resolve backend
-        from openhcs.config_framework.lazy_factory import get_current_global_config
+        from openhcs.config_framework.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         global_config = get_current_global_config(GlobalPipelineConfig)
 
