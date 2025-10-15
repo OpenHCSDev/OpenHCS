@@ -51,6 +51,7 @@ class PlateViewWidget(QWidget):
         self.plate_dimensions = (8, 12)  # rows, cols (default 96-well)
         self.subdirs = []  # List of subdirectory names
         self.active_subdir = None  # Currently selected subdirectory
+        self.coord_to_well = {}  # (row_index, col_index) -> well_id mapping
         
         # UI components
         self.subdir_buttons = {}  # subdir_name -> QPushButton
@@ -185,26 +186,34 @@ class PlateViewWidget(QWidget):
         self.active_subdir = subdir
         # Could emit signal here if needed for filtering by subdir
     
-    def set_available_wells(self, well_ids: Set[str]):
+    def set_available_wells(self, well_ids: Set[str], plate_dimensions: Optional[Tuple[int, int]] = None,
+                           coord_to_well: Optional[dict] = None):
         """
         Update which wells have images and rebuild grid.
-        
+
         Args:
             well_ids: Set of well IDs that have images
+            plate_dimensions: Optional (rows, cols) tuple. If None, auto-detects from well IDs.
+            coord_to_well: Optional mapping from (row_index, col_index) to well_id.
+                          Required for non-standard well ID formats (e.g., Opera Phenix R01C01).
         """
         self.wells_with_images = well_ids
-        
+        self.coord_to_well = coord_to_well or {}
+
         if not well_ids:
             self._clear_grid()
             self.status_label.setText("No wells")
             return
-        
-        # Auto-detect plate dimensions
-        self.plate_dimensions = self._detect_dimensions(well_ids)
-        
+
+        # Use provided dimensions or auto-detect
+        if plate_dimensions is not None:
+            self.plate_dimensions = plate_dimensions
+        else:
+            self.plate_dimensions = self._detect_dimensions(well_ids)
+
         # Rebuild grid
         self._build_grid()
-        
+
         # Update status
         self._update_status()
     
@@ -278,7 +287,8 @@ class PlateViewWidget(QWidget):
 
             # Well buttons
             for col in range(1, cols + 1):
-                well_id = f"{row_letter}{col:02d}"
+                # Use coordinate mapping if available, otherwise construct standard well ID
+                well_id = self.coord_to_well.get((row, col), f"{row_letter}{col:02d}")
 
                 btn = QPushButton()
                 btn.setFixedSize(40, 40)  # Larger buttons for better visibility

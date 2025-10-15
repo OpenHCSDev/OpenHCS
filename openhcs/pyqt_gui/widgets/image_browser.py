@@ -1326,8 +1326,22 @@ class ImageBrowserWidget(QWidget):
                 # Skip images without well metadata (e.g., plate-level files)
                 pass
 
-        # Update plate view
-        self.plate_view_widget.set_available_wells(well_ids)
+        # Detect plate dimensions and build coordinate mapping
+        plate_dimensions = self._detect_plate_dimensions(well_ids) if well_ids else None
+
+        # Build mapping from (row_index, col_index) to actual well_id
+        # This handles different well ID formats (A01 vs R01C01)
+        coord_to_well = {}
+        parser = self.orchestrator.microscope_handler.parser
+        for well_id in well_ids:
+            row, col = parser.extract_component_coordinates(well_id)
+            # Convert row letter to index (A=1, B=2, etc.)
+            row_idx = sum((ord(c.upper()) - ord('A') + 1) * (26 ** i)
+                         for i, c in enumerate(reversed(row)))
+            coord_to_well[(row_idx, int(col))] = well_id
+
+        # Update plate view with well IDs, dimensions, and coordinate mapping
+        self.plate_view_widget.set_available_wells(well_ids, plate_dimensions, coord_to_well)
 
         # Handle subdirectory selection
         current_folder = self._get_current_folder()
