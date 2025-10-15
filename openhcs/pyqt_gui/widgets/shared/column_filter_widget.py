@@ -10,75 +10,130 @@ from typing import Dict, Set, List, Optional, Callable
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QCheckBox, QPushButton,
-    QScrollArea, QLabel, QFrame
+    QScrollArea, QLabel, QFrame, QSplitter
 )
 from PyQt6.QtCore import pyqtSignal, Qt
+
+from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from openhcs.pyqt_gui.widgets.shared.layout_constants import COMPACT_LAYOUT
 
 logger = logging.getLogger(__name__)
 
 
-class ColumnFilterWidget(QWidget):
+class ColumnFilterWidget(QFrame):
     """
     Filter widget for a single column showing checkboxes for unique values.
-    
+    Uses compact styling matching parameter form manager.
+
     Signals:
         filter_changed: Emitted when filter selection changes
     """
-    
+
     filter_changed = pyqtSignal()
-    
-    def __init__(self, column_name: str, unique_values: List[str], parent=None):
+
+    def __init__(self, column_name: str, unique_values: List[str],
+                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
         """
         Initialize column filter widget.
-        
+
         Args:
             column_name: Name of the column being filtered
             unique_values: List of unique values in this column
+            color_scheme: Color scheme for styling
             parent: Parent widget
         """
         super().__init__(parent)
         self.column_name = column_name
         self.unique_values = sorted(unique_values)  # Sort for consistent display
         self.checkboxes: Dict[str, QCheckBox] = {}
-        
+        self.color_scheme = color_scheme or PyQt6ColorScheme()
+        self.style_gen = StyleSheetGenerator(self.color_scheme)
+
+        # Apply frame styling
+        self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
+                border: 1px solid {self.color_scheme.to_hex(self.color_scheme.border_color)};
+                border-radius: 3px;
+            }}
+        """)
+
         self._init_ui()
     
     def _init_ui(self):
-        """Initialize the UI."""
+        """Initialize the UI with compact styling matching parameter form manager."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(3, 3, 3, 3)
-        layout.setSpacing(3)
+        layout.setContentsMargins(*COMPACT_LAYOUT.main_layout_margins)
+        layout.setSpacing(COMPACT_LAYOUT.main_layout_spacing)
 
-        # Header with select all/none buttons
+        # Header: Column title on left, buttons on right (same row)
         header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(COMPACT_LAYOUT.parameter_row_spacing)
 
+        # Column title label (bold, accent color)
+        title_label = QLabel(self.column_name)
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                font-weight: bold;
+                color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};
+                font-size: 11px;
+            }}
+        """)
+        header_layout.addWidget(title_label)
+
+        header_layout.addStretch()
+
+        # All/None buttons (compact, matching parameter form buttons)
         select_all_btn = QPushButton("All")
-        select_all_btn.setMaximumWidth(40)
+        select_all_btn.setMaximumWidth(35)
+        select_all_btn.setMaximumHeight(20)
+        select_all_btn.setStyleSheet(self.style_gen.generate_button_style())
         select_all_btn.clicked.connect(self.select_all)
         header_layout.addWidget(select_all_btn)
 
         select_none_btn = QPushButton("None")
-        select_none_btn.setMaximumWidth(40)
+        select_none_btn.setMaximumWidth(35)
+        select_none_btn.setMaximumHeight(20)
+        select_none_btn.setStyleSheet(self.style_gen.generate_button_style())
         select_none_btn.clicked.connect(self.select_none)
         header_layout.addWidget(select_none_btn)
 
-        header_layout.addStretch()
         layout.addLayout(header_layout)
 
-        # Scrollable checkbox list (no max height - let parent scroll area handle it)
+        # Scrollable checkbox list
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(80)  # Minimum to show a few items
+        scroll_area.setMinimumHeight(60)  # Minimum to show a few items
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
+                border: none;
+            }}
+        """)
 
         checkbox_container = QWidget()
         checkbox_layout = QVBoxLayout(checkbox_container)
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
-        checkbox_layout.setSpacing(1)
+        checkbox_layout.setSpacing(COMPACT_LAYOUT.content_layout_spacing)
 
-        # Create checkbox for each unique value
+        # Create checkbox for each unique value (compact styling)
         for value in self.unique_values:
             checkbox = QCheckBox(str(value))
             checkbox.setChecked(True)  # Start with all selected
+            checkbox.setStyleSheet(f"""
+                QCheckBox {{
+                    color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
+                    spacing: 4px;
+                    font-size: 11px;
+                }}
+                QCheckBox::indicator {{
+                    width: 14px;
+                    height: 14px;
+                }}
+            """)
             checkbox.stateChanged.connect(self._on_checkbox_changed)
             self.checkboxes[value] = checkbox
             checkbox_layout.addWidget(checkbox)
@@ -87,9 +142,14 @@ class ColumnFilterWidget(QWidget):
         scroll_area.setWidget(checkbox_container)
         layout.addWidget(scroll_area)
 
-        # Count label
+        # Count label (compact, secondary text color)
         self.count_label = QLabel()
-        self.count_label.setStyleSheet("font-size: 10px; color: gray;")
+        self.count_label.setStyleSheet(f"""
+            QLabel {{
+                font-size: 10px;
+                color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};
+            }}
+        """)
         self._update_count_label()
         layout.addWidget(self.count_label)
     
@@ -126,9 +186,10 @@ class ColumnFilterWidget(QWidget):
 
 class MultiColumnFilterPanel(QWidget):
     """
-    Panel containing filters for multiple columns.
+    Panel containing filters for multiple columns with resizable splitters.
 
     Provides column-based filtering with AND logic across columns.
+    Each filter can be resized independently using vertical splitters.
 
     Signals:
         filters_changed: Emitted when any filter changes
@@ -136,25 +197,28 @@ class MultiColumnFilterPanel(QWidget):
 
     filters_changed = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
         """Initialize multi-column filter panel."""
         super().__init__(parent)
         self.column_filters: Dict[str, ColumnFilterWidget] = {}
+        self.color_scheme = color_scheme or PyQt6ColorScheme()
         self._init_ui()
 
     def _init_ui(self):
-        """Initialize the UI."""
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(5, 5, 5, 5)
-        self.main_layout.setSpacing(10)
+        """Initialize the UI with vertical splitter for resizable filters."""
+        # Use vertical splitter so each filter can be resized
+        self.splitter = QSplitter(Qt.Orientation.Vertical)
+        self.splitter.setChildrenCollapsible(False)  # Prevent filters from collapsing
 
-        # Add stretch at the end to top-align filters
-        self.main_layout.addStretch()
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(self.splitter)
     
     def add_column_filter(self, column_name: str, unique_values: List[str]):
         """
         Add a filter for a column.
-        
+
         Args:
             column_name: Name of the column
             unique_values: List of unique values in this column
@@ -162,38 +226,23 @@ class MultiColumnFilterPanel(QWidget):
         if column_name in self.column_filters:
             # Remove existing filter
             self.remove_column_filter(column_name)
-        
-        # Create filter widget
-        filter_widget = ColumnFilterWidget(column_name, unique_values)
+
+        # Create filter widget with color scheme
+        filter_widget = ColumnFilterWidget(column_name, unique_values, self.color_scheme)
         filter_widget.filter_changed.connect(self._on_filter_changed)
-        
-        # Wrap in a frame with title
-        frame = QFrame()
-        frame.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        frame_layout = QVBoxLayout(frame)
-        frame_layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Column name label
-        label = QLabel(column_name.replace('_', ' ').title())
-        label.setStyleSheet("font-weight: bold;")
-        frame_layout.addWidget(label)
-        
-        frame_layout.addWidget(filter_widget)
-        
-        # Insert before the stretch
-        self.main_layout.insertWidget(self.main_layout.count() - 1, frame)
-        
+
+        # Add to splitter (each filter is independently resizable)
+        self.splitter.addWidget(filter_widget)
+
         self.column_filters[column_name] = filter_widget
     
     def remove_column_filter(self, column_name: str):
         """Remove a column filter."""
         if column_name in self.column_filters:
             widget = self.column_filters[column_name]
-            # Remove from layout
-            parent_frame = widget.parent()
-            if parent_frame:
-                self.main_layout.removeWidget(parent_frame)
-                parent_frame.deleteLater()
+            # Remove from splitter
+            widget.setParent(None)
+            widget.deleteLater()
             del self.column_filters[column_name]
     
     def clear_all_filters(self):

@@ -118,7 +118,7 @@ class ImageBrowserWidget(QWidget):
         left_splitter.addWidget(tree_widget)
 
         # Column filter panel (initially empty, populated when images load)
-        self.column_filter_panel = MultiColumnFilterPanel()
+        self.column_filter_panel = MultiColumnFilterPanel(color_scheme=self.color_scheme)
         self.column_filter_panel.filters_changed.connect(self._on_column_filters_changed)
 
         # Wrap in scroll area for vertical scrolling when many filters
