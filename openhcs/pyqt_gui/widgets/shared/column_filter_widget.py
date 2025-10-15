@@ -103,13 +103,13 @@ class ColumnFilterWidget(QFrame):
 
         layout.addLayout(header_layout)
 
-        # Scrollable checkbox list
+        # Scrollable checkbox list - each filter has its own scroll area
         from PyQt6.QtWidgets import QSizePolicy
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setMinimumHeight(60)  # Minimum to show a few items
-        # CRITICAL: Expanding vertical policy allows splitter to resize this widget
-        scroll_area.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setStyleSheet(f"""
             QScrollArea {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
@@ -145,6 +145,10 @@ class ColumnFilterWidget(QFrame):
         scroll_area.setWidget(checkbox_container)
         # Add scroll area with stretch factor so it takes up available space
         layout.addWidget(scroll_area, 1)
+
+        # Set fixed height for this widget - splitter will control the size
+        self.setMinimumHeight(100)
+        self.setMaximumHeight(300)
 
         # Count label (compact, secondary text color)
         self.count_label = QLabel()
@@ -209,20 +213,26 @@ class MultiColumnFilterPanel(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        """Initialize the UI with vertical splitter for resizable filters."""
-        from PyQt6.QtWidgets import QSizePolicy
+        """Initialize the UI with vertical splitter for resizable filters in a scroll area."""
+        from PyQt6.QtWidgets import QSizePolicy, QScrollArea
 
         # Use vertical splitter so each filter can be resized
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.splitter.setChildrenCollapsible(False)  # Prevent filters from collapsing
         self.splitter.setHandleWidth(5)  # Make handle more visible and easier to grab
-        # CRITICAL: Expanding policy allows splitter to resize properly
-        self.splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        # Wrap splitter in scroll area so the whole group can scroll
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(self.splitter)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        main_layout.addWidget(self.splitter)
+        main_layout.addWidget(scroll_area)
     
     def add_column_filter(self, column_name: str, unique_values: List[str]):
         """
@@ -232,8 +242,6 @@ class MultiColumnFilterPanel(QWidget):
             column_name: Name of the column
             unique_values: List of unique values in this column
         """
-        from PyQt6.QtWidgets import QSizePolicy
-
         if column_name in self.column_filters:
             # Remove existing filter
             self.remove_column_filter(column_name)
@@ -242,15 +250,8 @@ class MultiColumnFilterPanel(QWidget):
         filter_widget = ColumnFilterWidget(column_name, unique_values, self.color_scheme)
         filter_widget.filter_changed.connect(self._on_filter_changed)
 
-        # CRITICAL: Set size policy so splitter can resize this widget
-        filter_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
         # Add to splitter (each filter is independently resizable)
         self.splitter.addWidget(filter_widget)
-
-        # Set stretch factor for equal distribution
-        index = self.splitter.indexOf(filter_widget)
-        self.splitter.setStretchFactor(index, 1)
 
         self.column_filters[column_name] = filter_widget
 
