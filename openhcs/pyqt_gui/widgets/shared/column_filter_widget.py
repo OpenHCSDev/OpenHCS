@@ -212,22 +212,24 @@ class MultiColumnFilterPanel(QWidget):
         """Initialize the UI with vertical splitter for resizable filters in a scroll area."""
         from PyQt6.QtWidgets import QSizePolicy, QScrollArea
 
+        # Container widget to hold the splitter
+        # This allows us to control the size independently of the scroll area
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
         # Use vertical splitter so each filter can be resized
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.splitter.setChildrenCollapsible(False)  # Prevent filters from collapsing
         self.splitter.setHandleWidth(5)  # Make handle more visible and easier to grab
 
-        # CRITICAL: Set size policy to prevent splitter from shrinking
-        # This ensures splitter maintains its size and scroll area scrolls instead
-        self.splitter.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        container_layout.addWidget(self.splitter)
 
-        # Connect to splitter moved signal to update minimum size
-        self.splitter.splitterMoved.connect(self._on_splitter_moved)
-
-        # Wrap splitter in scroll area so the whole group can scroll
+        # Wrap container in scroll area so the whole group can scroll
         scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setWidget(self.splitter)
+        scroll_area.setWidgetResizable(False)  # CRITICAL: Let container control its own size
+        scroll_area.setWidget(container)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -261,13 +263,6 @@ class MultiColumnFilterPanel(QWidget):
         # Update sizes after adding widget
         self._update_splitter_sizes()
     
-    def _on_splitter_moved(self, pos, index):
-        """Handle splitter movement - update minimum height to prevent shrinking."""
-        # Calculate total height needed for all widgets at their current sizes
-        total_height = sum(self.splitter.sizes())
-        # Set minimum height to current total so splitter doesn't shrink
-        self.splitter.setMinimumHeight(total_height)
-
     def _update_splitter_sizes(self):
         """Update splitter sizes to distribute space equally among filters."""
         num_filters = len(self.column_filters)
@@ -276,8 +271,6 @@ class MultiColumnFilterPanel(QWidget):
             # Splitter can resize freely without restrictions
             sizes = [200] * num_filters
             self.splitter.setSizes(sizes)
-            # Set initial minimum height
-            self.splitter.setMinimumHeight(sum(sizes))
 
     def remove_column_filter(self, column_name: str):
         """Remove a column filter."""
