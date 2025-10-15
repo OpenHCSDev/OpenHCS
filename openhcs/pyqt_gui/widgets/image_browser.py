@@ -807,7 +807,7 @@ class ImageBrowserWidget(QWidget):
         # Get plate path
         plate_path = Path(self.orchestrator.plate_path)
 
-        # Resolve backend
+        # Resolve backend (lightweight operation, safe in UI thread)
         from openhcs.config_framework.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         global_config = get_current_global_config(GlobalPipelineConfig)
@@ -817,16 +817,7 @@ class ImageBrowserWidget(QWidget):
         else:
             read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path)
 
-        # Load all images
-        image_data_list = []
-        file_paths = []
-        for filename in filenames:
-            image_path = plate_path / filename
-            image_data = self.filemanager.load(str(image_path), read_backend)
-            image_data_list.append(image_data)
-            file_paths.append(filename)
-
-        # Resolve Napari config
+        # Resolve Napari config (lightweight operation, safe in UI thread)
         from openhcs.config_framework.context_manager import config_context
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyNapariStreamingConfig
 
@@ -837,13 +828,15 @@ class ImageBrowserWidget(QWidget):
             with config_context(temp_config):
                 napari_config = resolve_lazy_configurations_for_serialization(temp_config)
 
-        # Get or create viewer
+        # Get or create viewer (lightweight operation, safe in UI thread)
         viewer = self.orchestrator.get_or_create_visualizer(napari_config)
 
-        # Stream batch to Napari (wait happens in background thread)
-        self._stream_batch_to_napari(viewer, image_data_list, file_paths, napari_config)
+        # Load and stream in background thread (HEAVY OPERATION - must not block UI)
+        self._load_and_stream_batch_to_napari_async(
+            viewer, filenames, plate_path, read_backend, napari_config
+        )
 
-        logger.info(f"Streaming batch of {len(filenames)} images to Napari viewer on port {napari_config.napari_port}...")
+        logger.info(f"Loading and streaming batch of {len(filenames)} images to Napari viewer on port {napari_config.napari_port}...")
 
     def _load_and_stream_batch_to_fiji(self, filenames: list):
         """Load multiple images and stream as batch to Fiji (builds hyperstack)."""
@@ -853,7 +846,7 @@ class ImageBrowserWidget(QWidget):
         # Get plate path
         plate_path = Path(self.orchestrator.plate_path)
 
-        # Resolve backend
+        # Resolve backend (lightweight operation, safe in UI thread)
         from openhcs.config_framework.global_config import get_current_global_config
         from openhcs.core.config import GlobalPipelineConfig
         global_config = get_current_global_config(GlobalPipelineConfig)
@@ -863,16 +856,7 @@ class ImageBrowserWidget(QWidget):
         else:
             read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path)
 
-        # Load all images
-        image_data_list = []
-        file_paths = []
-        for filename in filenames:
-            image_path = plate_path / filename
-            image_data = self.filemanager.load(str(image_path), read_backend)
-            image_data_list.append(image_data)
-            file_paths.append(filename)
-
-        # Resolve Fiji config
+        # Resolve Fiji config (lightweight operation, safe in UI thread)
         from openhcs.config_framework.context_manager import config_context
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyFijiStreamingConfig
 
@@ -883,15 +867,92 @@ class ImageBrowserWidget(QWidget):
             with config_context(temp_config):
                 fiji_config = resolve_lazy_configurations_for_serialization(temp_config)
 
-        # Get or create viewer
+        # Get or create viewer (lightweight operation, safe in UI thread)
         viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
 
-        # Stream batch to Fiji (wait happens in background thread)
-        self._stream_batch_to_fiji(viewer, image_data_list, file_paths, fiji_config)
+        # Load and stream in background thread (HEAVY OPERATION - must not block UI)
+        self._load_and_stream_batch_to_fiji_async(
+            viewer, filenames, plate_path, read_backend, fiji_config
+        )
 
-        logger.info(f"Streaming batch of {len(filenames)} images to Fiji viewer on port {fiji_config.fiji_port}...")
+        logger.info(f"Loading and streaming batch of {len(filenames)} images to Fiji viewer on port {fiji_config.fiji_port}...")
 
+    def _load_and_stream_batch_to_napari_async(self, viewer, filenames: list, plate_path: Path,
+                                                 read_backend: str, config):
+        """Load and stream batch of images to Napari in background thread (NEVER blocks UI)."""
+        import threading
 
+        def load_and_stream():
+            try:
+                # HEAVY OPERATION: Load all images (runs in background thread)
+                image_data_list = []
+                file_paths = []
+                for filename in filenames:
+                    image_path = plate_path / filename
+                    image_data = self.filemanager.load(str(image_path), read_backend)
+                    image_data_list.append(image_data)
+                    file_paths.append(filename)
+
+                logger.info(f"Loaded {len(image_data_list)} images in background thread")
+
+                # Register that we're launching a viewer
+                from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
+                    register_launching_viewer, unregister_launching_viewer
+                )
+
+                # Check if viewer is already ready (quick ping with short timeout)
+                is_already_running = viewer.wait_for_ready(timeout=0.1)
+
+                if not is_already_running:
+                    # Viewer is launching - register it and show in UI
+                    register_launching_viewer(viewer.napari_port, 'napari', len(file_paths))
+                    logger.info(f"Waiting for Napari viewer on port {viewer.napari_port} to be ready...")
+
+                    # Wait for viewer to be ready before streaming
+                    if not viewer.wait_for_ready(timeout=15.0):
+                        unregister_launching_viewer(viewer.napari_port)
+                        raise RuntimeError(f"Napari viewer on port {viewer.napari_port} failed to become ready")
+
+                    logger.info(f"Napari viewer on port {viewer.napari_port} is ready")
+                    # Unregister from launching registry (now ready)
+                    unregister_launching_viewer(viewer.napari_port)
+                else:
+                    logger.info(f"Napari viewer on port {viewer.napari_port} is already running")
+
+                # Use the napari streaming backend to send the batch
+                from openhcs.constants.constants import Backend as BackendEnum
+
+                # Prepare metadata for streaming
+                metadata = {
+                    'napari_port': viewer.napari_port,
+                    'display_config': config,
+                    'microscope_handler': self.orchestrator.microscope_handler,
+                    'step_index': 0,
+                    'step_name': 'image_browser'
+                }
+
+                # Stream batch to Napari
+                self.filemanager.save_batch(
+                    image_data_list,
+                    file_paths,
+                    BackendEnum.NAPARI_STREAM.value,
+                    **metadata
+                )
+                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Napari on port {viewer.napari_port}")
+            except Exception as e:
+                logger.error(f"Failed to load/stream batch to Napari: {e}")
+                # Show error in UI thread
+                from PyQt6.QtCore import QMetaObject, Qt
+                QMetaObject.invokeMethod(
+                    self, "_show_streaming_error",
+                    Qt.ConnectionType.QueuedConnection,
+                    str(e)
+                )
+
+        # Start loading and streaming in background thread
+        thread = threading.Thread(target=load_and_stream, daemon=True)
+        thread.start()
+        logger.info(f"Started background thread to load and stream {len(filenames)} images to Napari")
 
     def _stream_batch_to_napari(self, viewer, image_data_list: list, file_paths: list, config):
         """Stream batch of images to Napari viewer asynchronously (builds hyperstack)."""
@@ -963,6 +1024,83 @@ class ImageBrowserWidget(QWidget):
     def _show_streaming_error(self, error_msg: str):
         """Show streaming error in UI thread (called via QMetaObject.invokeMethod)."""
         QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Napari: {error_msg}")
+
+    def _load_and_stream_batch_to_fiji_async(self, viewer, filenames: list, plate_path: Path,
+                                               read_backend: str, config):
+        """Load and stream batch of images to Fiji in background thread (NEVER blocks UI)."""
+        import threading
+
+        def load_and_stream():
+            try:
+                # HEAVY OPERATION: Load all images (runs in background thread)
+                image_data_list = []
+                file_paths = []
+                for filename in filenames:
+                    image_path = plate_path / filename
+                    image_data = self.filemanager.load(str(image_path), read_backend)
+                    image_data_list.append(image_data)
+                    file_paths.append(filename)
+
+                logger.info(f"Loaded {len(image_data_list)} images in background thread")
+
+                # Register that we're launching a viewer
+                from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import (
+                    register_launching_viewer, unregister_launching_viewer
+                )
+
+                # Check if viewer is already ready (quick ping with short timeout)
+                is_already_running = viewer.wait_for_ready(timeout=0.1)
+
+                if not is_already_running:
+                    # Viewer is launching - register it and show in UI
+                    register_launching_viewer(viewer.fiji_port, 'fiji', len(file_paths))
+                    logger.info(f"Waiting for Fiji viewer on port {viewer.fiji_port} to be ready...")
+
+                    # Wait for viewer to be ready before streaming
+                    if not viewer.wait_for_ready(timeout=15.0):
+                        unregister_launching_viewer(viewer.fiji_port)
+                        raise RuntimeError(f"Fiji viewer on port {viewer.fiji_port} failed to become ready")
+
+                    logger.info(f"Fiji viewer on port {viewer.fiji_port} is ready")
+                    # Unregister from launching registry (now ready)
+                    unregister_launching_viewer(viewer.fiji_port)
+                else:
+                    logger.info(f"Fiji viewer on port {viewer.fiji_port} is already running")
+
+                # Use the Fiji streaming backend to send the batch
+                from openhcs.constants.constants import Backend as BackendEnum
+
+                # Prepare metadata for streaming
+                metadata = {
+                    'fiji_port': viewer.fiji_port,
+                    'display_config': config,
+                    'microscope_handler': self.orchestrator.microscope_handler,
+                    'step_index': 0,
+                    'step_name': 'image_browser'
+                }
+
+                # Stream batch to Fiji
+                self.filemanager.save_batch(
+                    image_data_list,
+                    file_paths,
+                    BackendEnum.FIJI_STREAM.value,
+                    **metadata
+                )
+                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.fiji_port}")
+            except Exception as e:
+                logger.error(f"Failed to load/stream batch to Fiji: {e}")
+                # Show error in UI thread
+                from PyQt6.QtCore import QMetaObject, Qt
+                QMetaObject.invokeMethod(
+                    self, "_show_fiji_streaming_error",
+                    Qt.ConnectionType.QueuedConnection,
+                    str(e)
+                )
+
+        # Start loading and streaming in background thread
+        thread = threading.Thread(target=load_and_stream, daemon=True)
+        thread.start()
+        logger.info(f"Started background thread to load and stream {len(filenames)} images to Fiji")
 
     def _stream_batch_to_fiji(self, viewer, image_data_list: list, file_paths: list, config):
         """Stream batch of images to Fiji viewer asynchronously (builds hyperstack)."""
