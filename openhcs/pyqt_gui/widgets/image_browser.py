@@ -22,6 +22,7 @@ from openhcs.io.filemanager import FileManager
 from openhcs.io.base import storage_registry
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from openhcs.pyqt_gui.widgets.shared.column_filter_widget import MultiColumnFilterPanel
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +56,15 @@ class ImageBrowserWidget(QWidget):
         self.all_images = {}  # filename -> metadata dict
         self.filtered_images = {}  # filename -> metadata dict (after search/filter)
         self.selected_wells = set()  # Selected wells for filtering
+        self.metadata_keys = []  # Column names from parser metadata
 
         # Plate view widget (will be created in init_ui)
         self.plate_view_widget = None
         self.plate_view_detached_window = None
         self.middle_splitter = None  # Reference to splitter for reattaching
+
+        # Column filter panel
+        self.column_filter_panel = None
 
         # Start global ack listener for image acknowledgment tracking
         from openhcs.runtime.zmq_base import start_global_ack_listener
@@ -101,6 +106,19 @@ class ImageBrowserWidget(QWidget):
         search_layout.addWidget(self.search_input)
 
         layout.addLayout(search_layout)
+
+        # Column filter panel (initially empty, populated when images load)
+        self.column_filter_panel = MultiColumnFilterPanel()
+        self.column_filter_panel.filters_changed.connect(self._on_column_filters_changed)
+
+        # Wrap in scroll area for horizontal scrolling when many columns
+        filter_scroll = QScrollArea()
+        filter_scroll.setWidgetResizable(True)
+        filter_scroll.setMaximumHeight(200)  # Limit vertical space
+        filter_scroll.setWidget(self.column_filter_panel)
+        filter_scroll.setVisible(False)  # Hidden until images load
+        self.filter_scroll_area = filter_scroll
+        layout.addWidget(filter_scroll)
 
         # Create main splitter (tree | table | config)
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -437,7 +455,7 @@ class ImageBrowserWidget(QWidget):
             self._update_plate_view()
 
     def _apply_combined_filters(self):
-        """Apply search, folder, and well filters together."""
+        """Apply search, folder, well, and column filters together."""
         # Start with search-filtered images
         result = self.filtered_images.copy()
 
@@ -459,9 +477,63 @@ class ImageBrowserWidget(QWidget):
                 if self._matches_wells(filename, metadata)
             }
 
+        # Apply column filters
+        if self.column_filter_panel:
+            active_filters = self.column_filter_panel.get_active_filters()
+            if active_filters:
+                # Filter with AND logic across columns
+                filtered_result = {}
+                for filename, metadata in result.items():
+                    matches = True
+                    for column_name, selected_values in active_filters.items():
+                        # Get the metadata key (lowercase with underscores)
+                        metadata_key = column_name.lower().replace(' ', '_')
+                        item_value = str(metadata.get(metadata_key, ''))
+                        if item_value not in selected_values:
+                            matches = False
+                            break
+                    if matches:
+                        filtered_result[filename] = metadata
+                result = filtered_result
+
         # Update table with combined filters
         self._populate_table(result)
         logger.debug(f"Combined filters: {len(result)} images shown")
+
+    def _build_column_filters(self):
+        """Build column filter widgets from loaded image metadata."""
+        if not self.all_images or not self.metadata_keys:
+            return
+
+        # Clear existing filters
+        self.column_filter_panel.clear_all_filters()
+
+        # Extract unique values for each metadata column
+        for metadata_key in self.metadata_keys:
+            unique_values = set()
+            for metadata in self.all_images.values():
+                value = metadata.get(metadata_key)
+                if value is not None:
+                    unique_values.add(str(value))
+
+            if unique_values:
+                # Create filter for this column
+                column_display_name = metadata_key.replace('_', ' ').title()
+                self.column_filter_panel.add_column_filter(column_display_name, sorted(list(unique_values)))
+
+        # Show filter panel if we have filters
+        if self.column_filter_panel.column_filters:
+            self.filter_scroll_area.setVisible(True)
+
+        logger.debug(f"Built {len(self.column_filter_panel.column_filters)} column filters")
+
+    def _on_column_filters_changed(self):
+        """Handle column filter changes."""
+        self._apply_combined_filters()
+
+        # Update plate view if visible
+        if self.plate_view_widget and self.plate_view_widget.isVisible():
+            self._update_plate_view()
 
     def filter_images(self, search_term: str):
         """Filter images using shared search service (canonical code path)."""
@@ -490,7 +562,7 @@ class ImageBrowserWidget(QWidget):
         # Perform search using shared service
         self.filtered_images = self._search_service.filter(search_term)
 
-        # Apply combined filters (search + folder selection)
+        # Apply combined filters (search + folder + column filters)
         self._apply_combined_filters()
 
     def load_images(self):
@@ -517,10 +589,10 @@ class ImageBrowserWidget(QWidget):
 
             if first_parsed:
                 # Get metadata keys (excluding 'extension')
-                metadata_keys = [k for k in first_parsed.keys() if k != 'extension']
+                self.metadata_keys = [k for k in first_parsed.keys() if k != 'extension']
 
                 # Set up table columns: Filename + metadata keys
-                column_headers = ["Filename"] + [k.replace('_', ' ').title() for k in metadata_keys]
+                column_headers = ["Filename"] + [k.replace('_', ' ').title() for k in self.metadata_keys]
                 self.image_table.setColumnCount(len(column_headers))
                 self.image_table.setHorizontalHeaderLabels(column_headers)
 
@@ -532,7 +604,7 @@ class ImageBrowserWidget(QWidget):
                 # Fallback if parsing fails
                 self.image_table.setColumnCount(1)
                 self.image_table.setHorizontalHeaderLabels(["Filename"])
-                metadata_keys = []
+                self.metadata_keys = []
 
             # Build all_images dictionary
             self.all_images = {}
@@ -548,6 +620,9 @@ class ImageBrowserWidget(QWidget):
 
             # Build folder tree from file paths
             self._build_folder_tree()
+
+            # Build column filters from metadata
+            self._build_column_filters()
 
             # Populate table
             self._populate_table(self.filtered_images)
