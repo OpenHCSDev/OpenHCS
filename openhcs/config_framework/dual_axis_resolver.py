@@ -156,34 +156,17 @@ def resolve_field_inheritance_old(
                     # Field doesn't exist on this config type
                     continue
 
-    # Step 4: Cross-dataclass inheritance from related config types (PRIORITY-ORDERED)
+    # Step 4: Cross-dataclass inheritance from related config types (MRO-based)
     # NOTE: Inheritance blocking was already applied in Step 2, so this only runs for types without concrete overrides
-    # CRITICAL FIX: Process configs in priority order to ensure proper inheritance hierarchy
-    sorted_configs = _sort_configs_by_priority(available_configs)
-
-    for config_name, config_instance in sorted_configs:
+    # Uses pure MRO-based resolution - no custom priority functions needed
+    for config_name, config_instance in available_configs.items():
         config_type = type(config_instance)
-        if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-            priority = _get_config_priority(config_type)
-            logger.debug(f"🔍 CROSS-DATACLASS: Checking {config_type.__name__} (priority {priority}) for {field_name}")
 
         if _is_related_config_type(obj_type, config_type):
             # Skip if this is the same type as the requesting object (avoid self-inheritance)
             if config_type == obj_type:
                 if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
                     logger.debug(f"🔍 CROSS-DATACLASS: Skipping self-inheritance from {config_type.__name__}")
-                continue
-
-            # CRITICAL FIX: Prevent lower-priority configs from inheriting from higher-priority configs
-            # Base classes (higher priority numbers) should NOT inherit from derived classes (lower priority numbers)
-            obj_priority = _get_config_priority(obj_type)
-            config_priority = _get_config_priority(config_type)
-
-            if obj_priority > config_priority:
-                # Requesting object has LOWER priority (higher number) than the config - skip inheritance
-                # Example: WellFilterConfig (priority 11) should NOT inherit from StepWellFilterConfig (priority 2)
-                if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-                    logger.debug(f"🔍 CROSS-DATACLASS: Skipping inheritance from higher-priority {config_type.__name__} (priority {config_priority}) to lower-priority {obj_type.__name__} (priority {obj_priority})")
                 continue
 
             try:
@@ -193,7 +176,7 @@ def resolve_field_inheritance_old(
                     logger.debug(f"🔍 CROSS-DATACLASS: {config_type.__name__}.{field_name} = {value} (related config)")
                 if value is not None:
                     if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
-                        logger.debug(f"🔍 CROSS-DATACLASS: FOUND {config_type.__name__}.{field_name}: {value} (priority {priority})")
+                        logger.debug(f"🔍 CROSS-DATACLASS: FOUND {config_type.__name__}.{field_name}: {value}")
                     logger.debug(f"Cross-dataclass inheritance from {config_type.__name__}: {value}")
                     return value
             except AttributeError:

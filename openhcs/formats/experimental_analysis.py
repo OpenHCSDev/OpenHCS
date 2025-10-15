@@ -760,23 +760,7 @@ def create_table_for_feature_per_well(feature,experiment_dict_values):
 
     return pd.DataFrame([values], columns=col_names)
 
-def create_feature_results_table(feature,experiment_dict):
-    replicates = list(experiment_dict_values.keys())
-    conditions = list(list(experiment_dict_values.values()).keys())
-    col_names=[]
-    for replicate in replicates:
-        for condition in conditions:
-            col_names.append(str(replicate)+"_"+str(condition))
-    feature_table = {col_name:[] for col_name in col_names}
-    for condition in conditions:
-        for replicate in replicates:
-            col_name=(str(condition)+"_"+str(replicate))
-            for dose in doses:
-                feature_table[col_name].append(plates_dict[replicate][dose][condition][feature])
-    feature_table=pd.DataFrame(feature_table)
-    feature_table.columns = pd.MultiIndex.from_tuples([(c.split("_")) for c in feature_table.columns])
-    feature_table.index = replicates
-    return feature_table
+
 
 def create_all_feature_tables(experiment_dict_values,features,per_well_datapoints=False):
     """Create feature tables. Both modes now use the same function since data is in dict format."""
