@@ -3,14 +3,17 @@
 import logging
 import time
 import uuid
+import zmq
 import threading
 import queue
 import os
+import signal
 from pathlib import Path
+from typing import Any, Dict, Optional, List
 from openhcs.runtime.zmq_base import ZMQServer
 from openhcs.runtime.zmq_messages import (
     ControlMessageType, ResponseType, ExecutionStatus, MessageFields,
-    PongResponse, ExecuteRequest, ExecuteResponse, StatusRequest, CancelRequest,
+    PongResponse, ExecuteRequest, ExecuteResponse, StatusRequest, CancelRequest, ProgressUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -160,6 +163,7 @@ class ZMQExecutionServer(ZMQServer):
         return self._shutdown_workers(force=False)
 
     def _execute_pipeline(self, execution_id, plate_id, pipeline_code, config_params, config_code, pipeline_config_code, client_address=None):
+        from openhcs.constants import AllComponents, VariableComponents, GroupBy
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 
         logger.info(f"[{execution_id}] Starting plate {plate_id}")
@@ -195,11 +199,12 @@ class ZMQExecutionServer(ZMQServer):
         ), PipelineConfig())
 
     def _execute_with_orchestrator(self, execution_id, plate_id, pipeline_steps, global_config, pipeline_config, config_params):
+        from pathlib import Path
         import multiprocessing
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
         from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-        from openhcs.constants import MULTIPROCESSING_AXIS
+        from openhcs.constants import AllComponents, VariableComponents, GroupBy, MULTIPROCESSING_AXIS
         from openhcs.io.base import reset_memory_backend, storage_registry
         from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
         from openhcs.io.omero_local import OMEROLocalBackend

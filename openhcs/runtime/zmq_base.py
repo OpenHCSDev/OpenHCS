@@ -6,9 +6,11 @@ import subprocess
 import platform
 import time
 import threading
+import os
 from abc import ABC, abstractmethod
+from pathlib import Path
 import pickle
-from openhcs.runtime.zmq_messages import ControlMessageType, MessageFields, PongResponse, SocketType, ImageAck
+from openhcs.runtime.zmq_messages import ControlMessageType, ResponseType, MessageFields, PongResponse, SocketType, ImageAck
 
 logger = logging.getLogger(__name__)
 
@@ -517,7 +519,7 @@ class ZMQClient(ABC):
                     # Graceful shutdown timeout - server might have killed workers but didn't respond
                     # This is OK, consider it success
                     logger.info(f"⚠️ Graceful shutdown message sent to port {port}, but no response received: {e}")
-                    logger.info("✅ Considering graceful shutdown successful (workers likely killed)")
+                    logger.info(f"✅ Considering graceful shutdown successful (workers likely killed)")
                     return True
                 else:
                     # Force shutdown timeout - check if port is free

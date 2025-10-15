@@ -118,16 +118,12 @@ class ImageBrowserWidget(QWidget):
         left_splitter.addWidget(tree_widget)
 
         # Column filter panel (initially empty, populated when images load)
+        # DO NOT wrap in scroll area - breaks splitter resizing!
+        # Each filter has its own scroll area for checkboxes
         self.column_filter_panel = MultiColumnFilterPanel(color_scheme=self.color_scheme)
         self.column_filter_panel.filters_changed.connect(self._on_column_filters_changed)
-
-        # Wrap in scroll area for vertical scrolling when many filters
-        filter_scroll = QScrollArea()
-        filter_scroll.setWidgetResizable(True)
-        filter_scroll.setWidget(self.column_filter_panel)
-        filter_scroll.setVisible(False)  # Hidden until images load
-        self.filter_scroll_area = filter_scroll
-        left_splitter.addWidget(filter_scroll)
+        self.column_filter_panel.setVisible(False)  # Hidden until images load
+        left_splitter.addWidget(self.column_filter_panel)
 
         # Set initial sizes: tree gets more space (60% tree, 40% filters)
         left_splitter.setSizes([300, 200])
@@ -530,7 +526,7 @@ class ImageBrowserWidget(QWidget):
 
         # Show filter panel if we have filters
         if self.column_filter_panel.column_filters:
-            self.filter_scroll_area.setVisible(True)
+            self.column_filter_panel.setVisible(True)
 
         logger.debug(f"Built {len(self.column_filter_panel.column_filters)} column filters")
 

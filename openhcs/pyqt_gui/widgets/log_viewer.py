@@ -12,7 +12,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
-    QTextEdit, QToolBar, QLineEdit, QCheckBox, QPushButton
+    QTextEdit, QToolBar, QLineEdit, QCheckBox, QPushButton, QDialog
 )
 from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument
 from PyQt6.QtCore import QObject, QTimer, QFileSystemWatcher, pyqtSignal, pyqtSlot, Qt, QRegularExpression, QThread
@@ -20,6 +20,9 @@ from PyQt6.QtGui import QTextCharFormat, QColor, QAction, QFont, QTextCursor
 
 from openhcs.io.filemanager import FileManager
 from openhcs.core.log_utils import LogFileInfo
+from openhcs.pyqt_gui.utils.log_detection_utils import (
+    get_current_tui_log_path, discover_logs, discover_all_logs
+)
 from openhcs.core.log_utils import (
     classify_log_file, is_openhcs_log_file, infer_base_log_path
 )
@@ -28,8 +31,14 @@ from openhcs.pyqt_gui.utils.process_tracker import (
 )
 
 # Import Pygments for advanced syntax highlighting
+from pygments import highlight
+from pygments.lexers import PythonLexer, get_lexer_by_name
+from pygments.formatters import get_formatter_by_name
 from pygments.token import Token
+from pygments.style import Style
+from pygments.styles import get_style_by_name
 from dataclasses import dataclass
+from typing import Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -1013,7 +1022,7 @@ class LogViewerWindow(QMainWindow):
     def clear_subprocess_logs(self) -> None:
         """Remove all non-TUI logs from dropdown and switch to TUI log."""
         import traceback
-        logger.error("🔥 DEBUG: clear_subprocess_logs called! Stack trace:")
+        logger.error(f"🔥 DEBUG: clear_subprocess_logs called! Stack trace:")
         for line in traceback.format_stack():
             logger.error(f"🔥 DEBUG: {line.strip()}")
 
