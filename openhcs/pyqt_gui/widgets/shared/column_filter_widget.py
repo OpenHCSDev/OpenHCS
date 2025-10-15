@@ -216,10 +216,13 @@ class MultiColumnFilterPanel(QWidget):
         self.splitter = QSplitter(Qt.Orientation.Vertical)
         self.splitter.setChildrenCollapsible(False)  # Prevent filters from collapsing
         self.splitter.setHandleWidth(5)  # Make handle more visible and easier to grab
+        # Set minimum width so splitter doesn't collapse horizontally
+        self.splitter.setMinimumWidth(200)
 
         # Wrap splitter in scroll area so the whole group can scroll
+        # CRITICAL: setWidgetResizable(False) allows splitter to expand beyond visible area
         scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidgetResizable(False)  # Let splitter control its own size
         scroll_area.setWidget(self.splitter)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
