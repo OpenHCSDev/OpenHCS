@@ -146,10 +146,6 @@ class ColumnFilterWidget(QFrame):
         # Add scroll area with stretch factor so it takes up available space
         layout.addWidget(scroll_area, 1)
 
-        # Set fixed height for this widget - splitter will control the size
-        self.setMinimumHeight(100)
-        self.setMaximumHeight(300)
-
         # Count label (compact, secondary text color)
         self.count_label = QLabel()
         self.count_label.setStyleSheet(f"""
@@ -262,8 +258,9 @@ class MultiColumnFilterPanel(QWidget):
         """Update splitter sizes to distribute space equally among filters."""
         num_filters = len(self.column_filters)
         if num_filters > 0:
-            # Give each filter equal space (e.g., 150px each)
-            sizes = [150] * num_filters
+            # Give each filter generous initial space (200px each)
+            # Splitter can resize freely without restrictions
+            sizes = [200] * num_filters
             self.splitter.setSizes(sizes)
 
     def remove_column_filter(self, column_name: str):
