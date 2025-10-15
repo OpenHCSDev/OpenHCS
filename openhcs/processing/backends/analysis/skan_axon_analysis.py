@@ -241,7 +241,8 @@ def skan_axon_skeletonize_and_analyze(
         raise ValueError(f"Invalid analysis_dimension: {analysis_dimension}")
     
     # Step 5: Filter results
-    if min_branch_length > 0 and len(branch_data) > 0 and 'branch_distance' in branch_data.columns:
+    # DataFrame always has proper schema (even when empty), so we can filter directly
+    if min_branch_length > 0 and len(branch_data) > 0:
         branch_data = branch_data[branch_data['branch_distance'] >= min_branch_length]
 
     # Step 6: Generate skeleton visualizations if requested
@@ -341,6 +342,50 @@ def _skeletonize_3d(binary_stack):
     return skeleton_stack
 
 
+def _create_empty_branch_dataframe(include_2d_columns: bool = False):
+    """
+    Create an empty DataFrame with the expected skan branch data schema.
+
+    This ensures consistent DataFrame structure even when no branches are found,
+    preventing KeyError when filtering or processing results.
+
+    Args:
+        include_2d_columns: If True, include additional columns for 2D slice analysis
+
+    Returns:
+        Empty DataFrame with proper column schema
+    """
+    # Core columns from skan.summarize()
+    columns = [
+        'skeleton_id',
+        'node_id_src',
+        'node_id_dst',
+        'branch_distance',
+        'branch_type',
+        'mean_pixel_value',
+        'stdev_pixel_value',
+        'image_coord_src_0',
+        'image_coord_src_1',
+        'image_coord_src_2',
+        'image_coord_dst_0',
+        'image_coord_dst_1',
+        'image_coord_dst_2',
+        'coord_src_0',
+        'coord_src_1',
+        'coord_src_2',
+        'coord_dst_0',
+        'coord_dst_1',
+        'coord_dst_2',
+        'euclidean_distance',
+    ]
+
+    # Add 2D-specific columns if requested
+    if include_2d_columns:
+        columns.extend(['z_slice', 'z_coord', 'skeleton_id'])
+
+    return pd.DataFrame(columns=columns)
+
+
 def _analyze_3d_skeleton(skeleton_stack, voxel_spacing):
     """Analyze skeleton as single 3D network."""
     try:
@@ -351,7 +396,7 @@ def _analyze_3d_skeleton(skeleton_stack, voxel_spacing):
 
     if not skeleton_stack.any():
         logger.warning("Empty skeleton - returning empty analysis")
-        return pd.DataFrame()
+        return _create_empty_branch_dataframe()
 
     # Single 3D analysis - preserves Z-connections
     skeleton_obj = Skeleton(skeleton_stack, spacing=voxel_spacing)
@@ -394,7 +439,7 @@ def _analyze_2d_slices(skeleton_stack, voxel_spacing):
         return combined_data
     else:
         logger.warning("No skeleton data found in any slice")
-        return pd.DataFrame()
+        return _create_empty_branch_dataframe(include_2d_columns=True)
 
 
 def _create_output_array_2d(slice_image, slice_binary, slice_skeleton, output_mode):
