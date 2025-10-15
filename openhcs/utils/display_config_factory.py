@@ -14,6 +14,9 @@ def create_display_config(
     base_fields: Dict[str, tuple[Type, Any]],
     component_mode_enum: Type[Enum],
     component_defaults: Optional[Dict[str, Any]] = None,
+    virtual_components: Optional[Type[Enum]] = None,
+    component_order: Optional[list[str]] = None,
+    default_mode: Optional[Any] = None,
     methods: Optional[Dict[str, Callable]] = None,
     docstring: Optional[str] = None
 ) -> Type:
@@ -23,13 +26,18 @@ def create_display_config(
     Creates a frozen dataclass with:
     - Base fields (e.g., colormap, variable_size_handling)
     - Component-specific mode fields (e.g., channel_mode, z_index_mode, well_mode)
+    - Virtual component mode fields (e.g., step_name_mode, source_mode)
     - Custom methods (e.g., get_dimension_mode, get_colormap_name)
+    - COMPONENT_ORDER class attribute for canonical layer naming order
 
     Args:
         name: Name of the dataclass to create
         base_fields: Dict mapping field names to (type, default_value) tuples
         component_mode_enum: Enum class for component dimension modes
         component_defaults: Optional dict mapping component names to default modes
+        virtual_components: Optional enum of virtual components (step_name, source, etc.)
+        component_order: Canonical order for layer naming (e.g., ['step_name', 'source', 'well', ...])
+        default_mode: Default mode for components not specified in component_defaults (required)
         methods: Optional dict mapping method names to method implementations
         docstring: Optional docstring for the created class
 
@@ -45,6 +53,8 @@ def create_display_config(
         ...     },
         ...     component_mode_enum=NapariDimensionMode,
         ...     component_defaults={'channel': NapariDimensionMode.SLICE},
+        ...     virtual_components=VirtualComponents,
+        ...     component_order=['step_name', 'source', 'well', 'channel'],
         ...     methods={'get_colormap_name': lambda self: self.colormap.value}
         ... )
     """
@@ -57,6 +67,10 @@ def create_display_config(
     all_components = list(AllComponents)
     component_defaults = component_defaults or {}
 
+    # Require explicit default_mode - no magic fallbacks
+    if default_mode is None:
+        raise ValueError("default_mode is required - specify the default mode for unspecified components")
+
     annotations = {}
     defaults = {}
 
@@ -64,10 +78,18 @@ def create_display_config(
         annotations[field_name] = field_type
         defaults[field_name] = default_value
 
+    # Generate mode fields for filename components
     for component in all_components:
         field_name = f"{component.value}_mode"
         annotations[field_name] = component_mode_enum
-        defaults[field_name] = component_defaults.get(component.value, list(component_mode_enum)[1])
+        defaults[field_name] = component_defaults.get(component.value, default_mode)
+
+    # Generate mode fields for virtual components
+    if virtual_components:
+        for component in virtual_components:
+            field_name = f"{component.value}_mode"
+            annotations[field_name] = component_mode_enum
+            defaults[field_name] = component_defaults.get(component.value, default_mode)
 
     def __init__(self, **kwargs):
         for field_name, default_value in defaults.items():
@@ -85,6 +107,10 @@ def create_display_config(
     for field_name, default_value in defaults.items():
         class_attrs[field_name] = default_value
 
+    # Add component order as class attribute
+    if component_order:
+        class_attrs['COMPONENT_ORDER'] = component_order
+
     if methods:
         class_attrs.update(methods)
 
@@ -101,7 +127,10 @@ def create_display_config(
 def create_napari_display_config(
     colormap_enum: Type[Enum],
     dimension_mode_enum: Type[Enum],
-    variable_size_handling_enum: Type[Enum]
+    variable_size_handling_enum: Type[Enum],
+    virtual_components: Optional[Type[Enum]] = None,
+    component_order: Optional[list[str]] = None,
+    virtual_component_defaults: Optional[Dict[str, Any]] = None
 ) -> Type:
     """
     Create NapariDisplayConfig with component-specific fields.
@@ -110,6 +139,9 @@ def create_napari_display_config(
         colormap_enum: Enum for colormap options
         dimension_mode_enum: Enum for dimension modes (SLICE/STACK)
         variable_size_handling_enum: Enum for variable size handling
+        virtual_components: Optional enum of virtual components (step_name, source, etc.)
+        component_order: Canonical order for layer naming
+        virtual_component_defaults: Optional dict mapping virtual component names to default modes
 
     Returns:
         NapariDisplayConfig dataclass
@@ -133,6 +165,11 @@ def create_napari_display_config(
     def get_colormap_name(self):
         return self.colormap.value
 
+    # Merge component defaults
+    component_defaults = {'channel': dimension_mode_enum.SLICE}
+    if virtual_component_defaults:
+        component_defaults.update(virtual_component_defaults)
+
     return create_display_config(
         name='NapariDisplayConfig',
         base_fields={
@@ -140,7 +177,10 @@ def create_napari_display_config(
             'variable_size_handling': (variable_size_handling_enum, variable_size_handling_enum.SEPARATE_LAYERS),
         },
         component_mode_enum=dimension_mode_enum,
-        component_defaults={'channel': dimension_mode_enum.SLICE},
+        component_defaults=component_defaults,
+        virtual_components=virtual_components,
+        component_order=component_order,
+        default_mode=dimension_mode_enum.STACK,
         methods={
             'get_dimension_mode': get_dimension_mode,
             'get_colormap_name': get_colormap_name,
@@ -153,13 +193,18 @@ def create_napari_display_config(
 
         Includes ALL dimensions (site, channel, z_index, timepoint, well) regardless of
         which dimension is used as the multiprocessing axis.
+
+        Also includes virtual components (step_name, step_index, source) for streaming contexts.
         """
     )
 
 
 def create_fiji_display_config(
     lut_enum: Type[Enum],
-    dimension_mode_enum: Type[Enum]
+    dimension_mode_enum: Type[Enum],
+    virtual_components: Optional[Type[Enum]] = None,
+    component_order: Optional[list[str]] = None,
+    virtual_component_defaults: Optional[Dict[str, Any]] = None
 ) -> Type:
     """
     Create FijiDisplayConfig with component-specific fields.
@@ -175,6 +220,9 @@ def create_fiji_display_config(
     Args:
         lut_enum: Enum for Fiji LUT options
         dimension_mode_enum: Enum for dimension modes (WINDOW/CHANNEL/SLICE/FRAME)
+        virtual_components: Optional enum of virtual components (step_name, source, etc.)
+        component_order: Canonical order for layer naming
+        virtual_component_defaults: Optional dict mapping virtual component names to default modes
 
     Returns:
         FijiDisplayConfig dataclass
@@ -206,6 +254,17 @@ def create_fiji_display_config(
     def get_lut_name(self):
         return self.lut.value
 
+    # Merge component defaults
+    component_defaults = {
+        'well': dimension_mode_enum.WINDOW,
+        'site': dimension_mode_enum.CHANNEL,
+        'channel': dimension_mode_enum.CHANNEL,
+        'z_index': dimension_mode_enum.SLICE,
+        'timepoint': dimension_mode_enum.FRAME
+    }
+    if virtual_component_defaults:
+        component_defaults.update(virtual_component_defaults)
+
     return create_display_config(
         name='FijiDisplayConfig',
         base_fields={
@@ -213,13 +272,10 @@ def create_fiji_display_config(
             'auto_contrast': (bool, True),
         },
         component_mode_enum=dimension_mode_enum,
-        component_defaults={
-            'well': dimension_mode_enum.WINDOW,
-            'site': dimension_mode_enum.CHANNEL,
-            'channel': dimension_mode_enum.CHANNEL,
-            'z_index': dimension_mode_enum.SLICE,
-            'timepoint': dimension_mode_enum.FRAME
-        },
+        component_defaults=component_defaults,
+        virtual_components=virtual_components,
+        component_order=component_order,
+        default_mode=dimension_mode_enum.CHANNEL,
         methods={
             'get_dimension_mode': get_dimension_mode,
             'get_lut_name': get_lut_name,
@@ -232,6 +288,8 @@ def create_fiji_display_config(
 
         Includes ALL dimensions (site, channel, z_index, timepoint, well) regardless of
         which dimension is used as the multiprocessing axis.
+
+        Also includes virtual components (step_name, step_index, source) for streaming contexts.
 
         ImageJ hyperstacks have 3 dimensions:
         - Channels (C): Color channels or sites

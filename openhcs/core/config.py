@@ -150,10 +150,28 @@ class NapariVariableSizeHandling(Enum):
 
 
 # Create NapariDisplayConfig using factory
+from openhcs.constants import VirtualComponents
+
 NapariDisplayConfig = create_napari_display_config(
     colormap_enum=NapariColormap,
     dimension_mode_enum=NapariDimensionMode,
-    variable_size_handling_enum=NapariVariableSizeHandling
+    variable_size_handling_enum=NapariVariableSizeHandling,
+    virtual_components=VirtualComponents,
+    component_order=[
+        'step_name',
+        'step_index',
+        'source',
+        'well',
+        'site',
+        'channel',
+        'z_index',
+        'timepoint'
+    ],
+    virtual_component_defaults={
+        'step_name': NapariDimensionMode.SLICE,
+        'step_index': NapariDimensionMode.SLICE,
+        'source': NapariDimensionMode.SLICE
+    }
 )
 
 # Apply the global pipeline config decorator
@@ -196,7 +214,23 @@ class FijiDimensionMode(Enum):
 # Create FijiDisplayConfig using factory (with component-specific fields like Napari)
 FijiDisplayConfig = create_fiji_display_config(
     lut_enum=FijiLUT,
-    dimension_mode_enum=FijiDimensionMode
+    dimension_mode_enum=FijiDimensionMode,
+    virtual_components=VirtualComponents,
+    component_order=[
+        'step_name',
+        'step_index',
+        'source',
+        'well',
+        'site',
+        'channel',
+        'z_index',
+        'timepoint'
+    ],
+    virtual_component_defaults={
+        'step_name': FijiDimensionMode.WINDOW,
+        'step_index': FijiDimensionMode.WINDOW,
+        'source': FijiDimensionMode.WINDOW
+    }
 )
 
 # Apply the global pipeline config decorator

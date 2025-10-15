@@ -155,16 +155,12 @@ class FijiViewerServer(ZMQServer):
             if not images:
                 return
 
-            # Get step name from first image
-            step_name = images[0].get('step_name', 'unknown_step')
-
             # Process ALL images together - let _add_images_to_hyperstack group by window
             # Don't group by well here - that causes sequential processing!
-            self._add_images_to_hyperstack(step_name, images, display_config_dict)
+            self._add_images_to_hyperstack(images, display_config_dict)
         else:
             # Single image message (fallback)
             self._add_images_to_hyperstack(
-                data.get('step_name', 'unknown_step'),
                 [data],
                 data.get('display_config', {})
             )
@@ -254,7 +250,7 @@ class FijiViewerServer(ZMQServer):
             preserved_display_ranges=display_ranges
         )
 
-    def _add_images_to_hyperstack(self, step_name: str, images: List[Dict[str, Any]],
+    def _add_images_to_hyperstack(self, images: List[Dict[str, Any]],
                                     display_config_dict: Dict[str, Any]):
         """
         Add images to ImageJ hyperstacks using configurable dimension mapping.
@@ -266,7 +262,6 @@ class FijiViewerServer(ZMQServer):
         - FRAME: Map to ImageJ Frame dimension (T)
 
         Args:
-            step_name: Name of the processing step
             images: List of image info dicts with metadata and shared memory names
             display_config_dict: Display configuration with component_modes
         """
@@ -303,22 +298,46 @@ class FijiViewerServer(ZMQServer):
         if not image_data_list:
             return
 
-        # Get component modes from display config
+        # Get component modes and order from display config
         component_modes = display_config_dict.get('component_modes', {})
+        component_order = display_config_dict['component_order']
 
         logger.info(f"🎛️  FIJI SERVER: Component modes from display config: {component_modes}")
+        logger.info(f"🎛️  FIJI SERVER: Component order: {component_order}")
 
-        # Organize dimensions by their mode
+        # First pass: collect unique values for each component to detect flat dimensions
+        component_unique_values = {}
+        for comp_name in component_order:
+            unique_vals = set()
+            for img_data in image_data_list:
+                meta = img_data['metadata']
+                if comp_name in meta:
+                    unique_vals.add(meta[comp_name])
+            component_unique_values[comp_name] = unique_vals
+
+        logger.info(f"🔍 FIJI SERVER: Component cardinality: {[(comp, len(vals)) for comp, vals in component_unique_values.items()]}")
+
+        # Organize dimensions by their mode, EXCLUDING flat dimensions (only 1 unique value)
         window_components = []  # Components that create separate windows
         channel_components = []  # Components mapped to ImageJ Channels
         slice_components = []  # Components mapped to ImageJ Slices
         frame_components = []  # Components mapped to ImageJ Frames
 
-        for comp_name in ['well', 'site', 'channel', 'z_index', 'timepoint']:
-            mode = component_modes.get(comp_name, 'channel')  # Default to channel
+        for comp_name in component_order:
+            mode = component_modes[comp_name]
+
+            # Skip flat dimensions (only 1 unique value) - they don't need a hyperstack axis
+            # BUT: WINDOW mode components should NEVER be filtered out, even if flat in current batch
+            # They're used to separate images into different windows across batches
+            is_flat = len(component_unique_values.get(comp_name, set())) <= 1
 
             if mode == 'window':
+                # Always include WINDOW components, even if flat in current batch
                 window_components.append(comp_name)
+            elif is_flat:
+                # Skip flat dimensions for hyperstack axes (CHANNEL/SLICE/FRAME)
+                logger.info(f"🔍 FIJI SERVER: Skipping flat dimension '{comp_name}' (only 1 unique value)")
+                continue
             elif mode == 'channel':
                 channel_components.append(comp_name)
             elif mode == 'slice':
@@ -332,6 +351,10 @@ class FijiViewerServer(ZMQServer):
         logger.info(f"  SLICE: {slice_components}")
         logger.info(f"  FRAME: {frame_components}")
 
+        # Debug: Show actual metadata from first image
+        if image_data_list:
+            logger.info(f"🔍 FIJI SERVER: First image metadata: {image_data_list[0]['metadata']}")
+
         # Group images by window components
         # Components in WINDOW mode create separate windows
         # Components in CHANNEL/SLICE/FRAME modes are combined into the same hyperstack
@@ -339,13 +362,12 @@ class FijiViewerServer(ZMQServer):
         for img_data in image_data_list:
             meta = img_data['metadata']
 
-            # Build window key from step name and window components
-            # This now includes well only if it's in WINDOW mode
-            window_key_parts = [step_name]
+            # Build window key from window components in canonical order
+            window_key_parts = []
             for comp in window_components:
                 if comp in meta:
-                    window_key_parts.append(f"{comp}={meta[comp]}")
-            window_key = "_".join(window_key_parts)
+                    window_key_parts.append(f"{comp}_{meta[comp]}")
+            window_key = "_".join(window_key_parts) if window_key_parts else "default_window"
 
             if window_key not in windows:
                 windows[window_key] = []
@@ -444,9 +466,9 @@ class FijiViewerServer(ZMQServer):
 
         logger.info(f"🔬 FIJI SERVER: Building hyperstack '{window_key}': "
                    f"{nChannels}C x {nSlices}Z x {nFrames}T")
-        logger.info(f"  Channel components: {channel_components}")
-        logger.info(f"  Slice components: {slice_components}")
-        logger.info(f"  Frame components: {frame_components}")
+        logger.info(f"  Channel components: {channel_components} → values: {channel_values}")
+        logger.info(f"  Slice components: {slice_components} → values: {slice_values}")
+        logger.info(f"  Frame components: {frame_components} → values: {frame_values}")
 
         # Images should already have 'data' key (loaded from shared memory earlier)
         if not all_images:
@@ -489,11 +511,15 @@ class FijiViewerServer(ZMQServer):
                         # Build label
                         label_parts = []
                         if channel_components:
-                            label_parts.append(f"C{c_key}")
+                            # Format tuple as underscore-separated values
+                            c_str = "_".join(str(v) for v in c_key) if isinstance(c_key, tuple) else str(c_key)
+                            label_parts.append(f"C{c_str}")
                         if slice_components:
-                            label_parts.append(f"Z{z_key}")
+                            z_str = "_".join(str(v) for v in z_key) if isinstance(z_key, tuple) else str(z_key)
+                            label_parts.append(f"Z{z_str}")
                         if frame_components:
-                            label_parts.append(f"T{t_key}")
+                            t_str = "_".join(str(v) for v in t_key) if isinstance(t_key, tuple) else str(t_key)
+                            label_parts.append(f"T{t_str}")
                         label = "_".join(label_parts) if label_parts else "slice"
 
                         stack.addSlice(label, processor)
@@ -508,8 +534,17 @@ class FijiViewerServer(ZMQServer):
         # Set hyperstack dimensions
         imp.setDimensions(nChannels, nSlices, nFrames)
 
-        # Convert to CompositeImage if multiple channels
-        if nChannels > 1:
+        # CRITICAL: Convert to HyperStack to enable proper Z/T slider behavior
+        # Without this, ImageJ treats it as a simple stack with only Z slider
+        if nSlices > 1 or nFrames > 1 or nChannels > 1:
+            # Import HyperStackConverter
+            HyperStackConverter = sj.jimport('ij.plugin.HyperStackConverter')
+            # Convert to hyperstack (returns new ImagePlus)
+            imp = HyperStackConverter.toHyperStack(imp, nChannels, nSlices, nFrames, "xyczt", "Composite")
+            imp.setTitle(window_key)
+
+        # Convert to CompositeImage if multiple channels (if not already done by HyperStackConverter)
+        if nChannels > 1 and not isinstance(imp, CompositeImage):
             comp = CompositeImage(imp, CompositeImage.COMPOSITE)
             comp.setTitle(window_key)
             imp = comp

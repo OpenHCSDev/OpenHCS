@@ -107,9 +107,8 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
     """
     Handle component-aware display following OpenHCS stacking patterns.
 
-    Creates separate layers for each step and well, with proper component-based stacking.
-    Each step gets its own layer. Each well gets its own layer. Components marked as
-    SLICE create separate layers, components marked as STACK are stacked together.
+    Components marked as SLICE create separate layers, components marked as STACK are stacked together.
+    Layer naming follows canonical component order from display config.
     """
     try:
         # Use component metadata from ZMQ message - fail loud if not available
@@ -117,45 +116,37 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
             raise ValueError(f"No component metadata available for path: {path}")
         component_info = component_metadata
 
-        # Get step information from component metadata
-        step_index = component_info.get('step_index', 0)
-        step_name = component_info.get('step_name', 'unknown_step')
-
-        # Create step prefix for layer naming
-        step_prefix = f"step_{step_index:02d}_{step_name}"
-
-        # Get well identifier (configurable: slice vs stack)
-        well_id = component_info.get('well', 'unknown_well')
-
-        # Build component_modes from config (dict or object), default to channel=slice, others=stack
+        # Build component_modes and component_order from config (dict or object)
         component_modes = None
+        component_order = None
+
         if isinstance(display_config, dict):
             cm = display_config.get('component_modes') or display_config.get('componentModes')
             if isinstance(cm, dict) and cm:
                 component_modes = cm
-        if component_modes is None:
+            component_order = display_config['component_order']
+        else:
             # Handle object-like config (NapariDisplayConfig)
+            component_order = display_config.COMPONENT_ORDER
             component_modes = {}
-            for component in ['site', 'channel', 'z_index', 'well']:
+            for component in component_order:
                 mode_field = f"{component}_mode"
                 if hasattr(display_config, mode_field):
                     mode_value = getattr(display_config, mode_field)
                     component_modes[component] = getattr(mode_value, 'value', str(mode_value))
-                else:
-                    component_modes[component] = 'slice' if component == 'channel' else 'stack'
 
-        # Create layer grouping key: step_prefix + slice_components
+        # Generic layer naming - iterate over components in canonical order
         # Components in SLICE mode create separate layers
         # Components in STACK mode are combined into the same layer
-        layer_key_parts = [step_prefix]
 
-        # Add slice components to layer key (these create separate layers)
-        # This now includes ALL components (including well) based on their mode
-        for component_name, mode in component_modes.items():
-            if mode == 'slice' and component_name in component_info:
-                layer_key_parts.append(f"{component_name}_{component_info[component_name]}")
+        layer_key_parts = []
+        for component in component_order:
+            mode = component_modes.get(component)
+            if mode == 'slice' and component in component_info:
+                value = component_info[component]
+                layer_key_parts.append(f"{component}_{value}")
 
-        layer_key = "_".join(layer_key_parts)
+        layer_key = "_".join(layer_key_parts) if layer_key_parts else "default_layer"
 
         # Reconcile cached layer/group state with live napari viewer after possible manual deletions
         try:
@@ -548,10 +539,6 @@ class NapariViewerServer(ZMQServer):
         shm_name = image_info.get('shm_name')
         direct_data = image_info.get('data')
         component_metadata = image_info.get('component_metadata', {})
-
-        # Add step information to component metadata
-        component_metadata['step_index'] = image_info.get('step_index', 0)
-        component_metadata['step_name'] = image_info.get('step_name', 'unknown_step')
 
         try:
             # Load image data

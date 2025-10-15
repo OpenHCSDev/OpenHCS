@@ -18,6 +18,13 @@ class Microscope(Enum):
     OMERO = "omero"  # Added for OMERO virtual filesystem backend
 
 
+class VirtualComponents(Enum):
+    """Components that don't come from filename parsing but from execution/location context."""
+    STEP_NAME = "step_name"
+    STEP_INDEX = "step_index"
+    SOURCE = "source"  # Parent directory/plate name
+
+
 def get_openhcs_config():
     """Get the OpenHCS configuration, initializing it if needed."""
     from openhcs.components.framework import ComponentConfigurationFactory
@@ -74,6 +81,33 @@ def _create_enums():
     return all_components, vc, GroupBy
 
 
+@lru_cache(maxsize=1)
+def _create_streaming_components():
+    """Create StreamingComponents enum combining AllComponents + VirtualComponents.
+
+    This enum includes both filename components (from parser) and virtual components
+    (from execution/location context) for streaming visualization.
+    """
+    import logging
+    import os
+    logger = logging.getLogger(__name__)
+    logger.info(f"🔧 _create_streaming_components() CALLED in process {os.getpid()}")
+
+    # Import AllComponents (triggers lazy creation if needed)
+    from openhcs.constants import AllComponents
+
+    # Combine all component types
+    components_dict = {c.name: c.value for c in AllComponents}
+    components_dict.update({c.name: c.value for c in VirtualComponents})
+
+    streaming_components = Enum('StreamingComponents', components_dict)
+    streaming_components.__module__ = __name__
+    streaming_components.__qualname__ = 'StreamingComponents'
+
+    logger.info(f"🔧 _create_streaming_components() RETURNING: StreamingComponents={id(streaming_components)}")
+    return streaming_components
+
+
 def __getattr__(name):
     """Lazy enum creation with identity guarantee.
 
@@ -101,6 +135,25 @@ def __getattr__(name):
         logger.info(f"🔧 ENUM CREATION: VariableComponents.__module__={vc.__module__}, __qualname__={vc.__qualname__}")
 
         return globals()[name]
+
+    if name == 'StreamingComponents':
+        # Check if already created
+        if name in globals():
+            return globals()[name]
+
+        import logging
+        import os
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔧 ENUM CREATION: Creating StreamingComponents in process {os.getpid()}")
+
+        streaming_components = _create_streaming_components()
+        globals()['StreamingComponents'] = streaming_components
+
+        logger.info(f"🔧 ENUM CREATION: Created StreamingComponents in process {os.getpid()}: "
+                   f"StreamingComponents={id(streaming_components)}")
+
+        return globals()[name]
+
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 

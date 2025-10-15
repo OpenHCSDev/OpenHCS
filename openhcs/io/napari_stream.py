@@ -124,9 +124,15 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             shm_array[:] = np_data[:]
             self._shared_memory_blocks[shm_name] = shm
 
-            # Parse component metadata
+            # Parse component metadata from filename
             filename = os.path.basename(str(file_path))
             component_metadata = microscope_handler.parser.parse_filename(filename)
+
+            # Add virtual components
+            from pathlib import Path
+            component_metadata['step_name'] = step_name
+            component_metadata['step_index'] = step_index
+            component_metadata['source'] = Path(file_path).parent.name
 
             batch_images.append({
                 'path': str(file_path),
@@ -134,18 +140,16 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 'dtype': str(np_data.dtype),
                 'shm_name': shm_name,
                 'component_metadata': component_metadata,
-                'step_index': step_index,
-                'step_name': step_name,
                 'image_id': image_id  # Add image ID for acknowledgment tracking
             })
 
-        # Build component modes for all dimensions (including multiprocessing axis)
-        from openhcs.constants import AllComponents
+        # Build component modes for ALL components in component_order (including virtual components)
         component_modes = {}
-        for component in AllComponents:
-            field_name = f"{component.value}_mode"
-            mode = getattr(display_config, field_name)
-            component_modes[component.value] = mode.value
+        for comp_name in display_config.COMPONENT_ORDER:
+            mode_field = f"{comp_name}_mode"
+            if hasattr(display_config, mode_field):
+                mode = getattr(display_config, mode_field)
+                component_modes[comp_name] = mode.value
 
         # Send batch message
         message = {
@@ -154,6 +158,7 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             'display_config': {
                 'colormap': display_config.get_colormap_name(),
                 'component_modes': component_modes,
+                'component_order': display_config.COMPONENT_ORDER,
                 'variable_size_handling': display_config.variable_size_handling.value if hasattr(display_config, 'variable_size_handling') and display_config.variable_size_handling else None
             },
             'timestamp': time.time()
