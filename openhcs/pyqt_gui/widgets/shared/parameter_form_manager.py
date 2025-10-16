@@ -291,13 +291,9 @@ class ParameterFormManager(QWidget):
             self.parameter_changed.connect(lambda param_name, value: self._refresh_with_live_context() if not getattr(self, '_in_reset', False) else None)
 
             # Register this form manager for cross-window updates (only root managers, not nested)
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"🔍 Checking registration: field_id={self.field_id}, _parent_manager={self._parent_manager}")
             if self._parent_manager is None:
                 # Connect parameter_changed to emit cross-window context changes
                 self.parameter_changed.connect(self._emit_cross_window_change)
-                logger.info(f"🔗 Registering {self.field_id} for cross-window updates ({len(self._active_form_managers)} existing)")
 
                 # Connect this instance's signal to all existing instances
                 for existing_manager in self._active_form_managers:
@@ -305,7 +301,6 @@ class ParameterFormManager(QWidget):
                     self.context_value_changed.connect(existing_manager._on_cross_window_context_changed)
                     # Connect existing instances to this instance
                     existing_manager.context_value_changed.connect(self._on_cross_window_context_changed)
-                    logger.info(f"  ↔️ {self.field_id} ↔ {existing_manager.field_id}")
 
                 # Add this instance to the registry
                 self._active_form_managers.append(self)
@@ -1508,6 +1503,21 @@ class ParameterFormManager(QWidget):
         if is_root_global_config:
             static_defaults = self.global_config_type()
             stack.enter_context(config_context(static_defaults, mask_with_none=True))
+        else:
+            # CRITICAL: For non-global-config editors (PipelineConfig, Step), check if GlobalPipelineConfig editor is open
+            # If so, apply its live values to override the thread-local GlobalPipelineConfig
+            # This enables GlobalPipelineConfig → PipelineConfig → Step propagation
+            if live_context and self.global_config_type:
+                logger.info(f"🔍 {self.field_id} checking for live GlobalPipelineConfig: live_context has {list(live_context.keys()) if live_context else 'None'}")
+                global_live_values = self._find_live_values_for_type(self.global_config_type, live_context)
+                logger.info(f"🔍 {self.field_id} found global_live_values: {global_live_values is not None}")
+                if global_live_values is not None:
+                    try:
+                        global_live_instance = self.global_config_type(**global_live_values)
+                        stack.enter_context(config_context(global_live_instance))
+                        logger.info(f"🌍 Applied live GlobalPipelineConfig context for {self.field_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to apply live GlobalPipelineConfig: {e}")
 
         # Apply parent context(s) if provided
         if self.context_obj is not None:
@@ -1680,7 +1690,12 @@ class ParameterFormManager(QWidget):
         else:
             live_context = None
 
+        # Refresh this form's placeholders
         self._refresh_all_placeholders(live_context=live_context)
+
+        # CRITICAL: Also refresh all nested managers' placeholders
+        # This ensures nested configs (like napari_display_config, fiji_streaming_config) also update
+        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
 
     def _refresh_all_placeholders(self, live_context: dict = None) -> None:
         """Refresh placeholder text for all widgets in this form.
@@ -1706,7 +1721,13 @@ class ParameterFormManager(QWidget):
                 for param_name, widget in self.widgets.items():
                     # CRITICAL: Check current value from self.parameters (has correct None values)
                     current_value = self.parameters.get(param_name)
-                    if current_value is None:
+
+                    # CRITICAL: Also check if widget is in placeholder state
+                    # This handles the case where live context changed and we need to re-resolve the placeholder
+                    # even though self.parameters still has None
+                    widget_in_placeholder_state = widget.property("is_placeholder_state")
+
+                    if current_value is None or widget_in_placeholder_state:
                         with monitor.measure():
                             placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                             if placeholder_text:
@@ -1844,20 +1865,36 @@ class ParameterFormManager(QWidget):
             param_name: Name of the parameter that changed
             value: New value
         """
-        field_path = f"{self.field_id}.{param_name}"
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"📡 {self.field_id} emitting: {param_name} = {value}")
+        field_path = f"{self.field_id}.{param_name}"
+        logger.info(f"📡 {self.field_id} emitting cross-window: {param_name} = {value}")
         self.context_value_changed.emit(field_path, value,
                                        self.object_instance, self.context_obj)
 
-    def _on_destroyed(self):
-        """Cleanup when widget is destroyed - unregister from active managers."""
+    def unregister_from_cross_window_updates(self):
+        """Manually unregister this form manager from cross-window updates.
+
+        This should be called when the window is closing (before destruction) to ensure
+        other windows refresh their placeholders without this window's live values.
+        """
         try:
             if self in self._active_form_managers:
                 self._active_form_managers.remove(self)
+
+                # CRITICAL: Trigger refresh in all remaining windows
+                # They were using this window's live values, now they need to revert to saved values
+                for manager in self._active_form_managers:
+                    # Refresh immediately (not deferred) since we're in a controlled close event
+                    manager._refresh_with_live_context()
         except (ValueError, AttributeError):
             pass  # Already removed or list doesn't exist
+
+    def _on_destroyed(self):
+        """Cleanup when widget is destroyed - unregister from active managers."""
+        # Call the manual unregister method
+        # This is a fallback in case the window didn't call it explicitly
+        self.unregister_from_cross_window_updates()
 
     def _on_cross_window_context_changed(self, field_path: str, new_value: object,
                                          editing_object: object, context_object: object):
@@ -1871,7 +1908,7 @@ class ParameterFormManager(QWidget):
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"📥 {self.field_id} received: {field_path} = {new_value}")
+        logger.info(f"📥 {self.field_id} received: {field_path} from {type(editing_object).__name__}")
 
         # Don't refresh if this is the window that made the change
         if editing_object is self.object_instance:
@@ -1880,7 +1917,7 @@ class ParameterFormManager(QWidget):
 
         # Check if the change affects this form based on context hierarchy
         if not self._is_affected_by_context_change(editing_object, context_object):
-            logger.info(f"  ⏭️ Not affected by hierarchy, skipping")
+            logger.info(f"  ⏭️ Not affected, skipping")
             return
 
         logger.info(f"  ✅ Scheduling refresh")
@@ -1969,11 +2006,20 @@ class ParameterFormManager(QWidget):
         Returns a dict mapping object types to their current live values.
         This allows matching by type rather than instance identity.
         Maps both the actual type AND its lazy/non-lazy equivalent for flexible matching.
+
+        CRITICAL: Only collects context from PARENT types in the hierarchy, not from the same type.
+        E.g., PipelineConfig editor collects GlobalPipelineConfig but not other PipelineConfig instances.
+        This prevents a window from using its own live values for placeholder resolution.
         """
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
         from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+        import logging
+        logger = logging.getLogger(__name__)
 
         live_context = {}
+        my_type = type(self.object_instance)
+
+        logger.info(f"🔍 {self.field_id} collecting live context: my_type={my_type.__name__}, checking {len(self._active_form_managers)} managers")
 
         for manager in self._active_form_managers:
             if manager is not self:
@@ -1981,6 +2027,17 @@ class ParameterFormManager(QWidget):
                 live_values = manager.get_current_values()
                 obj_type = type(manager.object_instance)
 
+                logger.info(f"  Checking {manager.field_id}: obj_type={obj_type.__name__}")
+
+                # CRITICAL: Only skip if this is EXACTLY the same type as us
+                # E.g., PipelineConfig editor should not use live values from another PipelineConfig editor
+                # But it SHOULD use live values from GlobalPipelineConfig editor (parent in hierarchy)
+                # Don't check lazy/base equivalents here - that's for type matching, not hierarchy filtering
+                if obj_type == my_type:
+                    logger.info(f"    ⏭️ Skipping (same type as me)")
+                    continue
+
+                logger.info(f"    ✅ Adding to live_context")
                 # Map by the actual type
                 live_context[obj_type] = live_values
 
@@ -1997,12 +2054,17 @@ class ParameterFormManager(QWidget):
                 if lazy_type and lazy_type != obj_type:
                     live_context[lazy_type] = live_values
 
+        logger.info(f"🔍 {self.field_id} collected live_context with {len(live_context)} types: {list(live_context.keys())}")
         return live_context
 
     def _do_cross_window_refresh(self):
         """Actually perform the cross-window placeholder refresh using live values from other windows."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         # Collect live context values from other open windows
         live_context = self._collect_live_context_from_other_windows()
+        logger.info(f"🔄 {self.field_id} cross-window refresh with live_context: {list(live_context.keys()) if live_context else 'None'}")
 
         # Refresh placeholders for this form and all nested forms using live context
         self._refresh_all_placeholders(live_context=live_context)

@@ -668,16 +668,28 @@ class ConfigWindow(QDialog):
         """Handle dialog rejection (Cancel button)."""
         self.config_cancelled.emit()
         self._cleanup_signal_connections()
+        # CRITICAL: Unregister from cross-window updates so other windows revert to saved values
+        # Only do this on cancel - on save, the values are now saved so other windows should use them
+        if hasattr(self, 'form_manager'):
+            self.form_manager.unregister_from_cross_window_updates()
         super().reject()
 
     def accept(self):
         """Handle dialog acceptance (Save button)."""
         self._cleanup_signal_connections()
+        # DON'T unregister on save - the values are now saved, so other windows should continue using them
+        # The unregistration will happen naturally when the widget is destroyed
         super().accept()
 
     def closeEvent(self, event):
         """Handle window close event."""
         self._cleanup_signal_connections()
+        # Only unregister if we're closing without saving (user clicked X)
+        # If we saved, the values are persisted so other windows should use them
+        # Check if we're in the middle of saving
+        if not getattr(self, '_saving', False):
+            if hasattr(self, 'form_manager'):
+                self.form_manager.unregister_from_cross_window_updates()
         super().closeEvent(event)
 
     def _cleanup_signal_connections(self):

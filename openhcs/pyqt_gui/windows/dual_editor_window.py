@@ -545,6 +545,9 @@ class DualEditorWindow(QDialog):
                 return
 
         self.step_cancelled.emit()
+        # CRITICAL: Unregister from cross-window updates before closing
+        if hasattr(self, 'step_editor') and hasattr(self.step_editor, 'form_manager'):
+            self.step_editor.form_manager.unregister_from_cross_window_updates()
         self.reject()
         logger.debug("Step editing cancelled")
 
@@ -566,4 +569,7 @@ class DualEditorWindow(QDialog):
                 event.ignore()
                 return
 
+        # CRITICAL: Unregister from cross-window updates before closing
+        if hasattr(self, 'step_editor') and hasattr(self.step_editor, 'form_manager'):
+            self.step_editor.form_manager.unregister_from_cross_window_updates()
         event.accept()
