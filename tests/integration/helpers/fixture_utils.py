@@ -469,11 +469,7 @@ def debug_global_config(execution_mode, backend_config):
             output_dir_suffix="_outputs"  # Suffix for output directories
         ),
         vfs=VFSConfig(materialization_backend=MaterializationBackend(backend_config)),
-        zarr=ZarrConfig(
-            store_name="images.zarr",  # Name of the zarr store
-            ome_zarr_metadata=True,    # Generate OME-ZARR metadata
-            write_plate_metadata=True  # Write plate-level metadata
-        ),
+        zarr=ZarrConfig(),
         use_threading=use_threading
     )
 

@@ -62,7 +62,6 @@ class TestConstants:
     DEFAULT_WORKERS: int = 1
     DEFAULT_SUB_DIR: str = "images"
     OUTPUT_SUFFIX: str = "_outputs"
-    ZARR_STORE_NAME: str = "images.zarr"
     STEP_WELL_FILTER_TEST: int = 4
     PIPELINE_STEP_WELL_FILTER_TEST: int = 2
     GLOBAL_STEP_WELL_FILTER_TEST: int = 3
@@ -342,11 +341,7 @@ def _create_pipeline_config(test_config: TestConfig) -> GlobalPipelineConfig:
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
         vfs_config=VFSConfig(materialization_backend=materialization_backend),
-        zarr_config=ZarrConfig(
-            store_name=CONSTANTS.ZARR_STORE_NAME,
-            ome_zarr_metadata=True,
-            write_plate_metadata=True
-        ),
+        zarr_config=ZarrConfig(),
         step_well_filter_config=StepWellFilterConfig(well_filter=CONSTANTS.GLOBAL_STEP_WELL_FILTER_TEST),
         use_threading=test_config.use_threading
     )

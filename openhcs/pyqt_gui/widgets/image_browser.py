@@ -7,7 +7,7 @@ view them in Napari with configurable display settings.
 
 import logging
 from pathlib import Path
-from typing import Optional, List, Dict, Set
+from typing import Optional, List, Dict, Set, Any
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
@@ -512,7 +512,9 @@ class ImageBrowserWidget(QWidget):
                     for column_name, selected_values in active_filters.items():
                         # Get the metadata key (lowercase with underscores)
                         metadata_key = column_name.lower().replace(' ', '_')
-                        item_value = str(metadata.get(metadata_key, ''))
+                        raw_value = metadata.get(metadata_key, '')
+                        # Get display value for comparison (metadata name if available)
+                        item_value = self._get_metadata_display_value(metadata_key, raw_value)
                         if item_value not in selected_values:
                             matches = False
                             break
@@ -523,6 +525,54 @@ class ImageBrowserWidget(QWidget):
         # Update table with combined filters
         self._populate_table(result)
         logger.debug(f"Combined filters: {len(result)} images shown")
+
+    def _get_metadata_display_value(self, metadata_key: str, raw_value: Any) -> str:
+        """
+        Get display value for metadata, using metadata cache if available.
+
+        For components like channel, this returns "1 | W1" format (raw key | metadata name)
+        to preserve both the number and the metadata name. This handles cases where
+        different subdirectories might have the same channel number mapped to different names.
+
+        Args:
+            metadata_key: Metadata key (e.g., "channel", "site", "well")
+            raw_value: Raw value from parser (e.g., 1, 2, "A01")
+
+        Returns:
+            Display value in format "raw_key | metadata_name" if metadata available,
+            otherwise just "raw_key"
+        """
+        if raw_value is None:
+            return 'N/A'
+
+        # Convert to string for lookup
+        value_str = str(raw_value)
+
+        # Try to get metadata display name from cache
+        if self.orchestrator:
+            try:
+                # Map metadata_key to AllComponents enum
+                from openhcs.constants import AllComponents
+                component_map = {
+                    'channel': AllComponents.CHANNEL,
+                    'site': AllComponents.SITE,
+                    'z_index': AllComponents.Z_INDEX,
+                    'timepoint': AllComponents.TIMEPOINT,
+                    'well': AllComponents.WELL,
+                }
+
+                component = component_map.get(metadata_key)
+                if component:
+                    metadata_name = self.orchestrator._metadata_cache_service.get_component_metadata(component, value_str)
+                    if metadata_name:
+                        # Format like TUI: "Channel 1 | HOECHST 33342"
+                        # But for table cells, just show "1 | W1" (more compact)
+                        return f"{value_str} | {metadata_name}"
+            except Exception as e:
+                logger.debug(f"Could not get metadata for {metadata_key} {value_str}: {e}")
+
+        # Fallback to raw value only
+        return value_str
 
     def _build_column_filters(self):
         """Build column filter widgets from loaded image metadata."""
@@ -538,7 +588,9 @@ class ImageBrowserWidget(QWidget):
             for metadata in self.all_images.values():
                 value = metadata.get(metadata_key)
                 if value is not None:
-                    unique_values.add(str(value))
+                    # Use metadata display value instead of raw value
+                    display_value = self._get_metadata_display_value(metadata_key, value)
+                    unique_values.add(display_value)
 
             if unique_values:
                 # Create filter for this column
@@ -695,10 +747,11 @@ class ImageBrowserWidget(QWidget):
             filename_item.setData(Qt.ItemDataRole.UserRole, filename)
             self.image_table.setItem(i, 0, filename_item)
 
-            # Metadata columns
+            # Metadata columns - use metadata display values
             for col_idx, key in enumerate(metadata_keys, start=1):
                 value = metadata.get(key, 'N/A')
-                display_value = str(value) if value is not None else 'N/A'
+                # Get display value (metadata name if available, otherwise raw value)
+                display_value = self._get_metadata_display_value(key, value)
                 self.image_table.setItem(i, col_idx, QTableWidgetItem(display_value))
 
     def _build_folder_tree(self):
