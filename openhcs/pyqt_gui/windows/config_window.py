@@ -118,8 +118,8 @@ class ConfigWindow(QDialog):
         
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        
-        # Header with help functionality for dataclass
+
+        # Header with title, help button, and action buttons
         header_widget = QWidget()
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(10, 10, 10, 10)
@@ -137,6 +137,42 @@ class ConfigWindow(QDialog):
             header_layout.addWidget(help_btn)
 
         header_layout.addStretch()
+
+        # Add action buttons to header (top right)
+        button_styles = self.style_generator.generate_config_button_styles()
+
+        # View Code button
+        view_code_button = QPushButton("View Code")
+        view_code_button.setFixedHeight(28)
+        view_code_button.setMinimumWidth(80)
+        view_code_button.clicked.connect(self._view_code)
+        view_code_button.setStyleSheet(button_styles["reset"])
+        header_layout.addWidget(view_code_button)
+
+        # Reset button
+        reset_button = QPushButton("Reset to Defaults")
+        reset_button.setFixedHeight(28)
+        reset_button.setMinimumWidth(100)
+        reset_button.clicked.connect(self.reset_to_defaults)
+        reset_button.setStyleSheet(button_styles["reset"])
+        header_layout.addWidget(reset_button)
+
+        # Cancel button
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setFixedHeight(28)
+        cancel_button.setMinimumWidth(70)
+        cancel_button.clicked.connect(self.reject)
+        cancel_button.setStyleSheet(button_styles["cancel"])
+        header_layout.addWidget(cancel_button)
+
+        # Save button
+        save_button = QPushButton("Save")
+        save_button.setFixedHeight(28)
+        save_button.setMinimumWidth(70)
+        save_button.clicked.connect(self.save_config)
+        save_button.setStyleSheet(button_styles["save"])
+        header_layout.addWidget(save_button)
+
         layout.addWidget(header_widget)
 
         # Create splitter with tree view on left and form on right
@@ -160,10 +196,6 @@ class ConfigWindow(QDialog):
 
         # Add splitter with stretch factor so it expands to fill available space
         layout.addWidget(splitter, 1)  # stretch factor = 1
-
-        # Button panel (no container widget)
-        button_layout = self.create_button_panel()
-        layout.addLayout(button_layout)
 
         # Apply centralized styling (config window style includes tree styling now)
         self.setStyleSheet(
@@ -391,57 +423,7 @@ class ConfigWindow(QDialog):
         else:
             logger.warning(f"❌ Field '{field_name}' not in nested_managers")
 
-    def create_button_panel(self) -> QHBoxLayout:
-        """
-        Create the button panel layout (no container widget).
 
-        Returns:
-            QHBoxLayout containing action buttons
-        """
-        layout = QHBoxLayout()
-        layout.setContentsMargins(5, 3, 5, 3)
-        layout.setSpacing(5)
-        layout.addStretch()
-
-        button_styles = self.style_generator.generate_config_button_styles()
-
-        # View Code button (left side)
-        view_code_button = QPushButton("View Code")
-        view_code_button.setFixedHeight(28)
-        view_code_button.setMinimumWidth(80)
-        view_code_button.clicked.connect(self._view_code)
-        view_code_button.setStyleSheet(button_styles["reset"])
-        layout.addWidget(view_code_button)
-
-        layout.addStretch()
-
-        # Reset button
-        reset_button = QPushButton("Reset to Defaults")
-        reset_button.setFixedHeight(28)
-        reset_button.setMinimumWidth(100)
-        reset_button.clicked.connect(self.reset_to_defaults)
-        reset_button.setStyleSheet(button_styles["reset"])
-        layout.addWidget(reset_button)
-
-        layout.addSpacing(5)
-
-        # Cancel button
-        cancel_button = QPushButton("Cancel")
-        cancel_button.setFixedHeight(28)
-        cancel_button.setMinimumWidth(70)
-        cancel_button.clicked.connect(self.reject)
-        cancel_button.setStyleSheet(button_styles["cancel"])
-        layout.addWidget(cancel_button)
-
-        # Save button
-        save_button = QPushButton("Save")
-        save_button.setFixedHeight(28)
-        save_button.setMinimumWidth(70)
-        save_button.clicked.connect(self.save_config)
-        save_button.setStyleSheet(button_styles["save"])
-        layout.addWidget(save_button)
-
-        return layout
     
 
 
@@ -526,7 +508,51 @@ class ConfigWindow(QDialog):
             QMessageBox.critical(self, "Save Error", f"Failed to save configuration:\n{e}")
     
 
-    
+    def _patch_lazy_constructors(self):
+        """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
+        from contextlib import contextmanager
+        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
+        from openhcs.config_framework.lazy_factory import _lazy_type_registry
+        import dataclasses
+
+        @contextmanager
+        def patch_context():
+            original_constructors = {}
+
+            # FIXED: Dynamically discover all lazy types from registry instead of hardcoding
+            # This ensures we patch ALL lazy types, including future additions
+            for lazy_type in _lazy_type_registry.keys():
+                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
+                    # Store original constructor
+                    original_constructors[lazy_type] = lazy_type.__init__
+
+                    # Create patched constructor that uses raw values
+                    def create_patched_init(original_init, dataclass_type):
+                        def patched_init(self, **kwargs):
+                            # Use raw value approach instead of calling original constructor
+                            # This prevents lazy resolution during code execution
+                            for field in dataclasses.fields(dataclass_type):
+                                value = kwargs.get(field.name, None)
+                                object.__setattr__(self, field.name, value)
+
+                            # Initialize any required lazy dataclass attributes
+                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
+                                object.__setattr__(self, '_is_lazy_dataclass', True)
+
+                        return patched_init
+
+                    # Apply the patch
+                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
+
+            try:
+                yield
+            finally:
+                # Restore original constructors
+                for lazy_type, original_init in original_constructors.items():
+                    lazy_type.__init__ = original_init
+
+        return patch_context()
+
     def _view_code(self):
         """Open code editor to view/edit the configuration as Python code."""
         try:
@@ -562,8 +588,15 @@ class ConfigWindow(QDialog):
     def _handle_edited_config_code(self, edited_code: str):
         """Handle edited configuration code from the code editor."""
         try:
+            # CRITICAL: Parse the code to extract explicitly specified fields
+            # This prevents overwriting None values for unspecified fields
+            explicitly_set_fields = self._extract_explicitly_set_fields(edited_code)
+
             namespace = {}
-            exec(edited_code, namespace)
+
+            # CRITICAL FIX: Use lazy constructor patching
+            with self._patch_lazy_constructors():
+                exec(edited_code, namespace)
 
             new_config = namespace.get('config')
             if not new_config:
@@ -572,32 +605,115 @@ class ConfigWindow(QDialog):
             if not isinstance(new_config, self.config_class):
                 raise ValueError(f"Expected {self.config_class.__name__}, got {type(new_config).__name__}")
 
-            # Update the current config
+            # Update current config
             self.current_config = new_config
 
-            # Update form manager's values from the new config
-            # This is simpler than rebuilding the entire form
-            from dataclasses import fields
-            for field in fields(new_config):
-                value = getattr(new_config, field.name)
-                if field.name in self.form_manager.parameters:
-                    self.form_manager.parameters[field.name] = value
-                    # Update the widget to show the new value
-                    if field.name in self.form_manager.widgets:
-                        widget = self.form_manager.widgets[field.name]
-                        from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-                        PyQt6WidgetEnhancer.set_widget_value(widget, value)
+            # FIXED: Proper context propagation based on config type
+            # ConfigWindow is used for BOTH GlobalPipelineConfig AND PipelineConfig editing
+            from openhcs.config_framework.global_config import set_global_config_for_editing
+            from openhcs.core.config import GlobalPipelineConfig
 
-            # Refresh placeholders to reflect the new values
-            self.form_manager._refresh_all_placeholders()
-            self.form_manager._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+            if self.config_class == GlobalPipelineConfig:
+                # For GlobalPipelineConfig: Update thread-local context
+                # This ensures all lazy resolution uses the new config
+                set_global_config_for_editing(GlobalPipelineConfig, new_config)
+                logger.debug("Updated thread-local GlobalPipelineConfig context")
+            # For PipelineConfig: No context update needed here
+            # The orchestrator.apply_pipeline_config() happens in the save callback
+            # Code edits just update the form, actual application happens on Save
 
-            logger.info("Updated config from edited code and refreshed placeholders")
+            # Update form values from the new config without rebuilding
+            self._update_form_from_config(new_config, explicitly_set_fields)
+
+            logger.info("Updated config from edited code")
 
         except Exception as e:
             logger.error(f"Failed to apply edited config code: {e}")
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
+
+    def _extract_explicitly_set_fields(self, code: str) -> set:
+        """
+        Parse code to extract which fields were explicitly set.
+
+        Returns a set of field names that appear in the config constructor call.
+        For nested fields, uses dot notation like 'zarr_config.chunk_size'.
+        """
+        import re
+
+        # Find the config = ClassName(...) pattern
+        # Match the class name and capture everything inside parentheses
+        pattern = rf'config\s*=\s*{self.config_class.__name__}\s*\((.*?)\)\s*$'
+        match = re.search(pattern, code, re.DOTALL | re.MULTILINE)
+
+        if not match:
+            return set()
+
+        constructor_args = match.group(1)
+
+        # Extract field names (simple pattern: field_name=...)
+        # This handles both simple fields and nested dataclass fields
+        field_pattern = r'(\w+)\s*='
+        fields_found = set(re.findall(field_pattern, constructor_args))
+
+        logger.debug(f"Explicitly set fields from code: {fields_found}")
+        return fields_found
+
+    def _update_form_from_config(self, new_config, explicitly_set_fields: set):
+        """Update form values from new config without rebuilding the entire form."""
+        from dataclasses import fields, is_dataclass
+
+        # CRITICAL: Only update fields that were explicitly set in the code
+        # This preserves None values for fields not mentioned in the code
+        for field in fields(new_config):
+            if field.name in explicitly_set_fields:
+                new_value = getattr(new_config, field.name)
+                if field.name in self.form_manager.parameters:
+                    # For nested dataclasses, we need to recursively update nested fields
+                    if is_dataclass(new_value) and not isinstance(new_value, type):
+                        self._update_nested_dataclass(field.name, new_value)
+                    else:
+                        self.form_manager.update_parameter(field.name, new_value)
+
+        # Refresh placeholders to reflect the new values
+        self.form_manager._refresh_all_placeholders()
+        self.form_manager._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+
+    def _update_nested_dataclass(self, field_name: str, new_value):
+        """Recursively update a nested dataclass field and all its children."""
+        from dataclasses import fields, is_dataclass
+
+        # Update the parent field first
+        self.form_manager.update_parameter(field_name, new_value)
+
+        # Get the nested manager for this field
+        nested_manager = self.form_manager.nested_managers.get(field_name)
+        if nested_manager:
+            # Update each field in the nested manager
+            for field in fields(new_value):
+                nested_field_value = getattr(new_value, field.name)
+                if field.name in nested_manager.parameters:
+                    # Recursively handle nested dataclasses
+                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
+                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
+                    else:
+                        nested_manager.update_parameter(field.name, nested_field_value)
+
+    def _update_nested_dataclass_in_manager(self, manager, field_name: str, new_value):
+        """Helper to update nested dataclass within a specific manager."""
+        from dataclasses import fields, is_dataclass
+
+        manager.update_parameter(field_name, new_value)
+
+        nested_manager = manager.nested_managers.get(field_name)
+        if nested_manager:
+            for field in fields(new_value):
+                nested_field_value = getattr(new_value, field.name)
+                if field.name in nested_manager.parameters:
+                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
+                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
+                    else:
+                        nested_manager.update_parameter(field.name, nested_field_value)
 
     def reject(self):
         """Handle dialog rejection (Cancel button)."""

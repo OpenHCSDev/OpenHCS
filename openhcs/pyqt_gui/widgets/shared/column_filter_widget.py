@@ -371,6 +371,10 @@ class MultiColumnFilterPanel(QWidget):
         """Update splitter sizes based on each filter's content."""
         num_filters = len(self.column_filters)
         if num_filters > 0:
+            # Force layout update first to get accurate size hints
+            for filter_widget in self.column_filters.values():
+                filter_widget.updateGeometry()
+
             # Size each filter based on its actual content (sizeHint)
             sizes = []
             for filter_widget in self.column_filters.values():
@@ -389,6 +393,37 @@ class MultiColumnFilterPanel(QWidget):
 
             # Resize to the calculated height
             self.splitter.setFixedHeight(total_height)
+
+            # Schedule a deferred update to fix layout after widgets are fully rendered
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, self._deferred_size_update)
+
+    def _deferred_size_update(self):
+        """Deferred size update after widgets are fully rendered."""
+        num_filters = len(self.column_filters)
+        if num_filters > 0:
+            # Force a full layout pass first
+            self.splitter.updateGeometry()
+            for filter_widget in self.column_filters.values():
+                filter_widget.layout().activate()
+                filter_widget.updateGeometry()
+
+            # Recalculate sizes now that widgets are rendered
+            sizes = []
+            for filter_widget in self.column_filters.values():
+                hint = filter_widget.sizeHint()
+                sizes.append(max(100, hint.height()))
+
+            self.splitter.setSizes(sizes)
+
+            total_height = sum(sizes)
+            num_handles = max(0, num_filters - 1)
+            total_height += num_handles * self.splitter.handleWidth()
+            self.splitter.setMinimumHeight(total_height)
+            self.splitter.setFixedHeight(total_height)
+
+            # Force a repaint to ensure proper rendering
+            self.splitter.update()
 
     def remove_column_filter(self, column_name: str):
         """Remove a column filter."""

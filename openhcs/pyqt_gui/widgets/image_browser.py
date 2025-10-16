@@ -83,13 +83,12 @@ class ImageBrowserWidget(QWidget):
     def init_ui(self):
         """Initialize the user interface."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
+        layout.setSpacing(5)  # Reduced spacing between rows
 
-
-
-        # Search input row
+        # Search input row with buttons on the right
         search_layout = QHBoxLayout()
+        search_layout.setSpacing(10)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search images by filename or metadata...")
@@ -107,7 +106,25 @@ class ImageBrowserWidget(QWidget):
                 border: 1px solid {self.color_scheme.to_hex(self.color_scheme.input_focus_border)};
             }}
         """)
-        search_layout.addWidget(self.search_input)
+        search_layout.addWidget(self.search_input, 1)  # Stretch factor 1 - can compress
+
+        # Plate view toggle button (moved from bottom)
+        self.plate_view_toggle_btn = QPushButton("Show Plate View")
+        self.plate_view_toggle_btn.setCheckable(True)
+        self.plate_view_toggle_btn.clicked.connect(self._toggle_plate_view)
+        self.plate_view_toggle_btn.setStyleSheet(self.style_gen.generate_button_style())
+        search_layout.addWidget(self.plate_view_toggle_btn, 0)  # No stretch
+
+        # Refresh button (moved from bottom)
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self.load_images)
+        self.refresh_btn.setStyleSheet(self.style_gen.generate_button_style())
+        search_layout.addWidget(self.refresh_btn, 0)  # No stretch
+
+        # Info label (moved from bottom)
+        self.info_label = QLabel("No images loaded")
+        self.info_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
+        search_layout.addWidget(self.info_label, 0)  # No stretch
 
         layout.addLayout(search_layout)
 
@@ -163,43 +180,6 @@ class ImageBrowserWidget(QWidget):
 
         # Add splitter with stretch factor to fill vertical space
         layout.addWidget(main_splitter, 1)
-
-        # Action buttons
-        button_layout = QHBoxLayout()
-
-        self.view_napari_btn = QPushButton("View in Napari")
-        self.view_napari_btn.clicked.connect(self.view_selected_in_napari)
-        self.view_napari_btn.setStyleSheet(self.style_gen.generate_button_style())
-        self.view_napari_btn.setEnabled(False)
-        button_layout.addWidget(self.view_napari_btn)
-
-        self.view_fiji_btn = QPushButton("View in Fiji")
-        self.view_fiji_btn.clicked.connect(self.view_selected_in_fiji)
-        self.view_fiji_btn.setStyleSheet(self.style_gen.generate_button_style())
-        self.view_fiji_btn.setEnabled(False)
-        button_layout.addWidget(self.view_fiji_btn)
-
-        button_layout.addStretch()
-
-        # Plate view toggle button (moved from header for compact layout)
-        self.plate_view_toggle_btn = QPushButton("Show Plate View")
-        self.plate_view_toggle_btn.setCheckable(True)
-        self.plate_view_toggle_btn.clicked.connect(self._toggle_plate_view)
-        self.plate_view_toggle_btn.setStyleSheet(self.style_gen.generate_button_style())
-        button_layout.addWidget(self.plate_view_toggle_btn)
-
-        # Refresh button (moved from header for compact layout)
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self.load_images)
-        self.refresh_btn.setStyleSheet(self.style_gen.generate_button_style())
-        button_layout.addWidget(self.refresh_btn)
-
-        # Info label
-        self.info_label = QLabel("No images loaded")
-        self.info_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
-        button_layout.addWidget(self.info_label)
-
-        layout.addLayout(button_layout)
         
         # Connect selection change
         self.image_table.itemSelectionChanged.connect(self.on_selection_changed)
@@ -255,12 +235,15 @@ class ImageBrowserWidget(QWidget):
     def _create_right_panel(self):
         """Create the right panel with config tabs and instance manager."""
         container = QWidget()
+        container.setMinimumWidth(300)  # Prevent clipping of config widgets
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(5)
 
-        # Vertical splitter for configs and instance manager
-        vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+        # Tab bar row with view buttons
+        tab_row = QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 0, 0)
+        tab_row.setSpacing(5)
 
         # Tab widget for streaming configs
         from PyQt6.QtWidgets import QTabWidget
@@ -278,14 +261,44 @@ class ImageBrowserWidget(QWidget):
         # Update tab text when configs are enabled/disabled
         self._update_tab_labels()
 
-        vertical_splitter.addWidget(self.streaming_tabs)
+        # Extract tab bar and add to horizontal layout
+        self.tab_bar = self.streaming_tabs.tabBar()
+        self.tab_bar.setExpanding(False)
+        self.tab_bar.setUsesScrollButtons(False)
+        tab_row.addWidget(self.tab_bar, 0)  # No stretch - tabs at natural size
+
+        # View buttons beside tabs
+        self.view_napari_btn = QPushButton("View in Napari")
+        self.view_napari_btn.clicked.connect(self.view_selected_in_napari)
+        self.view_napari_btn.setStyleSheet(self.style_gen.generate_button_style())
+        self.view_napari_btn.setEnabled(False)
+        tab_row.addWidget(self.view_napari_btn, 0)  # No stretch
+
+        self.view_fiji_btn = QPushButton("View in Fiji")
+        self.view_fiji_btn.clicked.connect(self.view_selected_in_fiji)
+        self.view_fiji_btn.setStyleSheet(self.style_gen.generate_button_style())
+        self.view_fiji_btn.setEnabled(False)
+        tab_row.addWidget(self.view_fiji_btn, 0)  # No stretch
+
+        layout.addLayout(tab_row)
+
+        # Vertical splitter for configs and instance manager
+        vertical_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # Extract the stacked widget (content area) from tab widget and add it to splitter
+        # The tab bar is already in tab_row above
+        from PyQt6.QtWidgets import QStackedWidget
+        stacked_widget = self.streaming_tabs.findChild(QStackedWidget)
+        if stacked_widget:
+            stacked_widget.setMinimumWidth(300)  # Prevent clipping of config widgets
+            vertical_splitter.addWidget(stacked_widget)
 
         # Instance manager panel
         instance_panel = self._create_instance_manager_panel()
         vertical_splitter.addWidget(instance_panel)
 
-        # Set initial sizes (30% configs, 70% instance manager)
-        vertical_splitter.setSizes([150, 350])
+        # Set initial sizes (80% configs, 20% instance manager)
+        vertical_splitter.setSizes([400, 100])
 
         layout.addWidget(vertical_splitter)
 
@@ -326,9 +339,11 @@ class ImageBrowserWidget(QWidget):
             context_obj=context_obj
         )
 
-        # Wrap in scroll area for long forms
+        # Wrap in scroll area for long forms (vertical scrolling only)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setWidget(self.napari_config_form)
         layout.addWidget(scroll)
 
@@ -369,9 +384,11 @@ class ImageBrowserWidget(QWidget):
             context_obj=context_obj
         )
 
-        # Wrap in scroll area for long forms
+        # Wrap in scroll area for long forms (vertical scrolling only)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setWidget(self.fiji_config_form)
         layout.addWidget(scroll)
 

@@ -56,13 +56,24 @@ class PlateViewerWindow(QDialog):
     def _setup_ui(self):
         """Setup the window UI."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-        
-        # Header
-        header_layout = QHBoxLayout()
+        layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
+        layout.setSpacing(5)  # Reduced spacing
 
-        # Show plate name with full path in parentheses, with elision
+        # Single row: tabs + title + button
+        tab_row = QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 0, 0)  # No margins - let tabs breathe
+        tab_row.setSpacing(10)
+
+        # Tab widget (tabs on the left)
+        self.tab_widget = QTabWidget()
+        # Get the tab bar and add it to our horizontal layout
+        self.tab_bar = self.tab_widget.tabBar()
+        # Prevent tab scrolling by setting expanding to false and using minimum size hint
+        self.tab_bar.setExpanding(False)
+        self.tab_bar.setUsesScrollButtons(False)
+        tab_row.addWidget(self.tab_bar, 0)  # 0 stretch - don't expand
+
+        # Show plate name with full path in parentheses, with elision (title on right of tabs)
         if self.orchestrator:
             plate_name = self.orchestrator.plate_path.name
             full_path = str(self.orchestrator.plate_path)
@@ -79,26 +90,20 @@ class PlateViewerWindow(QDialog):
         # Enable elision (text will be cut with ... when too long)
         from PyQt6.QtWidgets import QSizePolicy
         title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        header_layout.addWidget(title_label, 1)  # Stretch to fill available space
-        
-        header_layout.addStretch()
-        
+        tab_row.addWidget(title_label, 1)  # Stretch to fill available space
+
+        tab_row.addStretch()
+
         # Close button
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
         close_btn.setStyleSheet(self.style_gen.generate_button_style())
-        header_layout.addWidget(close_btn)
-        
-        layout.addLayout(header_layout)
-        
-        # Tab widget
-        self.tab_widget = QTabWidget()
-        # Use inline style (same pattern as dual_editor_window)
-        self.tab_widget.setStyleSheet(f"""
-            QTabWidget::pane {{
-                border: none;
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-            }}
+        tab_row.addWidget(close_btn)
+
+        layout.addLayout(tab_row)
+
+        # Style the tab bar
+        self.tab_bar.setStyleSheet(f"""
             QTabBar::tab {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.input_bg)};
                 color: white;
@@ -115,16 +120,29 @@ class PlateViewerWindow(QDialog):
                 background-color: {self.color_scheme.to_hex(self.color_scheme.button_hover_bg)};
             }}
         """)
-        
+
         # Tab 1: Image Browser
         self.image_browser_tab = self._create_image_browser_tab()
         self.tab_widget.addTab(self.image_browser_tab, "Image Browser")
-        
+
         # Tab 2: Metadata Viewer
         self.metadata_viewer_tab = self._create_metadata_viewer_tab()
         self.tab_widget.addTab(self.metadata_viewer_tab, "Metadata")
-        
-        layout.addWidget(self.tab_widget)
+
+        # Add the tab widget's content area (stacked widget) below the tab row
+        # The tab bar is already in tab_row, so we only add the content pane here
+        from PyQt6.QtWidgets import QStackedWidget
+        content_container = QWidget()
+        content_layout = QVBoxLayout(content_container)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        # Get the stacked widget from the tab widget and add it
+        stacked_widget = self.tab_widget.findChild(QStackedWidget)
+        if stacked_widget:
+            content_layout.addWidget(stacked_widget)
+
+        layout.addWidget(content_container)
     
     def _create_image_browser_tab(self) -> QWidget:
         """Create the image browser tab."""

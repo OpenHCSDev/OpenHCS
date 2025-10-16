@@ -10,9 +10,9 @@ from typing import Optional, Callable, Dict
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QTabWidget, QWidget
+    QTabWidget, QWidget, QStackedWidget
 )
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
 
 from openhcs.core.steps.function_step import FunctionStep
@@ -107,26 +107,71 @@ class DualEditorWindow(QDialog):
         title = "New Step" if self.is_new else f"Edit Step: {getattr(self.editing_step, 'name', 'Unknown')}"
         self.setWindowTitle(title)
         # Keep non-modal (already set in __init__)
-        self.setMinimumSize(800, 600)
+        # No minimum size - let it be determined by content
         self.resize(1000, 700)
-        
+
         layout = QVBoxLayout(self)
         layout.setSpacing(5)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        # Header
+        # Single row: tabs + title + status + buttons
+        tab_row = QHBoxLayout()
+        tab_row.setContentsMargins(5, 5, 5, 5)
+        tab_row.setSpacing(10)
+
+        # Tab widget (tabs on the left)
+        self.tab_widget = QTabWidget()
+        # Get the tab bar and add it to our horizontal layout
+        self.tab_bar = self.tab_widget.tabBar()
+        # Prevent tab scrolling by setting expanding to false and using minimum size hint
+        self.tab_bar.setExpanding(False)
+        self.tab_bar.setUsesScrollButtons(False)
+        tab_row.addWidget(self.tab_bar, 0)  # 0 stretch - don't expand
+
+        # Title on the right of tabs (allow it to be cropped if needed)
         header_label = QLabel(title)
         header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; padding: 5px;")
-        layout.addWidget(header_label)
+        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        from PyQt6.QtWidgets import QSizePolicy
+        header_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        tab_row.addWidget(header_label, 1)  # 1 stretch - allow to expand and be cropped
 
-        # Tabbed content
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setStyleSheet(f"""
-            QTabWidget::pane {{
-                border: none;
+        tab_row.addStretch()
+
+        # Status indicator
+        self.changes_label = QLabel("")
+        self.changes_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_warning)}; font-style: italic;")
+        tab_row.addWidget(self.changes_label)
+
+        # Get centralized button styles
+        button_styles = self.style_generator.generate_config_button_styles()
+
+        # Cancel button
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setFixedHeight(28)
+        cancel_button.setMinimumWidth(70)
+        cancel_button.clicked.connect(self.cancel_edit)
+        cancel_button.setStyleSheet(button_styles["cancel"])
+        tab_row.addWidget(cancel_button)
+
+        # Save button
+        self.save_button = QPushButton("Save")
+        self.save_button.setFixedHeight(28)
+        self.save_button.setMinimumWidth(70)
+        self.save_button.setEnabled(False)  # Initially disabled
+        self.save_button.clicked.connect(self.save_edit)
+        self.save_button.setStyleSheet(button_styles["save"] + f"""
+            QPushButton:disabled {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
+                color: {self.color_scheme.to_hex(self.color_scheme.border_light)};
+                border: none;
             }}
+        """)
+        tab_row.addWidget(self.save_button)
+
+        layout.addLayout(tab_row)
+        # Style the tab bar
+        self.tab_bar.setStyleSheet(f"""
             QTabBar::tab {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.input_bg)};
                 color: white;
@@ -143,16 +188,24 @@ class DualEditorWindow(QDialog):
                 background-color: {self.color_scheme.to_hex(self.color_scheme.button_hover_bg)};
             }}
         """)
-        
-        # Create tabs
+
+        # Create tabs (this adds content to the tab widget)
         self.create_step_tab()
         self.create_function_tab()
-        
-        layout.addWidget(self.tab_widget)
 
-        # Button panel (no container widget)
-        button_layout = self.create_button_panel()
-        layout.addLayout(button_layout)
+        # Add the tab widget's content area (stacked widget) below the tab row
+        # The tab bar is already in tab_row, so we only add the content pane here
+        content_container = QWidget()
+        content_layout = QVBoxLayout(content_container)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        # Get the stacked widget from the tab widget and add it
+        stacked_widget = self.tab_widget.findChild(QStackedWidget)
+        if stacked_widget:
+            content_layout.addWidget(stacked_widget)
+
+        layout.addWidget(content_container)
 
         # Apply centralized styling
         self.setStyleSheet(self.style_generator.generate_config_window_style())
@@ -230,51 +283,7 @@ class DualEditorWindow(QDialog):
 
 
 
-    def create_button_panel(self) -> QHBoxLayout:
-        """
-        Create the button panel layout (no container widget).
 
-        Returns:
-            QHBoxLayout containing action buttons
-        """
-        layout = QHBoxLayout()
-        layout.setContentsMargins(5, 3, 5, 3)
-        layout.setSpacing(5)
-
-        # Changes indicator
-        self.changes_label = QLabel("")
-        self.changes_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_warning)}; font-style: italic;")
-        layout.addWidget(self.changes_label)
-
-        layout.addStretch()
-
-        # Get centralized button styles
-        button_styles = self.style_generator.generate_config_button_styles()
-
-        # Cancel button
-        cancel_button = QPushButton("Cancel")
-        cancel_button.setFixedHeight(28)
-        cancel_button.setMinimumWidth(70)
-        cancel_button.clicked.connect(self.cancel_edit)
-        cancel_button.setStyleSheet(button_styles["cancel"])
-        layout.addWidget(cancel_button)
-
-        # Save button
-        self.save_button = QPushButton("Save")
-        self.save_button.setFixedHeight(28)
-        self.save_button.setMinimumWidth(70)
-        self.save_button.setEnabled(False)  # Initially disabled
-        self.save_button.clicked.connect(self.save_edit)
-        self.save_button.setStyleSheet(button_styles["save"] + f"""
-            QPushButton:disabled {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
-                color: {self.color_scheme.to_hex(self.color_scheme.border_light)};
-                border: none;
-            }}
-        """)
-        layout.addWidget(self.save_button)
-
-        return layout
 
     def setup_connections(self):
         """Setup signal/slot connections."""

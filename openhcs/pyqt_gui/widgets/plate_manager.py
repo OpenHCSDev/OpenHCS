@@ -128,12 +128,25 @@ class PlateManagerWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
-        
-        # Title
+
+        # Header with title and status
+        header_widget = QWidget()
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(5, 5, 5, 5)
+
         title_label = QLabel("Plate Manager")
         title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; padding: 5px;")
-        layout.addWidget(title_label)
+        title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        header_layout.addWidget(title_label)
+
+        header_layout.addStretch()
+
+        # Status label in header
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_success)}; font-weight: bold;")
+        header_layout.addWidget(self.status_label)
+
+        layout.addWidget(header_widget)
         
         # Main content splitter
         splitter = QSplitter(Qt.Orientation.Vertical)
@@ -172,9 +185,10 @@ class PlateManagerWidget(QWidget):
         button_panel = self.create_button_panel()
         splitter.addWidget(button_panel)
 
-        # Status section
-        status_frame = self.create_status_section()
-        layout.addWidget(status_frame)
+        # Progress bar (below splitter)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
 
         # Set splitter proportions - make button panel much smaller
         splitter.setSizes([400, 80])
@@ -243,39 +257,7 @@ class PlateManagerWidget(QWidget):
 
         return panel
     
-    def create_status_section(self) -> QWidget:
-        """
-        Create the status section with progress bar and status label.
 
-        Returns:
-            Widget containing status information
-        """
-        frame = QWidget()
-        # Set consistent background
-        frame.setStyleSheet(f"""
-            QWidget {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.window_bg)};
-                border: none;
-                padding: 2px;
-            }}
-        """)
-
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(2)
-        
-        # Status label
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_success)}; font-weight: bold;")
-        layout.addWidget(self.status_label)
-        
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        # Progress bar styling is handled by the main widget stylesheet
-        layout.addWidget(self.progress_bar)
-        
-        return frame
     
     def setup_connections(self):
         """Setup signal/slot connections."""

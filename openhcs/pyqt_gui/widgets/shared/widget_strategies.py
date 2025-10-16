@@ -820,3 +820,35 @@ class PyQt6WidgetEnhancer:
         if hasattr(widget, 'changed') and hasattr(widget, 'value'):
             return widget
         return None
+
+    @staticmethod
+    def set_widget_value(widget: Any, value: Any) -> None:
+        """
+        Set widget value without triggering signals.
+
+        Args:
+            widget: Widget to update
+            value: New value
+        """
+        # Temporarily block signals to avoid recursion
+        widget.blockSignals(True)
+
+        try:
+            if isinstance(widget, QCheckBox):
+                widget.setChecked(bool(value))
+            elif isinstance(widget, (QSpinBox, NoScrollSpinBox)):
+                widget.setValue(int(value) if value is not None else 0)
+            elif isinstance(widget, (QDoubleSpinBox, NoScrollDoubleSpinBox)):
+                widget.setValue(float(value) if value is not None else 0.0)
+            elif isinstance(widget, (QComboBox, NoScrollComboBox)):
+                for i in range(widget.count()):
+                    if widget.itemData(i) == value:
+                        widget.setCurrentIndex(i)
+                        break
+            elif isinstance(widget, QLineEdit):
+                widget.setText(str(value) if value is not None else "")
+            # Handle magicgui widgets
+            elif hasattr(widget, 'value'):
+                widget.value = value
+        finally:
+            widget.blockSignals(False)

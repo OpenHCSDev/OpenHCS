@@ -442,14 +442,14 @@ class StyleSheetGenerator:
             """,
             "cancel": f"""
                 QPushButton {{
-                    background-color: {cs.to_hex(cs.status_error)};
-                    color: {cs.to_hex(cs.text_primary)};
-                    border: 1px solid {cs.to_hex(cs.status_error)};
+                    background-color: {cs.to_hex(cs.button_normal_bg)};
+                    color: {cs.to_hex(cs.button_text)};
+                    border: 1px solid {cs.to_hex(cs.border_light)};
                     border-radius: 3px;
                     padding: 8px;
                 }}
                 QPushButton:hover {{
-                    background-color: rgba({cs.status_error[0]}, {cs.status_error[1]}, {cs.status_error[2]}, 0.8);
+                    background-color: {cs.to_hex(cs.button_hover_bg)};
                 }}
             """,
             "save": f"""

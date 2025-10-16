@@ -55,8 +55,8 @@ class MetadataViewerDialog(QDialog):
     def _setup_ui(self):
         """Setup the dialog UI."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(5, 5, 5, 5)  # Reduced margins
+        layout.setSpacing(5)  # Reduced spacing
         
         # Title label
         title_label = QLabel(f"<b>Plate:</b> {self.orchestrator.plate_path}")
