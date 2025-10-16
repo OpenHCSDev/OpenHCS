@@ -336,17 +336,20 @@ class ParameterFormManager(QWidget):
             # Connect to destroyed signal for cleanup
             self.destroyed.connect(self._on_destroyed)
 
-            # CRITICAL: For root GlobalPipelineConfig, refresh placeholders AGAIN after initial load
-            # This enables sibling inheritance using the loaded form values as overlay
-            # The first refresh (line 233) uses static defaults only
-            # This second refresh uses static defaults + loaded form values for sibling inheritance
+            # CRITICAL: Refresh placeholders with live context after initial load
+            # This ensures new windows immediately show live values from other open windows
             is_root_global_config = (self.config.is_global_config_editing and
                                      self.global_config_type is not None and
                                      self.context_obj is None)
             if is_root_global_config:
+                # For root GlobalPipelineConfig, refresh with sibling inheritance
                 with timer("  Root global config sibling inheritance refresh", threshold_ms=10.0):
                     self._refresh_all_placeholders()
                     self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+            else:
+                # For other windows (PipelineConfig, Step), refresh with live context from other windows
+                with timer("  Initial live context refresh", threshold_ms=10.0):
+                    self._refresh_with_live_context()
 
     # ==================== GENERIC OBJECT INTROSPECTION METHODS ====================
 
@@ -1190,16 +1193,14 @@ class ParameterFormManager(QWidget):
 
             # OPTIMIZATION: Single placeholder refresh at the end instead of per-parameter
             # This is much faster than refreshing after each reset
+            # Use _refresh_with_live_context to avoid redundant get_current_values() calls
             if not self._in_reset:
-                self._refresh_all_placeholders()
+                self._refresh_with_live_context()
 
 
 
     def update_parameter(self, param_name: str, value: Any) -> None:
         """Update parameter value using shared service layer."""
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"🔧 {self.field_id}.update_parameter({param_name}, {value})")
 
         if param_name in self.parameters:
             # Convert value using service layer
@@ -1253,8 +1254,6 @@ class ParameterFormManager(QWidget):
 
     def _reset_parameter_impl(self, param_name: str) -> None:
         """Internal reset implementation."""
-        import logging
-        logger = logging.getLogger(__name__)
 
         # Function parameters reset to static defaults from param_defaults
         if self._is_function_parameter(param_name):
@@ -1344,11 +1343,7 @@ class ParameterFormManager(QWidget):
         # Update widget with reset value
         if param_name in self.widgets:
             widget = self.widgets[param_name]
-            logger.info(f"🔍 RESET_IMPL: Updating widget for {param_name} to {reset_value}")
             self.update_widget_value(widget, reset_value, param_name)
-            # Verify widget was updated
-            actual_value = self.get_widget_value(widget)
-            logger.info(f"🔍 RESET_IMPL: Widget value after update: {actual_value}")
 
             # Apply placeholder only if reset value is None (lazy behavior)
             # OPTIMIZATION: Skip during batch reset - we'll refresh all placeholders once at the end
@@ -1675,23 +1670,25 @@ class ParameterFormManager(QWidget):
         # The root manager will emit context_value_changed via _emit_cross_window_change
         self.parameter_changed.emit(param_name, value)
 
-    def _refresh_with_live_context(self) -> None:
+    def _refresh_with_live_context(self, live_context: dict = None) -> None:
         """Refresh placeholders using live context from other open windows.
 
         This is the standard refresh method that should be used for all placeholder updates.
-        It automatically collects live values from other open windows.
+        It automatically collects live values from other open windows (unless already provided).
+
+        Args:
+            live_context: Optional pre-collected live context. If None, will collect it.
         """
         # Only root managers should collect live context (nested managers inherit from parent)
-        if self._parent_manager is None:
+        # If live_context is already provided (e.g., from parent), use it to avoid redundant collection
+        if live_context is None and self._parent_manager is None:
             live_context = self._collect_live_context_from_other_windows()
-        else:
-            live_context = None
 
         # Refresh this form's placeholders
         self._refresh_all_placeholders(live_context=live_context)
 
         # CRITICAL: Also refresh all nested managers' placeholders
-        # This ensures nested configs (like napari_display_config, fiji_streaming_config) also update
+        # Pass the same live_context to avoid redundant get_current_values() calls
         self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
 
     def _refresh_all_placeholders(self, live_context: dict = None) -> None:
