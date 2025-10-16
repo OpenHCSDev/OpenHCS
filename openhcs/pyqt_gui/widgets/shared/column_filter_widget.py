@@ -234,24 +234,62 @@ class ColumnFilterWidget(QFrame):
         total_count = len(self.unique_values)
         self.count_label.setText(f"{selected_count}/{total_count} selected")
     
-    def select_all(self):
-        """Select all checkboxes."""
+    def select_all(self, block_signals: bool = False):
+        """
+        Select all checkboxes.
+
+        Args:
+            block_signals: If True, block signals while updating checkboxes
+        """
         for checkbox in self.checkboxes.values():
+            if block_signals:
+                checkbox.blockSignals(True)
             checkbox.setChecked(True)
-    
-    def select_none(self):
-        """Deselect all checkboxes."""
+            if block_signals:
+                checkbox.blockSignals(False)
+
+        if block_signals:
+            self._update_count_label()
+
+    def select_none(self, block_signals: bool = False):
+        """
+        Deselect all checkboxes.
+
+        Args:
+            block_signals: If True, block signals while updating checkboxes
+        """
         for checkbox in self.checkboxes.values():
+            if block_signals:
+                checkbox.blockSignals(True)
             checkbox.setChecked(False)
+            if block_signals:
+                checkbox.blockSignals(False)
+
+        if block_signals:
+            self._update_count_label()
     
     def get_selected_values(self) -> Set[str]:
         """Get set of selected values."""
         return {value for value, checkbox in self.checkboxes.items() if checkbox.isChecked()}
     
-    def set_selected_values(self, values: Set[str]):
-        """Set which values are selected."""
+    def set_selected_values(self, values: Set[str], block_signals: bool = False):
+        """
+        Set which values are selected.
+
+        Args:
+            values: Set of values to select
+            block_signals: If True, block signals while updating checkboxes to prevent loops
+        """
         for value, checkbox in self.checkboxes.items():
+            if block_signals:
+                checkbox.blockSignals(True)
             checkbox.setChecked(value in values)
+            if block_signals:
+                checkbox.blockSignals(False)
+
+        # Update count label manually if signals were blocked
+        if block_signals:
+            self._update_count_label()
 
 
 class MultiColumnFilterPanel(QWidget):

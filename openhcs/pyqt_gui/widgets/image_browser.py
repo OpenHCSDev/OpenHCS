@@ -532,15 +532,26 @@ class ImageBrowserWidget(QWidget):
         if self.column_filter_panel.column_filters:
             self.column_filter_panel.setVisible(True)
 
+        # Connect well filter to plate view for bidirectional sync
+        if 'Well' in self.column_filter_panel.column_filters and self.plate_view_widget:
+            well_filter = self.column_filter_panel.column_filters['Well']
+            self.plate_view_widget.set_well_filter_widget(well_filter)
+
+            # Connect well filter changes to sync back to plate view
+            well_filter.filter_changed.connect(self._on_well_filter_changed)
+
         logger.debug(f"Built {len(self.column_filter_panel.column_filters)} column filters")
 
     def _on_column_filters_changed(self):
         """Handle column filter changes."""
         self._apply_combined_filters()
 
-        # Update plate view if visible
-        if self.plate_view_widget and self.plate_view_widget.isVisible():
-            self._update_plate_view()
+    def _on_well_filter_changed(self):
+        """Handle well filter checkbox changes - sync to plate view."""
+        if self.plate_view_widget:
+            self.plate_view_widget.sync_from_well_filter()
+        # Apply the filter to the table
+        self._apply_combined_filters()
 
     def filter_images(self, search_term: str):
         """Filter images using shared search service (canonical code path)."""
