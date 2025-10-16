@@ -67,10 +67,10 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         # Convenience attributes
         self.compression_level = zarr_config.compression_level
 
-        # Create actual compressor from config
+        # Create actual compressor from config (shuffle always enabled for Blosc)
         self.compressor = self.config.compressor.create_compressor(
             self.config.compression_level,
-            self.config.shuffle
+            shuffle=True  # Always enable shuffle for better compression
         )
 
     def _get_compressor(self) -> Optional[Any]:
@@ -100,7 +100,26 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
 
         return self.compressor
 
+    def _calculate_chunks(self, data_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        """
+        Calculate chunk shape based on configured strategy.
 
+        Args:
+            data_shape: Shape of the 5D array (fields, channels, z, y, x)
+
+        Returns:
+            Chunk shape tuple
+        """
+        from openhcs.core.config import ZarrChunkStrategy
+
+        match self.config.chunk_strategy:
+            case ZarrChunkStrategy.WELL:
+                # Single chunk for entire well (current behavior, optimal for batch I/O)
+                return data_shape
+            case ZarrChunkStrategy.FILE:
+                # One chunk per individual file: (1, 1, 1, y, x)
+                # Each original tif is compressed separately
+                return (1, 1, 1, data_shape[3], data_shape[4])
 
     def _split_store_and_key(self, path: Union[str, Path]) -> Tuple[Any, str]:
         """
@@ -327,10 +346,9 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         # Get the store for compatibility with existing code
         store = root.store
 
-        # Write plate metadata with locking to prevent concurrent corruption (if enabled)
-        should_write_plate_metadata = kwargs.get('write_plate_metadata', self.config.write_plate_metadata)
-        if should_write_plate_metadata:
-            self._ensure_plate_metadata_with_lock(root, row, col, store_path)
+        # Write plate metadata with locking to prevent concurrent corruption
+        # Always enabled for OME-ZARR HCS compliance
+        self._ensure_plate_metadata_with_lock(root, row, col, store_path)
 
         # Create HCS-compliant structure: plate/row/col/field/resolution
         # Create row group if it doesn't exist
@@ -401,9 +419,9 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         # Write OME-ZARR well metadata with single field (well-chunked approach)
         write_well_metadata(well_group, ['0'])
 
-        # Use single chunk approach for optimal performance
+        # Calculate chunks based on configured strategy
         storage_options = {
-            "chunks": reshaped_data.shape,  # Single chunk for entire well
+            "chunks": self._calculate_chunks(reshaped_data.shape),
             "compressor": self._get_compressor()
         }
 

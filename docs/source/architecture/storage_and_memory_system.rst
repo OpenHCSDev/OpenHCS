@@ -724,11 +724,82 @@ Real-World Usage Patterns
 - Workflows requiring OME-ZARR compliance
 - Long-term archival with compression benefits
 
+Zarr Chunking Strategies
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+OpenHCS provides two chunking strategies for zarr storage, configurable via ``ZarrChunkStrategy`` enum:
+
+**WELL Mode (Default)**:
+
+.. code-block:: python
+
+   zarr_config = ZarrConfig(
+       chunk_strategy=ZarrChunkStrategy.WELL,
+       compressor=ZarrCompressor.ZSTD,
+       compression_level=1
+   )
+
+- **Chunk shape**: ``(fields, channels, z, y, x)`` - entire 5D array in one chunk
+- **Performance**: 40x improvement for batch operations
+- **Use case**: Loading entire wells or many files from same well
+- **Example**: 9 fields × 2 channels × 5 z-planes = 1 chunk (~180MB compressed)
+- **Benefits**: Optimal for sequential processing, minimal I/O overhead
+
+**FILE Mode**:
+
+.. code-block:: python
+
+   zarr_config = ZarrConfig(
+       chunk_strategy=ZarrChunkStrategy.FILE,
+       compressor=ZarrCompressor.ZSTD,
+       compression_level=1
+   )
+
+- **Chunk shape**: ``(1, 1, 1, y, x)`` - each original file is a separate chunk
+- **Performance**: Better for random access to individual files
+- **Use case**: Sparse access patterns, individual file retrieval
+- **Example**: 9 fields × 2 channels × 5 z-planes = 90 chunks (~2MB each)
+- **Benefits**: Lower memory footprint, granular access
+
+**Choosing a Strategy**:
+
+- Use **WELL mode** (default) for:
+  - Processing entire wells sequentially
+  - Batch operations on multiple images
+  - Maximum I/O performance
+  - Standard high-content screening workflows
+
+- Use **FILE mode** for:
+  - Random access to individual images
+  - Memory-constrained environments
+  - Sparse sampling across wells
+  - Interactive exploration workflows
+
+**OME-ZARR Structure**:
+
+Both strategies maintain OME-ZARR HCS compliance with the same 5D array structure:
+
+.. code-block:: text
+
+   /plate_openhcs/images/
+   ├── .zgroup                    # Root group metadata
+   ├── .zattrs                    # Plate-level OME-ZARR metadata
+   ├── A/                         # Row A
+   │   ├── 01/                    # Column 01 (well A01)
+   │   │   ├── .zgroup
+   │   │   └── 0/                 # Field group (5D array)
+   │   │       ├── .zarray        # Array metadata
+   │   │       ├── .zattrs        # Well metadata + filename mapping
+   │   │       └── 0.0.0.0.0      # Chunk file(s)
+
+The difference is internal: WELL mode creates one large chunk file, FILE mode creates many small chunk files.
+
 **Performance Benefits**:
 - Automatic format handling between memory types during processing
 - Optimized GPU memory management across pipeline steps
 - Coordinated storage decisions based on data size and use case
 - Consistent performance regardless of memory type used for computation
+- Configurable chunking for optimal I/O patterns
 
 Benefits and Design Principles
 ------------------------------

@@ -340,11 +340,7 @@ class OpenHCSExecutionServer:
                             config_params.get('materialization_backend', 'disk')
                         )
                     ),
-                    zarr_config=ZarrConfig(
-                        store_name='images.zarr',
-                        ome_zarr_metadata=True,
-                        write_plate_metadata=True,
-                    ),
+                    zarr_config=ZarrConfig(),
                     step_well_filter_config=StepWellFilterConfig(
                         well_filter=config_params.get('well_filter')
                     ),

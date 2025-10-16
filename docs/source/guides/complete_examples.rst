@@ -57,13 +57,9 @@ Key Code Patterns
             materialization_backend=MaterializationBackend.ZARR
         ),
         zarr=ZarrConfig(
-            store_name="images.zarr",
             compressor=ZarrCompressor.ZSTD,
             compression_level=1,
-            shuffle=True,
-            chunk_strategy=ZarrChunkStrategy.SINGLE,
-            ome_zarr_metadata=True,
-            write_plate_metadata=True
+            chunk_strategy=ZarrChunkStrategy.WELL
         ),
         microscope=Microscope.AUTO
     )

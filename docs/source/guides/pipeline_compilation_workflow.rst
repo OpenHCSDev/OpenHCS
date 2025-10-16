@@ -94,14 +94,12 @@ Phase 2: ZARR Store Declaration
 
 .. code-block:: python
 
-    # ZARR configuration for large datasets
+    # ZARR metadata for large datasets
+    # Note: This is metadata dict, not the ZarrConfig dataclass
     if will_use_zarr:
         step_plan["zarr_config"] = {
-            "store_name": "images.zarr",
             "all_wells": all_wells,
-            "needs_initialization": True,
-            "compressor": "lz4",
-            "chunk_strategy": "adaptive"
+            "needs_initialization": True
         }
 
 Phase 3: Materialization Flag Planning

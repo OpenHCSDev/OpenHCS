@@ -67,9 +67,8 @@ class ZarrCompressor(Enum):
 
 class ZarrChunkStrategy(Enum):
     """Chunking strategies for zarr arrays."""
-    SINGLE = "single"  # Single chunk per array (optimal for batch I/O)
-    AUTO = "auto"      # Let zarr decide chunk size
-    CUSTOM = "custom"  # User-defined chunk sizes
+    WELL = "well"  # Single chunk per well (optimal for batch I/O)
+    FILE = "file"  # One chunk per file (better for random access)
 
 
 class MaterializationBackend(Enum):
@@ -251,27 +250,19 @@ class WellFilterConfig:
 @global_pipeline_config
 @dataclass(frozen=True)
 class ZarrConfig:
-    """Configuration for Zarr storage backend."""
-    store_name: str = "images"
-    """Name of the zarr store directory."""
+    """Configuration for Zarr storage backend.
 
+    OME-ZARR metadata and plate metadata are always enabled for HCS compliance.
+    Shuffle filter is always enabled for Blosc compressor (ignored for others).
+    """
     compressor: ZarrCompressor = ZarrCompressor.ZLIB
     """Compression algorithm to use."""
 
     compression_level: int = 3
     """Compression level (1-9 for LZ4, higher = more compression)."""
 
-    shuffle: bool = True
-    """Enable byte shuffling for better compression (blosc only)."""
-
-    chunk_strategy: ZarrChunkStrategy = ZarrChunkStrategy.SINGLE
-    """Chunking strategy for zarr arrays."""
-
-    ome_zarr_metadata: bool = True
-    """Generate OME-ZARR compatible metadata and structure."""
-
-    write_plate_metadata: bool = True
-    """Write plate-level metadata for HCS viewing (required for OME-ZARR viewers like napari)."""
+    chunk_strategy: ZarrChunkStrategy = ZarrChunkStrategy.WELL
+    """Chunking strategy: WELL (single chunk per well) or FILE (one chunk per file)."""
 
 
 @global_pipeline_config

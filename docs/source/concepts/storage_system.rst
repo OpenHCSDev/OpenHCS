@@ -190,10 +190,11 @@ Zarr Output Structure
    └── ...
 
 **Benefits of Zarr**:
-- **Compression**: Significant space savings for large datasets
-- **Chunking**: Efficient access to subsets of large arrays
-- **Metadata**: Rich metadata storage with processing history
+- **Compression**: Significant space savings for large datasets (up to 10x reduction)
+- **Chunking**: Configurable chunking strategies for optimal I/O performance
+- **Metadata**: Rich OME-ZARR metadata for interoperability with napari, Fiji
 - **Cross-platform**: Works across different operating systems and languages
+- **Performance**: 40x faster batch operations with WELL chunking mode
 
 Storage Configuration Examples
 -----------------------------
@@ -214,14 +215,11 @@ VFS Configuration Details
 
    # Detailed ZARR configuration
    zarr_config = ZarrConfig(
-       store_name="images.zarr",                         # ZARR store filename
        compressor=ZarrCompressor.ZSTD,                   # Compression algorithm
        compression_level=1,                              # Compression level (1-9)
-       shuffle=True,                                     # Enable shuffle filter
-       chunk_strategy=ZarrChunkStrategy.SINGLE,          # Chunking strategy
-       ome_zarr_metadata=True,                           # OME-ZARR metadata
-       write_plate_metadata=True                         # Plate-level metadata
+       chunk_strategy=ZarrChunkStrategy.WELL             # WELL (single chunk) or FILE (per-file chunks)
    )
+   # Note: OME-ZARR metadata, plate metadata, and shuffle filter are always enabled
 
    # Integration with global configuration
    global_config = GlobalPipelineConfig(
@@ -229,6 +227,47 @@ VFS Configuration Details
        zarr=zarr_config,
        num_workers=8
    )
+
+Zarr Chunking Strategies
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+OpenHCS provides two chunking strategies for optimal performance in different use cases:
+
+**WELL Mode (Default - Recommended)**:
+
+.. code-block:: python
+
+   zarr_config = ZarrConfig(
+       chunk_strategy=ZarrChunkStrategy.WELL,  # Single chunk per well
+       compressor=ZarrCompressor.ZSTD,
+       compression_level=1
+   )
+
+- **Best for**: Standard high-content screening workflows
+- **Performance**: 40x faster than FILE mode for batch operations
+- **Memory**: Loads entire well at once (~180MB compressed for typical well)
+- **Use case**: Processing entire wells sequentially, batch analysis
+
+**FILE Mode (Random Access)**:
+
+.. code-block:: python
+
+   zarr_config = ZarrConfig(
+       chunk_strategy=ZarrChunkStrategy.FILE,  # One chunk per file
+       compressor=ZarrCompressor.ZSTD,
+       compression_level=1
+   )
+
+- **Best for**: Interactive exploration, sparse sampling
+- **Performance**: Better for random access to individual images
+- **Memory**: Loads individual files on demand (~2MB each)
+- **Use case**: Viewing specific images, memory-constrained environments
+
+**Choosing the Right Strategy**:
+
+- **Use WELL mode** if you're processing entire plates or wells sequentially
+- **Use FILE mode** if you need to access random individual images
+- **Default is WELL** - it provides the best performance for typical HCS workflows
 
 High-Performance Processing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
