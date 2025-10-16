@@ -630,23 +630,9 @@ class PlateManagerWidget(QWidget):
                 self,                   # parent
             )
 
-            # CRITICAL: Connect to orchestrator config changes for automatic refresh
-            # This ensures the config window stays in sync when tier 3 edits change the underlying config
-            if orchestrator and hasattr(config_window, 'refresh_config'):
-                def handle_orchestrator_config_change(plate_path: str, effective_config):
-                    # Only refresh if this is for the same orchestrator
-                    if plate_path == str(orchestrator.plate_path):
-                        # Get the updated pipeline config from the orchestrator
-                        updated_pipeline_config = orchestrator.pipeline_config
-                        if updated_pipeline_config:
-                            config_window.refresh_config(updated_pipeline_config)
-                            logger.debug(f"Auto-refreshed config window for orchestrator: {plate_path}")
-
-                # Connect the signal
-                self.orchestrator_config_changed.connect(handle_orchestrator_config_change)
-
-                # Store the connection so we can disconnect it when the window closes
-                config_window._orchestrator_signal_connection = handle_orchestrator_config_change
+            # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system
+            # Config windows automatically update their placeholders through cross-window signals
+            # when other windows save changes. No need to rebuild the entire form.
 
             # Show as non-modal window (like main window configuration)
             config_window.show()

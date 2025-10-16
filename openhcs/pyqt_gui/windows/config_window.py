@@ -471,94 +471,6 @@ class ConfigWindow(QDialog):
 
         logger.debug("Reset all parameters using enhanced ParameterFormManager service")
 
-    def refresh_config(self, new_config):
-        """Refresh the config window with new configuration data.
-
-        This is called when the underlying configuration changes (e.g., from tier 3 edits)
-        to keep the UI in sync with the actual data.
-
-        Args:
-            new_config: New configuration instance to display
-        """
-        from openhcs.utils.performance_monitor import timer
-        with timer("⚠️ REFRESH_CONFIG CALLED", threshold_ms=0.0):
-            # CRITICAL: Don't refresh if we're currently saving - the window already has the correct data!
-            # This prevents recreating the entire form (1262ms) when the save operation triggers
-            # orchestrator_config_changed signal which calls this method.
-            saving_flag = getattr(self, '_saving', False)
-            logger.info(f"🔍 REFRESH_CONFIG: _saving={saving_flag} (id={id(self)})")
-            if saving_flag:
-                logger.info("✅ Skipping refresh_config during save operation")
-                return
-
-        try:
-            # Import required services
-
-            # Update the current config
-            self.current_config = new_config
-
-            # Determine placeholder prefix based on actual instance type (same logic as __init__)
-            is_lazy_dataclass = LazyDefaultPlaceholderService.has_lazy_resolution(type(new_config))
-            placeholder_prefix = "Pipeline default" if is_lazy_dataclass else "Default"
-
-            # SIMPLIFIED: Create new form manager with dual-axis resolution
-            root_field_id = type(new_config).__name__  # e.g., "GlobalPipelineConfig" or "PipelineConfig"
-
-            # FIXED: Use the dataclass instance itself for context consistently
-            new_form_manager = ParameterFormManager.from_dataclass_instance(
-                dataclass_instance=new_config,
-                field_id=root_field_id,
-                placeholder_prefix=placeholder_prefix,
-                color_scheme=self.color_scheme,
-                use_scroll_area=True,
-                global_config_type=GlobalPipelineConfig
-            )
-
-            # Find and replace the form widget in the layout
-            # Layout structure: [0] header, [1] form/scroll_area, [2] buttons
-            layout = self.layout()
-            if layout.count() >= 2:
-                # Get the form container (might be scroll area or direct form)
-                form_container_item = layout.itemAt(1)
-                if form_container_item:
-                    old_container = form_container_item.widget()
-
-                    # Remove old container from layout
-                    layout.removeItem(form_container_item)
-
-                    # Properly delete old container and its contents
-                    if old_container:
-                        old_container.deleteLater()
-
-                    # Add new form container at the same position
-                    if self._should_use_scroll_area():
-                        # Create new scroll area with new form
-                        from PyQt6.QtWidgets import QScrollArea
-                        from PyQt6.QtCore import Qt
-                        scroll_area = QScrollArea()
-                        scroll_area.setWidgetResizable(True)
-                        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-                        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-                        scroll_area.setWidget(new_form_manager)
-                        layout.insertWidget(1, scroll_area)
-                    else:
-                        # Add form directly
-                        layout.insertWidget(1, new_form_manager)
-
-                    # Update the form manager reference
-                    self.form_manager = new_form_manager
-
-                    logger.debug(f"Config window refreshed with new {type(new_config).__name__}")
-                else:
-                    logger.error("Could not find form container in layout")
-            else:
-                logger.error(f"Layout has insufficient items: {layout.count()}")
-
-        except Exception as e:
-            logger.error(f"Failed to refresh config window: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-
     def save_config(self):
         """Save the configuration preserving lazy behavior for unset fields."""
         try:
@@ -648,12 +560,20 @@ class ConfigWindow(QDialog):
             # Update the current config
             self.current_config = new_config
 
-            # Rebuild the form with the new config
-            # This properly preserves None vs concrete values
-            self.refresh_config(new_config)
+            # Update form manager's values from the new config
+            # This is simpler than rebuilding the entire form
+            from dataclasses import fields
+            for field in fields(new_config):
+                value = getattr(new_config, field.name)
+                if field.name in self.form_manager.parameters:
+                    self.form_manager.parameters[field.name] = value
+                    # Update the widget to show the new value
+                    if field.name in self.form_manager.widgets:
+                        widget = self.form_manager.widgets[field.name]
+                        from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
+                        PyQt6WidgetEnhancer.set_widget_value(widget, value)
 
-            # CRITICAL: Refresh placeholders using current form values after rebuild
-            # This ensures placeholders reflect the new values for sibling inheritance
+            # Refresh placeholders to reflect the new values
             self.form_manager._refresh_all_placeholders()
             self.form_manager._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
@@ -667,7 +587,6 @@ class ConfigWindow(QDialog):
     def reject(self):
         """Handle dialog rejection (Cancel button)."""
         self.config_cancelled.emit()
-        self._cleanup_signal_connections()
         # CRITICAL: Unregister from cross-window updates so other windows revert to saved values
         # Only do this on cancel - on save, the values are now saved so other windows should use them
         if hasattr(self, 'form_manager'):
@@ -676,14 +595,12 @@ class ConfigWindow(QDialog):
 
     def accept(self):
         """Handle dialog acceptance (Save button)."""
-        self._cleanup_signal_connections()
         # DON'T unregister on save - the values are now saved, so other windows should continue using them
         # The unregistration will happen naturally when the widget is destroyed
         super().accept()
 
     def closeEvent(self, event):
         """Handle window close event."""
-        self._cleanup_signal_connections()
         # Only unregister if we're closing without saving (user clicked X)
         # If we saved, the values are persisted so other windows should use them
         # Check if we're in the middle of saving
@@ -691,22 +608,5 @@ class ConfigWindow(QDialog):
             if hasattr(self, 'form_manager'):
                 self.form_manager.unregister_from_cross_window_updates()
         super().closeEvent(event)
-
-    def _cleanup_signal_connections(self):
-        """Clean up signal connections to prevent memory leaks."""
-        # Disconnect the orchestrator_config_changed signal if it was connected
-        if hasattr(self, '_orchestrator_signal_connection'):
-            try:
-                # Find the plate manager in the parent hierarchy
-                parent = self.parent()
-                while parent is not None:
-                    # Check if parent has the orchestrator_config_changed signal
-                    if hasattr(parent, 'orchestrator_config_changed'):
-                        parent.orchestrator_config_changed.disconnect(self._orchestrator_signal_connection)
-                        logger.info(f"✅ Disconnected orchestrator_config_changed signal for window id={id(self)}")
-                        break
-                    parent = parent.parent()
-            except Exception as e:
-                logger.warning(f"Failed to disconnect signal: {e}")
 
         logger.debug(f"Config window closing (id={id(self)})")
