@@ -342,6 +342,17 @@ class MultiColumnFilterPanel(QWidget):
         viewport_width = self.scroll_area.viewport().width()
         if viewport_width > 0:
             self.splitter.setFixedWidth(viewport_width)
+
+    def showEvent(self, event):
+        """Handle show event to ensure proper initial sizing."""
+        super().showEvent(event)
+        # When first shown, ensure splitter has correct width and recalculate sizes
+        viewport_width = self.scroll_area.viewport().width()
+        if viewport_width > 0:
+            self.splitter.setFixedWidth(viewport_width)
+            # Recalculate sizes now that we have proper dimensions
+            if self.column_filters:
+                self._update_splitter_sizes()
     
     def add_column_filter(self, column_name: str, unique_values: List[str]):
         """
@@ -402,11 +413,18 @@ class MultiColumnFilterPanel(QWidget):
         """Deferred size update after widgets are fully rendered."""
         num_filters = len(self.column_filters)
         if num_filters > 0:
+            # Force synchronous event processing to ensure layout is complete
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+
             # Force a full layout pass first
             self.splitter.updateGeometry()
             for filter_widget in self.column_filters.values():
                 filter_widget.layout().activate()
                 filter_widget.updateGeometry()
+
+            # Process events again after geometry updates
+            QApplication.processEvents()
 
             # Recalculate sizes now that widgets are rendered
             sizes = []

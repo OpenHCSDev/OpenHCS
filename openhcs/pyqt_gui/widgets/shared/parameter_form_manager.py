@@ -137,6 +137,12 @@ class ParameterFormManager(QWidget):
     # Args: (field_path, new_value, editing_object, context_object)
     context_value_changed = pyqtSignal(str, object, object, object)
 
+    # Class-level signal for cascading placeholder refreshes
+    # Emitted when a form's placeholders are refreshed due to upstream changes
+    # This allows downstream windows to know they should re-collect live context
+    # Args: (editing_object, context_object)
+    context_refreshed = pyqtSignal(object, object)
+
     # Class-level registry of all active form managers for cross-window updates
     _active_form_managers = []
 
@@ -292,6 +298,10 @@ class ParameterFormManager(QWidget):
 
             # Register this form manager for cross-window updates (only root managers, not nested)
             if self._parent_manager is None:
+                # CRITICAL: Store initial values when window opens for cancel/revert behavior
+                # When user cancels, other windows should revert to these initial values, not current edited values
+                self._initial_values_on_open = self.get_user_modified_values() if hasattr(self.config, '_resolve_field_value') else self.get_current_values()
+
                 # Connect parameter_changed to emit cross-window context changes
                 self.parameter_changed.connect(self._emit_cross_window_change)
 
@@ -299,8 +309,10 @@ class ParameterFormManager(QWidget):
                 for existing_manager in self._active_form_managers:
                     # Connect this instance to existing instances
                     self.context_value_changed.connect(existing_manager._on_cross_window_context_changed)
+                    self.context_refreshed.connect(existing_manager._on_cross_window_context_refreshed)
                     # Connect existing instances to this instance
                     existing_manager.context_value_changed.connect(self._on_cross_window_context_changed)
+                    existing_manager.context_refreshed.connect(self._on_cross_window_context_refreshed)
 
                 # Add this instance to the registry
                 self._active_form_managers.append(self)
@@ -1439,26 +1451,67 @@ class ParameterFormManager(QWidget):
         # Only include fields where the raw value is not None
         for field_name, value in current_values.items():
             if value is not None:
-                # CRITICAL: For nested dataclasses, extract raw values to prevent resolution pollution
-                # We need to rebuild the nested dataclass with only raw non-None values
+                # CRITICAL: For nested dataclasses, we need to extract only user-modified fields
+                # by checking the raw values (using object.__getattribute__ to avoid resolution)
                 from dataclasses import is_dataclass, fields as dataclass_fields
                 if is_dataclass(value) and not isinstance(value, type):
                     # Extract raw field values from nested dataclass
-                    nested_raw_values = {}
+                    nested_user_modified = {}
                     for field in dataclass_fields(value):
                         raw_value = object.__getattribute__(value, field.name)
                         if raw_value is not None:
-                            nested_raw_values[field.name] = raw_value
+                            nested_user_modified[field.name] = raw_value
 
                     # Only include if nested dataclass has user-modified fields
-                    # Recreate the instance with only raw values
-                    if nested_raw_values:
-                        user_modified[field_name] = type(value)(**nested_raw_values)
+                    if nested_user_modified:
+                        # CRITICAL: Pass as dict, not as reconstructed instance
+                        # This allows the context merging to handle it properly
+                        # We'll need to reconstruct it when applying to context
+                        user_modified[field_name] = (type(value), nested_user_modified)
                 else:
                     # Non-dataclass field, include if not None
                     user_modified[field_name] = value
 
         return user_modified
+
+    def _reconstruct_nested_dataclasses(self, live_values: dict, base_instance=None) -> dict:
+        """
+        Reconstruct nested dataclasses from tuple format (type, dict) to instances.
+
+        get_user_modified_values() returns nested dataclasses as (type, dict) tuples
+        to preserve only user-modified fields. This function reconstructs them as instances
+        by merging the user-modified fields into the base instance's nested dataclasses.
+
+        Args:
+            live_values: Dict with values, may contain (type, dict) tuples for nested dataclasses
+            base_instance: Base dataclass instance to merge into (for nested dataclass fields)
+        """
+        import dataclasses
+        from dataclasses import is_dataclass
+
+        reconstructed = {}
+        for field_name, value in live_values.items():
+            if isinstance(value, tuple) and len(value) == 2:
+                # Nested dataclass in tuple format: (type, dict)
+                dataclass_type, field_dict = value
+
+                # CRITICAL: If we have a base instance, merge into its nested dataclass
+                # This prevents creating fresh instances with None defaults
+                if base_instance and hasattr(base_instance, field_name):
+                    base_nested = getattr(base_instance, field_name)
+                    if base_nested is not None and is_dataclass(base_nested):
+                        # Merge user-modified fields into base nested dataclass
+                        reconstructed[field_name] = dataclasses.replace(base_nested, **field_dict)
+                    else:
+                        # No base nested dataclass, create fresh instance
+                        reconstructed[field_name] = dataclass_type(**field_dict)
+                else:
+                    # No base instance, create fresh instance
+                    reconstructed[field_name] = dataclass_type(**field_dict)
+            else:
+                # Regular value, pass through
+                reconstructed[field_name] = value
+        return reconstructed
 
     def _build_context_stack(self, overlay, skip_parent_overlay: bool = False, live_context: dict = None):
         """Build nested config_context() calls for placeholder resolution.
@@ -1499,15 +1552,29 @@ class ParameterFormManager(QWidget):
             static_defaults = self.global_config_type()
             stack.enter_context(config_context(static_defaults, mask_with_none=True))
         else:
-            # CRITICAL: For non-global-config editors (PipelineConfig, Step), check if GlobalPipelineConfig editor is open
-            # If so, apply its live values to override the thread-local GlobalPipelineConfig
-            # This enables GlobalPipelineConfig → PipelineConfig → Step propagation
+            # CRITICAL: Apply GlobalPipelineConfig live values FIRST (as base layer)
+            # Then parent context (PipelineConfig) will be applied AFTER, allowing it to override
+            # This ensures proper hierarchy: GlobalPipelineConfig → PipelineConfig → Step
+            #
+            # Order matters:
+            # 1. GlobalPipelineConfig live (base layer) - provides defaults
+            # 2. PipelineConfig (next layer) - overrides GlobalPipelineConfig where it has concrete values
+            # 3. Step overlay (top layer) - overrides everything
             if live_context and self.global_config_type:
                 global_live_values = self._find_live_values_for_type(self.global_config_type, live_context)
                 if global_live_values is not None:
                     try:
-                        global_live_instance = self.global_config_type(**global_live_values)
-                        stack.enter_context(config_context(global_live_instance))
+                        # CRITICAL: Merge live values into thread-local GlobalPipelineConfig instead of creating fresh instance
+                        # This preserves all fields from thread-local and only updates concrete live values
+                        from openhcs.config_framework.context_manager import get_base_global_config
+                        import dataclasses
+                        thread_local_global = get_base_global_config()
+                        if thread_local_global is not None:
+                            # CRITICAL: Reconstruct nested dataclasses from tuple format, merging into thread-local's nested dataclasses
+                            global_live_values = self._reconstruct_nested_dataclasses(global_live_values, thread_local_global)
+
+                            global_live_instance = dataclasses.replace(thread_local_global, **global_live_values)
+                            stack.enter_context(config_context(global_live_instance))
                     except Exception as e:
                         logger.warning(f"Failed to apply live GlobalPipelineConfig: {e}")
 
@@ -1521,7 +1588,12 @@ class ParameterFormManager(QWidget):
                     live_values = self._find_live_values_for_type(ctx_type, live_context)
                     if live_values is not None:
                         try:
-                            live_instance = ctx_type(**live_values)
+                            # CRITICAL: Reconstruct nested dataclasses from tuple format, merging into saved instance's nested dataclasses
+                            live_values = self._reconstruct_nested_dataclasses(live_values, ctx)
+
+                            # CRITICAL: Use dataclasses.replace to merge live values into saved instance
+                            import dataclasses
+                            live_instance = dataclasses.replace(ctx, **live_values)
                             stack.enter_context(config_context(live_instance))
                         except:
                             stack.enter_context(config_context(ctx))
@@ -1529,14 +1601,22 @@ class ParameterFormManager(QWidget):
                         stack.enter_context(config_context(ctx))
             else:
                 # Single parent context (Step Editor: pipeline_config)
-                # CRITICAL: If live_context has updated values for this context TYPE, use those instead
+                # CRITICAL: If live_context has updated values for this context TYPE, merge them into the saved instance
+                # This preserves inheritance: only concrete (non-None) live values override the saved instance
                 ctx_type = type(self.context_obj)
                 live_values = self._find_live_values_for_type(ctx_type, live_context)
                 if live_values is not None:
                     try:
-                        live_instance = ctx_type(**live_values)
+                        # CRITICAL: Reconstruct nested dataclasses from tuple format, merging into saved instance's nested dataclasses
+                        live_values = self._reconstruct_nested_dataclasses(live_values, self.context_obj)
+
+                        # CRITICAL: Use dataclasses.replace to merge live values into saved instance
+                        # This ensures None values in live_values don't override concrete values in self.context_obj
+                        import dataclasses
+                        live_instance = dataclasses.replace(self.context_obj, **live_values)
                         stack.enter_context(config_context(live_instance))
-                    except:
+                    except Exception as e:
+                        logger.warning(f"Failed to apply live parent context: {e}")
                         stack.enter_context(config_context(self.context_obj))
                 else:
                     stack.enter_context(config_context(self.context_obj))
@@ -1908,6 +1988,30 @@ class ParameterFormManager(QWidget):
         # Debounce the refresh to avoid excessive updates
         self._schedule_cross_window_refresh()
 
+    def _on_cross_window_context_refreshed(self, editing_object: object, context_object: object):
+        """Handle cascading placeholder refreshes from upstream windows.
+
+        This is triggered when an upstream window's placeholders are refreshed due to
+        changes in its parent context. This allows the refresh to cascade downstream.
+
+        Example: GlobalPipelineConfig changes → PipelineConfig placeholders refresh →
+                 PipelineConfig emits context_refreshed → Step editor refreshes
+
+        Args:
+            editing_object: The object whose placeholders were refreshed
+            context_object: The context object used by that window
+        """
+        # Don't refresh if this is the window that was refreshed
+        if editing_object is self.object_instance:
+            return
+
+        # Check if the refresh affects this form based on context hierarchy
+        if not self._is_affected_by_context_change(editing_object, context_object):
+            return
+
+        # Debounce the refresh to avoid excessive updates
+        self._schedule_cross_window_refresh()
+
     def _is_affected_by_context_change(self, editing_object: object, context_object: object) -> bool:
         """Determine if a context change from another window affects this form.
 
@@ -1994,6 +2098,10 @@ class ParameterFormManager(QWidget):
         CRITICAL: Only collects context from PARENT types in the hierarchy, not from the same type.
         E.g., PipelineConfig editor collects GlobalPipelineConfig but not other PipelineConfig instances.
         This prevents a window from using its own live values for placeholder resolution.
+
+        CRITICAL: Uses get_user_modified_values() to only collect concrete (non-None) values.
+        This ensures proper inheritance: if PipelineConfig has None for a field, it won't
+        override GlobalPipelineConfig's concrete value in the Step editor's context.
         """
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
         from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
@@ -2003,8 +2111,9 @@ class ParameterFormManager(QWidget):
 
         for manager in self._active_form_managers:
             if manager is not self:
-                # Get live values from the other window's form
-                live_values = manager.get_current_values()
+                # CRITICAL: Get only user-modified (concrete, non-None) values
+                # This preserves inheritance hierarchy: None values don't override parent values
+                live_values = manager.get_user_modified_values()
                 obj_type = type(manager.object_instance)
 
                 # CRITICAL: Only skip if this is EXACTLY the same type as us
@@ -2040,3 +2149,9 @@ class ParameterFormManager(QWidget):
         # Refresh placeholders for this form and all nested forms using live context
         self._refresh_all_placeholders(live_context=live_context)
         self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
+
+        # CRITICAL: Emit context_refreshed signal to cascade the refresh downstream
+        # This allows Step editors to know that PipelineConfig's effective context changed
+        # even though no actual field values were modified (only placeholders updated)
+        # Example: GlobalPipelineConfig change → PipelineConfig placeholders update → Step editor needs to refresh
+        self.context_refreshed.emit(self.object_instance, self.context_obj)

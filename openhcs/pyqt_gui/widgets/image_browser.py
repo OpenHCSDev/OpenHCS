@@ -146,8 +146,8 @@ class ImageBrowserWidget(QWidget):
         self.column_filter_panel.setVisible(False)  # Hidden until images load
         left_splitter.addWidget(self.column_filter_panel)
 
-        # Set initial sizes: tree gets more space (60% tree, 40% filters)
-        left_splitter.setSizes([300, 200])
+        # Set initial sizes: filters get more space (20% tree, 80% filters)
+        left_splitter.setSizes([100, 400])
 
         main_splitter.addWidget(left_splitter)
 
