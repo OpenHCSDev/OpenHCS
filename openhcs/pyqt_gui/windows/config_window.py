@@ -190,21 +190,18 @@ class ConfigWindow(QDialog):
         return tree
 
     def _populate_inheritance_tree(self, tree: QTreeWidget):
-        """Populate the inheritance tree with only dataclasses visible in the UI."""
+        """Populate the inheritance tree with only dataclasses visible in the UI.
+
+        Excludes the root node (PipelineConfig/GlobalPipelineConfig) and shows
+        its attributes directly as top-level items.
+        """
         import dataclasses
 
-        # Create root item for the main config class
-        config_name = self.config_class.__name__ if self.config_class else "Configuration"
-        root_item = QTreeWidgetItem([config_name])
-        root_item.setData(0, Qt.ItemDataRole.UserRole, {'type': 'dataclass', 'class': self.config_class})
-        tree.addTopLevelItem(root_item)
-
-        # Only show dataclasses that are visible in the UI (have form sections)
+        # Skip creating root item - add children directly to tree as top-level items
         if dataclasses.is_dataclass(self.config_class):
-            self._add_ui_visible_dataclasses_to_tree(root_item, self.config_class)
+            self._add_ui_visible_dataclasses_to_tree(tree, self.config_class, is_root=True)
 
-        # Expand the tree
-        tree.expandAll()
+        # Leave tree collapsed by default (user can expand as needed)
 
     def _get_base_type(self, dataclass_type):
         """Get base (non-lazy) type for a dataclass - type-based detection."""
@@ -219,8 +216,14 @@ class ConfigWindow(QDialog):
 
         return dataclass_type
 
-    def _add_ui_visible_dataclasses_to_tree(self, parent_item: QTreeWidgetItem, dataclass_type):
-        """Add only dataclasses that are visible in the UI form."""
+    def _add_ui_visible_dataclasses_to_tree(self, parent_item, dataclass_type, is_root=False):
+        """Add only dataclasses that are visible in the UI form.
+
+        Args:
+            parent_item: Either a QTreeWidgetItem or QTreeWidget (for root level)
+            dataclass_type: The dataclass type to process
+            is_root: True if adding direct children of the root config class
+        """
         import dataclasses
 
         # Get all fields from this dataclass
@@ -236,21 +239,33 @@ class ConfigWindow(QDialog):
                 base_type = self._get_base_type(field_type)
                 display_name = base_type.__name__
 
+                # For root-level items, show only the class name (matching child style)
+                # For nested items, show "field_name (ClassName)"
+                if is_root:
+                    label = display_name
+                else:
+                    label = f"{field_name} ({display_name})"
+
                 # Create a child item for this nested dataclass
-                field_item = QTreeWidgetItem([f"{field_name} ({display_name})"])
+                field_item = QTreeWidgetItem([label])
                 field_item.setData(0, Qt.ItemDataRole.UserRole, {
                     'type': 'dataclass',
                     'class': field_type,  # Store original type for field lookup
                     'field_name': field_name
                 })
-                parent_item.addChild(field_item)
+
+                # Add to parent (either QTreeWidget for root or QTreeWidgetItem for nested)
+                if is_root:
+                    parent_item.addTopLevelItem(field_item)
+                else:
+                    parent_item.addChild(field_item)
 
                 # Show inheritance hierarchy using the BASE type (not lazy type)
                 # This automatically skips the lazy→base transition
                 self._add_inheritance_info(field_item, base_type)
 
-                # Recursively add nested dataclasses using BASE type
-                self._add_ui_visible_dataclasses_to_tree(field_item, base_type)
+                # Recursively add nested dataclasses using BASE type (not root anymore)
+                self._add_ui_visible_dataclasses_to_tree(field_item, base_type, is_root=False)
 
     def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
         """Add inheritance information for a dataclass with proper hierarchy."""
