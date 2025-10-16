@@ -170,6 +170,9 @@ class ParameterFormManager(QWidget):
             # OPTIMIZATION: Store parent manager reference early so setup_ui() can detect nested configs
             self._parent_manager = parent_manager
 
+            # Track completion callbacks for async widget creation
+            self._on_build_complete_callbacks = []
+
             # Initialize service layer first (needed for parameter extraction)
             with timer("  Service initialization", threshold_ms=1.0):
                 self.service = ParameterFormService()
@@ -531,7 +534,13 @@ class ParameterFormManager(QWidget):
             # Async widget creation for large forms (>5 parameters)
             # Create widgets progressively to avoid blocking the UI
             with timer(f"      Schedule async creation of {len(self.form_structure.parameters)} widgets", threshold_ms=1.0):
-                self._create_widgets_async(content_layout, self.form_structure.parameters)
+                def on_async_complete():
+                    """Called when all async widgets are created."""
+                    for callback in self._on_build_complete_callbacks:
+                        callback()
+                    self._on_build_complete_callbacks.clear()
+
+                self._create_widgets_async(content_layout, self.form_structure.parameters, on_complete=on_async_complete)
         else:
             # Sync widget creation for small forms (<=5 parameters)
             with timer(f"      Create {len(self.form_structure.parameters)} parameter widgets", threshold_ms=5.0):
@@ -539,6 +548,11 @@ class ParameterFormManager(QWidget):
                     with timer(f"        Create widget for {param_info.name} ({'nested' if param_info.is_nested else 'regular'})", threshold_ms=2.0):
                         widget = self._create_widget_for_param(param_info)
                         content_layout.addWidget(widget)
+
+            # For sync creation, trigger callbacks immediately
+            for callback in self._on_build_complete_callbacks:
+                callback()
+            self._on_build_complete_callbacks.clear()
 
         return content_widget
 
@@ -554,8 +568,14 @@ class ParameterFormManager(QWidget):
             # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
             return self._create_regular_parameter_widget(param_info)
 
-    def _create_widgets_async(self, layout, param_infos):
-        """Create widgets asynchronously to avoid blocking the UI."""
+    def _create_widgets_async(self, layout, param_infos, on_complete=None):
+        """Create widgets asynchronously to avoid blocking the UI.
+
+        Args:
+            layout: Layout to add widgets to
+            param_infos: List of parameter info objects
+            on_complete: Optional callback to run when all widgets are created
+        """
         # Create widgets in batches using QTimer to yield to event loop
         batch_size = 3  # Create 3 widgets at a time
         index = 0
@@ -574,6 +594,9 @@ class ParameterFormManager(QWidget):
             # Schedule next batch if there are more widgets
             if index < len(param_infos):
                 QTimer.singleShot(0, create_next_batch)
+            elif on_complete:
+                # All widgets created - run completion callback
+                on_complete()
 
         # Start creating widgets
         QTimer.singleShot(0, create_next_batch)
@@ -811,7 +834,21 @@ class ParameterFormManager(QWidget):
                 self.update_parameter(param_info.name, None)
 
         checkbox.toggled.connect(on_checkbox_changed)
-        on_checkbox_changed(checkbox.isChecked())
+
+        # Apply initial styling after nested form is fully constructed
+        # Use a deferred approach that waits for the widget tree to be fully built
+        # This handles both sync and async widget creation, and nested async forms
+        def apply_initial_styling():
+            # Use QTimer with a small delay to ensure all nested async forms are complete
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(10, lambda: on_checkbox_changed(checkbox.isChecked()))
+
+        # Register callback with nested manager (for async forms)
+        nested_manager._on_build_complete_callbacks.append(apply_initial_styling)
+
+        # Also call immediately (for sync forms where callbacks already triggered)
+        # The QTimer delay ensures this runs after everything is attached
+        apply_initial_styling()
 
         self.widgets[param_info.name] = group_box
         return group_box
