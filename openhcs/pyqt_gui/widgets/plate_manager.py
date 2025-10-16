@@ -603,6 +603,8 @@ class PlateManagerWidget(QWidget):
 
         # SIMPLIFIED: ConfigWindow now uses the dataclass instance directly for context
         # No need for external context management - the form manager handles it automatically
+        # CRITICAL: Pass orchestrator's plate_path as scope_id to limit cross-window updates to same orchestrator
+        scope_id = str(orchestrator.plate_path) if orchestrator else None
         with config_context(orchestrator.pipeline_config):
             config_window = ConfigWindow(
                 config_class,           # config_class
@@ -610,6 +612,7 @@ class PlateManagerWidget(QWidget):
                 on_save_callback,       # on_save_callback
                 self.color_scheme,      # color_scheme
                 self,                   # parent
+                scope_id=scope_id       # Scope to this orchestrator
             )
 
             # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system

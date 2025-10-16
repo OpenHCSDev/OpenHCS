@@ -39,7 +39,7 @@ class StepParameterEditorWidget(QWidget):
     step_parameter_changed = pyqtSignal()
     
     def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None,
-                 gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None):
+                 gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None, scope_id: Optional[str] = None):
         super().__init__(parent)
 
         # Initialize color scheme and GUI config
@@ -49,6 +49,7 @@ class StepParameterEditorWidget(QWidget):
         self.step = step
         self.service_adapter = service_adapter
         self.pipeline_config = pipeline_config  # Store pipeline config for context hierarchy
+        self.scope_id = scope_id  # Store scope_id for cross-window update scoping
 
         # Live placeholder updates not yet ready - disable for now
         self._step_editor_coordinator = None
@@ -100,7 +101,8 @@ class StepParameterEditorWidget(QWidget):
             field_id="step",                     # Use "step" as field identifier
             parent=self,                         # Pass self as parent widget
             context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
-            exclude_params=['func']              # Exclude func - it has its own dedicated tab
+            exclude_params=['func'],             # Exclude func - it has its own dedicated tab
+            scope_id=self.scope_id               # Pass scope_id to limit cross-window updates to same orchestrator
         )
         
         self.setup_ui()

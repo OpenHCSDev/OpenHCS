@@ -643,8 +643,16 @@ class PipelineOrchestrator(ContextProvider):
         context.input_dir = self.input_dir
         context.workspace_path = self.workspace_path
         context.plate_path = self.plate_path  # Add plate_path for path planner
-        # Pass metadata cache for OpenHCS metadata creation
-        context.metadata_cache = {}  # Initialize empty - metadata cache is not pickled
+
+        # CRITICAL: Pass metadata cache for OpenHCS metadata creation
+        # Extract cached metadata from service and convert to dict format expected by OpenHCSMetadataGenerator
+        metadata_dict = {}
+        for component in AllComponents:
+            cached_metadata = self._metadata_cache_service.get_cached_metadata(component)
+            if cached_metadata:
+                metadata_dict[component] = cached_metadata
+        context.metadata_cache = metadata_dict
+
         return context
 
     def compile_pipelines(

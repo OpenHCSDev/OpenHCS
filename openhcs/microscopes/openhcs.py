@@ -463,17 +463,19 @@ class OpenHCSMetadataGenerator:
         actual_files = self.filemanager.list_image_files(output_dir, write_backend)
         relative_files = [f"{sub_dir}/{Path(f).name}" for f in actual_files]
 
+        # CRITICAL: Use AllComponents enum for cache lookups (cache is keyed by AllComponents)
+        # GroupBy and AllComponents have same values but different hashes, so dict.get() fails with GroupBy
         return OpenHCSMetadata(
             microscope_handler_name=handler.microscope_type,
             source_filename_parser_name=handler.parser.__class__.__name__,
             grid_dimensions=handler.metadata_handler._get_with_fallback('get_grid_dimensions', context.input_dir),
             pixel_size=handler.metadata_handler._get_with_fallback('get_pixel_size', context.input_dir),
             image_files=relative_files,
-            channels=cache.get(GroupBy.CHANNEL),
-            wells=cache.get(AllComponents.WELL),  # Use AllComponents for multiprocessing axis
-            sites=cache.get(GroupBy.SITE),
-            z_indexes=cache.get(GroupBy.Z_INDEX),
-            timepoints=cache.get(GroupBy.TIMEPOINT),
+            channels=cache.get(AllComponents.CHANNEL),
+            wells=cache.get(AllComponents.WELL),
+            sites=cache.get(AllComponents.SITE),
+            z_indexes=cache.get(AllComponents.Z_INDEX),
+            timepoints=cache.get(AllComponents.TIMEPOINT),
             available_backends={write_backend: True},
             main=is_main if is_main else None
         )

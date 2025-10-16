@@ -47,7 +47,8 @@ class ConfigWindow(QDialog):
 
     def __init__(self, config_class: Type, current_config: Any,
                  on_save_callback: Optional[Callable] = None,
-                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,):
+                 color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,
+                 scope_id: Optional[str] = None):
         """
         Initialize the configuration window.
 
@@ -57,7 +58,7 @@ class ConfigWindow(QDialog):
             on_save_callback: Function to call when config is saved
             color_scheme: Color scheme for styling (optional, uses default if None)
             parent: Parent widget
-            orchestrator: Optional orchestrator reference for context persistence
+            scope_id: Optional scope identifier (e.g., plate_path) to limit cross-window updates to same orchestrator
         """
         super().__init__(parent)
 
@@ -65,6 +66,7 @@ class ConfigWindow(QDialog):
         self.config_class = config_class
         self.current_config = current_config
         self.on_save_callback = on_save_callback
+        self.scope_id = scope_id  # Store scope_id for passing to form_manager
 
         # Flag to prevent refresh during save operation
         self._saving = False
@@ -98,7 +100,8 @@ class ConfigWindow(QDialog):
             color_scheme=self.color_scheme,
             use_scroll_area=False,  # Config window handles scrolling
             global_config_type=global_config_type,
-            context_obj=None  # Inherit from thread-local GlobalPipelineConfig only
+            context_obj=None,  # Inherit from thread-local GlobalPipelineConfig only
+            scope_id=self.scope_id  # Pass scope_id to limit cross-window updates to same orchestrator
         )
 
         # No config_editor needed - everything goes through form_manager

@@ -217,13 +217,16 @@ class DualEditorWindow(QDialog):
 
         # Create step parameter editor widget with proper nested context
         # Step must be nested: GlobalPipelineConfig -> PipelineConfig -> Step
+        # CRITICAL: Pass orchestrator's plate_path as scope_id to limit cross-window updates to same orchestrator
+        scope_id = str(self.orchestrator.plate_path) if self.orchestrator else None
         with config_context(self.orchestrator.pipeline_config):  # Pipeline level
             with config_context(self.editing_step):              # Step level
                 self.step_editor = StepParameterEditorWidget(
                     self.editing_step,
                     service_adapter=None,
                     color_scheme=self.color_scheme,
-                    pipeline_config=self.orchestrator.pipeline_config
+                    pipeline_config=self.orchestrator.pipeline_config,
+                    scope_id=scope_id
                 )
 
         # Connect parameter changes - use form manager signal for immediate response
