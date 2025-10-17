@@ -47,7 +47,7 @@ class PyclesperantoRegistry(RuntimeTestingRegistryBase):
         return cle.__version__
 
     def is_library_available(self) -> bool:
-        return cle is not None
+        return bool(cle)
 
     def get_library_object(self):
         return cle

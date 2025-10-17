@@ -116,7 +116,7 @@ class OpenHCSRegistry(LibraryRegistryBase):
 
 
     def discover_functions(self) -> Dict[str, FunctionMetadata]:
-        """Discover OpenHCS functions with explicit contracts."""
+        """Discover OpenHCS functions with explicit contracts and filter by backend availability."""
         functions = {}
         modules = self.get_modules_to_scan()
 
@@ -127,11 +127,19 @@ class OpenHCSRegistry(LibraryRegistryBase):
                 if hasattr(func, '__processing_contract__'):
                     contract = getattr(func, '__processing_contract__')
 
+                    # Check if function's backend is available before including it
+                    if not self._is_function_backend_available(func):
+                        logger.debug(f"Skipping {name} - backend not available")
+                        continue
+
                     # Apply contract wrapper (adds slice_by_slice for FLEXIBLE)
                     wrapped_func = self.apply_contract_wrapper(func, contract)
 
                     # Generate unique function name using module information
                     unique_name = self._generate_function_name(name, module_name)
+
+                    # Extract full docstring, not just first line
+                    doc = self._extract_function_docstring(func)
 
                     metadata = FunctionMetadata(
                         name=unique_name,
@@ -139,7 +147,7 @@ class OpenHCSRegistry(LibraryRegistryBase):
                         contract=contract,
                         registry=self,
                         module=func.__module__ or "",
-                        doc=(func.__doc__ or "").splitlines()[0] if func.__doc__ else "",
+                        doc=doc,
                         tags=["openhcs"],
                         original_name=name
                     )
@@ -182,3 +190,117 @@ class OpenHCSRegistry(LibraryRegistryBase):
                 tags.append('segmentation')
         
         return tags
+
+    def _is_function_backend_available(self, func) -> bool:
+        """
+        Check if the function's backend is available.
+
+        For OpenHCS functions with mixed backends, we need to check each function
+        individually based on its memory type attributes.
+
+        Args:
+            func: Function to check
+
+        Returns:
+            True if the function's backend is available, False otherwise
+        """
+        # Get the function's memory type
+        memory_type = None
+        if hasattr(func, 'input_memory_type'):
+            memory_type = func.input_memory_type
+        elif hasattr(func, 'output_memory_type'):
+            memory_type = func.output_memory_type
+        elif hasattr(func, 'backend'):
+            memory_type = func.backend
+
+        if not memory_type:
+            # If no memory type specified, assume numpy (always available)
+            return True
+
+        # Check backend availability based on memory type
+        return self._check_backend_availability(memory_type)
+
+    def _check_backend_availability(self, memory_type: str) -> bool:
+        """
+        Check if a specific backend/memory type is available using the registry system.
+
+        This uses the existing registry system as the source of truth for backend availability,
+        avoiding hardcoded checks and ensuring consistency across the system.
+
+        Args:
+            memory_type: Memory type to check (e.g., "cupy", "torch", "numpy", "pyclesperanto")
+
+        Returns:
+            True if backend is available, False otherwise
+        """
+        # Import registry service to get registry instances
+        from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+
+        # Special case: numpy is always available (no dedicated registry)
+        if memory_type == "numpy":
+            return True
+
+        # Get all available registries
+        try:
+            registry_classes = RegistryService._discover_registries()
+
+            # Find the registry that matches this memory type
+            for registry_class in registry_classes:
+                try:
+                    registry_instance = registry_class()
+
+                    # Check if this registry handles the memory type
+                    if hasattr(registry_instance, 'MEMORY_TYPE') and registry_instance.MEMORY_TYPE == memory_type:
+                        # Use the registry's own availability check as source of truth
+                        return registry_instance.is_library_available()
+
+                except Exception as e:
+                    logger.debug(f"Failed to check registry {registry_class.__name__}: {e}")
+                    continue
+
+            # If no registry found for this memory type, it's not available
+            logger.debug(f"No registry found for memory type: {memory_type}")
+            return False
+
+        except Exception as e:
+            logger.warning(f"Failed to check backend availability for {memory_type}: {e}")
+            return False
+
+    def _extract_function_docstring(self, func) -> str:
+        """
+        Extract the full docstring from a function, with proper formatting.
+
+        Args:
+            func: Function to extract docstring from
+
+        Returns:
+            Formatted docstring or empty string if none
+        """
+        if not func.__doc__:
+            return ""
+
+        # Get the full docstring
+        docstring = func.__doc__.strip()
+
+        # For UI display, we want a concise but informative description
+        # Take the first paragraph (up to first double newline) or first 200 chars
+        lines = docstring.split('\n')
+
+        # Find the first non-empty line (summary)
+        summary_lines = []
+        for line in lines:
+            line = line.strip()
+            if not line and summary_lines:
+                # Empty line after content - end of summary
+                break
+            if line:
+                summary_lines.append(line)
+
+        if summary_lines:
+            summary = ' '.join(summary_lines)
+            # Limit length for UI display
+            if len(summary) > 200:
+                summary = summary[:197] + "..."
+            return summary
+
+        return ""

@@ -44,7 +44,7 @@ class CupyRegistry(RuntimeTestingRegistryBase):
         return cucim.__version__
 
     def is_library_available(self) -> bool:
-        return cp is not None and cucim_skimage is not None
+        return bool(cp) and bool(cucim_skimage)
 
     def get_library_object(self):
         return cucim_skimage

@@ -80,6 +80,37 @@ class FunctionMetadata:
     tags: List[str] = field(default_factory=list)
     original_name: str = ""  # Original function name for cache reconstruction
 
+    def get_memory_type(self) -> str:
+        """
+        Get the actual memory type (backend) of this function.
+
+        Returns the function's input_memory_type if available, otherwise falls back
+        to the registry's memory type. This ensures UI shows the actual backend
+        (cupy, numpy, etc.) instead of the registry name (openhcs).
+
+        Returns:
+            Memory type string (e.g., "cupy", "numpy", "torch", "pyclesperanto")
+        """
+        # First try to get memory type from function attributes
+        if hasattr(self.func, 'input_memory_type'):
+            return self.func.input_memory_type
+        elif hasattr(self.func, 'output_memory_type'):
+            return self.func.output_memory_type
+        elif hasattr(self.func, 'backend'):
+            return self.func.backend
+
+        # Fallback to registry memory type
+        return self.registry.get_memory_type()
+
+    def get_registry_name(self) -> str:
+        """
+        Get the registry name that registered this function.
+
+        Returns:
+            Registry name string (e.g., "openhcs", "skimage", "cupy", "pyclesperanto")
+        """
+        return self.registry.library_name
+
 
 
 

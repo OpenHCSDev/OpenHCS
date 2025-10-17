@@ -99,7 +99,6 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
             with Horizontal():
                 # Left pane: Hierarchical tree view
                 with Vertical(classes="left-pane"):
-                    yield Static("Module Structure", classes="pane-title")
                     yield self._build_module_tree()
 
                 # Right pane: Enhanced table view
@@ -116,10 +115,11 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
         """Build table widget with enhanced function metadata."""
         table = DataTable(id="function_table", cursor_type="row")
 
-        # Add columns with sorting support
+        # Add columns with sorting support - Backend shows memory type, Registry shows source
         table.add_column("Name", key="name")
         table.add_column("Module", key="module")
         table.add_column("Backend", key="backend")
+        table.add_column("Registry", key="registry")
         table.add_column("Contract", key="contract")
         table.add_column("Tags", key="tags")
         table.add_column("Description", key="description")
@@ -132,7 +132,8 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
     def _build_module_tree(self) -> Tree:
         """Build hierarchical tree widget showing module structure based purely on module paths."""
         tree = Tree("Module Structure", id="module_tree")
-        tree.root.expand()
+        # Start with tree collapsed - users can expand as needed
+        tree.root.collapse()
 
         # Build hierarchical structure directly from module paths
         module_hierarchy = {}
@@ -224,13 +225,9 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
         table.clear()
 
         for composite_key, metadata in functions_metadata.items():
-            # Extract backend from composite key
-            if ':' in composite_key:
-                backend, func_name = composite_key.split(':', 1)
-            else:
-                # Fallback for non-composite keys
-                backend = getattr(metadata.func, 'input_memory_type', 'unknown')
-                func_name = composite_key
+            # Get actual memory type (backend) and registry name separately
+            memory_type = metadata.get_memory_type()
+            registry_name = metadata.get_registry_name()
 
             # Format tags as comma-separated string
             tags_str = ", ".join(metadata.tags) if metadata.tags else ""
@@ -238,11 +235,12 @@ class FunctionSelectorWindow(BaseOpenHCSWindow):
             # Truncate description for table display
             description = metadata.doc[:50] + "..." if len(metadata.doc) > 50 else metadata.doc
 
-            # Add row with function metadata
+            # Add row with function metadata - Backend shows memory type, Registry shows source
             row_key = table.add_row(
                 metadata.name,
                 metadata.module.split('.')[-1] if metadata.module else "unknown",  # Show only last part of module
-                backend.title(),  # Capitalize backend name for display
+                memory_type.title(),  # Show actual memory type (cupy, numpy, etc.)
+                registry_name.title(),  # Show registry source (openhcs, skimage, etc.)
                 metadata.contract.name if metadata.contract else "unknown",
                 tags_str,
                 description,

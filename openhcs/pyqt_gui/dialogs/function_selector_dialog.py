@@ -181,7 +181,9 @@ class FunctionSelectorDialog(QDialog):
                 'contract': metadata.contract,
                 'tags': metadata.tags,
                 'doc': metadata.doc,
-                'backend': backend  # Add explicit backend field for UI
+                'backend': metadata.get_memory_type(),  # Actual memory type (cupy, numpy, etc.)
+                'registry': metadata.get_registry_name(),  # Registry source (openhcs, skimage, etc.)
+                'metadata': metadata  # Store full metadata for access to new methods
             }
 
         # Cache the results for future use
@@ -346,7 +348,8 @@ class FunctionSelectorDialog(QDialog):
                     "module_part": key,
                     "full_path": '.'.join(new_path_parts)
                 })
-                module_part_item.setExpanded(True)
+                # Start collapsed - users can expand as needed
+                module_part_item.setExpanded(False)
 
                 # Recursively build subtree
                 self._build_module_hierarchy_tree(module_part_item, value, new_path_parts, is_root=False)
@@ -402,11 +405,11 @@ class FunctionSelectorDialog(QDialog):
         left_widget = self._create_pane_widget("Module Structure", self.module_tree)
         splitter.addWidget(left_widget)
 
-        # Function table with enhanced columns
+        # Function table with enhanced columns - Backend shows memory type, Registry shows source
         self.function_table = QTableWidget()
-        self.function_table.setColumnCount(6)
+        self.function_table.setColumnCount(7)
         self.function_table.setHorizontalHeaderLabels([
-            "Name", "Module", "Backend", "Contract", "Tags", "Description"
+            "Name", "Module", "Backend", "Registry", "Contract", "Tags", "Description"
         ])
 
         # Configure table behavior
@@ -492,8 +495,9 @@ class FunctionSelectorDialog(QDialog):
         self.function_table.setSortingEnabled(False)  # Disable during population
 
         for row, (composite_key, metadata) in enumerate(functions_metadata.items()):
-            # Use explicit backend field from metadata
+            # Get backend (memory type) and registry separately
             backend = metadata.get('backend', 'unknown')
+            registry = metadata.get('registry', 'unknown')
 
             # Format tags as comma-separated string
             tags_str = ", ".join(metadata.get('tags', [])) if metadata.get('tags') else ""
@@ -506,11 +510,12 @@ class FunctionSelectorDialog(QDialog):
             contract = metadata.get('contract')
             contract_name = contract.name if hasattr(contract, 'name') else str(contract) if contract else "unknown"
 
-            # Create all table items using factored pattern
+            # Create all table items using factored pattern - Backend shows memory type, Registry shows source
             items_data = [
                 metadata.get('name', metadata.get('name', composite_key.split(':')[-1] if ':' in composite_key else composite_key)),
                 metadata.get('module', 'unknown'),
-                backend.title(),
+                backend.title(),  # Memory type (cupy, numpy, etc.)
+                registry.title(),  # Registry source (openhcs, skimage, etc.)
                 contract_name,
                 tags_str,
                 description
