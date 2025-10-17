@@ -197,13 +197,13 @@ class OMEROInstanceManager:
     def is_omero_running(self) -> bool:
         """
         Check if OMERO is running and responsive.
-        
+
         Returns:
-            True if OMERO is running and we can connect
+            True if OMERO server is running and we can connect
         """
         try:
             from omero.gateway import BlitzGateway
-            
+
             # Try to connect with short timeout
             conn = BlitzGateway(
                 self.user,
@@ -211,16 +211,62 @@ class OMEROInstanceManager:
                 host=self.host,
                 port=self.port
             )
-            
+
             if conn.connect():
                 conn.close()
                 return True
             return False
-            
+
         except Exception as e:
-            logger.warning(f"OMERO not running or cannot connect: {e}")
+            logger.warning(f"OMERO server not running or cannot connect: {e}")
             import traceback
             logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return False
+
+    def is_omero_web_running(self) -> bool:
+        """
+        Check if OMERO.web is running and responsive.
+
+        Returns:
+            True if OMERO.web is accessible
+        """
+        try:
+            import urllib.request
+            import urllib.error
+
+            # Try to connect to OMERO.web with short timeout
+            web_url = f"http://{self.host}:{DEFAULT_OMERO_WEB_PORT}"
+            request = urllib.request.Request(web_url)
+
+            with urllib.request.urlopen(request, timeout=5) as response:
+                # Any HTTP response (including redirects) means web is running
+                return True
+
+        except Exception as e:
+            logger.warning(f"OMERO.web not running or cannot connect: {e}")
+            return False
+
+    def is_omero_stack_running(self) -> bool:
+        """
+        Check if both OMERO server and OMERO.web are running.
+
+        Returns:
+            True if both OMERO server and OMERO.web are accessible
+        """
+        server_running = self.is_omero_running()
+        web_running = self.is_omero_web_running()
+
+        if server_running and web_running:
+            logger.info("✓ Both OMERO server and OMERO.web are running")
+            return True
+        elif server_running:
+            logger.warning("OMERO server is running but OMERO.web is not accessible")
+            return False
+        elif web_running:
+            logger.warning("OMERO.web is accessible but OMERO server is not running")
+            return False
+        else:
+            logger.info("Neither OMERO server nor OMERO.web are running")
             return False
     
     def connect(self, timeout: int = 30) -> bool:
@@ -256,13 +302,13 @@ class OMEROInstanceManager:
                     pass
                 self.conn = None
 
-        # Try to connect to existing instance
-        if self.is_omero_running():
-            logger.info(f"✓ Found existing OMERO instance at {self.host}:{self.port}")
+        # Try to connect to existing instance - check both server and web
+        if self.is_omero_stack_running():
+            logger.info(f"✓ Found existing OMERO stack at {self.host}:{self.port}")
             return self._connect_to_omero()
 
-        # No existing instance - check Docker and start OMERO
-        logger.info("No OMERO instance found, attempting to start one...")
+        # No existing instance or incomplete stack - check Docker and start OMERO
+        logger.info("OMERO stack not fully running, attempting to start all services...")
 
         # Ensure Docker daemon is running
         if not self._is_docker_running():
