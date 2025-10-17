@@ -219,16 +219,31 @@ class ZMQExecutionServer(ZMQServer):
         setup_global_gpu_registry(global_config=global_config)
         ensure_global_config_context(type(global_config), global_config)
 
-        # Only connect to OMERO if the plate path is an OMERO path
+        # Convert OMERO plate IDs to virtual paths
+        # Check if plate_id is an integer or a string that converts to an integer
         plate_path_str = str(plate_id)
-        if plate_path_str.startswith("/omero/"):
+        is_omero_plate_id = False
+        try:
+            int(plate_path_str)
+            is_omero_plate_id = True
+        except ValueError:
+            # Not an integer, check if it's already an OMERO virtual path
+            is_omero_plate_id = plate_path_str.startswith("/omero/")
+
+        # Connect to OMERO and convert plate ID to virtual path if needed
+        if is_omero_plate_id:
             omero_manager = OMEROInstanceManager()
             if not omero_manager.connect(timeout=60):
                 raise RuntimeError("OMERO server not available")
             storage_registry['omero_local'] = OMEROLocalBackend(omero_conn=omero_manager.conn)
 
+            # Convert integer plate ID to virtual path format
+            # OMERO handler expects format: /omero/plate_<id> not /omero/plate/<id>
+            if not plate_path_str.startswith("/omero/"):
+                plate_path_str = f"/omero/plate_{plate_path_str}"
+
         orchestrator = PipelineOrchestrator(
-            plate_path=Path(plate_id),
+            plate_path=Path(plate_path_str),
             pipeline_config=pipeline_config,
             progress_callback=lambda axis_id, step, status, metadata: self.send_progress_update(axis_id, step, status)
         )

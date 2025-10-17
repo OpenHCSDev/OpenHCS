@@ -516,17 +516,108 @@ class NapariViewerServer(ZMQServer):
         # Parse JSON message
         data = json.loads(message.decode('utf-8'))
 
-        # Check if this is a batch message
-        if data.get('type') == 'batch':
+        msg_type = data.get('type')
+
+        # Check message type
+        if msg_type == 'batch':
             # Handle batch of images
             images = data.get('images', [])
             display_config_dict = data.get('display_config')
 
             for image_info in images:
                 self._process_single_image(image_info, display_config_dict)
+
+        elif msg_type == 'shapes':
+            # Handle shapes/ROIs message
+            self._process_shapes_message(data)
+
         else:
             # Handle single image
             self._process_single_image(data, data.get('display_config'))
+
+    def _process_shapes_message(self, data: Dict[str, Any]):
+        """Process shapes/ROIs message and add to Napari viewer.
+
+        Args:
+            data: Message data containing shapes list and layer name
+        """
+        import numpy as np
+
+        shapes_data = data.get('shapes', [])
+        layer_name = data.get('layer_name', 'ROIs')
+
+        try:
+            # Convert shapes to Napari format
+            napari_shapes = []
+            shape_types = []
+            properties = {'label': [], 'area': [], 'centroid': []}
+
+            for shape_dict in shapes_data:
+                shape_type = shape_dict.get('type')
+                metadata = shape_dict.get('metadata', {})
+
+                if shape_type == 'polygon':
+                    # Polygon coordinates are already in (y, x) format
+                    coords = np.array(shape_dict['coordinates'])
+                    napari_shapes.append(coords)
+                    shape_types.append('polygon')
+
+                elif shape_type == 'ellipse':
+                    # Napari ellipse format: 4 corner points of bounding box
+                    center = shape_dict['center']  # [y, x]
+                    radii = shape_dict['radii']    # [radius_y, radius_x]
+
+                    # Create ellipse as 4 corner points
+                    y_min = center[0] - radii[0]
+                    y_max = center[0] + radii[0]
+                    x_min = center[1] - radii[1]
+                    x_max = center[1] + radii[1]
+
+                    ellipse_coords = np.array([
+                        [y_min, x_min],
+                        [y_min, x_max],
+                        [y_max, x_max],
+                        [y_max, x_min]
+                    ])
+                    napari_shapes.append(ellipse_coords)
+                    shape_types.append('ellipse')
+
+                elif shape_type == 'point':
+                    # Point coordinates
+                    coords = np.array([shape_dict['coordinates']])  # [[y, x]]
+                    napari_shapes.append(coords)
+                    shape_types.append('point')
+
+                # Add metadata to properties
+                properties['label'].append(metadata.get('label', 0))
+                properties['area'].append(metadata.get('area', 0.0))
+                properties['centroid'].append(str(metadata.get('centroid', (0, 0))))
+
+            # Add or update shapes layer
+            if layer_name in self.layers:
+                # Update existing layer
+                layer = self.layers[layer_name]
+                layer.data = napari_shapes
+                layer.shape_type = shape_types
+                layer.properties = properties
+                logger.info(f"🔬 NAPARI SERVER: Updated {len(napari_shapes)} shapes in layer '{layer_name}'")
+            else:
+                # Create new shapes layer
+                layer = self.viewer.add_shapes(
+                    napari_shapes,
+                    shape_type=shape_types,
+                    properties=properties,
+                    name=layer_name,
+                    edge_color='red',
+                    face_color='transparent',
+                    edge_width=2
+                )
+                self.layers[layer_name] = layer
+                logger.info(f"🔬 NAPARI SERVER: Created shapes layer '{layer_name}' with {len(napari_shapes)} shapes")
+
+        except Exception as e:
+            logger.error(f"🔬 NAPARI SERVER: Failed to process shapes message: {e}")
+            raise  # Fail loud
 
     def _process_single_image(self, image_info: Dict[str, Any], display_config_dict: Dict[str, Any]):
         """Process a single image and display in Napari."""

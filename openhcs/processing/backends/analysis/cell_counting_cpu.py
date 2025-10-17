@@ -87,10 +87,27 @@ class MultiChannelResult:
     overlap_positions: List[Tuple[float, float]]
 
 
-def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult]], path: str, filemanager, backend: str) -> str:
-    """Materialize cell counting results as analysis-ready CSV and JSON formats."""
+def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult]], path: str, filemanager, backends: Union[str, List[str]], backend_kwargs: dict = None) -> str:
+    """Materialize cell counting results as analysis-ready CSV and JSON formats.
 
-    logger.info(f"🔬 CELL_COUNT_MATERIALIZE: Called with path={path}, data_length={len(data) if data else 0}, backend={backend}")
+    Args:
+        data: List of cell count results (single or multi-channel)
+        path: Output path for results
+        filemanager: FileManager instance for I/O operations
+        backends: Single backend string or list of backends to save to
+        backend_kwargs: Dict mapping backend names to their kwargs (e.g., {'fiji_stream': {'fiji_port': 5560}})
+
+    Returns:
+        Path to the saved results file (first backend in list)
+    """
+    # Normalize backends to list
+    if isinstance(backends, str):
+        backends = [backends]
+
+    if backend_kwargs is None:
+        backend_kwargs = {}
+
+    logger.info(f"🔬 CELL_COUNT_MATERIALIZE: Called with path={path}, data_length={len(data) if data else 0}, backends={backends}")
 
     # Determine if this is single-channel or multi-channel data
     if not data:
@@ -101,54 +118,94 @@ def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult
     logger.info(f"🔬 CELL_COUNT_MATERIALIZE: is_multi_channel={is_multi_channel}")
 
     if is_multi_channel:
-        return _materialize_multi_channel_results(data, path, filemanager, backend)
+        return _materialize_multi_channel_results(data, path, filemanager, backends, backend_kwargs)
     else:
-        return _materialize_single_channel_results(data, path, filemanager, backend)
+        return _materialize_single_channel_results(data, path, filemanager, backends, backend_kwargs)
 
 
-def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanager, backend: str) -> str:
-    """Materialize segmentation masks as individual TIFF files."""
+def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanager, backends: Union[str, List[str]], backend_kwargs: dict = None) -> str:
+    """Materialize segmentation masks as ROIs and summary.
 
-    logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Called with path={path}, masks_count={len(data) if data else 0}, backend={backend}")
+    Extracts ROIs from labeled masks and saves them via backend-specific format:
+    - OMERO: Creates omero.model.RoiI objects linked to images
+    - Napari: Streams shapes layer via ZMQ
+    - Fiji: Streams ImageJ ROIs via ZMQ
+    - Disk: Saves JSON file with ROI data
+
+    Args:
+        data: List of labeled mask arrays (one per z-plane)
+        path: Output path for ROI data
+        filemanager: FileManager instance for I/O operations
+        backends: Single backend string or list of backends to save to
+        backend_kwargs: Dict mapping backend names to their kwargs (e.g., {'fiji_stream': {'fiji_port': 5560}})
+
+    Returns:
+        Path to the saved ROI file (first backend in list)
+    """
+    # Normalize backends to list
+    if isinstance(backends, str):
+        backends = [backends]
+
+    if backend_kwargs is None:
+        backend_kwargs = {}
+
+    logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Called with path={path}, masks_count={len(data) if data else 0}, backends={backends}")
 
     if not data:
         logger.info("🔬 SEGMENTATION_MATERIALIZE: No segmentation masks to materialize (return_segmentation_mask=False)")
         # Create empty summary file to indicate no masks were generated
         summary_path = path.replace('.pkl', '_segmentation_summary.txt')
         summary_content = "No segmentation masks generated (return_segmentation_mask=False)\n"
-        filemanager.save(summary_content, summary_path, backend)
+        # Save to all backends
+        for backend in backends:
+            filemanager.save(summary_content, summary_path, backend)
         return summary_path
 
-    # Generate output file paths based on the input path
+    # Extract ROIs from labeled masks (once for all backends)
+    from openhcs.core.roi import extract_rois_from_labeled_mask
+
+    all_rois = []
+    total_cells = 0
+    for z_idx, mask in enumerate(data):
+        rois = extract_rois_from_labeled_mask(
+            mask,
+            min_area=10,  # Skip tiny regions
+            extract_contours=True  # Extract polygon contours
+        )
+        all_rois.extend(rois)
+        total_cells += len(rois)
+        logger.debug(f"🔬 SEGMENTATION_MATERIALIZE: Extracted {len(rois)} ROIs from z-plane {z_idx}")
+
+    logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Extracted {total_cells} total ROIs from {len(data)} z-planes")
+
+    # Save ROIs to all backends (streaming backends convert to shapes/ROI objects)
     base_path = path.replace('.pkl', '')
+    roi_path = f"{base_path}_rois.json"  # Extension determines format
 
-    # Save each mask as a separate TIFF file
-    for i, mask in enumerate(data):
-        mask_filename = f"{base_path}_slice_{i:03d}.tif"
+    if all_rois:
+        for backend in backends:
+            # Get kwargs for this backend (empty dict if not specified)
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(all_rois, roi_path, backend, **kwargs)
+            logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Saved {len(all_rois)} ROIs to {backend} backend")
+    else:
+        logger.warning(f"🔬 SEGMENTATION_MATERIALIZE: No ROIs extracted (all regions below min_area threshold)")
 
-        # Convert mask to appropriate dtype for saving (uint16 to match input images)
-        if mask.dtype != np.uint16:
-            # Normalize to uint16 range if needed
-            if mask.max() <= 1.0:
-                mask_uint16 = (mask * 65535).astype(np.uint16)
-            else:
-                mask_uint16 = mask.astype(np.uint16)
-        else:
-            mask_uint16 = mask
-
-        # Save using filemanager
-        filemanager.save(mask_uint16, mask_filename, backend)
-        logger.debug(f"🔬 SEGMENTATION_MATERIALIZE: Saved mask {i} to {mask_filename}")
-
-    # Return summary path
+    # Save summary to all backends (backends will ignore if they don't support text data)
     summary_path = f"{base_path}_segmentation_summary.txt"
-    summary_content = f"Segmentation masks saved: {len(data)} files\n"
-    summary_content += f"Base filename pattern: {base_path}_slice_XXX.tif\n"
-    summary_content += f"Mask dtype: {data[0].dtype}\n"
-    summary_content += f"Mask shape: {data[0].shape}\n"
+    summary_content = f"Segmentation ROIs: {len(all_rois)} cells\n"
+    summary_content += f"Z-planes: {len(data)}\n"
+    if all_rois:
+        summary_content += f"ROI file: {roi_path}\n"
+    else:
+        summary_content += f"No ROIs extracted (all regions below min_area threshold)\n"
 
-    filemanager.save(summary_content, summary_path, backend)
-    logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Completed, saved {len(data)} masks")
+    for backend in backends:
+        # Get kwargs for this backend (empty dict if not specified)
+        kwargs = backend_kwargs.get(backend, {})
+        filemanager.save(summary_content, summary_path, backend, **kwargs)
+
+    logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Completed, saved to {len(backends)} backends")
 
     return summary_path
 
@@ -446,8 +503,15 @@ def count_cells_multi_channel(
     return output_stack, multi_results
 
 
-def _materialize_single_channel_results(data: List[CellCountResult], path: str, filemanager, backend: str) -> str:
+def _materialize_single_channel_results(data: List[CellCountResult], path: str, filemanager, backends: Union[str, List[str]], backend_kwargs: dict = None) -> str:
     """Materialize single-channel cell counting results."""
+    # Normalize backends to list
+    if isinstance(backends, str):
+        backends = [backends]
+
+    if backend_kwargs is None:
+        backend_kwargs = {}
+
     # Generate output file paths based on the input path
     # Use clean naming: preserve namespaced path structure, don't duplicate special output key
     base_path = path.replace('.pkl', '')
@@ -458,8 +522,9 @@ def _materialize_single_channel_results(data: List[CellCountResult], path: str, 
     from pathlib import Path
     from openhcs.constants.constants import Backend
     output_dir = Path(json_path).parent
-    if backend == Backend.DISK.value:
-        filemanager.ensure_directory(str(output_dir), backend)
+    for backend in backends:
+        if backend == Backend.DISK.value:
+            filemanager.ensure_directory(str(output_dir), backend)
 
     summary = {
         "analysis_type": "single_channel_cell_counting",
@@ -501,27 +566,46 @@ def _materialize_single_channel_results(data: List[CellCountResult], path: str, 
     summary["total_cells_all_slices"] = total_cells
     summary["average_cells_per_slice"] = total_cells / len(data) if data else 0
 
-    # Save JSON summary (overwrite if exists)
+    # Save JSON summary to all backends (backends will ignore if they don't support text data)
     json_content = json.dumps(summary, indent=2, default=str)
-    # Remove existing file if it exists using filemanager
-    if filemanager.exists(json_path, backend):
-        filemanager.delete(json_path, backend)
-    filemanager.save(json_content, json_path, backend)
+    for backend in backends:
+        kwargs = backend_kwargs.get(backend, {})
+        # Only check exists/delete for storage backends (streaming backends don't support these operations)
+        try:
+            if filemanager.exists(json_path, backend):
+                filemanager.delete(json_path, backend)
+        except AttributeError:
+            # Streaming backend doesn't have exists/delete - that's fine
+            pass
+        filemanager.save(json_content, json_path, backend, **kwargs)
 
-    # Save CSV details (overwrite if exists)
+    # Save CSV details to all backends (backends will ignore if they don't support text data)
     if rows:
         df = pd.DataFrame(rows)
         csv_content = df.to_csv(index=False)
-        # Remove existing file if it exists using filemanager
-        if filemanager.exists(csv_path, backend):
-            filemanager.delete(csv_path, backend)
-        filemanager.save(csv_content, csv_path, backend)
+        for backend in backends:
+            kwargs = backend_kwargs.get(backend, {})
+            # Only check exists/delete for storage backends (streaming backends don't support these operations)
+            try:
+                if filemanager.exists(csv_path, backend):
+                    filemanager.delete(csv_path, backend)
+            except AttributeError:
+                # Streaming backend doesn't have exists/delete - that's fine
+                pass
+            filemanager.save(csv_content, csv_path, backend, **kwargs)
 
     return json_path
 
 
-def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str, filemanager, backend: str) -> str:
+def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str, filemanager, backends: Union[str, List[str]], backend_kwargs: dict = None) -> str:
     """Materialize multi-channel cell counting and colocalization results."""
+    # Normalize backends to list
+    if isinstance(backends, str):
+        backends = [backends]
+
+    if backend_kwargs is None:
+        backend_kwargs = {}
+
     # Generate output file paths based on the input path
     # Use clean naming: preserve namespaced path structure, don't duplicate special output key
     base_path = path.replace('.pkl', '')
@@ -531,8 +615,9 @@ def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str
     # Ensure output directory exists for disk backend
     from pathlib import Path
     output_dir = Path(json_path).parent
-    if backend == Backend.DISK.value:
-        filemanager.ensure_directory(str(output_dir), backend)
+    for backend in backends:
+        if backend == Backend.DISK.value:
+            filemanager.ensure_directory(str(output_dir), backend)
 
     summary = {
         "analysis_type": "multi_channel_cell_counting_colocalization",
@@ -583,21 +668,33 @@ def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str
         total_coloc_pct / len(data) if data else 0
     )
 
-    # Save JSON summary (overwrite if exists)
+    # Save JSON summary to all backends (backends will ignore if they don't support text data)
     json_content = json.dumps(summary, indent=2, default=str)
-    # Remove existing file if it exists using filemanager
-    if filemanager.exists(json_path, backend):
-        filemanager.delete(json_path, backend)
-    filemanager.save(json_content, json_path, backend)
+    for backend in backends:
+        kwargs = backend_kwargs.get(backend, {})
+        # Only check exists/delete for storage backends (streaming backends don't support these operations)
+        try:
+            if filemanager.exists(json_path, backend):
+                filemanager.delete(json_path, backend)
+        except AttributeError:
+            # Streaming backend doesn't have exists/delete - that's fine
+            pass
+        filemanager.save(json_content, json_path, backend, **kwargs)
 
-    # Save CSV details (overwrite if exists)
+    # Save CSV details to all backends (backends will ignore if they don't support text data)
     if rows:
         df = pd.DataFrame(rows)
         csv_content = df.to_csv(index=False)
-        # Remove existing file if it exists using filemanager
-        if filemanager.exists(csv_path, backend):
-            filemanager.delete(csv_path, backend)
-        filemanager.save(csv_content, csv_path, backend)
+        for backend in backends:
+            kwargs = backend_kwargs.get(backend, {})
+            # Only check exists/delete for storage backends (streaming backends don't support these operations)
+            try:
+                if filemanager.exists(csv_path, backend):
+                    filemanager.delete(csv_path, backend)
+            except AttributeError:
+                # Streaming backend doesn't have exists/delete - that's fine
+                pass
+            filemanager.save(csv_content, csv_path, backend, **kwargs)
 
     return json_path
 

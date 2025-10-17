@@ -716,6 +716,52 @@ class PipelineCompiler:
                 setattr(context, attr_name, resolved_value)
 
     @staticmethod
+    def ensure_analysis_materialization(pipeline_definition: List[AbstractStep]) -> None:
+        """
+        Ensure intermediate steps with analysis outputs have step_materialization_config.
+
+        Analysis results (special outputs) must be saved alongside the images they were
+        created from to maintain metadata coherence. For intermediate steps (not final),
+        this requires materializing the images so analysis has matching image metadata.
+
+        Final steps don't need auto-creation because their images and analysis both
+        go to main output directory (no metadata mismatch).
+
+        Called once before per-well compilation loop.
+
+        Args:
+            pipeline_definition: List of pipeline steps to check
+        """
+        from openhcs.core.config import StepMaterializationConfig
+
+        for step_index, step in enumerate(pipeline_definition):
+            # Only process FunctionSteps
+            if not isinstance(step, FunctionStep):
+                continue
+
+            # Check if step has special outputs (analysis results)
+            has_special_outputs = hasattr(step.func, '__special_outputs__') and step.func.__special_outputs__
+
+            # Only auto-create for intermediate steps (not final step)
+            is_intermediate_step = step_index < len(pipeline_definition) - 1
+
+            if has_special_outputs and not step.step_materialization_config and is_intermediate_step:
+                # Auto-instantiate step materialization to preserve metadata coherence
+                # Use LazyStepMaterializationConfig to enable proper inheritance from global config
+                from openhcs.config_framework.lazy_factory import LazyStepMaterializationConfig
+                step.step_materialization_config = LazyStepMaterializationConfig()
+
+                logger.warning(
+                    f"⚠️  Step '{step.name}' (index {step_index}) has analysis outputs but no "
+                    f"step_materialization_config. Auto-creating with defaults to preserve "
+                    f"metadata coherence (intermediate step analysis must be saved with matching images)."
+                )
+                logger.info(
+                    f"    → Images and analysis will be saved to: "
+                    f"{{plate_root}}/{step.step_materialization_config.sub_dir}/"
+                )
+
+    @staticmethod
     def compile_pipelines(
         orchestrator,
         pipeline_definition: List[AbstractStep],
@@ -766,6 +812,11 @@ class PipelineCompiler:
                 }
 
             logger.info(f"Starting compilation for axis values: {', '.join(axis_values_to_process)}")
+
+            # === ANALYSIS MATERIALIZATION AUTO-INSTANTIATION ===
+            # Ensure intermediate steps with analysis outputs have step_materialization_config
+            # This preserves metadata coherence (ROIs must match image structure they were created from)
+            PipelineCompiler.ensure_analysis_materialization(pipeline_definition)
 
             # === GLOBAL AXIS FILTER RESOLUTION ===
             # Resolve axis filters once for all axis values to ensure step-level inheritance works

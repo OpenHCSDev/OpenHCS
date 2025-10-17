@@ -202,13 +202,13 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False)
                 step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.STEP_WELL_FILTER_TEST),
                 step_materialization_config=LazyStepMaterializationConfig(),
                 napari_streaming_config=LazyNapariStreamingConfig(napari_port=5555) if enable_napari else None,
-                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5556) if enable_fiji else None
+                fiji_streaming_config=LazyFijiStreamingConfig() if enable_fiji else None
             ),
             Step(
                 func=create_composite,
                 variable_components=[VariableComponents.CHANNEL],
                 napari_streaming_config=LazyNapariStreamingConfig(napari_port=5557) if enable_napari else None,
-                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5558) if enable_fiji else None
+                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5556) if enable_fiji else None
             ),
             Step(
                 name="Z-Stack Flattening",
@@ -236,7 +236,19 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False)
                         'max_cell_area': 200,
                         'enable_preprocessing': False,
                         'detection_method': DetectionMethod.WATERSHED,
-                        'dtype_conversion': DtypeConversion.UINT8
+                        'dtype_conversion': DtypeConversion.UINT8,
+                        'return_segmentation_mask': True
+                        }
+                    ),
+                    '2':
+                    (
+                    count_cells_single_channel, {
+                        'min_cell_area': 40,
+                        'max_cell_area': 200,
+                        'enable_preprocessing': False,
+                        'detection_method': DetectionMethod.WATERSHED,
+                        'dtype_conversion': DtypeConversion.UINT8,
+                        'return_segmentation_mask': True
                         }
                     )
                     }
@@ -245,7 +257,7 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False)
                     napari_port=5559,
                     variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX
                 ) if enable_napari else None,
-                fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5560) if enable_fiji else None
+                fiji_streaming_config=LazyFijiStreamingConfig() if enable_fiji else None
             ),
         ],
         name=f"Multi-Subdirectory Test Pipeline{' (CPU-Only)' if cpu_only_mode else ''}",

@@ -439,33 +439,251 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
         """
         Save data to OMERO.
 
+        For ROI data (List[ROI]): Creates OMERO ROI objects linked to images
         For image data (numpy arrays): Creates a new image in a dataset
-        For text data (JSON/CSV): Creates a FileAnnotation attached to plate/well/image
+        For tabular data (CSV/JSON/TXT): Attempts to parse and save as OMERO.table (queryable structured data)
+        For other text data: Creates a FileAnnotation attached to plate/well/image
+
+        Args:
+            data: Data to save
+            output_path: Output path
+            **kwargs: Additional arguments, including:
+                - images_dir: Directory containing images (required for analysis results to link to correct plate)
+                - dataset_id: Dataset ID for image data
         """
+        from openhcs.core.roi import ROI
+
         output_path = Path(output_path)
 
-        # Detect if this is text data (JSON/CSV) or image data using registry
-        if isinstance(data, str) and self.format_registry.is_text_format(output_path.suffix):
-            # Text file - save as FileAnnotation
-            self._save_text_annotation(data, output_path, **kwargs)
+        # Explicit type dispatch - fail-loud
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], ROI):
+            # ROI data - save as OMERO ROI objects
+            images_dir = kwargs.pop('images_dir', None)
+            self._save_rois(data, output_path, images_dir=images_dir, **kwargs)
+        elif isinstance(data, str) and self.format_registry.is_text_format(output_path.suffix):
+            # Try to parse as tabular data and save as OMERO.table
+            # Extract images_dir from kwargs if present (passed via filemanager context)
+            # Remove it from kwargs to avoid duplicate keyword argument error
+            images_dir = kwargs.pop('images_dir', None)
+            self._save_as_table_or_annotation(data, output_path, images_dir=images_dir, **kwargs)
         else:
             # Image data - save as OMERO image
             self._save_image(data, output_path, **kwargs)
 
-    def _save_text_annotation(self, text_content: str, output_path: Path, **kwargs) -> None:
-        """Save text content as a FileAnnotation attached to OMERO object."""
+    def _save_as_table_or_annotation(self, text_content: str, output_path: Path, images_dir: str = None, **kwargs) -> None:
+        """
+        Try to parse text content as tabular data and save as OMERO.table.
+        If parsing fails, fall back to FileAnnotation.
+
+        Supports:
+        - CSV files (direct parsing)
+        - JSON files (if they contain tabular data)
+        - TXT files (if they contain tabular data)
+
+        Args:
+            text_content: Text content to save
+            output_path: Output path
+            images_dir: Directory containing images (required for analysis results to link to correct plate)
+            **kwargs: Additional arguments
+        """
+        import pandas as pd
+        from io import StringIO
+        import json
+
+        df = None
+
+        # Try to parse based on file extension
+        suffix = output_path.suffix.lower()
+
+        try:
+            if suffix == '.csv':
+                # Parse CSV directly
+                df = pd.read_csv(StringIO(text_content))
+            elif suffix == '.json':
+                # Try to parse JSON as tabular data
+                data = json.loads(text_content)
+                # Check if it's a list of dicts (table-like) or a dict with list values
+                if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+                    df = pd.DataFrame(data)
+                elif isinstance(data, dict):
+                    # Try to convert dict to DataFrame
+                    df = pd.DataFrame(data)
+            elif suffix == '.txt':
+                # Try to parse as CSV (tab or comma separated)
+                # First try tab-separated
+                try:
+                    df = pd.read_csv(StringIO(text_content), sep='\t')
+                    # Check if it actually parsed into multiple columns
+                    if len(df.columns) == 1:
+                        # Try comma-separated
+                        df = pd.read_csv(StringIO(text_content))
+                except:
+                    # Try comma-separated
+                    try:
+                        df = pd.read_csv(StringIO(text_content))
+                    except:
+                        # Try to parse as key-value pairs (e.g., "Key: Value" format)
+                        lines = text_content.strip().split('\n')
+                        data = {}
+                        for line in lines:
+                            if ':' in line:
+                                key, value = line.split(':', 1)
+                                data[key.strip()] = [value.strip()]
+                        if data:
+                            df = pd.DataFrame(data)
+        except Exception:
+            # Parsing failed, will fall back to FileAnnotation
+            df = None
+
+        # If we successfully parsed tabular data, save as OMERO.table
+        if df is not None and not df.empty and len(df.columns) > 0:
+            # Convert back to CSV for the table creation method
+            csv_content = df.to_csv(index=False)
+            self._save_csv_as_table(csv_content, output_path, images_dir=images_dir, **kwargs)
+        else:
+            # Fall back to FileAnnotation
+            self._save_text_annotation(text_content, output_path, images_dir=images_dir, **kwargs)
+
+    def _save_csv_as_table(self, csv_content: str, output_path: Path, images_dir: str = None, **kwargs) -> None:
+        """
+        Save CSV content as an OMERO.table (queryable structured data).
+
+        Tables are linked to the appropriate OMERO object (Plate, Well, or Image).
+
+        Args:
+            csv_content: CSV content to save
+            output_path: Output path (used for table name)
+            images_dir: Directory containing images (required to link table to correct plate)
+            **kwargs: Additional arguments
+        """
+        from omero.grid import LongColumn, DoubleColumn, StringColumn, BoolColumn
+        from omero.model import FileAnnotationI
+        from omero.rtypes import rstring
+        import pandas as pd
+        from io import StringIO
+
         conn = self._get_connection(**kwargs)
 
-        # Parse path to determine what to attach to
-        # Format: /omero/plate_X/results/A01_cell_counts.json
-        path_str = str(output_path)
+        # Parse CSV content into pandas DataFrame
+        df = pd.read_csv(StringIO(csv_content))
 
-        # Extract plate ID from path
-        import re
-        match = re.search(r'/omero/plate_(\d+)', path_str)
-        if not match:
-            raise ValueError(f"Cannot extract plate ID from path: {path_str}")
-        plate_id = int(match.group(1))
+        # Validate images_dir is provided
+        if not images_dir:
+            raise ValueError(
+                f"images_dir is required for OMERO table linking. "
+                f"This should be passed from the materialization context. "
+                f"Output path: {output_path}"
+            )
+
+        # Parse the images directory path to get the plate name, then query OMERO for actual plate ID
+        # Path format: /omero/plate_274_outputs/images/
+        # The path contains the INPUT plate ID (274), but we need the OUTPUT plate ID
+        # We must parse the full plate name and query OMERO to get the actual ID
+        images_dir = Path(images_dir)
+        plate_name, base_id, is_derived = self._parse_omero_path(images_dir)
+
+        # Query OMERO for the actual plate ID by name
+        plate_id = self._find_plate_by_name(plate_name, **kwargs)
+        if not plate_id:
+            raise ValueError(f"Plate '{plate_name}' not found in OMERO (images dir: {images_dir})")
+
+        # Determine table name from filename
+        table_name = output_path.stem
+
+        # Build column objects based on DataFrame dtypes
+        columns = []
+        for col_name in df.columns:
+            col_data = df[col_name]
+
+            # Determine column type from pandas dtype
+            if pd.api.types.is_integer_dtype(col_data):
+                col = LongColumn(col_name, '', [])
+                col.values = col_data.astype(int).tolist()
+            elif pd.api.types.is_float_dtype(col_data):
+                col = DoubleColumn(col_name, '', [])
+                col.values = col_data.astype(float).tolist()
+            elif pd.api.types.is_bool_dtype(col_data):
+                col = BoolColumn(col_name, '', [])
+                col.values = col_data.astype(bool).tolist()
+            else:
+                # Default to string column
+                # Calculate max string length (OMERO requires size > 0)
+                str_values = col_data.astype(str).tolist()
+                max_len = max(len(s) for s in str_values) if str_values else 1
+                col = StringColumn(col_name, '', max_len, [])
+                col.values = str_values
+
+            columns.append(col)
+
+        # Create table via OMERO.tables service
+        resources = conn.c.sf.sharedResources()
+        repository_id = resources.repositories().descriptions[0].getId().getValue()
+        table = resources.newTable(repository_id, f"{table_name}.h5")
+
+        if table is None:
+            raise RuntimeError("Failed to create OMERO.table")
+
+        try:
+            # Initialize table with columns
+            table.initialize(columns)
+
+            # Add all rows
+            table.addData(columns)
+
+            # Get the OriginalFile for the table
+            orig_file = table.getOriginalFile()
+
+            # Create FileAnnotation to link the table
+            file_ann = FileAnnotationI()
+            file_ann.setFile(orig_file)
+            file_ann.setNs(rstring('openhcs.analysis.results.table'))
+            file_ann.setDescription(rstring(f'Analysis results table: {table_name}'))
+            file_ann = conn.getUpdateService().saveAndReturnObject(file_ann)
+
+            # Link to plate
+            plate = conn.getObject("Plate", plate_id)
+            if not plate:
+                raise ValueError(f"Plate {plate_id} not found")
+
+            # Get the annotation ID and fetch as gateway object
+            ann_id = file_ann.getId().getValue()
+            file_ann_wrapped = conn.getObject("Annotation", ann_id)
+            plate.linkAnnotation(file_ann_wrapped)
+            logger.info(f"Created OMERO.table '{table_name}' and linked to plate {plate_id}")
+
+        finally:
+            table.close()
+
+    def _save_text_annotation(self, text_content: str, output_path: Path, images_dir: str = None, **kwargs) -> None:
+        """Save text content as a FileAnnotation attached to OMERO object.
+
+        Args:
+            text_content: Text content to save
+            output_path: Output path (used for filename)
+            images_dir: Directory containing images (required to link annotation to correct plate)
+            **kwargs: Additional arguments
+        """
+        conn = self._get_connection(**kwargs)
+
+        # Validate images_dir is provided
+        if not images_dir:
+            raise ValueError(
+                f"images_dir is required for OMERO annotation linking. "
+                f"This should be passed from the materialization context. "
+                f"Output path: {output_path}"
+            )
+
+        # Parse the images directory path to get the plate name, then query OMERO for actual plate ID
+        # Path format: /omero/plate_274_outputs/images/
+        # The path contains the INPUT plate ID (274), but we need the OUTPUT plate ID
+        # We must parse the full plate name and query OMERO to get the actual ID
+        images_dir = Path(images_dir)
+        plate_name, base_id, is_derived = self._parse_omero_path(images_dir)
+
+        # Query OMERO for the actual plate ID by name
+        plate_id = self._find_plate_by_name(plate_name, **kwargs)
+        if not plate_id:
+            raise ValueError(f"Plate '{plate_name}' not found in OMERO (images dir: {images_dir})")
 
         # Create FileAnnotation
         import tempfile
@@ -587,13 +805,28 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
         return False
 
     def _parse_omero_path(self, path: Path) -> Tuple[str, int, bool]:
-        """Extract (plate_name, base_id, is_derived) from path."""
+        """Extract (plate_name, base_id, is_derived) from path.
+
+        This method extracts the OMERO plate name from a path by combining the base plate directory
+        with any subdirectories (but NOT the filename).
+
+        Examples:
+            /omero/plate_289 -> ("plate_289", 289, False)
+            /omero/plate_289_outputs -> ("plate_289_outputs", 289, True)
+            /omero/plate_289_outputs/images -> ("plate_289_outputs_images", 289, True)
+            /omero/plate_289_outputs/images/A01.tif -> ("plate_289_outputs_images", 289, True)
+            /omero/plate_289_outputs/images_results -> ("plate_289_outputs_images_results", 289, True)
+            /omero/plate_289_outputs/checkpoints_step0/A01.tif -> ("plate_294_outputs_checkpoints_step0", 294, True)
+        """
         parts = path.parts
         if len(parts) < 2 or parts[0] != "/" or parts[1] != "omero":
             raise ValueError(f"Not an OMERO path: {path}")
 
-        base_name = parts[2]  # "plate_55_outputs"
-        subdirs = parts[3:-1] if len(parts) > 4 else []
+        base_name = parts[2]  # "plate_289_outputs"
+        # Extract subdirectories (everything between base_name and filename)
+        # For /omero/plate_289_outputs/images/A01.tif, subdirs should be ["images"]
+        # parts[3:-1] excludes both the base_name (parts[2]) and the filename (parts[-1])
+        subdirs = list(parts[3:-1]) if len(parts) > 4 else (list(parts[3:]) if len(parts) == 4 else [])
 
         if not base_name.startswith("plate_"):
             raise ValueError(f"OMERO path must use 'plate_{{id}}' format: {base_name}")
@@ -603,7 +836,7 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
             raise ValueError(f"Cannot extract plate ID from: {base_name}")
 
         base_id = int(name_parts[1])
-        plate_name = "_".join([base_name] + list(subdirs)) if subdirs else base_name
+        plate_name = "_".join([base_name] + subdirs) if subdirs else base_name
         is_derived = len(subdirs) > 0 or len(name_parts) > 2
 
         return plate_name, base_id, is_derived
@@ -815,6 +1048,11 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
                             key = (z, c, t)
                             if key in img_data['planes']:
                                 data = img_data['planes'][key]
+
+                                # Convert CuPy arrays to NumPy (OMERO requires NumPy)
+                                if hasattr(data, 'get'):  # CuPy array
+                                    data = data.get()
+
                                 h, w = data.shape
 
                                 # Pad if needed
@@ -1008,3 +1246,134 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
     def load_batch(self, file_paths: List[Union[str, Path]], **kwargs) -> List[Any]:
         """Load multiple images from OMERO."""
         return [self.load(fp, **kwargs) for fp in file_paths]
+
+    def _save_rois(self, rois: List, output_path: Path, images_dir: str = None, **kwargs) -> str:
+        """Save ROIs to OMERO by linking to images in the materialized plate.
+
+        Args:
+            rois: List of ROI objects
+            output_path: Output path (e.g., /omero/plate_32_outputs/images_results/A01_rois_step7.json)
+            images_dir: Images directory path (required for OMERO to link ROIs to correct plate)
+
+        Returns:
+            String describing where ROIs were saved
+        """
+        from openhcs.core.roi import PolygonShape, MaskShape, PointShape, EllipseShape
+        import omero.model
+        from omero.rtypes import rstring, rdouble, rint
+
+        conn = self._get_connection(**kwargs)
+
+        # Validate images_dir is provided
+        if not images_dir:
+            raise ValueError(
+                f"images_dir is required for OMERO ROI linking. "
+                f"This should be passed from the materialization context. "
+                f"Output path: {output_path}"
+            )
+
+        images_dir = Path(images_dir)
+
+        # Parse the images directory path to get the plate name
+        plate_name, base_id, is_derived = self._parse_omero_path(images_dir)
+
+        # Query OMERO for the actual plate ID by name
+        plate_id = self._find_plate_by_name(plate_name, **kwargs)
+        if not plate_id:
+            raise ValueError(f"Plate '{plate_name}' not found in OMERO (images dir: {images_dir})")
+
+        # Extract well ID from filename (first component before underscore)
+        filename = output_path.name
+        well_id_from_filename = filename.split('_')[0]  # "A01" or "A1"
+
+        # Query OMERO for images in this well of the materialized plate
+        plate = conn.getObject("Plate", plate_id)
+        if not plate:
+            raise ValueError(f"Plate {plate_id} not found in OMERO")
+
+        # Find well by label
+        # Note: getWellPos() returns format like "A1" (no zero-padding)
+        # but filenames might use "A01" (zero-padded), so we need to normalize
+        well = None
+        for w in plate.listChildren():
+            well_pos = w.getWellPos()  # e.g., "A1"
+            # Normalize both to compare: remove leading zeros from column number
+            # "A01" -> "A1", "A1" -> "A1"
+            normalized_filename_well = well_id_from_filename[0] + str(int(well_id_from_filename[1:]))
+            if well_pos == normalized_filename_well:
+                well = w
+                break
+
+        if not well:
+            raise ValueError(f"Well {well_id_from_filename} not found in plate {plate_id}")
+
+        # Get all images in this well
+        images = []
+        for well_sample in well.listChildren():
+            image = well_sample.getImage()
+            if image:
+                images.append(image)
+
+        if not images:
+            raise ValueError(f"No images found in well {well_id_from_filename} of plate {plate_id}")
+
+        # Link ROIs to ALL images in the well
+        # (ROIs were created from the full image stack at this step)
+        update_service = conn.getUpdateService()
+        roi_count = 0
+
+        for image in images:
+            for roi in rois:
+                # Create OMERO ROI object
+                omero_roi = omero.model.RoiI()
+                omero_roi.setImage(image._obj)
+
+                # Add shapes to ROI
+                for shape in roi.shapes:
+                    if isinstance(shape, PolygonShape):
+                        # Create OMERO polygon
+                        polygon = omero.model.PolygonI()
+
+                        # Convert coordinates to OMERO format (comma-separated string)
+                        # OMERO expects "x1,y1 x2,y2 x3,y3 ..."
+                        points_str = " ".join([f"{x},{y}" for y, x in shape.coordinates])
+                        polygon.setPoints(rstring(points_str))
+
+                        # Set metadata
+                        if 'label' in roi.metadata:
+                            polygon.setTextValue(rstring(str(roi.metadata['label'])))
+
+                        omero_roi.addShape(polygon)
+
+                    elif isinstance(shape, EllipseShape):
+                        # Create OMERO ellipse
+                        ellipse = omero.model.EllipseI()
+                        ellipse.setX(rdouble(shape.center_x))
+                        ellipse.setY(rdouble(shape.center_y))
+                        ellipse.setRadiusX(rdouble(shape.radius_x))
+                        ellipse.setRadiusY(rdouble(shape.radius_y))
+
+                        if 'label' in roi.metadata:
+                            ellipse.setTextValue(rstring(str(roi.metadata['label'])))
+
+                        omero_roi.addShape(ellipse)
+
+                    elif isinstance(shape, PointShape):
+                        # Create OMERO point
+                        point = omero.model.PointI()
+                        point.setX(rdouble(shape.x))
+                        point.setY(rdouble(shape.y))
+
+                        if 'label' in roi.metadata:
+                            point.setTextValue(rstring(str(roi.metadata['label'])))
+
+                        omero_roi.addShape(point)
+
+                # Save ROI to OMERO
+                if omero_roi.sizeOfShapes() > 0:
+                    update_service.saveAndReturnObject(omero_roi)
+                    roi_count += 1
+
+        result_msg = f"Linked {len(rois)} ROIs to {len(images)} images in well {well_id_from_filename} (plate: {plate_name}, ID: {plate_id})"
+        logger.info(result_msg)
+        return result_msg

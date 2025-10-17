@@ -190,7 +190,8 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         else:
             return tifffile.imread(str(path))
 
-    def _text_writer(self, path, data):
+    def _text_writer(self, path, data, **kwargs):
+        """Write text data to file. Accepts and ignores extra kwargs for compatibility."""
         path.write_text(str(data))
 
     def _text_reader(self, path):
@@ -280,7 +281,17 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             TypeError: If output_path is not a valid path type or content_type is not specified
             ValueError: If the data cannot be saved
         """
+        from openhcs.core.roi import ROI
+
         disk_output_path = Path(output_path)
+
+        # Explicit type dispatch for ROI data
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], ROI):
+            # ROI data - save as JSON
+            images_dir = kwargs.pop('images_dir', None)
+            self._save_rois(data, disk_output_path, images_dir=images_dir, **kwargs)
+            return
+
         ext = disk_output_path.suffix.lower()
         if not self.format_registry.is_registered(ext):
             raise ValueError(f"No writer registered for extension '{ext}'")
@@ -717,3 +728,92 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
                 shutil.copy2(src, dst)
         except Exception as e:
             raise StorageResolutionError(f"Failed to copy {src} → {dst}") from e
+
+    def _save_rois(self, rois: List, output_path: Path, images_dir: str = None, **kwargs) -> str:
+        """Save ROIs to disk as JSON and ImageJ .roi files.
+
+        Args:
+            rois: List of ROI objects
+            output_path: Output path (e.g., /disk/plate_001/checkpoints/A01_rois_step3.json)
+            images_dir: Images directory path (unused for disk backend)
+
+        Returns:
+            Path where ROIs were saved
+        """
+        import json
+        from openhcs.core.roi import PolygonShape, MaskShape, PointShape, EllipseShape
+
+        output_path = Path(output_path)
+
+        # Ensure output directory exists
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Convert ROIs to JSON-serializable format
+        rois_data = []
+        for roi in rois:
+            roi_dict = {
+                'metadata': roi.metadata,
+                'shapes': []
+            }
+
+            for shape in roi.shapes:
+                if isinstance(shape, PolygonShape):
+                    roi_dict['shapes'].append({
+                        'type': 'polygon',
+                        'coordinates': shape.coordinates.tolist()
+                    })
+                elif isinstance(shape, MaskShape):
+                    roi_dict['shapes'].append({
+                        'type': 'mask',
+                        'bbox': shape.bbox,
+                        'mask': shape.mask.tolist()
+                    })
+                elif isinstance(shape, PointShape):
+                    roi_dict['shapes'].append({
+                        'type': 'point',
+                        'y': shape.y,
+                        'x': shape.x
+                    })
+                elif isinstance(shape, EllipseShape):
+                    roi_dict['shapes'].append({
+                        'type': 'ellipse',
+                        'center_y': shape.center_y,
+                        'center_x': shape.center_x,
+                        'radius_y': shape.radius_y,
+                        'radius_x': shape.radius_x
+                    })
+
+            rois_data.append(roi_dict)
+
+        # Save JSON file
+        json_path = output_path.with_suffix('.json')
+        with open(json_path, 'w') as f:
+            json.dump(rois_data, f, indent=2)
+
+        logger.info(f"Saved {len(rois)} ROIs to JSON: {json_path}")
+
+        # Save ImageJ .roi files (one per ROI)
+        try:
+            from roifile import ImagejRoi
+
+            roi_dir = output_path.parent / f"{output_path.stem}_rois"
+            roi_dir.mkdir(parents=True, exist_ok=True)
+
+            for idx, roi in enumerate(rois):
+                for shape in roi.shapes:
+                    if isinstance(shape, PolygonShape):
+                        # Convert polygon to ImageJ ROI
+                        # roifile expects (x, y) coordinates, but we have (y, x)
+                        coords_xy = shape.coordinates[:, [1, 0]]  # Swap columns
+                        ij_roi = ImagejRoi.frompoints(coords_xy)
+
+                        # Set ROI name from metadata
+                        label = roi.metadata.get('label', idx)
+                        roi_path = roi_dir / f"roi_{label}.roi"
+                        ij_roi.tofile(roi_path)
+
+            logger.info(f"Saved {len(rois)} ROIs to ImageJ format: {roi_dir}")
+        except ImportError:
+            logger.warning("roifile library not available, skipping ImageJ .roi file generation")
+
+        return str(json_path)

@@ -50,7 +50,22 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         return self._publishers[key]
 
     def save(self, data: Any, file_path: Union[str, Path], **kwargs) -> None:
-        """Stream single image to Fiji."""
+        """Stream single image or ROIs to Fiji."""
+        from openhcs.core.roi import ROI
+
+        # Streaming backend only handles images and ROIs, not text data
+        if isinstance(data, str):
+            # Silently ignore text data (JSON, CSV, etc.) - streaming backends don't handle this
+            return
+
+        # Explicit type dispatch for ROI data
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], ROI):
+            # ROI data - stream as ROIs
+            images_dir = kwargs.pop('images_dir', None)
+            self._save_rois(data, Path(file_path), images_dir=images_dir, **kwargs)
+            return
+
+        # Image data - stream as image
         self.save_batch([data], [file_path], **kwargs)
 
     def save_batch(self, data_list: List[Any], file_paths: List[Union[str, Path]], **kwargs) -> None:
@@ -198,3 +213,107 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             self._context = None
 
         logger.debug("Fiji streaming backend cleaned up")
+
+    def _save_rois(self, rois: List, output_path: Path, images_dir: str = None, **kwargs) -> str:
+        """Stream ROIs to Fiji ROI Manager.
+
+        Args:
+            rois: List of ROI objects
+            output_path: Output_path (used to extract metadata, not for actual saving)
+            images_dir: Images directory path (unused for fiji streaming)
+            **kwargs: Must contain fiji_port
+
+        Returns:
+            String describing where ROIs were sent
+        """
+        from openhcs.core.roi import PolygonShape, EllipseShape, PointShape
+        import base64
+
+        try:
+            fiji_host = kwargs.get('fiji_host', 'localhost')
+            fiji_port = kwargs['fiji_port']
+            publisher = self._get_publisher(fiji_host, fiji_port)
+        except KeyError:
+            raise ValueError("fiji_port required for streaming ROIs to Fiji")
+
+        # Convert ROIs to ImageJ ROI format
+        try:
+            from roifile import ImagejRoi
+        except ImportError:
+            logger.error("roifile library required for Fiji ROI streaming")
+            raise RuntimeError("roifile library not available")
+
+        # Extract descriptive prefix from output_path (e.g., "A01_w1_segmentation_masks_step7_rois.json" -> "A01_w1_segmentation_masks_step7_rois")
+        roi_prefix = output_path.stem  # Remove .json extension
+
+        roi_bytes_list = []
+
+        for roi in rois:
+            for shape in roi.shapes:
+                if isinstance(shape, PolygonShape):
+                    # Convert polygon to ImageJ ROI
+                    # roifile expects (x, y) coordinates, but we have (y, x)
+                    coords_xy = shape.coordinates[:, [1, 0]]  # Swap columns
+                    ij_roi = ImagejRoi.frompoints(coords_xy)
+
+                    # Set ROI name with descriptive prefix
+                    if 'label' in roi.metadata:
+                        ij_roi.name = f"{roi_prefix}_ROI_{roi.metadata['label']}"
+                    else:
+                        ij_roi.name = f"{roi_prefix}_ROI"
+
+                    roi_bytes_list.append(ij_roi.tobytes())
+
+                elif isinstance(shape, EllipseShape):
+                    # ImageJ ellipse ROI
+                    # Create as oval using bounding box
+                    left = shape.center_x - shape.radius_x
+                    top = shape.center_y - shape.radius_y
+                    width = 2 * shape.radius_x
+                    height = 2 * shape.radius_y
+
+                    ij_roi = ImagejRoi.fromroi(
+                        roitype=ImagejRoi.OVAL,
+                        left=left,
+                        top=top,
+                        right=left + width,
+                        bottom=top + height
+                    )
+
+                    if 'label' in roi.metadata:
+                        ij_roi.name = f"{roi_prefix}_ROI_{roi.metadata['label']}"
+                    else:
+                        ij_roi.name = f"{roi_prefix}_ROI"
+
+                    roi_bytes_list.append(ij_roi.tobytes())
+
+                elif isinstance(shape, PointShape):
+                    # ImageJ point ROI
+                    ij_roi = ImagejRoi.frompoints(np.array([[shape.x, shape.y]]))
+
+                    if 'label' in roi.metadata:
+                        ij_roi.name = f"{roi_prefix}_ROI_{roi.metadata['label']}"
+                    else:
+                        ij_roi.name = f"{roi_prefix}_ROI"
+
+                    roi_bytes_list.append(ij_roi.tobytes())
+
+        # Encode ROI bytes as base64 for JSON transmission
+        encoded_rois = [base64.b64encode(roi_bytes).decode('utf-8') for roi_bytes in roi_bytes_list]
+
+        # Send ROIs message
+        message = {
+            'type': 'rois',
+            'rois': encoded_rois,
+            'timestamp': time.time()
+        }
+
+        import zmq
+        try:
+            publisher.send_json(message, flags=zmq.NOBLOCK)
+            result_msg = f"Streamed {len(rois)} ROIs to Fiji (port {fiji_port})"
+            logger.info(result_msg)
+            return result_msg
+        except zmq.Again:
+            logger.warning(f"Fiji viewer busy, dropped {len(rois)} ROIs (port {fiji_port})")
+            return f"Failed to stream ROIs (Fiji busy)"

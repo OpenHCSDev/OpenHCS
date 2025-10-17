@@ -207,20 +207,20 @@ class PathPlanner:
     def build_output_plate_root(plate_path: Path, path_config, is_per_step_materialization: bool = False) -> Path:
         """Build output plate root directory directly from configuration components.
 
-        Formula:
-        - If output_dir_suffix is empty and NOT per-step materialization: use main pipeline output directory
-        - If output_dir_suffix is empty and IS per-step materialization: use plate_path directly
-        - Otherwise: (global_output_folder OR plate_path.parent) + plate_name + output_dir_suffix
+        Formula: (global_output_folder OR plate_path.parent) + plate_name + output_dir_suffix
+
+        Results (analysis outputs) should ALWAYS use the output plate path, never the input plate path.
+        This ensures metadata coherence - ROIs and other analysis results are saved alongside the
+        processed images they were created from, not with the original input images.
 
         Args:
             plate_path: Path to the original plate directory
             path_config: PathPlanningConfig with global_output_folder and output_dir_suffix
-            is_per_step_materialization: True if this is per-step materialization (no auto suffix)
+            is_per_step_materialization: Unused (kept for API compatibility)
 
         Returns:
             Path to plate root directory (e.g., "/data/results/plate001_processed")
         """
-
 
         # OMERO paths always use /omero as base, ignore global_output_folder
         if str(plate_path).startswith("/omero/"):
@@ -230,14 +230,14 @@ class PathPlanner:
         else:
             base = plate_path.parent
 
-        # Handle empty suffix differently for per-step vs pipeline-level materialization
+        # Always append suffix to create output plate path
+        # If suffix is None/empty, fail loud - this is a configuration error
         if not path_config.output_dir_suffix:
-            if is_per_step_materialization:
-                # Per-step materialization: use exact path without automatic suffix
-                return base / plate_path.name
-            else:
-                # Pipeline-level materialization: trust lazy inheritance system
-                return base / plate_path.name
+            raise ValueError(
+                f"output_dir_suffix cannot be None or empty. "
+                f"Results must always use output plate path, not input plate path. "
+                f"Config: {path_config}"
+            )
 
         result = base / f"{plate_path.name}{path_config.output_dir_suffix}"
         return result
@@ -325,11 +325,20 @@ class PathPlanner:
         return 'PREVIOUS_STEP'
 
     def _get_results_path(self) -> Path:
-        """Get results path from global pipeline configuration."""
+        """Get results path from global pipeline configuration.
+
+        Results must always be stored in the OUTPUT plate, not the input plate.
+        This ensures metadata coherence - analysis results are saved alongside the
+        processed images they were created from.
+        """
         try:
             # Access materialization_results_path from global config, not path planning config
             path = self.ctx.global_config.materialization_results_path
-            return Path(path) if Path(path).is_absolute() else self.plate_path / path
+
+            # Build output plate root to ensure results go to output plate
+            output_plate_root = self.build_output_plate_root(self.plate_path, self.cfg, is_per_step_materialization=False)
+
+            return Path(path) if Path(path).is_absolute() else output_plate_root / path
         except AttributeError as e:
             # Fallback with clear error message if global config is unavailable
             raise RuntimeError(f"Cannot access global config for materialization_results_path: {e}") from e

@@ -137,7 +137,15 @@ class FileManager:
 
         try:
             backend_instance = self._get_backend(backend)
-            backend_instance.save(data, output_path, **kwargs)
+
+            # If materialization context exists, merge it into kwargs
+            # This allows backends to access context like images_dir for OMERO ROI/analysis linking
+            if hasattr(self, '_materialization_context') and self._materialization_context:
+                # Merge context into kwargs (kwargs takes precedence if keys overlap)
+                merged_kwargs = {**self._materialization_context, **kwargs}
+                backend_instance.save(data, output_path, **merged_kwargs)
+            else:
+                backend_instance.save(data, output_path, **kwargs)
         except StorageResolutionError: # Allow specific backend errors to propagate if they are StorageResolutionError
             raise
         except Exception as e:

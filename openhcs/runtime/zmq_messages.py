@@ -43,6 +43,12 @@ class MessageFields:
     IMAGE_ID = "image_id"
     VIEWER_PORT = "viewer_port"
     VIEWER_TYPE = "viewer_type"
+    # ROI message fields
+    ROIS = "rois"
+    LAYER_NAME = "layer_name"
+    SHAPES = "shapes"
+    COORDINATES = "coordinates"
+    METADATA = "metadata"
 
 
 class ControlMessageType(Enum):
@@ -261,4 +267,52 @@ class ImageAck:
             timestamp=data.get(MessageFields.TIMESTAMP),
             error=data.get(MessageFields.ERROR)
         )
+
+@dataclass(frozen=True)
+class ROIMessage:
+    """Message for streaming ROIs to viewers (Napari/Fiji).
+
+    Sent via ZMQ to viewer servers to display ROIs in real-time.
+    """
+    rois: list  # List of ROI dictionaries with shapes and metadata
+    layer_name: str = "ROIs"  # Name of the layer/overlay
+
+    def to_dict(self):
+        return {
+            MessageFields.TYPE: "rois",
+            MessageFields.ROIS: self.rois,
+            MessageFields.LAYER_NAME: self.layer_name
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            rois=data[MessageFields.ROIS],
+            layer_name=data.get(MessageFields.LAYER_NAME, "ROIs")
+        )
+
+
+@dataclass(frozen=True)
+class ShapesMessage:
+    """Message for Napari shapes layer.
+
+    Napari-specific format for displaying polygon/ellipse shapes.
+    """
+    shapes: list  # List of shape dictionaries with type, coordinates, metadata
+    layer_name: str = "ROIs"
+
+    def to_dict(self):
+        return {
+            MessageFields.TYPE: "shapes",
+            MessageFields.SHAPES: self.shapes,
+            MessageFields.LAYER_NAME: self.layer_name
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            shapes=data[MessageFields.SHAPES],
+            layer_name=data.get(MessageFields.LAYER_NAME, "ROIs")
+        )
+
 

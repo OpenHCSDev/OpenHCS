@@ -70,7 +70,22 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
 
     def save(self, data: Any, file_path: Union[str, Path], **kwargs) -> None:
-        """Stream single image to napari."""
+        """Stream single image or ROIs to napari."""
+        from openhcs.core.roi import ROI
+
+        # Streaming backend only handles images and ROIs, not text data
+        if isinstance(data, str):
+            # Silently ignore text data (JSON, CSV, etc.) - streaming backends don't handle this
+            return
+
+        # Explicit type dispatch for ROI data
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], ROI):
+            # ROI data - stream as shapes
+            images_dir = kwargs.pop('images_dir', None)
+            self._save_rois(data, Path(file_path), images_dir=images_dir, **kwargs)
+            return
+
+        # Image data - stream as image
         self.save_batch([data], [file_path], **kwargs)
 
     def save_batch(self, data_list: List[Any], file_paths: List[Union[str, Path]], **kwargs) -> None:
@@ -218,3 +233,67 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
     def __del__(self):
         """Cleanup on deletion."""
         self.cleanup()
+
+    def _save_rois(self, rois: List, output_path: Path, images_dir: str = None, **kwargs) -> str:
+        """Stream ROIs to Napari as shapes layer.
+
+        Args:
+            rois: List of ROI objects
+            output_path: Output path (used to extract metadata, not for actual saving)
+            images_dir: Images directory path (unused for napari streaming)
+            **kwargs: Must contain napari_port
+
+        Returns:
+            String describing where ROIs were sent
+        """
+        from openhcs.core.roi import PolygonShape, EllipseShape, PointShape
+
+        try:
+            napari_host = kwargs.get('napari_host', 'localhost')
+            napari_port = kwargs['napari_port']
+            publisher = self._get_publisher(napari_host, napari_port)
+        except KeyError:
+            raise ValueError("napari_port required for streaming ROIs to Napari")
+
+        # Convert ROIs to Napari shapes format
+        shapes_data = []
+
+        for roi in rois:
+            for shape in roi.shapes:
+                if isinstance(shape, PolygonShape):
+                    shapes_data.append({
+                        'type': 'polygon',
+                        'coordinates': shape.coordinates.tolist(),  # (y, x) format
+                        'metadata': roi.metadata
+                    })
+                elif isinstance(shape, EllipseShape):
+                    # Napari ellipse format: center + radii
+                    shapes_data.append({
+                        'type': 'ellipse',
+                        'center': [shape.center_y, shape.center_x],
+                        'radii': [shape.radius_y, shape.radius_x],
+                        'metadata': roi.metadata
+                    })
+                elif isinstance(shape, PointShape):
+                    shapes_data.append({
+                        'type': 'point',
+                        'coordinates': [shape.y, shape.x],
+                        'metadata': roi.metadata
+                    })
+
+        # Extract layer name from output_path (e.g., "A01_segmentation_masks_step7_rois.json" -> "A01_segmentation_masks_step7_rois")
+        layer_name = output_path.stem  # Remove .json extension
+
+        # Send shapes message
+        message = {
+            'type': 'shapes',
+            'shapes': shapes_data,
+            'layer_name': layer_name,
+            'timestamp': time.time()
+        }
+
+        publisher.send_json(message)
+
+        result_msg = f"Streamed {len(rois)} ROIs to Napari as layer '{layer_name}' (port {napari_port})"
+        logger.info(result_msg)
+        return result_msg

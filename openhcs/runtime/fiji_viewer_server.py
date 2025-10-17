@@ -145,8 +145,10 @@ class FijiViewerServer(ZMQServer):
         # Parse JSON message
         data = json.loads(message.decode('utf-8'))
 
-        # Check if this is a batch message
-        if data.get('type') == 'batch':
+        msg_type = data.get('type')
+
+        # Check message type
+        if msg_type == 'batch':
             images = data.get('images', [])
             display_config_dict = data.get('display_config', {})
 
@@ -158,12 +160,88 @@ class FijiViewerServer(ZMQServer):
             # Process ALL images together - let _add_images_to_hyperstack group by window
             # Don't group by well here - that causes sequential processing!
             self._add_images_to_hyperstack(images, display_config_dict)
+
+        elif msg_type == 'rois':
+            # Handle ROIs message
+            self._process_rois_message(data)
+
         else:
             # Single image message (fallback)
             self._add_images_to_hyperstack(
                 [data],
                 data.get('display_config', {})
             )
+
+    def _process_rois_message(self, data: Dict[str, Any]):
+        """Process ROIs message and add to Fiji ROI Manager.
+
+        Args:
+            data: Message data containing base64-encoded ROI bytes
+        """
+        import base64
+
+        rois_encoded = data.get('rois', [])
+
+        if not rois_encoded:
+            logger.warning("🔬 FIJI SERVER: Received empty ROIs message")
+            return
+
+        try:
+            from roifile import ImagejRoi
+        except ImportError:
+            logger.error("🔬 FIJI SERVER: roifile library required for ROI handling")
+            return
+
+        try:
+            # Get ROI Manager
+            import scyjava as sj
+            RoiManager = sj.jimport('ij.plugin.frame.RoiManager')
+
+            # Get or create ROI Manager instance
+            rm = RoiManager.getInstance()
+            if rm is None:
+                rm = RoiManager()
+
+            # Decode and add ROIs to manager
+            for roi_encoded in rois_encoded:
+                # Decode base64 to bytes
+                roi_bytes = base64.b64decode(roi_encoded)
+
+                # Parse ImageJ ROI from bytes
+                ij_roi = ImagejRoi.frombytes(roi_bytes)
+
+                # Convert to ImageJ Roi object using scyjava
+                # The roifile library provides a way to get the Java Roi object
+                # We need to create a temporary file and load it via ImageJ
+                import tempfile
+                import os
+
+                with tempfile.NamedTemporaryFile(suffix='.roi', delete=False) as tmp:
+                    tmp.write(roi_bytes)
+                    tmp_path = tmp.name
+
+                try:
+                    # Load ROI using ImageJ's RoiDecoder
+                    RoiDecoder = sj.jimport('ij.io.RoiDecoder')
+                    roi_decoder = RoiDecoder(tmp_path)
+                    java_roi = roi_decoder.getRoi()
+
+                    # Add to ROI Manager
+                    rm.addRoi(java_roi)
+                    logger.debug(f"🔬 FIJI SERVER: Added ROI to manager")
+                finally:
+                    # Clean up temp file
+                    os.unlink(tmp_path)
+
+            # Show ROI Manager if not visible
+            if not rm.isVisible():
+                rm.setVisible(True)
+
+            logger.info(f"🔬 FIJI SERVER: Added {len(rois_encoded)} ROIs to ROI Manager")
+
+        except Exception as e:
+            logger.error(f"🔬 FIJI SERVER: Failed to process ROIs: {e}")
+            raise  # Fail loud
 
     def _add_slices_to_existing_hyperstack(self, existing_imp, new_images: List[Dict[str, Any]],
                                              window_key: str, channel_components: List[str],
