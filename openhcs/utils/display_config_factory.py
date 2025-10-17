@@ -242,7 +242,7 @@ def create_fiji_display_config(
             # Default mapping for Fiji hyperstacks
             defaults = {
                 'well': dimension_mode_enum.WINDOW,
-                'site': dimension_mode_enum.CHANNEL,
+                'site': dimension_mode_enum.FRAME,
                 'channel': dimension_mode_enum.CHANNEL,
                 'z_index': dimension_mode_enum.SLICE,
                 'timepoint': dimension_mode_enum.FRAME
@@ -257,7 +257,7 @@ def create_fiji_display_config(
     # Merge component defaults
     component_defaults = {
         'well': dimension_mode_enum.WINDOW,
-        'site': dimension_mode_enum.CHANNEL,
+        'site': dimension_mode_enum.FRAME,
         'channel': dimension_mode_enum.CHANNEL,
         'z_index': dimension_mode_enum.SLICE,
         'timepoint': dimension_mode_enum.FRAME
