@@ -131,6 +131,9 @@
         <div id="server-status-content">
             Checking server status...
         </div>
+        <div id="server-control-buttons" style="margin-top: 10px; display: none;">
+            <button id="start-server-btn" style="background-color: #28a745;">Start Server</button>
+        </div>
     </div>
 
     <div class="openhcs-help">
@@ -187,10 +190,43 @@ config = GlobalPipelineConfig()</textarea>
     const serverStatusDiv = document.getElementById('openhcs-server-status');
     const serverStatusContent = document.getElementById('server-status-content');
     const serverStatusIcon = document.getElementById('server-status-icon');
+    const serverControlButtons = document.getElementById('server-control-buttons');
+    const startServerBtn = document.getElementById('start-server-btn');
 
     // Check server status on load
     checkServerStatus();
     setInterval(checkServerStatus, 10000); // Check every 10 seconds
+
+    // Start server button handler
+    startServerBtn.addEventListener('click', function() {
+        startServerBtn.disabled = true;
+        startServerBtn.textContent = 'Starting...';
+
+        fetch(`/openhcs/start_server/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCookie('csrftoken')
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showStatus('✓ Server started successfully! Checking status...', 'success');
+                // Check status immediately and then resume normal polling
+                setTimeout(checkServerStatus, 2000);
+            } else {
+                showStatus(`✗ Failed to start server: ${data.message}`, 'error');
+                startServerBtn.disabled = false;
+                startServerBtn.textContent = 'Start Server';
+            }
+        })
+        .catch(error => {
+            showStatus(`✗ Error starting server: ${error.message}`, 'error');
+            startServerBtn.disabled = false;
+            startServerBtn.textContent = 'Start Server';
+        });
+    });
 
     function checkServerStatus() {
         fetch(`/openhcs/server_status/`)
@@ -208,20 +244,27 @@ config = GlobalPipelineConfig()</textarea>
                         <div><strong>Active Executions:</strong> ${data.active_executions || 0}</div>
                         <div><strong>Workers:</strong> ${workerStatus}</div>
                     `;
+                    serverControlButtons.style.display = 'none';
                 } else {
                     serverStatusIcon.textContent = '❌';
                     serverStatusContent.innerHTML = `
                         <div><strong>Status:</strong> <span class="status-offline">Offline</span></div>
-                        <div>Cannot connect to execution server</div>
+                        <div>The execution server is not responding. Please start the server.</div>
                     `;
+                    serverControlButtons.style.display = 'block';
+                    startServerBtn.disabled = false;
+                    startServerBtn.textContent = 'Start Server';
                 }
             })
             .catch(error => {
                 serverStatusIcon.textContent = '❌';
                 serverStatusContent.innerHTML = `
-                    <div><strong>Status:</strong> <span class="status-offline">Error</span></div>
-                    <div>${error.message}</div>
+                    <div><strong>Status:</strong> <span class="status-offline">Offline</span></div>
+                    <div>The execution server is not responding. Please start the server.</div>
                 `;
+                serverControlButtons.style.display = 'block';
+                startServerBtn.disabled = false;
+                startServerBtn.textContent = 'Start Server';
             });
     }
 

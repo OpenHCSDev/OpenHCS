@@ -280,3 +280,70 @@ def cancel_job(request, execution_id, conn=None, **kwargs):
             'message': str(e)
         }, status=500)
 
+
+@login_required()
+@require_http_methods(["POST"])
+def start_server(request, conn=None, **kwargs):
+    """
+    Start the ZMQ execution server.
+
+    Args:
+        request: Django request object
+        conn: OMERO connection (provided by @login_required decorator)
+
+    Returns:
+        JSON response with server start status
+    """
+    try:
+        import subprocess
+        import sys
+        from pathlib import Path
+        import time
+
+        # Check if server is already running
+        try:
+            client = _get_zmq_client()
+            if client.ping():
+                return JsonResponse({
+                    'status': 'success',
+                    'message': 'Server is already running'
+                })
+        except:
+            pass  # Server not running, proceed to start it
+
+        # Start the server as a background process
+        log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file_path = log_dir / f"openhcs_zmq_server_port_7777_{int(time.time() * 1000000)}.log"
+
+        cmd = [
+            sys.executable, '-m',
+            'openhcs.runtime.zmq_execution_server_launcher',
+            '--port', '7777',
+            '--persistent',
+            '--log-file-path', str(log_file_path)
+        ]
+
+        # Start the server process detached
+        subprocess.Popen(
+            cmd,
+            stdout=open(log_file_path, 'w'),
+            stderr=subprocess.STDOUT,
+            start_new_session=True
+        )
+
+        logger.info(f"Started ZMQ execution server on port 7777, log: {log_file_path}")
+
+        return JsonResponse({
+            'status': 'success',
+            'message': 'Server started successfully',
+            'log_file': str(log_file_path)
+        })
+
+    except Exception as e:
+        logger.error(f"Error starting server: {e}", exc_info=True)
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+

@@ -104,12 +104,8 @@ TEST_PARAMS = {
         # OpenHCS uses same params as base formats
     },
     "OMERO": {
-        "default": {
-            **syn_data_params,
-            "wells": ['A01', 'A02', 'B01', 'B02'],  # 4 wells to match test expectations
-            "grid_size": (2, 2),  # Smaller grid for faster upload
-            "tile_size": (128, 128)  # Smaller tiles for faster upload
-        }
+        "default": syn_data_params
+        # OMERO uses same params as base formats
     }
 }
 

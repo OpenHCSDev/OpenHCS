@@ -1,17 +1,18 @@
-Real-Time Visualization with Napari
-===================================
+Real-Time Visualization with Napari and Fiji
+============================================
 
 Overview
 --------
 
-OpenHCS provides automatic real-time visualization of pipeline results using napari, a fast n-dimensional image viewer. This enables you to monitor processing progress and immediately see results as they're generated.
+OpenHCS provides automatic real-time visualization of pipeline results using napari (n-dimensional image viewer) and Fiji/ImageJ. This enables you to monitor processing progress and immediately see results as they're generated, including images and ROIs (regions of interest).
 
 **Key Benefits**:
 
-- **Automatic Setup**: Napari viewers are created automatically when needed
+- **Automatic Setup**: Viewers are created automatically when needed
 - **Smart Filtering**: Only shows meaningful outputs (final results, checkpoints), not every intermediate step
 - **No Performance Impact**: Visualization runs in separate processes, doesn't slow down processing
-- **Persistent Viewers**: Napari windows stay open across multiple pipeline runs
+- **Persistent Viewers**: Viewer windows stay open across multiple pipeline runs
+- **ROI Streaming**: Automatically streams extracted ROIs from segmentation masks to viewers
 
 Quick Start
 -----------
@@ -236,3 +237,58 @@ When processing multiple wells, each well's results appear as separate layers in
 **Large Dataset Processing**:
 
 For large datasets, consider enabling visualization only for key steps to avoid overwhelming the napari interface while still monitoring critical processing stages.
+
+ROI Streaming
+-------------
+
+OpenHCS automatically streams ROIs (regions of interest) extracted from segmentation masks to both Napari and Fiji viewers in real-time.
+
+**Enabling ROI Streaming**:
+
+.. code-block:: python
+
+   from openhcs.processing.backends.analysis.cell_counting_cpu import count_cells_single_channel
+   from openhcs.core.config import DetectionMethod, LazyNapariStreamingConfig, LazyFijiStreamingConfig
+
+   Step(
+       name="Cell Counting",
+       func={
+           '1': (count_cells_single_channel, {
+               'min_cell_area': 40,
+               'max_cell_area': 200,
+               'detection_method': DetectionMethod.WATERSHED,
+               'return_segmentation_mask': True  # Enable ROI extraction
+           }),
+           '2': (count_cells_single_channel, {
+               'min_cell_area': 40,
+               'max_cell_area': 200,
+               'detection_method': DetectionMethod.WATERSHED,
+               'return_segmentation_mask': True
+           })
+       },
+       group_by=GroupBy.CHANNEL,
+       napari_streaming_config=LazyNapariStreamingConfig(napari_port=5559),
+       fiji_streaming_config=LazyFijiStreamingConfig(fiji_port=5560)
+   )
+
+**What Gets Streamed**:
+
+- **Images**: Processed images are streamed as image layers
+- **ROIs**: Extracted ROIs from segmentation masks are streamed as shapes (Napari) or ROI Manager entries (Fiji)
+- **Per-Channel**: Each channel gets separate ROI layers/sets for easy identification
+
+**ROI Naming**:
+
+- **Napari**: Layer names include well + channel (e.g., ``A01_w1_segmentation_masks_step7_rois``)
+- **Fiji**: ROI names include well + channel + label (e.g., ``A01_w1_segmentation_masks_step7_rois_ROI_1``)
+
+**Example Output**:
+
+For a 2-well, 2-channel experiment, you'll see:
+
+- **Napari**: 4 separate shapes layers (``A01_w1_rois``, ``A01_w2_rois``, ``B03_w1_rois``, ``B03_w2_rois``)
+- **Fiji**: ROIs in ROI Manager with descriptive names for each well/channel combination
+
+**See Also**:
+
+- :doc:`../architecture/roi_system` - ROI system architecture and implementation details

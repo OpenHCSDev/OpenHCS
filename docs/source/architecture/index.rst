@@ -18,6 +18,7 @@ Fundamental systems that define OpenHCS architecture.
    function_registry_system
    pipeline_compilation_system
    special_io_system
+   roi_system
    analysis_consolidation_system
    experimental_analysis_system
    dict_pattern_case_study
@@ -147,7 +148,7 @@ Quick Start Paths
 
 **Configuration Systems?** Focus on :doc:`lazy_class_system` → :doc:`configuration_resolution` → :doc:`composition_detection_system` → :doc:`context_management_system`
 
-**Real-Time Visualization?** Begin with :doc:`napari_integration_architecture` → :doc:`napari_streaming_system` → :doc:`fiji_streaming_system` → :doc:`storage_and_memory_system`
+**Real-Time Visualization?** Begin with :doc:`napari_integration_architecture` → :doc:`napari_streaming_system` → :doc:`fiji_streaming_system` → :doc:`roi_system` → :doc:`storage_and_memory_system`
 
 **OMERO Integration?** Start with :doc:`omero_backend_system` → :doc:`zmq_execution_system` → :doc:`storage_and_memory_system`
 

@@ -816,10 +816,21 @@ class ZarrCompressor(Enum):
 
 ```python
 class ZarrChunkStrategy(Enum):
-    SINGLE = "single"  # Single chunk per array (optimal for batch I/O)
-    AUTO = "auto"      # Let zarr decide chunk size
-    CUSTOM = "custom"  # User-defined chunk sizes
+    WELL = "well"  # Single chunk per well (optimal for batch I/O, 40x performance)
+    FILE = "file"  # One chunk per file (better for random access to individual files)
 ```
+
+**WELL mode** (default):
+- Chunk shape: `(fields, channels, z, y, x)` - entire 5D array in one chunk
+- Optimal for loading entire wells or many files from same well
+- 40x performance improvement for batch operations
+- Example: 9 fields × 2 channels × 5 z-planes = 1 chunk (~180MB compressed)
+
+**FILE mode**:
+- Chunk shape: `(1, 1, 1, y, x)` - each original file is a separate chunk
+- Better for random access to individual files
+- Each tif compressed separately
+- Example: 9 fields × 2 channels × 5 z-planes = 90 chunks (~2MB each)
 
 ### Batch Operations
 

@@ -96,6 +96,7 @@ napari = [
 fiji = [
     "pyimagej>=1.4.1",
     "scyjava>=1.9.1",
+    "roifile>=2024.5.24",
 ]
 
 # All visualization tools (napari + fiji)

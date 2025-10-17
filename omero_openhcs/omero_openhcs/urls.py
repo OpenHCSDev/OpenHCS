@@ -37,5 +37,10 @@ urlpatterns = [
     re_path(r'^cancel/(?P<execution_id>[a-f0-9-]+)/$',
             views.cancel_job,
             name='openhcs_cancel'),
+
+    # Start execution server
+    re_path(r'^start-server/$',
+            views.start_server,
+            name='openhcs_start_server'),
 ]
 
