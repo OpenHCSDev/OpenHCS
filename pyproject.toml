@@ -90,6 +90,7 @@ gui = [
 # Napari viewer
 napari = [
     "napari>=0.4.18",
+    "napari-roi-manager>=0.1.0",
 ]
 
 # Fiji/ImageJ integration
@@ -102,8 +103,10 @@ fiji = [
 # All visualization tools (napari + fiji)
 viz = [
     "napari>=0.4.18",
+    "napari-roi-manager>=0.1.0",
     "pyimagej>=1.4.1",
     "scyjava>=1.9.1",
+    "roifile>=2024.5.24",
 ]
 
 # OMERO integration dependencies
@@ -159,8 +162,10 @@ all = [
 
     # Viz
     "napari>=0.4.18",
+    "napari-roi-manager>=0.1.0",
     "pyimagej>=1.4.1",
     "scyjava>=1.9.1",
+    "roifile>=2024.5.24",
 
     # GPU
     "torch>=2.6.0,<2.8.0",
