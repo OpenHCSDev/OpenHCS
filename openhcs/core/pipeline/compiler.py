@@ -255,7 +255,7 @@ class PipelineCompiler:
                     # Inject input conversion config using existing PathPlanningConfig pattern
                     path_config = orchestrator.pipeline_config.path_planning_config
                     conversion_config = PathPlanningConfig(
-                        output_dir_suffix="",  # No suffix - write to plate root
+                        output_dir_suffix=".zarr",  # Zarr store suffix
                         global_output_folder=plate_path.parent,  # Parent of plate
                         sub_dir=path_config.sub_dir  # Use same sub_dir (e.g., "images")
                     )

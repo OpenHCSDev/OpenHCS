@@ -160,10 +160,10 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             FileExistsError: If destination key already exists
             StorageResolutionError: If creation fails
         """
-        # Passthrough to disk backend for text files (JSON, CSV, TXT)
-        # Zarr only supports array data, not text files
+        # Passthrough to disk backend for non-array files (text files, ROI files, etc.)
+        # Zarr only supports array data
         path_str = str(output_path)
-        if path_str.endswith(('.json', '.csv', '.txt')):
+        if path_str.endswith(('.json', '.csv', '.txt', '.roi.zip', '.zip')):
             from openhcs.io.backend_registry import get_backend_instance
             disk_backend = get_backend_instance(Backend.DISK.value)
             # Ensure parent directory exists before saving
