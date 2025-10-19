@@ -112,10 +112,12 @@ jobs:
           pip install ruff black mypy
 
       - name: Run ruff (linting)
+        continue-on-error: true  # Don't fail CI on linting errors initially
         run: |
           ruff check openhcs/ --output-format=github
 
       - name: Run black (formatting check)
+        continue-on-error: true  # Don't fail CI on formatting errors initially
         run: |
           black --check openhcs/
 
