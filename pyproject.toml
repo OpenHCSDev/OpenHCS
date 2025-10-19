@@ -39,20 +39,21 @@ dependencies = [
     "scikit-learn>=1.7.1",
     "scipy>=1.12.0",
     "pandas>=2.3.1",
-    
+
     # Image I/O and formats
     "imageio>=2.37.0",
     "tifffile>=2025.6.11",
     "imagecodecs>=2025.3.30",
     "opencv-python>=4.11.0.86",
     "Multi-Template-Matching>=2.0.1",
-    
+    "roifile>=2024.5.24",  # Required for ROI saving to disk
+
     # Storage and serialization
     "PyYAML>=6.0.2",
     "zarr>=2.18.7,<3.0",
     "ome-zarr>=0.11.1",
     "dill>=0.4.0",
-    
+
     # Core utilities
     "setuptools",
     "watchdog>=6.0.0",
@@ -97,7 +98,6 @@ napari = [
 fiji = [
     "pyimagej>=1.4.1",
     "scyjava>=1.9.1",
-    "roifile>=2024.5.24",
 ]
 
 # All visualization tools (napari + fiji)
@@ -106,7 +106,6 @@ viz = [
     "napari-roi-manager>=0.1.0",
     "pyimagej>=1.4.1",
     "scyjava>=1.9.1",
-    "roifile>=2024.5.24",
 ]
 
 # OMERO integration dependencies
@@ -165,7 +164,6 @@ all = [
     "napari-roi-manager>=0.1.0",
     "pyimagej>=1.4.1",
     "scyjava>=1.9.1",
-    "roifile>=2024.5.24",
 
     # GPU
     "torch>=2.6.0,<2.8.0",
