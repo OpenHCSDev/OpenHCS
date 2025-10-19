@@ -34,6 +34,5 @@ To get started, check out the following resources:
    basic_interface
    intro_stitching
    intro_analysis
-   advanced_tips
    glossary
    troubleshooting_FAQ

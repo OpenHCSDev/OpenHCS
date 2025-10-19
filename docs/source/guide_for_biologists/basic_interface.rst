@@ -7,6 +7,7 @@ This page is a visual and practical guide to the OpenHCS user interface. It is d
    :local:
    :depth: 2
 
+Tip: Clicking the "?" icon next to most OpenHCS elements will provide a description of that element.
 ----------------------------
 
 Main Window Overview
@@ -16,12 +17,10 @@ The main window that opens when you launch OpenHCS.
 
 *Main Window Overview.*
  
-.. figure:: ../_static/menu-annotated.png
+.. figure:: ../_static/Main_menu.png
    :alt: Main Window Overview
 
    *Tip: OpenHCS is designed to be efficient in performance and memory usage. If your computer is struggling and these graphs showcase high usage, something might be wrong.*
-
-
 
 
 ----------------------------
@@ -31,11 +30,10 @@ Plate Manager
 
 The Plate Manager helps you organize and view your experimental plates and wells.
 
-.. figure:: ../_static/plate-manager.png
+.. figure:: ../_static/plate_viewer.png
    :alt: Plate Manager
 
-   *Note: Options that can't be used at that moment are greyed out. For example, you can't compile *
-
+   *Note: Options that can't be used at that moment are greyed out. For example, you can't compile a pipeline if you don't have any steps in it yet.*
 
 
 ----------------------------
@@ -43,69 +41,47 @@ The Plate Manager helps you organize and view your experimental plates and wells
 Pipeline Editor
 ---------------
 
-The Pipeline Editor is where you build and customize your analysis workflows.
+The Pipeline Editor is where you build and customize your analysis workflows. It shows the pipeline for the currently selected plate.
 
-.. figure:: _static/ui_pipeline_editor_placeholder.png
+.. figure:: ../_static/pipeline_editor.png
    :alt: Pipeline Editor
 
-   *Placeholder: Add a screenshot of the Pipeline Editor. Annotate the list of available analysis steps, the pipeline flow, and controls for adding/removing steps.*
+*Tip: You can share workflows by clicking the "Code" button and copying the generated code. Anyone else can paste it into their own code viewer and load your pipeline.*
 
-**What to describe:**
-- Adding analysis steps to your pipeline
-- Reordering or removing steps
-- Saving and loading pipelines
+Each step can be edited in the steps setting editor. Learn more about this in the :doc:`intro_stitching`.
 
 ----------------------------
 
-Image Viewer (Napari)
+Metadata menu
 ---------------------
 
-The Image Viewer lets you look at your raw and processed images.
+The Metadata menu has 2 tabs: "Image Browser" and "Metadata"
 
-.. figure:: _static/ui_image_viewer_placeholder.png
-   :alt: Image Viewer
+`````````````
+Image Browser
+`````````````
+The Image Browser lets you look at your raw and processed images.
 
-   *Placeholder: Add a screenshot of the Image Viewer. Annotate the image display area, zoom controls, and channel selection.*
+.. figure:: ../_static/image_browser.png
+   :alt: Image Browser
 
-**What to describe:**
-- Navigating between images (wells, sites, channels)
-- Adjusting zoom and contrast
-- Viewing analysis results overlays
+*Here, you can explore your images prior to processing, using either Napari or Fiji. Simply double-click on an image to open it in the viewer.*
 
-----------------------------
+`````````````
+Metadata
+`````````````
+The Metadata tab shows information about your images and experiments.
 
-Running and Monitoring Analysis
---------------------------------
+.. figure:: ../_static/metadata_viewer.png
+   :alt: Metadata Viewer
 
-How to start, pause, and monitor your analysis jobs.
-
-.. figure:: _static/ui_run_analysis_placeholder.png
-   :alt: Running Analysis
-
-   *Placeholder: Add a screenshot showing the analysis progress bar or job monitor. Annotate the start/pause buttons and progress indicators.*
-
-**What to describe:**
-- How to start an analysis
-- How to check progress
-- Where to find error or completion messages
-
-----------------------------
-
-Exporting Results
------------------
-
-How to save and export your analysis results.
-
-.. figure:: _static/ui_export_results_placeholder.png
-   :alt: Exporting Results
-
-   *Placeholder: Add a screenshot of the export dialog or results table. Annotate export options and file format selectors.*
-
-**What to describe:**
-- Exporting tables or images
-- Choosing file formats (e.g., CSV, MetaXpress)
-- Where exported files are saved
-
-----------------------------
+*In this tab, you can view and edit metadata associated with your images, such as acquisition settings, experimental conditions, and annotations.*
 
 
+
+-------------------------
+
+Conclusion
+------------------------
+
+This guide has provided an overview of the OpenHCS user interface, including the Main Window, Plate Manager, Pipeline Editor, and Metadata menu. With this knowledge, you should be able to navigate OpenHCS effectively and utilize its features for your bioimage analysis needs. For more detailed instructions on specific workflows, refer to the other guides in this series.

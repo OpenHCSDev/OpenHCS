@@ -1,82 +1,43 @@
 Basic Workflow: Stitching Images
 ===============================
 
-This guide walks you through the process of stitching microscope images using OpenHCS. We'll use a practical example with sample data to demonstrate each step, from adding your plate to viewing the final stitched image.
+This guide demonstrates stitching microscope images using OpenHCS with sample data from a neurite outgrowth assay.
 
+The dataset uses a 96-well plate with a custom microfluidic design, so images may look different from standard formats. The workflow applies to any plate format and HCS imaging setup.
 
-While parameters may vary based on your specific experiment and imaging setup, this guide provides a foundational understanding of the stitching workflow in OpenHCS. You can adapt this example pipeline with minimal difficulty for most common microscopy setups.
-
-
-In this guide, we will use sample microscope data from a neurite outgrowth assay. The data is available for download from this link: <!placeholder for link to sample data>.
-
-The dataset comes from a 96-well plate assay performed with a custom microfluidic plate developed in our lab, so the images may look different from standard cell culture formats. This tutorial is intended only to demonstrate the basics of OpenHCS—the same workflow applies to any plate format, and OpenHCS can be used across a wide range of HCS imaging experiments.
+**Sample data:** <!placeholder for link to sample data>
 
 Step 1: Adding a Plate
 ----------------------
 
 **What is a plate?**
-````````````````````
 
-In microscopy, a "plate" refers to a sample holder containing multiple wells (like a 96-well plate used in experiments). Each well may contain multiple images (or "fields") taken at different positions. OpenHCS organizes your images based on this plate structure.
+A plate (like a 96-well plate) contains multiple wells, each with multiple images ("fields") at different positions. OpenHCS organizes images by this structure.
 
-**Supported plate formats:**
+**Supported formats:** ImageXpress, Opera Phenix, OpenHCS ZARR (example dataset format)
 
-OpenHCS currently supports:
+**Adding your plate:**
 
-- ImageXpress plate format
-
-- Opera Phenix plate format
-
-- OpenHCS's native ZARR format - a flexible format for storing large image datasets, that can be generated using OpenHCS
-
-The plate provided in the example dataset is a ZARR plate. The steps remain the same for other supported formats.
-
-**How to add a plate**
-````````````````````
-
-1. Open the Plate Manager window from the Windows menu.
-
-2. Click the "Add" button.
-
-   <!-- IMAGE: Screenshot of Plate Manager with "Add Plate" button highlighted -->
-
-3. Navigate to the folder containing your microscope images and hit "choose". In the example data, this is the "basic_example_data" folder
-
-4. OpenHCS will detect the microscope format automatically and load it into the plate manager.
-
-5. Click "Init" to initialize the plate for processing.
-
-   <!-- IMAGE: Screenshot showing plate initialization dialog -->
-
-6. If the Compile button is no longer greyed out (it wont be in this case), the plate is ready for processing.
-
+1. Open Plate Manager (Windows menu)
+2. Click "Add" → navigate to "basic_example_data" → "Choose"
+3. OpenHCS auto-detects the format and loads it
+4. Click "Init" to initialize
+5. Open the pipeline editor
 
 Step 2: Setting up a Stitching Pipeline
 ---------------------------------------
 
-Once you learn more about OpenHCS pipelines, you can create your own stitching pipelines. For now, we'll use a pipeline with values tuned for this experiment. This pipeline can be adapted for most common multi-well microscopy setups with minimal changes.
+**Loading a Pipeline:**
 
+1. In Pipeline Editor, click "Load"
+2. Select "basic_image_stitching.pipeline" from example data folder
+3. Pipeline loads with all steps and settings
 
-**Loading a Pipeline from Disk**
-````````````````````````````````````
+**Understanding Pipelines**
 
-If you already have a stitching pipeline:
+A pipeline is a sequence of steps that process your images in a specific order. Think of it like a laboratory protocol.
 
-1. In the Pipeline Editor, click "Load".
-
-2. Navigate to your saved pipeline file and select it. In the example data, this file is called "basic_image_stitching.pipeline".
-
-3. The pipeline will load with all its steps and settings.
-
-**Understanding Pipelines, Steps, and Functions**
-----------------------------------------------------
-
-**What is a pipeline?**
-``````````````````````````````````````
-
-A pipeline is a sequence of steps that process your images in a specific order. Think of it like a laboratory protocol:
-
-A step in OpenHCS is a single operation. This doesn't mean they only do one thing, however. Many steps perform multiple operations. Open the "Initial Processing" by clicking on it, and then clicking on "Edit" so we can take a deeper look.
+Each pipeline is made of multiple steps. A step in OpenHCS is a single operation. This doesn't mean they only do one thing, however. Many steps perform multiple operations. Select the "Initial Processing" by clicking on it, and then click on "Edit" so we can take a deeper look.
 
 **Steps and the Step Editor**
 ```````````````````````````````
@@ -86,7 +47,8 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 <!-- IMAGE: Screenshot of Step Editor with "Step Settings" tab highlighted, and each section numbered --> 
 
 1. **Step Name**: This is the name of the step. You can change it to something more descriptive if you want.
-2. **Variable Components**:
+2. **Step Description**: A brief description of what this step does.
+3. **Variable Components**:
 
    - These tell OpenHCS how to split up images before processing.
 
@@ -118,7 +80,7 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
       - Each group contains images from all sites of a specific channel of a specific well
       - This is done because sometimes the processing we want to do (like stitching) needs to consider all sites together for each well and channel. Or, we might want to have our variable component be channel so that we can compare how different fluorescence markers look in the same well and site.
    
-3. **Group By**
+4. **Group By**
   
    - This tells OpenHCS how to treat variations inside each group.
   
@@ -138,45 +100,26 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
       Similarly, in OpenHCS, you might want to vary your analysis based on which fluorescence markers you stained with.
 
 
-Variable components and group by settings are used to process the entire plate but dynamically adjust to the different variables in the dataset. This is especially useful for large datasets with many variables. You should consider your experimental setup and your analysis goal in order to determine how to group your data. This functionality works for all different dimensions specified.
+5. **Input Source**: Which images are being used (previous step output or original plate images);
 
-4. **Input Source**
+6. **Step Well Filter**: Process only specific wells (e.g., A1 and B1). Leave blank to process all wells.
 
-   - This is the source of the images for this step. Typically, this will be the output of the previous step. It can also be the original images from the plate if you so choose. Pipelines are dynamic and can have multiple branches. Since this is the first step, the input source is the original images from the plate.
+7. **Materialization Config**: Save intermediate results to disk (inherits from global config unless changed).
 
+8. **Napari/Fiji Streaming Config**: Visualize step results in Napari or Fiji (inherits from global config as well).
 
-5. **Step Well Filter config**
+**Function Pattern Tab**
 
-   - This allows you to filter which wells are processed in this step. For example, if you only want to process wells A1 and B1, you can set that here. In this case, we want to process all wells, so we leave it blank. You can also change the mode to "exclude" if you want to exclude certain wells instead of including them.
+Click "Function Pattern" at top. A step's function pattern is its series of operations.
 
+- Add/remove/edit functions as needed
+- This step applies filters to prepare images for stitching
+- Use arrows (top-left) to cycle through channels and see channel-specific processing
+- Example: DAPI/FITC use "TopHat" filter; TL-20 uses "Sobel" filter
 
-6. **Step Materialization Config**
+**Pipeline Overview**
 
-   - Materialization allows you to save the results of a single step to disk, so you can see intermediary results. Typically, the only files that are saved are the final outputs of the last step in the pipeline, but this allows you to save outputs from any step, if you so choose. We won't worry about that for now. The settings in materialization config are pretty self-explanatory, so we won't go into detail here. What is something you should note is that the materializaation config "inherits" from the global configuration, so it will have the same settings as the global config unless you change them here.
-
-
-7. **Napari/Fiji Streaming Config**
-
-   - This allows you to visualize the results of this step in Napari or Fiji. We won't go into detail here, but you can set it up if you want to visualize the results of this step. It has the same inheritance behavior as the materialization config.
-
-
-Now, click on the "Function Pattern" tab at the top of the window.
-
-**Functions and Function patterns**
------------------------------------
-
-A step consists of a "Function pattern" which is a series of operations each step will do. Each function is a specific operation that will be performed on the images. 
-
-<!-- IMAGE: Screenshot of Step Editor with "Function Pattern" tab highlighted, and the different parts of the windows explained briefly   -->
-
-You can add, remove, or edit functions as needed. For now, we won't change anything here, but this step is just processing the images by running certain filters on them to prepare them for the image stitching algorithm. However, at the left of the top bar, you can see that you can change the selected channels, and hit the arrows to cycle through the channels. This is because we set our "Group By" to channel, so we can see how this step will process each channel differently.
-In this case, the DAPI and FITC channels use a "TopHat" filter as their second function, while the TL-20 channel uses a "Sobel" filter. 
-
-
-**Basic Stitching Pipeline Overview**
-`````````````````````````````````````
-
-Hit save and close the step editor. Now, lets take a look at the entire pipeline. The overall goal of this pipeline is to create 1 composite image for each well, using all the sites of that well. It consists of 5 steps:
+Close the editor. This pipeline creates one composite image per well from all sites through five steps:
 
 **Step 1: Pre-processing**
 - Improves image quality before stitching
@@ -197,9 +140,9 @@ Hit save and close the step editor. Now, lets take a look at the entire pipeline
 - Whats important to note is that this step doesn't output any images. It only outputs the positions of each tile, which are used in the next step.
 
 **Step 4: Re-processing**
-- Prepares your original images for final assembly
-- Can adjust brightness, contrast, or other properties
-- Uses the original images (not the pre-processed ones made from step 1)
+- Prepares original images for assembly
+- Adjusts brightness/contrast
+- Uses original images (not Step 1 output)
 
 **Step 5: Assembling**
 - Takes the positions from Step 3 and the images from Step 4
