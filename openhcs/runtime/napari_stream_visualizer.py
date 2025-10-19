@@ -44,6 +44,9 @@ _global_viewer_process: Optional[multiprocessing.Process] = None
 _global_viewer_port: Optional[int] = None
 _global_process_lock = threading.Lock()
 
+# Registry of data type handlers (will be populated after helper functions are defined)
+_DATA_TYPE_HANDLERS = None
+
 
 def _cleanup_global_viewer() -> None:
     """
@@ -102,15 +105,214 @@ def _parse_component_info_from_path(path_str: str):
         return {}
 
 
-def _handle_component_aware_display(viewer, layers, component_groups, image_data, path,
-                                   colormap, display_config, replace_layers, component_metadata=None):
+
+def _build_nd_shapes(layer_items, stack_components):
+    """
+    Build nD shapes by prepending stack component indices to 2D shape coordinates.
+
+    Args:
+        layer_items: List of items with 'data' (shapes_data) and 'components'
+        stack_components: List of component names to stack
+
+    Returns:
+        Tuple of (all_shapes_nd, all_shape_types, all_properties)
+    """
+    from openhcs.runtime.roi_converters import NapariROIConverter
+
+    all_shapes_nd = []
+    all_shape_types = []
+    all_properties = {'label': [], 'area': [], 'centroid_y': [], 'centroid_x': []}
+
+    # Build component value to index mapping (same as _build_nd_image_array)
+    component_values = {}
+    for comp in stack_components:
+        values = sorted(set(item['components'].get(comp, 0) for item in layer_items))
+        component_values[comp] = values
+
+    for item in layer_items:
+        shapes_data = item['data']  # List of shape dicts
+        components = item['components']
+
+        # Get stack component INDICES to prepend (not values!)
+        prepend_dims = [
+            component_values[comp].index(components.get(comp, 0))
+            for comp in stack_components
+        ]
+
+        # Convert each shape to nD
+        for shape_dict in shapes_data:
+            # Use registry-based dimension handler
+            nd_coords = NapariROIConverter.add_dimensions_to_shape(shape_dict, prepend_dims)
+            all_shapes_nd.append(nd_coords)
+            all_shape_types.append(shape_dict['type'])
+
+            # Extract properties
+            metadata = shape_dict.get('metadata', {})
+            centroid = metadata.get('centroid', (0, 0))
+            all_properties['label'].append(metadata.get('label', ''))
+            all_properties['area'].append(metadata.get('area', 0))
+            all_properties['centroid_y'].append(centroid[0])
+            all_properties['centroid_x'].append(centroid[1])
+
+    return all_shapes_nd, all_shape_types, all_properties
+
+
+def _build_nd_image_array(layer_items, stack_components):
+    """
+    Build nD image array by stacking images along stack component dimensions.
+
+    Args:
+        layer_items: List of items with 'data' (image arrays) and 'components'
+        stack_components: List of component names to stack
+
+    Returns:
+        np.ndarray: Stacked image array
+    """
+    if len(stack_components) == 1:
+        # Single stack component - simple 3D stack
+        image_stack = [img['data'] for img in layer_items]
+        from openhcs.core.memory.stack_utils import stack_slices
+        return stack_slices(image_stack, memory_type='numpy', gpu_id=0)
+    else:
+        # Multiple stack components - create multi-dimensional array
+        component_values = {}
+        for comp in stack_components:
+            values = sorted(set(img['components'].get(comp, 0) for img in layer_items))
+            component_values[comp] = values
+
+        # Create empty array with shape (comp1_size, comp2_size, ..., y, x)
+        first_img = layer_items[0]['data']
+        stack_shape = tuple(len(component_values[comp]) for comp in stack_components) + first_img.shape
+        stacked_array = np.zeros(stack_shape, dtype=first_img.dtype)
+
+        # Fill array
+        for img in layer_items:
+            # Get indices for this image
+            indices = tuple(
+                component_values[comp].index(img['components'].get(comp, 0))
+                for comp in stack_components
+            )
+            stacked_array[indices] = img['data']
+
+        return stacked_array
+
+
+def _create_or_update_shapes_layer(viewer, layers, layer_name, shapes_data, shape_types, properties):
+    """
+    Create or update a Napari shapes layer.
+
+    Note: Unlike image layers, shapes layers don't handle updates well when dimensions change.
+    We remove and recreate the layer instead of updating in place.
+
+    Args:
+        viewer: Napari viewer
+        layers: Dict of existing layers
+        layer_name: Name for the layer
+        shapes_data: List of shape coordinate arrays
+        shape_types: List of shape type strings
+        properties: Dict of properties
+
+    Returns:
+        The created or updated layer
+    """
+    # Check if layer exists
+    existing_layer = None
+    for layer in viewer.layers:
+        if layer.name == layer_name:
+            existing_layer = layer
+            break
+
+    if existing_layer is not None:
+        # Remove existing layer - shapes layers don't handle dimension changes well
+        viewer.layers.remove(existing_layer)
+        layers.pop(layer_name, None)
+        logger.info(f"🔬 NAPARI PROCESS: Removed existing shapes layer {layer_name} for recreation")
+
+    # Always create new layer
+    new_layer = viewer.add_shapes(
+        shapes_data,
+        shape_type=shape_types,
+        properties=properties,
+        name=layer_name,
+        edge_color='red',
+        face_color='transparent',
+        edge_width=2
+    )
+    layers[layer_name] = new_layer
+    logger.info(f"🔬 NAPARI PROCESS: Created shapes layer {layer_name} with {len(shapes_data)} shapes")
+    return new_layer
+
+
+def _create_or_update_image_layer(viewer, layers, layer_name, image_data, colormap):
+    """
+    Create or update a Napari image layer.
+
+    Args:
+        viewer: Napari viewer
+        layers: Dict of existing layers
+        layer_name: Name for the layer
+        image_data: Image array
+        colormap: Colormap name
+
+    Returns:
+        The created or updated layer
+    """
+    # Check if layer exists
+    existing_layer = None
+    for layer in viewer.layers:
+        if layer.name == layer_name:
+            existing_layer = layer
+            break
+
+    if existing_layer is not None:
+        existing_layer.data = image_data
+        if colormap:
+            existing_layer.colormap = colormap
+        layers[layer_name] = existing_layer
+        logger.info(f"🔬 NAPARI PROCESS: Updated existing image layer {layer_name}")
+        return existing_layer
+    else:
+        new_layer = viewer.add_image(
+            image_data,
+            name=layer_name,
+            colormap=colormap or 'gray'
+        )
+        layers[layer_name] = new_layer
+        logger.info(f"🔬 NAPARI PROCESS: Created new image layer {layer_name}")
+        return new_layer
+
+
+# Populate registry now that helper functions are defined
+from openhcs.constants.streaming import StreamingDataType
+
+_DATA_TYPE_HANDLERS = {
+    StreamingDataType.IMAGE: {
+        'build_nd_data': _build_nd_image_array,
+        'create_layer': _create_or_update_image_layer,
+    },
+    StreamingDataType.SHAPES: {
+        'build_nd_data': _build_nd_shapes,
+        'create_layer': _create_or_update_shapes_layer,
+    }
+}
+
+
+def _handle_component_aware_display(viewer, layers, component_groups, data, path,
+                                   colormap, display_config, replace_layers, component_metadata=None, data_type='image'):
     """
     Handle component-aware display following OpenHCS stacking patterns.
 
     Components marked as SLICE create separate layers, components marked as STACK are stacked together.
     Layer naming follows canonical component order from display config.
+
+    Args:
+        data_type: 'image' for image data, 'shapes' for ROI/shapes data (string or StreamingDataType enum)
     """
     try:
+        # Convert data_type to enum if needed (for backwards compatibility)
+        if isinstance(data_type, str):
+            data_type = StreamingDataType(data_type)
+
         # Use component metadata from ZMQ message - fail loud if not available
         if not component_metadata:
             raise ValueError(f"No component metadata available for path: {path}")
@@ -160,63 +362,50 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
             # Fail-loud elsewhere; reconciliation is best-effort and must not mask display
             pass
 
+        # Add "_shapes" suffix for shapes layers to distinguish from image layers
+        if data_type == StreamingDataType.SHAPES:
+            layer_key = f"{layer_key}_shapes"
+
         # Initialize layer group if needed
         if layer_key not in component_groups:
             component_groups[layer_key] = []
 
-        # Add image to layer group
+        # Add data to layer group
         component_groups[layer_key].append({
-            'data': image_data,
+            'data': data,
             'components': component_info,
-            'path': str(path)
+            'path': str(path),
+            'data_type': data_type
         })
 
-        # Get all images for this layer
-        layer_images = component_groups[layer_key]
+        # Get all items for this layer
+        layer_items = component_groups[layer_key]
 
-        # Determine if we should stack or use single image
+        # Determine if we should stack or use single item
         stack_components = [comp for comp, mode in component_modes.items()
                           if mode == 'stack' and comp in component_info]
 
-        if len(layer_images) == 1:
-            # Single image - add directly
+        if len(layer_items) == 1:
+            # Single item - add directly using registry
             layer_name = layer_key
 
-            # Check if layer exists in actual napari viewer
-            existing_layer = None
-            for layer in viewer.layers:
-                if layer.name == layer_name:
-                    existing_layer = layer
-                    break
-
-            if existing_layer is not None:
-                # Update existing layer
-                existing_layer.data = image_data
-                layers[layer_name] = existing_layer
-                logger.info(f"🔬 NAPARI PROCESS: Updated existing layer {layer_name}")
-            else:
-                # Create new layer - this should always work for new names
-                logger.info(f"🔬 NAPARI PROCESS: Creating new layer {layer_name}, viewer has {len(viewer.layers)} existing layers")
-                logger.info(f"🔬 NAPARI PROCESS: Existing layer names: {[layer.name for layer in viewer.layers]}")
-                logger.info(f"🔬 NAPARI PROCESS: Image data shape: {image_data.shape}, dtype: {image_data.dtype}")
-                logger.info(f"🔬 NAPARI PROCESS: Viewer type: {type(viewer)}")
-                try:
-                    new_layer = viewer.add_image(image_data, name=layer_name, colormap=colormap)
-                    layers[layer_name] = new_layer
-                    logger.info(f"🔬 NAPARI PROCESS: Successfully created new layer {layer_name}")
-                    logger.info(f"🔬 NAPARI PROCESS: Viewer now has {len(viewer.layers)} layers")
-                except Exception as e:
-                    logger.error(f"🔬 NAPARI PROCESS: FAILED to create layer {layer_name}: {e}")
-                    logger.error(f"🔬 NAPARI PROCESS: Exception type: {type(e)}")
-                    import traceback
-                    logger.error(f"🔬 NAPARI PROCESS: Traceback: {traceback.format_exc()}")
-                    raise
+            # Prepare data based on type
+            if data_type == StreamingDataType.SHAPES:
+                from openhcs.runtime.roi_converters import NapariROIConverter
+                napari_shapes, shape_types, properties = NapariROIConverter.shapes_to_napari_format(data)
+                _create_or_update_shapes_layer(viewer, layers, layer_name, napari_shapes, shape_types, properties)
+            else:  # IMAGE
+                _create_or_update_image_layer(viewer, layers, layer_name, data, colormap)
         else:
-            # Multiple images - create multi-dimensional array for napari
+            # Multiple items - handle stacking
             try:
-                # Check if all images have the same shape
-                first_shape = layer_images[0]['data'].shape
-                all_same_shape = all(img['data'].shape == first_shape for img in layer_images)
+                # For shapes, skip the shape checking logic (shapes don't have .shape attribute)
+                if data_type == StreamingDataType.SHAPES:
+                    all_same_shape = True  # Shapes don't need same shape
+                else:
+                    # Check if all images have the same shape
+                    first_shape = layer_items[0]['data'].shape
+                    all_same_shape = all(img['data'].shape == first_shape for img in layer_items)
 
                 if not all_same_shape:
                     # Images have different shapes - handle based on config
@@ -242,7 +431,7 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
 
                         # Find max dimensions
                         max_shape = list(first_shape)
-                        for img_info in layer_images:
+                        for img_info in layer_items:
                             img_shape = img_info['data'].shape
                             for i, dim in enumerate(img_shape):
                                 max_shape[i] = max(max_shape[i], dim)
@@ -250,7 +439,7 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
 
                         # Pad all images to max shape
                         padded_images = []
-                        for img_info in layer_images:
+                        for img_info in layer_items:
                             img_data = img_info['data']
                             if img_data.shape != max_shape:
                                 # Calculate padding for each dimension
@@ -273,7 +462,7 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
 
                         # Group by well and create separate layers
                         wells_in_layer = {}
-                        for img_info in layer_images:
+                        for img_info in layer_items:
                             well = img_info['components'].get('well', 'unknown_well')
                             if well not in wells_in_layer:
                                 wells_in_layer[well] = []
@@ -311,73 +500,24 @@ def _handle_component_aware_display(viewer, layers, component_groups, image_data
                         # Skip the normal stacking logic below
                         return
 
-                # All images have same shape - proceed with normal stacking
-                # Sort images by stack components for consistent ordering
+                # Sort by stack components for consistent ordering
                 if stack_components:
-                    def sort_key(img_info):
-                        return tuple(img_info['components'].get(comp, 0) for comp in stack_components)
-                    layer_images.sort(key=sort_key)
+                    def sort_key(item_info):
+                        return tuple(item_info['components'].get(comp, 0) for comp in stack_components)
+                    layer_items.sort(key=sort_key)
 
-                # Group images by stack component values to create proper dimensions
-                if len(stack_components) == 1:
-                    # Single stack component - simple 3D stack
-                    image_stack = [img['data'] for img in layer_images]
-                    from openhcs.core.memory.stack_utils import stack_slices
-                    stacked_data = stack_slices(image_stack, memory_type='numpy', gpu_id=0)
-                else:
-                    # Multiple stack components - create multi-dimensional array
-                    # Get unique values for each stack component
-                    component_values = {}
-                    for comp in stack_components:
-                        values = sorted(set(img['components'].get(comp, 0) for img in layer_images))
-                        component_values[comp] = values
+                # Build nD data using registry (UNIFIED for images and shapes)
+                if data_type == StreamingDataType.SHAPES:
+                    stacked_data, shape_types, properties = _build_nd_shapes(layer_items, stack_components)
+                else:  # IMAGE
+                    stacked_data = _build_nd_image_array(layer_items, stack_components)
 
-                    # Create multi-dimensional array
-                    # Shape: (comp1_size, comp2_size, ..., height, width)
-                    shape_dims = [len(component_values[comp]) for comp in stack_components]
-                    first_img = layer_images[0]['data']
-                    full_shape = tuple(shape_dims + list(first_img.shape))
-                    stacked_data = np.zeros(full_shape, dtype=first_img.dtype)
-
-                    # Fill the multi-dimensional array
-                    for img_info in layer_images:
-                        # Get indices for this image
-                        indices = []
-                        for comp in stack_components:
-                            comp_value = img_info['components'].get(comp, 0)
-                            comp_index = component_values[comp].index(comp_value)
-                            indices.append(comp_index)
-
-                        # Place image in the correct position
-                        stacked_data[tuple(indices)] = img_info['data']
-
-                # Update or create stack layer
+                # Create or update layer using registry (UNIFIED dispatch)
                 layer_name = layer_key
-
-                # Check if layer exists in actual napari viewer
-                existing_layer = None
-                for layer in viewer.layers:
-                    if layer.name == layer_name:
-                        existing_layer = layer
-                        break
-
-                if existing_layer is not None:
-                    # Update existing layer
-                    existing_layer.data = stacked_data
-                    layers[layer_name] = existing_layer
-                    logger.info(f"🔬 NAPARI PROCESS: Updated existing stack layer {layer_name} (shape: {stacked_data.shape})")
-                else:
-                    # Create new layer - this should always work for new names
-                    logger.info(f"🔬 NAPARI PROCESS: Creating new stack layer {layer_name}, viewer has {len(viewer.layers)} existing layers")
-                    try:
-                        new_layer = viewer.add_image(stacked_data, name=layer_name, colormap=colormap)
-                        layers[layer_name] = new_layer
-                        logger.info(f"🔬 NAPARI PROCESS: Successfully created new stack layer {layer_name} (shape: {stacked_data.shape})")
-                    except Exception as e:
-                        logger.error(f"🔬 NAPARI PROCESS: FAILED to create stack layer {layer_name}: {e}")
-                        import traceback
-                        logger.error(f"🔬 NAPARI PROCESS: Traceback: {traceback.format_exc()}")
-                        raise
+                if data_type == StreamingDataType.SHAPES:
+                    _create_or_update_shapes_layer(viewer, layers, layer_name, stacked_data, shape_types, properties)
+                else:  # IMAGE
+                    _create_or_update_image_layer(viewer, layers, layer_name, stacked_data, colormap)
 
             except Exception as e:
                 logger.error(f"🔬 NAPARI PROCESS: Failed to create stack for layer {layer_key}: {e}")
@@ -520,149 +660,71 @@ class NapariViewerServer(ZMQServer):
 
         # Check message type
         if msg_type == 'batch':
-            # Handle batch of images
+            # Handle batch of images/shapes
             images = data.get('images', [])
             display_config_dict = data.get('display_config')
 
             for image_info in images:
                 self._process_single_image(image_info, display_config_dict)
 
-        elif msg_type == 'shapes':
-            # Handle shapes/ROIs message
-            self._process_shapes_message(data)
-
         else:
-            # Handle single image
+            # Handle single image (legacy)
             self._process_single_image(data, data.get('display_config'))
 
-    def _process_shapes_message(self, data: Dict[str, Any]):
-        """Process shapes/ROIs message and add to Napari viewer.
-
-        Args:
-            data: Message data containing shapes list and layer name
-        """
-        import numpy as np
-
-        shapes_data = data.get('shapes', [])
-        layer_name = data.get('layer_name', 'ROIs')
-
-        try:
-            # Convert shapes to Napari format
-            napari_shapes = []
-            shape_types = []
-            properties = {'label': [], 'area': [], 'centroid': []}
-
-            for shape_dict in shapes_data:
-                shape_type = shape_dict.get('type')
-                metadata = shape_dict.get('metadata', {})
-
-                if shape_type == 'polygon':
-                    # Polygon coordinates are already in (y, x) format
-                    coords = np.array(shape_dict['coordinates'])
-                    napari_shapes.append(coords)
-                    shape_types.append('polygon')
-
-                elif shape_type == 'ellipse':
-                    # Napari ellipse format: 4 corner points of bounding box
-                    center = shape_dict['center']  # [y, x]
-                    radii = shape_dict['radii']    # [radius_y, radius_x]
-
-                    # Create ellipse as 4 corner points
-                    y_min = center[0] - radii[0]
-                    y_max = center[0] + radii[0]
-                    x_min = center[1] - radii[1]
-                    x_max = center[1] + radii[1]
-
-                    ellipse_coords = np.array([
-                        [y_min, x_min],
-                        [y_min, x_max],
-                        [y_max, x_max],
-                        [y_max, x_min]
-                    ])
-                    napari_shapes.append(ellipse_coords)
-                    shape_types.append('ellipse')
-
-                elif shape_type == 'point':
-                    # Point coordinates
-                    coords = np.array([shape_dict['coordinates']])  # [[y, x]]
-                    napari_shapes.append(coords)
-                    shape_types.append('point')
-
-                # Add metadata to properties
-                properties['label'].append(metadata.get('label', 0))
-                properties['area'].append(metadata.get('area', 0.0))
-                properties['centroid'].append(str(metadata.get('centroid', (0, 0))))
-
-            # Add or update shapes layer
-            if layer_name in self.layers:
-                # Update existing layer
-                layer = self.layers[layer_name]
-                layer.data = napari_shapes
-                layer.shape_type = shape_types
-                layer.properties = properties
-                logger.info(f"🔬 NAPARI SERVER: Updated {len(napari_shapes)} shapes in layer '{layer_name}'")
-            else:
-                # Create new shapes layer
-                layer = self.viewer.add_shapes(
-                    napari_shapes,
-                    shape_type=shape_types,
-                    properties=properties,
-                    name=layer_name,
-                    edge_color='red',
-                    face_color='transparent',
-                    edge_width=2
-                )
-                self.layers[layer_name] = layer
-                logger.info(f"🔬 NAPARI SERVER: Created shapes layer '{layer_name}' with {len(napari_shapes)} shapes")
-
-        except Exception as e:
-            logger.error(f"🔬 NAPARI SERVER: Failed to process shapes message: {e}")
-            raise  # Fail loud
-
     def _process_single_image(self, image_info: Dict[str, Any], display_config_dict: Dict[str, Any]):
-        """Process a single image and display in Napari."""
+        """Process a single image or shapes data and display in Napari."""
         import numpy as np
 
         path = image_info.get('path', 'unknown')
         image_id = image_info.get('image_id')  # UUID for acknowledgment
-        shape = image_info.get('shape')
-        dtype = image_info.get('dtype')
-        shm_name = image_info.get('shm_name')
-        direct_data = image_info.get('data')
-        component_metadata = image_info.get('component_metadata', {})
+        data_type = image_info.get('data_type', 'image')  # 'image' or 'shapes'
+        component_metadata = image_info.get('metadata', {})
 
         try:
-            # Load image data
-            if shm_name:
-                from multiprocessing import shared_memory
-                shm = shared_memory.SharedMemory(name=shm_name)
-                image_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
-                shm.close()
-            elif direct_data:
-                image_data = np.array(direct_data, dtype=dtype).reshape(shape)
+            # Check if this is shapes data
+            if data_type == 'shapes':
+                # Handle shapes/ROIs - just pass the shapes data directly
+                shapes_data = image_info.get('shapes', [])
+                data = shapes_data
+                colormap = None  # Shapes don't use colormap
             else:
-                logger.warning("🔬 NAPARI PROCESS: No image data in message")
-                if image_id:
-                    self._send_ack(image_id, status='error', error='No image data in message')
-                return
+                # Handle image data - load from shared memory or direct data
+                shape = image_info.get('shape')
+                dtype = image_info.get('dtype')
+                shm_name = image_info.get('shm_name')
+                direct_data = image_info.get('data')
 
-            # Extract colormap
-            colormap = 'viridis'
-            if display_config_dict and 'colormap' in display_config_dict:
-                colormap = display_config_dict['colormap']
+                # Load image data
+                if shm_name:
+                    from multiprocessing import shared_memory
+                    shm = shared_memory.SharedMemory(name=shm_name)
+                    data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                    shm.close()
+                elif direct_data:
+                    data = np.array(direct_data, dtype=dtype).reshape(shape)
+                else:
+                    logger.warning("🔬 NAPARI PROCESS: No image data in message")
+                    if image_id:
+                        self._send_ack(image_id, status='error', error='No image data in message')
+                    return
 
-            # Component-aware layer management
+                # Extract colormap
+                colormap = 'viridis'
+                if display_config_dict and 'colormap' in display_config_dict:
+                    colormap = display_config_dict['colormap']
+
+            # Component-aware layer management (handles both images and shapes)
             _handle_component_aware_display(
-                self.viewer, self.layers, self.component_groups, image_data, path,
-                colormap, display_config_dict or {}, self.replace_layers, component_metadata
+                self.viewer, self.layers, self.component_groups, data, path,
+                colormap, display_config_dict or {}, self.replace_layers, component_metadata, data_type
             )
 
-            # Send acknowledgment that image was successfully displayed
+            # Send acknowledgment that data was successfully displayed
             if image_id:
                 self._send_ack(image_id, status='success')
 
         except Exception as e:
-            logger.error(f"🔬 NAPARI PROCESS: Failed to process image {path}: {e}")
+            logger.error(f"🔬 NAPARI PROCESS: Failed to process {data_type} {path}: {e}")
             if image_id:
                 self._send_ack(image_id, status='error', error=str(e))
             raise  # Fail loud
@@ -1015,7 +1077,7 @@ class NapariStreamVisualizer:
 
             if self._is_running:
                 logger.warning("Napari viewer is already running.")
-                return 
+                return
 
             # Use configured port for napari streaming
             self.port = self.napari_port

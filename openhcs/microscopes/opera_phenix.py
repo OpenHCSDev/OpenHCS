@@ -479,7 +479,8 @@ class OperaPhenixFilenameParser(FilenameParser):
     # Regular expression pattern for Opera Phenix filenames
     # Supports: row, column, site (field), z_index (plane), channel, timepoint (sk=stack)
     # sk = stack/timepoint, fk = field stack, fl = focal level
-    _pattern = re.compile(r"r(\d{1,2})c(\d{1,2})f(\d+|\{[^\}]*\})p(\d+|\{[^\}]*\})-ch(\d+|\{[^\}]*\})(?:sk(\d+|\{[^\}]*\}))?(?:fk\d+)?(?:fl\d+)?(\.\w+)$", re.I)
+    # Also supports result files with suffixes like: r01c01f001p01-ch1_cell_counts_step7.json
+    _pattern = re.compile(r"r(\d{1,2})c(\d{1,2})f(\d+|\{[^\}]*\})p(\d+|\{[^\}]*\})-ch(\d+|\{[^\}]*\})(?:sk(\d+|\{[^\}]*\}))?(?:fk\d+)?(?:fl\d+)?(?:_.*?)?(\.\w+)$", re.I)
 
     # Pattern for extracting row and column from Opera Phenix well format
     _well_pattern = re.compile(r"R(\d{2})C(\d{2})", re.I)

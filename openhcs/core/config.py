@@ -211,13 +211,14 @@ class FijiDimensionMode(Enum):
 
 
 # Create FijiDisplayConfig using factory (with component-specific fields like Napari)
+# NOTE: step_name and step_index are EXCLUDED from component_order for Fiji
+# They are unreliable for ROIs (come from materialization context, not filename)
+# Only source and well are used for window grouping
 FijiDisplayConfig = create_fiji_display_config(
     lut_enum=FijiLUT,
     dimension_mode_enum=FijiDimensionMode,
     virtual_components=VirtualComponents,
     component_order=[
-        'step_name',
-        'step_index',
         'source',
         'well',
         'site',
@@ -226,8 +227,7 @@ FijiDisplayConfig = create_fiji_display_config(
         'timepoint'
     ],
     virtual_component_defaults={
-        'step_name': FijiDimensionMode.WINDOW,
-        'step_index': FijiDimensionMode.WINDOW,
+        # Only source is WINDOW for ROI->image mapping (well is already WINDOW in component_defaults)
         'source': FijiDimensionMode.WINDOW
     }
 )

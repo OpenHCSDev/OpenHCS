@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
     QPushButton, QLabel, QHeaderView, QAbstractItemView, QMessageBox,
     QSplitter, QGroupBox, QTreeWidget, QTreeWidgetItem, QScrollArea,
-    QLineEdit
+    QLineEdit, QTabWidget, QTextEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 
@@ -53,11 +53,14 @@ class ImageBrowserWidget(QWidget):
         self.fiji_config_form = None
         self.lazy_fiji_config = None
 
-        # Image data tracking
-        self.all_images = {}  # filename -> metadata dict
-        self.filtered_images = {}  # filename -> metadata dict (after search/filter)
+        # File data tracking (images + results)
+        self.all_files = {}  # filename -> metadata dict (merged images + results)
+        self.all_images = {}  # filename -> metadata dict (images only, temporary for merging)
+        self.all_results = {}  # filename -> file info dict (results only, temporary for merging)
+        self.result_full_paths = {}  # filename -> Path (full path for results, for opening files)
+        self.filtered_files = {}  # filename -> metadata dict (after search/filter)
         self.selected_wells = set()  # Selected wells for filtering
-        self.metadata_keys = []  # Column names from parser metadata
+        self.metadata_keys = []  # Column names from parser metadata (union of all keys)
 
         # Plate view widget (will be created in init_ui)
         self.plate_view_widget = None
@@ -151,7 +154,7 @@ class ImageBrowserWidget(QWidget):
 
         main_splitter.addWidget(left_splitter)
 
-        # Middle: Vertical splitter for plate view and table
+        # Middle: Vertical splitter for plate view and tabs
         self.middle_splitter = QSplitter(Qt.Orientation.Vertical)
 
         # Plate view (initially hidden)
@@ -162,9 +165,9 @@ class ImageBrowserWidget(QWidget):
         self.plate_view_widget.setVisible(False)
         self.middle_splitter.addWidget(self.plate_view_widget)
 
-        # Image table
-        table_widget = self._create_table_widget()
-        self.middle_splitter.addWidget(table_widget)
+        # Single table for both images and results (no tabs needed)
+        image_table_widget = self._create_table_widget()
+        self.middle_splitter.addWidget(image_table_widget)
 
         # Set initial sizes (30% plate view, 70% table when visible)
         self.middle_splitter.setSizes([150, 350])
@@ -180,9 +183,9 @@ class ImageBrowserWidget(QWidget):
 
         # Add splitter with stretch factor to fill vertical space
         layout.addWidget(main_splitter, 1)
-        
+
         # Connect selection change
-        self.image_table.itemSelectionChanged.connect(self.on_selection_changed)
+        self.file_table.itemSelectionChanged.connect(self.on_selection_changed)
 
     def _create_folder_tree(self):
         """Create folder tree widget for filtering images by directory."""
@@ -202,35 +205,39 @@ class ImageBrowserWidget(QWidget):
         return tree
 
     def _create_table_widget(self):
-        """Create and configure the image table widget."""
+        """Create and configure the unified file table widget (images + results)."""
         table_container = QWidget()
         layout = QVBoxLayout(table_container)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Image table (columns will be set dynamically based on parser metadata)
-        self.image_table = QTableWidget()
-        self.image_table.setColumnCount(1)  # Start with just filename
-        self.image_table.setHorizontalHeaderLabels(["Filename"])
+        # Unified table for images and results (columns will be set dynamically based on parser metadata)
+        self.file_table = QTableWidget()
+        self.file_table.setColumnCount(2)  # Start with Filename + Type
+        self.file_table.setHorizontalHeaderLabels(["Filename", "Type"])
 
         # Configure table
-        self.image_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.image_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # Enable multi-selection
-        self.image_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.image_table.setSortingEnabled(True)
+        self.file_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.file_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)  # Enable multi-selection
+        self.file_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.file_table.setSortingEnabled(True)
 
         # Configure header - make all columns resizable and movable (like function selector)
-        header = self.image_table.horizontalHeader()
+        header = self.file_table.horizontalHeader()
         header.setSectionsMovable(True)  # Allow column reordering
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)  # Filename - resizable
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)  # Type - resizable
 
         # Apply styling
-        self.image_table.setStyleSheet(self.style_gen.generate_table_widget_style())
+        self.file_table.setStyleSheet(self.style_gen.generate_table_widget_style())
 
         # Connect double-click to view in enabled viewer(s)
-        self.image_table.cellDoubleClicked.connect(self.on_image_double_clicked)
+        self.file_table.cellDoubleClicked.connect(self.on_file_double_clicked)
 
-        layout.addWidget(self.image_table)
+        layout.addWidget(self.file_table)
+
         return table_container
+
+    # Removed _create_results_widget - now using unified file table
 
     def _create_right_panel(self):
         """Create the right panel with config tabs and instance manager."""
@@ -411,13 +418,13 @@ class ImageBrowserWidget(QWidget):
     def _on_napari_enable_toggled(self, checked: bool):
         """Handle Napari enable checkbox toggle."""
         self.napari_config_form.setEnabled(checked)
-        self.view_napari_btn.setEnabled(checked and len(self.image_table.selectedItems()) > 0)
+        self.view_napari_btn.setEnabled(checked and len(self.file_table.selectedItems()) > 0)
         self._update_tab_labels()
 
     def _on_fiji_enable_toggled(self, checked: bool):
         """Handle Fiji enable checkbox toggle."""
         self.fiji_config_form.setEnabled(checked)
-        self.view_fiji_btn.setEnabled(checked and len(self.image_table.selectedItems()) > 0)
+        self.view_fiji_btn.setEnabled(checked and len(self.file_table.selectedItems()) > 0)
         self._update_tab_labels()
 
     def _create_instance_manager_panel(self):
@@ -480,18 +487,24 @@ class ImageBrowserWidget(QWidget):
 
     def _apply_combined_filters(self):
         """Apply search, folder, well, and column filters together."""
-        # Start with search-filtered images
-        result = self.filtered_images.copy()
+        # Start with search-filtered files
+        result = self.filtered_files.copy()
 
         # Apply folder filter if a folder is selected
         selected_items = self.folder_tree.selectedItems()
         if selected_items:
             folder_path = selected_items[0].data(0, Qt.ItemDataRole.UserRole)
             if folder_path:  # Not root
-                # Filter by folder
+                # Filter by folder - include both the selected folder AND its associated results folder
+                # e.g., if "images" is selected, also include "images_results"
+                results_folder_path = f"{folder_path}_results"
+
                 result = {
                     filename: metadata for filename, metadata in result.items()
-                    if str(Path(filename).parent) == folder_path or filename.startswith(folder_path + "/")
+                    if (str(Path(filename).parent) == folder_path or
+                        filename.startswith(folder_path + "/") or
+                        str(Path(filename).parent) == results_folder_path or
+                        filename.startswith(results_folder_path + "/"))
                 }
 
         # Apply well filter if wells are selected
@@ -575,8 +588,8 @@ class ImageBrowserWidget(QWidget):
         return value_str
 
     def _build_column_filters(self):
-        """Build column filter widgets from loaded image metadata."""
-        if not self.all_images or not self.metadata_keys:
+        """Build column filter widgets from loaded file metadata."""
+        if not self.all_files or not self.metadata_keys:
             return
 
         # Clear existing filters
@@ -585,7 +598,7 @@ class ImageBrowserWidget(QWidget):
         # Extract unique values for each metadata column
         for metadata_key in self.metadata_keys:
             unique_values = set()
-            for metadata in self.all_images.values():
+            for metadata in self.all_files.values():
                 value = metadata.get(metadata_key)
                 if value is not None:
                     # Use metadata display value instead of raw value
@@ -623,12 +636,12 @@ class ImageBrowserWidget(QWidget):
         self._apply_combined_filters()
 
     def filter_images(self, search_term: str):
-        """Filter images using shared search service (canonical code path)."""
+        """Filter files using shared search service (canonical code path)."""
         from openhcs.ui.shared.search_service import SearchService
 
         # Create searchable text extractor
         def create_searchable_text(metadata):
-            """Create searchable text from image metadata."""
+            """Create searchable text from file metadata."""
             searchable_fields = [metadata.get('filename', '')]
             # Add all metadata values
             for key, value in metadata.items():
@@ -639,15 +652,15 @@ class ImageBrowserWidget(QWidget):
         # Create search service if not exists
         if not hasattr(self, '_search_service'):
             self._search_service = SearchService(
-                all_items=self.all_images,
+                all_items=self.all_files,
                 searchable_text_extractor=create_searchable_text
             )
 
-        # Update search service with current images
-        self._search_service.update_items(self.all_images)
+        # Update search service with current files
+        self._search_service.update_items(self.all_files)
 
         # Perform search using shared service
-        self.filtered_images = self._search_service.filter(search_term)
+        self.filtered_files = self._search_service.filter(search_term)
 
         # Apply combined filters (search + folder + column filters)
         self._apply_combined_filters()
@@ -656,6 +669,8 @@ class ImageBrowserWidget(QWidget):
         """Load image files from the orchestrator's metadata."""
         if not self.orchestrator:
             self.info_label.setText("No plate loaded")
+            # Still try to load results even if no orchestrator
+            self.load_results()
             return
 
         try:
@@ -669,29 +684,9 @@ class ImageBrowserWidget(QWidget):
 
             if not image_files:
                 self.info_label.setText("No images found")
+                # Still load results even if no images
+                self.load_results()
                 return
-
-            # Parse first file to determine columns
-            first_parsed = handler.parser.parse_filename(image_files[0])
-
-            if first_parsed:
-                # Get metadata keys (excluding 'extension')
-                self.metadata_keys = [k for k in first_parsed.keys() if k != 'extension']
-
-                # Set up table columns: Filename + metadata keys
-                column_headers = ["Filename"] + [k.replace('_', ' ').title() for k in self.metadata_keys]
-                self.image_table.setColumnCount(len(column_headers))
-                self.image_table.setHorizontalHeaderLabels(column_headers)
-
-                # Set all columns to Interactive resize mode (like function selector)
-                header = self.image_table.horizontalHeader()
-                for col in range(len(column_headers)):
-                    header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
-            else:
-                # Fallback if parsing fails
-                self.image_table.setColumnCount(1)
-                self.image_table.setHorizontalHeaderLabels(["Filename"])
-                self.metadata_keys = []
 
             # Build all_images dictionary
             self.all_images = {}
@@ -702,60 +697,249 @@ class ImageBrowserWidget(QWidget):
                     metadata.update(parsed)
                 self.all_images[filename] = metadata
 
-            # Initialize filtered images to all images
-            self.filtered_images = self.all_images.copy()
-
-            # Build folder tree from file paths
-            self._build_folder_tree()
-
-            # Build column filters from metadata
-            self._build_column_filters()
-
-            # Populate table
-            self._populate_table(self.filtered_images)
-
-            # Update info label
-            self.info_label.setText(f"{len(self.all_images)} images loaded")
-
-            # Update plate view if visible
-            if self.plate_view_widget and self.plate_view_widget.isVisible():
-                self._update_plate_view()
-
         except Exception as e:
             logger.error(f"Failed to load images: {e}")
             QMessageBox.warning(self, "Error", f"Failed to load images: {e}")
             self.info_label.setText("Error loading images")
+            self.all_images = {}
 
-    def _populate_table(self, images_dict: Dict[str, Dict]):
-        """Populate table with images from dictionary."""
+        # Load results and merge with images
+        self.load_results()
+
+        # Merge images and results into unified all_files dictionary
+        self.all_files = {**self.all_images, **self.all_results}
+
+        # Determine metadata keys from all files (union of all keys)
+        all_keys = set()
+        for file_metadata in self.all_files.values():
+            all_keys.update(file_metadata.keys())
+
+        # Remove 'filename' from keys (it's always the first column)
+        all_keys.discard('filename')
+
+        # Sort keys for consistent column order (extension first, then alphabetical)
+        self.metadata_keys = sorted(all_keys, key=lambda k: (k != 'extension', k))
+
+        # Set up table columns: Filename + metadata keys
+        column_headers = ["Filename"] + [k.replace('_', ' ').title() for k in self.metadata_keys]
+        self.file_table.setColumnCount(len(column_headers))
+        self.file_table.setHorizontalHeaderLabels(column_headers)
+
+        # Set all columns to Interactive resize mode
+        header = self.file_table.horizontalHeader()
+        for col in range(len(column_headers)):
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+
+        # Initialize filtered files to all files
+        self.filtered_files = self.all_files.copy()
+
+        # Build folder tree from file paths
+        self._build_folder_tree()
+
+        # Build column filters from metadata
+        self._build_column_filters()
+
+        # Populate table
+        self._populate_table(self.filtered_files)
+
+        # Update info label
+        total_files = len(self.all_files)
+        num_images = len(self.all_images)
+        num_results = len(self.all_results)
+        self.info_label.setText(f"{total_files} files loaded ({num_images} images, {num_results} results)")
+
+        # Update plate view if visible
+        if self.plate_view_widget and self.plate_view_widget.isVisible():
+            self._update_plate_view()
+
+    def load_results(self):
+        """Load result files (ROI JSON, CSV) from the results directory and populate self.all_results."""
+        self.all_results = {}
+
+        if not self.orchestrator:
+            logger.warning("IMAGE BROWSER RESULTS: No orchestrator available")
+            return
+
+        try:
+            # Get results directory from metadata (single source of truth)
+            # The metadata contains the results_dir field that was calculated during compilation
+            handler = self.orchestrator.microscope_handler
+            plate_path = self.orchestrator.plate_path
+
+            # Load metadata JSON directly
+            from openhcs.io.metadata_writer import get_metadata_path
+            import json
+
+            metadata_path = get_metadata_path(plate_path)
+            if not metadata_path.exists():
+                logger.warning(f"IMAGE BROWSER RESULTS: Metadata file not found: {metadata_path}")
+                self.all_results = {}
+                return
+
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+
+            # Find the main subdirectory's results_dir field
+            results_dir = None
+            if metadata and 'subdirectories' in metadata:
+                # First try to find the subdirectory marked as main
+                for subdir_name, subdir_metadata in metadata['subdirectories'].items():
+                    if subdir_metadata.get('main') and 'results_dir' in subdir_metadata and subdir_metadata['results_dir']:
+                        # Build full path: plate_path / results_dir
+                        results_dir = plate_path / subdir_metadata['results_dir']
+                        logger.info(f"IMAGE BROWSER RESULTS: Found results_dir in main subdirectory '{subdir_name}': {subdir_metadata['results_dir']}")
+                        break
+
+                # Fallback: if no main subdirectory, use first subdirectory with results_dir
+                if not results_dir:
+                    for subdir_name, subdir_metadata in metadata['subdirectories'].items():
+                        if 'results_dir' in subdir_metadata and subdir_metadata['results_dir']:
+                            results_dir = plate_path / subdir_metadata['results_dir']
+                            logger.info(f"IMAGE BROWSER RESULTS: Found results_dir in subdirectory '{subdir_name}': {subdir_metadata['results_dir']}")
+                            break
+
+            if not results_dir:
+                logger.warning("IMAGE BROWSER RESULTS: No results_dir found in metadata")
+                return
+
+            logger.info(f"IMAGE BROWSER RESULTS: plate_path = {plate_path}")
+            logger.info(f"IMAGE BROWSER RESULTS: Resolved results directory = {results_dir}")
+
+            if not results_dir.exists():
+                logger.warning(f"IMAGE BROWSER RESULTS: Results directory does not exist: {results_dir}")
+                return
+
+            # Get parser from orchestrator for filename parsing
+            handler = self.orchestrator.microscope_handler
+
+            # Scan for ROI JSON files and CSV files
+            logger.info(f"IMAGE BROWSER RESULTS: Scanning directory recursively...")
+            file_count = 0
+            for file_path in results_dir.rglob('*'):
+                if file_path.is_file():
+                    file_count += 1
+                    suffix = file_path.suffix.lower()
+                    logger.debug(f"IMAGE BROWSER RESULTS: Found file: {file_path.name} (suffix={suffix})")
+
+                    # Determine file type using FileFormat registry
+                    from openhcs.constants.constants import FileFormat
+
+                    file_type = None
+                    if file_path.name.endswith('.roi.zip'):
+                        file_type = 'ROI'
+                        logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as ROI: {file_path.name}")
+                    elif suffix in FileFormat.CSV.value:
+                        file_type = 'CSV'
+                        logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as CSV: {file_path.name}")
+                    elif suffix in FileFormat.JSON.value:
+                        file_type = 'JSON'
+                        logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as JSON: {file_path.name}")
+                    else:
+                        logger.debug(f"IMAGE BROWSER RESULTS: ✗ Filtered out: {file_path.name} (suffix={suffix})")
+
+                    if file_type:
+                        # Get relative path from plate_path (not results_dir) to include subdirectory
+                        rel_path = file_path.relative_to(plate_path)
+
+                        # Get file size
+                        size_bytes = file_path.stat().st_size
+                        if size_bytes < 1024:
+                            size_str = f"{size_bytes} B"
+                        elif size_bytes < 1024 * 1024:
+                            size_str = f"{size_bytes / 1024:.1f} KB"
+                        else:
+                            size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+
+                        # Parse ONLY the filename (not the full path) to extract metadata
+                        parsed = handler.parser.parse_filename(file_path.name)
+
+                        # Build file info with parsed metadata (no full_path in metadata dict)
+                        file_info = {
+                            'filename': str(rel_path),
+                            'type': file_type,
+                            'size': size_str,
+                        }
+
+                        # Add parsed metadata components if parsing succeeded
+                        if parsed:
+                            file_info.update(parsed)
+                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Parsed result: {file_path.name} -> {parsed}")
+                            logger.info(f"IMAGE BROWSER RESULTS:   Full file_info: {file_info}")
+                        else:
+                            logger.warning(f"IMAGE BROWSER RESULTS: ✗ Could not parse filename: {file_path.name}")
+
+                        # Store file info and full path separately
+                        self.all_results[str(rel_path)] = file_info
+                        self.result_full_paths[str(rel_path)] = file_path
+
+            logger.info(f"IMAGE BROWSER RESULTS: Scanned {file_count} total files, matched {len(self.all_results)} result files")
+
+        except Exception as e:
+            logger.error(f"IMAGE BROWSER RESULTS: Failed to load results: {e}", exc_info=True)
+
+    # Removed _populate_results_table - now using unified _populate_table
+    # Removed on_result_double_clicked - now using unified on_file_double_clicked
+
+    def _stream_roi_file(self, roi_zip_path: Path):
+        """Load ROI .roi.zip file and stream to enabled viewer(s)."""
+        try:
+            from openhcs.core.roi import load_rois_from_zip
+
+            # Load ROIs from .roi.zip archive
+            rois = load_rois_from_zip(roi_zip_path)
+
+            if not rois:
+                QMessageBox.information(self, "No ROIs", f"No ROIs found in {roi_zip_path.name}")
+                return
+
+            # Check which viewers are enabled
+            napari_enabled = self.napari_enable_checkbox.isChecked()
+            fiji_enabled = self.fiji_enable_checkbox.isChecked()
+
+            if not napari_enabled and not fiji_enabled:
+                QMessageBox.information(
+                    self,
+                    "No Viewer Enabled",
+                    "Please enable Napari or Fiji streaming to view ROIs."
+                )
+                return
+
+            # Stream to enabled viewers
+            if napari_enabled:
+                self._stream_rois_to_napari(rois, roi_zip_path)
+
+            if fiji_enabled:
+                self._stream_rois_to_fiji(rois, roi_zip_path)
+
+            logger.info(f"Streamed {len(rois)} ROIs from {roi_zip_path.name}")
+
+        except Exception as e:
+            logger.error(f"Failed to stream ROI file: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to stream ROI file: {e}")
+
+    def _populate_table(self, files_dict: Dict[str, Dict]):
+        """Populate table with files (images + results) from dictionary."""
         # Clear table
-        self.image_table.setRowCount(0)
-
-        # Get metadata keys from first image
-        if images_dict:
-            first_metadata = next(iter(images_dict.values()))
-            metadata_keys = [k for k in first_metadata.keys() if k != 'filename' and k != 'extension']
-        else:
-            metadata_keys = []
+        self.file_table.setRowCount(0)
 
         # Populate rows
-        for i, (filename, metadata) in enumerate(images_dict.items()):
-            self.image_table.insertRow(i)
+        for i, (filename, metadata) in enumerate(files_dict.items()):
+            self.file_table.insertRow(i)
 
             # Filename column
             filename_item = QTableWidgetItem(filename)
             filename_item.setData(Qt.ItemDataRole.UserRole, filename)
-            self.image_table.setItem(i, 0, filename_item)
+            self.file_table.setItem(i, 0, filename_item)
 
             # Metadata columns - use metadata display values
-            for col_idx, key in enumerate(metadata_keys, start=1):
+            for col_idx, key in enumerate(self.metadata_keys, start=1):
                 value = metadata.get(key, 'N/A')
                 # Get display value (metadata name if available, otherwise raw value)
                 display_value = self._get_metadata_display_value(key, value)
-                self.image_table.setItem(i, col_idx, QTableWidgetItem(display_value))
+                self.file_table.setItem(i, col_idx, QTableWidgetItem(display_value))
 
     def _build_folder_tree(self):
-        """Build folder tree from image file paths."""
+        """Build folder tree from file paths (images + results)."""
         # Save current selection before rebuilding
         selected_folder = None
         selected_items = self.folder_tree.selectedItems()
@@ -764,17 +948,18 @@ class ImageBrowserWidget(QWidget):
 
         self.folder_tree.clear()
 
-        # Extract unique folder paths
+        # Extract unique folder paths (exclude *_results folders since they're auto-included)
         folders: Set[str] = set()
-        for filename in self.all_images.keys():
+        for filename in self.all_files.keys():
             path = Path(filename)
             # Add all parent directories
             for parent in path.parents:
-                if str(parent) != '.':
-                    folders.add(str(parent))
+                parent_str = str(parent)
+                if parent_str != '.' and not parent_str.endswith('_results'):
+                    folders.add(parent_str)
 
         # Build tree structure
-        root_item = QTreeWidgetItem(["All Images"])
+        root_item = QTreeWidgetItem(["All Files"])
         root_item.setData(0, Qt.ItemDataRole.UserRole, None)
         self.folder_tree.addTopLevelItem(root_item)
 
@@ -809,13 +994,30 @@ class ImageBrowserWidget(QWidget):
     
     def on_selection_changed(self):
         """Handle selection change in the table."""
-        has_selection = len(self.image_table.selectedItems()) > 0
+        has_selection = len(self.file_table.selectedItems()) > 0
         # Enable buttons based on selection AND checkbox state
         self.view_napari_btn.setEnabled(has_selection and self.napari_enable_checkbox.isChecked())
         self.view_fiji_btn.setEnabled(has_selection and self.fiji_enable_checkbox.isChecked())
     
-    def on_image_double_clicked(self, row: int, column: int):
-        """Handle double-click on an image row - stream to enabled viewer(s)."""
+    def on_file_double_clicked(self, row: int, column: int):
+        """Handle double-click on a file row - stream images or display results."""
+        # Get file info from table
+        filename_item = self.file_table.item(row, 0)
+        filename = filename_item.data(Qt.ItemDataRole.UserRole)
+
+        # Check if this is a result file (has 'type' field) or an image
+        file_info = self.all_files.get(filename, {})
+        file_type = file_info.get('type')
+
+        if file_type:
+            # This is a result file (ROI, CSV, JSON)
+            self._handle_result_double_click(file_info)
+        else:
+            # This is an image file
+            self._handle_image_double_click()
+
+    def _handle_image_double_click(self):
+        """Handle double-click on an image - stream to enabled viewer(s)."""
         napari_enabled = self.napari_enable_checkbox.isChecked()
         fiji_enabled = self.fiji_enable_checkbox.isChecked()
 
@@ -837,48 +1039,103 @@ class ImageBrowserWidget(QWidget):
                 "No Viewer Enabled",
                 "Please enable Napari or Fiji streaming to view images."
             )
+
+    def _handle_result_double_click(self, file_info: dict):
+        """Handle double-click on a result file - stream ROIs or display CSV."""
+        filename = file_info['filename']
+        file_path = self.result_full_paths.get(filename)
+
+        if not file_path:
+            logger.error(f"Could not find full path for result file: {filename}")
+            return
+
+        file_type = file_info['type']
+
+        if file_type == 'ROI':
+            # Stream ROI JSON to enabled viewer(s)
+            self._stream_roi_file(file_path)
+        elif file_type == 'CSV':
+            # Open CSV in system default application
+            import subprocess
+            subprocess.run(['xdg-open', str(file_path)])
+        elif file_type == 'JSON':
+            # Open JSON in system default application
+            import subprocess
+            subprocess.run(['xdg-open', str(file_path)])
     
     def view_selected_in_napari(self):
         """View all selected images in Napari as a batch (builds hyperstack)."""
-        selected_rows = self.image_table.selectionModel().selectedRows()
+        selected_rows = self.file_table.selectionModel().selectedRows()
         if not selected_rows:
             return
 
-        # Collect all filenames
-        filenames = []
+        # Collect all filenames and separate ROI files from images
+        image_filenames = []
+        roi_filenames = []
         for row_index in selected_rows:
             row = row_index.row()
-            filename_item = self.image_table.item(row, 0)
+            filename_item = self.file_table.item(row, 0)
             filename = filename_item.data(Qt.ItemDataRole.UserRole)
-            filenames.append(filename)
+
+            # Check if this is a .roi.zip file
+            if filename.endswith('.roi.zip'):
+                roi_filenames.append(filename)
+            else:
+                image_filenames.append(filename)
 
         try:
-            # Stream all images as a batch
-            self._load_and_stream_batch_to_napari(filenames)
+            # Stream ROI files separately
+            if roi_filenames:
+                plate_path = Path(self.orchestrator.plate_path)
+                for roi_filename in roi_filenames:
+                    roi_path = plate_path / roi_filename
+                    self._stream_roi_file(roi_path)
+
+            # Stream image files as a batch
+            if image_filenames:
+                self._load_and_stream_batch_to_napari(image_filenames)
+
         except Exception as e:
             logger.error(f"Failed to view images in Napari: {e}")
             QMessageBox.warning(self, "Error", f"Failed to view images in Napari: {e}")
 
     def view_selected_in_fiji(self):
         """View all selected images in Fiji as a batch (builds hyperstack)."""
-        selected_rows = self.image_table.selectionModel().selectedRows()
+        selected_rows = self.file_table.selectionModel().selectedRows()
         if not selected_rows:
             return
 
-        # Collect all filenames
-        filenames = []
+        # Collect all filenames and separate ROI files from images
+        image_filenames = []
+        roi_filenames = []
         for row_index in selected_rows:
             row = row_index.row()
-            filename_item = self.image_table.item(row, 0)
+            filename_item = self.file_table.item(row, 0)
             filename = filename_item.data(Qt.ItemDataRole.UserRole)
-            filenames.append(filename)
 
-        logger.info(f"🎯 IMAGE BROWSER: User selected {len(filenames)} images to view in Fiji")
-        logger.info(f"🎯 IMAGE BROWSER: Filenames: {filenames[:5]}{'...' if len(filenames) > 5 else ''}")
+            # Check if this is a .roi.zip file
+            if filename.endswith('.roi.zip'):
+                roi_filenames.append(filename)
+            else:
+                image_filenames.append(filename)
+
+        logger.info(f"🎯 IMAGE BROWSER: User selected {len(image_filenames)} images and {len(roi_filenames)} ROI files to view in Fiji")
+        logger.info(f"🎯 IMAGE BROWSER: Image filenames: {image_filenames[:5]}{'...' if len(image_filenames) > 5 else ''}")
+        if roi_filenames:
+            logger.info(f"🎯 IMAGE BROWSER: ROI filenames: {roi_filenames}")
 
         try:
-            # Stream all images as a batch
-            self._load_and_stream_batch_to_fiji(filenames)
+            # Stream ROI files separately
+            if roi_filenames:
+                plate_path = Path(self.orchestrator.plate_path)
+                for roi_filename in roi_filenames:
+                    roi_path = plate_path / roi_filename
+                    self._stream_roi_file(roi_path)
+
+            # Stream image files as a batch
+            if image_filenames:
+                self._load_and_stream_batch_to_fiji(image_filenames)
+
         except Exception as e:
             logger.error(f"Failed to view images in Fiji: {e}")
             QMessageBox.warning(self, "Error", f"Failed to view images in Fiji: {e}")
@@ -1280,6 +1537,131 @@ class ImageBrowserWidget(QWidget):
         """Show Fiji streaming error in UI thread."""
         QMessageBox.warning(self, "Streaming Error", f"Failed to stream images to Fiji: {error_msg}")
 
+    def _stream_rois_to_napari(self, rois: list, roi_json_path: Path):
+        """Stream ROIs to Napari viewer."""
+        try:
+            # Get Napari config using current form values
+            from openhcs.config_framework.context_manager import config_context
+            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyNapariStreamingConfig
+
+            current_values = self.napari_config_form.get_current_values()
+            temp_config = LazyNapariStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
+
+            with config_context(self.orchestrator.pipeline_config):
+                with config_context(temp_config):
+                    napari_config = resolve_lazy_configurations_for_serialization(temp_config)
+
+            # Get or create viewer
+            viewer = self.orchestrator.get_or_create_visualizer(napari_config)
+
+            # Stream ROIs using filemanager.save() - same as pipeline execution
+            # Pass display_config and microscope_handler just like image streaming does
+            from openhcs.constants.constants import Backend as BackendEnum
+            self.filemanager.save(
+                rois,
+                roi_json_path,
+                BackendEnum.NAPARI_STREAM.value,
+                napari_host='localhost',
+                napari_port=napari_config.napari_port,
+                display_config=napari_config,
+                microscope_handler=self.orchestrator.microscope_handler,
+                step_index=0,
+                step_name='image_browser'
+            )
+
+            logger.info(f"Streamed {len(rois)} ROIs to Napari on port {napari_config.napari_port}")
+
+        except Exception as e:
+            logger.error(f"Failed to stream ROIs to Napari: {e}")
+            raise
+
+    def _stream_rois_to_fiji(self, rois: list, roi_json_path: Path):
+        """Stream ROIs to Fiji viewer."""
+        try:
+            # Get Fiji config using current form values
+            from openhcs.config_framework.context_manager import config_context
+            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyFijiStreamingConfig
+
+            current_values = self.fiji_config_form.get_current_values()
+            temp_config = LazyFijiStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
+
+            with config_context(self.orchestrator.pipeline_config):
+                with config_context(temp_config):
+                    fiji_config = resolve_lazy_configurations_for_serialization(temp_config)
+
+            # Get or create viewer
+            viewer = self.orchestrator.get_or_create_visualizer(fiji_config)
+
+            # Stream ROIs using filemanager.save() - same as pipeline execution
+            # Pass display_config and microscope_handler just like image streaming does
+            from openhcs.constants.constants import Backend as BackendEnum
+            self.filemanager.save(
+                rois,
+                roi_json_path,
+                BackendEnum.FIJI_STREAM.value,
+                fiji_host='localhost',
+                fiji_port=fiji_config.fiji_port,
+                display_config=fiji_config,
+                microscope_handler=self.orchestrator.microscope_handler,
+                step_index=0,
+                step_name='image_browser'
+            )
+
+            logger.info(f"Streamed {len(rois)} ROIs to Fiji on port {fiji_config.fiji_port}")
+
+        except Exception as e:
+            logger.error(f"Failed to stream ROIs to Fiji: {e}")
+            raise
+
+    def _display_csv_file(self, csv_path: Path):
+        """Display CSV file in preview area."""
+        try:
+            import pandas as pd
+
+            # Read CSV
+            df = pd.read_csv(csv_path)
+
+            # Format as string (show first 100 rows)
+            if len(df) > 100:
+                preview_text = f"Showing first 100 of {len(df)} rows:\n\n"
+                preview_text += df.head(100).to_string(index=False)
+            else:
+                preview_text = df.to_string(index=False)
+
+            # Show preview
+            self.csv_preview.setPlainText(preview_text)
+            self.csv_preview.setVisible(True)
+
+            logger.info(f"Displayed CSV file: {csv_path.name} ({len(df)} rows)")
+
+        except Exception as e:
+            logger.error(f"Failed to display CSV file: {e}")
+            self.csv_preview.setPlainText(f"Error loading CSV: {e}")
+            self.csv_preview.setVisible(True)
+
+    def _display_json_file(self, json_path: Path):
+        """Display JSON file in preview area."""
+        try:
+            import json
+
+            # Read JSON
+            with open(json_path, 'r') as f:
+                data = json.load(f)
+
+            # Format as pretty JSON
+            preview_text = json.dumps(data, indent=2)
+
+            # Show preview
+            self.csv_preview.setPlainText(preview_text)
+            self.csv_preview.setVisible(True)
+
+            logger.info(f"Displayed JSON file: {json_path.name}")
+
+        except Exception as e:
+            logger.error(f"Failed to display JSON file: {e}")
+            self.csv_preview.setPlainText(f"Error loading JSON: {e}")
+            self.csv_preview.setVisible(True)
+
     def cleanup(self):
         """Clean up resources before widget destruction."""
         # Stop global ack listener thread
@@ -1396,15 +1778,15 @@ class ImageBrowserWidget(QWidget):
         self._apply_combined_filters()
 
     def _update_plate_view(self):
-        """Update plate view with current image data."""
-        # Extract all well IDs from current images (filter out failures)
+        """Update plate view with current file data (images + results)."""
+        # Extract all well IDs from current files (filter out failures)
         well_ids = set()
-        for filename, metadata in self.all_images.items():
+        for filename, metadata in self.all_files.items():
             try:
                 well_id = self._extract_well_id(metadata)
                 well_ids.add(well_id)
             except (KeyError, ValueError):
-                # Skip images without well metadata (e.g., plate-level files)
+                # Skip files without well metadata (e.g., plate-level files)
                 pass
 
         # Detect plate dimensions and build coordinate mapping
@@ -1472,10 +1854,10 @@ class ImageBrowserWidget(QWidget):
                 # Already in a subdirectory, no subdirs to show
                 return []
 
-        # Find immediate subdirectories that contain well images
+        # Find immediate subdirectories that contain well files
         subdirs_with_wells = set()
 
-        for filename in self.all_images.keys():
+        for filename in self.all_files.keys():
             file_path = Path(filename)
 
             # Check if file is in a subdirectory of base_path
@@ -1488,7 +1870,7 @@ class ImageBrowserWidget(QWidget):
                     subdir_name = parts[0]
 
                     # Check if this file has well metadata
-                    metadata = self.all_images[filename]
+                    metadata = self.all_files[filename]
                     try:
                         self._extract_well_id(metadata)
                         # Has well metadata, add subdir

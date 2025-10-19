@@ -39,6 +39,39 @@ def _generate_materialized_paths(memory_paths: List[str], step_output_dir: Path,
     return materialized_paths
 
 
+def _filter_special_outputs_for_function(
+    outputs_to_save: List[str],
+    special_outputs_map: Dict,
+    dict_key: str
+) -> Dict:
+    """Filter and build channel-specific paths for special outputs.
+
+    Args:
+        outputs_to_save: List of output keys this function should save
+        special_outputs_map: Map of all special outputs for the step
+        dict_key: Dict pattern key (e.g., "1" for channel 1, or "default")
+
+    Returns:
+        Filtered map with channel-specific paths for dict patterns
+    """
+    from openhcs.core.pipeline.path_planner import PipelinePathPlanner
+
+    result = {}
+    for key in outputs_to_save:
+        if key in special_outputs_map:
+            output_config = special_outputs_map[key].copy()
+
+            # For dict patterns, build channel-specific path
+            if dict_key != "default":
+                output_config['path'] = PipelinePathPlanner.build_dict_pattern_path(
+                    output_config['path'], dict_key
+                )
+
+            result[key] = output_config
+
+    return result
+
+
 def _save_materialized_data(filemanager, memory_data: List, materialized_paths: List[str],
                            materialized_backend: str, step_plan: Dict, context, axis_id: str) -> None:
     """Save data to materialized location using appropriate backend."""
@@ -488,34 +521,10 @@ def _execute_chain_core(
         logger.info(f"🔍 FUNCPLAN DEBUG: step_special_outputs_plan = {step_special_outputs_plan}")
 
         if execution_key in funcplan:
-            # Get outputs this specific function should save
             outputs_to_save = funcplan[execution_key]
-            outputs_plan_for_this_call = {}
-            for key in outputs_to_save:
-                if key in step_special_outputs_plan:
-                    # Make a copy of the special output config
-                    output_config = step_special_outputs_plan[key].copy()
-
-                    # If processing a dict pattern (multiple components like channels),
-                    # modify the path to include the component value to prevent collisions
-                    if dict_key != "default":
-                        # Extract path and modify it to include component value
-                        original_path = output_config['path']
-                        # Insert component value before the special output key
-                        # e.g., "A01_cell_counts_step7.pkl" -> "A01_w1_cell_counts_step7.pkl"
-                        path_parts = original_path.rsplit('/', 1)
-                        if len(path_parts) == 2:
-                            dir_part, filename = path_parts
-                            # Insert component value after well ID
-                            # Filename format: "{axis_id}_{key}_step{step_index}.pkl"
-                            filename_parts = filename.split('_', 1)
-                            if len(filename_parts) == 2:
-                                well_id, rest = filename_parts
-                                new_filename = f"{well_id}_w{dict_key}_{rest}"
-                                output_config['path'] = f"{dir_part}/{new_filename}"
-
-                    outputs_plan_for_this_call[key] = output_config
-
+            outputs_plan_for_this_call = _filter_special_outputs_for_function(
+                outputs_to_save, step_special_outputs_plan, dict_key
+            )
             logger.info(f"🔍 FUNCPLAN: {execution_key} -> {outputs_to_save}")
             logger.info(f"🔍 FUNCPLAN: outputs_plan_for_this_call = {outputs_plan_for_this_call}")
         else:
@@ -643,34 +652,10 @@ def _process_single_pattern_group(
             logger.info(f"🔍 SINGLE FUNC FUNCPLAN DEBUG: special_outputs_map = {special_outputs_map}")
 
             if execution_key in funcplan:
-                # Get outputs this specific function should save
                 outputs_to_save = funcplan[execution_key]
-                filtered_special_outputs_map = {}
-                for key in outputs_to_save:
-                    if key in special_outputs_map:
-                        # Make a copy of the special output config
-                        output_config = special_outputs_map[key].copy()
-
-                        # If processing a dict pattern (multiple components like channels),
-                        # modify the path to include the component value to prevent collisions
-                        if dict_key_for_funcplan != "default":
-                            # Extract path and modify it to include component value
-                            original_path = output_config['path']
-                            # Insert component value before the special output key
-                            # e.g., "A01_cell_counts_step7.pkl" -> "A01_w1_cell_counts_step7.pkl"
-                            path_parts = original_path.rsplit('/', 1)
-                            if len(path_parts) == 2:
-                                dir_part, filename = path_parts
-                                # Insert component value after well ID
-                                # Filename format: "{axis_id}_{key}_step{step_index}.pkl"
-                                filename_parts = filename.split('_', 1)
-                                if len(filename_parts) == 2:
-                                    well_id, rest = filename_parts
-                                    new_filename = f"{well_id}_w{dict_key_for_funcplan}_{rest}"
-                                    output_config['path'] = f"{dir_part}/{new_filename}"
-
-                        filtered_special_outputs_map[key] = output_config
-
+                filtered_special_outputs_map = _filter_special_outputs_for_function(
+                    outputs_to_save, special_outputs_map, dict_key_for_funcplan
+                )
                 logger.info(f"🔍 SINGLE FUNC FUNCPLAN: {execution_key} -> {outputs_to_save}")
                 logger.info(f"🔍 SINGLE FUNC FUNCPLAN: filtered_special_outputs_map = {filtered_special_outputs_map}")
             else:
@@ -1030,15 +1015,31 @@ class FunctionStep(AbstractStep):
                 # Get paths at runtime like materialization does
                 step_output_dir = step_plan["output_dir"]
                 get_paths_for_axis = step_plan["get_paths_for_axis"]  # Get the path getter from step_plan
-                streaming_paths = get_paths_for_axis(step_output_dir, Backend.MEMORY.value)
-                streaming_data = filemanager.load_batch(streaming_paths, Backend.MEMORY.value)
+
+                # Get memory paths (where data actually is)
+                memory_paths = get_paths_for_axis(step_output_dir, Backend.MEMORY.value)
+
+                # For materialized steps, use materialized paths for streaming (for correct source extraction)
+                # but load from memory paths (where data actually is)
+                if "materialized_output_dir" in step_plan:
+                    materialized_output_dir = step_plan["materialized_output_dir"]
+                    streaming_paths = _generate_materialized_paths(memory_paths, step_output_dir, Path(materialized_output_dir))
+                    logger.info(f"🔍 STREAMING: Materialized step - loading from memory, streaming with materialized paths")
+                    logger.info(f"🔍 STREAMING: First memory path: {memory_paths[0] if memory_paths else 'NONE'}")
+                    logger.info(f"🔍 STREAMING: First streaming path: {streaming_paths[0] if streaming_paths else 'NONE'}")
+                else:
+                    streaming_paths = memory_paths
+
+                # Load from memory (where data actually is)
+                streaming_data = filemanager.load_batch(memory_paths, Backend.MEMORY.value)
+                logger.info(f"🔍 STREAMING: Loaded {len(streaming_data)} items from memory")
                 kwargs = config_instance.get_streaming_kwargs(context)  # Pass context for microscope handler access
 
                 # Add step information for proper layer naming
                 kwargs["step_index"] = step_index
                 kwargs["step_name"] = step_name
 
-                # Execute streaming - backend from config enum
+                # Execute streaming - use streaming_paths (materialized paths) for metadata extraction
                 filemanager.save_batch(streaming_data, streaming_paths, config_instance.backend.value, **kwargs)
                 logger.info(f"🔍 {config_instance.backend.name}: Streamed {len(streaming_paths)} files for step {step_name}")
 
@@ -1062,7 +1063,8 @@ class FunctionStep(AbstractStep):
                     actual_write_backend,
                     is_main=is_pipeline_output,
                     plate_root=step_plan['output_plate_root'],
-                    sub_dir=step_plan['sub_dir']
+                    sub_dir=step_plan['sub_dir'],
+                    results_dir=step_plan.get('analysis_results_dir')  # Pass pre-calculated results directory
                 )
 
             # 📄 MATERIALIZED METADATA: Create metadata for materialized directory if it exists
@@ -1080,7 +1082,8 @@ class FunctionStep(AbstractStep):
                         materialized_backend,
                         is_main=False,
                         plate_root=step_plan['materialized_plate_root'],
-                        sub_dir=step_plan['materialized_sub_dir']
+                        sub_dir=step_plan['materialized_sub_dir'],
+                        results_dir=step_plan.get('materialized_analysis_results_dir')  # Pass pre-calculated materialized results directory
                     )
 
             #  SPECIAL DATA MATERIALIZATION
@@ -1250,172 +1253,91 @@ class FunctionStep(AbstractStep):
         logger.debug(f"Backend detection result: {backends}")
         return backends
 
+    def _build_analysis_filename(self, output_key: str, step_index: int, step_plan: Dict, dict_key: Optional[str] = None) -> str:
+        """Build analysis result filename from first image path template.
 
-    def _materialize_special_outputs(self, filemanager, step_plan, special_outputs, backend, context):
-        """Load special data from memory and call materialization functions.
-
-        Transforms memory paths to analysis output paths based on step materialization config:
-        - If step has materialized_output_dir: creates sibling directory with _results suffix
-        - Otherwise: creates sibling directory to main output with _results suffix
-
-        For dict patterns (e.g., {'1': func1, '2': func2}), loads from all channel-specific paths
-        and combines the data before materialization.
-
-        Analysis results are saved in a sibling directory at the same hierarchical level as
-        the images, with a _results suffix to clearly indicate which step they belong to.
-
-        Materialization functions are called with a list of backends (main backend + streaming backends)
-        so they can save to multiple destinations in a single call.
-
-        Example:
-            checkpoints_step3/          # Step 3 images
-            checkpoints_step3_results/  # Step 3 analysis results
-            images/                     # Final images
-            images_results/             # Final analysis results
+        Uses first image filename as template to preserve all metadata components.
+        Falls back to well ID only if no images available.
 
         Args:
-            filemanager: FileManager instance for I/O operations
-            step_plan: Step execution plan containing paths and configs
-            special_outputs: Dictionary of special outputs to materialize
-            backend: Backend to use for materialization (e.g., 'disk', 'omero_local')
-            context: ProcessingContext for accessing streaming configs and other context
+            output_key: Special output key (e.g., 'rois', 'cell_counts')
+            step_index: Pipeline step index
+            step_plan: Step plan dictionary
+            dict_key: Optional channel/component key for dict pattern functions
         """
-        # Build list of backends: main backend + streaming backends
-        backends = [backend]
+        memory_paths = step_plan['get_paths_for_axis'](step_plan['output_dir'], Backend.MEMORY.value)
 
-        # Build kwargs dict for each backend (streaming backends need port info, etc.)
-        backend_kwargs = {backend: {}}  # Main backend has no special kwargs
+        if not memory_paths:
+            return f"{step_plan['axis_id']}_{output_key}_step{step_index}.roi.zip"
 
-        # Check for streaming configs in step_plan and add streaming backends
+        # Filter paths by channel if dict_key provided (for dict pattern functions)
+        if dict_key:
+            # Filter to only paths matching this channel (e.g., w1, w2)
+            filtered_paths = [p for p in memory_paths if f"_w{dict_key}_" in p]
+            if filtered_paths:
+                memory_paths = filtered_paths
+
+        # Use first image as template: "A01_s001_w1_z001_t001.tif" -> "A01_s001_w1_z001_t001_rois_step7.roi.zip"
+        base_filename = Path(memory_paths[0]).stem
+        return f"{base_filename}_{output_key}_step{step_index}.roi.zip"
+
+    def _materialize_special_outputs(self, filemanager, step_plan, special_outputs, backend, context):
+        """Materialize special outputs (ROIs, cell counts) to disk and streaming backends."""
+        # Collect backends: main + streaming
         from openhcs.core.config import StreamingConfig
-        for key, config_instance in step_plan.items():
-            if isinstance(config_instance, StreamingConfig):
-                backend_name = config_instance.backend.value
-                backends.append(backend_name)
-                # Get streaming kwargs (fiji_port, napari_port, etc.)
-                backend_kwargs[backend_name] = config_instance.get_streaming_kwargs(context)
-                logger.info(f"STREAMING: Added {backend_name} to materialization backends with kwargs={backend_kwargs[backend_name]}")
+        backends = [backend]
+        backend_kwargs = {backend: {}}
 
-        logger.info(f"�🔍 MATERIALIZE_METHOD: Processing {len(special_outputs)} special outputs with backends={backends}")
+        for config in step_plan.values():
+            if isinstance(config, StreamingConfig):
+                backends.append(config.backend.value)
+                backend_kwargs[config.backend.value] = config.get_streaming_kwargs(context)
 
-        # Determine base output directory for analysis results
-        if 'materialized_output_dir' in step_plan:
-            # Step has materialization - create sibling directory with _results suffix
-            images_dir = Path(step_plan['materialized_output_dir'])
-            # Get the directory name (e.g., "checkpoints_step3")
-            dir_name = images_dir.name
-            # Create sibling directory with _results suffix
-            analysis_output_dir = images_dir.parent / f"{dir_name}_results"
-            logger.debug(f"Analysis dir (step materialization): {analysis_output_dir}")
-        else:
-            # No step materialization - use main pipeline output with _results suffix
-            images_dir = Path(step_plan['output_dir'])
-            # Get the directory name (e.g., "images")
-            dir_name = images_dir.name
-            # Create sibling directory with _results suffix
-            analysis_output_dir = images_dir.parent / f"{dir_name}_results"
-            logger.debug(f"Analysis dir (main output): {analysis_output_dir}")
+        # Get analysis directory (pre-calculated by compiler)
+        has_step_mat = 'materialized_output_dir' in step_plan
+        analysis_output_dir = Path(step_plan['materialized_analysis_results_dir' if has_step_mat else 'analysis_results_dir'])
+        images_dir = str(step_plan['materialized_output_dir' if has_step_mat else 'output_dir'])
 
-        # Store images directory in step_plan for backends that need it (e.g., OMERO ROI linking)
-        step_plan['analysis_images_dir'] = str(images_dir)
+        # Add images_dir to all backend kwargs (OMERO needs it for ROI linking)
+        for kwargs in backend_kwargs.values():
+            kwargs['images_dir'] = images_dir
 
-        # Add images_dir to ALL backend kwargs (needed for OMERO ROI linking and streaming backends)
-        # Backends that don't need it will ignore it via **kwargs
-        for backend_name in backends:
-            if backend_name not in backend_kwargs:
-                backend_kwargs[backend_name] = {}
-            backend_kwargs[backend_name]['images_dir'] = step_plan.get('analysis_images_dir')
+        filemanager._materialization_context = {'images_dir': images_dir}
 
-        logger.debug(f"Analysis will be saved to: {analysis_output_dir}")
+        # Get dict pattern info
+        step_func = step_plan['func']
+        dict_keys = list(step_func.keys()) if isinstance(step_func, dict) else []
 
-        # Check if this step uses dict patterns (multiple channels/components)
-        step_func = step_plan.get('func')
-        is_dict_pattern = isinstance(step_func, dict)
-        dict_keys = list(step_func.keys()) if is_dict_pattern else []
-        logger.info(f"🔍 MATERIALIZE_METHOD: is_dict_pattern={is_dict_pattern}, dict_keys={dict_keys}")
-
+        # Materialize each special output
         for output_key, output_info in special_outputs.items():
-            logger.debug(f"🔍 MATERIALIZE_METHOD: Processing output_key: {output_key}")
-            logger.debug(f"🔍 MATERIALIZE_METHOD: output_info: {output_info}")
-
             mat_func = output_info.get('materialization_function')
-            logger.debug(f"🔍 MATERIALIZE_METHOD: materialization_function: {mat_func}")
+            if not mat_func:
+                continue
 
-            if mat_func:
-                memory_path = output_info['path']  # Base path in memory backend
-                logger.info(f"🔬 MATERIALIZING: {output_key} from {memory_path} using backend={backend}")
+            memory_path = output_info['path']
+            step_index = step_plan['pipeline_position']
 
-                try:
-                    # For dict patterns, materialize each channel separately
-                    if is_dict_pattern and dict_keys:
-                        # Materialize each channel separately to preserve channel identity
-                        for dict_key in dict_keys:
-                            # Modify path to include channel component
-                            # e.g., "A01_cell_counts_step7.pkl" -> "A01_w1_cell_counts_step7.pkl"
-                            path_parts = memory_path.rsplit('/', 1)
-                            if len(path_parts) == 2:
-                                dir_part, filename = path_parts
-                                filename_parts = filename.split('_', 1)
-                                if len(filename_parts) == 2:
-                                    well_id, rest = filename_parts
-                                    channel_path = f"{dir_part}/{well_id}_w{dict_key}_{rest}"
-                                else:
-                                    channel_path = memory_path  # Fallback
-                            else:
-                                channel_path = memory_path  # Fallback
+            # For dict patterns, materialize each channel separately
+            channels_to_process = dict_keys if dict_keys else [None]
 
-                            logger.info(f"🔍 MATERIALIZE_METHOD: Loading channel '{dict_key}' from {channel_path}")
-                            filemanager.ensure_directory(Path(channel_path).parent, Backend.MEMORY.value)
-                            channel_data = filemanager.load(channel_path, Backend.MEMORY.value)
+            for dict_key in channels_to_process:
+                # Build channel-specific memory path if needed
+                if dict_key:
+                    from openhcs.core.pipeline.path_planner import PipelinePathPlanner
+                    channel_path = PipelinePathPlanner.build_dict_pattern_path(memory_path, dict_key)
+                else:
+                    channel_path = memory_path
 
-                            # Transform memory path to analysis output path (with channel component)
-                            # Memory path: /memory/plate_001/results/A01_w1_rois_step3.pkl
-                            # Analysis path: /disk/plate_001_outputs/checkpoints_step3_results/A01_w1_rois_step3.pkl
-                            analysis_path = analysis_output_dir / Path(channel_path).name
+                # Load data
+                filemanager.ensure_directory(Path(channel_path).parent, Backend.MEMORY.value)
+                data = filemanager.load(channel_path, Backend.MEMORY.value)
 
-                            logger.debug(f"🔍 MATERIALIZE_METHOD: Transformed path: {channel_path} → {analysis_path}")
+                # Build analysis filename and path (pass dict_key for channel-specific naming)
+                filename = self._build_analysis_filename(output_key, step_index, step_plan, dict_key)
+                analysis_path = analysis_output_dir / filename
 
-                            # Pass transformed path and list of backends to materialization function
-                            # Store images_dir in filemanager's context for backends that need it (e.g., OMERO)
-                            filemanager._materialization_context = {
-                                'images_dir': step_plan.get('analysis_images_dir')
-                            }
-
-                            # Call materialization function with list of backends (main + streaming) and their kwargs
-                            logger.info(f"🔬 MATERIALIZING: {output_key} (channel {dict_key}) to backends={backends}")
-                            result_path = mat_func(channel_data, str(analysis_path), filemanager, backends, backend_kwargs)
-                            logger.info(f"🔬 MATERIALIZED: {output_key} (channel {dict_key}) → {result_path}")
-                    else:
-                        # Single pattern - load from single path
-                        filemanager.ensure_directory(Path(memory_path).parent, Backend.MEMORY.value)
-                        special_data = filemanager.load(memory_path, Backend.MEMORY.value)
-
-                        logger.debug(f"🔍 MATERIALIZE_METHOD: Loaded special data type: {type(special_data)}")
-
-                        # Transform memory path to analysis output path
-                        # Memory path: /memory/plate_001/results/A01_rois_step3.pkl
-                        # Analysis path: /disk/plate_001_outputs/checkpoints_step3_results/A01_rois_step3.pkl (step materialization)
-                        #            or: /disk/plate_001_outputs/images_results/A01_rois_step3.pkl (final step)
-                        analysis_path = analysis_output_dir / Path(memory_path).name
-
-                        logger.debug(f"🔍 MATERIALIZE_METHOD: Transformed path: {memory_path} → {analysis_path}")
-
-                        # Pass transformed path and list of backends to materialization function
-                        # Store images_dir in filemanager's context for backends that need it (e.g., OMERO)
-                        filemanager._materialization_context = {
-                            'images_dir': step_plan.get('analysis_images_dir')
-                        }
-
-                        # Call materialization function with list of backends (main + streaming) and their kwargs
-                        logger.info(f"🔬 MATERIALIZING: {output_key} to backends={backends}")
-                        result_path = mat_func(special_data, str(analysis_path), filemanager, backends, backend_kwargs)
-                        logger.info(f"🔬 MATERIALIZED: {output_key} → {result_path}")
-
-                except Exception as e:
-                    logger.error(f"🔬 MATERIALIZATION ERROR: Failed to materialize {output_key}: {e}")
-                    raise
-            else:
-                logger.warning(f"🔬 MATERIALIZATION: No materialization function for {output_key}, skipping")
+                # Materialize to all backends
+                mat_func(data, str(analysis_path), filemanager, backends, backend_kwargs)
 
 
 

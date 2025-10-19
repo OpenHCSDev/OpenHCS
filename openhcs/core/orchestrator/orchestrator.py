@@ -624,6 +624,35 @@ class PipelineOrchestrator(ContextProvider):
     def is_initialized(self) -> bool:
         return self._initialized
 
+    def get_results_path(self) -> Path:
+        """Get the results directory path for this orchestrator's plate.
+
+        Uses the same logic as PathPlanner._get_results_path() to ensure consistency.
+        This is the single source of truth for where results are stored.
+
+        Returns:
+            Path to results directory (absolute or relative to output plate root)
+        """
+        from openhcs.core.pipeline.path_planner import PipelinePathPlanner
+
+        # Get materialization_results_path from global config
+        materialization_path = self.global_config.materialization_results_path
+
+        # If absolute, use as-is
+        if Path(materialization_path).is_absolute():
+            return Path(materialization_path)
+
+        # If relative, resolve relative to output plate root
+        # Use path_planning_config from global config
+        path_config = self.global_config.path_planning_config
+        output_plate_root = PipelinePathPlanner.build_output_plate_root(
+            self.plate_path,
+            path_config,
+            is_per_step_materialization=False
+        )
+
+        return output_plate_root / materialization_path
+
     def create_context(self, axis_id: str) -> ProcessingContext:
         """Creates a ProcessingContext for a given multiprocessing axis value."""
         if not self.is_initialized():

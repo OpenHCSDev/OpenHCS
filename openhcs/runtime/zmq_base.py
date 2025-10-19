@@ -237,6 +237,106 @@ class ZMQServer(ABC):
             pass
         return killed
 
+    @staticmethod
+    def load_images_from_shared_memory(images, error_callback=None):
+        """Load images from shared memory and clean up.
+
+        Args:
+            images: List of image info dicts with shm_name, shape, dtype, metadata, image_id
+            error_callback: Optional callback(image_id, status, error) for errors
+
+        Returns:
+            List of dicts with 'data', 'metadata', 'image_id' keys
+        """
+        import numpy as np
+        from multiprocessing import shared_memory
+
+        image_data_list = []
+        for image_info in images:
+            shm_name = image_info.get('shm_name')
+            shape = tuple(image_info.get('shape'))
+            dtype = np.dtype(image_info.get('dtype'))
+            metadata = image_info.get('metadata', {})
+            image_id = image_info.get('image_id')
+
+            try:
+                shm = shared_memory.SharedMemory(name=shm_name)
+                np_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                shm.close()
+                shm.unlink()
+
+                image_data_list.append({
+                    'data': np_data,
+                    'metadata': metadata,
+                    'image_id': image_id
+                })
+            except Exception as e:
+                logger.error(f"Failed to read shared memory {shm_name}: {e}")
+                if error_callback and image_id:
+                    error_callback(image_id, 'error', f"Failed to read shared memory: {e}")
+                continue
+
+        return image_data_list
+
+    @staticmethod
+    def collect_dimension_values(images, components):
+        """Collect unique dimension value tuples from images.
+
+        Args:
+            images: List of image data dicts with 'metadata' key
+            components: List of component names to collect
+
+        Returns:
+            Sorted list of unique value tuples
+        """
+        if not components:
+            return [()]
+
+        values = set()
+        for img_data in images:
+            meta = img_data['metadata']
+            # Fail loud if component missing from metadata
+            value_tuple = tuple(meta[comp] for comp in components)
+            values.add(value_tuple)
+
+        return sorted(values)
+
+    @staticmethod
+    def organize_components_by_mode(component_order, component_modes, component_unique_values, always_include_window=True, skip_flat_dimensions=True):
+        """Organize components by their display mode.
+
+        Args:
+            component_order: Ordered list of component names
+            component_modes: Map of component name to mode ('window', 'channel', 'slice', 'frame')
+            component_unique_values: Map of component name to set of unique values
+            always_include_window: If True, include WINDOW components even if flat
+            skip_flat_dimensions: If True, skip components with cardinality <= 1 for non-window dimensions
+
+        Returns:
+            Dict with keys 'window', 'channel', 'slice', 'frame' mapping to component lists
+        """
+        result = {
+            'window': [],
+            'channel': [],
+            'slice': [],
+            'frame': []
+        }
+
+        for comp_name in component_order:
+            mode = component_modes[comp_name]
+            is_flat = len(component_unique_values.get(comp_name, set())) <= 1
+
+            if mode == 'window':
+                # Always include WINDOW components, even if flat
+                result['window'].append(comp_name)
+            elif skip_flat_dimensions and is_flat:
+                # Skip flat dimensions for hyperstack axes (only if skip_flat_dimensions=True)
+                continue
+            else:
+                result[mode].append(comp_name)
+
+        return result
+
     @abstractmethod
     def handle_control_message(self, message):
         pass

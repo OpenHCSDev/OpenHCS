@@ -179,8 +179,8 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
     logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Extracted {total_cells} total ROIs from {len(data)} z-planes")
 
     # Save ROIs to all backends (streaming backends convert to shapes/ROI objects)
-    base_path = path.replace('.pkl', '')
-    roi_path = f"{base_path}_rois.json"  # Extension determines format
+    base_path = path.replace('.pkl', '').replace('.roi.zip', '')
+    roi_path = f"{base_path}_rois.roi.zip"  # Extension determines format
 
     if all_rois:
         for backend in backends:

@@ -26,136 +26,87 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
     # Backend type from enum for registration
     _backend_type = Backend.NAPARI_STREAM.value
-    """
-    Napari streaming backend for real-time visualization.
 
-    Streams image data to napari viewer using ZeroMQ.
-    Connects to existing NapariStreamVisualizer process.
-    Inherits from StreamingBackend - no file system operations.
-    """
+    # Configure ABC attributes
+    VIEWER_TYPE = 'napari'
+    HOST_PARAM = 'napari_host'
+    PORT_PARAM = 'napari_port'
+    SHM_PREFIX = 'napari_'
 
-    def __init__(self):
-        """Initialize the napari streaming backend."""
-        self._publishers = {}  # Dictionary of publishers keyed by port
-        self._context = None
-        self._shared_memory_blocks = {}
+    # __init__, _get_publisher, save, cleanup now inherited from ABC
 
-    def _get_publisher(self, napari_host: str, napari_port: int):
-        """Lazy initialization of ZeroMQ publisher for the given host:port."""
-        key = f"{napari_host}:{napari_port}"
-        if key not in self._publishers:
-            try:
-                import zmq
-                if self._context is None:
-                    self._context = zmq.Context()
+    def _prepare_shapes_data(self, data: Any, file_path: Union[str, Path]) -> dict:
+        """
+        Prepare shapes data for transmission.
 
-                publisher = self._context.socket(zmq.PUB)
-                # Set high water mark to allow more buffering (default is 1000)
-                # This prevents message loss during viewer startup (slow joiner problem)
-                publisher.setsockopt(zmq.SNDHWM, 10000)
-                publisher.connect(f"tcp://{napari_host}:{napari_port}")
-                logger.info(f"Napari streaming publisher connected to {napari_host}:{napari_port}")
+        Args:
+            data: ROI list
+            file_path: Path identifier
 
-                # Small delay to ensure socket is ready
-                time.sleep(0.1)
+        Returns:
+            Dict with shapes data
+        """
+        from openhcs.runtime.roi_converters import NapariROIConverter
+        shapes_data = NapariROIConverter.rois_to_shapes(data)
 
-                self._publishers[key] = publisher
-
-            except ImportError:
-                logger.error("ZeroMQ not available - napari streaming disabled")
-                raise RuntimeError("ZeroMQ required for napari streaming")
-
-        return self._publishers[key]
-
-
-
-    def save(self, data: Any, file_path: Union[str, Path], **kwargs) -> None:
-        """Stream single image or ROIs to napari."""
-        from openhcs.core.roi import ROI
-
-        # Streaming backend only handles images and ROIs, not text data
-        if isinstance(data, str):
-            # Silently ignore text data (JSON, CSV, etc.) - streaming backends don't handle this
-            return
-
-        # Explicit type dispatch for ROI data
-        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], ROI):
-            # ROI data - stream as shapes
-            images_dir = kwargs.pop('images_dir', None)
-            self._save_rois(data, Path(file_path), images_dir=images_dir, **kwargs)
-            return
-
-        # Image data - stream as image
-        self.save_batch([data], [file_path], **kwargs)
+        return {
+            'path': str(file_path),
+            'shapes': shapes_data,
+        }
 
     def save_batch(self, data_list: List[Any], file_paths: List[Union[str, Path]], **kwargs) -> None:
         """
-        Stream multiple images to napari as a batch.
+        Stream multiple images or ROIs to napari as a batch.
 
         Args:
-            data_list: List of image data
+            data_list: List of image data or ROI lists
             file_paths: List of path identifiers
             **kwargs: Additional metadata
         """
-
+        from openhcs.constants.streaming import StreamingDataType
 
         if len(data_list) != len(file_paths):
             raise ValueError("data_list and file_paths must have the same length")
 
-        try:
-            napari_host = kwargs.get('napari_host', 'localhost')  # Default to localhost for backward compatibility
-            napari_port = kwargs['napari_port']
-            publisher = self._get_publisher(napari_host, napari_port)
-            display_config = kwargs['display_config']
-            microscope_handler = kwargs['microscope_handler']
-            step_index = kwargs.get('step_index', 0)
-            step_name = kwargs.get('step_name', 'unknown_step')
-        except KeyError as e:
-            raise
+        # Extract kwargs using class attributes
+        host = kwargs.get(self.HOST_PARAM, 'localhost')
+        port = kwargs[self.PORT_PARAM]
+        publisher = self._get_publisher(host, port)
+        display_config = kwargs['display_config']
+        microscope_handler = kwargs['microscope_handler']
+        step_index = kwargs.get('step_index', 0)
+        step_name = kwargs.get('step_name', 'unknown_step')
 
-        # Prepare batch of images
+        # Prepare batch of images/ROIs
         batch_images = []
-        image_ids = []  # Track image IDs for queue tracker registration
+        image_ids = []
 
         for data, file_path in zip(data_list, file_paths):
-            # Generate unique ID for this image (for acknowledgment tracking)
+            # Generate unique ID
             import uuid
             image_id = str(uuid.uuid4())
             image_ids.append(image_id)
 
-            # Convert to numpy
-            if hasattr(data, 'cpu'):
-                np_data = data.cpu().numpy()
-            elif hasattr(data, 'get'):
-                np_data = data.get()
-            else:
-                np_data = np.asarray(data)
+            # Detect data type using ABC helper
+            data_type = self._detect_data_type(data)
 
-            # Create shared memory
-            from multiprocessing import shared_memory
-            shm_name = f"napari_{id(data)}_{time.time_ns()}"
-            shm = shared_memory.SharedMemory(create=True, size=np_data.nbytes, name=shm_name)
-            shm_array = np.ndarray(np_data.shape, dtype=np_data.dtype, buffer=shm.buf)
-            shm_array[:] = np_data[:]
-            self._shared_memory_blocks[shm_name] = shm
+            # Parse component metadata using ABC helper (ONCE for all types)
+            component_metadata = self._parse_component_metadata(
+                file_path, microscope_handler, step_name, step_index
+            )
 
-            # Parse component metadata from filename
-            filename = os.path.basename(str(file_path))
-            component_metadata = microscope_handler.parser.parse_filename(filename)
+            # Prepare data based on type
+            if data_type == StreamingDataType.SHAPES:
+                item_data = self._prepare_shapes_data(data, file_path)
+            else:  # IMAGE
+                item_data = self._create_shared_memory(data, file_path)
 
-            # Add virtual components
-            from pathlib import Path
-            component_metadata['step_name'] = step_name
-            component_metadata['step_index'] = step_index
-            component_metadata['source'] = Path(file_path).parent.name
-
+            # Build batch item
             batch_images.append({
-                'path': str(file_path),
-                'shape': np_data.shape,
-                'dtype': str(np_data.dtype),
-                'shm_name': shm_name,
-                'component_metadata': component_metadata,
-                'image_id': image_id  # Add image ID for acknowledgment tracking
+                **item_data,
+                'data_type': data_type.value,
+                'metadata': component_metadata,
+                'image_id': image_id
             })
 
         # Build component modes for ALL components in component_order (including virtual components)
@@ -181,119 +132,11 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
         publisher.send_json(message)
 
-        # Register sent images with queue tracker for acknowledgment tracking
-        from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
-        registry = GlobalQueueTrackerRegistry()
-        tracker = registry.get_or_create_tracker(napari_port, 'napari')
-        for image_id in image_ids:
-            tracker.register_sent(image_id)
+        # Register sent images with queue tracker using ABC helper
+        self._register_with_queue_tracker(port, image_ids)
 
-    # REMOVED: All file system methods (load, load_batch, exists, list_files, delete, etc.)
-    # These are no longer inherited - clean interface!
-
-    def cleanup_connections(self) -> None:
-        """Clean up ZeroMQ connections without affecting shared memory or napari window."""
-        # Close all publishers
-        for port, publisher in self._publishers.items():
-            try:
-                publisher.close()
-                logger.debug(f"Closed publisher for port {port}")
-            except Exception as e:
-                logger.warning(f"Failed to close publisher for port {port}: {e}")
-
-        self._publishers.clear()
-
-        if self._context is not None:
-            self._context.term()
-            self._context = None
-
-        logger.debug("Napari streaming connections cleaned up")
-
-    def cleanup(self) -> None:
-        """Clean up shared memory blocks and close publisher.
-
-        Note: This does NOT close the napari window - it should remain open
-        for future test executions and user interaction.
-        """
-        # Clean up shared memory blocks
-        for shm_name, shm in self._shared_memory_blocks.items():
-            try:
-                shm.close()
-                shm.unlink()
-            except Exception as e:
-                logger.warning(f"Failed to cleanup shared memory {shm_name}: {e}")
-
-        self._shared_memory_blocks.clear()
-
-        # Clean up connections
-        self.cleanup_connections()
-
-        logger.debug("Napari streaming backend cleaned up (napari window remains open)")
+    # cleanup() now inherited from ABC
 
     def __del__(self):
         """Cleanup on deletion."""
         self.cleanup()
-
-    def _save_rois(self, rois: List, output_path: Path, images_dir: str = None, **kwargs) -> str:
-        """Stream ROIs to Napari as shapes layer.
-
-        Args:
-            rois: List of ROI objects
-            output_path: Output path (used to extract metadata, not for actual saving)
-            images_dir: Images directory path (unused for napari streaming)
-            **kwargs: Must contain napari_port
-
-        Returns:
-            String describing where ROIs were sent
-        """
-        from openhcs.core.roi import PolygonShape, EllipseShape, PointShape
-
-        try:
-            napari_host = kwargs.get('napari_host', 'localhost')
-            napari_port = kwargs['napari_port']
-            publisher = self._get_publisher(napari_host, napari_port)
-        except KeyError:
-            raise ValueError("napari_port required for streaming ROIs to Napari")
-
-        # Convert ROIs to Napari shapes format
-        shapes_data = []
-
-        for roi in rois:
-            for shape in roi.shapes:
-                if isinstance(shape, PolygonShape):
-                    shapes_data.append({
-                        'type': 'polygon',
-                        'coordinates': shape.coordinates.tolist(),  # (y, x) format
-                        'metadata': roi.metadata
-                    })
-                elif isinstance(shape, EllipseShape):
-                    # Napari ellipse format: center + radii
-                    shapes_data.append({
-                        'type': 'ellipse',
-                        'center': [shape.center_y, shape.center_x],
-                        'radii': [shape.radius_y, shape.radius_x],
-                        'metadata': roi.metadata
-                    })
-                elif isinstance(shape, PointShape):
-                    shapes_data.append({
-                        'type': 'point',
-                        'coordinates': [shape.y, shape.x],
-                        'metadata': roi.metadata
-                    })
-
-        # Extract layer name from output_path (e.g., "A01_segmentation_masks_step7_rois.json" -> "A01_segmentation_masks_step7_rois")
-        layer_name = output_path.stem  # Remove .json extension
-
-        # Send shapes message
-        message = {
-            'type': 'shapes',
-            'shapes': shapes_data,
-            'layer_name': layer_name,
-            'timestamp': time.time()
-        }
-
-        publisher.send_json(message)
-
-        result_msg = f"Streamed {len(rois)} ROIs to Napari as layer '{layer_name}' (port {napari_port})"
-        logger.info(result_msg)
-        return result_msg

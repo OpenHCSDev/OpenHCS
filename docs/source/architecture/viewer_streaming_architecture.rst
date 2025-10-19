@@ -14,14 +14,95 @@ This document describes the technical architecture of OpenHCS's viewer streaming
 - **Type-safe configuration**: Uses ``isinstance()`` checks instead of ``hasattr()``
 - **Progressive building**: Images accumulate into hyperstacks instead of replacing
 - **Real-time progress tracking**: Acknowledgment system tracks image processing progress
+- **Unified code paths**: Images and ROIs share common streaming infrastructure
+- **Registry patterns**: Type-safe dispatch using enums instead of if/else chains
+- **Abstract class attributes**: Subclasses configure behavior via class-level constants
 
 .. seealso::
 
    :doc:`image_acknowledgment_system`
       Detailed documentation of the real-time image acknowledgment system
 
+   :doc:`roi_system`
+      ROI extraction, materialization, and streaming system
+
 Architecture Components
 -----------------------
+
+Streaming Backend ABC
+~~~~~~~~~~~~~~~~~~~~~
+
+**Location**: ``openhcs/io/streaming.py``
+
+**Responsibility**: Abstract base class providing common ZeroMQ and shared memory infrastructure
+
+**Key Innovation**: Uses abstract class attributes to eliminate ~237 lines of duplicated code
+
+.. code-block:: python
+
+   class StreamingBackend(DataSink):
+       """Abstract base class for ZeroMQ-based streaming backends.
+
+       Subclasses must define abstract class attributes:
+       - VIEWER_TYPE: str (e.g., 'napari', 'fiji')
+       - HOST_PARAM: str (e.g., 'napari_host', 'fiji_host')
+       - PORT_PARAM: str (e.g., 'napari_port', 'fiji_port')
+       - SHM_PREFIX: str (e.g., 'napari_', 'fiji_')
+       """
+
+       # Abstract class attributes
+       VIEWER_TYPE: str = None
+       HOST_PARAM: str = None
+       PORT_PARAM: str = None
+       SHM_PREFIX: str = None
+
+       def _get_publisher(self, host: str, port: int):
+           """Lazy initialization of ZeroMQ publisher (common for all backends)."""
+
+       def _parse_component_metadata(self, file_path, microscope_handler, step_name, step_index):
+           """Parse component metadata from filename (common for all backends)."""
+
+       def _detect_data_type(self, data: Any):
+           """Detect if data is ROI or image (common for all backends)."""
+
+       def _create_shared_memory(self, data: Any, file_path):
+           """Create shared memory for image data (common for all backends)."""
+
+       def _register_with_queue_tracker(self, port: int, image_ids: List[str]):
+           """Register sent images with queue tracker (common for all backends)."""
+
+**Concrete Implementations**:
+
+.. code-block:: python
+
+   class NapariStreamingBackend(StreamingBackend):
+       # Configure ABC attributes
+       VIEWER_TYPE = 'napari'
+       HOST_PARAM = 'napari_host'
+       PORT_PARAM = 'napari_port'
+       SHM_PREFIX = 'napari_'
+
+       # Napari-specific ROI preparation
+       def _prepare_shapes_data(self, data, file_path):
+           """Convert ROIs to Napari shapes format."""
+
+   class FijiStreamingBackend(StreamingBackend):
+       # Configure ABC attributes
+       VIEWER_TYPE = 'fiji'
+       HOST_PARAM = 'fiji_host'
+       PORT_PARAM = 'fiji_port'
+       SHM_PREFIX = 'fiji_'
+
+       # Fiji-specific ROI preparation
+       def _prepare_rois_data(self, data, file_path):
+           """Convert ROIs to ImageJ format."""
+
+**Benefits**:
+
+- **Code reuse**: ~93 lines of common code extracted to ABC
+- **Type safety**: Abstract class attributes enforce configuration
+- **Fail-loud**: Missing attributes raise ``AttributeError`` at class definition time
+- **Unified paths**: Images and ROIs share same infrastructure
 
 Orchestrator
 ~~~~~~~~~~~~
@@ -272,6 +353,79 @@ Image Browser
 - Sending individually → each image is a "complete" batch → separate hyperstacks
 - Sending as batch → all images in one batch → single hyperstack with all dimensions
 
+Type-Safe Streaming Enums
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Location**: ``openhcs/constants/streaming.py``
+
+**Purpose**: Replace magic strings with type-safe enums
+
+.. code-block:: python
+
+   class StreamingDataType(Enum):
+       """Types of data that can be streamed to viewers."""
+       IMAGE = 'image'
+       SHAPES = 'shapes'  # For Napari
+       ROIS = 'rois'      # For Fiji
+
+   class NapariShapeType(Enum):
+       """Napari shape types for ROI visualization."""
+       POLYGON = 'polygon'
+       ELLIPSE = 'ellipse'
+       POINT = 'point'
+       LINE = 'line'
+       PATH = 'path'
+       RECTANGLE = 'rectangle'
+
+**Benefits**:
+
+- **Type safety**: IDE autocomplete and type checking
+- **Fail-loud**: Invalid values raise ``AttributeError`` instead of silent bugs
+- **Registry keys**: Used as dictionary keys for handler dispatch
+
+ROI Converter Registry
+~~~~~~~~~~~~~~~~~~~~~~~
+
+**Location**: ``openhcs/runtime/roi_converters.py``
+
+**Purpose**: Single source of truth for ROI format conversion
+
+.. code-block:: python
+
+   class NapariROIConverter:
+       """Convert OpenHCS ROIs to Napari shapes format."""
+
+       # Registry of shape type handlers for adding dimensions
+       _SHAPE_DIMENSION_HANDLERS = {
+           'polygon': lambda shape_dict, prepend_dims: ...,
+           'ellipse': lambda shape_dict, prepend_dims: ...,
+           'point': lambda shape_dict, prepend_dims: ...,
+       }
+
+       @staticmethod
+       def add_dimensions_to_shape(shape_dict, prepend_dims):
+           """Add dimensions to 2D shape to make it nD."""
+           handler = NapariROIConverter._SHAPE_DIMENSION_HANDLERS.get(shape_type)
+           return handler(shape_dict, prepend_dims)
+
+   class FijiROIConverter:
+       """Convert OpenHCS ROIs to ImageJ ROI format."""
+
+       @staticmethod
+       def rois_to_imagej_bytes(rois, roi_prefix=""):
+           """Convert ROI objects to ImageJ ROI bytes."""
+
+       @staticmethod
+       def encode_rois_for_transmission(roi_bytes_list):
+           """Base64 encode ROI bytes for JSON transmission."""
+
+**Benefits**:
+
+- **Single source of truth**: All ROI conversion logic in one place
+- **Registry pattern**: Shape handlers dispatched via dictionary lookup
+- **Reusability**: Used by both backends and viewer servers
+- **Testability**: Isolated conversion logic easy to unit test
+
 Communication Protocols
 -----------------------
 
@@ -325,6 +479,87 @@ Ping/Pong Handshake
 - Fiji server requires ping to set ``_ready = True``
 - Without ping, server ignores data messages
 - Orchestrator sends ping in background thread after async startup
+
+Metadata Key Standardization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Problem**: Inconsistent metadata key names caused ``KeyError`` bugs
+
+**Before**:
+
+- Napari backend sent ``'component_metadata'``
+- Fiji backend sent ``'metadata'``
+- zmq_base.py loader expected ``'component_metadata'``
+- Servers had inconsistent expectations
+
+**After**: All code uses ``'metadata'`` key
+
+.. code-block:: python
+
+   # Backends send 'metadata'
+   batch_images.append({
+       'data_type': data_type.value,
+       'metadata': component_metadata,  # Standardized key
+       'image_id': image_id
+   })
+
+   # Servers read 'metadata'
+   metadata = image_info.get('metadata', {})
+   channel_idx = metadata['channel']  # Fail loud if missing
+
+**Benefits**:
+
+- **Consistency**: Single key name across all components
+- **Fail-loud**: Missing metadata raises ``KeyError`` immediately
+- **Debuggability**: Clear error messages instead of silent defaults
+
+Unified Image/ROI Code Paths
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Problem**: Separate code paths for images and ROIs led to duplication
+
+**Solution**: Unified processing with type-based dispatch
+
+.. code-block:: python
+
+   # Backend: Unified save_batch for both images and ROIs
+   def save_batch(self, data_list, file_paths, **kwargs):
+       for data, file_path in zip(data_list, file_paths):
+           # Detect data type using ABC helper
+           data_type = self._detect_data_type(data)
+
+           # Parse metadata ONCE for all types
+           metadata = self._parse_component_metadata(file_path, ...)
+
+           # Prepare data based on type
+           if data_type == StreamingDataType.SHAPES:
+               item_data = self._prepare_shapes_data(data, file_path)
+           else:  # IMAGE
+               item_data = self._create_shared_memory(data, file_path)
+
+           # Build batch item (same structure for all types)
+           batch_images.append({
+               **item_data,
+               'data_type': data_type.value,
+               'metadata': metadata,
+               'image_id': image_id
+           })
+
+   # Server: Registry-based dispatch
+   _DATA_TYPE_HANDLERS = {
+       StreamingDataType.IMAGE: _handle_images_for_window,
+       StreamingDataType.ROIS: _handle_rois_for_window,
+   }
+
+   handler = _DATA_TYPE_HANDLERS[data_type]
+   handler(window_key, items, ...)
+
+**Benefits**:
+
+- **Code reuse**: Metadata parsing happens once for all types
+- **Type safety**: Enum-based dispatch instead of string checks
+- **Extensibility**: New data types just add registry entry
+- **Maintainability**: Changes to common logic affect all types
 
 Shared Memory Transfer
 ~~~~~~~~~~~~~~~~~~~~~~~

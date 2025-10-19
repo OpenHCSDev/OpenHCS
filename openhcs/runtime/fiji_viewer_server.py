@@ -11,8 +11,20 @@ from typing import Dict, Any, List
 
 from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT
 from openhcs.runtime.zmq_messages import ImageAck
+from openhcs.constants.streaming import StreamingDataType
 
 logger = logging.getLogger(__name__)
+
+
+# Registry mapping data types to handler methods
+_FIJI_ITEM_HANDLERS = {}
+
+def register_fiji_handler(data_type: StreamingDataType):
+    """Decorator to register handler for a data type."""
+    def decorator(func):
+        _FIJI_ITEM_HANDLERS[data_type] = func
+        return func
+    return decorator
 
 
 class FijiViewerServer(ZMQServer):
@@ -45,6 +57,9 @@ class FijiViewerServer(ZMQServer):
         self.hyperstacks = {}  # Track hyperstacks by (step_name, well) key
         self.hyperstack_metadata = {}  # Track original image metadata for each hyperstack
         self._shutdown_requested = False
+        self.window_key_to_group_id = {}  # Map window_key strings to integer group IDs
+        self._next_group_id = 1  # Counter for assigning group IDs
+        self.window_dimension_values = {}  # Store dimension values (channel/slice/frame) per window
 
         # Create PUSH socket for sending acknowledgments to shared ack port
         self.ack_socket = None
@@ -149,104 +164,257 @@ class FijiViewerServer(ZMQServer):
 
         # Check message type
         if msg_type == 'batch':
-            images = data.get('images', [])
+            items = data.get('images', [])
             display_config_dict = data.get('display_config', {})
+            images_dir = data.get('images_dir')
 
-            logger.info(f"📨 FIJI SERVER: Received batch message with {len(images)} images")
+            logger.info(f"📨 FIJI SERVER: Received batch message with {len(items)} items")
 
-            if not images:
+            if not items:
                 return
 
-            # Process ALL images together - let _add_images_to_hyperstack group by window
-            # Don't group by well here - that causes sequential processing!
-            self._add_images_to_hyperstack(images, display_config_dict)
-
-        elif msg_type == 'rois':
-            # Handle ROIs message
-            self._process_rois_message(data)
+            # Process all items through unified pipeline
+            self._process_items_from_batch(items, display_config_dict, images_dir)
 
         else:
             # Single image message (fallback)
-            self._add_images_to_hyperstack(
+            self._process_items_from_batch(
                 [data],
-                data.get('display_config', {})
+                data.get('display_config', {}),
+                data.get('images_dir')
             )
 
-    def _process_rois_message(self, data: Dict[str, Any]):
-        """Process ROIs message and add to Fiji ROI Manager.
+    def _process_items_from_batch(self, items: List[Dict[str, Any]], display_config_dict: Dict[str, Any], images_dir: str = None):
+        """
+        Unified processing for all item types (images, ROIs, future types).
+
+        Uses polymorphic dispatch via registry to handle type-specific operations
+        while sharing common component organization and coordinate mapping logic.
 
         Args:
-            data: Message data containing base64-encoded ROI bytes
+            items: List of items (mixed types allowed)
+            display_config_dict: Display configuration with component_modes
+            images_dir: Source image subdirectory (for mapping ROI source to image source)
         """
-        import base64
-
-        rois_encoded = data.get('rois', [])
-
-        if not rois_encoded:
-            logger.warning("🔬 FIJI SERVER: Received empty ROIs message")
+        if not items:
             return
 
-        try:
-            from roifile import ImagejRoi
-        except ImportError:
-            logger.error("🔬 FIJI SERVER: roifile library required for ROI handling")
-            return
+        # STEP 1: SHARED - Get component modes and order
+        component_modes = display_config_dict.get('component_modes', {})
+        component_order = display_config_dict['component_order']
+
+        logger.info(f"🎛️  FIJI SERVER: Component modes: {component_modes}")
+        logger.info(f"🎛️  FIJI SERVER: Component order: {component_order}")
+
+        # STEP 2: SHARED - Collect unique values for ALL items (all types together)
+        component_unique_values = {}
+        for comp_name in component_order:
+            unique_vals = set()
+            for item in items:
+                meta = item.get('metadata', {})
+                if comp_name in meta:
+                    unique_vals.add(meta[comp_name])
+            component_unique_values[comp_name] = unique_vals
+
+        logger.info(f"🔍 FIJI SERVER: Component cardinality: {[(c, len(v)) for c, v in component_unique_values.items()]}")
+
+        # STEP 3: SHARED - Organize components by mode using component_modes directly
+        # For Fiji, we don't use cardinality filtering - component_modes define the mapping
+        # This ensures consistent CZT coordinate mapping regardless of batch size
+        result = {
+            'window': [],
+            'channel': [],
+            'slice': [],
+            'frame': []
+        }
+
+        for comp_name in component_order:
+            mode = component_modes[comp_name]
+            result[mode].append(comp_name)
+
+        organized = result
+
+        window_components = organized['window']
+        channel_components = organized['channel']
+        slice_components = organized['slice']
+        frame_components = organized['frame']
+
+        logger.info(f"🗂️  FIJI SERVER: Dimension mapping:")
+        logger.info(f"  WINDOW: {window_components}")
+        logger.info(f"  CHANNEL: {channel_components}")
+        logger.info(f"  SLICE: {slice_components}")
+        logger.info(f"  FRAME: {frame_components}")
+
+        # STEP 4: SHARED - Group items by window components
+        windows = {}
+        for item in items:
+            meta = item.get('metadata', {})
+            data_type_str = item.get('data_type')
+
+            # Build window key from window components
+            # For ROIs: normalize source to match image hyperstack using images_dir
+            window_key_parts = []
+            for comp in window_components:
+                if comp in meta:
+                    value = meta[comp]
+                    # Normalize source ONLY for ROIs: use images_dir (maps 'images_results' -> 'images')
+                    if comp == 'source' and images_dir and data_type_str == 'rois':
+                        from pathlib import Path
+                        value = Path(images_dir).name  # Extract subdirectory name from full path
+                    window_key_parts.append(f"{comp}_{value}")
+            window_key = "_".join(window_key_parts) if window_key_parts else "default_window"
+
+            if window_key not in windows:
+                windows[window_key] = []
+            windows[window_key].append(item)
+
+        # STEP 5: Process each window group
+        for window_key, window_items in windows.items():
+            self._process_window_group(
+                window_key, window_items, display_config_dict,
+                channel_components, slice_components, frame_components
+            )
+
+    def _process_window_group(self, window_key: str, items: List[Dict[str, Any]],
+                              display_config_dict: Dict[str, Any],
+                              channel_components: List[str],
+                              slice_components: List[str],
+                              frame_components: List[str]):
+        """
+        Process all items for a single window group.
+
+        Builds shared coordinate space, then dispatches to type-specific handlers.
+
+        Args:
+            window_key: Window identifier
+            items: All items for this window (mixed types)
+            display_config_dict: Display configuration
+            channel_components: Components mapped to Channel dimension
+            slice_components: Components mapped to Slice dimension
+            frame_components: Components mapped to Frame dimension
+        """
+        # STEP 1: SHARED - Collect dimension values from ALL items (all types)
+        # For images: collect from current batch and store for future ROI batches
+        # For ROIs: reuse stored values from corresponding image hyperstack
+
+        # Check if we have stored dimension values for this window (from previous image batch)
+        if window_key in self.window_dimension_values:
+            # Reuse stored values (for ROIs matching existing hyperstack)
+            stored = self.window_dimension_values[window_key]
+            channel_values = stored['channel']
+            slice_values = stored['slice']
+            frame_values = stored['frame']
+            logger.info(f"🔬 FIJI SERVER: Reusing stored dimension values for window '{window_key}'")
+        else:
+            # Collect from current batch (for new hyperstacks)
+            channel_values = self._collect_dimension_values_from_items(
+                items, channel_components
+            )
+            slice_values = self._collect_dimension_values_from_items(
+                items, slice_components
+            )
+            frame_values = self._collect_dimension_values_from_items(
+                items, frame_components
+            )
+
+            # Store for future batches (ROIs)
+            self.window_dimension_values[window_key] = {
+                'channel': channel_values,
+                'slice': slice_values,
+                'frame': frame_values
+            }
+            logger.info(f"🔬 FIJI SERVER: Stored dimension values for window '{window_key}'")
+
+        # STEP 2: Group items by data_type (convert string to enum)
+        items_by_type = {}
+        for item in items:
+            data_type_str = item.get('data_type')
+
+            # Convert string to StreamingDataType enum
+            if data_type_str == 'image':
+                data_type = StreamingDataType.IMAGE
+            elif data_type_str == 'rois':
+                data_type = StreamingDataType.ROIS
+            else:
+                logger.warning(f"🔬 FIJI SERVER: Unknown data type string: {data_type_str}")
+                continue
+
+            if data_type not in items_by_type:
+                items_by_type[data_type] = []
+            items_by_type[data_type].append(item)
+
+        # STEP 3: POLYMORPHIC DISPATCH - Call handler for each type
+        for data_type, type_items in items_by_type.items():
+            handler = _FIJI_ITEM_HANDLERS.get(data_type)
+
+            if handler is None:
+                logger.warning(f"🔬 FIJI SERVER: No handler registered for type {data_type}")
+                continue
+
+            # Call handler with shared coordinate space
+            handler(
+                self, window_key, type_items, display_config_dict,
+                channel_components, slice_components, frame_components,
+                channel_values, slice_values, frame_values
+            )
+
+    def _collect_dimension_values_from_items(self, items: List[Dict[str, Any]],
+                                             component_list: List[str]) -> List[tuple]:
+        """
+        Collect unique dimension values from items for coordinate mapping.
+
+        Args:
+            items: List of items (any type)
+            component_list: List of component names for this dimension
+
+        Returns:
+            Sorted list of unique tuples of component values
+        """
+        if not component_list:
+            return [()]
+
+        unique_values = set()
+        for item in items:
+            meta = item.get('metadata', {})
+
+            # Build tuple of values for this dimension (fail loud if missing)
+            value_tuple = tuple(meta[comp] for comp in component_list)
+            unique_values.add(value_tuple)
+
+        return sorted(unique_values)
+
+    def _get_dimension_index(self, metadata: Dict[str, Any],
+                             component_list: List[str],
+                             dimension_values: List[tuple]) -> int:
+        """
+        Get index in dimension_values for metadata components.
+
+        Maps component metadata values to coordinate space index.
+
+        Args:
+            metadata: Component metadata dict
+            component_list: List of component names for this dimension
+            dimension_values: Sorted list of unique value tuples for this dimension
+
+        Returns:
+            Index (0-based) or -1 if not found
+        """
+        # Build key from metadata (empty tuple if no components, fail loud if missing)
+        key = tuple(metadata[comp] for comp in component_list) if component_list else ()
 
         try:
-            # Get ROI Manager
-            import scyjava as sj
-            RoiManager = sj.jimport('ij.plugin.frame.RoiManager')
-
-            # Get or create ROI Manager instance
-            rm = RoiManager.getInstance()
-            if rm is None:
-                rm = RoiManager()
-
-            # Decode and add ROIs to manager
-            for roi_encoded in rois_encoded:
-                # Decode base64 to bytes
-                roi_bytes = base64.b64decode(roi_encoded)
-
-                # Parse ImageJ ROI from bytes
-                ij_roi = ImagejRoi.frombytes(roi_bytes)
-
-                # Convert to ImageJ Roi object using scyjava
-                # The roifile library provides a way to get the Java Roi object
-                # We need to create a temporary file and load it via ImageJ
-                import tempfile
-                import os
-
-                with tempfile.NamedTemporaryFile(suffix='.roi', delete=False) as tmp:
-                    tmp.write(roi_bytes)
-                    tmp_path = tmp.name
-
-                try:
-                    # Load ROI using ImageJ's RoiDecoder
-                    RoiDecoder = sj.jimport('ij.io.RoiDecoder')
-                    roi_decoder = RoiDecoder(tmp_path)
-                    java_roi = roi_decoder.getRoi()
-
-                    # Add to ROI Manager
-                    rm.addRoi(java_roi)
-                    logger.debug(f"🔬 FIJI SERVER: Added ROI to manager")
-                finally:
-                    # Clean up temp file
-                    os.unlink(tmp_path)
-
-            # Show ROI Manager if not visible
-            if not rm.isVisible():
-                rm.setVisible(True)
-
-            logger.info(f"🔬 FIJI SERVER: Added {len(rois_encoded)} ROIs to ROI Manager")
-
-        except Exception as e:
-            logger.error(f"🔬 FIJI SERVER: Failed to process ROIs: {e}")
-            raise  # Fail loud
+            return dimension_values.index(key)
+        except ValueError:
+            logger.warning(f"🔬 FIJI SERVER: Dimension value {key} not found in {dimension_values}")
+            return -1
 
     def _add_slices_to_existing_hyperstack(self, existing_imp, new_images: List[Dict[str, Any]],
                                              window_key: str, channel_components: List[str],
                                              slice_components: List[str], frame_components: List[str],
-                                             display_config_dict: Dict[str, Any]):
+                                             display_config_dict: Dict[str, Any],
+                                             channel_values: List[tuple] = None,
+                                             slice_values: List[tuple] = None,
+                                             frame_values: List[tuple] = None):
         """
         Incrementally add new slices to an existing hyperstack WITHOUT rebuilding.
 
@@ -266,9 +434,9 @@ class FijiViewerServer(ZMQServer):
         existing_lookup = {}
         for img_data in existing_images:
             meta = img_data['metadata']
-            c_key = tuple(meta.get(comp, 1) for comp in channel_components)
-            z_key = tuple(meta.get(comp, 1) for comp in slice_components)
-            t_key = tuple(meta.get(comp, 1) for comp in frame_components)
+            c_key = tuple(meta[comp] for comp in channel_components) if channel_components else ()
+            z_key = tuple(meta[comp] for comp in slice_components) if slice_components else ()
+            t_key = tuple(meta[comp] for comp in frame_components) if frame_components else ()
             existing_lookup[(c_key, z_key, t_key)] = img_data
 
         # Get existing stack and dimensions
@@ -278,17 +446,17 @@ class FijiViewerServer(ZMQServer):
         old_nFrames = existing_imp.getNFrames()
 
         # Collect dimension values from existing images
-        existing_channel_values = self._collect_dimension_values(existing_images, channel_components)
-        existing_slice_values = self._collect_dimension_values(existing_images, slice_components)
-        existing_frame_values = self._collect_dimension_values(existing_images, frame_components)
+        existing_channel_values = self.collect_dimension_values(existing_images, channel_components)
+        existing_slice_values = self.collect_dimension_values(existing_images, slice_components)
+        existing_frame_values = self.collect_dimension_values(existing_images, frame_components)
 
         # Process new images and check if dimensions changed
         new_coords_added = []
         for img_data in new_images:
             meta = img_data['metadata']
-            c_key = tuple(meta.get(comp, 1) for comp in channel_components)
-            z_key = tuple(meta.get(comp, 1) for comp in slice_components)
-            t_key = tuple(meta.get(comp, 1) for comp in frame_components)
+            c_key = tuple(meta[comp] for comp in channel_components) if channel_components else ()
+            z_key = tuple(meta[comp] for comp in slice_components) if slice_components else ()
+            t_key = tuple(meta[comp] for comp in frame_components) if frame_components else ()
 
             coord = (c_key, z_key, t_key)
 
@@ -322,147 +490,22 @@ class FijiViewerServer(ZMQServer):
 
         # Build new hyperstack with all images (old + new)
         # Pass is_new=False and preserved_display_ranges to avoid recalculation
+        # Pass dimension values to use shared coordinate space
         self._build_new_hyperstack(
             all_images, window_key, channel_components, slice_components,
             frame_components, display_config_dict, is_new=False,
-            preserved_display_ranges=display_ranges
+            preserved_display_ranges=display_ranges,
+            channel_values=channel_values, slice_values=slice_values, frame_values=frame_values
         )
-
-    def _add_images_to_hyperstack(self, images: List[Dict[str, Any]],
-                                    display_config_dict: Dict[str, Any]):
-        """
-        Add images to ImageJ hyperstacks using configurable dimension mapping.
-
-        Uses FijiDimensionMode to map OpenHCS dimensions to ImageJ hyperstack dimensions:
-        - WINDOW: Create separate windows
-        - CHANNEL: Map to ImageJ Channel dimension (C)
-        - SLICE: Map to ImageJ Slice dimension (Z)
-        - FRAME: Map to ImageJ Frame dimension (T)
-
-        Args:
-            images: List of image info dicts with metadata and shared memory names
-            display_config_dict: Display configuration with component_modes
-        """
-        import numpy as np
-        from multiprocessing import shared_memory
-
-        # Load all images from shared memory
-        image_data_list = []
-        for image_info in images:
-            shm_name = image_info.get('shm_name')
-            shape = tuple(image_info.get('shape'))
-            dtype = np.dtype(image_info.get('dtype'))
-            component_metadata = image_info.get('component_metadata', {})
-            image_id = image_info.get('image_id')  # UUID for acknowledgment
-
-            try:
-                shm = shared_memory.SharedMemory(name=shm_name)
-                np_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
-                shm.close()
-                shm.unlink()  # Clean up shared memory
-
-                image_data_list.append({
-                    'data': np_data,
-                    'metadata': component_metadata,
-                    'image_id': image_id  # Preserve image_id for ack
-                })
-            except Exception as e:
-                logger.error(f"🔬 FIJI SERVER: Failed to read shared memory {shm_name}: {e}")
-                # Send error ack
-                if image_id:
-                    self._send_ack(image_id, status='error', error=f"Failed to read shared memory: {e}")
-                continue
-
-        if not image_data_list:
-            return
-
-        # Get component modes and order from display config
-        component_modes = display_config_dict.get('component_modes', {})
-        component_order = display_config_dict['component_order']
-
-        logger.info(f"🎛️  FIJI SERVER: Component modes from display config: {component_modes}")
-        logger.info(f"🎛️  FIJI SERVER: Component order: {component_order}")
-
-        # First pass: collect unique values for each component to detect flat dimensions
-        component_unique_values = {}
-        for comp_name in component_order:
-            unique_vals = set()
-            for img_data in image_data_list:
-                meta = img_data['metadata']
-                if comp_name in meta:
-                    unique_vals.add(meta[comp_name])
-            component_unique_values[comp_name] = unique_vals
-
-        logger.info(f"🔍 FIJI SERVER: Component cardinality: {[(comp, len(vals)) for comp, vals in component_unique_values.items()]}")
-
-        # Organize dimensions by their mode, EXCLUDING flat dimensions (only 1 unique value)
-        window_components = []  # Components that create separate windows
-        channel_components = []  # Components mapped to ImageJ Channels
-        slice_components = []  # Components mapped to ImageJ Slices
-        frame_components = []  # Components mapped to ImageJ Frames
-
-        for comp_name in component_order:
-            mode = component_modes[comp_name]
-
-            # Skip flat dimensions (only 1 unique value) - they don't need a hyperstack axis
-            # BUT: WINDOW mode components should NEVER be filtered out, even if flat in current batch
-            # They're used to separate images into different windows across batches
-            is_flat = len(component_unique_values.get(comp_name, set())) <= 1
-
-            if mode == 'window':
-                # Always include WINDOW components, even if flat in current batch
-                window_components.append(comp_name)
-            elif is_flat:
-                # Skip flat dimensions for hyperstack axes (CHANNEL/SLICE/FRAME)
-                logger.info(f"🔍 FIJI SERVER: Skipping flat dimension '{comp_name}' (only 1 unique value)")
-                continue
-            elif mode == 'channel':
-                channel_components.append(comp_name)
-            elif mode == 'slice':
-                slice_components.append(comp_name)
-            elif mode == 'frame':
-                frame_components.append(comp_name)
-
-        logger.info(f"🗂️  FIJI SERVER: Dimension mapping:")
-        logger.info(f"  WINDOW: {window_components}")
-        logger.info(f"  CHANNEL: {channel_components}")
-        logger.info(f"  SLICE: {slice_components}")
-        logger.info(f"  FRAME: {frame_components}")
-
-        # Debug: Show actual metadata from first image
-        if image_data_list:
-            logger.info(f"🔍 FIJI SERVER: First image metadata: {image_data_list[0]['metadata']}")
-
-        # Group images by window components
-        # Components in WINDOW mode create separate windows
-        # Components in CHANNEL/SLICE/FRAME modes are combined into the same hyperstack
-        windows = {}
-        for img_data in image_data_list:
-            meta = img_data['metadata']
-
-            # Build window key from window components in canonical order
-            window_key_parts = []
-            for comp in window_components:
-                if comp in meta:
-                    window_key_parts.append(f"{comp}_{meta[comp]}")
-            window_key = "_".join(window_key_parts) if window_key_parts else "default_window"
-
-            if window_key not in windows:
-                windows[window_key] = []
-            windows[window_key].append(img_data)
-
-        # Build hyperstack for each window
-        for window_key, window_images in windows.items():
-            self._build_single_hyperstack(
-                window_key, window_images, display_config_dict,
-                channel_components, slice_components, frame_components
-            )
 
     def _build_single_hyperstack(self, window_key: str, images: List[Dict[str, Any]],
                                   display_config_dict: Dict[str, Any],
                                   channel_components: List[str],
                                   slice_components: List[str],
-                                  frame_components: List[str]):
+                                  frame_components: List[str],
+                                  channel_values: List[tuple] = None,
+                                  slice_values: List[tuple] = None,
+                                  frame_values: List[tuple] = None):
         """
         Build or update a single ImageJ hyperstack from images.
 
@@ -476,6 +519,9 @@ class FijiViewerServer(ZMQServer):
             channel_components: Components mapped to Channel dimension
             slice_components: Components mapped to Slice dimension
             frame_components: Components mapped to Frame dimension
+            channel_values: Pre-computed channel dimension values (optional, for shared coordinate space)
+            slice_values: Pre-computed slice dimension values (optional, for shared coordinate space)
+            frame_values: Pre-computed frame dimension values (optional, for shared coordinate space)
         """
         import scyjava as sj
 
@@ -495,7 +541,8 @@ class FijiViewerServer(ZMQServer):
             self._add_slices_to_existing_hyperstack(
                 existing_imp, images, window_key,
                 channel_components, slice_components, frame_components,
-                display_config_dict
+                display_config_dict,
+                channel_values=channel_values, slice_values=slice_values, frame_values=frame_values
             )
             return
 
@@ -503,71 +550,37 @@ class FijiViewerServer(ZMQServer):
         logger.info(f"🔬 FIJI SERVER: ✨ NEW HYPERSTACK: Creating '{window_key}' with {len(images)} images")
         self._build_new_hyperstack(
             images, window_key, channel_components, slice_components,
-            frame_components, display_config_dict, is_new=True
+            frame_components, display_config_dict, is_new=True,
+            channel_values=channel_values, slice_values=slice_values, frame_values=frame_values
         )
 
-    def _build_new_hyperstack(self, all_images: List[Dict[str, Any]], window_key: str,
-                               channel_components: List[str], slice_components: List[str],
-                               frame_components: List[str], display_config_dict: Dict[str, Any],
-                               is_new: bool, preserved_display_ranges: List[tuple] = None):
-        """
-        Build a new hyperstack from scratch.
+    def _build_image_lookup(self, images, channel_components, slice_components, frame_components):
+        """Build coordinate lookup dict from images.
 
-        Args:
-            all_images: List of all images to include
-            window_key: Window identifier
-            channel_components: Components mapped to channel dimension
-            slice_components: Components mapped to slice dimension
-            frame_components: Components mapped to frame dimension
-            display_config_dict: Display configuration
-            is_new: True if this is a brand new hyperstack, False if rebuilding existing
-            preserved_display_ranges: List of (min, max) tuples per channel to preserve
+        Returns:
+            Dict mapping (c_key, z_key, t_key) to image data
         """
-        import numpy as np
-        from multiprocessing import shared_memory
+        image_lookup = {}
+        for img_data in images:
+            meta = img_data['metadata']
+            c_key = tuple(meta[comp] for comp in channel_components) if channel_components else ()
+            z_key = tuple(meta[comp] for comp in slice_components) if slice_components else ()
+            t_key = tuple(meta[comp] for comp in frame_components) if frame_components else ()
+            image_lookup[(c_key, z_key, t_key)] = img_data['data']
+        return image_lookup
+
+    def _create_imagestack_from_images(self, image_lookup, channel_values, slice_values, frame_values,
+                                        width, height, channel_components, slice_components, frame_components):
+        """Create ImageJ ImageStack from image lookup dict.
+
+        Returns:
+            ImageJ ImageStack object
+        """
         import scyjava as sj
-
-        # Import ImageJ classes
         ImageStack = sj.jimport('ij.ImageStack')
-        ImagePlus = sj.jimport('ij.ImagePlus')
-        CompositeImage = sj.jimport('ij.CompositeImage')
         ShortProcessor = sj.jimport('ij.process.ShortProcessor')
 
-        # Collect unique values for each dimension (from all images)
-        channel_values = self._collect_dimension_values(all_images, channel_components)
-        slice_values = self._collect_dimension_values(all_images, slice_components)
-        frame_values = self._collect_dimension_values(all_images, frame_components)
-
-        nChannels = len(channel_values)
-        nSlices = len(slice_values)
-        nFrames = len(frame_values)
-
-        logger.info(f"🔬 FIJI SERVER: Building hyperstack '{window_key}': "
-                   f"{nChannels}C x {nSlices}Z x {nFrames}T")
-        logger.info(f"  Channel components: {channel_components} → values: {channel_values}")
-        logger.info(f"  Slice components: {slice_components} → values: {slice_values}")
-        logger.info(f"  Frame components: {frame_components} → values: {frame_values}")
-
-        # Images should already have 'data' key (loaded from shared memory earlier)
-        if not all_images:
-            logger.error(f"🔬 FIJI SERVER: No images provided for '{window_key}'")
-            return
-
-        # Get spatial dimensions
-        first_img = all_images[0]['data']
-        height, width = first_img.shape[-2:]
-
-        # Create ImageStack
         stack = ImageStack(width, height)
-
-        # Build lookup dict (new images override existing at same coordinates)
-        image_lookup = {}
-        for img_data in all_images:
-            meta = img_data['metadata']
-            c_key = tuple(meta.get(comp, 1) for comp in channel_components)
-            z_key = tuple(meta.get(comp, 1) for comp in slice_components)
-            t_key = tuple(meta.get(comp, 1) for comp in frame_components)
-            image_lookup[(c_key, z_key, t_key)] = img_data['data']
 
         # Add slices in ImageJ CZT order
         for t_key in frame_values:
@@ -589,7 +602,6 @@ class FijiViewerServer(ZMQServer):
                         # Build label
                         label_parts = []
                         if channel_components:
-                            # Format tuple as underscore-separated values
                             c_str = "_".join(str(v) for v in c_key) if isinstance(c_key, tuple) else str(c_key)
                             label_parts.append(f"C{c_str}")
                         if slice_components:
@@ -606,33 +618,53 @@ class FijiViewerServer(ZMQServer):
                         blank = ShortProcessor(width, height)
                         stack.addSlice("BLANK", blank)
 
-        # Create ImagePlus
-        imp = ImagePlus(window_key, stack)
+        return stack
+
+    def _convert_to_hyperstack(self, imp, nChannels, nSlices, nFrames, window_key):
+        """Convert ImagePlus to HyperStack with proper dimensions.
+
+        Returns:
+            ImagePlus or CompositeImage
+        """
+        import scyjava as sj
 
         # Set hyperstack dimensions
         imp.setDimensions(nChannels, nSlices, nFrames)
 
-        # CRITICAL: Convert to HyperStack to enable proper Z/T slider behavior
-        # Without this, ImageJ treats it as a simple stack with only Z slider
+        # Convert to HyperStack to enable proper Z/T slider behavior
         if nSlices > 1 or nFrames > 1 or nChannels > 1:
-            # Import HyperStackConverter
             HyperStackConverter = sj.jimport('ij.plugin.HyperStackConverter')
-            # Convert to hyperstack (returns new ImagePlus)
             imp = HyperStackConverter.toHyperStack(imp, nChannels, nSlices, nFrames, "xyczt", "Composite")
             imp.setTitle(window_key)
 
-        # Convert to CompositeImage if multiple channels (if not already done by HyperStackConverter)
-        if nChannels > 1 and not isinstance(imp, CompositeImage):
-            comp = CompositeImage(imp, CompositeImage.COMPOSITE)
-            comp.setTitle(window_key)
-            imp = comp
+        # Convert to CompositeImage if multiple channels
+        if nChannels > 1:
+            CompositeImage = sj.jimport('ij.CompositeImage')
+            if not isinstance(imp, CompositeImage):
+                comp = CompositeImage(imp, CompositeImage.COMPOSITE)
+                comp.setTitle(window_key)
+                imp = comp
 
-        # Apply LUT and display settings
-        lut_name = display_config_dict.get('lut', 'Grays')
-        auto_contrast = display_config_dict.get('auto_contrast', True)
+        return imp
 
-        if is_new:
-            # Brand new hyperstack - apply LUT and auto-contrast
+    def _apply_display_settings(self, imp, lut_name, auto_contrast, nChannels, preserved_ranges=None):
+        """Apply LUT and display settings to ImagePlus.
+
+        Args:
+            imp: ImagePlus to modify
+            lut_name: LUT name to apply
+            auto_contrast: Whether to apply auto-contrast
+            nChannels: Number of channels
+            preserved_ranges: Optional list of (min, max) tuples per channel
+        """
+        if preserved_ranges:
+            # Restore preserved display ranges
+            for c in range(1, min(nChannels, len(preserved_ranges)) + 1):
+                min_val, max_val = preserved_ranges[c - 1]
+                imp.setC(c)
+                imp.setDisplayRange(min_val, max_val)
+        else:
+            # Apply LUT and auto-contrast for new hyperstacks
             if lut_name not in ['Grays', 'grays'] and nChannels == 1:
                 try:
                     self.ij.IJ.run(imp, lut_name, "")
@@ -641,80 +673,211 @@ class FijiViewerServer(ZMQServer):
 
             if auto_contrast:
                 try:
-                    # Only run expensive "Enhance Contrast" on brand new hyperstacks
-                    # This recalculates min/max across ALL slices, which gets slower as stack grows
                     self.ij.IJ.run(imp, "Enhance Contrast", "saturated=0.35")
-                    logger.debug(f"🔬 FIJI SERVER: Applied auto-contrast to new hyperstack '{window_key}'")
                 except Exception as e:
                     logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
 
-            # Show new hyperstack
-            imp.show()
-            self.hyperstacks[window_key] = imp
+    def _build_new_hyperstack(self, all_images: List[Dict[str, Any]], window_key: str,
+                               channel_components: List[str], slice_components: List[str],
+                               frame_components: List[str], display_config_dict: Dict[str, Any],
+                               is_new: bool, preserved_display_ranges: List[tuple] = None,
+                               channel_values: List[tuple] = None,
+                               slice_values: List[tuple] = None,
+                               frame_values: List[tuple] = None):
+        """Build a new hyperstack from scratch."""
+        import scyjava as sj
 
-        else:
-            # Rebuilt hyperstack - restore preserved display ranges BEFORE showing
-            # This prevents ImageJ from auto-calculating display range
-            if preserved_display_ranges:
-                try:
-                    for c in range(1, min(nChannels, len(preserved_display_ranges)) + 1):
-                        min_val, max_val = preserved_display_ranges[c - 1]
-                        imp.setC(c)
-                        imp.setDisplayRange(min_val, max_val)
+        # Collect dimension values (use provided values if available, otherwise compute)
+        if channel_values is None:
+            channel_values = self.collect_dimension_values(all_images, channel_components)
+        if slice_values is None:
+            slice_values = self.collect_dimension_values(all_images, slice_components)
+        if frame_values is None:
+            frame_values = self.collect_dimension_values(all_images, frame_components)
 
-                    logger.debug(f"🔬 FIJI SERVER: Restored preserved display ranges for '{window_key}'")
-                except Exception as e:
-                    logger.warning(f"🔬 FIJI SERVER: Failed to restore display ranges: {e}")
+        nChannels = len(channel_values)
+        nSlices = len(slice_values)
+        nFrames = len(frame_values)
 
-            # Close old hyperstack and show new one
-            # Display ranges are already set, so show() won't recalculate
-            if window_key in self.hyperstacks:
-                old_imp = self.hyperstacks[window_key]
-                old_imp.close()
+        logger.info(f"🔬 FIJI SERVER: Building hyperstack '{window_key}': {nChannels}C x {nSlices}Z x {nFrames}T")
 
-            imp.show()
-            self.hyperstacks[window_key] = imp
+        if not all_images:
+            logger.error(f"🔬 FIJI SERVER: No images provided for '{window_key}'")
+            return
 
-        # Store metadata for future merging
+        # Get spatial dimensions
+        first_img = all_images[0]['data']
+        height, width = first_img.shape[-2:]
+
+        # Build image lookup
+        image_lookup = self._build_image_lookup(all_images, channel_components, slice_components, frame_components)
+
+        # Create ImageStack
+        stack = self._create_imagestack_from_images(
+            image_lookup, channel_values, slice_values, frame_values,
+            width, height, channel_components, slice_components, frame_components
+        )
+
+        # Create ImagePlus
+        ImagePlus = sj.jimport('ij.ImagePlus')
+        imp = ImagePlus(window_key, stack)
+
+        # Convert to hyperstack
+        imp = self._convert_to_hyperstack(imp, nChannels, nSlices, nFrames, window_key)
+
+        # Apply display settings
+        lut_name = display_config_dict.get('lut', 'Grays')
+        auto_contrast = display_config_dict.get('auto_contrast', True)
+        self._apply_display_settings(
+            imp, lut_name, auto_contrast, nChannels,
+            preserved_ranges=None if is_new else preserved_display_ranges
+        )
+
+        # Close old hyperstack if rebuilding
+        if window_key in self.hyperstacks:
+            self.hyperstacks[window_key].close()
+
+        # Show and store
+        imp.show()
+        self.hyperstacks[window_key] = imp
         self.hyperstack_metadata[window_key] = all_images
 
-        logger.info(f"🔬 FIJI SERVER: Displayed hyperstack '{window_key}' with {stack.getSize()} slices ({len(all_images)} unique images)")
+        logger.info(f"🔬 FIJI SERVER: Displayed hyperstack '{window_key}' with {stack.getSize()} slices")
 
-        # Send acknowledgments for all successfully displayed images
+        # Send acknowledgments
         for img_data in all_images:
-            image_id = img_data.get('image_id')
-            if image_id:
+            if image_id := img_data.get('image_id'):
                 self._send_ack(image_id, status='success')
 
-    def _collect_dimension_values(self, images: List[Dict[str, Any]], components: List[str]) -> List[tuple]:
-        """
-        Collect unique dimension value tuples from images.
-
-        Args:
-            images: List of image data dicts
-            components: List of component names to collect
-
-        Returns:
-            Sorted list of unique value tuples
-        """
-        if not components:
-            return [()]  # Single value if no components
-
-        values = set()
-        for img_data in images:
-            meta = img_data['metadata']
-            value_tuple = tuple(meta.get(comp, 1) for comp in components)
-            values.add(value_tuple)
-
-        return sorted(values)
-
-
-
-    
     def request_shutdown(self):
         """Request graceful shutdown."""
         self._shutdown_requested = True
         self.stop()
+
+
+@register_fiji_handler(StreamingDataType.IMAGE)
+def _handle_images_for_window(self, window_key: str, items: List[Dict[str, Any]],
+                               display_config_dict: Dict[str, Any],
+                               channel_components: List[str],
+                               slice_components: List[str],
+                               frame_components: List[str],
+                               channel_values: List[tuple],
+                               slice_values: List[tuple],
+                               frame_values: List[tuple]):
+    """
+    Handle images for a window group.
+
+    Builds or updates ImageJ hyperstack using shared coordinate space.
+    """
+    # Load images from shared memory
+    image_data_list = self.load_images_from_shared_memory(items, error_callback=self._send_ack)
+
+    if not image_data_list:
+        return
+
+    # Delegate to existing hyperstack building logic
+    # Pass dimension values so it uses shared coordinate space
+    self._build_single_hyperstack(
+        window_key, image_data_list, display_config_dict,
+        channel_components, slice_components, frame_components,
+        channel_values, slice_values, frame_values
+    )
+
+
+@register_fiji_handler(StreamingDataType.ROIS)
+def _handle_rois_for_window(self, window_key: str, items: List[Dict[str, Any]],
+                             display_config_dict: Dict[str, Any],
+                             channel_components: List[str],
+                             slice_components: List[str],
+                             frame_components: List[str],
+                             channel_values: List[tuple],
+                             slice_values: List[tuple],
+                             frame_values: List[tuple]):
+    """
+    Handle ROIs for a window group.
+
+    Adds ROIs to ROI Manager with proper CZT positioning using shared coordinate space.
+    ROIs are grouped by window_key to associate with corresponding hyperstack.
+    """
+    from openhcs.runtime.roi_converters import FijiROIConverter
+    import scyjava as sj
+
+    RoiManager = sj.jimport('ij.plugin.frame.RoiManager')
+    rm = RoiManager.getInstance()
+    if rm is None:
+        rm = RoiManager()
+
+    # Get or assign integer group ID for this window
+    if window_key not in self.window_key_to_group_id:
+        self.window_key_to_group_id[window_key] = self._next_group_id
+        self._next_group_id += 1
+
+    group_id = self.window_key_to_group_id[window_key]
+
+    total_rois_added = 0
+
+    for roi_item in items:
+        rois_encoded = roi_item.get('rois', [])
+        if not rois_encoded:
+            if image_id := roi_item.get('image_id'):
+                self._send_ack(image_id, status='success')
+            continue
+
+        meta = roi_item.get('metadata', {})
+        file_path = roi_item.get('path', 'unknown')
+
+        logger.info(f"🔬 FIJI SERVER: ROI metadata: {meta}")
+        logger.info(f"🔬 FIJI SERVER: Channel components: {channel_components}, values: {channel_values}")
+        logger.info(f"🔬 FIJI SERVER: Slice components: {slice_components}, values: {slice_values}")
+        logger.info(f"🔬 FIJI SERVER: Frame components: {frame_components}, values: {frame_values}")
+
+        # Map metadata to CZT indices using SHARED coordinate space
+        c_index = self._get_dimension_index(meta, channel_components, channel_values)
+        z_index = self._get_dimension_index(meta, slice_components, slice_values)
+        t_index = self._get_dimension_index(meta, frame_components, frame_values)
+
+        # Convert to 1-indexed for ImageJ (0 means "all")
+        c_value = c_index + 1 if c_index >= 0 else 1
+        z_value = z_index + 1 if z_index >= 0 else 1
+        t_value = t_index + 1 if t_index >= 0 else 1
+
+        logger.info(f"🔬 FIJI SERVER: ROI '{file_path}' position: C={c_value}, Z={z_value}, T={t_value} (from indices {c_index}, {z_index}, {t_index})")
+
+        # Decode and add ROIs
+        roi_bytes_list = FijiROIConverter.decode_rois_from_transmission(rois_encoded)
+
+        # Extract base name from path for ROI naming
+        from pathlib import Path
+        base_name = Path(file_path).stem  # Get filename without extension
+
+        for roi_idx, roi_bytes in enumerate(roi_bytes_list):
+            java_roi = FijiROIConverter.bytes_to_java_roi(roi_bytes, sj)
+
+            # Set ROI name using file path and index
+            roi_name = f"{base_name}_{roi_idx:04d}"
+            java_roi.setName(roi_name)
+
+            # Set hyperstack position (same coordinate space as images!)
+            java_roi.setPosition(c_value, z_value, t_value)
+
+            # Set group ID (associates ROIs with hyperstack window)
+            java_roi.setGroup(group_id)
+
+            rm.addRoi(java_roi)
+            total_rois_added += 1
+
+        if image_id := roi_item.get('image_id'):
+            self._send_ack(image_id, status='success')
+
+    if not rm.isVisible():
+        rm.setVisible(True)
+
+    logger.info(f"🔬 FIJI SERVER: Added {total_rois_added} ROIs to group {group_id} ('{window_key}') with shared coordinate space")
+
+
+# Make handlers instance methods by binding them to the class
+FijiViewerServer._handle_images_for_window = _handle_images_for_window
+FijiViewerServer._handle_rois_for_window = _handle_rois_for_window
 
 
 def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, log_file_path: str = None):

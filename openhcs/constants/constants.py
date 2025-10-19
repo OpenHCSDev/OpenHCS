@@ -227,6 +227,7 @@ class FileFormat(Enum):
     JSON = [".json"]
     CSV = [".csv"]
     TEXT = [".txt", ".py", ".md"]
+    ROI = [".roi.zip"]
 
 DEFAULT_BACKEND = Backend.MEMORY
 REQUIRES_DISK_READ = "requires_disk_read"

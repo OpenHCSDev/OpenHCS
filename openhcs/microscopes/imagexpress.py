@@ -336,7 +336,8 @@ class ImageXpressFilenameParser(FilenameParser):
 
     # Regular expression pattern for ImageXpress filenames
     # Supports: well, site, channel, z_index, timepoint
-    _pattern = re.compile(r'(?:.*?_)?([A-Z]\d+)(?:_s(\d+|\{[^\}]*\}))?(?:_w(\d+|\{[^\}]*\}))?(?:_z(\d+|\{[^\}]*\}))?(?:_t(\d+|\{[^\}]*\}))?(\.\w+)?$')
+    # Also supports result files with suffixes like: A01_s001_w1_z001_t001_cell_counts_step7.json
+    _pattern = re.compile(r'(?:.*?_)?([A-Z]\d+)(?:_s(\d+|\{[^\}]*\}))?(?:_w(\d+|\{[^\}]*\}))?(?:_z(\d+|\{[^\}]*\}))?(?:_t(\d+|\{[^\}]*\}))?(?:_.*?)?(\.\w+)?$')
 
     def __init__(self, filemanager=None, pattern_format=None):
         """

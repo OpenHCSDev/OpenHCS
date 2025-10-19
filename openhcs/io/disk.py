@@ -143,6 +143,13 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             self._csv_reader
         ))
 
+        # ROI.ZIP (double extension for ImageJ ROI archives)
+        formats.append((
+            ['.roi.zip'],
+            self._roi_zip_writer,
+            self._roi_zip_reader
+        ))
+
         # Register everything
         for extensions, writer, reader in formats:
             for ext in extensions:
@@ -231,6 +238,16 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
                 writer = csv.writer(f)
                 writer.writerow([data])
 
+    def _roi_zip_writer(self, path, data, **kwargs):
+        """Write ROIs to .roi.zip archive. Wrapper for _save_rois."""
+        # data should be a list of ROI objects
+        self._save_rois(data, path, **kwargs)
+
+    def _roi_zip_reader(self, path, **kwargs):
+        """Read ROIs from .roi.zip archive."""
+        from openhcs.core.roi import load_rois_from_zip
+        return load_rois_from_zip(path)
+
     def _csv_reader(self, path):
         import csv
         with path.open('r', newline='') as f:
@@ -257,7 +274,20 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         """
 
         disk_path = Path(file_path)
-        ext = disk_path.suffix.lower()
+
+        # Handle double extensions (e.g., .roi.zip, .csv.zip)
+        # Check if file has double extension by looking at suffixes
+        ext = None
+        if len(disk_path.suffixes) >= 2:
+            # Try double extension first (e.g., '.roi.zip')
+            double_ext = ''.join(disk_path.suffixes[-2:]).lower()
+            if self.format_registry.is_registered(double_ext):
+                ext = double_ext
+
+        # Fall back to single extension if double extension not registered
+        if ext is None:
+            ext = disk_path.suffix.lower()
+
         if not self.format_registry.is_registered(ext):
             raise ValueError(f"No writer registered for extension '{ext}'")
 
@@ -730,17 +760,18 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             raise StorageResolutionError(f"Failed to copy {src} → {dst}") from e
 
     def _save_rois(self, rois: List, output_path: Path, images_dir: str = None, **kwargs) -> str:
-        """Save ROIs to disk as JSON and ImageJ .roi files.
+        """Save ROIs as .roi.zip archive (ImageJ standard format).
 
         Args:
             rois: List of ROI objects
-            output_path: Output path (e.g., /disk/plate_001/checkpoints/A01_rois_step3.json)
+            output_path: Output path (e.g., /disk/plate_001/step_7_results/A01_rois_step7.roi.zip)
             images_dir: Images directory path (unused for disk backend)
 
         Returns:
             Path where ROIs were saved
         """
-        import json
+        import zipfile
+        import numpy as np
         from openhcs.core.roi import PolygonShape, MaskShape, PointShape, EllipseShape
 
         output_path = Path(output_path)
@@ -748,57 +779,19 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         # Ensure output directory exists
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Convert ROIs to JSON-serializable format
-        rois_data = []
-        for roi in rois:
-            roi_dict = {
-                'metadata': roi.metadata,
-                'shapes': []
-            }
+        # Ensure output path has .roi.zip extension
+        if not output_path.name.endswith('.roi.zip'):
+            output_path = output_path.with_suffix('.roi.zip')
 
-            for shape in roi.shapes:
-                if isinstance(shape, PolygonShape):
-                    roi_dict['shapes'].append({
-                        'type': 'polygon',
-                        'coordinates': shape.coordinates.tolist()
-                    })
-                elif isinstance(shape, MaskShape):
-                    roi_dict['shapes'].append({
-                        'type': 'mask',
-                        'bbox': shape.bbox,
-                        'mask': shape.mask.tolist()
-                    })
-                elif isinstance(shape, PointShape):
-                    roi_dict['shapes'].append({
-                        'type': 'point',
-                        'y': shape.y,
-                        'x': shape.x
-                    })
-                elif isinstance(shape, EllipseShape):
-                    roi_dict['shapes'].append({
-                        'type': 'ellipse',
-                        'center_y': shape.center_y,
-                        'center_x': shape.center_x,
-                        'radius_y': shape.radius_y,
-                        'radius_x': shape.radius_x
-                    })
-
-            rois_data.append(roi_dict)
-
-        # Save JSON file
-        json_path = output_path.with_suffix('.json')
-        with open(json_path, 'w') as f:
-            json.dump(rois_data, f, indent=2)
-
-        logger.info(f"Saved {len(rois)} ROIs to JSON: {json_path}")
-
-        # Save ImageJ .roi files (one per ROI)
         try:
             from roifile import ImagejRoi
+        except ImportError:
+            logger.error("roifile library not available - cannot save ROIs")
+            raise ImportError("roifile library required for ROI saving. Install with: pip install roifile")
 
-            roi_dir = output_path.parent / f"{output_path.stem}_rois"
-            roi_dir.mkdir(parents=True, exist_ok=True)
-
+        # Create .roi.zip archive
+        roi_count = 0
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             for idx, roi in enumerate(rois):
                 for shape in roi.shapes:
                     if isinstance(shape, PolygonShape):
@@ -807,13 +800,44 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
                         coords_xy = shape.coordinates[:, [1, 0]]  # Swap columns
                         ij_roi = ImagejRoi.frompoints(coords_xy)
 
-                        # Set ROI name from metadata
-                        label = roi.metadata.get('label', idx)
-                        roi_path = roi_dir / f"roi_{label}.roi"
-                        ij_roi.tofile(roi_path)
+                        # Use incrementing counter for unique filenames (avoid duplicate names from label values)
+                        ij_roi.name = f"ROI_{roi_count + 1}"
 
-            logger.info(f"Saved {len(rois)} ROIs to ImageJ format: {roi_dir}")
-        except ImportError:
-            logger.warning("roifile library not available, skipping ImageJ .roi file generation")
+                        # Write to zip archive
+                        roi_bytes = ij_roi.tobytes()
+                        zf.writestr(f"{roi_count + 1:04d}.roi", roi_bytes)
+                        roi_count += 1
 
-        return str(json_path)
+                    elif isinstance(shape, PointShape):
+                        # Convert point to ImageJ ROI
+                        coords_xy = np.array([[shape.x, shape.y]])
+                        ij_roi = ImagejRoi.frompoints(coords_xy)
+
+                        ij_roi.name = f"ROI_{roi_count + 1}"
+
+                        roi_bytes = ij_roi.tobytes()
+                        zf.writestr(f"{roi_count + 1:04d}.roi", roi_bytes)
+                        roi_count += 1
+
+                    elif isinstance(shape, EllipseShape):
+                        # Convert ellipse to polygon approximation (ImageJ ROI format limitation)
+                        # Generate 64 points around the ellipse
+                        theta = np.linspace(0, 2 * np.pi, 64)
+                        x = shape.center_x + shape.radius_x * np.cos(theta)
+                        y = shape.center_y + shape.radius_y * np.sin(theta)
+                        coords_xy = np.column_stack([x, y])
+
+                        ij_roi = ImagejRoi.frompoints(coords_xy)
+                        ij_roi.name = f"ROI_{roi_count + 1}"
+
+                        roi_bytes = ij_roi.tobytes()
+                        zf.writestr(f"{roi_count + 1:04d}.roi", roi_bytes)
+                        roi_count += 1
+
+                    elif isinstance(shape, MaskShape):
+                        # Skip mask shapes - ImageJ ROI format doesn't support binary masks
+                        logger.warning(f"Skipping mask shape for ROI {idx} - not supported in ImageJ .roi format")
+                        continue
+
+        logger.info(f"Saved {roi_count} ROIs to .roi.zip archive: {output_path}")
+        return str(output_path)

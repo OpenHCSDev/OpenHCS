@@ -379,6 +379,7 @@ class OpenHCSMetadata:
     timepoints: Optional[Dict[str, str]]
     available_backends: Dict[str, bool]
     main: Optional[bool] = None  # Indicates if this subdirectory is the primary/input subdirectory
+    results_dir: Optional[str] = None  # Sibling directory containing analysis results for this subdirectory
 
 
 @dataclass(frozen=True)
@@ -442,26 +443,34 @@ class OpenHCSMetadataGenerator:
         write_backend: str,
         is_main: bool = False,
         plate_root: str = None,
-        sub_dir: str = None
+        sub_dir: str = None,
+        results_dir: str = None
     ) -> None:
         """Create or update subdirectory-keyed OpenHCS metadata file."""
         plate_root_path = Path(plate_root)
         metadata_path = get_metadata_path(plate_root_path)
 
-        current_metadata = self._extract_metadata_from_disk_state(context, output_dir, write_backend, is_main, sub_dir)
+        current_metadata = self._extract_metadata_from_disk_state(context, output_dir, write_backend, is_main, sub_dir, results_dir)
         metadata_dict = asdict(current_metadata)
 
         self.atomic_writer.update_subdirectory_metadata(metadata_path, sub_dir, metadata_dict)
 
 
 
-    def _extract_metadata_from_disk_state(self, context: 'ProcessingContext', output_dir: str, write_backend: str, is_main: bool, sub_dir: str) -> OpenHCSMetadata:
+    def _extract_metadata_from_disk_state(self, context: 'ProcessingContext', output_dir: str, write_backend: str, is_main: bool, sub_dir: str, results_dir: str = None) -> OpenHCSMetadata:
         """Extract metadata reflecting current disk state after processing."""
         handler = context.microscope_handler
         cache = context.metadata_cache or {}
 
         actual_files = self.filemanager.list_image_files(output_dir, write_backend)
         relative_files = [f"{sub_dir}/{Path(f).name}" for f in actual_files]
+
+        # Calculate relative results directory path (relative to plate root)
+        # Example: "images_results" for images subdirectory
+        relative_results_dir = None
+        if results_dir:
+            results_path = Path(results_dir)
+            relative_results_dir = results_path.name  # Just the directory name, not full path
 
         # CRITICAL: Use AllComponents enum for cache lookups (cache is keyed by AllComponents)
         # GroupBy and AllComponents have same values but different hashes, so dict.get() fails with GroupBy
@@ -477,7 +486,8 @@ class OpenHCSMetadataGenerator:
             z_indexes=cache.get(AllComponents.Z_INDEX),
             timepoints=cache.get(AllComponents.TIMEPOINT),
             available_backends={write_backend: True},
-            main=is_main if is_main else None
+            main=is_main if is_main else None,
+            results_dir=relative_results_dir
         )
 
 

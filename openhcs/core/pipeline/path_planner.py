@@ -141,12 +141,20 @@ class PathPlanner:
         # Calculate main pipeline plate root for this step
         main_plate_root = self.build_output_plate_root(self.plate_path, self.cfg, is_per_step_materialization=False)
 
+        # Calculate analysis results directory (sibling to output_dir with _results suffix)
+        # This ensures results are saved alongside images at the same hierarchical level
+        # Example: images/ -> images_results/, checkpoints_step3/ -> checkpoints_step3_results/
+        output_dir_path = Path(output_dir)
+        dir_name = output_dir_path.name
+        analysis_results_dir = output_dir_path.parent / f"{dir_name}_results"
+
         # Single update
         self.plans[sid].update({
             'input_dir': str(input_dir),
             'output_dir': str(output_dir),
             'output_plate_root': str(main_plate_root),
             'sub_dir': self.cfg.sub_dir,  # Store resolved sub_dir for main pipeline
+            'analysis_results_dir': str(analysis_results_dir),  # Pre-calculated results directory
             'pipeline_position': i,
             'input_source': self._get_input_source(step, i),
             'special_inputs': special_inputs,
@@ -158,10 +166,17 @@ class PathPlanner:
         if materialized_output_dir:
             # Per-step materialization uses its own config to determine plate root
             materialized_plate_root = self.build_output_plate_root(self.plate_path, step.step_materialization_config, is_per_step_materialization=False)
+
+            # Calculate analysis results directory for materialized output
+            materialized_dir_path = Path(materialized_output_dir)
+            materialized_dir_name = materialized_dir_path.name
+            materialized_analysis_results_dir = materialized_dir_path.parent / f"{materialized_dir_name}_results"
+
             self.plans[sid].update({
                 'materialized_output_dir': str(materialized_output_dir),
                 'materialized_plate_root': str(materialized_plate_root),
                 'materialized_sub_dir': step.step_materialization_config.sub_dir,  # Store resolved sub_dir for materialization
+                'materialized_analysis_results_dir': str(materialized_analysis_results_dir),  # Pre-calculated materialized results directory
                 'materialized_backend': self.vfs.materialization_backend.value,
                 'materialization_config': step.step_materialization_config  # Store config for well filtering (will be resolved by compiler)
             })
@@ -445,6 +460,24 @@ class PipelinePathPlanner:
         if step_index is not None:
             return f"{axis_id}_{key}_step{step_index}.{extension}"
         return f"{axis_id}_{key}.{extension}"
+
+    @staticmethod
+    def build_dict_pattern_path(base_path: str, dict_key: str) -> str:
+        """Build channel-specific path for dict patterns.
+
+        Inserts _w{dict_key} after well ID in the filename.
+        Example: "dir/A01_rois_step7.pkl" + "1" -> "dir/A01_w1_rois_step7.pkl"
+
+        Args:
+            base_path: Base path without channel component
+            dict_key: Dict pattern key (e.g., "1" for channel 1)
+
+        Returns:
+            Channel-specific path
+        """
+        dir_part, filename = base_path.rsplit('/', 1)
+        well_id, rest = filename.split('_', 1)
+        return f"{dir_part}/{well_id}_w{dict_key}_{rest}"
 
 
 
