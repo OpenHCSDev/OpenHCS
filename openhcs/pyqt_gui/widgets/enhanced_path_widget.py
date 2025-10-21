@@ -16,7 +16,7 @@ from PyQt6.QtCore import pyqtSignal
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.core.path_cache import PathCacheKey, get_cached_dialog_path, cache_dialog_path
-from openhcs.ui.shared.signature_analyzer import ParameterInfo
+from openhcs.introspection.signature_analyzer import ParameterInfo
 
 logger = logging.getLogger(__name__)
 

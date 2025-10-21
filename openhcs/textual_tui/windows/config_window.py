@@ -150,7 +150,7 @@ class ConfigWindow(BaseOpenHCSWindow):
             self.config_form.form_manager.reset_all_parameters()
         else:
             # Fallback: reset each parameter individually
-            from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
+            from openhcs.introspection.signature_analyzer import SignatureAnalyzer
             param_info = SignatureAnalyzer.analyze(self.config_class)
             for param_name in param_info.keys():
                 if hasattr(self.config_form.form_manager, 'reset_parameter'):

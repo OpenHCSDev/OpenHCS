@@ -382,7 +382,7 @@ class ParameterFormManager(QWidget):
             obj: Object to extract parameters from
             exclude_params: Optional list of parameter names to exclude
         """
-        from openhcs.ui.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
+        from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
 
         # Use unified analyzer for all object types with exclusions
         param_info_dict = UnifiedParameterAnalyzer.analyze(obj, exclude_params=exclude_params)
@@ -423,7 +423,7 @@ class ParameterFormManager(QWidget):
         - For dataclasses: field defaults from class definition
         - For any object: constructor parameter defaults from class definition
         """
-        from openhcs.ui.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
+        from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
 
         # CRITICAL FIX: For reset functionality, we need SIGNATURE defaults, not instance values
         # Analyze the CLASS/TYPE, not the instance, to get signature defaults

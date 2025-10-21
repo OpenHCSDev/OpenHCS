@@ -144,10 +144,10 @@ class PatternFileServiceBridge:
         """
         self.service_adapter = service_adapter
         self.async_bridge = AsyncServiceBridge(service_adapter)
-        
-        # Import and adapt the original service
-        from openhcs.textual_tui.services.pattern_file_service import PatternFileService
-        self.original_service = PatternFileService(service_adapter)
+
+        # Import and adapt the framework-agnostic service
+        from openhcs.ui.shared.pattern_file_service import PatternFileService
+        self.original_service = PatternFileService()
     
     def load_pattern_from_file(self, file_path, callback: Callable = None):
         """

@@ -14,7 +14,7 @@ import dataclasses
 from typing import Dict, Union, Callable, Type, Any, Optional
 from dataclasses import dataclass
 
-from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer, ParameterInfo
+from openhcs.introspection.signature_analyzer import SignatureAnalyzer, ParameterInfo
 
 
 @dataclass

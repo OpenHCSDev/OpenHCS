@@ -16,7 +16,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
 
 from openhcs.core.steps.function_step import FunctionStep
-from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
+from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator

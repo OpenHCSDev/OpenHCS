@@ -9,8 +9,8 @@ import dataclasses
 import logging
 from typing import Type, Set, Optional, get_args, get_origin, Callable
 
-from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
-from openhcs.ui.shared.unified_parameter_analyzer import UnifiedParameterAnalyzer
+from openhcs.introspection.signature_analyzer import SignatureAnalyzer
+from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
 from openhcs.ui.shared.parameter_form_service import ParameterFormService
 
 logger = logging.getLogger(__name__)

@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
-from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
+from openhcs.introspection.signature_analyzer import SignatureAnalyzer
 
 # Import PyQt6 help components (using same pattern as Textual TUI)
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme

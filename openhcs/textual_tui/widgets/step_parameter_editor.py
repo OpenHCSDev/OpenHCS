@@ -11,7 +11,7 @@ from textual.message import Message
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.core.steps.abstract import AbstractStep
 from .shared.parameter_form_manager import ParameterFormManager
-from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
+from openhcs.introspection.signature_analyzer import SignatureAnalyzer
 
 logger = logging.getLogger(__name__)
 

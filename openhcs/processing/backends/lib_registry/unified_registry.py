@@ -638,7 +638,7 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         """Extract type hints from docstring using mathematical simplification approach."""
         try:
             # Import from shared UI utilities (no circular dependency)
-            from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
+            from openhcs.introspection.signature_analyzer import SignatureAnalyzer
             import numpy as np
 
             logger.debug(f"🔍 ENHANCE ANNOTATIONS: {original_func.__name__} from {original_func.__module__}")

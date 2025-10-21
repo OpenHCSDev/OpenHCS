@@ -337,7 +337,7 @@ class FunctionListEditorWidget(Container):
                 # Convert value to proper type based on function signature
                 converted_value = event.value
                 try:
-                    from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
+                    from openhcs.introspection.signature_analyzer import SignatureAnalyzer
                     from enum import Enum
 
                     param_info = SignatureAnalyzer.analyze(func)

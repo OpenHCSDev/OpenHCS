@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.core.steps.function_step import FunctionStep
-from openhcs.ui.shared.signature_analyzer import SignatureAnalyzer
+from openhcs.introspection.signature_analyzer import SignatureAnalyzer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config

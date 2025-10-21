@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.processing.backends.lib_registry.registry_service import RegistryService
-from openhcs.textual_tui.services.pattern_data_manager import PatternDataManager
+from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.widgets.function_pane import FunctionPaneWidget
 from openhcs.constants.constants import GroupBy
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme

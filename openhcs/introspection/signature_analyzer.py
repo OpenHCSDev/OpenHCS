@@ -1,4 +1,4 @@
-# File: openhcs/textual_tui/widgets/shared/signature_analyzer.py
+# File: openhcs/introspection/signature_analyzer.py
 
 import ast
 import inspect
@@ -6,8 +6,27 @@ import dataclasses
 import re
 from typing import Any, Dict, Callable, get_type_hints, NamedTuple, Union, Optional, Type
 from dataclasses import dataclass
-import openhcs.config_framework.lazy_factory as lazy_module
-import openhcs.core.config as config_module
+
+# Lazy imports for OpenHCS-specific type resolution (optional dependency)
+# These are only imported when needed for type hint resolution
+_lazy_module = None
+_config_module = None
+
+
+def _get_openhcs_modules():
+    """Lazy-load OpenHCS-specific modules for type resolution."""
+    global _lazy_module, _config_module
+    if _lazy_module is None:
+        try:
+            import openhcs.config_framework.lazy_factory as lazy_module
+            import openhcs.core.config as config_module
+            _lazy_module = lazy_module
+            _config_module = config_module
+        except ImportError:
+            # If OpenHCS modules aren't available, return empty dicts
+            _lazy_module = type('EmptyModule', (), {})()
+            _config_module = type('EmptyModule', (), {})()
+    return _lazy_module, _config_module
 
 
 @dataclass(frozen=True)
@@ -360,6 +379,7 @@ class SignatureAnalyzer:
         sig = inspect.signature(callable_obj)
         # Build comprehensive namespace for forward reference resolution
         # Start with function's globals (which contain the actual types), then add our modules as fallback
+        lazy_module, config_module = _get_openhcs_modules()
         globalns = {
             **vars(lazy_module),
             **vars(config_module),

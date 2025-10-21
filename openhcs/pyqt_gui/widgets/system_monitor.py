@@ -23,8 +23,8 @@ try:
 except ImportError:
     PYQTGRAPH_AVAILABLE = False
 
-# Import the SystemMonitor service
-from openhcs.textual_tui.services.system_monitor import SystemMonitor
+# Import the SystemMonitorCore service (framework-agnostic)
+from openhcs.ui.shared.system_monitor_core import SystemMonitorCore
 from openhcs.pyqt_gui.services.persistent_system_monitor import PersistentSystemMonitor
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
@@ -71,7 +71,7 @@ class SystemMonitorWidget(QWidget):
         history_length = self.monitor_config.calculated_max_data_points
 
         # Core monitoring - use persistent thread for non-blocking metrics collection
-        self.monitor = SystemMonitor(history_length=history_length)  # Match the dynamic history length
+        self.monitor = SystemMonitorCore(history_length=history_length)  # Match the dynamic history length
 
         self.persistent_monitor = PersistentSystemMonitor(
             update_interval=update_interval,
