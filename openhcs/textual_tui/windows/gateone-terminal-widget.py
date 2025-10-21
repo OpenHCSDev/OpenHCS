@@ -7,11 +7,17 @@ import os
 import pty
 import asyncio
 import struct
-import fcntl
-import termios
 import logging
 from typing import Optional, Tuple
 from pathlib import Path
+
+# Unix-only imports (TUI is deprecated and not supported on Windows)
+try:
+    import fcntl
+    import termios
+    UNIX_AVAILABLE = True
+except ImportError:
+    UNIX_AVAILABLE = False
 
 from rich.style import Style
 from rich.segment import Segment

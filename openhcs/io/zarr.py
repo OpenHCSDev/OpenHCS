@@ -22,6 +22,14 @@ try:
 except ImportError:
     OME_ZARR_AVAILABLE = False
 
+# Cross-platform file locking
+try:
+    import fcntl
+    FCNTL_AVAILABLE = True
+except ImportError:
+    import portalocker
+    FCNTL_AVAILABLE = False
+
 from openhcs.constants.constants import Backend
 from openhcs.io.base import StorageBackend
 from openhcs.io.backend_registry import StorageBackendMeta
@@ -468,13 +476,14 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
 
     def _ensure_plate_metadata_with_lock(self, root: zarr.Group, row: str, col: str, store_path: Path) -> None:
         """Ensure plate-level metadata includes ALL existing wells with file locking."""
-        import fcntl
-
         lock_path = store_path.with_suffix('.metadata.lock')
 
         try:
             with open(lock_path, 'w') as lock_file:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                if FCNTL_AVAILABLE:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                else:
+                    portalocker.lock(lock_file, portalocker.LOCK_EX)
                 self._ensure_plate_metadata(root, row, col)
         except Exception as e:
             logger.error(f"Failed to update plate metadata with lock: {e}")

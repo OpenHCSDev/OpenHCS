@@ -11,8 +11,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union, Tuple
 from collections import defaultdict
 from datetime import datetime
-import fcntl
 import threading
+
+# Cross-platform file locking
+try:
+    import fcntl
+    FCNTL_AVAILABLE = True
+except ImportError:
+    import portalocker
+    FCNTL_AVAILABLE = False
 
 import numpy as np
 
@@ -925,7 +932,10 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
 
         try:
             with open(lock_path, 'w') as lock_file:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                if FCNTL_AVAILABLE:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                else:
+                    portalocker.lock(lock_file, portalocker.LOCK_EX)
 
                 existing_id = self._find_plate_by_name(plate_name, **kwargs)
                 if existing_id:
@@ -1103,7 +1113,10 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
 
                 try:
                     with open(lock_path, 'w') as lock_file:
-                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                        if FCNTL_AVAILABLE:
+                            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                        else:
+                            portalocker.lock(lock_file, portalocker.LOCK_EX)
 
                         # Re-check if well exists after acquiring both locks
                         # Use findAllByQuery since findByQuery throws exception on null

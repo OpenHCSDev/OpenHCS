@@ -5,7 +5,6 @@ Provides utilities for atomic read-modify-write operations with file locking
 to prevent concurrency issues in multiprocessing environments.
 """
 
-import fcntl
 import json
 import logging
 import os
@@ -15,6 +14,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, TypeVar, Union
+
+# Cross-platform file locking
+try:
+    import fcntl
+    FCNTL_AVAILABLE = True
+except ImportError:
+    # Windows compatibility - use portalocker
+    import portalocker
+    FCNTL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +90,11 @@ def _try_acquire_lock(lock_path: Path) -> Optional[int]:
     """Try to acquire lock once, return fd or None."""
     try:
         lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC)
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if FCNTL_AVAILABLE:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            # Windows: use portalocker
+            portalocker.lock(lock_fd, portalocker.LOCK_EX | portalocker.LOCK_NB)
         logger.debug(f"Acquired file lock: {lock_path}")
         return lock_fd
     except (OSError, IOError):
@@ -93,7 +105,11 @@ def _cleanup_lock(lock_fd: Optional[int], lock_path: Path) -> None:
     """Clean up file lock resources."""
     if lock_fd is not None:
         try:
-            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            if FCNTL_AVAILABLE:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            else:
+                # Windows: use portalocker
+                portalocker.unlock(lock_fd)
             os.close(lock_fd)
             logger.debug(f"Released file lock: {lock_path}")
         except Exception as e:

@@ -57,6 +57,7 @@ dependencies = [
     # Core utilities
     "setuptools",
     "watchdog>=6.0.0",
+    "portalocker>=2.8.2",  # Cross-platform file locking (Windows compatibility for fcntl)
 ]
 
 [project.optional-dependencies]
@@ -86,6 +87,7 @@ gui = [
     "pyqtgraph>=0.13.7",
     "psutil>=7.0.0",
     "GPUtil>=1.4.0",
+    "plotext>=5.2.8",  # Required by system monitor (reuses TUI services)
 ]
 
 # Napari viewer
@@ -158,6 +160,9 @@ all = [
     "PyQt6>=6.9.1",
     "PyQt6-QScintilla>=2.14.1",
     "pyqtgraph>=0.13.7",
+    "psutil>=7.0.0",
+    "GPUtil>=1.4.0",
+    "plotext>=5.2.8",
 
     # Viz
     "napari>=0.4.18",

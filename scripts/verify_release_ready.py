@@ -40,29 +40,29 @@ def check_version():
     return True
 
 
-def check_setup_py():
-    """Check that setup.py exists and has required fields."""
-    print("\nChecking setup.py...")
-    setup_file = Path("setup.py")
-    if not setup_file.exists():
-        print("  ❌ setup.py not found")
+def check_pyproject_toml():
+    """Check that pyproject.toml exists and has required fields."""
+    print("\nChecking pyproject.toml...")
+    pyproject_file = Path("pyproject.toml")
+    if not pyproject_file.exists():
+        print("  ❌ pyproject.toml not found")
         return False
-    
-    content = setup_file.read_text()
+
+    content = pyproject_file.read_text()
     required_fields = {
         'name': r'name\s*=\s*["\']openhcs["\']',
         'version': r'version\s*=',
         'description': r'description\s*=',
-        'author': r'author\s*=',
-        'url': r'url\s*=',
+        'authors': r'authors\s*=',
+        'build-backend': r'build-backend\s*=\s*["\']setuptools\.build_meta["\']',
     }
-    
+
     all_found = True
     for field, pattern in required_fields.items():
         if not re.search(pattern, content):
             print(f"  ❌ Missing or invalid field: {field}")
             all_found = False
-    
+
     if all_found:
         print("  ✅ All required fields present")
     return all_found
@@ -229,7 +229,7 @@ def main():
     
     checks = [
         ("Version", check_version),
-        ("setup.py", check_setup_py),
+        ("pyproject.toml", check_pyproject_toml),
         ("README.md", check_readme),
         ("Build dependencies", check_build_dependencies),
         ("Git status", check_git_status),
