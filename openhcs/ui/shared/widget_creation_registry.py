@@ -38,7 +38,7 @@ def get_enum_from_list(param_type: Type) -> Type:
 # Registry factory functions - return actual widget creators
 def create_textual_registry():
     """Return Textual widget creator function."""
-    from openhcs.ui.shared.textual_widget_strategies import create_textual_widget
+    from openhcs.textual_tui.widgets.shared.textual_widget_strategies import create_textual_widget
     return create_textual_widget
 
 
