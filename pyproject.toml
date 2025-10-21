@@ -58,6 +58,9 @@ dependencies = [
     "setuptools",
     "watchdog>=6.0.0",
     "portalocker>=2.8.2",  # Cross-platform file locking (Windows compatibility for fcntl)
+
+    # System monitoring (required by ui/shared/system_monitor_core.py)
+    "psutil>=7.0.0",
 ]
 
 [project.optional-dependencies]
@@ -85,9 +88,9 @@ gui = [
     "PyQt6>=6.9.1",
     "PyQt6-QScintilla>=2.14.1",
     "pyqtgraph>=0.13.7",  # Used for system monitor visualization
-    "psutil>=7.0.0",
     "GPUtil>=1.4.0",
     # plotext removed - PyQt GUI now uses pyqtgraph instead
+    # psutil moved to core dependencies (required by ui/shared/system_monitor_core.py)
 ]
 
 # Napari viewer
@@ -160,9 +163,9 @@ all = [
     "PyQt6>=6.9.1",
     "PyQt6-QScintilla>=2.14.1",
     "pyqtgraph>=0.13.7",
-    "psutil>=7.0.0",
     "GPUtil>=1.4.0",
     # plotext removed - PyQt GUI now uses pyqtgraph instead
+    # psutil moved to core dependencies (required by ui/shared/system_monitor_core.py)
 
     # Viz
     "napari>=0.4.18",
