@@ -1,12 +1,13 @@
 """Textual TUI Widget Creation Functions"""
 
 import dataclasses
-from textual.widgets import Input, Checkbox, Collapsible
 from .widget_creation_registry import resolve_optional, is_enum, is_list_of_enums, get_enum_from_list
 
 
 def create_textual_widget(param_name: str, param_type: type, current_value, widget_id: str, parameter_info=None):
     """Create Textual TUI widget directly."""
+    # Lazy import to avoid requiring textual when only PyQt GUI is used
+    from textual.widgets import Input, Checkbox, Collapsible
     from openhcs.ui.shared.ui_utils import format_param_name
 
     param_type = resolve_optional(param_type)
