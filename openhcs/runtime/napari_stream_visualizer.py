@@ -201,7 +201,7 @@ def _create_or_update_shapes_layer(viewer, layers, layer_name, shapes_data, shap
     """
     Create or update a Napari shapes layer.
 
-    Note: Unlike image layers, shapes layers don't handle updates well when dimensions change.
+    Note: Shapes layers don't handle .data updates well when dimensions change.
     We remove and recreate the layer instead of updating in place.
 
     Args:
@@ -223,12 +223,17 @@ def _create_or_update_shapes_layer(viewer, layers, layer_name, shapes_data, shap
             break
 
     if existing_layer is not None:
-        # Remove existing layer - shapes layers don't handle dimension changes well
+        # For shapes, we need to remove and recreate because .data assignment doesn't work
+        # when dimensions change. But we need to be careful: removing the layer will trigger
+        # the reconciliation code to clear component_groups on the NEXT data arrival.
+        #
+        # Solution: Remove the layer, but immediately recreate it so it exists when
+        # reconciliation runs on the next well.
         viewer.layers.remove(existing_layer)
         layers.pop(layer_name, None)
         logger.info(f"🔬 NAPARI PROCESS: Removed existing shapes layer {layer_name} for recreation")
 
-    # Always create new layer
+    # Create new layer (or recreate if we just removed it)
     new_layer = viewer.add_shapes(
         shapes_data,
         shape_type=shape_types,
@@ -350,33 +355,51 @@ def _handle_component_aware_display(viewer, layers, component_groups, data, path
 
         layer_key = "_".join(layer_key_parts) if layer_key_parts else "default_layer"
 
+        # Add "_shapes" suffix for shapes layers to distinguish from image layers
+        # MUST happen BEFORE reconciliation so we check the correct layer name
+        if data_type == StreamingDataType.SHAPES:
+            layer_key = f"{layer_key}_shapes"
+
         # Reconcile cached layer/group state with live napari viewer after possible manual deletions
         try:
             current_layer_names = {l.name for l in viewer.layers}
             if layer_key not in current_layer_names:
                 # Drop any stale references so we will recreate the layer
+                num_items = len(component_groups.get(layer_key, []))
                 layers.pop(layer_key, None)
                 component_groups.pop(layer_key, None)
-                logger.debug(f"🔬 NAPARI PROCESS: Reconciling state — '{layer_key}' not in viewer; purged stale caches")
+                logger.info(f"🔬 NAPARI PROCESS: Reconciling state — '{layer_key}' not in viewer; purged stale caches (had {num_items} items in component_groups)")
         except Exception:
             # Fail-loud elsewhere; reconciliation is best-effort and must not mask display
             pass
-
-        # Add "_shapes" suffix for shapes layers to distinguish from image layers
-        if data_type == StreamingDataType.SHAPES:
-            layer_key = f"{layer_key}_shapes"
 
         # Initialize layer group if needed
         if layer_key not in component_groups:
             component_groups[layer_key] = []
 
-        # Add data to layer group
-        component_groups[layer_key].append({
+        # Check if an item with the same component_info already exists
+        # If so, replace it instead of appending (prevents accumulation across runs)
+        existing_index = None
+        for i, item in enumerate(component_groups[layer_key]):
+            if item['components'] == component_info:
+                existing_index = i
+                break
+
+        new_item = {
             'data': data,
             'components': component_info,
             'path': str(path),
             'data_type': data_type
-        })
+        }
+
+        if existing_index is not None:
+            # Replace existing item with same components
+            component_groups[layer_key][existing_index] = new_item
+            logger.info(f"🔬 NAPARI PROCESS: Replaced item in component_groups[{layer_key}] at index {existing_index}, total items: {len(component_groups[layer_key])}")
+        else:
+            # Add new item
+            component_groups[layer_key].append(new_item)
+            logger.info(f"🔬 NAPARI PROCESS: Added to component_groups[{layer_key}], now has {len(component_groups[layer_key])} items")
 
         # Get all items for this layer
         layer_items = component_groups[layer_key]
@@ -507,8 +530,10 @@ def _handle_component_aware_display(viewer, layers, component_groups, data, path
                     layer_items.sort(key=sort_key)
 
                 # Build nD data using registry (UNIFIED for images and shapes)
+                logger.info(f"🔬 NAPARI PROCESS: Building nD data for {layer_key} from {len(layer_items)} items")
                 if data_type == StreamingDataType.SHAPES:
                     stacked_data, shape_types, properties = _build_nd_shapes(layer_items, stack_components)
+                    logger.info(f"🔬 NAPARI PROCESS: Built {len(stacked_data)} shapes from {len(layer_items)} items")
                 else:  # IMAGE
                     stacked_data = _build_nd_image_array(layer_items, stack_components)
 
@@ -617,6 +642,7 @@ class NapariViewerServer(ZMQServer):
         Supported message types:
         - shutdown: Graceful shutdown (closes viewer)
         - force_shutdown: Force shutdown (same as shutdown for Napari)
+        - clear_state: Clear accumulated component groups (for new pipeline runs)
         """
         msg_type = message.get('type')
 
@@ -634,6 +660,16 @@ class NapariViewerServer(ZMQServer):
                 'type': 'shutdown_ack',
                 'status': 'success',
                 'message': 'Napari viewer shutting down'
+            }
+
+        elif msg_type == 'clear_state':
+            # Clear accumulated component groups to prevent shape accumulation across runs
+            logger.info(f"🔬 NAPARI SERVER: Clearing component groups (had {len(self.component_groups)} groups)")
+            self.component_groups.clear()
+            return {
+                'type': 'clear_state_ack',
+                'status': 'success',
+                'message': 'Component groups cleared'
             }
 
         # Unknown message type
