@@ -136,3 +136,7 @@ plans/
 semantic_matrix_analyzer/
 tools/
 bin/
+
+# Chunkhound
+.chunkhound/
+docs/generated_md/
