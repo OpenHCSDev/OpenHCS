@@ -1106,18 +1106,24 @@ class PlateManagerWidget(QWidget):
 
             self.update_button_states()
 
-            # Disconnect from server
-            def _disconnect():
-                self.zmq_client.disconnect()
-
-            await loop.run_in_executor(None, _disconnect)
-            self.zmq_client = None
-
         except Exception as e:
             logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
             # Use signal for thread-safe error reporting
             self.execution_error.emit(f"Failed to execute: {e}")
             self.execution_state = "idle"
+
+        finally:
+            # Always disconnect from server, even if execution failed
+            if self.zmq_client is not None:
+                try:
+                    def _disconnect():
+                        self.zmq_client.disconnect()
+
+                    await loop.run_in_executor(None, _disconnect)
+                except Exception as disconnect_error:
+                    logger.warning(f"Failed to disconnect ZMQ client: {disconnect_error}")
+                finally:
+                    self.zmq_client = None
             self.current_execution_id = None
             self.update_button_states()
 
