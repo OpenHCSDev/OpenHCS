@@ -41,12 +41,12 @@ class OpenHCSMainWindow(QMainWindow):
     def __init__(self, global_config: Optional[GlobalPipelineConfig] = None):
         """
         Initialize the main OpenHCS window.
-        
+
         Args:
             global_config: Global configuration (uses default if None)
         """
         super().__init__()
-        
+
         # Core configuration
         self.global_config = global_config or GlobalPipelineConfig()
         
@@ -358,7 +358,7 @@ class OpenHCSMainWindow(QMainWindow):
     def setup_menu_bar(self):
         """Setup application menu bar."""
         menubar = self.menuBar()
-        
+
         # File menu
         file_menu = menubar.addMenu("&File")
         
@@ -394,7 +394,7 @@ class OpenHCSMainWindow(QMainWindow):
         exit_action.setShortcut(QKeySequence.StandardKey.Quit)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        
+
         # View menu
         view_menu = menubar.addMenu("&View")
 
@@ -433,6 +433,12 @@ class OpenHCSMainWindow(QMainWindow):
         config_action.setShortcut("Ctrl+G")
         config_action.triggered.connect(self.show_configuration)
         view_menu.addAction(config_action)
+
+        # Generate Synthetic Plate action
+        generate_plate_action = QAction("Generate &Synthetic Plate", self)
+        generate_plate_action.setShortcut("Ctrl+Shift+G")
+        generate_plate_action.triggered.connect(self.show_synthetic_plate_generator)
+        view_menu.addAction(generate_plate_action)
 
         view_menu.addSeparator()
 
@@ -624,10 +630,94 @@ class OpenHCSMainWindow(QMainWindow):
         else:
             logger.debug("Pipeline editor not yet created - connection will be made when both exist")
 
+    def show_synthetic_plate_generator(self):
+        """Show synthetic plate generator window."""
+        from openhcs.pyqt_gui.windows.synthetic_plate_generator_window import SyntheticPlateGeneratorWindow
+
+        # Create and show the generator window
+        generator_window = SyntheticPlateGeneratorWindow(
+            color_scheme=self.service_adapter.get_current_color_scheme(),
+            parent=self
+        )
+
+        # Connect the plate_generated signal to add the plate to the manager
+        generator_window.plate_generated.connect(self._on_synthetic_plate_generated)
+
+        # Show the window
+        generator_window.exec()
+
+    def _on_synthetic_plate_generated(self, output_dir: str):
+        """
+        Handle synthetic plate generation completion.
+
+        Args:
+            output_dir: Path to the generated plate directory
+        """
+        from pathlib import Path
+
+        # Get the plate manager widget
+        if "plate_manager" in self.floating_windows:
+            plate_dialog = self.floating_windows["plate_manager"]
+            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+            plate_manager = plate_dialog.findChild(PlateManagerWidget)
+
+            if plate_manager:
+                # Add the generated plate - this triggers plate_selected signal
+                # which automatically updates pipeline editor via existing connections
+                plate_manager.add_plate_callback([Path(output_dir)])
+
+                # Load default test pipeline preset for synthetic plates
+                self._load_test_pipeline_preset(output_dir)
+
+                # Show the plate manager window if it's hidden
+                self.show_plate_manager()
+
+                logger.info(f"Added synthetic plate and loaded test pipeline: {output_dir}")
+
+    def _load_test_pipeline_preset(self, plate_path: str):
+        """
+        Load test pipeline preset for synthetic plate.
+
+        Uses the existing test.py preset from openhcs/processing/presets/pipelines/
+        or creates a minimal test pipeline if preset is not available.
+
+        Args:
+            plate_path: Path to the plate directory
+        """
+        try:
+            # Get the pipeline editor widget
+            if "pipeline_editor" not in self.floating_windows:
+                logger.debug("Pipeline editor not available - skipping preset load")
+                return
+
+            pipeline_dialog = self.floating_windows["pipeline_editor"]
+            from openhcs.pyqt_gui.widgets.pipeline_editor import PipelineEditorWidget
+            pipeline_editor = pipeline_dialog.findChild(PipelineEditorWidget)
+
+            if not pipeline_editor:
+                logger.debug("Pipeline editor widget not found - skipping preset load")
+                return
+
+            # Try to load test preset from presets directory
+            from pathlib import Path
+            preset_path = Path(__file__).parent.parent / "processing" / "presets" / "pipelines" / "test.py"
+
+            if preset_path.exists():
+                # Load preset using existing infrastructure
+                pipeline_editor.load_pipeline_from_file(preset_path)
+                logger.info(f"Loaded test pipeline preset for synthetic plate: {plate_path}")
+            else:
+                logger.debug(f"Test preset not found at {preset_path} - no pipeline loaded")
+
+        except Exception as e:
+            logger.error(f"Failed to load test pipeline preset: {e}", exc_info=True)
+
+
+
     def show_help(self):
         """Opens documentation URL in default web browser."""
         from openhcs.constants.constants import DOCUMENTATION_URL
-        
+
         url =  (DOCUMENTATION_URL)
         if not QDesktopServices.openUrl(QUrl.fromUserInput(url)):
             #fallback for wsl users because it wants to be special
