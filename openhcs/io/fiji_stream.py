@@ -173,3 +173,7 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                         logger.warning(f"Failed to cleanup dropped shared memory {shm_name}: {e}")
 
     # cleanup() now inherited from ABC
+
+    def __del__(self):
+        """Cleanup on deletion."""
+        self.cleanup()
