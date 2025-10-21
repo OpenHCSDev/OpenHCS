@@ -646,12 +646,13 @@ class OpenHCSMainWindow(QMainWindow):
         # Show the window
         generator_window.exec()
 
-    def _on_synthetic_plate_generated(self, output_dir: str):
+    def _on_synthetic_plate_generated(self, output_dir: str, pipeline_path: str):
         """
         Handle synthetic plate generation completion.
 
         Args:
             output_dir: Path to the generated plate directory
+            pipeline_path: Path to the test pipeline to load
         """
         from pathlib import Path
 
@@ -666,28 +667,25 @@ class OpenHCSMainWindow(QMainWindow):
                 # which automatically updates pipeline editor via existing connections
                 plate_manager.add_plate_callback([Path(output_dir)])
 
-                # Load default test pipeline preset for synthetic plates
-                self._load_test_pipeline_preset(output_dir)
+                # Load the test pipeline
+                self._load_pipeline_file(pipeline_path)
 
                 # Show the plate manager window if it's hidden
                 self.show_plate_manager()
 
                 logger.info(f"Added synthetic plate and loaded test pipeline: {output_dir}")
 
-    def _load_test_pipeline_preset(self, plate_path: str):
+    def _load_pipeline_file(self, pipeline_path: str):
         """
-        Load test pipeline preset for synthetic plate.
-
-        Uses the existing test.py preset from openhcs/processing/presets/pipelines/
-        or creates a minimal test pipeline if preset is not available.
+        Load a pipeline file into the pipeline editor.
 
         Args:
-            plate_path: Path to the plate directory
+            pipeline_path: Path to the pipeline file to load
         """
         try:
             # Get the pipeline editor widget
             if "pipeline_editor" not in self.floating_windows:
-                logger.debug("Pipeline editor not available - skipping preset load")
+                logger.debug("Pipeline editor not available - skipping pipeline load")
                 return
 
             pipeline_dialog = self.floating_windows["pipeline_editor"]
@@ -695,22 +693,22 @@ class OpenHCSMainWindow(QMainWindow):
             pipeline_editor = pipeline_dialog.findChild(PipelineEditorWidget)
 
             if not pipeline_editor:
-                logger.debug("Pipeline editor widget not found - skipping preset load")
+                logger.debug("Pipeline editor widget not found - skipping pipeline load")
                 return
 
-            # Try to load test preset from presets directory
+            # Load the pipeline file
             from pathlib import Path
-            preset_path = Path(__file__).parent.parent / "processing" / "presets" / "pipelines" / "test.py"
+            pipeline_file = Path(pipeline_path)
 
-            if preset_path.exists():
-                # Load preset using existing infrastructure
-                pipeline_editor.load_pipeline_from_file(preset_path)
-                logger.info(f"Loaded test pipeline preset for synthetic plate: {plate_path}")
+            if pipeline_file.exists():
+                # Load pipeline using existing infrastructure
+                pipeline_editor.load_pipeline_from_file(pipeline_file)
+                logger.info(f"Loaded pipeline: {pipeline_path}")
             else:
-                logger.debug(f"Test preset not found at {preset_path} - no pipeline loaded")
+                logger.warning(f"Pipeline file not found: {pipeline_path}")
 
         except Exception as e:
-            logger.error(f"Failed to load test pipeline preset: {e}", exc_info=True)
+            logger.error(f"Failed to load pipeline: {e}", exc_info=True)
 
 
 
