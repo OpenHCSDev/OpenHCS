@@ -343,7 +343,8 @@ class ImageBrowserWidget(QWidget):
             object_instance=self.lazy_napari_config,
             field_id="napari_config",
             parent=panel,
-            context_obj=context_obj
+            context_obj=context_obj,
+            color_scheme=self.color_scheme
         )
 
         # Wrap in scroll area for long forms (vertical scrolling only)
@@ -388,7 +389,8 @@ class ImageBrowserWidget(QWidget):
             object_instance=self.lazy_fiji_config,
             field_id="fiji_config",
             parent=panel,
-            context_obj=context_obj
+            context_obj=context_obj,
+            color_scheme=self.color_scheme
         )
 
         # Wrap in scroll area for long forms (vertical scrolling only)

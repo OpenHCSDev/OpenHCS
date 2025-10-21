@@ -172,7 +172,7 @@ class ParameterFormManager(QWidget):
         """
         return cls.ASYNC_WIDGET_CREATION and param_count > cls.ASYNC_THRESHOLD
 
-    def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None, read_only: bool = False, scope_id: Optional[str] = None):
+    def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None, read_only: bool = False, scope_id: Optional[str] = None, color_scheme=None):
         """
         Initialize PyQt parameter form manager with generic object introspection.
 
@@ -186,6 +186,7 @@ class ParameterFormManager(QWidget):
             parent_manager: Optional parent ParameterFormManager (for nested configs)
             read_only: If True, make all widgets read-only and hide reset buttons
             scope_id: Optional scope identifier (e.g., plate_path) to limit cross-window updates to same orchestrator
+            color_scheme: Optional color scheme for styling (uses DEFAULT_COLOR_SCHEME or default if None)
         """
         with timer(f"ParameterFormManager.__init__ ({field_id})", threshold_ms=5.0):
             QWidget.__init__(self, parent)
@@ -237,10 +238,11 @@ class ParameterFormManager(QWidget):
 
             # Create configuration object with auto-detected settings
             with timer("  Create config object", threshold_ms=1.0):
-                color_scheme = self.DEFAULT_COLOR_SCHEME or PyQt6ColorScheme()
+                # Use instance color_scheme if provided, otherwise fall back to class default or create new
+                resolved_color_scheme = color_scheme or self.DEFAULT_COLOR_SCHEME or PyQt6ColorScheme()
                 config = pyqt_config(
                     field_id=field_id,
-                    color_scheme=color_scheme,
+                    color_scheme=resolved_color_scheme,
                     function_target=object_instance,  # Use object_instance as function_target
                     use_scroll_area=self.DEFAULT_USE_SCROLL_AREA
                 )
@@ -507,7 +509,8 @@ class ParameterFormManager(QWidget):
             field_id=field_id,
             parent=parent,
             context_obj=context_obj,  # No default - None means inherit from thread-local global only
-            scope_id=scope_id
+            scope_id=scope_id,
+            color_scheme=color_scheme  # Pass through color_scheme parameter
         )
 
     @classmethod

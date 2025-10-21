@@ -44,26 +44,22 @@ MICROSCOPE_CONFIGS = {
         "format": "ImageXpress",
         "test_dir_name": "imagexpress_pipeline",
         "microscope_type": "auto",  # Use auto-detection
-        "auto_image_size": True
     },
     "OperaPhenix": {
         "format": "OperaPhenix",
         "test_dir_name": "opera_phenix_pipeline",
         "microscope_type": "auto",  # Explicitly specify type
-        "auto_image_size": True
     },
     "OpenHCS": {
         "format": "OpenHCS",
         "test_dir_name": "openhcs_pipeline",
         "microscope_type": "auto",  # Use auto-detection (will detect openhcs_metadata.json)
-        "auto_image_size": True,
         "base_format": "ImageXpress"  # Generate ImageXpress data then add OpenHCS metadata
     },
     "OMERO": {
         "format": "OMERO",
         "test_dir_name": "omero_test_plate",  # Will be created dynamically
         "microscope_type": "omero",
-        "auto_image_size": True,
         "is_virtual": True,  # Flag to indicate virtual backend
         "requires_connection": True  # Flag to indicate OMERO connection needed
     }
@@ -270,11 +266,6 @@ def create_synthetic_plate_data(test_function_dir, microscope_config, test_param
             cell_size_range=test_params.get("cell_size_range", (5, 10)),
             wells=test_params.get("wells", ['A01']),
             format=generator_format,  # Use base format for generation
-            # Use test_params override if available
-            auto_image_size=test_params.get(
-                "auto_image_size",
-                microscope_config["auto_image_size"]
-            ),
             # For OpenHCS, include all filename components
             include_all_components=(microscope_config["format"] == "OpenHCS"),
             # Skip files if specified (for testing missing image handling)
@@ -334,10 +325,6 @@ def plate_dir(test_function_dir, microscope_config, test_params, data_type_confi
                 cell_size_range=test_params.get("cell_size_range", (5, 10)),
                 wells=test_params.get("wells", ['A01']),
                 format=generator_format,  # Use ImageXpress format for OMERO
-                auto_image_size=test_params.get(
-                    "auto_image_size",
-                    microscope_config["auto_image_size"]
-                )
             )
 
             # Don't suppress output so we can see what's happening

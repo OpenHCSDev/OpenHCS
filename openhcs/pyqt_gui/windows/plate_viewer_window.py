@@ -254,7 +254,8 @@ class PlateViewerWindow(QDialog):
             object_instance=metadata_instance,
             field_id="metadata_viewer",
             parent=None,
-            read_only=True
+            read_only=True,
+            color_scheme=self.color_scheme
         )
         layout.addWidget(metadata_form)
     
@@ -271,7 +272,8 @@ class PlateViewerWindow(QDialog):
                 object_instance=metadata_instance,
                 field_id=f"metadata_{subdir_name}",
                 parent=None,
-                read_only=True
+                read_only=True,
+                color_scheme=self.color_scheme
             )
             group_layout.addWidget(metadata_form)
 

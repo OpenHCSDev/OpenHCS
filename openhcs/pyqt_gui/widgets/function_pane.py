@@ -230,7 +230,8 @@ class FunctionPaneWidget(QWidget):
             field_id=f"func_{self.index}",   # Use function index as field identifier
             parent=self,                     # Pass self as parent widget
             context_obj=None,                # Functions don't need context for placeholder resolution
-            initial_values=self.kwargs       # Pass saved kwargs to populate form fields
+            initial_values=self.kwargs,      # Pass saved kwargs to populate form fields
+            color_scheme=self.color_scheme   # Pass color_scheme for consistent theming
         )
 
         # Connect parameter changes

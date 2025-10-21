@@ -252,8 +252,8 @@ class PlateManagerWidget(QWidget):
 
             layout.addLayout(row_layout)
 
-        # Set maximum height to constrain the button panel (2 rows of buttons)
-        panel.setMaximumHeight(80)
+        # Set maximum height to constrain the button panel (3 rows of buttons)
+        panel.setMaximumHeight(110)
 
         return panel
     
@@ -417,7 +417,7 @@ class PlateManagerWidget(QWidget):
 
         self.update_plate_list()
         self.status_message.emit(f"Deleted {len(paths_to_delete)} plate(s)")
-    
+
     def _validate_plates_for_operation(self, plates, operation_type):
         """Unified functional validator for all plate operations."""
         # Functional validation mapping

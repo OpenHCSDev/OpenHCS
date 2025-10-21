@@ -28,6 +28,7 @@ import json
 import random
 from datetime import datetime
 from pathlib import Path
+from typing import Optional, Tuple, List, Dict, Any
 
 import numpy as np
 import tifffile
@@ -41,38 +42,36 @@ class SyntheticMicroscopyGenerator:
     """Generate synthetic microscopy images for testing."""
 
     def __init__(self,
-                 output_dir,
-                 grid_size=(3, 3),
-                 image_size=(1024, 1024),
-                 tile_size=(512, 512),
-                 overlap_percent=10,
-                 stage_error_px=2,
-                 wavelengths=2,
-                 z_stack_levels=1,
-                 z_step_size=0.1,  # Reduced by 10x for more subtle blur effect
-                 num_cells=50,
-                 cell_size_range=(10, 30),
-                 cell_eccentricity_range=(0.1, 0.5),
-                 cell_intensity_range=(5000, 20000),
-                 background_intensity=500,
-                 noise_level=100,
-                 wavelength_params=None,
-                 shared_cell_fraction=0.95,  # Fraction of cells shared between wavelengths
-                 wavelength_intensities=None,  # Fixed intensities for each wavelength
-                 wavelength_backgrounds=None,  # Background intensities for each wavelength
-                 wells=['A01'],  # List of wells to generate
-                 format='ImageXpress',  # Format of the filenames ('ImageXpress' or 'OperaPhenix')
-                 auto_image_size=True,  # Automatically calculate image size based on grid and tile size
-                 random_seed=None,
-                 include_all_components=False,  # Include all filename components (for OpenHCS)
-                 skip_files=None):  # List of filenames to skip (for testing missing image handling)
+                 output_dir: str,
+                 grid_size: Tuple[int, int] = (3, 3),
+                 tile_size: Tuple[int, int] = (256, 256),  # Updated to match common test defaults
+                 overlap_percent: int = 10,
+                 stage_error_px: int = 2,
+                 wavelengths: int = 2,
+                 z_stack_levels: int = 3,  # Updated to match common test defaults (3D data)
+                 z_step_size: float = 0.1,  # Reduced by 10x for more subtle blur effect
+                 num_cells: int = 50,
+                 cell_size_range: Tuple[int, int] = (3, 6),  # Updated to match common test defaults
+                 cell_eccentricity_range: Tuple[float, float] = (0.1, 0.5),
+                 cell_intensity_range: Tuple[int, int] = (5000, 20000),
+                 background_intensity: int = 500,
+                 noise_level: int = 100,
+                 wavelength_params: Optional[Dict[int, Dict[str, Any]]] = None,
+                 shared_cell_fraction: float = 0.95,  # Fraction of cells shared between wavelengths
+                 wavelength_intensities: Optional[Dict[int, Tuple[int, int]]] = None,  # Fixed intensities for each wavelength
+                 wavelength_backgrounds: Optional[Dict[int, int]] = None,  # Background intensities for each wavelength
+                 wells: List[str] = None,  # Updated to match common test defaults (4 wells)
+                 format: str = 'ImageXpress',  # Format of the filenames ('ImageXpress' or 'OperaPhenix')
+                 openhcs_format: bool = False,  # If True, generate OpenHCS native format with metadata
+                 random_seed: Optional[int] = None,
+                 include_all_components: bool = False,  # Include all filename components (for OpenHCS)
+                 skip_files: Optional[List[str]] = None):  # List of filenames to skip (for testing missing image handling)
         """
         Initialize the synthetic microscopy generator.
 
         Args:
             output_dir: Directory to save generated images
             grid_size: Tuple of (rows, cols) for the grid of tiles
-            image_size: Size of the full image before tiling
             tile_size: Size of each tile
             overlap_percent: Percentage of overlap between tiles
             stage_error_px: Random error in stage positioning (pixels)
@@ -112,7 +111,7 @@ class SyntheticMicroscopyGenerator:
                 Example: {1: 800, 2: 400}
             wells: List of well IDs to generate (e.g., ['A01', 'A02'])
             format: Format of the filenames ('ImageXpress' or 'OperaPhenix')
-            auto_image_size: If True, automatically calculate image size based on grid and tile parameters
+            openhcs_format: If True, generate OpenHCS native format with openhcs_metadata.json
             random_seed: Random seed for reproducibility
             include_all_components: If True, include all filename components (timepoint, z-index) even for flat plates
             skip_files: List of filenames to skip during generation (for testing missing image handling)
@@ -124,17 +123,15 @@ class SyntheticMicroscopyGenerator:
         self.overlap_percent = overlap_percent
         self.stage_error_px = stage_error_px
         self.include_all_components = include_all_components
+        self.openhcs_format = openhcs_format
 
         # Create parser instances for filename construction
         self.imagexpress_parser = ImageXpressFilenameParser()
         self.operaphenix_parser = OperaPhenixFilenameParser()
 
-        # Calculate image size if auto_image_size is True
-        if auto_image_size:
-            self.image_size = self._calculate_image_size(grid_size, tile_size, overlap_percent, stage_error_px)
-            print(f"Auto-calculated image size: {self.image_size[0]}x{self.image_size[1]}")
-        else:
-            self.image_size = image_size
+        # Always auto-calculate image size from grid and tile parameters
+        self.image_size = self._calculate_image_size(grid_size, tile_size, overlap_percent, stage_error_px)
+        print(f"Auto-calculated image size: {self.image_size[0]}x{self.image_size[1]}")
         self.wavelengths = wavelengths
         self.z_stack_levels = z_stack_levels
         self.z_step_size = z_step_size
@@ -165,8 +162,8 @@ class SyntheticMicroscopyGenerator:
         else:
             self.wavelength_backgrounds = wavelength_backgrounds
 
-        # Store the wells to generate
-        self.wells = wells
+        # Store the wells to generate (use default if None)
+        self.wells = wells if wells is not None else ['A01', 'D02', 'B03', 'B06']
 
         # Store the format
         self.format = format
@@ -234,12 +231,12 @@ class SyntheticMicroscopyGenerator:
                     y = base_y + tile_size[1] - overlap_y + np.random.randint(0, overlap_y)
 
                 # Ensure we're within image bounds
-                x = min(x, image_size[0] - 1)
-                y = min(y, image_size[1] - 1)
+                x = min(x, self.image_size[0] - 1)
+                y = min(y, self.image_size[1] - 1)
             else:
                 # Random position anywhere in the image
-                x = np.random.randint(0, image_size[0])
-                y = np.random.randint(0, image_size[1])
+                x = np.random.randint(0, self.image_size[0])
+                y = np.random.randint(0, self.image_size[1])
 
             # Common cell attributes
             size = np.random.uniform(*self.cell_size_range)
@@ -901,6 +898,16 @@ class SyntheticMicroscopyGenerator:
                             site_index += 1
 
         print("Dataset generation complete!")
+
+        # If OpenHCS format requested, generate metadata file
+        if self.openhcs_format:
+            # Determine subdirectory based on format
+            if self.format == "ImageXpress":
+                sub_dir = "TimePoint_1"
+            else:  # OperaPhenix
+                sub_dir = "Images"
+
+            self.generate_openhcs_metadata(sub_dir=sub_dir, pixel_size=0.65)
 
     def generate_openhcs_metadata(self, sub_dir: str = "images", pixel_size: float = 0.65):
         """
