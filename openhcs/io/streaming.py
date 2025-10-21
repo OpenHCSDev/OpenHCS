@@ -130,9 +130,18 @@ class StreamingBackend(DataSink):
                   data.get() if hasattr(data, 'get') else np.asarray(data)
 
         # Create shared memory
-        from multiprocessing import shared_memory
+        from multiprocessing import shared_memory, resource_tracker
         shm_name = f"{self.SHM_PREFIX}{id(data)}_{time.time_ns()}"
         shm = shared_memory.SharedMemory(create=True, size=np_data.nbytes, name=shm_name)
+
+        # Unregister from resource tracker - we manage cleanup manually
+        # This prevents resource tracker warnings when worker processes exit
+        # before the viewer has unlinked the shared memory
+        try:
+            resource_tracker.unregister(shm._name, "shared_memory")
+        except Exception:
+            pass  # Ignore errors if already unregistered
+
         shm_array = np.ndarray(np_data.shape, dtype=np_data.dtype, buffer=shm.buf)
         shm_array[:] = np_data[:]
         self._shared_memory_blocks[shm_name] = shm

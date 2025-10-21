@@ -1080,17 +1080,25 @@ class PipelineOrchestrator(ContextProvider):
 
                 logger.info(f"🔥 ORCHESTRATOR: All tasks completed, {len(execution_results)} results collected")
 
-            logger.info(f"🔥 ORCHESTRATOR: About to start GPU cleanup (use_multiprocessing={self.use_multiprocessing})")
+                # Explicitly shutdown executor INSIDE the with block to avoid hang on context exit
+                logger.info("🔥 ORCHESTRATOR: Explicitly shutting down executor")
+                executor.shutdown(wait=True, cancel_futures=False)
+                logger.info("🔥 ORCHESTRATOR: Executor shutdown complete")
+
+            # Determine if we're using multiprocessing (ProcessPoolExecutor) or threading
+            effective_config = self.get_effective_config()
+            use_multiprocessing = not effective_config.use_threading
+            logger.info(f"🔥 ORCHESTRATOR: About to start GPU cleanup (use_multiprocessing={use_multiprocessing})")
 
             # 🔥 GPU CLEANUP: Skip in multiprocessing mode - workers handle their own cleanup
             # In multiprocessing mode, GPU cleanup in the main process can hang because
             # GPU contexts are owned by worker processes, not the orchestrator process
             try:
-                if cleanup_all_gpu_frameworks and not self.use_multiprocessing:
+                if cleanup_all_gpu_frameworks and not use_multiprocessing:
                     logger.info("🔥 ORCHESTRATOR: Running GPU cleanup...")
                     cleanup_all_gpu_frameworks()
                     logger.info("🔥 GPU CLEANUP: Cleared all GPU frameworks after plate execution")
-                elif self.use_multiprocessing:
+                elif use_multiprocessing:
                     logger.info("🔥 GPU CLEANUP: Skipped in multiprocessing mode (workers handle their own cleanup)")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup GPU memory after plate execution: {cleanup_error}")
@@ -1100,8 +1108,10 @@ class PipelineOrchestrator(ContextProvider):
             logger.info("🔥 ORCHESTRATOR: Plate execution completed, checking for analysis consolidation")
             # Run automatic analysis consolidation if enabled
             shared_context = get_current_global_config(GlobalPipelineConfig)
+            logger.info(f"🔥 ORCHESTRATOR: Analysis consolidation enabled={shared_context.analysis_consolidation_config.enabled}")
             if shared_context.analysis_consolidation_config.enabled:
                 try:
+                    logger.info("🔥 ORCHESTRATOR: Starting consolidation - finding results directory")
                     # Get results directory using same logic as path planner (single source of truth)
                     results_dir = None
                     for axis_id, context in compiled_contexts.items():
@@ -1120,14 +1130,18 @@ class PipelineOrchestrator(ContextProvider):
                             break
 
                     if results_dir and results_dir.exists():
+                        logger.info(f"🔥 ORCHESTRATOR: Results directory exists: {results_dir}")
                         # Check if there are actually CSV files (materialized results)
+                        logger.info("🔥 ORCHESTRATOR: Checking for CSV files...")
                         csv_files = list(results_dir.glob("*.csv"))
+                        logger.info(f"🔥 ORCHESTRATOR: Found {len(csv_files)} CSV files")
                         if csv_files:
                             logger.info(f"🔄 CONSOLIDATION: Found {len(csv_files)} CSV files, running consolidation")
                             # Get well IDs from compiled contexts
                             axis_ids = list(compiled_contexts.keys())
                             logger.info(f"🔄 CONSOLIDATION: Using well IDs: {axis_ids}")
 
+                            logger.info("🔥 ORCHESTRATOR: Calling consolidate_analysis_results()...")
                             consolidate_analysis_results(
                                 results_directory=str(results_dir),
                                 well_ids=axis_ids,
@@ -1141,25 +1155,33 @@ class PipelineOrchestrator(ContextProvider):
                         logger.info("⏭️ CONSOLIDATION: No results directory found in compiled contexts")
                 except Exception as e:
                     logger.error(f"❌ CONSOLIDATION: Failed: {e}")
-            
+            else:
+                logger.info("🔥 ORCHESTRATOR: Analysis consolidation disabled, skipping")
+
             # Update state based on execution results
+            logger.info("🔥 ORCHESTRATOR: Updating orchestrator state based on execution results")
             if all(result.get("status") == "success" for result in execution_results.values()):
                 self._state = OrchestratorState.COMPLETED
             else:
                 self._state = OrchestratorState.EXEC_FAILED
+            logger.info(f"🔥 ORCHESTRATOR: State updated to {self._state}")
 
             # 🔬 VISUALIZER CLEANUP: Stop all visualizers if they were auto-created and not persistent
-            for vis in visualizers:
+            logger.info(f"🔬 ORCHESTRATOR: Starting visualizer cleanup for {len(visualizers)} visualizers")
+            for idx, vis in enumerate(visualizers):
                 try:
+                    logger.info(f"🔬 ORCHESTRATOR: Processing visualizer {idx+1}/{len(visualizers)}, persistent={vis.persistent}")
                     if not vis.persistent:
+                        logger.info(f"🔬 ORCHESTRATOR: Calling stop_viewer() for non-persistent visualizer {idx+1}")
                         vis.stop_viewer()
-                        logger.info("🔬 ORCHESTRATOR: Stopped non-persistent visualizer")
+                        logger.info(f"🔬 ORCHESTRATOR: Stopped non-persistent visualizer {idx+1}")
                     else:
                         logger.info("🔬 ORCHESTRATOR: Keeping persistent visualizer alive (no cleanup needed)")
                         # Persistent visualizers stay alive across executions - no cleanup needed
                         # The ZMQ connection will be reused for the next execution
                 except Exception as e:
-                    logger.warning(f"🔬 ORCHESTRATOR: Failed to cleanup visualizer: {e}")
+                    logger.warning(f"🔬 ORCHESTRATOR: Failed to cleanup visualizer {idx+1}: {e}")
+            logger.info("🔬 ORCHESTRATOR: Visualizer cleanup complete")
 
             logger.info(f"🔥 ORCHESTRATOR: Plate execution finished. Results: {execution_results}")
 

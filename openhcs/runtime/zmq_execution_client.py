@@ -71,6 +71,7 @@ class ZMQExecutionClient(ZMQClient):
             self._start_progress_listener()
         from openhcs.debug.pickle_to_python import generate_complete_pipeline_steps_code, generate_config_code
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+        logger.info("🔌 CLIENT: Generating pipeline code...")
         pipeline_code = generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=True)
         request = {'type': 'execute', 'plate_id': str(plate_id), 'pipeline_code': pipeline_code}
         if config_params:
@@ -79,27 +80,38 @@ class ZMQExecutionClient(ZMQClient):
             request['config_code'] = generate_config_code(global_config, GlobalPipelineConfig, clean_mode=True)
             if pipeline_config:
                 request['pipeline_config_code'] = generate_config_code(pipeline_config, PipelineConfig, clean_mode=True)
+        logger.info("🔌 CLIENT: Sending execute request...")
         response = self._send_control_request(request)
+        logger.info(f"🔌 CLIENT: Got response: {response.get('status')}")
         if response.get('status') == 'accepted':
             execution_id = response.get('execution_id')
+            logger.info(f"🔌 CLIENT: Execution accepted, ID={execution_id}, starting status polling...")
             consecutive_errors = 0
             max_consecutive_errors = 5
+            poll_count = 0
 
             while True:
                 time.sleep(0.5)
+                poll_count += 1
 
                 try:
+                    logger.info(f"🔌 CLIENT: Status poll #{poll_count} for execution {execution_id}")
                     status_response = self.get_status(execution_id)
+                    logger.info(f"🔌 CLIENT: Status response: {status_response}")
                     consecutive_errors = 0  # Reset error counter on success
 
                     if status_response.get('status') == 'ok':
                         execution = status_response.get('execution', {})
                         exec_status = execution.get('status')
+                        logger.info(f"🔌 CLIENT: Execution status: {exec_status}")
                         if exec_status == 'complete':
+                            logger.info("🔌 CLIENT: Execution complete, returning results")
                             return {'status': 'complete', 'execution_id': execution_id, 'results': execution.get('results_summary', {})}
                         elif exec_status == 'failed':
+                            logger.info("🔌 CLIENT: Execution failed")
                             return {'status': 'error', 'execution_id': execution_id, 'message': execution.get('error')}
                         elif exec_status == 'cancelled':
+                            logger.info("🔌 CLIENT: Execution cancelled")
                             return {'status': 'cancelled', 'execution_id': execution_id, 'message': 'Execution was cancelled'}
                     elif status_response.get('status') == 'error':
                         # Server returned error status
@@ -121,6 +133,7 @@ class ZMQExecutionClient(ZMQClient):
                     # Wait a bit longer before retrying after error
                     time.sleep(1.0)
 
+        logger.info(f"🔌 CLIENT: Returning response: {response}")
         return response
 
     def get_status(self, execution_id=None):
