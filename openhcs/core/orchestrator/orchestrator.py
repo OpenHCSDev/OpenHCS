@@ -1080,16 +1080,22 @@ class PipelineOrchestrator(ContextProvider):
 
                 logger.info(f"🔥 ORCHESTRATOR: All tasks completed, {len(execution_results)} results collected")
 
+            logger.info(f"🔥 ORCHESTRATOR: About to start GPU cleanup (use_multiprocessing={self.use_multiprocessing})")
 
-            # 🔥 GPU CLEANUP: Clear GPU memory after plate execution
+            # 🔥 GPU CLEANUP: Skip in multiprocessing mode - workers handle their own cleanup
+            # In multiprocessing mode, GPU cleanup in the main process can hang because
+            # GPU contexts are owned by worker processes, not the orchestrator process
             try:
-                if cleanup_all_gpu_frameworks:
+                if cleanup_all_gpu_frameworks and not self.use_multiprocessing:
+                    logger.info("🔥 ORCHESTRATOR: Running GPU cleanup...")
                     cleanup_all_gpu_frameworks()
-                    logger.debug("🔥 GPU CLEANUP: Cleared all GPU frameworks after plate execution")
+                    logger.info("🔥 GPU CLEANUP: Cleared all GPU frameworks after plate execution")
+                elif self.use_multiprocessing:
+                    logger.info("🔥 GPU CLEANUP: Skipped in multiprocessing mode (workers handle their own cleanup)")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to cleanup GPU memory after plate execution: {cleanup_error}")
 
-
+            logger.info("🔥 ORCHESTRATOR: GPU cleanup section finished")
 
             logger.info("🔥 ORCHESTRATOR: Plate execution completed, checking for analysis consolidation")
             # Run automatic analysis consolidation if enabled
@@ -1149,10 +1155,9 @@ class PipelineOrchestrator(ContextProvider):
                         vis.stop_viewer()
                         logger.info("🔬 ORCHESTRATOR: Stopped non-persistent visualizer")
                     else:
-                        logger.info("🔬 ORCHESTRATOR: Keeping persistent visualizer alive")
-                        # Just cleanup ZMQ connection, leave process running
-                        if hasattr(vis, '_cleanup_zmq'):
-                            vis._cleanup_zmq()
+                        logger.info("🔬 ORCHESTRATOR: Keeping persistent visualizer alive (no cleanup needed)")
+                        # Persistent visualizers stay alive across executions - no cleanup needed
+                        # The ZMQ connection will be reused for the next execution
                 except Exception as e:
                     logger.warning(f"🔬 ORCHESTRATOR: Failed to cleanup visualizer: {e}")
 
