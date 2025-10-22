@@ -6,13 +6,37 @@ shared between TUI and PyQt GUI implementations.
 """
 
 import logging
+import time
 from pathlib import Path
 from typing import Optional, List
 from dataclasses import dataclass
 
-from openhcs.textual_tui.widgets.plate_manager import get_current_log_file_path as _get_current_log_file_path
-
 logger = logging.getLogger(__name__)
+
+
+def get_current_log_file_path() -> str:
+    """Get the current log file path from the logging system."""
+    try:
+        # Get the root logger and find the FileHandler
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                return handler.baseFilename
+
+        # Fallback: try to get from openhcs logger
+        openhcs_logger = logging.getLogger("openhcs")
+        for handler in openhcs_logger.handlers:
+            if isinstance(handler, logging.FileHandler):
+                return handler.baseFilename
+
+        # Last resort: create a default path
+        log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return str(log_dir / f"openhcs_subprocess_{int(time.time())}.log")
+
+    except Exception as e:
+        logger.error(f"Failed to get current log file path: {e}")
+        raise RuntimeError(f"Could not determine log file path: {e}")
 
 
 @dataclass
@@ -34,24 +58,6 @@ class LogFileInfo:
                 self.display_name = f"Worker {self.worker_id}"
             else:
                 self.display_name = self.path.name
-
-
-def get_current_log_file_path() -> str:
-    """
-    Get the current log file path from the logging system.
-    
-    This is a fail-loud wrapper around the core logging utility.
-    
-    Returns:
-        str: Path to the current log file
-        
-    Raises:
-        RuntimeError: If no log file found in logging configuration
-    """
-    log_path = _get_current_log_file_path()
-    if log_path is None:
-        raise RuntimeError("No file handler found in logging configuration")
-    return log_path
 
 
 def discover_logs(base_log_path: Optional[str] = None, include_main_log: bool = True,

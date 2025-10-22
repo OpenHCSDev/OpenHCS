@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Callable, Any, Tuple
 
 from openhcs.core.config import PipelineConfig
+from openhcs.core.log_utils import get_current_log_file_path
 
 from PIL import Image
 from textual.reactive import reactive
@@ -62,30 +63,6 @@ def get_orchestrator_status_symbol(orchestrator: PipelineOrchestrator) -> str:
     }
 
     return state_to_symbol.get(orchestrator.state, "?")
-
-def get_current_log_file_path() -> str:
-    """Get the current log file path from the logging system."""
-    try:
-        # Get the root logger and find the FileHandler
-        root_logger = logging.getLogger()
-        for handler in root_logger.handlers:
-            if isinstance(handler, logging.FileHandler):
-                return handler.baseFilename
-
-        # Fallback: try to get from openhcs logger
-        openhcs_logger = logging.getLogger("openhcs")
-        for handler in openhcs_logger.handlers:
-            if isinstance(handler, logging.FileHandler):
-                return handler.baseFilename
-
-        # Last resort: create a default path
-        log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        return str(log_dir / f"openhcs_subprocess_{int(time.time())}.log")
-
-    except Exception as e:
-        logger.warning(f"Could not determine log file path: {e}")
-        return "/tmp/openhcs_subprocess.log"
 
 
 
@@ -544,141 +521,7 @@ class PlateManagerWidget(ButtonListWidget):
             self.app.show_error("Selected plates are not compiled. Please compile first.")
             return
 
-        # Check if ZMQ execution is enabled (default: True)
-        import os
-        use_zmq = os.environ.get('OPENHCS_USE_ZMQ_EXECUTION', 'true').lower() in ('true', '1', 'yes')
-
-        if use_zmq:
-            await self._run_plates_zmq(ready_items)
-        else:
-            await self._run_plates_subprocess(ready_items)
-
-    async def _run_plates_subprocess(self, ready_items) -> None:
-        """Run plates using legacy subprocess runner (deprecated)."""
-        import warnings
-        warnings.warn(
-            "Subprocess runner is deprecated. Set OPENHCS_USE_ZMQ_EXECUTION=true to use ZMQ execution.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-
-        try:
-            # Use subprocess approach like integration tests
-            logger.debug("🔥 Using subprocess approach for clean isolation")
-
-            plate_paths_to_run = [item['path'] for item in ready_items]
-
-            # Pass definition pipeline steps - subprocess will make fresh copy and compile
-            pipeline_data = {}
-            for plate_path in plate_paths_to_run:
-                definition_pipeline = self._get_current_pipeline_definition(plate_path)
-                pipeline_data[plate_path] = definition_pipeline
-
-            logger.info(f"🔥 Starting subprocess for {len(plate_paths_to_run)} plates")
-
-            # Create data file for subprocess (only file needed besides log)
-            data_file = tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pkl')
-
-            # Generate unique ID for this subprocess
-            import time
-            subprocess_timestamp = int(time.time())
-            plate_names = [Path(path).name for path in plate_paths_to_run]
-            unique_id = f"plates_{'_'.join(plate_names[:2])}_{subprocess_timestamp}"  # Limit to first 2 plates for filename length
-
-            # Build subprocess log name from TUI log base using log utilities
-            from openhcs.core.log_utils import get_current_log_file_path
-            try:
-                tui_log_path = get_current_log_file_path()
-                if tui_log_path.endswith('.log'):
-                    tui_base = tui_log_path[:-4]  # Remove .log extension
-                else:
-                    tui_base = tui_log_path
-                log_file_base = f"{tui_base}_subprocess_{subprocess_timestamp}"
-            except RuntimeError:
-                # Fallback if no main log found
-                log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
-                log_dir.mkdir(parents=True, exist_ok=True)
-                log_file_base = str(log_dir / f"tui_subprocess_{subprocess_timestamp}")
-
-            # Pickle data for subprocess
-            subprocess_data = {
-                'plate_paths': plate_paths_to_run,
-                'pipeline_data': pipeline_data,
-                'global_config': self.app.global_config  # Pickle config object directly
-            }
-
-            # Resolve all lazy configurations to concrete values before pickling
-            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-            resolved_subprocess_data = resolve_lazy_configurations_for_serialization(subprocess_data)
-
-            # Wrap pickle operation in executor to avoid blocking UI
-            def _write_pickle_data():
-                import dill as pickle
-                with open(data_file.name, 'wb') as f:
-                    pickle.dump(resolved_subprocess_data, f)
-                data_file.close()
-
-            await asyncio.get_event_loop().run_in_executor(None, _write_pickle_data)
-
-            logger.debug(f"🔥 Created data file: {data_file.name}")
-
-            # Create subprocess (like integration tests)
-            subprocess_script = Path(__file__).parent.parent / "subprocess_runner.py"
-
-            # Generate actual log file path that subprocess will create
-            actual_log_file_path = f"{log_file_base}_{unique_id}.log"
-            logger.debug(f"🔥 Log file base: {log_file_base}")
-            logger.debug(f"🔥 Unique ID: {unique_id}")
-            logger.debug(f"🔥 Actual log file: {actual_log_file_path}")
-
-            # Store log file path for monitoring (subprocess logger writes to this)
-            self.log_file_path = actual_log_file_path
-            self.log_file_position = self._get_current_log_position()  # Start from current end
-
-            logger.debug(f"🔥 Subprocess command: {sys.executable} {subprocess_script} {data_file.name} {log_file_base} {unique_id}")
-            logger.debug(f"🔥 Subprocess logger will write to: {self.log_file_path}")
-            logger.debug("🔥 Subprocess stdout will be silenced (logger handles output)")
-
-            # SIMPLE SUBPROCESS: Let subprocess log to its own file (single source of truth)
-            # Wrap subprocess creation in executor to avoid blocking UI
-            def _create_subprocess():
-                return subprocess.Popen([
-                    sys.executable, str(subprocess_script),
-                    data_file.name, log_file_base, unique_id  # Only data file and log - no temp files
-                ],
-                stdout=subprocess.DEVNULL,  # Subprocess logs to its own file
-                stderr=subprocess.DEVNULL,  # Subprocess logs to its own file
-                text=True,  # Text mode for easier handling
-                )
-
-            self.current_process = await asyncio.get_event_loop().run_in_executor(None, _create_subprocess)
-
-            logger.info(f"🔥 Subprocess started with PID: {self.current_process.pid}")
-
-            # Subprocess logs to its own dedicated file - no output monitoring needed
-
-            # Update orchestrator states to show running state
-            for plate in ready_items:
-                plate_path = plate['path']
-                if plate_path in self.orchestrators:
-                    self.orchestrators[plate_path]._state = OrchestratorState.EXECUTING
-
-            # Trigger UI refresh after state changes
-            self._trigger_ui_refresh()
-
-            self.app.current_status = f"Running {len(ready_items)} plate(s) in subprocess..."
-            self._update_button_states()
-            
-            # Start reactive log monitoring
-            self._start_log_monitoring()
-
-            # Start async monitoring
-            await self._start_monitoring()
-
-        except Exception as e:
-            logger.critical(f"Failed to start subprocess: {e}", exc_info=True)
-            self.app.show_error("Failed to start subprocess", str(e))
-            self._reset_execution_state("Subprocess failed to start")
+        await self._run_plates_zmq(ready_items)
 
     def _start_log_monitoring(self) -> None:
         """Start reactive log monitoring for subprocess logs."""

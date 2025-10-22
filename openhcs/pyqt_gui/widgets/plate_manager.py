@@ -834,7 +834,7 @@ class PlateManagerWidget(QWidget):
         self.update_button_states()
     
     async def action_run_plate(self):
-        """Handle Run Plate button - execute compiled plates."""
+        """Handle Run Plate button - execute compiled plates using ZMQ."""
         selected_items = self.get_selected_plates()
         if not selected_items:
             self.service_adapter.show_error_dialog("No plates selected to run.")
@@ -845,158 +845,8 @@ class PlateManagerWidget(QWidget):
             self.service_adapter.show_error_dialog("Selected plates are not compiled. Please compile first.")
             return
 
-        # Check if ZMQ execution is enabled (default: True)
-        import os
-        use_zmq = os.environ.get('OPENHCS_USE_ZMQ_EXECUTION', 'true').lower() in ('true', '1', 'yes')
+        await self._run_plates_zmq(ready_items)
 
-        if use_zmq:
-            await self._run_plates_zmq(ready_items)
-        else:
-            await self._run_plates_subprocess(ready_items)
-
-    async def _run_plates_subprocess(self, ready_items):
-        """Run plates using legacy subprocess runner (deprecated)."""
-        import warnings
-        warnings.warn(
-            "Subprocess runner is deprecated. Set OPENHCS_USE_ZMQ_EXECUTION=true to use ZMQ execution.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-
-        try:
-            # Use subprocess approach like Textual TUI
-            logger.debug("Using subprocess approach for clean isolation")
-
-            plate_paths_to_run = [item['path'] for item in ready_items]
-
-            # Pass both pipeline definition and pre-compiled contexts to subprocess
-            pipeline_data = {}
-            effective_configs = {}
-            for plate_path in plate_paths_to_run:
-                compiled_data = self.plate_compiled_data[plate_path]
-                pipeline_data[plate_path] = {
-                    'pipeline_definition': compiled_data['execution_pipeline'],  # Use execution pipeline (stripped)
-                    'compiled_contexts': compiled_data['compiled_contexts']      # Pre-compiled contexts
-                }
-
-                # Get effective config for this plate (includes pipeline config if set)
-                # For subprocess execution, we need the merged config since subprocess doesn't use dual-axis resolver
-                if plate_path in self.orchestrators:
-                    # Get merged config from orchestrator (this resolves lazy values)
-                    effective_configs[plate_path] = self.orchestrators[plate_path].get_effective_config()
-                else:
-                    effective_configs[plate_path] = self.global_config
-
-            logger.info(f"Starting subprocess for {len(plate_paths_to_run)} plates")
-
-            # Clear subprocess logs before starting new execution
-            self.clear_subprocess_logs.emit()
-
-            # Create data file for subprocess
-            data_file = tempfile.NamedTemporaryFile(mode='wb', delete=False, suffix='.pkl')
-
-            # Generate unique ID for this subprocess
-            import time
-            subprocess_timestamp = int(time.time())
-            plate_names = [Path(path).name for path in plate_paths_to_run]
-            unique_id = f"plates_{'_'.join(plate_names[:2])}_{subprocess_timestamp}"
-
-            # Build subprocess log name using log utilities
-            from openhcs.core.log_utils import get_current_log_file_path
-            try:
-                tui_log_path = get_current_log_file_path()
-                if tui_log_path.endswith('.log'):
-                    tui_base = tui_log_path[:-4]  # Remove .log extension
-                else:
-                    tui_base = tui_log_path
-                log_file_base = f"{tui_base}_subprocess_{subprocess_timestamp}"
-            except RuntimeError:
-                # Fallback if no main log found
-                log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
-                log_dir.mkdir(parents=True, exist_ok=True)
-                log_file_base = str(log_dir / f"pyqt_gui_subprocess_{subprocess_timestamp}")
-
-            # Pickle data for subprocess
-            subprocess_data = {
-                'plate_paths': plate_paths_to_run,
-                'pipeline_data': pipeline_data,
-                'global_config': self.global_config,      # Fallback global config
-                'effective_configs': effective_configs    # Per-plate effective configs (includes pipeline config)
-            }
-
-            # Resolve all lazy configurations to concrete values before pickling
-            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
-            resolved_subprocess_data = resolve_lazy_configurations_for_serialization(subprocess_data)
-
-            # Write pickle data
-            def _write_pickle_data():
-                import dill as pickle
-                with open(data_file.name, 'wb') as f:
-                    pickle.dump(resolved_subprocess_data, f)
-                data_file.close()
-
-            # Write pickle data in executor (works in Qt thread)
-            import asyncio
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _write_pickle_data)
-
-            logger.debug(f"Created data file: {data_file.name}")
-
-            # Create subprocess
-            subprocess_script = Path(__file__).parent.parent.parent / "textual_tui" / "subprocess_runner.py"
-
-            # Generate actual log file path that subprocess will create
-            actual_log_file_path = f"{log_file_base}_{unique_id}.log"
-            logger.debug(f"Log file base: {log_file_base}")
-            logger.debug(f"Unique ID: {unique_id}")
-            logger.debug(f"Actual log file: {actual_log_file_path}")
-
-            # Store log file path for monitoring
-            self.log_file_path = actual_log_file_path
-            self.log_file_position = 0
-
-            logger.debug(f"Subprocess command: {sys.executable} {subprocess_script} {data_file.name} {log_file_base} {unique_id}")
-
-            # Create subprocess
-            def _create_subprocess():
-                return subprocess.Popen([
-                    sys.executable, str(subprocess_script),
-                    data_file.name, log_file_base, unique_id
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                )
-
-            # Create subprocess in executor (works in Qt thread)
-            import asyncio
-            loop = asyncio.get_event_loop()
-            self.current_process = await loop.run_in_executor(None, _create_subprocess)
-
-            logger.info(f"Subprocess started with PID: {self.current_process.pid}")
-
-            # Emit signal for log viewer to start monitoring
-            self.subprocess_log_started.emit(log_file_base)
-
-            # Update orchestrator states to show running state
-            for plate in ready_items:
-                plate_path = plate['path']
-                if plate_path in self.orchestrators:
-                    self.orchestrators[plate_path]._state = OrchestratorState.EXECUTING
-
-            self.execution_state = "running"
-            self.status_message.emit(f"Running {len(ready_items)} plate(s) in subprocess...")
-            self.update_button_states()
-
-            # Start monitoring
-            await self._start_monitoring()
-
-        except Exception as e:
-            logger.error(f"Failed to start plate execution: {e}", exc_info=True)
-            self.service_adapter.show_error_dialog(f"Failed to start execution: {e}")
-            self.execution_state = "idle"
-            self.update_button_states()
-    
     async def _run_plates_zmq(self, ready_items):
         """Run plates using ZMQ execution client (recommended)."""
         try:

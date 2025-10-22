@@ -177,7 +177,7 @@ class OpenHCSPyQtApp(QApplication):
             return exit_code
 
         except Exception as e:
-            logger.error(f"Error during application run: {e}")
+            logger.error(f"Error during application run: {e}", exc_info=True)
             self.cleanup()
             return 1
 
