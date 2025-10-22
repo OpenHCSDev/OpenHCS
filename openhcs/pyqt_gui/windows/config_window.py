@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
@@ -278,6 +278,14 @@ class ConfigWindow(BaseFormDialog):
                 base_type = self._get_base_type(field_type)
                 display_name = base_type.__name__
 
+                # Check if this field is hidden from UI
+                is_ui_hidden = self._is_field_ui_hidden(dataclass_type, field_name, field_type)
+
+                # Skip root-level ui_hidden items entirely (don't show them in tree at all)
+                # For nested items, show them but styled differently (for inheritance visibility)
+                if is_root and is_ui_hidden:
+                    continue
+
                 # For root-level items, show only the class name (matching child style)
                 # For nested items, show "field_name (ClassName)"
                 if is_root:
@@ -290,8 +298,17 @@ class ConfigWindow(BaseFormDialog):
                 field_item.setData(0, Qt.ItemDataRole.UserRole, {
                     'type': 'dataclass',
                     'class': field_type,  # Store original type for field lookup
-                    'field_name': field_name
+                    'field_name': field_name,
+                    'ui_hidden': is_ui_hidden  # Store ui_hidden flag
                 })
+
+                # Style ui_hidden items differently (grayed out, italicized)
+                if is_ui_hidden:
+                    font = field_item.font(0)
+                    font.setItalic(True)
+                    field_item.setFont(0, font)
+                    field_item.setForeground(0, QColor(128, 128, 128))
+                    field_item.setToolTip(0, "This configuration is not editable in the UI (inherited by other configs)")
 
                 # Add to parent (either QTreeWidget for root or QTreeWidgetItem for nested)
                 if is_root:
@@ -305,6 +322,36 @@ class ConfigWindow(BaseFormDialog):
 
                 # Recursively add nested dataclasses using BASE type (not root anymore)
                 self._add_ui_visible_dataclasses_to_tree(field_item, base_type, is_root=False)
+
+    def _is_field_ui_hidden(self, dataclass_type, field_name: str, field_type) -> bool:
+        """Check if a field should be hidden from the UI.
+
+        Args:
+            dataclass_type: The parent dataclass containing the field
+            field_name: Name of the field
+            field_type: Type of the field
+
+        Returns:
+            True if the field should be hidden from UI
+        """
+        import dataclasses
+
+        # Check field metadata for ui_hidden flag
+        try:
+            field_obj = next(f for f in dataclasses.fields(dataclass_type) if f.name == field_name)
+            if field_obj.metadata.get('ui_hidden', False):
+                return True
+        except (StopIteration, TypeError):
+            pass
+
+        # Check if the field's type itself has _ui_hidden attribute
+        # IMPORTANT: Check __dict__ directly to avoid inheriting _ui_hidden from parent classes
+        # We only want to hide fields whose type DIRECTLY has _ui_hidden=True
+        base_type = self._get_base_type(field_type)
+        if hasattr(base_type, '__dict__') and '_ui_hidden' in base_type.__dict__ and base_type._ui_hidden:
+            return True
+
+        return False
 
     def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
         """Add inheritance information for a dataclass with proper hierarchy."""
@@ -322,11 +369,24 @@ class ConfigWindow(BaseFormDialog):
 
         # Add base classes directly as children (no "Inherits from:" label)
         for base_class in direct_bases:
+            # Check if this base class is ui_hidden
+            is_ui_hidden = hasattr(base_class, '__dict__') and '_ui_hidden' in base_class.__dict__ and base_class._ui_hidden
+
             base_item = QTreeWidgetItem([base_class.__name__])
             base_item.setData(0, Qt.ItemDataRole.UserRole, {
                 'type': 'inheritance_link',
-                'target_class': base_class
+                'target_class': base_class,
+                'ui_hidden': is_ui_hidden
             })
+
+            # Style ui_hidden items differently (grayed out, italicized)
+            if is_ui_hidden:
+                font = base_item.font(0)
+                font.setItalic(True)
+                base_item.setFont(0, font)
+                base_item.setForeground(0, QColor(128, 128, 128))
+                base_item.setToolTip(0, "This configuration is not editable in the UI (inherited by other configs)")
+
             parent_item.addChild(base_item)
 
             # Recursively add inheritance for this base class
@@ -336,6 +396,11 @@ class ConfigWindow(BaseFormDialog):
         """Handle tree item double-clicks for navigation."""
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if not data:
+            return
+
+        # Check if this item is ui_hidden - if so, ignore the double-click
+        if data.get('ui_hidden', False):
+            logger.debug("Ignoring double-click on ui_hidden item")
             return
 
         item_type = data.get('type')

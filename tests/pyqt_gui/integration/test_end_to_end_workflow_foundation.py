@@ -27,9 +27,9 @@ from PyQt6.QtWidgets import QApplication, QDialog, QPushButton, QMessageBox, QLa
 from PyQt6.QtCore import QTimer, QObject, pyqtSignal
 from PyQt6.QtTest import QTest
 
-from openhcs.core.config import GlobalPipelineConfig
+from openhcs.core.config import GlobalPipelineConfig, LazyStepMaterializationConfig
 from openhcs.config_framework.global_config import set_current_global_config
-from openhcs.config_framework.lazy_factory import create_dataclass_for_editing, LazyStepMaterializationConfig
+from openhcs.config_framework.lazy_factory import create_dataclass_for_editing
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.constants import Microscope
 from openhcs.pyqt_gui.main import OpenHCSMainWindow

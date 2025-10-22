@@ -270,14 +270,27 @@ class LazyDataclassFactory:
 
             # CRITICAL FIX: Create default factory for Optional dataclass fields
             # This eliminates the need for field introspection and ensures UI always has instances to render
-            default_value = None
+            # CRITICAL: Always preserve metadata from original field (e.g., ui_hidden flag)
             if (is_already_optional or not has_default) and is_dataclass(field.type):
                 # For Optional dataclass fields, create default factory that creates lazy instances
                 # This ensures the UI always has nested lazy instances to render recursively
                 # CRITICAL: field_type is already the lazy type, so use it directly
-                default_value = dataclasses.field(default_factory=field_type)
+                field_def = (field.name, final_field_type, dataclasses.field(default_factory=field_type, metadata=field.metadata))
+            elif field.metadata:
+                # For fields with metadata but no dataclass default factory, create a Field object to preserve metadata
+                # We need to replicate the original field's default behavior
+                if field.default is not MISSING:
+                    field_def = (field.name, final_field_type, dataclasses.field(default=field.default, metadata=field.metadata))
+                elif field.default_factory is not MISSING:
+                    field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory, metadata=field.metadata))
+                else:
+                    # Field has metadata but no default - use MISSING to indicate required field
+                    field_def = (field.name, final_field_type, dataclasses.field(default=MISSING, metadata=field.metadata))
+            else:
+                # No metadata, no special handling needed
+                field_def = (field.name, final_field_type, None)
 
-            lazy_field_definitions.append((field.name, final_field_type, default_value))
+            lazy_field_definitions.append(field_def)
 
             # Debug logging with provided template (reduced to DEBUG level to reduce log pollution)
             logger.debug(debug_template.format(
@@ -879,14 +892,32 @@ def create_global_default_decorator(target_config_class: Type):
             field_name = _camel_to_snake(actual_cls.__name__)
             lazy_class_name = f"{LAZY_CONFIG_PREFIX}{actual_cls.__name__}"
 
-            # Add to pending injections for field injection (unless ui_hidden)
-            if not ui_hidden:
+            # Mark class with ui_hidden metadata for UI layer to check
+            # This allows the config to remain in the context (for lazy resolution)
+            # while being hidden from UI rendering
+            if ui_hidden:
+                actual_cls._ui_hidden = True
+
+            # Check if class is abstract (has unimplemented abstract methods)
+            # Abstract classes should NEVER be injected into GlobalPipelineConfig
+            # because they can't be instantiated
+            # NOTE: We need to check if the class ITSELF is abstract, not just if it inherits from ABC
+            # Concrete subclasses of abstract classes should still be injected
+            # We check for __abstractmethods__ attribute which exists even before @dataclass runs
+            # (it's set by ABCMeta when the class is created)
+            is_abstract = hasattr(actual_cls, '__abstractmethods__') and len(actual_cls.__abstractmethods__) > 0
+
+            # Add to pending injections for field injection
+            # Skip injection for abstract classes (they can't be instantiated)
+            # For concrete classes: inject even if ui_hidden (needed for lazy resolution context)
+            if not is_abstract:
                 _pending_injections[target_class_name]['configs_to_inject'].append({
                     'config_class': actual_cls,
                     'field_name': field_name,
                     'lazy_class_name': lazy_class_name,
                     'optional': optional,  # Store the optional flag
-                    'inherit_as_none': inherit_as_none  # Store the inherit_as_none flag
+                    'inherit_as_none': inherit_as_none,  # Store the inherit_as_none flag
+                    'ui_hidden': ui_hidden  # Store the ui_hidden flag for field metadata
                 })
 
             # Immediately create lazy version of this config (not dependent on injection)
@@ -900,6 +931,10 @@ def create_global_default_decorator(target_config_class: Type):
             # Export lazy class to config module immediately
             config_module = sys.modules[actual_cls.__module__]
             setattr(config_module, lazy_class_name, lazy_class)
+
+            # Also mark lazy class with ui_hidden metadata
+            if ui_hidden:
+                lazy_class._ui_hidden = True
 
             # CRITICAL: Post-process dataclass fields after @dataclass has run
             # This fixes the constructor behavior for inherited fields that should be None
@@ -990,6 +1025,7 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
         """Create field definition with optional and inherit_as_none support."""
         field_type = config['config_class']
         is_optional = config.get('optional', False)
+        is_ui_hidden = config.get('ui_hidden', False)
 
         # Algebraic simplification: factor out common default_value logic
         if is_optional:
@@ -997,7 +1033,8 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
             default_value = None
         else:
             # Both inherit_as_none and regular cases use same default factory
-            default_value = field(default_factory=field_type)
+            # Add ui_hidden metadata to the field so UI layer can check it
+            default_value = field(default_factory=field_type, metadata={'ui_hidden': is_ui_hidden})
 
         return (config['field_name'], field_type, default_value)
 

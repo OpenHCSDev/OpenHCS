@@ -101,7 +101,12 @@ class ParameterFormService:
         
         for param_name, param_type in parameter_types.items():
             current_value = parameters.get(param_name)
-            
+
+            # Check if this parameter should be hidden from UI
+            if self._should_hide_from_ui(parent_dataclass_type, param_name, param_type):
+                debug_param("analyze_parameters", f"Hiding parameter {param_name} from UI (ui_hidden=True)")
+                continue
+
             # Create parameter info
             param_info = self._create_parameter_info(
                 param_name, param_type, current_value, parameter_info
@@ -135,7 +140,45 @@ class ParameterFormService:
             nested_forms=nested_forms,
             has_optional_dataclasses=has_optional_dataclasses
         )
-    
+
+    def _should_hide_from_ui(self, parent_dataclass_type: Optional[Type], param_name: str, param_type: Type) -> bool:
+        """
+        Check if a parameter should be hidden from the UI.
+
+        Args:
+            parent_dataclass_type: The parent dataclass type (None for function parameters)
+            param_name: Name of the parameter
+            param_type: Type of the parameter
+
+        Returns:
+            True if the parameter should be hidden from UI
+        """
+        import dataclasses
+
+        # If no parent dataclass, can't check field metadata
+        if parent_dataclass_type is None:
+            # Still check if the type itself has _ui_hidden
+            unwrapped_type = self._type_utils.get_optional_inner_type(param_type) if self._type_utils.is_optional_dataclass(param_type) else param_type
+            if hasattr(unwrapped_type, '__dict__') and '_ui_hidden' in unwrapped_type.__dict__ and unwrapped_type._ui_hidden:
+                return True
+            return False
+
+        # Check field metadata for ui_hidden flag
+        try:
+            field_obj = next(f for f in dataclasses.fields(parent_dataclass_type) if f.name == param_name)
+            if field_obj.metadata.get('ui_hidden', False):
+                return True
+        except (StopIteration, TypeError, AttributeError):
+            pass
+
+        # Check if type itself has _ui_hidden attribute
+        # IMPORTANT: Check __dict__ directly to avoid inheriting _ui_hidden from parent classes
+        unwrapped_type = self._type_utils.get_optional_inner_type(param_type) if self._type_utils.is_optional_dataclass(param_type) else param_type
+        if hasattr(unwrapped_type, '__dict__') and '_ui_hidden' in unwrapped_type.__dict__ and unwrapped_type._ui_hidden:
+            return True
+
+        return False
+
     def convert_value_to_type(self, value: Any, param_type: Type, param_name: str, dataclass_type: Type = None) -> Any:
         """
         Convert a value to the appropriate type for a parameter.

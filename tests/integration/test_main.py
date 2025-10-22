@@ -21,7 +21,7 @@ from openhcs.core.config import (
     PathPlanningConfig, StepWellFilterConfig, VFSConfig, ZarrConfig,
     NapariVariableSizeHandling
 )
-from openhcs.config_framework.lazy_factory import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyFijiStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig
+from openhcs.core.config import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyFijiStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.pipeline import Pipeline
@@ -580,7 +580,7 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
         global_config = _create_pipeline_config(test_config)
 
         # Create pipeline config with lazy configs
-        from openhcs.config_framework.lazy_factory import LazyPathPlanningConfig, LazyStepWellFilterConfig
+        from openhcs.core.config import LazyPathPlanningConfig, LazyStepWellFilterConfig
         pipeline_config = PipelineConfig(
             path_planning_config=LazyPathPlanningConfig(
                 output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX

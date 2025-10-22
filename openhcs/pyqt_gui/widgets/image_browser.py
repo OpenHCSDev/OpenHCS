@@ -1201,7 +1201,8 @@ class ImageBrowserWidget(QWidget):
 
         # Resolve Fiji config (lightweight operation, safe in UI thread)
         from openhcs.config_framework.context_manager import config_context
-        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyFijiStreamingConfig
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
+        from openhcs.core.config import LazyFijiStreamingConfig
 
         current_values = self.fiji_config_form.get_current_values()
         temp_config = LazyFijiStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
@@ -1544,7 +1545,8 @@ class ImageBrowserWidget(QWidget):
         try:
             # Get Napari config using current form values
             from openhcs.config_framework.context_manager import config_context
-            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyNapariStreamingConfig
+            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
+            from openhcs.core.config import LazyNapariStreamingConfig
 
             current_values = self.napari_config_form.get_current_values()
             temp_config = LazyNapariStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
@@ -1582,7 +1584,8 @@ class ImageBrowserWidget(QWidget):
         try:
             # Get Fiji config using current form values
             from openhcs.config_framework.context_manager import config_context
-            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization, LazyFijiStreamingConfig
+            from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
+            from openhcs.core.config import LazyFijiStreamingConfig
 
             current_values = self.fiji_config_form.get_current_values()
             temp_config = LazyFijiStreamingConfig(**{k: v for k, v in current_values.items() if v is not None})
