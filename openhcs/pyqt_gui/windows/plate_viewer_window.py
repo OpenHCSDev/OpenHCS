@@ -49,7 +49,7 @@ class PlateViewerWindow(QDialog):
         self.resize(1400, 900)
         
         # Make floating window
-        self.setWindowFlags(Qt.WindowType.Dialog)
+        self.setWindowFlags(Qt.WindowType.Window)
         
         self._setup_ui()
     
