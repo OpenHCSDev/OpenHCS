@@ -9,7 +9,7 @@ registrations or other side-effects.
 
 import logging
 
-__version__ = "0.2.10"
+__version__ = "0.2.11"
 
 # Monkey patch logging.FileHandler to default to UTF-8 encoding
 # This ensures all log files support emojis and Unicode characters
