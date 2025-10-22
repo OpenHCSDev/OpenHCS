@@ -209,6 +209,7 @@ zip-safe = false
 
 [tool.setuptools.packages.find]
 include = ["openhcs*"]
+exclude = ["openhcs.textual_tui*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "openhcs.__version__"}
