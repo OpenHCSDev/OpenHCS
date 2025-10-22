@@ -31,7 +31,7 @@ Install OpenHCS with required GUI dependencies:
 
    pip install openhcs[gui]
 
-This will install openhcs along with all optional dependencies for full functionality. 
+This will install openhcs along with the GUI dependencies for full functionality. 
 
 If you want a minimal installation, you can choose to do a CPU-only install: (for CI/testing environments)
 .. code-block:: bash
