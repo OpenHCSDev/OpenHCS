@@ -25,81 +25,11 @@ System Requirements
 Installation Instructions
 ------------------------
 
-### Step 1: Install Python
-
-OpenHCS requires Python 3.11 or newer.
-
-**Linux:**
-
-Most modern Linux distributions come with Python 3. Check your version:
+Install OpenHCS with required GUI dependencies:
 
 .. code-block:: bash
 
-   python3 --version
-
-If you need to install or update Python:
-
-.. code-block:: bash
-
-   # Ubuntu/Debian
-   sudo apt update
-   sudo apt install python3.11 python3.11-venv python3-pip
-
-   # Fedora
-   sudo dnf install python3.11
-
-**Windows (WSL2):**
-
-1. Install WSL2 following Microsoft's official guide: https://docs.microsoft.com/en-us/windows/wsl/install
-2. Install Ubuntu from the Microsoft Store
-3. Open Ubuntu and run:
-
-.. code-block:: bash
-
-   sudo apt update
-   sudo apt install python3.11 python3.11-venv python3-pip
-
-**macOS:**
-
-Install Python using Homebrew:
-
-.. code-block:: bash
-
-   # Install Homebrew if you don't have it
-   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-   # Install Python
-   brew install python@3.11
-
-### Step 2: Create a Virtual Environment (Recommended)
-
-It's best practice to install OpenHCS in a virtual environment to avoid conflicts with other Python packages.
-
-.. code-block:: bash
-
-   # Create a new directory for your OpenHCS work
-   mkdir openhcs_workspace
-   cd openhcs_workspace
-
-   # Create a virtual environment
-   python3.11 -m venv openhcs_env
-
-   # Activate the virtual environment
-   # On Linux/macOS/WSL:
-   source openhcs_env/bin/activate
-
-   # On Windows (if not using WSL):
-   openhcs_env\Scripts\activate
-
-Your terminal prompt should now show ``(openhcs_env)`` indicating the environment is active.
-
-### Step 3: Install OpenHCS
-
-Install OpenHCS with all required dependencies:
-
-.. code-block:: bash
-
-   pip install openhcs[all]
+   pip install openhcs[gui]
 
 This will install openhcs along with all optional dependencies for full functionality. 
 
@@ -124,6 +54,8 @@ Once installed, you can launch the OpenHCS graphical interface with a command:
 
 .. code-block:: bash
 
+   openhcs
+   #or
    python -m openhcs.pyqt_gui
 
 ----------------------------
