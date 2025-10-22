@@ -132,9 +132,13 @@ def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult
 
 
 def materialize_segmentation_masks(data: List[cp.ndarray], path: str, filemanager, backend: str) -> str:
-    """Materialize segmentation masks as individual TIFF files."""
+    """
+    Materialize segmentation masks as individual TIFF files.
 
-    logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Called with path={path}, masks_count={len(data) if data else 0}")
+    Single-backend signature - decorator automatically wraps for multi-backend support.
+    """
+
+    logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Called with path={path}, backend={backend}, masks_count={len(data) if data else 0}")
 
     # Convert CuPy arrays to NumPy
     if data:
@@ -145,7 +149,7 @@ def materialize_segmentation_masks(data: List[cp.ndarray], path: str, filemanage
         # Create empty summary file to indicate no masks were generated
         summary_path = path.replace('.pkl', '_segmentation_summary.txt')
         summary_content = "No segmentation masks generated (return_segmentation_mask=False)\n"
-        filemanager.save(summary_content, summary_path, Backend.DISK.value)
+        filemanager.save(summary_content, summary_path, backend)
         return summary_path
 
     # Generate output file paths based on the input path
@@ -165,9 +169,9 @@ def materialize_segmentation_masks(data: List[cp.ndarray], path: str, filemanage
         else:
             mask_uint16 = mask
 
-        # Save using filemanager
-        filemanager.save(mask_uint16, mask_filename, Backend.DISK.value)
-        logger.debug(f"🔬 SEGMENTATION_MATERIALIZE: Saved mask {i} to {mask_filename}")
+        # Save using filemanager with provided backend
+        filemanager.save(mask_uint16, mask_filename, backend)
+        logger.debug(f"🔬 SEGMENTATION_MATERIALIZE: Saved mask {i} to {mask_filename} (backend={backend})")
 
     # Return summary path
     summary_path = f"{base_path}_segmentation_summary.txt"
@@ -176,8 +180,8 @@ def materialize_segmentation_masks(data: List[cp.ndarray], path: str, filemanage
     summary_content += f"Mask dtype: {data[0].dtype}\n"
     summary_content += f"Mask shape: {data[0].shape}\n"
 
-    filemanager.save(summary_content, summary_path, Backend.DISK.value)
-    logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Completed, saved {len(data)} masks")
+    filemanager.save(summary_content, summary_path, backend)
+    logger.info(f"🔬 SEGMENTATION_MATERIALIZE: Completed, saved {len(data)} masks to backend={backend}")
 
     return summary_path
 
@@ -533,18 +537,18 @@ def _materialize_single_channel_results(data: List[CellCountResult], path: str, 
     # Save JSON summary (overwrite if exists)
     json_content = json.dumps(summary, indent=2, default=str)
     # Remove existing file if it exists using filemanager
-    if filemanager.exists(json_path, Backend.DISK.value):
-        filemanager.delete(json_path, Backend.DISK.value)
-    filemanager.save(json_content, json_path, Backend.DISK.value)
+    if filemanager.exists(json_path, backend):
+        filemanager.delete(json_path, backend)
+    filemanager.save(json_content, json_path, backend)
 
     # Save CSV details (overwrite if exists)
     if rows:
         df = pd.DataFrame(rows)
         csv_content = df.to_csv(index=False)
         # Remove existing file if it exists using filemanager
-        if filemanager.exists(csv_path, Backend.DISK.value):
-            filemanager.delete(csv_path, Backend.DISK.value)
-        filemanager.save(csv_content, csv_path, Backend.DISK.value)
+        if filemanager.exists(csv_path, backend):
+            filemanager.delete(csv_path, backend)
+        filemanager.save(csv_content, csv_path, backend)
 
     return json_path
 
@@ -615,18 +619,18 @@ def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str
     # Save JSON summary (overwrite if exists)
     json_content = json.dumps(summary, indent=2, default=str)
     # Remove existing file if it exists using filemanager
-    if filemanager.exists(json_path, Backend.DISK.value):
-        filemanager.delete(json_path, Backend.DISK.value)
-    filemanager.save(json_content, json_path, Backend.DISK.value)
+    if filemanager.exists(json_path, backend):
+        filemanager.delete(json_path, backend)
+    filemanager.save(json_content, json_path, backend)
 
     # Save CSV details (overwrite if exists)
     if rows:
         df = pd.DataFrame(rows)
         csv_content = df.to_csv(index=False)
         # Remove existing file if it exists using filemanager
-        if filemanager.exists(csv_path, Backend.DISK.value):
-            filemanager.delete(csv_path, Backend.DISK.value)
-        filemanager.save(csv_content, csv_path, Backend.DISK.value)
+        if filemanager.exists(csv_path, backend):
+            filemanager.delete(csv_path, backend)
+        filemanager.save(csv_content, csv_path, backend)
 
     return json_path
 

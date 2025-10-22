@@ -425,31 +425,35 @@ Complete Workflow
 .. code-block:: python
 
    from openhcs.io.omero_local import OMEROLocalBackend
+   from openhcs.io.base import storage_registry
    from openhcs.microscopes.omero import OMEROHandler
    from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
-   from openhcs.core.orchestrator import PipelineOrchestrator
-   
+   from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
+
    # 1. Connect to OMERO
    with OMEROInstanceManager() as manager:
        conn = manager.get_connection()
-       
-       # 2. Create backend
+
+       # 2. Create and register backend (CRITICAL STEP)
        backend = OMEROLocalBackend(omero_conn=conn)
-       
+       storage_registry['omero_local'] = backend
+
        # 3. Create microscope handler
        handler = OMEROHandler(backend=backend)
-       
+
        # 4. Run pipeline
        orchestrator = PipelineOrchestrator(
            plate_paths=[123],  # OMERO plate ID
            steps=pipeline_steps,
            global_config=global_config
        )
-       
+
        orchestrator.run()
-       
+
        # 5. Results saved as OMERO FileAnnotations
        # Automatically attached to plate/wells/images
+
+**Critical Note**: The OMERO backend must be manually registered in the ``storage_registry`` because it requires a connection object that cannot be created automatically by the metaclass system. This is different from other backends (disk, memory, zarr) which are auto-registered.
 
 See Also
 --------

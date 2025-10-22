@@ -39,6 +39,60 @@ The VFS abstracts away the underlying storage mechanism through a common interfa
 
 **Why This Matters**: The same processing code works regardless of where data is stored. During development, you might use the memory backend for speed. For production runs, you might use the disk backend for reliability. For large datasets, you might use the ZARR backend for compression. The processing logic never changes.
 
+Backend Type Hierarchy
+~~~~~~~~~~~~~~~~~~~~~~
+
+OpenHCS defines a hierarchy of backend abstractions to support different storage paradigms:
+
+.. code:: python
+
+   # Base interface for all data destinations
+   class DataSink(ABC):
+       """Minimal interface for sending data to any destination."""
+
+       @abstractmethod
+       def save(self, data: Any, identifier: Union[str, Path], **kwargs) -> None:
+           """Send data to the destination."""
+           pass
+
+       @abstractmethod
+       def save_batch(self, data_list: List[Any], identifiers: List[Union[str, Path]], **kwargs) -> None:
+           """Send multiple data objects in a single operation."""
+           pass
+
+   # Backends with real filesystems (disk, memory, zarr)
+   class StorageBackend(DataSink):
+       """Persistent storage with file-like semantics and retrieval capabilities."""
+
+       @abstractmethod
+       def load(self, file_path: Union[str, Path], **kwargs) -> Any:
+           """Load data from storage."""
+           pass
+
+   # Backends without real filesystems (OMERO, cloud storage)
+   class VirtualBackend(DataSink):
+       """Virtual filesystem semantics - generates file listings on-demand."""
+
+       @abstractmethod
+       def list_files(self, directory: str, **kwargs) -> List[str]:
+           """Generate file list from metadata (not real filesystem)."""
+           pass
+
+       @abstractmethod
+       def generate_filename(self, metadata: Dict, **kwargs) -> str:
+           """Generate filename from metadata."""
+           pass
+
+**Key Distinction**: ``StorageBackend`` provides traditional file operations (load/save), while ``VirtualBackend`` generates filenames on-demand from metadata without real filesystem operations. This enables location-transparent processing where the same pipeline code works on disk, zarr, or OMERO without modification.
+
+**Examples**:
+
+- **StorageBackend**: DiskStorageBackend, MemoryStorageBackend, ZarrStorageBackend
+- **VirtualBackend**: OMEROLocalBackend (generates paths from OMERO plate structure)
+- **StreamingBackend**: NapariStreamBackend, FijiStreamBackend (real-time visualization)
+
+See :doc:`omero_backend_system` for detailed VirtualBackend architecture and OMERO integration.
+
 Path Virtualization
 ~~~~~~~~~~~~~~~~~~~
 
@@ -413,13 +467,13 @@ Functions declare their side effects using the ``@special_outputs`` decorator, w
 Materialization Function Implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Materialization functions follow a standard signature and handle the conversion from Python objects to persistent file formats. They receive data from the memory backend and save it using the FileManager with appropriate backend selection.
+Materialization functions follow standard signatures and handle the conversion from Python objects to persistent file formats. They receive data from the memory backend and save it using the FileManager with appropriate backend selection.
 
-**Standard Materialization Function Signature**:
+**Single Backend Signature** (for simple materialization):
 
 .. code:: python
 
-   def materialize_function_name(data: Any, path: str, filemanager) -> str:
+   def materialize_function_name(data: Any, path: str, filemanager, backend: str) -> str:
        """
        Convert special output data to persistent storage format.
 
@@ -427,10 +481,49 @@ Materialization functions follow a standard signature and handle the conversion 
            data: The special output data from memory backend
            path: Base path for output files (from VFS path planning)
            filemanager: FileManager instance for backend-agnostic I/O
+           backend: Backend name (disk, omero_local, napari_stream, fiji_stream)
 
        Returns:
            str: Path to the primary output file created
        """
+       # Get backend instance and dispatch to backend-specific implementation
+       backend_obj = filemanager.get_backend(backend)
+       return backend_obj._save_data(data, path)
+
+**Multi-Backend Signature** (for simultaneous materialization to multiple backends):
+
+.. code:: python
+
+   def materialize_function_name(
+       data: Any,
+       path: str,
+       filemanager,
+       backends: Union[str, List[str]],
+       backend_kwargs: dict = None
+   ) -> str:
+       """
+       Convert special output data to multiple backends simultaneously.
+
+       Args:
+           data: The special output data from memory backend
+           path: Base path for output files (from VFS path planning)
+           filemanager: FileManager instance for backend-agnostic I/O
+           backends: Single backend string or list of backends to save to
+           backend_kwargs: Dict mapping backend names to their kwargs
+
+       Returns:
+           str: Path to the primary output file created (first backend)
+       """
+       # Normalize backends to list
+       if isinstance(backends, str):
+           backends = [backends]
+
+       # Materialize to all backends
+       for backend in backends:
+           kwargs = backend_kwargs.get(backend, {}) if backend_kwargs else {}
+           filemanager.save(data, path, backend, **kwargs)
+
+       return path
 
 **Real Example - Cell Count Materialization**:
 
@@ -652,27 +745,64 @@ The FileManager provides comprehensive file and directory operations beyond basi
    # File existence checking across backends
    exists = filemanager.exists("/memory/intermediate_result.pkl", Backend.MEMORY.value)
 
-**Storage Registry System**: The FileManager uses a global singleton registry for backend management:
+**Storage Registry System**: The FileManager uses a metaclass-based auto-registration system for backend management:
 
 .. code:: python
 
-   # Global storage registry (created once at module import)
-   from openhcs.io.base import storage_registry
+   # Backends are automatically registered when their classes are defined
+   from openhcs.io.backend_registry import StorageBackendMeta, STORAGE_BACKENDS, create_storage_registry
+   from openhcs.io.base import DataSink
 
-   def _create_storage_registry() -> Dict[str, StorageBackend]:
-       """Factory for creating backend registries."""
-       from openhcs.io.disk import DiskStorageBackend
-       from openhcs.io.memory import MemoryStorageBackend
-       from openhcs.io.zarr import ZarrStorageBackend
+   # Example backend with automatic registration
+   class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
+       """Disk storage backend with automatic metaclass registration."""
 
-       return {
-           Backend.DISK.value: DiskStorageBackend(),
-           Backend.MEMORY.value: MemoryStorageBackend(),
-           Backend.ZARR.value: ZarrStorageBackend()
-       }
+       # Backend type from enum for registration
+       _backend_type = Backend.DISK.value
 
-   # Shared registry instance used by all FileManager instances
-   storage_registry = _create_storage_registry()
+       def __init__(self):
+           # Backend initialization
+           pass
+
+   # The metaclass automatically registers the backend in STORAGE_BACKENDS
+   # STORAGE_BACKENDS: Dict[str, Type[DataSink]] = {}  # Populated by metaclass
+
+   # Create registry with all discovered backends
+   def create_storage_registry() -> Dict[str, DataSink]:
+       """
+       Create storage registry with all registered backends.
+
+       Returns:
+           Dictionary mapping backend types to instances
+       """
+       # Ensure all backends are discovered
+       discover_all_backends()
+
+       registry = {}
+       for backend_type in STORAGE_BACKENDS.keys():
+           registry[backend_type] = get_backend_instance(backend_type)
+
+       return registry
+
+   # Global singleton storage registry
+   from openhcs.io.base import storage_registry  # Created at module import
+
+**Subprocess Runner Mode**: The backend discovery system supports a special subprocess runner mode that avoids importing GPU-heavy backends:
+
+.. code:: python
+
+   import os
+
+   # Check if we're in subprocess runner mode
+   if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+       # Subprocess runner mode - only import essential backends
+       from openhcs.io import disk, memory
+       # Skips: zarr, napari_stream, fiji_stream (avoid GPU library imports)
+   else:
+       # Normal mode - import all backend modules to trigger metaclass registration
+       from openhcs.io import disk, memory, zarr, napari_stream, fiji_stream
+
+This prevents GPU library imports in subprocess workers, which is critical for multiprocessing execution where worker processes don't need GPU access.
 
 **Natural Sorting Integration**: All file listing operations use natural sorting to handle numeric sequences correctly, preventing issues with lexicographic ordering of scientific image sequences.
 

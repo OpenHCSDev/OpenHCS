@@ -305,21 +305,21 @@ ProcessingContext Lifecycle
 
 .. code:: python
 
-   # Phase 1: Path planning
-   PipelinePathPlanner.prepare_pipeline_paths(context, steps)
+   # Phase 1: Step plan initialization
+   PipelineCompiler.initialize_step_plans_for_context(context, steps, orchestrator)
 
-   # Phase 2: Materialization planning  
-   MaterializationFlagPlanner.prepare_pipeline_flags(context, steps)
+   # Phase 2: ZARR store declaration
+   PipelineCompiler.declare_zarr_stores_for_context(context, steps, orchestrator)
 
-   # Phase 3: Memory contract validation + function pattern storage
-   memory_types = FuncStepContractValidator.validate_pipeline(steps, context)
-   # memory_types includes: input_memory_type, output_memory_type, AND func
-   # Inject memory types AND function patterns into context.step_plans
-   for step_id, types_and_func in memory_types.items():
-       context.step_plans[step_id].update(types_and_func)  # Includes 'func' key!
+   # Phase 3: Materialization planning
+   PipelineCompiler.plan_materialization_flags_for_context(context, steps, orchestrator)
 
-   # Phase 4: GPU resource assignment
-   GPUMemoryTypeValidator.validate_step_plans(context.step_plans)
+   # Phase 4: Memory contract validation + function pattern storage
+   PipelineCompiler.validate_memory_contracts_for_context(context, steps, orchestrator)
+   # This phase validates memory types AND stores function patterns in step_plans['func']
+
+   # Phase 5: GPU resource assignment
+   PipelineCompiler.assign_gpu_resources_for_context(context, steps, orchestrator)
 
 3. Freezing
 ~~~~~~~~~~~

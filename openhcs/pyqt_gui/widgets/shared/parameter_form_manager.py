@@ -1756,6 +1756,10 @@ class ParameterFormManager(QWidget):
         Args:
             live_context: Optional pre-collected live context. If None, will collect it.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔍 REFRESH: {self.field_id} (id={id(self)}) refreshing with live context")
+
         # Only root managers should collect live context (nested managers inherit from parent)
         # If live_context is already provided (e.g., from parent), use it to avoid redundant collection
         if live_context is None and self._parent_manager is None:
@@ -1942,9 +1946,31 @@ class ParameterFormManager(QWidget):
         This should be called when the window is closing (before destruction) to ensure
         other windows refresh their placeholders without this window's live values.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔍 UNREGISTER: {self.field_id} (id={id(self)}) unregistering from cross-window updates")
+        logger.info(f"🔍 UNREGISTER: Active managers before: {len(self._active_form_managers)}")
+
         try:
             if self in self._active_form_managers:
+                # CRITICAL FIX: Disconnect all signal connections BEFORE removing from registry
+                # This prevents the closed window from continuing to receive signals and execute
+                # _refresh_with_live_context() which causes runaway get_current_values() calls
+                for manager in self._active_form_managers:
+                    if manager is not self:
+                        try:
+                            # Disconnect this manager's signals from other manager
+                            self.context_value_changed.disconnect(manager._on_cross_window_context_changed)
+                            self.context_refreshed.disconnect(manager._on_cross_window_context_refreshed)
+                            # Disconnect other manager's signals from this manager
+                            manager.context_value_changed.disconnect(self._on_cross_window_context_changed)
+                            manager.context_refreshed.disconnect(self._on_cross_window_context_refreshed)
+                        except (TypeError, RuntimeError):
+                            pass  # Signal already disconnected or object destroyed
+
+                # Remove from registry
                 self._active_form_managers.remove(self)
+                logger.info(f"🔍 UNREGISTER: Active managers after: {len(self._active_form_managers)}")
 
                 # CRITICAL: Trigger refresh in all remaining windows
                 # They were using this window's live values, now they need to revert to saved values
@@ -2102,9 +2128,13 @@ class ParameterFormManager(QWidget):
         """
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
         from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+        import logging
+        logger = logging.getLogger(__name__)
 
         live_context = {}
         my_type = type(self.object_instance)
+
+        logger.info(f"🔍 COLLECT_CONTEXT: {self.field_id} (id={id(self)}) collecting from {len(self._active_form_managers)} managers")
 
         for manager in self._active_form_managers:
             if manager is not self:
@@ -2113,6 +2143,9 @@ class ParameterFormManager(QWidget):
                 # PipelineConfig/Step editors have scope_id=plate_path and only affect same orchestrator
                 if manager.scope_id is not None and self.scope_id is not None and manager.scope_id != self.scope_id:
                     continue  # Different orchestrator - skip
+
+                logger.info(f"🔍 COLLECT_CONTEXT: Calling get_user_modified_values() on {manager.field_id} (id={id(manager)})")
+
                 # CRITICAL: Get only user-modified (concrete, non-None) values
                 # This preserves inheritance hierarchy: None values don't override parent values
                 live_values = manager.get_user_modified_values()

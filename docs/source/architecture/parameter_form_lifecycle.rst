@@ -60,6 +60,40 @@ Global Config Lifecycle
 ~~~~~~~~~~~~~~~~~~~~~~~
 Global config editing (accessed from main window) creates forms that show static defaults. Reset operations restore base class default values since there's no higher-level context to resolve against.
 
+Cross-Window Placeholder Updates
+---------------------------------
+When multiple configuration dialogs are open simultaneously, they share live values for placeholder resolution. This enables real-time preview of configuration changes across windows.
+
+Live Context Collection
+~~~~~~~~~~~~~~~~~~~~~~~~
+:py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._collect_live_context_from_other_windows` gathers current user-modified values from all active form managers. When a user types in one window, other windows immediately see the updated value in their placeholders. This creates a live preview system where configuration changes are visible before saving.
+
+Active Manager Registry
+~~~~~~~~~~~~~~~~~~~~~~~~
+:py:attr:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._active_form_managers` maintains a class-level list of all active form manager instances. When a form manager is created, it registers itself in this list. When a dialog closes, it must unregister to prevent ghost references that cause infinite refresh loops.
+
+Signal-Based Synchronization
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Form managers emit :py:attr:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.context_value_changed` and :py:attr:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.context_refreshed` signals when values change. Other active managers listen to these signals and refresh their placeholders accordingly. This creates a reactive system where all windows stay synchronized.
+
+Dialog Lifecycle Management
+----------------------------
+Proper dialog cleanup is critical to prevent ghost form managers that cause infinite refresh loops and runaway CPU usage.
+
+The Ghost Manager Problem
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+When a dialog closes without unregistering its form manager, it remains in the ``_active_form_managers`` registry as a "ghost". When a new dialog opens and the user types, the system collects context from the ghost manager, which triggers a refresh in the ghost, which collects context from the new manager, creating an infinite ping-pong loop.
+
+Qt Dialog Lifecycle Quirk
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Qt's ``QDialog.accept()`` and ``QDialog.reject()`` methods do NOT trigger ``closeEvent()`` - they just hide the dialog and emit signals. This means cleanup code in ``closeEvent()`` is never called when users click Save or Cancel buttons. Dialogs must explicitly unregister in ``accept()``, ``reject()``, and ``closeEvent()`` to ensure cleanup happens regardless of how the dialog closes.
+
+BaseFormDialog Pattern
+~~~~~~~~~~~~~~~~~~~~~~
+:py:class:`~openhcs.pyqt_gui.windows.base_form_dialog.BaseFormDialog` solves the cleanup problem by providing a base class that automatically handles unregistration. It overrides ``accept()``, ``reject()``, and ``closeEvent()`` to call ``_unregister_all_form_managers()`` before closing. Subclasses implement ``_get_form_managers()`` to return their form manager instances, and the base class handles all cleanup automatically.
+
+This pattern ensures that every dialog using ParameterFormManager properly cleans up, preventing ghost manager bugs without requiring developers to remember manual cleanup in multiple methods.
+
 Form State Synchronization
 --------------------------
 The three-state synchronization pattern ensures consistency across all UI components.
@@ -76,8 +110,41 @@ Widget Display State
 ~~~~~~~~~~~~~~~~~~~~
 Widget values and placeholder text reflect the combination of internal parameters and context resolution. The form manager ensures widgets always display the correct state based on current parameters and context.
 
+Example: BaseFormDialog Usage
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
+   from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+   class MyConfigDialog(BaseFormDialog):
+       """Configuration dialog with automatic cleanup."""
+
+       def __init__(self, config, parent=None):
+           super().__init__(parent)
+
+           # Create form manager
+           self.form_manager = ParameterFormManager(
+               field_id="my_config",
+               dataclass_type=type(config),
+               initial_values=config
+           )
+
+       def _get_form_managers(self):
+           """Return form managers to unregister (required by BaseFormDialog)."""
+           return [self.form_manager]
+
+       # No need to override accept(), reject(), or closeEvent()
+       # BaseFormDialog handles all cleanup automatically!
+
+This pattern ensures proper cleanup regardless of how the dialog closes (Save button → ``accept()``, Cancel button → ``reject()``, X button → ``closeEvent()``).
+
 See Also
 --------
 - :doc:`placeholder_resolution_system` - Placeholder generation using form context
 - :doc:`context_management_system` - Thread-local context management patterns
 - :doc:`service-layer-architecture` - Service layer integration with forms
+- :py:class:`~openhcs.pyqt_gui.windows.base_form_dialog.BaseFormDialog` - Base class for dialog cleanup
+- :py:class:`~openhcs.pyqt_gui.windows.config_window.ConfigWindow` - Example BaseFormDialog implementation
+- :py:class:`~openhcs.pyqt_gui.windows.dual_editor_window.DualEditorWindow` - Example BaseFormDialog implementation

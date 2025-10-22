@@ -20,18 +20,22 @@ from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
+from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 logger = logging.getLogger(__name__)
 
 
-class DualEditorWindow(QDialog):
+class DualEditorWindow(BaseFormDialog):
     """
     PyQt6 Multi-Tab Parameter Editor Window.
 
     Generic parameter editing dialog with inheritance hierarchy-based tabbed interface.
     Creates one tab per class in the inheritance hierarchy, showing parameters specific
     to each class level. Preserves all business logic from Textual version with clean PyQt6 UI.
+
+    Inherits from BaseFormDialog to automatically handle unregistration from
+    cross-window placeholder updates when the dialog closes.
     """
-    
+
     # Signals
     step_saved = pyqtSignal(object)  # FunctionStep
     step_cancelled = pyqtSignal()
@@ -494,7 +498,7 @@ class DualEditorWindow(QDialog):
             if self.on_save_callback:
                 self.on_save_callback(step_to_save)
 
-            self.accept()
+            self.accept()  # BaseFormDialog handles unregistration
             logger.debug(f"Step saved: {getattr(step_to_save, 'name', 'Unknown')}")
 
         except Exception as e:
@@ -557,13 +561,8 @@ class DualEditorWindow(QDialog):
                 return
 
         self.step_cancelled.emit()
-        # CRITICAL: Unregister from cross-window updates before closing
-        if hasattr(self, 'step_editor') and hasattr(self.step_editor, 'form_manager'):
-            self.step_editor.form_manager.unregister_from_cross_window_updates()
-        self.reject()
+        self.reject()  # BaseFormDialog handles unregistration
         logger.debug("Step editing cancelled")
-
-
 
     def closeEvent(self, event):
         """Handle dialog close event."""
@@ -581,7 +580,10 @@ class DualEditorWindow(QDialog):
                 event.ignore()
                 return
 
-        # CRITICAL: Unregister from cross-window updates before closing
+        super().closeEvent(event)  # BaseFormDialog handles unregistration
+
+    def _get_form_managers(self):
+        """Return list of form managers to unregister (required by BaseFormDialog)."""
         if hasattr(self, 'step_editor') and hasattr(self.step_editor, 'form_manager'):
-            self.step_editor.form_manager.unregister_from_cross_window_updates()
-        event.accept()
+            return [self.step_editor.form_manager]
+        return []

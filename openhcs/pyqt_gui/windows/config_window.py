@@ -21,6 +21,7 @@ from PyQt6.QtGui import QFont
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
@@ -33,14 +34,17 @@ logger = logging.getLogger(__name__)
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 
 
-class ConfigWindow(QDialog):
+class ConfigWindow(BaseFormDialog):
     """
     PyQt6 Configuration Window.
-    
+
     Configuration editing dialog with parameter forms and validation.
     Preserves all business logic from Textual version with clean PyQt6 UI.
+
+    Inherits from BaseFormDialog to automatically handle unregistration from
+    cross-window placeholder updates when the dialog closes.
     """
-    
+
     # Signals
     config_saved = pyqtSignal(object)  # saved config
     config_cancelled = pyqtSignal()
@@ -721,26 +725,10 @@ class ConfigWindow(QDialog):
     def reject(self):
         """Handle dialog rejection (Cancel button)."""
         self.config_cancelled.emit()
-        # CRITICAL: Unregister from cross-window updates so other windows revert to saved values
-        # Only do this on cancel - on save, the values are now saved so other windows should use them
+        super().reject()  # BaseFormDialog handles unregistration
+
+    def _get_form_managers(self):
+        """Return list of form managers to unregister (required by BaseFormDialog)."""
         if hasattr(self, 'form_manager'):
-            self.form_manager.unregister_from_cross_window_updates()
-        super().reject()
-
-    def accept(self):
-        """Handle dialog acceptance (Save button)."""
-        # DON'T unregister on save - the values are now saved, so other windows should continue using them
-        # The unregistration will happen naturally when the widget is destroyed
-        super().accept()
-
-    def closeEvent(self, event):
-        """Handle window close event."""
-        # Only unregister if we're closing without saving (user clicked X)
-        # If we saved, the values are persisted so other windows should use them
-        # Check if we're in the middle of saving
-        if not getattr(self, '_saving', False):
-            if hasattr(self, 'form_manager'):
-                self.form_manager.unregister_from_cross_window_updates()
-        super().closeEvent(event)
-
-        logger.debug(f"Config window closing (id={id(self)})")
+            return [self.form_manager]
+        return []

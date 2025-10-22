@@ -273,6 +273,139 @@ def get_thread_gpu_context() -> ThreadGPUContext:
     return _thread_gpu_contexts.gpu_context
 
 
+# ===== MATERIALIZATION FUNCTION WRAPPING =====
+
+def wrap_materialization_function(mat_func: Callable) -> Callable:
+    """
+    Wrap a single-backend materialization function to handle multi-backend pattern.
+
+    Transforms signature from:
+        (data, path, filemanager, backend: str, **kwargs) -> str
+    To:
+        (data, path, filemanager, backends: Union[str, List[str]], backend_kwargs: dict) -> str
+
+    This allows developers to write simple single-backend materialization logic,
+    while the wrapper automatically handles looping over multiple backends.
+
+    Args:
+        mat_func: Materialization function with single-backend signature
+
+    Returns:
+        Wrapped function with multi-backend signature
+
+    Example:
+        # Developer writes simple single-backend function:
+        def materialize_rois(data, path, filemanager, backend: str):
+            filemanager.save(data, path, backend)
+            return path
+
+        # Wrapper transforms it to handle multiple backends:
+        wrapped = wrap_materialization_function(materialize_rois)
+        wrapped(data, path, fm, ['disk', 'napari'], {'napari': {'port': 5555}})
+        # Calls: materialize_rois(data, path, fm, 'disk')
+        # Calls: materialize_rois(data, path, fm, 'napari', port=5555)
+    """
+    import inspect
+    from typing import Union, List
+
+    # Check if function already has multi-backend signature
+    sig = inspect.signature(mat_func)
+    params = list(sig.parameters.keys())
+
+    # If it has 'backends' parameter (plural), it's already wrapped
+    if 'backends' in params:
+        logger.debug(f"Materialization function {mat_func.__name__} already has multi-backend signature, skipping wrap")
+        return mat_func
+
+    # If it doesn't have 'backend' parameter, it's not a materialization function
+    if 'backend' not in params:
+        logger.debug(f"Function {mat_func.__name__} doesn't have 'backend' parameter, skipping wrap")
+        return mat_func
+
+    @functools.wraps(mat_func)
+    def multi_backend_wrapper(data, path, filemanager, backends: Union[str, List[str]], backend_kwargs: dict = None):
+        """Auto-generated multi-backend wrapper for materialization function."""
+        # Normalize backends to list
+        if isinstance(backends, str):
+            backends = [backends]
+
+        if backend_kwargs is None:
+            backend_kwargs = {}
+
+        # Check if original function accepts **kwargs
+        sig = inspect.signature(mat_func)
+        accepts_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+
+        # Call materialization function for each backend
+        result_path = None
+        for backend in backends:
+            kwargs = backend_kwargs.get(backend, {})
+            logger.debug(f"Materializing to backend '{backend}' with kwargs: {kwargs}")
+
+            if accepts_kwargs or kwargs:
+                # Only pass kwargs if function accepts them or if there are kwargs to pass
+                if accepts_kwargs:
+                    result_path = mat_func(data, path, filemanager, backend, **kwargs)
+                else:
+                    # Function doesn't accept **kwargs, only call with positional args
+                    if kwargs:
+                        logger.warning(f"Backend '{backend}' has kwargs {kwargs} but {mat_func.__name__} doesn't accept **kwargs, ignoring")
+                    result_path = mat_func(data, path, filemanager, backend)
+            else:
+                result_path = mat_func(data, path, filemanager, backend)
+
+        return result_path  # Return path from last backend
+
+    logger.debug(f"Wrapped materialization function {mat_func.__name__} with multi-backend pattern")
+    return multi_backend_wrapper
+
+
+def _wrap_materialization_functions_if_present(func: F) -> F:
+    """
+    Wrap materialization functions if the function has __materialization_functions__ attribute.
+
+    This is called by the base memory_types() decorator, so ALL memory type decorators
+    (@numpy, @cupy, @torch, @jax, @pyclesperanto, @tensorflow) automatically get this behavior.
+
+    Args:
+        func: Function that may have __materialization_functions__ attribute
+
+    Returns:
+        Function with wrapped materialization functions (if any)
+
+    Example:
+        @numpy
+        @special_outputs(("cell_counts", materialize_cell_counts))
+        def count_cells(image):
+            return image, counts
+
+        # When @numpy calls memory_types(), this function:
+        # 1. Detects __materialization_functions__ attribute
+        # 2. Wraps materialize_cell_counts with multi-backend pattern
+        # 3. Updates __materialization_functions__ with wrapped version
+    """
+    if not hasattr(func, '__materialization_functions__'):
+        return func
+
+    mat_funcs_dict = func.__materialization_functions__
+    if not mat_funcs_dict:
+        return func
+
+    # Wrap each materialization function
+    wrapped_mat_funcs = {
+        key: wrap_materialization_function(mat_func) if mat_func else None
+        for key, mat_func in mat_funcs_dict.items()
+    }
+
+    # Update the attribute with wrapped versions
+    func.__materialization_functions__ = wrapped_mat_funcs
+    logger.debug(f"Wrapped {len(wrapped_mat_funcs)} materialization functions for {func.__name__}")
+
+    return func
+
+
+# ===== BASE MEMORY TYPE DECORATOR =====
+
 def memory_types(*, input_type: str, output_type: str, contract: Optional['ProcessingContract'] = None) -> Callable[[F], F]:
     """
     Decorator that explicitly declares the memory types for a function's input and output.
@@ -357,7 +490,12 @@ def memory_types(*, input_type: str, output_type: str, contract: Optional['Proce
         else:
             func.__processing_contract__ = contract
 
-        # Return the function unchanged (no wrapper)
+        # Automatically wrap materialization functions if present
+        # This ensures ALL memory type decorators (@numpy, @cupy, @torch, etc.)
+        # automatically get multi-backend materialization support
+        func = _wrap_materialization_functions_if_present(func)
+
+        # Return the function (possibly with wrapped materialization functions)
         return func
 
     return decorator
