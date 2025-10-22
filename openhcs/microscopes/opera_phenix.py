@@ -104,6 +104,7 @@ class OperaPhenixHandler(MicroscopeHandler):
         field_mapping = {}
 
         # Try to load field mapping from Index.xml if available
+        xml_parser = None
         try:
             index_xml = filemanager.find_file_recursive(plate_path, "Index.xml", Backend.DISK.value)
             if index_xml:
@@ -116,7 +117,14 @@ class OperaPhenixHandler(MicroscopeHandler):
             logger.error("Error loading Index.xml: %s", e)
             logger.debug("Using default field mapping due to error.")
 
-        # Get all image files in the directory
+        # Fill missing images BEFORE building virtual mapping
+        # This handles autofocus failures by creating black placeholder images
+        if xml_parser:
+            num_filled = self._fill_missing_images(image_dir, xml_parser, filemanager)
+            if num_filled > 0:
+                logger.info(f"Created {num_filled} placeholder images for autofocus failures")
+
+        # Get all image files in the directory (including newly created placeholders)
         image_files = filemanager.list_image_files(image_dir, Backend.DISK.value)
 
         # Initialize mapping dict (PLATE-RELATIVE paths)

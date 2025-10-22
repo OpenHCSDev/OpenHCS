@@ -411,6 +411,16 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             logger.warning(f"Data count mismatch: got {len(data_list)}, expected {total_expected} "
                          f"(fields={n_fields}, channels={n_channels}, z={n_z})")
 
+        # Log detailed shape information before reshape
+        logger.info(f"🔍 ZARR RESHAPE DEBUG:")
+        logger.info(f"  - Input: {len(data_list)} images")
+        logger.info(f"  - Stacked shape: {stacked_data.shape}")
+        logger.info(f"  - Stacked size: {stacked_data.size}")
+        logger.info(f"  - Target shape: {target_shape}")
+        logger.info(f"  - Target size: {np.prod(target_shape)}")
+        logger.info(f"  - Sample image shape: {sample_image.shape}")
+        logger.info(f"  - Dimensions: fields={n_fields}, channels={n_channels}, z={n_z}, h={height}, w={width}")
+
         # Always reshape to 5D structure
         reshaped_data = stacked_data.reshape(target_shape)
 
