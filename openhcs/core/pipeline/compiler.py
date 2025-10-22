@@ -293,6 +293,13 @@ class PipelineCompiler:
                 # Update orchestrator's config so it's used throughout execution
                 orchestrator.pipeline_config = pipeline_config
 
+                # CRITICAL: Also update context.global_config so get_vfs_config() returns the updated config
+                # The context was created with the old config, so we need to update it here
+                context.global_config = dataclasses.replace(
+                    context.global_config,
+                    vfs_config=pipeline_config.vfs_config
+                )
+
         # The axis_id and base_input_dir are available from the context object.
         # Path planning now gets config directly from orchestrator.pipeline_config parameter
         PipelinePathPlanner.prepare_pipeline_paths(
