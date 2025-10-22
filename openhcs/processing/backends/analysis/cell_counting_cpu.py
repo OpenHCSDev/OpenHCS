@@ -613,10 +613,11 @@ def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str
     csv_path = f"{base_path}_details.csv"
 
     # Ensure output directory exists for disk backend
+    # Skip directory creation for OMERO virtual paths (they don't exist on disk)
     from pathlib import Path
     output_dir = Path(json_path).parent
     for backend in backends:
-        if backend == Backend.DISK.value:
+        if backend == Backend.DISK.value and not str(output_dir).startswith('/omero/'):
             filemanager.ensure_directory(str(output_dir), backend)
 
     summary = {

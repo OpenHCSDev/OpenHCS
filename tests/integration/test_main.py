@@ -387,11 +387,15 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
         storage_registry['omero_local'] = omero_backend
 
     # Create PipelineConfig with lazy configs for proper hierarchical inheritance
+    # CRITICAL: Explicitly set vfs_config=None to inherit from global config
+    # Without this, PipelineConfig auto-creates a VFSConfig with default values (materialization_backend=DISK)
+    # which overrides the global config's omero_local backend for OMERO tests
     pipeline_config = PipelineConfig(
         path_planning_config=LazyPathPlanningConfig(
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
         step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+        vfs_config=None,  # Inherit from global config
     )
 
     # Convert plate_dir to Path - for OMERO, format as /omero/plate_{id}
