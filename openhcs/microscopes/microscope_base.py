@@ -157,140 +157,113 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         """
         return self.compatible_backends
 
-    def get_primary_backend(self, plate_path: Union[str, Path]) -> str:
+    def get_primary_backend(self, plate_path: Union[str, Path], filemanager: 'FileManager') -> str:
         """
         Get the primary backend name for this plate.
 
-        Default implementation returns the first compatible backend.
+        Checks FileManager registry first for registered backends (like virtual_workspace),
+        then falls back to compatible backends.
+
         Override this method only if you need custom backend selection logic
         (like OpenHCS which reads from metadata).
 
         Args:
-            plate_path: Path to the plate folder
+            plate_path: Path to the plate folder (or subdirectory)
+            filemanager: FileManager instance to check for registered backends
 
         Returns:
-            Backend name string (e.g., 'disk', 'zarr')
+            Backend name string (e.g., 'disk', 'zarr', 'virtual_workspace')
         """
+        # Check if virtual workspace backend is registered in FileManager
+        # This takes priority over compatible backends
+        if Backend.VIRTUAL_WORKSPACE.value in filemanager.registry:
+            logger.info(f"✅ Using backend '{Backend.VIRTUAL_WORKSPACE.value}' from FileManager registry")
+            return Backend.VIRTUAL_WORKSPACE.value
+
+        # Fall back to compatible backends
         available_backends = self.get_available_backends(plate_path)
         if not available_backends:
             raise RuntimeError(f"No available backends for {self.microscope_type} microscope at {plate_path}")
+        logger.info(f"⚠️ Using backend '{available_backends[0].value}' from compatible backends (virtual workspace not registered)")
         return available_backends[0].value
 
-    def initialize_workspace(self, plate_path: Path, workspace_path: Optional[Path], filemanager: FileManager) -> Path:
+    def initialize_workspace(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
-        Default workspace initialization: create workspace in plate folder and mirror with symlinks.
+        Initialize plate by creating virtual mapping in metadata.
 
-        Most microscope handlers need workspace mirroring. Override this method only if different behavior is needed.
+        No physical workspace directory is created - mapping is purely metadata-based.
+        All paths are relative to plate_path.
 
         Args:
-            plate_path: Path to the original plate directory
-            workspace_path: Optional workspace path (creates default in plate folder if None)
-            filemanager: FileManager instance for file operations
+            plate_path: Path to plate directory
+            filemanager: FileManager instance
 
         Returns:
-            Path to the actual directory containing images to process
+            Path to image directory (determined from plate structure)
         """
+        from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
         from openhcs.constants.constants import Backend
 
-        # Create workspace path in plate folder if not provided
-        if workspace_path is None:
-            workspace_path = plate_path / "workspace"
-
-        # Check if workspace already exists - skip mirroring if it does
-        workspace_already_exists = workspace_path.exists()
-        if workspace_already_exists:
-            logger.info(f"📁 EXISTING WORKSPACE FOUND: {workspace_path} - skipping mirror operation")
-            num_links = 0  # No new links created
-        else:
-            # Ensure workspace directory exists
-            filemanager.ensure_directory(str(workspace_path), Backend.DISK.value)
-
-            # Mirror plate directory with symlinks
-            logger.info(f"Mirroring plate directory {plate_path} to workspace {workspace_path}...")
-            try:
-                num_links = filemanager.mirror_directory_with_symlinks(
-                    source_dir=str(plate_path),
-                    target_dir=str(workspace_path),
-                    backend=Backend.DISK.value,
-                    recursive=True,
-                    overwrite_symlinks_only=True,
-                )
-                logger.info(f"Created {num_links} symlinks in workspace.")
-            except Exception as mirror_error:
-                # If mirroring fails, clean up and try again with fail-loud
-                logger.warning(f"⚠️ MIRROR FAILED: {mirror_error}. Cleaning workspace and retrying...")
-                try:
-                    import shutil
-                    shutil.rmtree(workspace_path)
-                    logger.info(f"🧹 Cleaned up failed workspace: {workspace_path}")
-
-                    # Recreate directory and try mirroring again
-                    filemanager.ensure_directory(str(workspace_path), Backend.DISK.value)
-                    num_links = filemanager.mirror_directory_with_symlinks(
-                        source_dir=str(plate_path),
-                        target_dir=str(workspace_path),
-                        backend=Backend.DISK.value,
-                        recursive=True,
-                        overwrite_symlinks_only=True,
-                    )
-                    logger.info(f"✅ RETRY SUCCESS: Created {num_links} symlinks in workspace.")
-                except Exception as retry_error:
-                    # Fail loud on second attempt
-                    error_msg = f"Failed to mirror plate directory to workspace after cleanup: {retry_error}"
-                    logger.error(error_msg)
-                    raise RuntimeError(error_msg) from retry_error
+        plate_path = Path(plate_path)
 
         # Set plate_folder for this handler
-        self.plate_folder = workspace_path
+        self.plate_folder = plate_path
 
-        # Prepare workspace and return final image directory
-        return self.post_workspace(workspace_path, filemanager, skip_preparation=workspace_already_exists)
+        # Call microscope-specific virtual mapping builder
+        # This builds the plate-relative mapping dict and saves to metadata
+        self._build_virtual_mapping(plate_path, filemanager)
 
-    def post_workspace(self, workspace_path: Union[str, Path], filemanager: FileManager, width: int = 3, skip_preparation: bool = False):
+        # Register virtual workspace backend in FileManager's local registry
+        backend = VirtualWorkspaceBackend(plate_root=plate_path)
+        filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
+
+        logger.info(f"Registered virtual workspace backend for {plate_path}")
+
+        # Return image directory using post_workspace
+        # skip_preparation=True because _build_virtual_mapping() already ran
+        return self.post_workspace(plate_path, filemanager, skip_preparation=True)
+
+    def post_workspace(self, plate_path: Union[str, Path], filemanager: FileManager, skip_preparation: bool = False) -> Path:
         """
-        Hook called after workspace symlink creation.
-        Applies normalization logic followed by consistent filename padding.
+        Apply post-workspace processing using virtual mapping.
 
-        This method requires a disk-backed path and should only be called
-        from steps with requires_fs_input=True.
+        All operations use plate_path - no workspace directory concept.
 
         Args:
-            workspace_path: Path to the workspace (string or Path object)
-            filemanager: FileManager instance for file operations
-            width: Width for padding (default: 3)
-            skip_preparation: If True, skip microscope-specific preparation (default: False)
+            plate_path: Path to plate directory
+            filemanager: FileManager instance
+            skip_preparation: Skip microscope-specific preparation (default: False)
 
         Returns:
-            Path to the normalized image directory
-
-        Raises:
-            FileNotFoundError: If workspace_path does not exist
+            Path to image directory
         """
-        # Ensure workspace_path is a Path object
-        if isinstance(workspace_path, str):
-            workspace_path = Path(workspace_path)
+        # Ensure plate_path is a Path object
+        if isinstance(plate_path, str):
+            plate_path = Path(plate_path)
 
-        # Ensure the path exists
-        if not workspace_path.exists():
-            raise FileNotFoundError(f"Workspace path does not exist: {workspace_path}")
+        # NO existence check - virtual workspaces are metadata-only
 
-        # Apply microscope-specific preparation logic (skip if workspace already existed)
+        # Apply microscope-specific preparation logic
         if skip_preparation:
-            logger.info("📁 SKIPPING PREPARATION: Workspace already existed - using as-is")
-            prepared_dir = workspace_path
+            logger.info("📁 SKIPPING PREPARATION: Virtual mapping already built")
+            prepared_dir = plate_path
         else:
-            logger.info("🔄 APPLYING PREPARATION: Processing new workspace")
-            prepared_dir = self._prepare_workspace(workspace_path, filemanager)
+            logger.info("🔄 APPLYING PREPARATION: Building virtual mapping")
+            prepared_dir = self._build_virtual_mapping(plate_path, filemanager)
 
-        # Deterministically resolve the image directory based on common_dirs
-        # Clause 245: Workspace operations are disk-only by design
-        # This call is structurally hardcoded to use the "disk" backend
-        entries = filemanager.list_dir(workspace_path, Backend.DISK.value)
+        # Determine backend - check if virtual workspace backend is registered
+        if Backend.VIRTUAL_WORKSPACE.value in filemanager.registry:
+            backend_type = Backend.VIRTUAL_WORKSPACE.value
+        else:
+            backend_type = Backend.DISK.value
+
+        # List contents
+        entries = filemanager.list_dir(plate_path, backend_type)
 
         # Filter entries to get only directories
         subdirs = []
         for entry in entries:
-            entry_path = Path(workspace_path) / entry
+            entry_path = Path(plate_path) / entry
             if entry_path.is_dir():
                 subdirs.append(entry_path)
 
@@ -321,10 +294,8 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         # Ensure parser is provided
         parser = self.parser
 
-        # Get all image files in the directory
-        # Clause 245: Workspace operations are disk-only by design
-        # This call is structurally hardcoded to use the "disk" backend
-        image_files = filemanager.list_image_files(image_dir, Backend.DISK.value)
+        # Get all image files in the directory - use same backend as determined above
+        image_files = filemanager.list_image_files(image_dir, backend_type)
 
         # Map original filenames to reconstructed filenames
         rename_map = {}
@@ -409,31 +380,23 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         return image_dir
 
     @abstractmethod
-    def _prepare_workspace(self, workspace_path: Path, filemanager: FileManager):
+    def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
-        Microscope-specific preparation logic before image directory resolution.
+        Build microscope-specific virtual workspace mapping.
 
-        This method performs any necessary preprocessing on the workspace but does NOT
-        determine the final image directory. It may return a suggested directory, but
-        the final image directory will be determined by post_workspace() based on
-        common_dirs matching.
+        This method creates a plate-relative mapping dict and saves it to metadata.
+        All paths in the mapping are relative to plate_path.
 
-        Override in subclasses. Default implementation just returns the workspace path.
-
-        This method requires a disk-backed path and should only be called
-        from steps with requires_fs_input=True.
+        Override in subclasses to implement microscope-specific mapping logic.
 
         Args:
-            workspace_path: Path to the symlinked workspace
+            plate_path: Path to plate directory
             filemanager: FileManager instance for file operations
 
         Returns:
-            Path: A suggested directory for further processing (not necessarily the final image directory)
-
-        Raises:
-            FileNotFoundError: If workspace_path does not exist
+            Path: Suggested directory for further processing
         """
-        return workspace_path
+        return plate_path
 
 
     # Delegate methods to parser

@@ -186,15 +186,8 @@ class PathPlanner:
                 'input_conversion_backend': self.vfs.materialization_backend.value
             })
 
-        # Set backend if needed
-        if getattr(step, 'input_source', None) == InputSource.PIPELINE_START:
-            self.plans[sid][READ_BACKEND] = self.vfs.materialization_backend.value
-
-            # If zarr conversion occurred, redirect input_dir to zarr store
-            if self.vfs.materialization_backend == MaterializationBackend.ZARR and pipeline:
-                first_step_plan = self.plans.get(0, {})  # Use step index 0 instead of step_id
-                if "input_conversion_dir" in first_step_plan:
-                    self.plans[sid]['input_dir'] = first_step_plan['input_conversion_dir']
+        # PIPELINE_START steps read from original input, not zarr conversion
+        # (zarr conversion only applies to normal pipeline flow, not PIPELINE_START jumps)
 
     def _get_dir(self, step: AbstractStep, i: int, pipeline: List,
                  dir_type: str, fallback: Path = None) -> Path:

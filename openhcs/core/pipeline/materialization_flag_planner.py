@@ -57,7 +57,13 @@ class MaterializationFlagPlanner:
                 # Zarr conversion flag is already set by path planner if needed
             else:  # Other steps - read from memory (unless already set by chainbreaker logic)
                 if READ_BACKEND not in step_plan:
-                    step_plan[READ_BACKEND] = Backend.MEMORY.value
+                    # Check if this step reads from PIPELINE_START (original input)
+                    from openhcs.core.steps.abstract import InputSource
+                    if getattr(step, 'input_source', None) == InputSource.PIPELINE_START:
+                        # Use the same backend as the first step
+                        step_plan[READ_BACKEND] = step_plans[0][READ_BACKEND]
+                    else:
+                        step_plan[READ_BACKEND] = Backend.MEMORY.value
 
             # === WRITE BACKEND SELECTION ===
             # Check if this step will use zarr (has zarr_config set by compiler)
@@ -104,7 +110,7 @@ class MaterializationFlagPlanner:
         """Unified backend detection logic for both read and materialization backends."""
         # Use the microscope handler's get_primary_backend method
         # This handles both OpenHCS (metadata-based) and other microscopes (compatibility-based)
-        return context.microscope_handler.get_primary_backend(context.input_dir)
+        return context.microscope_handler.get_primary_backend(context.input_dir, context.filemanager)
 
 
 

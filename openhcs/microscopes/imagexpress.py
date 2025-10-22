@@ -16,6 +16,7 @@ import tifffile
 from openhcs.constants.constants import Backend
 from openhcs.io.exceptions import MetadataNotFoundError
 from openhcs.io.filemanager import FileManager
+from openhcs.io.metadata_writer import AtomicMetadataWriter
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 from openhcs.microscopes.microscope_interfaces import (FilenameParser,
                                                             MetadataHandler)
@@ -70,32 +71,33 @@ class ImageXpressHandler(MicroscopeHandler):
 
     # Uses default workspace initialization from base class
 
-    def _prepare_workspace(self, workspace_path: Path, filemanager: FileManager) -> Path:
+    def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
-        Flattens TimePoint and Z-step folder structures and renames image files for
-        consistent padding and dimension resolution.
+        Build ImageXpress virtual workspace mapping using plate-relative paths.
 
-        This method performs preparation but does not determine the final image directory.
+        Flattens TimePoint and Z-step folder structures virtually by building a mapping dict.
 
         Args:
-            workspace_path: Path to the symlinked workspace
+            plate_path: Path to plate directory
             filemanager: FileManager instance for file operations
 
         Returns:
-            Path to the flattened image directory.
+            Path to image directory
         """
-        # First, flatten timepoint folders (if they exist)
-        self._flatten_timepoints(workspace_path, filemanager)
+        plate_path = Path(plate_path)  # Ensure Path object
 
-        # Then flatten Z-steps (existing logic)
-        # Find all subdirectories in workspace using the filemanager
-        # Pass the backend parameter as required by Clause 306 (Backend Positional Parameters)
-        entries = filemanager.list_dir(workspace_path, Backend.DISK.value)
+        logger.info(f"🔄 BUILDING VIRTUAL MAPPING: ImageXpress folder flattening for {plate_path}")
+
+        # Initialize mapping dict (PLATE-RELATIVE paths)
+        workspace_mapping = {}
+
+        # Find all subdirectories in plate
+        entries = filemanager.list_dir(plate_path, Backend.DISK.value)
 
         # Filter entries to get only directories
         subdirs = []
         for entry in entries:
-            entry_path = Path(workspace_path) / entry
+            entry_path = Path(plate_path) / entry
             if entry_path.is_dir():
                 subdirs.append(entry_path)
 
@@ -104,52 +106,59 @@ class ImageXpressHandler(MicroscopeHandler):
 
         for subdir in subdirs:
             if any(common_dir in subdir.name for common_dir in self.common_dirs):
-                self._flatten_zsteps(subdir, filemanager)
+                # Flatten TimePoint and ZStep folders virtually (reuse existing methods)
+                self._flatten_timepoints(subdir, filemanager, workspace_mapping, plate_path)
+                self._flatten_zsteps(subdir, filemanager, workspace_mapping, plate_path)
                 common_dir_found = True
 
-        # If no common directory found, process the workspace directly
+        # If no common directory found, process the plate directly
         if not common_dir_found:
-            self._flatten_zsteps(workspace_path, filemanager)
+            self._flatten_timepoints(plate_path, filemanager, workspace_mapping, plate_path)
+            self._flatten_zsteps(plate_path, filemanager, workspace_mapping, plate_path)
 
-        # Remove thumbnail symlinks after processing
-        # Find all files in workspace recursively
-        _, all_files = filemanager.collect_dirs_and_files(workspace_path, Backend.DISK.value, recursive=True)
+        logger.info(f"Built {len(workspace_mapping)} virtual path mappings for ImageXpress")
 
-        for file_path in all_files:
-            # Check if filename contains "thumb" and if it's a symlink
-            if "thumb" in Path(file_path).name.lower() and filemanager.is_symlink(file_path, Backend.DISK.value):
-                try:
-                    filemanager.delete(file_path, Backend.DISK.value)
-                    logger.debug("Removed thumbnail symlink: %s", file_path)
-                except Exception as e:
-                    logger.warning("Failed to remove thumbnail symlink %s: %s", file_path, e)
+        # Save virtual workspace mapping to metadata
+        metadata_path = plate_path / "openhcs_metadata.json"
+        writer = AtomicMetadataWriter()
+
+        # Determine subdirectory name for metadata
+        subdir_name = subdirs[0].name if common_dir_found and subdirs else "Images"
+
+        writer.merge_subdirectory_metadata(metadata_path, {
+            subdir_name: {
+                "workspace_mapping": workspace_mapping,  # Plate-relative paths
+                "available_backends": {"disk": True, "virtual_workspace": True}
+            }
+        })
+
+        logger.info(f"✅ Saved virtual workspace mapping to {metadata_path}")
 
         # Return the image directory
-        return workspace_path
+        return plate_path
 
-    def _flatten_zsteps(self, directory: Path, fm: FileManager):
+    def _flatten_zsteps(self, directory: Path, fm: FileManager, mapping_dict: Dict[str, str], plate_path: Path):
         """
-        Process Z-step folders in the given directory.
+        Process Z-step folders virtually by building plate-relative mapping dict.
 
         Args:
             directory: Path to directory that might contain Z-step folders
             fm: FileManager instance for file operations
+            mapping_dict: Dict to populate with virtual → real mappings
+            plate_path: Plate root path for computing relative paths
         """
         zstep_pattern = re.compile(r"ZStep[_-]?(\d+)", re.IGNORECASE)
 
         # Find and process Z-step folders
-        found_folders = self._flatten_indexed_folders(
+        self._flatten_indexed_folders(
             directory=directory,
             fm=fm,
             folder_pattern=zstep_pattern,
             component_name='z_index',
-            folder_type="ZStep"
+            folder_type="ZStep",
+            mapping_dict=mapping_dict,
+            plate_path=plate_path
         )
-
-        # If no Z-step folders found, process files directly
-        if not found_folders:
-            logger.info("No Z step folders found in %s. Processing files directly in directory.", directory)
-            self._process_files_in_directory(directory, fm)
 
     def _process_files_in_directory(self, directory: Path, fm: FileManager):
         """
@@ -216,15 +225,15 @@ class ImageXpressHandler(MicroscopeHandler):
                         logger.error("Error renaming %s to %s: %s", img_file, new_path, e)
                         raise
 
-    def _flatten_timepoints(self, directory: Path, fm: FileManager):
+    def _flatten_timepoints(self, directory: Path, fm: FileManager, mapping_dict: Dict[str, str], plate_path: Path):
         """
-        Process TimePoint folders in the given directory.
-
-        Flattens structure: TimePoint_N/ZStep_M/file.tif → file_zM_tN.tif
+        Process TimePoint folders virtually by building plate-relative mapping dict.
 
         Args:
             directory: Path to directory that might contain TimePoint folders
             fm: FileManager instance for file operations
+            mapping_dict: Dict to populate with virtual → real mappings
+            plate_path: Plate root path for computing relative paths
         """
         timepoint_pattern = re.compile(r"TimePoint[_-]?(\d+)", re.IGNORECASE)
 
@@ -235,8 +244,7 @@ class ImageXpressHandler(MicroscopeHandler):
 
         for subdir in subdirs:
             if timepoint_pattern.search(subdir.name):
-                # Flatten Z-steps within this timepoint folder
-                self._flatten_zsteps(subdir, fm)
+                self._flatten_zsteps(subdir, fm, mapping_dict, plate_path)
 
         # Then flatten timepoint folders themselves
         self._flatten_indexed_folders(
@@ -244,16 +252,18 @@ class ImageXpressHandler(MicroscopeHandler):
             fm=fm,
             folder_pattern=timepoint_pattern,
             component_name='timepoint',
-            folder_type="TimePoint"
+            folder_type="TimePoint",
+            mapping_dict=mapping_dict,
+            plate_path=plate_path
         )
 
     def _flatten_indexed_folders(self, directory: Path, fm: FileManager,
                                  folder_pattern: re.Pattern, component_name: str,
-                                 folder_type: str) -> bool:
+                                 folder_type: str, mapping_dict: Dict[str, str], plate_path: Path):
         """
-        Generic helper to flatten indexed folders (TimePoint_N, ZStep_M, etc.).
+        Generic helper to flatten indexed folders virtually (TimePoint_N, ZStep_M, etc.).
 
-        Updates the specified component in filenames and moves files to parent directory.
+        Builds plate-relative mapping dict instead of moving files.
 
         Args:
             directory: Path to directory that might contain indexed folders
@@ -261,9 +271,8 @@ class ImageXpressHandler(MicroscopeHandler):
             folder_pattern: Regex pattern to match folder names (must have one capture group for index)
             component_name: Component to update in metadata (e.g., 'z_index', 'timepoint')
             folder_type: Human-readable folder type name (for logging)
-
-        Returns:
-            bool: True if folders were found and processed, False otherwise
+            mapping_dict: Dict to populate with virtual → real mappings
+            plate_path: Plate root path for computing relative paths
         """
         # List all subdirectories
         entries = fm.list_dir(directory, Backend.DISK.value)
@@ -279,12 +288,12 @@ class ImageXpressHandler(MicroscopeHandler):
                 indexed_folders.append((index, d))
 
         if not indexed_folders:
-            return False
+            return
 
         # Sort by index
         indexed_folders.sort(key=lambda x: x[0])
 
-        logger.info(f"Found {len(indexed_folders)} {folder_type} folders. Flattening...")
+        logger.info(f"Found {len(indexed_folders)} {folder_type} folders. Building virtual mapping...")
 
         # Process each folder
         for index, folder in indexed_folders:
@@ -309,20 +318,18 @@ class ImageXpressHandler(MicroscopeHandler):
 
                 # Reconstruct filename
                 new_filename = self.parser.construct_filename(**metadata)
-                new_path = directory / new_filename
 
-                # Move file to parent directory
-                fm.move(img_file, str(new_path), Backend.DISK.value, replace_symlinks=True)
-                logger.debug(f"  Moved: {filename} → {new_filename}")
+                # Build PLATE-RELATIVE virtual flattened path
+                virtual_relative = str(directory.relative_to(plate_path) / new_filename)
 
-            # Remove empty folder after processing
-            try:
-                fm.delete_all(str(folder), Backend.DISK.value)
-                logger.debug(f"  Removed empty folder: {folder.name}")
-            except Exception as e:
-                logger.warning(f"Failed to remove {folder_type} folder {folder}: {e}")
+                # Build PLATE-RELATIVE real path (in subfolder)
+                real_relative = str(Path(img_file).relative_to(plate_path))
 
-        return True
+                # Add to mapping (both plate-relative)
+                mapping_dict[virtual_relative] = real_relative
+                logger.debug(f"  Mapped: {virtual_relative} → {real_relative}")
+
+
 
 
 class ImageXpressFilenameParser(FilenameParser):

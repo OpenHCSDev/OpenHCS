@@ -1158,7 +1158,7 @@ class ImageBrowserWidget(QWidget):
         if global_config.vfs_config.read_backend != Backend.AUTO:
             read_backend = global_config.vfs_config.read_backend.value
         else:
-            read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path)
+            read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path, self.orchestrator.filemanager)
 
         # Resolve Napari config (lightweight operation, safe in UI thread)
         from openhcs.config_framework.context_manager import config_context
@@ -1197,7 +1197,7 @@ class ImageBrowserWidget(QWidget):
         if global_config.vfs_config.read_backend != Backend.AUTO:
             read_backend = global_config.vfs_config.read_backend.value
         else:
-            read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path)
+            read_backend = self.orchestrator.microscope_handler.get_primary_backend(plate_path, self.orchestrator.filemanager)
 
         # Resolve Fiji config (lightweight operation, safe in UI thread)
         from openhcs.config_framework.context_manager import config_context
