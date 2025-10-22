@@ -320,7 +320,7 @@ class OpenHCSTUIApp(App):
             logger.error(traceback.format_exc())
 
         # Configure default window manager settings from separate TUI config
-        from openhcs.core.config import TUIConfig
+        from openhcs.textual_tui.config import TUIConfig
         tui_config = TUIConfig()  # Use default TUI configuration
         window_manager.set_tiling_layout(tui_config.default_tiling_layout)
         window_manager.set_window_gap(tui_config.default_window_gap)
