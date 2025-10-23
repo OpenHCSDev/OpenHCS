@@ -3,11 +3,14 @@ Basic Interface
 
 This page is a visual and practical guide to the OpenHCS user interface. It is designed for biologists and other non-technical users who want to quickly understand how to navigate and use the main features of OpenHCS. Use this guide as both a quick reference and a step-by-step introduction.
 
+
 .. contents::
    :local:
    :depth: 2
 
-Tip: Clicking the "?" icon next to most OpenHCS elements will provide a description of that element.
+
+Note: Clicking the “?” icon next to most OpenHCS features will provide a description of that feature
+
 ----------------------------
 
 Main Window Overview

@@ -1,11 +1,7 @@
-Basic Workflow: Stitching Images
+Introdutory workflow
 ===============================
 
-This guide demonstrates stitching microscope images using OpenHCS with sample data from a neurite outgrowth assay.
-
-The dataset uses a 96-well plate with a custom microfluidic design, so images may look different from standard formats. The workflow applies to any plate format and HCS imaging setup.
-
-**Sample data:** <!placeholder for link to sample data>
+This guide will walk you through a basic image stitching and analysis workflow in OpenHCS. By the end, you'll understand how to set up a plate, create a stitching pipeline, and visualize results.
 
 Step 1: Adding a Plate
 ----------------------
@@ -16,10 +12,13 @@ A plate (like a 96-well plate) contains multiple wells, each with multiple image
 
 **Supported formats:** ImageXpress, Opera Phenix, OpenHCS ZARR (example dataset format)
 
-**Adding your plate:**
+For now, we will use a synthetic dataset included with OpenHCS. Under "View" in the 
+
+
+If you instead want to use your own data, this is how you can add it:
 
 1. Open Plate Manager (Windows menu)
-2. Click "Add" → navigate to "basic_example_data" → "Choose"
+2. Click "Add" → navigate to your dataset folder → "Choose"
 3. OpenHCS auto-detects the format and loads it
 4. Click "Init" to initialize
 5. Open the pipeline editor
