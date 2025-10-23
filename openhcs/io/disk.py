@@ -588,7 +588,9 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             link_name.unlink()  # Remove existing file/symlink only if overwrite=True
 
         link_name.parent.mkdir(parents=True, exist_ok=True)
-        link_name.symlink_to(source)
+        # On Windows, symlink_to() requires target_is_directory to be set correctly
+        # On Unix, this parameter is ignored, so it's safe to always specify it
+        link_name.symlink_to(source, target_is_directory=source.is_dir())
 
 
     def is_symlink(self, path: Union[str, Path]) -> bool:

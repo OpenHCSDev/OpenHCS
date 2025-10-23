@@ -585,7 +585,7 @@ class PipelineOrchestrator(ContextProvider):
             # Delegate workspace initialization to microscope handler
             logger.info("Initializing workspace with microscope handler...")
             actual_image_dir = self.microscope_handler.initialize_workspace(
-                self.plate_path, workspace_path, self.filemanager
+                self.plate_path, self.filemanager
             )
 
             # Use the actual image directory returned by the microscope handler
@@ -1276,7 +1276,7 @@ class PipelineOrchestrator(ContextProvider):
         # Single pass through all filenames - extract all components at once
         try:
             # Use primary backend from microscope handler
-            backend_to_use = self.microscope_handler.get_primary_backend(self.input_dir)
+            backend_to_use = self.microscope_handler.get_primary_backend(self.input_dir, self.filemanager)
             logger.debug(f"Using backend '{backend_to_use}' for file listing based on available backends")
 
             filenames = self.filemanager.list_files(str(self.input_dir), backend_to_use, extensions=DEFAULT_IMAGE_EXTENSIONS)

@@ -252,14 +252,22 @@ class PipelineCompiler:
                 already_zarr = Backend.ZARR in available_backends
 
                 if not already_zarr:
-                    # Inject input conversion config using existing PathPlanningConfig pattern
-                    path_config = orchestrator.pipeline_config.path_planning_config
-                    conversion_config = PathPlanningConfig(
-                        output_dir_suffix=".zarr",  # Zarr store suffix
-                        global_output_folder=plate_path.parent,  # Parent of plate
-                        sub_dir=path_config.sub_dir  # Use same sub_dir (e.g., "images")
-                    )
-                    context.step_plans[0]["input_conversion_config"] = conversion_config
+                    # Determine if input uses virtual workspace
+                    from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+                    openhcs_metadata_handler = OpenHCSMetadataHandler(context.filemanager)
+                    metadata = openhcs_metadata_handler._load_metadata_dict(plate_path)
+                    subdirs = metadata["subdirectories"]
+                    # Get actual subdirectory from input_dir (e.g., "TimePoint_1" for ImageXpress)
+                    original_subdir = Path(context.input_dir).name
+                    uses_virtual_workspace = Backend.VIRTUAL_WORKSPACE.value in subdirs[original_subdir]["available_backends"]
+
+                    zarr_subdir = "zarr" if uses_virtual_workspace else original_subdir
+                    conversion_dir = plate_path / zarr_subdir
+
+                    context.step_plans[0]["input_conversion_dir"] = str(conversion_dir)
+                    context.step_plans[0]["input_conversion_backend"] = MaterializationBackend.ZARR.value
+                    context.step_plans[0]["input_conversion_uses_virtual_workspace"] = uses_virtual_workspace
+                    context.step_plans[0]["input_conversion_original_subdir"] = original_subdir
                     logger.debug(f"Input conversion to zarr enabled for first step: {first_step.name}")
 
         # The axis_id and base_input_dir are available from the context object.

@@ -27,15 +27,6 @@ class MetadataConfig:
 METADATA_CONFIG = MetadataConfig()
 
 
-@dataclass(frozen=True)
-class MetadataUpdateRequest:
-    """Parameter object for metadata update operations."""
-    metadata_path: Union[str, Path]
-    sub_dir: str
-    metadata: Dict[str, Any]
-    available_backends: Optional[Dict[str, bool]] = None
-
-
 class MetadataWriteError(Exception):
     """Raised when metadata write operations fail."""
     pass
@@ -61,19 +52,7 @@ class AtomicMetadataWriter:
         data.setdefault(METADATA_CONFIG.SUBDIRECTORIES_KEY, {})
         return data
 
-    def _create_subdirectory_update(self, sub_dir: str, metadata: Dict[str, Any]) -> Callable:
-        """Create update function for subdirectory operations."""
-        def update_func(data):
-            data = self._ensure_subdirectories_structure(data)
-            data[METADATA_CONFIG.SUBDIRECTORIES_KEY][sub_dir] = metadata
-            return data
-        return update_func
-    
-    def update_subdirectory_metadata(self, metadata_path: Union[str, Path], sub_dir: str, metadata: Dict[str, Any]) -> None:
-        """Atomically update metadata for a specific subdirectory."""
-        update_func = self._create_subdirectory_update(sub_dir, metadata)
-        self._execute_update(metadata_path, update_func, {METADATA_CONFIG.SUBDIRECTORIES_KEY: {}})
-        self.logger.debug(f"Updated subdirectory '{sub_dir}' in {metadata_path}")
+
     
     def update_available_backends(self, metadata_path: Union[str, Path], available_backends: Dict[str, bool]) -> None:
         """Atomically update available backends in metadata."""
@@ -87,29 +66,34 @@ class AtomicMetadataWriter:
         self.logger.debug(f"Updated available backends in {metadata_path}")
     
     def merge_subdirectory_metadata(self, metadata_path: Union[str, Path], subdirectory_updates: Dict[str, Dict[str, Any]]) -> None:
-        """Atomically merge multiple subdirectory metadata updates."""
+        """Atomically merge multiple subdirectory metadata updates.
+
+        Performs deep merge - updates fields within subdirectories without replacing entire entries.
+
+        Example:
+            Existing: {"TimePoint_1": {"available_backends": {"disk": True}, "main": True}}
+            Updates:  {"TimePoint_1": {"main": False}}
+            Result:   {"TimePoint_1": {"available_backends": {"disk": True}, "main": False}}
+        """
         def update_func(data):
             data = self._ensure_subdirectories_structure(data)
-            data[METADATA_CONFIG.SUBDIRECTORIES_KEY].update(subdirectory_updates)
+            subdirs = data[METADATA_CONFIG.SUBDIRECTORIES_KEY]
+
+            # Deep merge each subdirectory update
+            for subdir_name, updates in subdirectory_updates.items():
+                if subdir_name in subdirs:
+                    # Merge into existing subdirectory
+                    subdirs[subdir_name].update(updates)
+                else:
+                    # Create new subdirectory
+                    subdirs[subdir_name] = updates
+
             return data
 
         self._execute_update(metadata_path, update_func, {METADATA_CONFIG.SUBDIRECTORIES_KEY: {}})
         self.logger.debug(f"Merged {len(subdirectory_updates)} subdirectories in {metadata_path}")
     
-    def create_or_update_metadata(self, request: MetadataUpdateRequest) -> None:
-        """Atomically create or update metadata file with subdirectory and backend info."""
-        update_func = self._create_subdirectory_update(request.sub_dir, request.metadata)
 
-        if request.available_backends is not None:
-            # Compose with backend update
-            original_func = update_func
-            def update_func(data):
-                data = original_func(data)
-                data[METADATA_CONFIG.AVAILABLE_BACKENDS_KEY] = request.available_backends
-                return data
-
-        self._execute_update(request.metadata_path, update_func, {METADATA_CONFIG.SUBDIRECTORIES_KEY: {}})
-        self.logger.debug(f"Created/updated metadata for '{request.sub_dir}' in {request.metadata_path}")
 
 
 def get_metadata_path(plate_root: Union[str, Path]) -> Path:

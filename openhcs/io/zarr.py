@@ -131,26 +131,29 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
 
     def _split_store_and_key(self, path: Union[str, Path]) -> Tuple[Any, str]:
         """
-        Split path into zarr store and key without auto-injection.
-        Path planner now provides the complete storage path.
+        Split path into zarr store and key.
 
-        Maps paths to zarr store and key:
-        - Directory: "/path/to/plate/images.zarr" → Store: "/path/to/plate/images.zarr", Key: ""
-        - File: "/path/to/plate/images.zarr/A01.tif" → Store: "/path/to/plate/images.zarr", Key: "A01.tif"
+        The zarr store is always the directory containing the image files, regardless of backend.
+        For example:
+        - "/path/to/plate_outputs/images/A01.tif" → Store: "/path/to/plate_outputs/images", Key: "A01.tif"
+        - "/path/to/plate.zarr/images/A01.tif" → Store: "/path/to/plate.zarr/images", Key: "A01.tif"
+
+        The images directory itself becomes the zarr store - zarr files are added within it.
+        A zarr store doesn't need to have a folder name ending in .zarr.
 
         Returns a DirectoryStore with dimension_separator='/' for OME-ZARR compatibility.
         """
         path = Path(path)
 
-        # If path has no extension or ends with .zarr, treat as directory (zarr store)
-        if not path.suffix or path.suffix == '.zarr':
+        # If path has a file extension (like .tif), the parent directory is the zarr store
+        if path.suffix:
+            # File path - parent directory (e.g., "images") is the zarr store
+            store_path = path.parent
+            relative_key = path.name
+        else:
             # Directory path - treat as zarr store
             store_path = path
             relative_key = ""
-        else:
-            # File path - parent is zarr store, filename is key
-            store_path = path.parent
-            relative_key = path.name
 
         # CRITICAL: Create DirectoryStore with dimension_separator='/' for OME-ZARR compatibility
         # This ensures chunk paths use '/' instead of '.' (e.g., '0/0/0' not '0.0.0')
@@ -410,6 +413,16 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         if len(data_list) != total_expected:
             logger.warning(f"Data count mismatch: got {len(data_list)}, expected {total_expected} "
                          f"(fields={n_fields}, channels={n_channels}, z={n_z})")
+
+        # Log detailed shape information before reshape
+        logger.info(f"🔍 ZARR RESHAPE DEBUG:")
+        logger.info(f"  - Input: {len(data_list)} images")
+        logger.info(f"  - Stacked shape: {stacked_data.shape}")
+        logger.info(f"  - Stacked size: {stacked_data.size}")
+        logger.info(f"  - Target shape: {target_shape}")
+        logger.info(f"  - Target size: {np.prod(target_shape)}")
+        logger.info(f"  - Sample image shape: {sample_image.shape}")
+        logger.info(f"  - Dimensions: fields={n_fields}, channels={n_channels}, z={n_z}, h={height}, w={width}")
 
         # Always reshape to 5D structure
         reshaped_data = stacked_data.reshape(target_shape)

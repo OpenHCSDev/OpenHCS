@@ -216,6 +216,7 @@ class Backend(Enum):
     NAPARI_STREAM = "napari_stream"
     FIJI_STREAM = "fiji_stream"
     OMERO_LOCAL = "omero_local"
+    VIRTUAL_WORKSPACE = "virtual_workspace"
 
 class FileFormat(Enum):
     TIFF = list(DEFAULT_IMAGE_EXTENSIONS)

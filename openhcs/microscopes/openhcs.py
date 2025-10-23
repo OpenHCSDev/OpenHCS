@@ -378,6 +378,7 @@ class OpenHCSMetadata:
     z_indexes: Optional[Dict[str, str]]
     timepoints: Optional[Dict[str, str]]
     available_backends: Dict[str, bool]
+    workspace_mapping: Optional[Dict[str, str]] = None  # Plate-relative virtual → real path mapping
     main: Optional[bool] = None  # Indicates if this subdirectory is the primary/input subdirectory
     results_dir: Optional[str] = None  # Sibling directory containing analysis results for this subdirectory
 
@@ -453,7 +454,7 @@ class OpenHCSMetadataGenerator:
         current_metadata = self._extract_metadata_from_disk_state(context, output_dir, write_backend, is_main, sub_dir, results_dir)
         metadata_dict = asdict(current_metadata)
 
-        self.atomic_writer.update_subdirectory_metadata(metadata_path, sub_dir, metadata_dict)
+        self.atomic_writer.merge_subdirectory_metadata(metadata_path, {sub_dir: metadata_dict})
 
 
 
@@ -657,7 +658,7 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
             # Fall back to all compatible backends if metadata reading fails
             return self.compatible_backends
 
-    def get_primary_backend(self, plate_path: Union[str, Path]) -> str:
+    def get_primary_backend(self, plate_path: Union[str, Path], filemanager: 'FileManager') -> str:
         """
         Get the primary backend name for OpenHCS plates.
 
@@ -666,13 +667,12 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
         available_backends_dict = self.metadata_handler.get_available_backends(plate_path)
         return next(iter(available_backends_dict.keys()))
 
-    def initialize_workspace(self, plate_path: Path, workspace_path: Optional[Path], filemanager: FileManager) -> Path:
+    def initialize_workspace(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
         OpenHCS format doesn't need workspace - determines the correct input subdirectory from metadata.
 
         Args:
             plate_path: Path to the original plate directory
-            workspace_path: Optional workspace path (ignored for OpenHCS)
             filemanager: FileManager instance for file operations
 
         Returns:
@@ -715,14 +715,14 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
             logger.debug(f"OpenHCSHandler: plate_folder set to {self.plate_folder} during _prepare_workspace.")
         return workspace_path
 
-    def post_workspace(self, workspace_path: Union[str, Path], filemanager: FileManager, width: int = 3):
+    def post_workspace(self, plate_path: Union[str, Path], filemanager: FileManager, skip_preparation: bool = False) -> Path:
         """
-        Hook called after workspace symlink creation.
+        Hook called after virtual workspace mapping creation.
         For OpenHCS, this ensures the plate_folder is set (if not already) which allows
-        the parser to be loaded using this workspace_path. It then calls the base
+        the parser to be loaded using this plate_path. It then calls the base
         implementation which handles filename normalization using the loaded parser.
         """
-        current_plate_folder = Path(workspace_path)
+        current_plate_folder = Path(plate_path)
         if self.plate_folder is None:
             logger.info(f"OpenHCSHandler.post_workspace: Setting plate_folder to {current_plate_folder}.")
             self.plate_folder = current_plate_folder
@@ -740,7 +740,7 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
 
         logger.info(f"OpenHCSHandler (plate: {self.plate_folder}): Files are expected to be pre-normalized. "
                      "Superclass post_workspace will run with the dynamically loaded parser.")
-        return super().post_workspace(workspace_path, filemanager, width)
+        return super().post_workspace(plate_path, filemanager, skip_preparation)
 
     # The following methods from MicroscopeHandler delegate to `self.parser`.
     # The `parser` property will ensure the correct, dynamically loaded parser is used.
