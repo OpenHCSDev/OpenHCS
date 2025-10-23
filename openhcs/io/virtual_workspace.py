@@ -197,13 +197,17 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
             if recursive:
                 # For recursive, check if virtual_relative starts with directory prefix
                 if relative_dir_str:
-                    if not virtual_relative.startswith(relative_dir_str + '/') and virtual_relative != relative_dir_str:
+                    # Check if path is in this directory or subdirectory
+                    if not (virtual_relative.startswith(relative_dir_str + '/') or virtual_relative == relative_dir_str):
                         continue
                 # else: relative_dir_str is empty (root), include all files
             else:
                 # For non-recursive, check if parent directory matches
                 vpath_parent = str(Path(virtual_relative).parent).replace('\\', '/')
-                if vpath_parent != relative_dir_str:
+                if relative_dir_str and vpath_parent != relative_dir_str:
+                    continue
+                elif not relative_dir_str and '/' in virtual_relative:
+                    # If looking at root and path has subdirectories, skip it (non-recursive)
                     continue
 
             # Apply filters
