@@ -136,7 +136,12 @@ class PathPlanner:
                 # No axis filter - create materialization path as normal
                 materialized_output_dir = self._build_output_path(step.step_materialization_config)
 
-        input_conversion_dir = self._get_optional_path("input_conversion_config", sid)
+        # Check if input_conversion_dir is already set by compiler (direct path)
+        # Otherwise try to calculate from input_conversion_config (legacy)
+        if "input_conversion_dir" in self.plans[sid]:
+            input_conversion_dir = Path(self.plans[sid]["input_conversion_dir"])
+        else:
+            input_conversion_dir = self._get_optional_path("input_conversion_config", sid)
 
         # Calculate main pipeline plate root for this step
         main_plate_root = self.build_output_plate_root(self.plate_path, self.cfg, is_per_step_materialization=False)

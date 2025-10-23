@@ -269,6 +269,76 @@ OpenHCS provides two chunking strategies for optimal performance in different us
 - **Use FILE mode** if you need to access random individual images
 - **Default is WELL** - it provides the best performance for typical HCS workflows
 
+Automatic Input Conversion to Zarr
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When you set ``materialization_backend=ZARR``, OpenHCS automatically converts input plates to zarr format on the first pipeline run. This conversion happens transparently and creates an optimized zarr representation within the same plate directory.
+
+**How It Works**:
+
+.. code-block:: python
+
+   from openhcs.core.config import VFSConfig, GlobalPipelineConfig
+   from openhcs.constants.constants import MaterializationBackend
+
+   # Enable automatic zarr conversion for input plates
+   config = GlobalPipelineConfig(
+       vfs=VFSConfig(
+           materialization_backend=MaterializationBackend.ZARR
+       )
+   )
+
+   # First run: Converts input to zarr automatically
+   orchestrator = PipelineOrchestrator(plate_path, config)
+   orchestrator.run()
+
+   # Subsequent runs: Uses zarr version automatically (no re-conversion)
+   orchestrator.run()
+
+**Conversion Behavior**:
+
+OpenHCS uses two different strategies based on the input plate type:
+
+1. **OpenHCS Output Plates** (no virtual workspace):
+
+   - Zarr files are added to the same subdirectory as the original images
+   - Both disk and zarr backends coexist in the same directory
+   - Metadata shows: ``"available_backends": {"disk": true, "zarr": true}``
+   - Example: ``plate/images/`` contains both ``.tif`` files and zarr metadata
+
+2. **Non-OpenHCS Input Plates** (ImageXpress, Opera Phenix with virtual workspace):
+
+   - Zarr files are created in a separate ``zarr/`` subdirectory
+   - Original subdirectory (e.g., ``TimePoint_1/``) is marked as ``main: false``
+   - New ``zarr/`` subdirectory is marked as ``main: true``
+   - Subsequent runs automatically use the zarr subdirectory
+   - Example: ``plate/zarr/`` contains OME-ZARR hierarchy
+
+**Metadata Structure After Conversion**:
+
+.. code-block:: json
+
+   {
+     "subdirectories": {
+       "TimePoint_1": {
+         "available_backends": {"disk": true, "virtual_workspace": true},
+         "main": false
+       },
+       "zarr": {
+         "available_backends": {"zarr": true},
+         "main": true
+       }
+     }
+   }
+
+**Benefits**:
+
+- **Automatic**: No manual conversion steps required
+- **Transparent**: Works seamlessly on subsequent runs
+- **Efficient**: Conversion happens only once
+- **Optimized**: Uses OME-ZARR format with compression and chunking
+- **Compatible**: Original data remains untouched
+
 High-Performance Processing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
