@@ -28,7 +28,7 @@ This creates a synthetic plate with random data, and creates a sample stitching 
   4. Click "Init" to initialize
   5. Open the pipeline editor
 
-Step 2: Exploring the Image Browser
+Step 2: Exploring the Image Browser & Metadata Viewer
 ----------------------------
 
 The Image Browser lets you view and explore images in your plate. Click on "Meta" in the plate manager to open it.
@@ -38,7 +38,15 @@ The Image Browser lets you view and explore images in your plate. Click on "Meta
 
    *In the Image Browser, you can navigate through the different wells and fields of your plate, and view the images associated with each one.*
 
-This table in the middle shows all images in the plate. You can filter images by well, field, channel, timepoint, etc. using the filters on the left. On the right, the configuration for either the Napari or Fiji streaming viewer can be adjusted. For details on each configuration option, refer to :doc:`configuration_reference <configuration_reference.rst>`, or hover over the (?) button next to each option for a tooltip.
+This table in the middle shows all images in the plate. You can filter images by well, field, channel, timepoint, etc. using the filters on the left. On the right, the configuration for either the Napari or Fiji streaming viewer can be adjusted. For details on each configuration option, refer to :doc:`configuration_reference.rst`, or hover over the (?) button next to each option for a tooltip.
+
+
+If you switch to the "Metadata" tab at the top, you can view metadata associated with your images, such as acquisition settings, experimental conditions, and annotations, as well as edit it.
+
+.. figure:: ../_static/metadata_viewer.png
+   :alt: Metadata Viewer
+
+   *In the Metadata tab, you can view and edit metadata associated with your images, such as acquisition settings, experimental conditions, and annotations.*
 
 
 Step 3: Setting up a Stitching Pipeline
@@ -83,7 +91,7 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 
    - OpenHCS will create a separate pile for every unique combination of the non-variable dimensions.
 
-   - In this example, the variable component is the site. The other dimensions are well and channel. This means that for each well and channel combination, there will be a seperate pile, and within each pile, the only difference between images is the site. So, for well A1 and channel DAPI, there will be a pile with an image for each site. There will be another pile for well A1 and channel FITC, again with images for each site, and so on.
+   - In this example, the variable component is the site. The other dimensions are well and channel. This means that for each well and channel combination, there will be a seperate pile, and within each pile, the only difference between images is the site. So, for well A1 and channel 'Wavelength 1', there will be a pile with an image for each site. There will be another pile for well A1 and channel 'Wavelength 2', again with images for each site, and so on.
     .. dropdown:: Extra help
 
       If that doesn't make sense, think about it this way: Imagine you're a teacher with exam papers from multiple classes (Class A, B, C), 
@@ -109,7 +117,7 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
   
    - In other words, after the images have been split into groups (using Variable Components), Group By decides what differences still matter inside those groups. 
   
-   - For example, in this example we want to process each channel differently: our DAPI and FITC fluorescence channels need different filtering than our TL-20 channel. So we “Group By” channel.
+   - For example, in this example we want to process each channel differently: our Wavelength 1 channel need different filtering than our Wavelength 2 channel. So we “Group By” channel.
   
    
  .. dropdown:: Extra help
@@ -131,7 +139,7 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 
 8. **Napari/Fiji Streaming Config**: Visualize step results in Napari or Fiji (inherits from global config as well).
 
-For more details on each configuration option, refer to :doc:`configuration_reference <configuration_reference.rst>`, or hover over the (?) button next to each option for a tooltip.
+For more details on each configuration option, refer to :doc:`configuration_reference.rst`, or hover over the (?) button next to each option for a tooltip.
 
 **Function Pattern Tab**
 
@@ -140,8 +148,9 @@ Click "Function Pattern" at top. A step's function pattern is its series of oper
 - Add/remove/edit functions as needed
 - This step applies filters to prepare images for stitching
 - Use arrows (top-left) to cycle through channels and see channel-specific processing
-- Example: DAPI/FITC use "TopHat" filter; TL-20 uses "Sobel" filter
+- Example: (need new example for synthetic data)
 
 **Pipeline Overview**
 Now that we've explored one step, let's look at the overall pipeline. This pipeline is designed for stitching and analyzing images. It processes images, stitches them together, and then analyzes the stitched images to extract useful information (in this case, it runs a simple cell-counting analysis on the stitched images).
 
+(In progress)

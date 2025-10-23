@@ -80,11 +80,11 @@ The Metadata tab shows information about your images and experiments.
 
 *In this tab, you can view and edit metadata associated with your images, such as acquisition settings, experimental conditions, and annotations.*
 
-````````````````
+-----------------------
 Global Configuration
-````````````````
+-----------------------
 The Global Configuration menu allows you to set application-wide settings.
-:doc:`configuration_reference <configuration_reference.rst>` explains this in detail.
+:doc:`configuration_reference.rst` explains this in detail.
 
 
 -------------------------

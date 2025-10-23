@@ -7,9 +7,13 @@ How the configuration system works
 ----------------------
 
 In OpenHCS, there are multiple levels of configuration that determine how the software behaves. These levels include:
+
 1. **Global Configuration**: This is the configuration that applies to the entire OpenHCS installation. 
+
 2. **Plate Configuration**: Each plate can have its own configuration settings that override the global settings.
+
 3. **Step Configuration**: Each step within a plate's pipeline can have its own configuration settings that
+
 4. **Materialization/Napari Viewer Configuration**: For each individaul step, you can materialize its output, and save it to disk, or stream it to Napari. This also has its own configuration system.
 
 Configurations automatically inherit from higher levels, and can be overridden at lower levels.  Some specific options also inherit horizontally, which will be explained in the relevant sections.
