@@ -379,7 +379,6 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
 
         return image_dir
 
-    @abstractmethod
     def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
         Build microscope-specific virtual workspace mapping.
@@ -387,7 +386,9 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         This method creates a plate-relative mapping dict and saves it to metadata.
         All paths in the mapping are relative to plate_path.
 
-        Override in subclasses to implement microscope-specific mapping logic.
+        Override in subclasses that need virtual workspace mapping (e.g., ImageXpress, Opera Phenix).
+        Handlers that override initialize_workspace() completely (e.g., OMERO, OpenHCS) don't need
+        to implement this method.
 
         Args:
             plate_path: Path to plate directory
@@ -395,8 +396,15 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
 
         Returns:
             Path: Suggested directory for further processing
+
+        Raises:
+            NotImplementedError: If called on a handler that doesn't support virtual workspace mapping
         """
-        return plate_path
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement _build_virtual_mapping(). "
+            f"This method is only needed for handlers that use the base class initialize_workspace(). "
+            f"Handlers that override initialize_workspace() completely (like OMERO, OpenHCS) don't need this."
+        )
 
 
     # Delegate methods to parser
