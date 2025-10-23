@@ -454,7 +454,7 @@ class OpenHCSMetadataGenerator:
         current_metadata = self._extract_metadata_from_disk_state(context, output_dir, write_backend, is_main, sub_dir, results_dir)
         metadata_dict = asdict(current_metadata)
 
-        self.atomic_writer.update_subdirectory_metadata(metadata_path, sub_dir, metadata_dict)
+        self.atomic_writer.merge_subdirectory_metadata(metadata_path, {sub_dir: metadata_dict})
 
 
 
