@@ -264,7 +264,7 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         subdirs = []
         for entry in entries:
             entry_path = Path(plate_path) / entry
-            if entry_path.is_dir():
+            if filemanager.is_dir(entry_path, backend_type):
                 subdirs.append(entry_path)
 
         # Look for a directory matching any of the common_dirs patterns
