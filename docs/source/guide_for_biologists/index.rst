@@ -18,11 +18,9 @@ To get started, check out the following resources:
 
 5. **Configuration reference**: :doc:`configuration_reference` - A reference of the configuration options available in OpenHCS.
 
-6. **Advanced tips** : :doc:`advanced_tips` - Explore more complex features and workflows to get the most out of OpenHCS.
+6. **Glossary**: :doc:`glossary` - Definitions of common terms used in OpenHCS and image analysis.
 
-7. **Glossary**: :doc:`glossary` - Definitions of common terms used in OpenHCS and image analysis.
-
-8. **Troubleshooting and FAQ**: :doc:`troubleshooting_FAQ` - Common issues and solutions to help you troubleshoot problems.
+7. **Troubleshooting and FAQ**: :doc:`troubleshooting_FAQ` - Common issues and solutions to help you troubleshoot problems.
 
 
 .. toctree::
