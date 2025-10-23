@@ -129,7 +129,14 @@ Virtual Workspace Backend
 
 **Integration with Microscope Handlers**:
 
-Microscope handlers implement ``_build_virtual_mapping()`` to generate the workspace mapping:
+Microscope handlers that need virtual workspace mapping (e.g., ImageXpress, Opera Phenix) implement ``_build_virtual_mapping()`` to generate the workspace mapping. This method is **optional** and only needed for handlers that use the base class ``initialize_workspace()`` implementation.
+
+Handlers that override ``initialize_workspace()`` completely (like OMERO and OpenHCS) don't need to implement this method because they handle workspace initialization differently:
+
+- **OMERO**: Uses database-backed virtual filesystem, doesn't need file-based mapping
+- **OpenHCS**: Already uses normalized format, doesn't need directory flattening
+
+**Example Implementation** (ImageXpress, Opera Phenix):
 
 .. code-block:: python
 
