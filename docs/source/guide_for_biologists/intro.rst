@@ -3,8 +3,6 @@ What is OpenHCS?
 
 OpenHCS is a bioimage analysis platform designed for biologists who work with large amounts of microscopy images from high-content screening experiments. If you find yourself spending too much time stitching images together, running repetitive analyses, or struggling to keep your results organized and reproducible, OpenHCS can help.
 
-OpenHCS evolved from EZStitcher (a microscopy stitching tool) into a comprehensive platform that can handle entire image analysis workflows—from raw microscope data to final measurements—all in one place.
-
 When should I use OpenHCS?
 --------------------------
 You should use OpenHCS if you have any of the following needs:

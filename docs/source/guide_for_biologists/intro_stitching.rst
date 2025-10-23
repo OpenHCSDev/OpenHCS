@@ -12,6 +12,8 @@ A plate (like a 96-well plate) contains multiple wells, each with multiple image
 
 **Supported formats:** ImageXpress, Opera Phenix, OpenHCS ZARR (example dataset format)
 
+** Adding a plate:**
+
 For now, we will use a synthetic dataset included with OpenHCS. Under "View" in the main menu, click "Generate Synthetic plate", or click Ctrl+Shift+G. Click confirm in the dialog that appears.
 
 <!-- IMAGE: Screenshot guide of above-->
@@ -31,6 +33,7 @@ This creates a synthetic plate with random data, and creates a sample stitching 
 Step 2: Exploring the Image Browser & Metadata Viewer
 ----------------------------
 
+**Image Browser**
 The Image Browser lets you view and explore images in your plate. Click on "Meta" in the plate manager to open it.
 
 .. figure:: ../_static/image_browser.png
@@ -38,9 +41,9 @@ The Image Browser lets you view and explore images in your plate. Click on "Meta
 
    *In the Image Browser, you can navigate through the different wells and fields of your plate, and view the images associated with each one.*
 
-This table in the middle shows all images in the plate. You can filter images by well, field, channel, timepoint, etc. using the filters on the left. On the right, the configuration for either the Napari or Fiji streaming viewer can be adjusted. For details on each configuration option, refer to :doc:`configuration_reference.rst`, or hover over the (?) button next to each option for a tooltip.
+This table in the middle shows all images in the plate. You can filter images by well, field, channel, timepoint, etc. using the filters on the left. On the right, the configuration for either the Napari or Fiji streaming viewer can be adjusted. For details on each configuration option, refer to :doc:`guide_for_biologists/configuration_reference`, or hover over the (?) button next to each option for a tooltip.
 
-
+**Metadata Viewer**
 If you switch to the "Metadata" tab at the top, you can view metadata associated with your images, such as acquisition settings, experimental conditions, and annotations, as well as edit it.
 
 .. figure:: ../_static/metadata_viewer.png
@@ -48,6 +51,9 @@ If you switch to the "Metadata" tab at the top, you can view metadata associated
 
    *In the Metadata tab, you can view and edit metadata associated with your images, such as acquisition settings, experimental conditions, and annotations.*
 
+
+
+Now, let's look at how to do things with these images. Open the Pipeline editor.
 
 Step 3: Setting up a Stitching Pipeline
 ---------------------------------------
@@ -139,8 +145,8 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 
 8. **Napari/Fiji Streaming Config**: Visualize step results in Napari or Fiji (inherits from global config as well).
 
-For more details on each configuration option, refer to :doc:`configuration_reference.rst`, or hover over the (?) button next to each option for a tooltip.
-
+For more details on each configuration option, refer to :doc:`guide_for_biologists/configuration_reference`, or hover over the (?) button next to each option for a tooltip.
+why does the above :doc: thingy not work 
 **Function Pattern Tab**
 
 Click "Function Pattern" at top. A step's function pattern is its series of operations.
