@@ -378,6 +378,22 @@ class OMEROHandler(MicroscopeHandler):
         """
         return workspace_path
 
+    def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
+        """
+        OMERO doesn't need virtual mapping - it already uses OMERO backend.
+
+        The OMERO backend provides its own virtual filesystem, so we don't need
+        to build a separate virtual workspace mapping.
+
+        Args:
+            plate_path: Path to plate directory (unused for OMERO)
+            filemanager: FileManager instance (unused for OMERO)
+
+        Returns:
+            plate_path unchanged
+        """
+        return plate_path
+
     def initialize_workspace(self, plate_path: Union[int, Path], filemanager: FileManager) -> Path:
         """
         OMERO creates a virtual path for the plate.
