@@ -14,9 +14,9 @@ To get started, check out the following resources:
 
 3. **Interface Layout**: :doc:`basic_interface` - A simple tutorial to help you get familiar with the OpenHCS interface and features.
 
-4. **Introductory workflow: stitching**: :doc:`intro_stitching` - Learn how to stitch images together using OpenHCS.
+4. **Introductory workflow**: :doc:`intro_stitching` - Learn how to stitch images together using OpenHCS.
 
-5. **Introductory workflow: analysis**: :doc:`intro_analysis` - A beginner-friendly guide to performing image analysis with OpenHCS.
+5. **Configuration reference**: :doc:`configuration_reference` - A reference of the configuration options available in OpenHCS.
 
 6. **Advanced tips** : :doc:`advanced_tips` - Explore more complex features and workflows to get the most out of OpenHCS.
 
