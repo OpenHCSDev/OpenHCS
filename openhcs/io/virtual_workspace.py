@@ -270,9 +270,40 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
                 any(vp.startswith(relative_str + '/') for vp in self._mapping_cache))
     
     def is_file(self, path: Union[str, Path]) -> bool:
-        """Check if virtual path is a file (always True if exists)."""
-        return self.exists(path)
-    
+        """Check if virtual path is a file (exists in mapping directly)."""
+        if self._mapping_cache is None:
+            self._load_mapping()
+
+        try:
+            relative_str = str(Path(path).relative_to(self.plate_root))
+        except ValueError:
+            relative_str = str(path)
+
+        # File if it's directly in the mapping
+        return relative_str in self._mapping_cache
+
+    def is_dir(self, path: Union[str, Path]) -> bool:
+        """Check if virtual path is a directory (has files under it)."""
+        if self._mapping_cache is None:
+            self._load_mapping()
+
+        try:
+            relative_str = str(Path(path).relative_to(self.plate_root))
+        except ValueError:
+            relative_str = str(path)
+
+        # Normalize to string with forward slashes
+        relative_str = relative_str.replace('\\', '/')
+        if relative_str == '.':
+            relative_str = ''
+
+        # Directory if any virtual path starts with this prefix
+        if relative_str:
+            return any(vp.startswith(relative_str + '/') for vp in self._mapping_cache)
+        else:
+            # Root is always a directory if mapping exists
+            return len(self._mapping_cache) > 0
+
     @property
     def requires_filesystem_validation(self) -> bool:
         """Virtual backends don't require filesystem validation."""
