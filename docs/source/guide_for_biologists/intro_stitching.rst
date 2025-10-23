@@ -12,36 +12,60 @@ A plate (like a 96-well plate) contains multiple wells, each with multiple image
 
 **Supported formats:** ImageXpress, Opera Phenix, OpenHCS ZARR (example dataset format)
 
-For now, we will use a synthetic dataset included with OpenHCS. Under "View" in the 
+For now, we will use a synthetic dataset included with OpenHCS. Under "View" in the main menu, click "Generate Synthetic plate", or click Ctrl+Shift+G. Click confirm in the dialog that appears.
+
+<!-- IMAGE: Screenshot guide of above-->
+
+This creates a synthetic plate with random data, and creates a sample stitching + analysis pipeline. Hit "Init" to initialize the plate. 
+
+.. dropdown:: Uploading your own data
+
+  For reference, if you'd rather upload your own dataset, follow these steps:
+
+  1. Open Plate Manager (Windows menu)
+  2. Click "Add" → navigate to your dataset folder → "Choose"
+  3. OpenHCS will auto-detect the format and load it
+  4. Click "Init" to initialize
+  5. Open the pipeline editor
+
+Step 2: Exploring the Image Browser
+----------------------------
+
+The Image Browser lets you view and explore images in your plate. Click on "Meta" in the plate manager to open it.
+
+.. figure:: ../_static/image_browser.png
+   :alt: Image Browser
+
+   *In the Image Browser, you can navigate through the different wells and fields of your plate, and view the images associated with each one.*
+
+This table in the middle shows all images in the plate. You can filter images by well, field, channel, timepoint, etc. using the filters on the left. On the right, the configuration for either the Napari or Fiji streaming viewer can be adjusted. For details on each configuration option, refer to :doc:`configuration_reference <configuration_reference.rst>`, or hover over the (?) button next to each option for a tooltip.
 
 
-If you instead want to use your own data, this is how you can add it:
-
-1. Open Plate Manager (Windows menu)
-2. Click "Add" → navigate to your dataset folder → "Choose"
-3. OpenHCS auto-detects the format and loads it
-4. Click "Init" to initialize
-5. Open the pipeline editor
-
-Step 2: Setting up a Stitching Pipeline
+Step 3: Setting up a Stitching Pipeline
 ---------------------------------------
-
-**Loading a Pipeline:**
-
-1. In Pipeline Editor, click "Load"
-2. Select "basic_image_stitching.pipeline" from example data folder
-3. Pipeline loads with all steps and settings
 
 **Understanding Pipelines**
 
 A pipeline is a sequence of steps that process your images in a specific order. Think of it like a laboratory protocol.
 
-Each pipeline is made of multiple steps. A step in OpenHCS is a single operation. This doesn't mean they only do one thing, however. Many steps perform multiple operations. Select the "Initial Processing" by clicking on it, and then click on "Edit" so we can take a deeper look.
+Each pipeline is made of multiple steps. A step in OpenHCS is a single operation. This doesn't mean they only do one thing, however. Many steps perform multiple operations. 
+
+<!-- IMAGE: Screenshot of Pipeline Editor with steps visible -->
+
+.. dropdown:: Sharing/Importing Pipelines
+
+   You can share pipelines by clicking the "Code" button and copying the generated code. Anyone else can paste it into their own code viewer and load your pipeline, and vice versa.
+
 
 **Steps and the Step Editor**
 ```````````````````````````````
+Lets take a look at a individual step by opening the Step Editor. Double-click on the first step in the pipeline (named "Image Enhancement Processing") to open it.
+
+<!-- IMAGE: Screenshot of Pipeline Editor with arrow pointing at step editor-->
+
 
 There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Lets look at step settings for now.
+
 
 <!-- IMAGE: Screenshot of Step Editor with "Step Settings" tab highlighted, and each section numbered --> 
 
@@ -107,6 +131,8 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 
 8. **Napari/Fiji Streaming Config**: Visualize step results in Napari or Fiji (inherits from global config as well).
 
+For more details on each configuration option, refer to :doc:`configuration_reference <configuration_reference.rst>`, or hover over the (?) button next to each option for a tooltip.
+
 **Function Pattern Tab**
 
 Click "Function Pattern" at top. A step's function pattern is its series of operations.
@@ -117,38 +143,5 @@ Click "Function Pattern" at top. A step's function pattern is its series of oper
 - Example: DAPI/FITC use "TopHat" filter; TL-20 uses "Sobel" filter
 
 **Pipeline Overview**
-
-Close the editor. This pipeline creates one composite image per well from all sites through five steps:
-
-**Step 1: Pre-processing**
-- Improves image quality before stitching
-- May include background removal or contrast enhancement
-- Runs on each individual image tile before they're stitched
-
-**Step 2: Compositing**
-- This "flattens" our piles of images into single images for each site
-- It uses channel as its variable component, so the piles just have 3 images, one for each channel, and there is a seperate pile for each site
-- It finds the average intensity for each pixel across all channels, and creates a single image using that.
-- This is because the stitching algorithm only takes one image per site to find overlaps, and using a composite image with information from all channels helps it find overlaps better.
-
-**Step 3: Position Generation (ASHLAR Algorithm)**
-- This is where the actual stitching calculation happens
-- The algorithm finds how your image tiles overlap
-- It calculates the exact position where each tile should be placeholder
-- It has its variable component set to site, so it looks at each well and finds the positions for all sites in that well. (The channel component doesn't matter here since we are using the composite images from step 2, and so the channels have been "flattened" into one image).
-- Whats important to note is that this step doesn't output any images. It only outputs the positions of each tile, which are used in the next step.
-
-**Step 4: Re-processing**
-- Prepares original images for assembly
-- Adjusts brightness/contrast
-- Uses original images (not Step 1 output)
-
-**Step 5: Assembling**
-- Takes the positions from Step 3 and the images from Step 4
-- Places each image in its correct position
-- Blends the edges where images overlap
-- Creates the final stitched image for each well (combining all sites in the well)
-
-
-
+Now that we've explored one step, let's look at the overall pipeline. This pipeline is designed for stitching and analyzing images. It processes images, stitches them together, and then analyzes the stitched images to extract useful information (in this case, it runs a simple cell-counting analysis on the stitched images).
 
