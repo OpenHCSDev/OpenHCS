@@ -84,7 +84,7 @@ The Metadata tab shows information about your images and experiments.
 Global Configuration
 -----------------------
 The Global Configuration menu allows you to set application-wide settings.
-:doc:`guide_for_biologists/configuration_reference` explains this in detail.
+:doc:`configuration_reference` explains this in detail.
 
 
 -------------------------

@@ -41,7 +41,7 @@ The Image Browser lets you view and explore images in your plate. Click on "Meta
 
    *In the Image Browser, you can navigate through the different wells and fields of your plate, and view the images associated with each one.*
 
-This table in the middle shows all images in the plate. You can filter images by well, field, channel, timepoint, etc. using the filters on the left. On the right, the configuration for either the Napari or Fiji streaming viewer can be adjusted. For details on each configuration option, refer to :doc:`guide_for_biologists/configuration_reference`, or hover over the (?) button next to each option for a tooltip.
+This table in the middle shows all images in the plate. You can filter images by well, field, channel, timepoint, etc. using the filters on the left. On the right, the configuration for either the Napari or Fiji streaming viewer can be adjusted. For details on each configuration option, refer to :doc:`configuration_reference`, or hover over the (?) button next to each option for a tooltip.
 
 **Metadata Viewer**
 If you switch to the "Metadata" tab at the top, you can view metadata associated with your images, such as acquisition settings, experimental conditions, and annotations, as well as edit it.
@@ -145,7 +145,7 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 
 8. **Napari/Fiji Streaming Config**: Visualize step results in Napari or Fiji (inherits from global config as well).
 
-For more details on each configuration option, refer to :doc:`guide_for_biologists/configuration_reference`, or hover over the (?) button next to each option for a tooltip.
+For more details on each configuration option, refer to :doc:`configuration_reference`, or hover over the (?) button next to each option for a tooltip.
 why does the above :doc: thingy not work 
 **Function Pattern Tab**
 
