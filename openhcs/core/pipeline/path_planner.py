@@ -328,7 +328,7 @@ class PathPlanner:
 
     def _get_input_source(self, step: AbstractStep, i: int) -> str:
         """Get input source string."""
-        if getattr(step, 'input_source', None) == InputSource.PIPELINE_START:
+        if step.input_source == InputSource.PIPELINE_START:
             return 'PIPELINE_START'
         return 'PREVIOUS_STEP'
 
