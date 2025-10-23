@@ -1360,24 +1360,30 @@ def _update_metadata_for_zarr_conversion(
     If zarr_subdir is None: add zarr to original_subdir's available_backends
     If zarr_subdir is set: create new zarr subdirectory, set original main=false
     """
-    from openhcs.io.metadata_writer import get_metadata_path
-    import json
+    from openhcs.io.metadata_writer import get_metadata_path, AtomicMetadataWriter
 
     metadata_path = get_metadata_path(plate_root)
-    with open(metadata_path) as f:
-        metadata = json.load(f)
-
-    subdirs = metadata["subdirectories"]
+    writer = AtomicMetadataWriter()
 
     if zarr_subdir:
-        # Separate zarr subdirectory
-        subdirs[original_subdir]["main"] = False
-        subdirs[zarr_subdir] = {
-            "available_backends": {"zarr": True},
-            "main": True
+        # Separate zarr subdirectory - update both subdirectories atomically
+        updates = {
+            zarr_subdir: {
+                "available_backends": {"zarr": True},
+                "main": True
+            },
+            original_subdir: {
+                "main": False
+            }
         }
+        writer.merge_subdirectory_metadata(metadata_path, updates)
         logger.info(f"Updated metadata: {original_subdir} main=false, {zarr_subdir} main=true")
     else:
-        # Shared subdirectory
-        subdirs[original_subdir]["available_backends"]["zarr"] = True
+        # Shared subdirectory - add zarr to available_backends
+        updates = {
+            original_subdir: {
+                "available_backends": {"zarr": True}
+            }
+        }
+        writer.merge_subdirectory_metadata(metadata_path, updates)
         logger.info(f"Updated metadata: {original_subdir} now has zarr backend")

@@ -87,10 +87,28 @@ class AtomicMetadataWriter:
         self.logger.debug(f"Updated available backends in {metadata_path}")
     
     def merge_subdirectory_metadata(self, metadata_path: Union[str, Path], subdirectory_updates: Dict[str, Dict[str, Any]]) -> None:
-        """Atomically merge multiple subdirectory metadata updates."""
+        """Atomically merge multiple subdirectory metadata updates.
+
+        Performs deep merge - updates fields within subdirectories without replacing entire entries.
+
+        Example:
+            Existing: {"TimePoint_1": {"available_backends": {"disk": True}, "main": True}}
+            Updates:  {"TimePoint_1": {"main": False}}
+            Result:   {"TimePoint_1": {"available_backends": {"disk": True}, "main": False}}
+        """
         def update_func(data):
             data = self._ensure_subdirectories_structure(data)
-            data[METADATA_CONFIG.SUBDIRECTORIES_KEY].update(subdirectory_updates)
+            subdirs = data[METADATA_CONFIG.SUBDIRECTORIES_KEY]
+
+            # Deep merge each subdirectory update
+            for subdir_name, updates in subdirectory_updates.items():
+                if subdir_name in subdirs:
+                    # Merge into existing subdirectory
+                    subdirs[subdir_name].update(updates)
+                else:
+                    # Create new subdirectory
+                    subdirs[subdir_name] = updates
+
             return data
 
         self._execute_update(metadata_path, update_func, {METADATA_CONFIG.SUBDIRECTORIES_KEY: {}})
