@@ -33,6 +33,6 @@ To get started, check out the following resources:
    installation_and_setup
    basic_interface
    intro_stitching
-   intro_analysis
+   configuration_reference
    glossary
    troubleshooting_FAQ
