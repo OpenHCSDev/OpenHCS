@@ -130,7 +130,8 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
             # Already relative or different root
             relative_path = path_obj
 
-        relative_str = str(relative_path)
+        # Normalize Windows backslashes to forward slashes
+        relative_str = str(relative_path).replace('\\', '/')
 
         # Load mapping if not cached
         if self._mapping_cache is None:
@@ -265,6 +266,9 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
         except ValueError:
             relative_str = str(path)
 
+        # Normalize Windows backslashes to forward slashes
+        relative_str = relative_str.replace('\\', '/')
+
         # File in mapping or directory prefix
         return (relative_str in self._mapping_cache or
                 any(vp.startswith(relative_str + '/') for vp in self._mapping_cache))
@@ -278,6 +282,9 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
             relative_str = str(Path(path).relative_to(self.plate_root))
         except ValueError:
             relative_str = str(path)
+
+        # Normalize Windows backslashes to forward slashes
+        relative_str = relative_str.replace('\\', '/')
 
         # File if it's directly in the mapping
         return relative_str in self._mapping_cache
