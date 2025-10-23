@@ -190,6 +190,11 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
         if self._mapping_cache is None:
             self._load_mapping()
 
+        logger.info(f"VirtualWorkspace.list_files called: directory={directory}, recursive={recursive}, pattern={pattern}, extensions={extensions}")
+        logger.info(f"  plate_root={self.plate_root}")
+        logger.info(f"  relative_dir_str='{relative_dir_str}'")
+        logger.info(f"  mapping has {len(self._mapping_cache)} entries")
+
         # Filter paths in this directory
         results = []
         for virtual_relative in self._mapping_cache.keys():
@@ -215,6 +220,16 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
 
             # Return absolute path
             results.append(str(self.plate_root / virtual_relative))
+
+        logger.info(f"  VirtualWorkspace.list_files returning {len(results)} files")
+        if len(results) == 0 and len(self._mapping_cache) > 0:
+            # Log first few mapping keys to help debug
+            sample_keys = list(self._mapping_cache.keys())[:3]
+            logger.info(f"  Sample mapping keys: {sample_keys}")
+            if not recursive and relative_dir_str == '':
+                sample_parents = [str(Path(k).parent).replace('\\', '/') for k in sample_keys]
+                logger.info(f"  Sample parent dirs: {sample_parents}")
+                logger.info(f"  Expected parent to match: '{relative_dir_str}'")
 
         return sorted(results)
 
