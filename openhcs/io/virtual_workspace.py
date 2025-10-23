@@ -181,6 +181,11 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
             # Already relative
             relative_dir = dir_path
 
+        # Normalize to forward slashes for comparison with JSON mapping
+        relative_dir_str = str(relative_dir).replace('\\', '/')
+        if relative_dir_str == '.':
+            relative_dir_str = ''
+
         # Load mapping - fail loud if missing
         if self._mapping_cache is None:
             self._load_mapping()
@@ -188,19 +193,21 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
         # Filter paths in this directory
         results = []
         for virtual_relative in self._mapping_cache.keys():
-            vpath = Path(virtual_relative)
-
-            # Check directory match
+            # Check directory match using string comparison with forward slashes
             if recursive:
-                try:
-                    vpath.relative_to(relative_dir)
-                except ValueError:
-                    continue
+                # For recursive, check if virtual_relative starts with directory prefix
+                if relative_dir_str:
+                    if not virtual_relative.startswith(relative_dir_str + '/') and virtual_relative != relative_dir_str:
+                        continue
+                # else: relative_dir_str is empty (root), include all files
             else:
-                if vpath.parent != relative_dir:
+                # For non-recursive, check if parent directory matches
+                vpath_parent = str(Path(virtual_relative).parent).replace('\\', '/')
+                if vpath_parent != relative_dir_str:
                     continue
 
             # Apply filters
+            vpath = Path(virtual_relative)
             if pattern and not fnmatch(vpath.name, pattern):
                 continue
             if extensions and vpath.suffix not in extensions:
