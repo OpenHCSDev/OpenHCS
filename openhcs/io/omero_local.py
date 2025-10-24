@@ -595,7 +595,9 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
             raise ValueError(f"Plate '{plate_name}' not found in OMERO (images dir: {images_dir})")
 
         # Determine table name from filename
-        table_name = output_path.stem
+        # Remove ALL extensions (e.g., "file.roi.zip.json" -> "file")
+        # OMERO table names cannot contain dots except for the .h5 extension
+        table_name = output_path.name.split('.')[0]
 
         # Build column objects based on DataFrame dtypes
         columns = []
