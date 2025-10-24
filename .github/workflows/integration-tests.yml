@@ -65,7 +65,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout
@@ -98,6 +98,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
         backend: [disk, zarr]
         microscope: [ImageXpress, OperaPhenix]
 
@@ -105,10 +106,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
