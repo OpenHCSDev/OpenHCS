@@ -13,9 +13,9 @@ if TYPE_CHECKING:
     import torch.nn.functional as F
 
 # Import torch modules using optional_import
-torch = optional_import("torch")
-nn = optional_import("torch.nn") if torch is not None else None
-F = optional_import("torch.nn.functional") if torch is not None else None
+from openhcs.core.lazy_gpu_imports import torch
+nn = optional_import("torch.nn") if torch else None
+F = optional_import("torch.nn.functional") if torch else None
 
 nnModule = create_placeholder_class(
     "Module", # Name for the placeholder if generated

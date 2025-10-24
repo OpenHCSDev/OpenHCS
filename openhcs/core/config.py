@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional, Union, Any, List
 from enum import Enum
 from abc import ABC, abstractmethod
-from openhcs.constants import Microscope
+from openhcs.constants import Microscope, VirtualComponents
 from openhcs.constants.constants import Backend
 
 # Import decorator for automatic decorator creation
@@ -122,8 +122,9 @@ class GlobalPipelineConfig:
 from openhcs.utils.enum_factory import create_colormap_enum
 from openhcs.utils.display_config_factory import create_napari_display_config, create_fiji_display_config
 
-# Create the colormap enum using pure introspection
-NapariColormap = create_colormap_enum()
+# Create colormap enum with minimal set to avoid importing napari (→ dask → GPU libs)
+# The lazy=True parameter uses a hardcoded minimal set instead of introspecting napari
+NapariColormap = create_colormap_enum(lazy=True)
 
 
 class NapariDimensionMode(Enum):
@@ -139,8 +140,7 @@ class NapariVariableSizeHandling(Enum):
 
 
 # Create NapariDisplayConfig using factory
-from openhcs.constants import VirtualComponents
-
+# Note: Uses lazy colormap enum to avoid importing napari at module level
 NapariDisplayConfig = create_napari_display_config(
     colormap_enum=NapariColormap,
     dimension_mode_enum=NapariDimensionMode,
@@ -166,8 +166,6 @@ NapariDisplayConfig = create_napari_display_config(
 # Apply the global pipeline config decorator with ui_hidden=True
 # This config is only inherited by NapariStreamingConfig, so hide it from UI
 NapariDisplayConfig = global_pipeline_config(ui_hidden=True)(NapariDisplayConfig)
-# Mark the class directly as well for UI layer checks
-NapariDisplayConfig._ui_hidden = True
 
 
 # ============================================================================
@@ -589,15 +587,8 @@ set_base_config_type(GlobalPipelineConfig)
 
 logger.debug("Configuration framework initialized with OpenHCS types")
 
-# PERFORMANCE OPTIMIZATION: Pre-warm analysis caches at import time
-# This eliminates the 1000ms+ first-load penalty when opening config windows
-try:
-    from openhcs.config_framework import prewarm_config_analysis_cache
-    # Warm config hierarchy cache (for config windows)
-    prewarm_config_analysis_cache(GlobalPipelineConfig)
-except ImportError:
-    # Circular import during subprocess initialization - cache warming not needed
-    # for non-UI execution contexts (ZMQ server, workers, etc.)
-    logger.debug("Skipping config cache warming (circular import during subprocess init)")
+# PERFORMANCE OPTIMIZATION: Cache warming is now done asynchronously in GUI startup
+# to avoid blocking imports. For non-GUI contexts (CLI, subprocess), cache warming
+# happens on-demand when config windows are first opened.
 
 # NOTE: Step editor cache warming is done in openhcs.core.steps.__init__ to avoid circular imports

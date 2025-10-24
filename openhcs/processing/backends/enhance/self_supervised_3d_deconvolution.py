@@ -5,12 +5,12 @@ from typing import Optional, Tuple
 # Import torch decorator and optional_import utility
 from openhcs.utils.import_utils import optional_import, create_placeholder_class
 from openhcs.core.memory.decorators import torch as torch_func
+from openhcs.core.lazy_gpu_imports import torch
 
 # --- PyTorch Imports as optional dependencies ---
-torch = optional_import("torch")
-nn = optional_import("torch.nn") if torch is not None else None
-F = optional_import("torch.nn.functional") if torch is not None else None
-if torch is not None:
+nn = optional_import("torch.nn") if torch else None
+F = optional_import("torch.nn.functional") if torch else None
+if torch:
     from torch.fft import irfftn, rfftn
 else:
     irfftn = None

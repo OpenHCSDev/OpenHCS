@@ -23,7 +23,7 @@ from openhcs.utils.import_utils import optional_import
 from openhcs.core.memory.decorators import torch as torch_func
 
 # Import torch modules as optional dependencies
-torch = optional_import("torch")
+from openhcs.core.lazy_gpu_imports import torch
 
 # Import torch_nlm as optional dependency
 # Note: The PyPI package is named 'nlm-torch' but imports as 'torch_nlm'

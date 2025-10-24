@@ -13,9 +13,9 @@ if TYPE_CHECKING:
     import torch.nn as nn
     import torch.nn.functional as F
 
-torch = optional_import("torch")
-nn = optional_import("torch.nn") if torch is not None else None
-F = optional_import("torch.nn.functional") if torch is not None else None
+from openhcs.core.lazy_gpu_imports import torch
+nn = optional_import("torch.nn") if torch else None
+F = optional_import("torch.nn.functional") if torch else None
 HAS_TORCH = torch is not None
 
 # CuPy
@@ -30,8 +30,8 @@ if TYPE_CHECKING:
     import jax
     import jax.numpy as jnp
 
-jax = optional_import("jax")
-jnp = optional_import("jax.numpy") if jax is not None else None
+from openhcs.core.lazy_gpu_imports import jax
+jnp = optional_import("jax.numpy") if jax else None
 HAS_JAX = jax is not None
 
 # TensorFlow

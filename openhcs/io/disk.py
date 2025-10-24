@@ -38,11 +38,7 @@ if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
     tf = None
     logger.info("Subprocess runner mode - skipping GPU library imports in disk backend")
 else:
-    torch = optional_import("torch")
-    jax = optional_import("jax")
-    jnp = optional_import("jax.numpy")
-    cupy = optional_import("cupy")
-    tf = optional_import("tensorflow")
+    from openhcs.core.lazy_gpu_imports import torch, jax, jnp, cupy, tf
 tifffile = optional_import("tifffile")
 
 class FileFormatRegistry:

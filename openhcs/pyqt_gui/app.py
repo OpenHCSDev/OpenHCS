@@ -14,7 +14,6 @@ from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
 
 from openhcs.core.config import GlobalPipelineConfig
-from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.io.base import storage_registry
 from openhcs.io.filemanager import FileManager
 
@@ -64,9 +63,11 @@ class OpenHCSPyQtApp(QApplication):
     
     def setup_application(self):
         """Setup application-wide configuration."""
-        # Setup GPU registry
-        setup_global_gpu_registry(global_config=self.global_config)
-        logger.info("GPU registry setup completed")
+        # DISABLED: Background initialization causes GIL contention and blocks GUI startup
+        # GPU libraries and storage backends will be loaded on-demand when first used
+        # from openhcs.io.async_init import start_async_initialization
+        # start_async_initialization()
+        # logger.info("Background initialization started (GPU libraries, ome-zarr)")
 
         # CRITICAL FIX: Establish global config context for lazy dataclass resolution
         # This was missing and caused placeholder resolution to fall back to static defaults
@@ -109,10 +110,15 @@ class OpenHCSPyQtApp(QApplication):
         """Show the main window."""
         if self.main_window is None:
             self.create_main_window()
-        
+
         self.main_window.show()
         self.main_window.raise_()
         self.main_window.activateWindow()
+
+        # Trigger deferred initialization AFTER window is visible
+        # This includes log viewer and default windows (pipeline editor)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, self.main_window._deferred_initialization)
     
     def on_config_changed(self, new_config: GlobalPipelineConfig):
         """

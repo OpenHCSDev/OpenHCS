@@ -20,7 +20,7 @@ from openhcs.core.pipeline.function_contracts import special_outputs
 
 # Import torch using the established optional import pattern
 from openhcs.core.utils import optional_import
-torch = optional_import("torch")
+from openhcs.core.lazy_gpu_imports import torch
 
 # Import torbi for GPU-accelerated Viterbi decoding
 torbi = optional_import("torbi")

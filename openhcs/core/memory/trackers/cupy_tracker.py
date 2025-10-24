@@ -1,11 +1,10 @@
 import logging
-from openhcs.core.utils import optional_import
+from openhcs.core.lazy_gpu_imports import cupy, check_installed_gpu_libraries
 
 logger = logging.getLogger(__name__)
 
-# Import cupy using the optional_import utility
-cupy = optional_import("cupy")
-CUPY_AVAILABLE = cupy is not None
+# Check if cupy is available (no import)
+CUPY_AVAILABLE = check_installed_gpu_libraries().get('cupy', False)
 if not CUPY_AVAILABLE:
     logger.info("CuPy library not found. CuPyMemoryTracker will not be available.")
 
