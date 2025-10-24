@@ -639,8 +639,17 @@ class PipelineOrchestrator(ContextProvider):
 
         Uses the same context creation logic as pipeline execution to get full metadata
         with channel names from metadata files (HTD, Index.xml, etc).
+
+        Skips OMERO and other non-disk-based microscope handlers since they don't have
+        real disk directories.
         """
         from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
+
+        # Skip metadata creation for OMERO and other non-disk-based handlers
+        # OMERO uses virtual paths like /omero/plate_1 which are not real directories
+        if self.microscope_handler.microscope_type == 'omero':
+            logger.debug("Skipping metadata creation for OMERO plate (uses virtual paths)")
+            return
 
         # For plates with virtual workspace, metadata is already created by _build_virtual_mapping()
         # We just need to add the component metadata to the existing "." subdirectory
