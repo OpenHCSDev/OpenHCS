@@ -156,8 +156,9 @@ class OperaPhenixHandler(MicroscopeHandler):
             new_name = self.parser.construct_filename(**metadata)
 
             # Build PLATE-RELATIVE mapping (no workspace directory)
-            virtual_relative = str(Path("Images") / new_name)
-            real_relative = str(Path("Images") / file_name)
+            # Use .as_posix() to ensure forward slashes on all platforms (Windows uses backslashes with str())
+            virtual_relative = (Path("Images") / new_name).as_posix()
+            real_relative = (Path("Images") / file_name).as_posix()
             workspace_mapping[virtual_relative] = real_relative
 
         logger.info(f"Built {len(workspace_mapping)} virtual path mappings for Opera Phenix")
