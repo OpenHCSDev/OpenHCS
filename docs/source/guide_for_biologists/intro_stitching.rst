@@ -170,9 +170,12 @@ The pipeline consists of the following steps:
 
 1. **Image Enhancement Processing**: Prepares images for stitching by applying filters.
 
-2. **Create Composite** With the variable component as channel, this step creates a composite image using both channels for each site of each Z-Stack of each well, so that there is only 1 image for each position. This is needed because stitching requires just one image per position, but with multi-channel images, there are multiple images per position (one for each channel).
+
+2. **Create Composite** With the variable component as channel, this step creates a composite image using both channels for each site of each well of each z-stack, so that there is only 1 image for each position. This is needed because stitching requires just one image per position, but with multi-channel images, there are multiple images per position (one for each channel).
+
 
 3. **Z-Stack Flattening** This does the same as Create Composite, but for z-stacks (3d heights). It flattens multiple z-slices into a single 2D image per position.
+
 
 4. **Position Computation**: Computes the positions of each image for stitching.
 
