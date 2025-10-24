@@ -95,26 +95,22 @@ class SystemMonitorWidget(QWidget):
 
     def create_loading_placeholder(self) -> QWidget:
         """
-        Create a startup screen widget shown while PyQtGraph loads.
+        Create a simple loading placeholder shown while PyQtGraph loads.
 
         Returns:
-            Startup screen widget with progress bar and live log
+            Simple loading label widget
         """
-        from openhcs.pyqt_gui.widgets.startup_screen import StartupScreenWidget
-        from openhcs.core.log_utils import get_current_log_file_path
-        from pathlib import Path
+        from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+        from PyQt6.QtCore import Qt
 
-        startup_screen = StartupScreenWidget()
+        placeholder = QWidget()
+        layout = QVBoxLayout(placeholder)
 
-        # Start monitoring the current log file
-        log_file_str = get_current_log_file_path()
-        if log_file_str:
-            startup_screen.start_monitoring(Path(log_file_str))
+        label = QLabel("Loading system monitor...")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
 
-        # Store reference so we can stop monitoring later
-        self._startup_screen = startup_screen
-
-        return startup_screen
+        return placeholder
 
     def _load_pyqtgraph_async(self):
         """
@@ -124,9 +120,9 @@ class SystemMonitorWidget(QWidget):
         thread imports to block the main thread anyway. By using QTimer with a delay,
         we give the user time to interact with the UI before the import happens.
         """
-        # Delay pyqtgraph import by 10 seconds to let user interact with UI first
-        QTimer.singleShot(10000, self._import_pyqtgraph_main_thread)
-        logger.info("PyQtGraph will load in 10 seconds (UI will freeze briefly during import)")
+        # Load immediately - no artificial delay
+        QTimer.singleShot(0, self._import_pyqtgraph_main_thread)
+        logger.info("PyQtGraph loading...")
 
     def _import_pyqtgraph_main_thread(self):
         """Import PyQtGraph in main thread after delay."""
@@ -143,21 +139,27 @@ class SystemMonitorWidget(QWidget):
             PYQTGRAPH_AVAILABLE = True
             logger.info("✅ PyQtGraph loaded successfully (GPU libraries ready)")
 
-            # Switch to PyQtGraph UI
-            self._switch_to_pyqtgraph_ui()
+            # Flush logs so startup screen can read them
+            import logging as _logging
+            for _h in _logging.getLogger().handlers:
+                try:
+                    _h.flush()
+                except Exception:
+                    pass
+
+            # Schedule UI switch on next event loop tick so startup screen can update
+            from PyQt6.QtCore import QTimer as _QTimer
+            _QTimer.singleShot(0, self._switch_to_pyqtgraph_ui)
         except ImportError as e:
             logger.warning(f"❌ PyQtGraph not available: {e}")
             PYQTGRAPH_AVAILABLE = False
 
-            # Switch to fallback UI
-            self._switch_to_fallback_ui()
+            # Schedule fallback switch similarly
+            from PyQt6.QtCore import QTimer as _QTimer
+            _QTimer.singleShot(0, self._switch_to_fallback_ui)
 
     def _switch_to_pyqtgraph_ui(self):
-        """Switch from startup screen to PyQtGraph UI (called in main thread)."""
-        # Stop startup screen monitoring if active
-        if hasattr(self, '_startup_screen') and self._startup_screen:
-            self._startup_screen.stop_monitoring()
-
+        """Switch from loading placeholder to PyQtGraph UI (called in main thread)."""
         # Remove loading placeholder
         old_widget = self.monitoring_widget
         layout = self.layout()
@@ -171,11 +173,7 @@ class SystemMonitorWidget(QWidget):
         logger.info("Switched to PyQtGraph UI")
 
     def _switch_to_fallback_ui(self):
-        """Switch from startup screen to fallback UI (called in main thread)."""
-        # Stop startup screen monitoring if active
-        if hasattr(self, '_startup_screen') and self._startup_screen:
-            self._startup_screen.stop_monitoring()
-
+        """Switch from loading placeholder to fallback UI (called in main thread)."""
         # Remove loading placeholder
         old_widget = self.monitoring_widget
         layout = self.layout()
