@@ -18,13 +18,13 @@ For now, we will use a synthetic dataset included with OpenHCS. Under "View" in 
 
 <!-- IMAGE: Screenshot guide of above-->
 
-This creates a synthetic plate with random data, and creates a sample stitching + analysis pipeline. Hit "Init" to initialize the plate. 
+This creates a synthetic plate with random data, and creates a sample stitching + analysis pipeline. Hit "Init" in the plate manager to initialize the plate. 
 
 .. dropdown:: Uploading your own data
 
   For reference, if you'd rather upload your own dataset, follow these steps:
 
-  1. Open Plate Manager (Windows menu)
+  1. Open Plate Manager 
   2. Click "Add" → navigate to your dataset folder → "Choose"
   3. OpenHCS will auto-detect the format and load it
   4. Click "Init" to initialize
@@ -34,7 +34,7 @@ Step 2: Exploring the Image Browser & Metadata Viewer
 ----------------------------
 
 **Image Browser**
-The Image Browser lets you view and explore images in your plate. Click on "Meta" in the plate manager to open it.
+The Image Browser lets you view and explore images in your plate. Click on "Meta" in the plate manager to open it. (Note: This wont work unless you've initialized a plate first. Hit the "Init" button if the Meta button is greyed out).
 
 .. figure:: ../_static/image_browser.png
    :alt: Image Browser
@@ -51,9 +51,7 @@ If you switch to the "Metadata" tab at the top, you can view metadata associated
 
    *In the Metadata tab, you can view and edit metadata associated with your images, such as acquisition settings, experimental conditions, and annotations.*
 
-
-
-Now, let's look at how to do things with these images. Open the Pipeline editor.
+Now, let's look at how to do things with these images. Open the Pipeline editor by clicking view on the main menu and clicking "Pipeline Editor".
 
 Step 3: Setting up a Stitching Pipeline
 ---------------------------------------
@@ -64,18 +62,21 @@ A pipeline is a sequence of steps that process your images in a specific order. 
 
 Each pipeline is made of multiple steps. A step in OpenHCS is a single operation. This doesn't mean they only do one thing, however. Many steps perform multiple operations. 
 
-<!-- IMAGE: Screenshot of Pipeline Editor with steps visible -->
+.. figure:: ../_static/pipeline_editor.png
+   :alt: Pipeline Editor
+
+   *The Pipeline Editor shows the sequence of steps that make up your image processing workflow.* 
 
 .. dropdown:: Sharing/Importing Pipelines
 
-   You can share pipelines by clicking the "Code" button and copying the generated code. Anyone else can paste it into their own code viewer and load your pipeline, and vice versa.
+   The best way to share pipelines is by clicking the "Code" button and copying the generated code. Anyone else can paste it into their own code viewer and load your pipeline, and vice versa.
 
 
 **Steps and the Step Editor**
 ```````````````````````````````
 Lets take a look at a individual step by opening the Step Editor. Double-click on the first step in the pipeline (named "Image Enhancement Processing") to open it.
 
-<!-- IMAGE: Screenshot of Pipeline Editor with arrow pointing at step editor-->
+
 
 
 There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Lets look at step settings for now.
