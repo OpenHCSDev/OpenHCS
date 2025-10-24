@@ -663,8 +663,14 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
         Get the primary backend name for OpenHCS plates.
 
         Uses metadata-based detection to determine the primary backend.
+        Prefers virtual_workspace over disk when both are available.
         """
         available_backends_dict = self.metadata_handler.get_available_backends(plate_path)
+
+        # Prefer virtual_workspace backend if available (for plates with workspace_mapping)
+        if 'virtual_workspace' in available_backends_dict and available_backends_dict['virtual_workspace']:
+            return 'virtual_workspace'
+
         return next(iter(available_backends_dict.keys()))
 
     def initialize_workspace(self, plate_path: Path, filemanager: FileManager) -> Path:
@@ -687,6 +693,16 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
         # Determine the main subdirectory from metadata - fail-loud on errors
         main_subdir = self.metadata_handler.determine_main_subdirectory(plate_path)
         input_dir = plate_path / main_subdir
+
+        # Check if workspace_mapping exists in metadata - if so, register virtual workspace backend
+        metadata_dict = self.metadata_handler._load_metadata_dict(plate_path)
+        subdir_metadata = metadata_dict.get(FIELDS.SUBDIRECTORIES, {}).get(main_subdir, {})
+
+        if subdir_metadata.get('workspace_mapping'):
+            from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
+            backend = VirtualWorkspaceBackend(plate_root=plate_path)
+            filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
+            logger.info(f"Registered virtual workspace backend for OpenHCS plate with workspace_mapping")
 
         # Verify the subdirectory exists - fail-loud if missing
         if not filemanager.is_dir(str(input_dir), Backend.DISK.value):

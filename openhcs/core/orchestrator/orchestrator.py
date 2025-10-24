@@ -424,7 +424,9 @@ class PipelineOrchestrator(ContextProvider):
             logger.info("PipelineOrchestrator using provided StorageRegistry instance.")
         else:
             # Create a copy of the global registry to avoid modifying shared state
-            from openhcs.io.base import storage_registry as global_storage_registry
+            from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
+            # Ensure registry is initialized before copying
+            ensure_storage_registry()
             self.registry = global_storage_registry.copy()
             logger.info("PipelineOrchestrator created its own StorageRegistry instance (copy of global).")
 

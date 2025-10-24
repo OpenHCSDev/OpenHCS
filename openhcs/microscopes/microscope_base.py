@@ -635,7 +635,7 @@ def validate_backend_compatibility(handler: MicroscopeHandler, backend: Backend)
 
 def _try_metadata_detection(handler_class, filemanager: FileManager, plate_folder: Path) -> Optional[Path]:
     """
-    Try metadata detection with a handler, normalizing return types and exceptions.
+    Try metadata detection with a handler, normalizing return types.
 
     Args:
         handler_class: MetadataHandler class to try
@@ -643,20 +643,16 @@ def _try_metadata_detection(handler_class, filemanager: FileManager, plate_folde
         plate_folder: Path to plate directory
 
     Returns:
-        Path if metadata found, None if not found (regardless of handler's native behavior)
+        Path if metadata found, None if metadata not found
+
+    Raises:
+        Any exception from the handler (fail-loud behavior)
     """
-    try:
-        handler = handler_class(filemanager)
-        result = handler.find_metadata_file(plate_folder)
+    handler = handler_class(filemanager)
+    result = handler.find_metadata_file(plate_folder)
 
-        # Normalize return type: convert any truthy result to Path, falsy to None
-        return Path(result) if result else None
-
-    except (FileNotFoundError, Exception) as e:
-        # Expected exceptions for "not found" - convert to None
-        # Note: Using broad Exception catch for now, can be refined based on actual handler exceptions
-        logger.debug(f"Metadata detection failed for {handler_class.__name__}: {e}")
-        return None
+    # Normalize return type: convert any truthy result to Path, falsy to None
+    return Path(result) if result else None
 
 
 def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
@@ -676,39 +672,46 @@ def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
 
     Raises:
         ValueError: If microscope type cannot be determined
+        MetadataNotFoundError: If metadata files are missing
+        Any other exception from metadata handlers (fail-loud)
     """
-    try:
-        # Ensure all handlers are discovered before auto-detection
-        from openhcs.microscopes.handler_registry_service import discover_all_handlers
-        discover_all_handlers()
+    # Ensure all handlers are discovered before auto-detection
+    from openhcs.microscopes.handler_registry_service import discover_all_handlers
+    from openhcs.io.exceptions import MetadataNotFoundError
+    discover_all_handlers()
 
-        # Build detection order: openhcsdata first, then filtered/ordered list
-        detection_order = ['openhcsdata']  # Always first, always included (correct registration name)
+    # Build detection order: openhcsdata first, then filtered/ordered list
+    detection_order = ['openhcsdata']  # Always first, always included (correct registration name)
 
-        if allowed_types is None:
-            # Use all registered handlers in registration order
-            detection_order.extend([name for name in METADATA_HANDLERS.keys() if name != 'openhcsdata'])
-        else:
-            # Use filtered list, but ensure openhcsdata is first
-            filtered_types = [name for name in allowed_types if name != 'openhcsdata' and name in METADATA_HANDLERS]
-            detection_order.extend(filtered_types)
+    if allowed_types is None:
+        # Use all registered handlers in registration order
+        detection_order.extend([name for name in METADATA_HANDLERS.keys() if name != 'openhcsdata'])
+    else:
+        # Use filtered list, but ensure openhcsdata is first
+        filtered_types = [name for name in allowed_types if name != 'openhcsdata' and name in METADATA_HANDLERS]
+        detection_order.extend(filtered_types)
 
-        # Try detection in order
-        for handler_name in detection_order:
-            handler_class = METADATA_HANDLERS.get(handler_name)
-            if handler_class and _try_metadata_detection(handler_class, filemanager, plate_folder):
+    # Try detection in order - only catch expected "not found" exceptions
+    for handler_name in detection_order:
+        handler_class = METADATA_HANDLERS.get(handler_name)
+        if not handler_class:
+            continue
+
+        try:
+            result = _try_metadata_detection(handler_class, filemanager, plate_folder)
+            if result:
                 logger.info(f"Auto-detected {handler_name} microscope type")
                 return handler_name
+        except (FileNotFoundError, MetadataNotFoundError):
+            # Expected - this handler's metadata not found, try next
+            logger.debug(f"{handler_name} metadata not found in {plate_folder}")
+            continue
 
-        # No handler succeeded - provide detailed error message
-        available_types = list(METADATA_HANDLERS.keys())
-        msg = (f"Could not auto-detect microscope type in {plate_folder}. "
-               f"Tried: {detection_order}. "
-               f"Available types: {available_types}. "
-               f"Ensure metadata files are present for supported formats.")
-        logger.error(msg)
-        raise ValueError(msg)
-
-    except Exception as e:
-        # Wrap exception with clear context
-        raise ValueError(f"Error during microscope type auto-detection in {plate_folder}: {e}") from e
+    # No handler succeeded - provide detailed error message
+    available_types = list(METADATA_HANDLERS.keys())
+    msg = (f"Could not auto-detect microscope type in {plate_folder}. "
+           f"Tried: {detection_order}. "
+           f"Available types: {available_types}. "
+           f"Ensure metadata files are present for supported formats.")
+    logger.error(msg)
+    raise ValueError(msg)

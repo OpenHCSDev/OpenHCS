@@ -1358,26 +1358,41 @@ def _update_metadata_for_zarr_conversion(
     """Update metadata after zarr conversion.
 
     If zarr_subdir is None: add zarr to original_subdir's available_backends
-    If zarr_subdir is set: create new zarr subdirectory, set original main=false
+    If zarr_subdir is set: copy original metadata to zarr subdirectory, set original main=false
     """
     from openhcs.io.metadata_writer import get_metadata_path, AtomicMetadataWriter
+    import json
 
     metadata_path = get_metadata_path(plate_root)
     writer = AtomicMetadataWriter()
 
     if zarr_subdir:
+        # Read existing metadata to copy from original subdirectory
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+
+        original_metadata = metadata.get("subdirectories", {}).get(original_subdir, {})
+
+        # Copy all metadata from original subdirectory to zarr subdirectory
+        zarr_metadata = original_metadata.copy()
+        zarr_metadata["available_backends"] = {"zarr": True, "virtual_workspace": True}
+        zarr_metadata["main"] = True
+
+        # Update image_files to use zarr subdirectory prefix
+        if "image_files" in zarr_metadata:
+            zarr_metadata["image_files"] = [
+                f"{zarr_subdir}/{Path(f).name}" for f in original_metadata.get("image_files", [])
+            ]
+
         # Separate zarr subdirectory - update both subdirectories atomically
         updates = {
-            zarr_subdir: {
-                "available_backends": {"zarr": True},
-                "main": True
-            },
+            zarr_subdir: zarr_metadata,
             original_subdir: {
                 "main": False
             }
         }
         writer.merge_subdirectory_metadata(metadata_path, updates)
-        logger.info(f"Updated metadata: {original_subdir} main=false, {zarr_subdir} main=true")
+        logger.info(f"Updated metadata: copied {original_subdir} metadata to {zarr_subdir}, set {original_subdir} main=false")
     else:
         # Shared subdirectory - add zarr to available_backends
         updates = {

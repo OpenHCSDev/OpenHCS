@@ -8,6 +8,7 @@ that all storage backends must fulfill.
 """
 
 import logging
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
@@ -527,6 +528,7 @@ class _LazyStorageRegistry(dict):
 # This is the shared registry instance that all components should use
 storage_registry: Dict[str, DataSink] = _LazyStorageRegistry()
 _registry_initialized = False
+_registry_lock = threading.Lock()
 
 
 def ensure_storage_registry() -> None:
@@ -536,13 +538,18 @@ def ensure_storage_registry() -> None:
     Lazily creates the registry on first access to avoid importing
     GPU-heavy backends during module import. This provides instant
     imports while maintaining backward compatibility.
+
+    Thread-safe: Multiple threads can call this simultaneously.
     """
     global _registry_initialized
 
+    # Double-checked locking pattern for thread safety
     if not _registry_initialized:
-        storage_registry.update(_create_storage_registry())
-        _registry_initialized = True
-        logger.info("Lazily initialized storage registry")
+        with _registry_lock:
+            if not _registry_initialized:
+                storage_registry.update(_create_storage_registry())
+                _registry_initialized = True
+                logger.info("Lazily initialized storage registry")
 
 
 def get_backend(backend_type: str) -> DataSink:

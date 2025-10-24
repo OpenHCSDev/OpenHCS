@@ -63,11 +63,16 @@ class OpenHCSPyQtApp(QApplication):
     
     def setup_application(self):
         """Setup application-wide configuration."""
-        # DISABLED: Background initialization causes GIL contention and blocks GUI startup
-        # GPU libraries and storage backends will be loaded on-demand when first used
-        # from openhcs.io.async_init import start_async_initialization
-        # start_async_initialization()
-        # logger.info("Background initialization started (GPU libraries, ome-zarr)")
+        # Start async storage registry initialization in background thread
+        import threading
+        def init_registry_background():
+            from openhcs.io.base import ensure_storage_registry
+            ensure_storage_registry()
+            logger.info("Storage registry initialized in background")
+
+        thread = threading.Thread(target=init_registry_background, daemon=True, name="registry-init")
+        thread.start()
+        logger.info("Storage registry initialization started in background")
 
         # CRITICAL FIX: Establish global config context for lazy dataclass resolution
         # This was missing and caused placeholder resolution to fall back to static defaults
