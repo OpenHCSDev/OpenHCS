@@ -208,6 +208,9 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
             else:
                 # For non-recursive, check if parent directory matches
                 vpath_parent = str(Path(virtual_relative).parent).replace('\\', '/')
+                # Normalize '.' to '' for root directory comparison
+                if vpath_parent == '.':
+                    vpath_parent = ''
                 if vpath_parent != relative_dir_str:
                     continue
 
@@ -291,7 +294,15 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
         # Normalize Windows backslashes to forward slashes
         relative_str = relative_str.replace('\\', '/')
 
+        # Normalize '.' to '' for root directory
+        if relative_str == '.':
+            relative_str = ''
+
         # File in mapping or directory prefix
+        # For root directory (empty string), check if mapping has any files
+        if relative_str == '':
+            return len(self._mapping_cache) > 0
+
         return (relative_str in self._mapping_cache or
                 any(vp.startswith(relative_str + '/') for vp in self._mapping_cache))
     

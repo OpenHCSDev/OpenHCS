@@ -244,12 +244,31 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         # NO existence check - virtual workspaces are metadata-only
 
         # Apply microscope-specific preparation logic
+        # _build_virtual_mapping() returns the correct image directory for each microscope:
+        # - ImageXpress: plate_path (images are at plate root with TimePoint_X/ prefix in mapping)
+        # - OperaPhenix: plate_path/Images (images are in Images/ subdirectory)
         if skip_preparation:
             logger.info("📁 SKIPPING PREPARATION: Virtual mapping already built")
-            prepared_dir = plate_path
+            # When skipping, we need to determine image_dir from metadata
+            # Read metadata to get the subdirectory key
+            from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+            openhcs_metadata_handler = OpenHCSMetadataHandler(filemanager)
+            metadata = openhcs_metadata_handler._load_metadata_dict(plate_path)
+            subdirs = metadata.get("subdirectories", {})
+
+            # Find the subdirectory with workspace_mapping (should be "." or "Images")
+            image_dir = plate_path  # Default to plate root
+            for subdir_name in subdirs.keys():
+                if "workspace_mapping" in subdirs[subdir_name]:
+                    if subdir_name == ".":
+                        image_dir = plate_path
+                    else:
+                        image_dir = plate_path / subdir_name
+                    break
         else:
             logger.info("🔄 APPLYING PREPARATION: Building virtual mapping")
-            prepared_dir = self._build_virtual_mapping(plate_path, filemanager)
+            # _build_virtual_mapping() returns the image directory
+            image_dir = self._build_virtual_mapping(plate_path, filemanager)
 
         # Determine backend - check if virtual workspace backend is registered
         if Backend.VIRTUAL_WORKSPACE.value in filemanager.registry:
@@ -257,44 +276,10 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         else:
             backend_type = Backend.DISK.value
 
-        # List contents
-        entries = filemanager.list_dir(plate_path, backend_type)
-
-        # Filter entries to get only directories
-        subdirs = []
-        for entry in entries:
-            entry_path = Path(plate_path) / entry
-            if filemanager.is_dir(entry_path, backend_type):
-                subdirs.append(entry_path)
-
-        # Look for a directory matching any of the common_dirs patterns
-        image_dir = None
-        for item in subdirs:
-            # FileManager should return strings, but handle Path objects too
-            if isinstance(item, str):
-                item_name = os.path.basename(item)
-            elif isinstance(item, Path):
-                item_name = item.name
-            else:
-                # Skip any unexpected types
-                logger.warning("Unexpected directory path type: %s", type(item).__name__)
-                continue
-
-            if any(dir_name.lower() in item_name.lower() for dir_name in self.common_dirs):
-                # Found a matching directory
-                logger.info("Found directory matching common_dirs pattern: %s", item)
-                image_dir = item
-                break
-
-        # If no matching directory found, use the prepared directory
-        if image_dir is None:
-            logger.info("No directory matching common_dirs found, using prepared directory: %s", prepared_dir)
-            image_dir = prepared_dir
-
         # Ensure parser is provided
         parser = self.parser
 
-        # Get all image files in the directory - use same backend as determined above
+        # Get all image files in the directory
         image_files = filemanager.list_image_files(image_dir, backend_type)
 
         # Map original filenames to reconstructed filenames

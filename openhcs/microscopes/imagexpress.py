@@ -318,9 +318,9 @@ class ImageXpressHandler(MicroscopeHandler):
                 # Reconstruct filename
                 new_filename = self.parser.construct_filename(**metadata)
 
-                # Build PLATE-RELATIVE virtual flattened path
-                # Use .as_posix() to ensure forward slashes on all platforms (Windows uses backslashes with str())
-                virtual_relative = (directory.relative_to(plate_path) / new_filename).as_posix()
+                # Build PLATE-RELATIVE virtual flattened path (at plate root, not in subdirectory)
+                # This makes images appear at plate root in virtual workspace
+                virtual_relative = new_filename
 
                 # Build PLATE-RELATIVE real path (in subfolder)
                 real_relative = Path(img_file).relative_to(plate_path).as_posix()
