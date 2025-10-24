@@ -234,10 +234,12 @@ jobs:
           python -m venv test_headless
           if [ "$RUNNER_OS" == "Windows" ]; then
             source test_headless/Scripts/activate
+            WHEEL=$(ls dist/*.whl)
           else
             source test_headless/bin/activate
+            WHEEL=$(ls dist/*.whl)
           fi
-          pip install dist/*.whl
+          pip install "$WHEEL"
           # Verify core OpenHCS works without GUI
           python -c "import openhcs; from openhcs.core.pipeline import Pipeline; print(f'✓ OpenHCS {openhcs.__version__} headless installation OK')"
 
@@ -247,10 +249,12 @@ jobs:
           python -m venv test_gui
           if [ "$RUNNER_OS" == "Windows" ]; then
             source test_gui/Scripts/activate
+            WHEEL=$(ls dist/*.whl)
           else
             source test_gui/bin/activate
+            WHEEL=$(ls dist/*.whl)
           fi
-          pip install dist/*.whl[gui]
+          pip install "${WHEEL}[gui]"
           # Verify GUI dependencies installed (can't import PyQt6 without X11/EGL in CI)
           python -c "import openhcs; import psutil; import GPUtil; print(f'✓ OpenHCS {openhcs.__version__} GUI dependencies installed')"
 
@@ -260,10 +264,12 @@ jobs:
           python -m venv test_dev
           if [ "$RUNNER_OS" == "Windows" ]; then
             source test_dev/Scripts/activate
+            WHEEL=$(ls dist/*.whl)
           else
             source test_dev/bin/activate
+            WHEEL=$(ls dist/*.whl)
           fi
-          pip install dist/*.whl[dev]
+          pip install "${WHEEL}[dev]"
           python -c "import pytest; import openhcs; print('✓ Dev dependencies OK')"
 
   # Run integration tests against wheel installation
