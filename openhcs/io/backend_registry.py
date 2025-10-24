@@ -192,19 +192,28 @@ def discover_all_backends() -> None:
     still triggering metaclass registration.
     """
     import os
+    import importlib
 
     # Check if we're in subprocess runner mode and should skip GPU-heavy backends
     if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
         # Subprocess runner mode - only import essential backends
         try:
-            from openhcs.io import disk, memory
+            from openhcs.io import disk, memory  # noqa: F401 - imported for metaclass registration
             logger.debug(f"Subprocess runner mode - discovered {len(STORAGE_BACKENDS)} essential backends: {list(STORAGE_BACKENDS.keys())}")
         except ImportError as e:
             logger.warning(f"Could not import essential backend modules: {e}")
     else:
         # Normal mode - import all backend modules to trigger metaclass registration
         try:
-            from openhcs.io import disk, memory, zarr, napari_stream, fiji_stream
+            # Import essential backends (always available)
+            from openhcs.io import disk, memory  # noqa: F401 - imported for metaclass registration
+
+            # Import GPU-heavy backends directly from their modules (not via __getattr__)
+            # This ensures the module is imported and metaclass registration happens
+            importlib.import_module('openhcs.io.zarr')
+            importlib.import_module('openhcs.io.napari_stream')
+            importlib.import_module('openhcs.io.fiji_stream')
+
             logger.debug(f"Discovered {len(STORAGE_BACKENDS)} storage backends: {list(STORAGE_BACKENDS.keys())}")
         except ImportError as e:
             logger.warning(f"Could not import some backend modules: {e}")

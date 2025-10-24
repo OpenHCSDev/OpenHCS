@@ -692,14 +692,36 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
         Get the primary backend name for OpenHCS plates.
 
         Uses metadata-based detection to determine the primary backend.
-        Prefers virtual_workspace over disk when both are available.
-        """
-        available_backends_dict = self.metadata_handler.get_available_backends(plate_path)
+        Preference hierarchy: zarr > virtual_workspace > disk
+        Registers virtual_workspace backend if needed.
 
-        # Prefer virtual_workspace backend if available (for plates with workspace_mapping)
+        Args:
+            plate_path: Input directory (may be subdirectory like zarr/)
+            filemanager: FileManager instance for backend registration
+        """
+        # Use plate_folder (plate root) for metadata operations, not the input_dir
+        actual_plate_root = self.plate_folder if self.plate_folder else Path(plate_path)
+        available_backends_dict = self.metadata_handler.get_available_backends(actual_plate_root)
+
+        # Preference hierarchy: zarr > virtual_workspace > disk
+        # 1. Prefer zarr if available (best performance for large datasets)
+        if 'zarr' in available_backends_dict and available_backends_dict['zarr']:
+            return 'zarr'
+
+        # 2. Prefer virtual_workspace if available (for plates with workspace_mapping)
         if 'virtual_workspace' in available_backends_dict and available_backends_dict['virtual_workspace']:
+            # Register virtual_workspace backend if not already registered
+            from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
+            from openhcs.constants.constants import Backend
+
+            if Backend.VIRTUAL_WORKSPACE.value not in filemanager.registry:
+                backend = VirtualWorkspaceBackend(plate_root=Path(actual_plate_root))
+                filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
+                logger.info(f"Registered virtual workspace backend for {actual_plate_root}")
+
             return 'virtual_workspace'
 
+        # 3. Fall back to first available backend (usually disk)
         return next(iter(available_backends_dict.keys()))
 
     def initialize_workspace(self, plate_path: Path, filemanager: FileManager) -> Path:
