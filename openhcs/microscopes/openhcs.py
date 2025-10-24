@@ -494,7 +494,12 @@ class OpenHCSMetadataGenerator:
         The caller filters out None values before merging to avoid overwriting existing fields.
         """
         handler = context.microscope_handler
-        cache = context.metadata_cache or {}
+
+        # metadata_cache is always set by create_context() - fail if not present
+        if not hasattr(context, 'metadata_cache'):
+            raise RuntimeError("ProcessingContext missing metadata_cache - must be created via create_context()")
+
+        cache = context.metadata_cache
 
         actual_files = self.filemanager.list_image_files(output_dir, write_backend)
         relative_files = [f"{sub_dir}/{Path(f).name}" for f in actual_files]
