@@ -199,29 +199,35 @@ Each microscope format requires different workspace preparation to normalize dir
 
    class ImageXpressHandler(MicroscopeHandler):
        @property
-       def common_dirs(self) -> List[str]:
-           """Directories that indicate ImageXpress format."""
-           return ['TimePoint_1']
+       def root_dir(self) -> str:
+           """Root directory where virtual workspace preparation starts.
 
-       def _prepare_workspace(self, workspace_path: Path, filemanager: FileManager) -> Path:
-           """Flatten Z-step directory structure and normalize filenames."""
-           # Find subdirectories using filemanager
-           entries = filemanager.list_dir(workspace_path, Backend.DISK.value)
-           subdirs = [Path(workspace_path) / entry for entry in entries
-                     if (Path(workspace_path) / entry).is_dir()]
+           Returns "." (plate root) because ImageXpress TimePoint/ZStep folders
+           are flattened starting from the plate root, and virtual paths have no prefix.
+           """
+           return "."
 
-           # Check for common directories (TimePoint_1, etc.)
-           common_dir_found = False
-           for subdir in subdirs:
-               if any(common_dir in subdir.name for common_dir in self.common_dirs):
-                   self._flatten_zsteps(subdir, filemanager)
-                   common_dir_found = True
+       def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
+           """Build virtual workspace mapping for nested folder structures."""
+           workspace_mapping = {}
 
-           # If no common directory found, process workspace directly
-           if not common_dir_found:
-               self._flatten_zsteps(workspace_path, filemanager)
+           # Apply virtual workspace preparation starting from root_dir
+           # For ImageXpress, root_dir is "." (plate root), so we process the plate directly
+           start_dir = plate_path if self.root_dir == "." else plate_path / self.root_dir
 
-           return workspace_path
+           # Flatten TimePoint and ZStep folders virtually (no physical file operations)
+           self._flatten_timepoints(start_dir, filemanager, workspace_mapping, plate_path)
+           self._flatten_zsteps(start_dir, filemanager, workspace_mapping, plate_path)
+
+           # Save virtual workspace mapping to metadata using root_dir as subdirectory key
+           writer.merge_subdirectory_metadata(metadata_path, {
+               self.root_dir: {
+                   "workspace_mapping": workspace_mapping,
+                   "available_backends": {"disk": True, "virtual_workspace": True}
+               }
+           })
+
+           return plate_path
 
        def _flatten_zsteps(self, directory: Path, filemanager: FileManager):
            """Flatten ZStep_N directories and normalize filenames."""
@@ -247,6 +253,54 @@ Each microscope format requires different workspace preparation to normalize dir
            return workspace_path
 
 This workspace preparation ensures pipelines always see a consistent flat structure regardless of the original microscope organization.
+
+Unified Image File Discovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+All microscope handlers use a unified approach to discover image files by reading from OpenHCS metadata:
+
+.. code-block:: python
+
+   class MetadataHandler(ABC):
+       def get_image_files(self, plate_path: Union[str, Path]) -> list[str]:
+           """Get list of image files from OpenHCS metadata.
+
+           Default implementation reads from openhcs_metadata.json after virtual workspace preparation.
+           Derives image list from workspace_mapping keys if available, otherwise from image_files list.
+           """
+           # Read from OpenHCS metadata (unified approach for all microscopes)
+           from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+           openhcs_handler = OpenHCSMetadataHandler(self.filemanager)
+
+           metadata = openhcs_handler._load_metadata_dict(plate_path)
+           subdirs = metadata.get("subdirectories", {})
+
+           # Find main subdirectory (marked with "main": true)
+           main_subdir_key = next((key for key, data in subdirs.items() if data.get("main")), None)
+           if not main_subdir_key:
+               main_subdir_key = next(iter(subdirs.keys()))
+
+           subdir_data = subdirs[main_subdir_key]
+
+           # Prefer workspace_mapping keys (virtual paths) if available
+           if workspace_mapping := subdir_data.get("workspace_mapping"):
+               return list(workspace_mapping.keys())
+
+           # Otherwise use image_files list
+           return subdir_data.get("image_files", [])
+
+**Key Design Points**:
+
+- **Single Source of Truth**: Metadata is authoritative, not filesystem
+- **No Filesystem Searching**: Eliminates defensive directory detection logic
+- **Unified API**: workspace_mapping keys and image_files use same format (subdirectory/filename)
+- **Fail-Loud**: No fallback logic - if metadata doesn't exist, return empty list
+
+**Image Path Format**:
+
+- **ImageXpress**: ``"A01_s001_w1_z001_t001.tif"`` (no prefix, root_dir is ``"."``)
+- **OperaPhenix**: ``"Images/remapped_file.tif"`` (includes ``Images/`` prefix, root_dir is ``"Images"``)
+- **Zarr**: ``"zarr/A01_s001_w1_z001_t001.tif"`` (includes ``zarr/`` prefix)
 
 Pattern Detection and File Discovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

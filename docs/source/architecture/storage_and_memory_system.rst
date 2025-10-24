@@ -157,13 +157,52 @@ Handlers that override ``initialize_workspace()`` completely (like OMERO and Ope
 
        return plate_path
 
-**Backend Selection**:
+**Backend Selection and Preference Hierarchy**:
+
+OpenHCS uses a strict backend preference hierarchy when multiple backends are available:
+
+**Preference Order**: ``zarr`` > ``virtual_workspace`` > ``disk``
+
+This hierarchy ensures that:
+
+1. **Zarr backend** is preferred when available (optimized for large datasets, compressed storage)
+2. **Virtual workspace** is used for original nested microscope data (when zarr not available)
+3. **Disk backend** is the fallback (standard TIFF files)
+
+**Main Subdirectory Selection**:
+
+When loading metadata with multiple subdirectories, OpenHCS selects the subdirectory marked with ``"main": true``:
+
+.. code-block:: json
+
+   {
+     "subdirectories": {
+       ".": {
+         "workspace_mapping": {...},
+         "available_backends": {"disk": true, "virtual_workspace": true},
+         "main": false
+       },
+       "zarr": {
+         "image_files": [...],
+         "available_backends": {"zarr": true},
+         "main": true
+       }
+     }
+   }
+
+The main subdirectory determines:
+
+- Which backend is used by ``get_primary_backend()``
+- Which image list is returned by ``get_image_files()``
+- Which metadata is used for pipeline execution
+
+**Automatic Backend Selection**:
 
 The virtual workspace backend is automatically selected when:
 
 1. Microscope handler's ``get_available_backends()`` detects ``workspace_mapping`` in metadata
 2. FileManager registers VirtualWorkspaceBackend in local registry
-3. ``get_primary_backend()`` returns ``"virtual_workspace"`` for reading original data
+3. ``get_primary_backend()`` returns ``"virtual_workspace"`` for reading original data (if zarr not available)
 
 **Materialization Compatibility**:
 
@@ -881,6 +920,39 @@ The FileManager provides comprehensive file and directory operations beyond basi
    # Global singleton storage registry
    from openhcs.io.base import storage_registry  # Created at module import
 
+**Lazy Backend Discovery**: The backend discovery system uses lazy imports to avoid loading GPU-heavy backends during startup:
+
+.. code:: python
+
+   # openhcs/io/__init__.py
+   def __getattr__(name: str):
+       """Lazy import for GPU-heavy backends."""
+       if name in ['zarr', 'napari_stream', 'fiji_stream']:
+           # Return the class without importing the module
+           # Module import happens later during discover_all_backends()
+           return getattr(sys.modules[__name__], name)
+       raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+   # Backend registration happens during module import via metaclass
+   def discover_all_backends() -> None:
+       """Discover and register all available backends.
+
+       Uses importlib.import_module() to directly import GPU-heavy backend modules,
+       ensuring metaclass registration happens even with lazy imports.
+       """
+       # Import GPU-heavy backends directly from their modules (not via __getattr__)
+       # This ensures the module is imported and metaclass registration happens
+       importlib.import_module('openhcs.io.zarr')
+       importlib.import_module('openhcs.io.napari_stream')
+       importlib.import_module('openhcs.io.fiji_stream')
+
+**Key Design Points**:
+
+- **Lazy Loading**: GPU-heavy backends (zarr, napari_stream, fiji_stream) are not imported during ``openhcs.io`` module load
+- **Explicit Discovery**: ``discover_all_backends()`` uses ``importlib.import_module()`` to trigger module imports
+- **Metaclass Registration**: Backend classes register themselves via ``StorageBackendMeta`` during module import
+- **Startup Performance**: Defers GPU library imports (ome-zarr, napari, fiji) until first use
+
 **Subprocess Runner Mode**: The backend discovery system supports a special subprocess runner mode that avoids importing GPU-heavy backends:
 
 .. code:: python
@@ -893,8 +965,9 @@ The FileManager provides comprehensive file and directory operations beyond basi
        from openhcs.io import disk, memory
        # Skips: zarr, napari_stream, fiji_stream (avoid GPU library imports)
    else:
-       # Normal mode - import all backend modules to trigger metaclass registration
-       from openhcs.io import disk, memory, zarr, napari_stream, fiji_stream
+       # Normal mode - discover all backends (including GPU-heavy ones)
+       from openhcs.io.backend_registry import discover_all_backends
+       discover_all_backends()
 
 This prevents GPU library imports in subprocess workers, which is critical for multiprocessing execution where worker processes don't need GPU access.
 
