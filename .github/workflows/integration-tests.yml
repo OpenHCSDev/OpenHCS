@@ -1,25 +1,32 @@
 # OpenHCS Integration Tests
 #
-# CI Strategy: Optimized boundary testing (11 jobs total)
+# CI Strategy: Optimized boundary testing (29 jobs total)
 #
-# Group 1: Python boundary tests (4 jobs)
-#   - Python 3.11 (oldest) and 3.13 (newest well-supported) on Linux + Windows
+# Group 1: Python boundary tests (6 jobs)
+#   - Python 3.11 (oldest) and 3.13 (newest well-supported) on Linux + Windows + macOS
+#   - 2 Python versions × 3 OSes = 6 jobs
 #   - Python 3.14 excluded: no pre-built NumPy/zeroc-ice wheels yet
 #
-# Group 2: Backend/microscope coverage (4 jobs)
-#   - Python 3.12 on Linux + Windows
+# Group 2: Backend/microscope coverage (12 jobs)
+#   - Python 3.12 on Linux + Windows + macOS
 #   - All backends: disk, zarr
 #   - All microscopes: ImageXpress, OperaPhenix
+#   - 3 OSes × 2 backends × 2 microscopes = 12 jobs
 #
 # Group 3: OMERO tests (2 jobs)
 #   - Python 3.11 and 3.12 on Linux only
 #   - Uses pre-built zeroc-ice wheels (no Python 3.13+ support yet)
 #
-# Group 4: Wheel installation test (1 job)
-#   - Python 3.12 on Linux
-#   - Validates PyPI-style installation
+# Group 4: PyPI installation tests (6 jobs)
+#   - Python 3.11 and 3.12 on Linux + Windows + macOS
+#   - Validates PyPI-style installation across all platforms
+#   - 2 Python versions × 3 OSes = 6 jobs
 #
-# Total: 11 jobs covering all Python versions (3.11-3.13), both OSes,
+# Group 5: Wheel integration test (1 job)
+#   - Python 3.12 on Linux
+#   - Full integration test suite against wheel installation
+#
+# Total: 29 jobs covering all Python versions (3.11-3.13), all 3 OSes,
 # all backends, and all microscope formats
 
 name: Integration Tests
@@ -41,8 +48,8 @@ on:
         - full-coverage
 
 jobs:
-  # Group 1: Python version boundary testing (4 jobs)
-  # Test oldest (3.11) and newest (3.13) Python on both OSes
+  # Group 1: Python version boundary testing (6 jobs)
+  # Test oldest (3.11) and newest (3.13) Python on all 3 OSes
   # Python 3.14 excluded: no pre-built NumPy wheels yet (builds from source stall on Windows)
   python-boundary-tests:
     runs-on: ${{ matrix.os }}
@@ -52,7 +59,7 @@ jobs:
       matrix:
         # Boundary testing: oldest and newest well-supported versions
         python-version: ["3.11", "3.13"]
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Checkout
@@ -74,15 +81,15 @@ jobs:
         run: |
           python -m pytest tests/integration/ --it-backends disk --it-microscopes ImageXpress --it-dims 3d --it-exec-mode multiprocessing -v --tb=short
 
-  # Group 2: Backend and microscope coverage (4 jobs)
-  # Test all backend/microscope combinations on both OSes with Python 3.12
+  # Group 2: Backend and microscope coverage (12 jobs)
+  # Test all backend/microscope combinations on all 3 OSes with Python 3.12
   backend-microscope-tests:
     runs-on: ${{ matrix.os }}
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         backend: [disk, zarr]
         microscope: [ImageXpress, OperaPhenix]
 
@@ -197,13 +204,15 @@ jobs:
         run: |
           mypy openhcs/ --ignore-missing-imports --no-strict-optional
 
-  # Test PyPI-style installation across Python versions
+  # Test PyPI-style installation across Python versions and OSes (6 jobs)
   pypi-installation-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Checkout
@@ -220,36 +229,42 @@ jobs:
           python -m build
 
       - name: Test headless installation (base - no extras)
+        shell: bash
         run: |
           python -m venv test_headless
-          source test_headless/bin/activate
-          WHEEL=$(ls dist/*.whl)
-          pip install "$WHEEL"
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            source test_headless/Scripts/activate
+          else
+            source test_headless/bin/activate
+          fi
+          pip install dist/*.whl
           # Verify core OpenHCS works without GUI
           python -c "import openhcs; from openhcs.core.pipeline import Pipeline; print(f'✓ OpenHCS {openhcs.__version__} headless installation OK')"
-          deactivate
-          rm -rf test_headless
 
       - name: Test GUI dependencies installation
+        shell: bash
         run: |
           python -m venv test_gui
-          source test_gui/bin/activate
-          WHEEL=$(ls dist/*.whl)
-          pip install "${WHEEL}[gui]"
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            source test_gui/Scripts/activate
+          else
+            source test_gui/bin/activate
+          fi
+          pip install dist/*.whl[gui]
           # Verify GUI dependencies installed (can't import PyQt6 without X11/EGL in CI)
           python -c "import openhcs; import psutil; import GPUtil; print(f'✓ OpenHCS {openhcs.__version__} GUI dependencies installed')"
-          deactivate
-          rm -rf test_gui
 
       - name: Test dev dependencies installation
+        shell: bash
         run: |
           python -m venv test_dev
-          source test_dev/bin/activate
-          WHEEL=$(ls dist/*.whl)
-          pip install "${WHEEL}[dev]"
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            source test_dev/Scripts/activate
+          else
+            source test_dev/bin/activate
+          fi
+          pip install dist/*.whl[dev]
           python -c "import pytest; import openhcs; print('✓ Dev dependencies OK')"
-          deactivate
-          rm -rf test_dev
 
   # Run integration tests against wheel installation
   wheel-integration-test:
