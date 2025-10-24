@@ -95,24 +95,26 @@ class SystemMonitorWidget(QWidget):
 
     def create_loading_placeholder(self) -> QWidget:
         """
-        Create a loading placeholder widget shown while PyQtGraph loads.
+        Create a startup screen widget shown while PyQtGraph loads.
 
         Returns:
-            Widget with loading message
+            Startup screen widget with progress bar and live log
         """
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(20, 20, 20, 20)
+        from openhcs.pyqt_gui.widgets.startup_screen import StartupScreenWidget
+        from openhcs.core.log_utils import get_current_log_file_path
+        from pathlib import Path
 
-        label = QLabel("Loading system monitor graphs...\n\n"
-                      "This may take several seconds on first load\n"
-                      "(importing GPU libraries)")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = QFont("Monospace", 12)
-        label.setFont(font)
-        layout.addWidget(label)
+        startup_screen = StartupScreenWidget()
 
-        return widget
+        # Start monitoring the current log file
+        log_file_str = get_current_log_file_path()
+        if log_file_str:
+            startup_screen.start_monitoring(Path(log_file_str))
+
+        # Store reference so we can stop monitoring later
+        self._startup_screen = startup_screen
+
+        return startup_screen
 
     def _load_pyqtgraph_async(self):
         """
@@ -131,23 +133,31 @@ class SystemMonitorWidget(QWidget):
         global PYQTGRAPH_AVAILABLE, pg
 
         try:
-            logger.info("Loading PyQtGraph (UI will freeze for ~8 seconds)...")
+            logger.info("⏳ Loading PyQtGraph (UI will freeze for ~8 seconds)...")
+            logger.info("📦 Importing pyqtgraph module...")
             import pyqtgraph as pg_module
+            logger.info("📦 PyQtGraph module imported")
+
+            logger.info("🔧 Initializing PyQtGraph (loading GPU libraries: cupy, numpy, etc.)...")
             pg = pg_module
             PYQTGRAPH_AVAILABLE = True
-            logger.info("PyQtGraph loaded successfully")
+            logger.info("✅ PyQtGraph loaded successfully (GPU libraries ready)")
 
             # Switch to PyQtGraph UI
             self._switch_to_pyqtgraph_ui()
         except ImportError as e:
-            logger.warning(f"PyQtGraph not available: {e}")
+            logger.warning(f"❌ PyQtGraph not available: {e}")
             PYQTGRAPH_AVAILABLE = False
 
             # Switch to fallback UI
             self._switch_to_fallback_ui()
 
     def _switch_to_pyqtgraph_ui(self):
-        """Switch from loading placeholder to PyQtGraph UI (called in main thread)."""
+        """Switch from startup screen to PyQtGraph UI (called in main thread)."""
+        # Stop startup screen monitoring if active
+        if hasattr(self, '_startup_screen') and self._startup_screen:
+            self._startup_screen.stop_monitoring()
+
         # Remove loading placeholder
         old_widget = self.monitoring_widget
         layout = self.layout()
@@ -161,7 +171,11 @@ class SystemMonitorWidget(QWidget):
         logger.info("Switched to PyQtGraph UI")
 
     def _switch_to_fallback_ui(self):
-        """Switch from loading placeholder to fallback UI (called in main thread)."""
+        """Switch from startup screen to fallback UI (called in main thread)."""
+        # Stop startup screen monitoring if active
+        if hasattr(self, '_startup_screen') and self._startup_screen:
+            self._startup_screen.stop_monitoring()
+
         # Remove loading placeholder
         old_widget = self.monitoring_widget
         layout = self.layout()

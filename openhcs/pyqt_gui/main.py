@@ -84,16 +84,16 @@ class OpenHCSMainWindow(QMainWindow):
         Deferred initialization that happens after window is visible.
 
         This includes:
-        - System monitor (shows immediately with "Loading..." placeholder) - IMMEDIATE
+        - System monitor with startup screen placeholder - IMMEDIATE
         - Log viewer initialization (file I/O) - IMMEDIATE
         - Default windows (pipeline editor with config cache warming) - IMMEDIATE
         """
-        # Create system monitor widget immediately (it will show loading placeholder)
-        # The widget itself doesn't import pyqtgraph - that happens asynchronously
+        # Create system monitor widget immediately
+        # It will show startup screen until PyQtGraph is ready
         from openhcs.pyqt_gui.widgets.system_monitor import SystemMonitorWidget
         self.system_monitor = SystemMonitorWidget()
         self.central_layout.addWidget(self.system_monitor)
-        logger.info("System monitor created (graphs will load asynchronously)")
+        logger.info("System monitor created (will show startup screen until ready)")
 
         # Initialize Log Viewer (hidden) for continuous log monitoring - IMMEDIATE
         self._initialize_log_viewer()
