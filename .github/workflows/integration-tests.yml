@@ -1,3 +1,27 @@
+# OpenHCS Integration Tests
+#
+# CI Strategy: Optimized boundary testing (11 jobs total)
+#
+# Group 1: Python boundary tests (4 jobs)
+#   - Python 3.11 (oldest) and 3.13 (newest well-supported) on Linux + Windows
+#   - Python 3.14 excluded: no pre-built NumPy/zeroc-ice wheels yet
+#
+# Group 2: Backend/microscope coverage (4 jobs)
+#   - Python 3.12 on Linux + Windows
+#   - All backends: disk, zarr
+#   - All microscopes: ImageXpress, OperaPhenix
+#
+# Group 3: OMERO tests (2 jobs)
+#   - Python 3.11 and 3.12 on Linux only
+#   - Uses pre-built zeroc-ice wheels (no Python 3.13+ support yet)
+#
+# Group 4: Wheel installation test (1 job)
+#   - Python 3.12 on Linux
+#   - Validates PyPI-style installation
+#
+# Total: 11 jobs covering all Python versions (3.11-3.13), both OSes,
+# all backends, and all microscope formats
+
 name: Integration Tests
 
 on:
