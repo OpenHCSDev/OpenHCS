@@ -450,7 +450,8 @@ class OpenHCSMetadataGenerator:
         """Ensure complete OpenHCS metadata exists, creating it if missing or incomplete.
 
         Checks if metadata already exists and is complete (has channels field).
-        If not, creates complete metadata from context.
+        If not, creates complete metadata from context. Uses deep merge to preserve
+        existing fields like workspace_mapping.
         """
         plate_root_path = Path(plate_root)
         metadata_path = get_metadata_path(plate_root_path)
@@ -466,7 +467,7 @@ class OpenHCSMetadataGenerator:
                 self.logger.debug(f"Metadata for {sub_dir} already complete, skipping")
                 return
 
-        # Create complete metadata
+        # Create complete metadata (merge_subdirectory_metadata does deep merge)
         self.create_metadata(context, output_dir, write_backend, is_main, plate_root, sub_dir, results_dir)
 
     def create_metadata(
