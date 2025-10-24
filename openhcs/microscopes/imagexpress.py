@@ -122,11 +122,10 @@ class ImageXpressHandler(MicroscopeHandler):
         metadata_path = plate_path / "openhcs_metadata.json"
         writer = AtomicMetadataWriter()
 
-        # Determine subdirectory name for metadata
-        subdir_name = subdirs[0].name if common_dir_found and subdirs else "Images"
-
+        # Subdirectory is always "." (plate root) since workspace_mapping paths are plate-relative
+        # and already include TimePoint_X/ prefix
         writer.merge_subdirectory_metadata(metadata_path, {
-            subdir_name: {
+            ".": {
                 "workspace_mapping": workspace_mapping,  # Plate-relative paths
                 "available_backends": {"disk": True, "virtual_workspace": True}
             }
