@@ -238,7 +238,7 @@ _gpu_init_thread = None
 _gpu_init_complete = threading.Event()
 
 
-def setup_global_gpu_registry_fast(global_config=None) -> Dict[str, bool]:
+def setup_global_gpu_registry_fast() -> Dict[str, bool]:
     """
     Fast GPU registry setup - check installation only (no imports).
 
@@ -249,7 +249,7 @@ def setup_global_gpu_registry_fast(global_config=None) -> Dict[str, bool]:
     return installed
 
 
-def setup_global_gpu_registry_lazy(global_config=None):
+def setup_global_gpu_registry_lazy():
     """
     Lazy GPU registry setup - defer detection until first use.
 

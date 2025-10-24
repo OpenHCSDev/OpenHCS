@@ -26,8 +26,7 @@ def _background_init():
 
         # Use lazy GPU registry setup (no imports, deferred until first use)
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry_lazy
-        from openhcs.core.config import GlobalPipelineConfig
-        setup_global_gpu_registry_lazy(global_config=GlobalPipelineConfig())
+        setup_global_gpu_registry_lazy()
 
         logger.info("Background I/O initialization complete (lazy mode)")
     except Exception as e:

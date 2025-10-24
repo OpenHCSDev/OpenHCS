@@ -43,10 +43,10 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
     def __init__(self, plate_root: Path):
         """
         Initialize with explicit plate root.
-        
+
         Args:
             plate_root: Path to plate directory containing openhcs_metadata.json
-            
+
         Raises:
             FileNotFoundError: If metadata file doesn't exist
             ValueError: If no workspace_mapping in metadata
@@ -55,9 +55,26 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
         self.disk_backend = DiskStorageBackend()
         self._mapping_cache: Optional[Dict[str, str]] = None
         self._cache_mtime: Optional[float] = None
-        
+
         # Load mapping eagerly - fail loud if metadata missing
         self._load_mapping()
+
+    @staticmethod
+    def _normalize_relative_path(path_str: str) -> str:
+        """
+        Normalize relative path for internal mapping lookups.
+
+        Converts Windows backslashes to forward slashes and normalizes
+        '.' (current directory) to empty string for root directory.
+
+        Args:
+            path_str: Relative path string to normalize
+
+        Returns:
+            Normalized path string with forward slashes, empty string for root
+        """
+        normalized = path_str.replace('\\', '/')
+        return '' if normalized == '.' else normalized
     
     def _load_mapping(self) -> Dict[str, str]:
         """
@@ -182,9 +199,7 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
             relative_dir = dir_path
 
         # Normalize to forward slashes for comparison with JSON mapping
-        relative_dir_str = str(relative_dir).replace('\\', '/')
-        if relative_dir_str == '.':
-            relative_dir_str = ''
+        relative_dir_str = self._normalize_relative_path(str(relative_dir))
 
         # Load mapping - fail loud if missing
         if self._mapping_cache is None:
@@ -207,10 +222,7 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
                 # else: relative_dir_str is empty (root), include all files
             else:
                 # For non-recursive, check if parent directory matches
-                vpath_parent = str(Path(virtual_relative).parent).replace('\\', '/')
-                # Normalize '.' to '' for root directory comparison
-                if vpath_parent == '.':
-                    vpath_parent = ''
+                vpath_parent = self._normalize_relative_path(str(Path(virtual_relative).parent))
                 if vpath_parent != relative_dir_str:
                     continue
 
@@ -256,9 +268,7 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
             relative_path = path
 
         # Normalize to string with forward slashes
-        relative_str = str(relative_path).replace('\\', '/')
-        if relative_str == '.':
-            relative_str = ''
+        relative_str = self._normalize_relative_path(str(relative_path))
 
         # Collect all unique directory/file names under this path
         entries = set()
@@ -291,12 +301,8 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
         except ValueError:
             relative_str = str(path)
 
-        # Normalize Windows backslashes to forward slashes
-        relative_str = relative_str.replace('\\', '/')
-
-        # Normalize '.' to '' for root directory
-        if relative_str == '.':
-            relative_str = ''
+        # Normalize Windows backslashes to forward slashes and '.' to ''
+        relative_str = self._normalize_relative_path(relative_str)
 
         # File in mapping or directory prefix
         # For root directory (empty string), check if mapping has any files
@@ -332,10 +338,8 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
         except ValueError:
             relative_str = str(path)
 
-        # Normalize to string with forward slashes
-        relative_str = relative_str.replace('\\', '/')
-        if relative_str == '.':
-            relative_str = ''
+        # Normalize to string with forward slashes and '.' to ''
+        relative_str = self._normalize_relative_path(relative_str)
 
         # Directory if any virtual path starts with this prefix
         if relative_str:
