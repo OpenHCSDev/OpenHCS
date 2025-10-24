@@ -18,29 +18,23 @@ from openhcs.core.lazy_gpu_imports import check_gpu_capability
 logger = logging.getLogger(__name__)
 
 
-def check_cupy_gpu_available() -> Optional[int]:
-    """Check cupy GPU availability (lazy import)."""
+def check_library_gpu_available(library_name: str) -> Optional[int]:
+    """
+    Check GPU availability for a specific library (lazy import).
+
+    Args:
+        library_name: Library name ('cupy', 'torch', 'tf'/'tensorflow', 'jax')
+
+    Returns:
+        Device ID if GPU available, None otherwise
+    """
     if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
         return None
-    return check_gpu_capability('cupy')
+    return check_gpu_capability(library_name)
 
 
-def check_torch_gpu_available() -> Optional[int]:
-    """Check torch GPU availability (lazy import)."""
-    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-        return None
-    return check_gpu_capability('torch')
-
-
-def check_tf_gpu_available() -> Optional[int]:
-    """Check tensorflow GPU availability (lazy import)."""
-    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-        return None
-    return check_gpu_capability('tf')
-
-
-def check_jax_gpu_available() -> Optional[int]:
-    """Check JAX GPU availability (lazy import)."""
-    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-        return None
-    return check_gpu_capability('jax')
+# Backwards compatibility aliases
+check_cupy_gpu_available = lambda: check_library_gpu_available('cupy')
+check_torch_gpu_available = lambda: check_library_gpu_available('torch')
+check_tf_gpu_available = lambda: check_library_gpu_available('tf')
+check_jax_gpu_available = lambda: check_library_gpu_available('jax')

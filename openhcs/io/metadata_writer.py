@@ -15,6 +15,25 @@ from .atomic import atomic_update_json, FileLockError, LOCK_CONFIG
 logger = logging.getLogger(__name__)
 
 
+def get_subdirectory_name(input_dir: Union[str, Path], plate_path: Union[str, Path]) -> str:
+    """
+    Determine subdirectory name for metadata.
+
+    Returns "." if input_dir equals plate_path (plate root), otherwise returns
+    the directory name.
+
+    Args:
+        input_dir: Input directory path
+        plate_path: Plate root path
+
+    Returns:
+        Subdirectory name ("." for plate root, directory name otherwise)
+    """
+    input_path = Path(input_dir)
+    plate_path = Path(plate_path)
+    return "." if input_path == plate_path else input_path.name
+
+
 @dataclass(frozen=True)
 class MetadataConfig:
     """Configuration constants for metadata operations."""

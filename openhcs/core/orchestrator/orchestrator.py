@@ -653,21 +653,22 @@ class PipelineOrchestrator(ContextProvider):
 
         # For plates with virtual workspace, metadata is already created by _build_virtual_mapping()
         # We just need to add the component metadata to the existing "." subdirectory
-        # Use "." as subdirectory for all plates (workspace_mapping paths are plate-relative)
-        subdir_name = "."
+        from openhcs.io.metadata_writer import get_subdirectory_name
+        subdir_name = get_subdirectory_name(self.input_dir, self.plate_path)
 
         # Create context using SAME logic as create_context() to get full metadata
         context = self.create_context(axis_id="metadata_init")
 
-        # Ensure metadata exists (will skip if already complete)
+        # Create metadata (will skip if already complete)
         generator = OpenHCSMetadataGenerator(self.filemanager)
-        generator.ensure_metadata(
+        generator.create_metadata(
             context,
             str(self.input_dir),
             "disk",
             is_main=True,
             plate_root=str(self.plate_path),
-            sub_dir=subdir_name
+            sub_dir=subdir_name,
+            skip_if_complete=True
         )
 
     def get_results_path(self) -> Path:

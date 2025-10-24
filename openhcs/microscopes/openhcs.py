@@ -437,7 +437,7 @@ class OpenHCSMetadataGenerator:
         self.atomic_writer = AtomicMetadataWriter()
         self.logger = logging.getLogger(__name__)
 
-    def ensure_metadata(
+    def create_metadata(
         self,
         context: 'ProcessingContext',
         output_dir: str,
@@ -445,19 +445,22 @@ class OpenHCSMetadataGenerator:
         is_main: bool = False,
         plate_root: str = None,
         sub_dir: str = None,
-        results_dir: str = None
+        results_dir: str = None,
+        skip_if_complete: bool = False,
+        allow_none_override: bool = False
     ) -> None:
-        """Ensure complete OpenHCS metadata exists, creating it if missing or incomplete.
+        """Create or update subdirectory-keyed OpenHCS metadata file.
 
-        Checks if metadata already exists and is complete (has channels field).
-        If not, creates complete metadata from context. Uses deep merge to preserve
-        existing fields like workspace_mapping.
+        Args:
+            skip_if_complete: If True, skip update if metadata already complete (has channels)
+            allow_none_override: If True, None values override existing fields;
+                               if False (default), None values are filtered out to preserve existing fields
         """
         plate_root_path = Path(plate_root)
         metadata_path = get_metadata_path(plate_root_path)
 
-        # Check if metadata already exists and is complete for this subdirectory
-        if metadata_path.exists():
+        # Check if metadata already complete (if requested)
+        if skip_if_complete and metadata_path.exists():
             import json
             with open(metadata_path, 'r') as f:
                 existing = json.load(f)
@@ -467,35 +470,15 @@ class OpenHCSMetadataGenerator:
                 self.logger.debug(f"Metadata for {sub_dir} already complete, skipping")
                 return
 
-        # Create complete metadata (merge_subdirectory_metadata does deep merge)
-        self.create_metadata(context, output_dir, write_backend, is_main, plate_root, sub_dir, results_dir)
-
-    def create_metadata(
-        self,
-        context: 'ProcessingContext',
-        output_dir: str,
-        write_backend: str,
-        is_main: bool = False,
-        plate_root: str = None,
-        sub_dir: str = None,
-        results_dir: str = None
-    ) -> None:
-        """Create or update subdirectory-keyed OpenHCS metadata file.
-
-        Only updates fields that are non-None to preserve existing metadata fields
-        like workspace_mapping and available_backends set by initialize_workspace().
-        """
-        plate_root_path = Path(plate_root)
-        metadata_path = get_metadata_path(plate_root_path)
-
+        # Extract metadata from current state
         current_metadata = self._extract_metadata_from_disk_state(context, output_dir, write_backend, is_main, sub_dir, results_dir)
         metadata_dict = asdict(current_metadata)
 
-        # Filter out None values to avoid overwriting existing fields
-        # This preserves workspace_mapping and available_backends set by initialize_workspace()
-        filtered_dict = {k: v for k, v in metadata_dict.items() if v is not None}
+        # Filter None values unless override allowed
+        if not allow_none_override:
+            metadata_dict = {k: v for k, v in metadata_dict.items() if v is not None}
 
-        self.atomic_writer.merge_subdirectory_metadata(metadata_path, {sub_dir: filtered_dict})
+        self.atomic_writer.merge_subdirectory_metadata(metadata_path, {sub_dir: metadata_dict})
 
 
 

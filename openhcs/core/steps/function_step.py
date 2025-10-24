@@ -1366,16 +1366,17 @@ def _update_metadata_for_zarr_conversion(
     from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
 
     if zarr_subdir:
-        # Ensure complete metadata exists for zarr subdirectory
+        # Create complete metadata for zarr subdirectory (skip if already complete)
         zarr_dir = plate_root / zarr_subdir
         metadata_generator = OpenHCSMetadataGenerator(context.filemanager)
-        metadata_generator.ensure_metadata(
+        metadata_generator.create_metadata(
             context,
             str(zarr_dir),
             "zarr",  # Zarr subdirectory uses zarr backend
             is_main=True,
             plate_root=str(plate_root),
-            sub_dir=zarr_subdir
+            sub_dir=zarr_subdir,
+            skip_if_complete=True
         )
 
         # Set original subdirectory to main=false

@@ -16,55 +16,41 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import numpy as np
 import zarr
 
-# Async ome-zarr loading to avoid dask → GPU library chain at import time
-OME_ZARR_AVAILABLE = None  # None = not checked, True = available, False = not available
-_ome_zarr_cache = {}
-_ome_zarr_loading = threading.Event()  # Set when loading complete
-_ome_zarr_load_thread = None
+# Lazy ome-zarr loading to avoid dask → GPU library chain at import time
+_ome_zarr_state = {'available': None, 'cache': {}, 'event': threading.Event(), 'thread': None}
 
 logger = logging.getLogger(__name__)
 
 
-def _load_ome_zarr_background():
-    """Background thread target for loading ome-zarr."""
-    global OME_ZARR_AVAILABLE, _ome_zarr_cache
-
+def _load_ome_zarr():
+    """Load ome-zarr and cache imports."""
     try:
-        logger.info("Background loading ome-zarr...")
+        logger.info("Loading ome-zarr...")
         from ome_zarr.writer import write_image, write_plate_metadata, write_well_metadata
         from ome_zarr.io import parse_url
 
-        _ome_zarr_cache = {
+        _ome_zarr_state['cache'] = {
             'write_image': write_image,
             'write_plate_metadata': write_plate_metadata,
             'write_well_metadata': write_well_metadata,
             'parse_url': parse_url
         }
-        OME_ZARR_AVAILABLE = True
-        logger.info("ome-zarr loaded successfully in background")
+        _ome_zarr_state['available'] = True
+        logger.info("ome-zarr loaded successfully")
     except ImportError as e:
-        OME_ZARR_AVAILABLE = False
+        _ome_zarr_state['available'] = False
         logger.warning(f"ome-zarr not available: {e}")
     finally:
-        _ome_zarr_loading.set()
+        _ome_zarr_state['event'].set()
 
 
 def start_ome_zarr_loading_async():
-    """
-    Start loading ome-zarr in background thread.
-
-    Call this during application startup to pre-load ome-zarr
-    without blocking. Non-blocking, safe to call multiple times.
-    """
-    global _ome_zarr_load_thread
-
-    if _ome_zarr_load_thread is None and OME_ZARR_AVAILABLE is None:
-        _ome_zarr_load_thread = threading.Thread(
-            target=_load_ome_zarr_background,
-            daemon=True,
-            name="ome-zarr-loader"
+    """Start loading ome-zarr in background thread (safe to call multiple times)."""
+    if _ome_zarr_state['thread'] is None and _ome_zarr_state['available'] is None:
+        _ome_zarr_state['thread'] = threading.Thread(
+            target=_load_ome_zarr, daemon=True, name="ome-zarr-loader"
         )
-        _ome_zarr_load_thread.start()
+        _ome_zarr_state['thread'].start()
         logger.info("Started ome-zarr background loading")
 
 
@@ -72,38 +58,27 @@ def _ensure_ome_zarr(timeout: float = 30.0):
     """
     Ensure ome-zarr is loaded, waiting for background load if needed.
 
-    Args:
-        timeout: Maximum seconds to wait for background loading
-
-    Returns:
-        Tuple of (write_image, write_plate_metadata, write_well_metadata, parse_url)
-
-    Raises:
-        ImportError: If ome-zarr not available
-        TimeoutError: If background loading times out
+    Returns: Tuple of (write_image, write_plate_metadata, write_well_metadata, parse_url)
+    Raises: ImportError if ome-zarr not available, TimeoutError if loading times out
     """
-    global OME_ZARR_AVAILABLE
-
-    # If not started loading yet, do it synchronously
-    if OME_ZARR_AVAILABLE is None and _ome_zarr_load_thread is None:
+    # Load synchronously if not started
+    if _ome_zarr_state['available'] is None and _ome_zarr_state['thread'] is None:
         logger.warning("ome-zarr not pre-loaded, loading synchronously (will block)")
-        _load_ome_zarr_background()
+        _load_ome_zarr()
 
-    # Wait for background loading to complete
-    if not _ome_zarr_loading.is_set():
-        logger.info("Waiting for ome-zarr background loading to complete...")
-        if not _ome_zarr_loading.wait(timeout):
+    # Wait for background loading
+    if not _ome_zarr_state['event'].is_set():
+        logger.info("Waiting for ome-zarr background loading...")
+        if not _ome_zarr_state['event'].wait(timeout):
             raise TimeoutError(f"ome-zarr loading timed out after {timeout}s")
 
-    # Check if loading succeeded
-    if not OME_ZARR_AVAILABLE:
-        raise ImportError("ome-zarr library not available. "
-                        "Install with: pip install ome-zarr")
+    # Check availability
+    if not _ome_zarr_state['available']:
+        raise ImportError("ome-zarr library not available. Install with: pip install ome-zarr")
 
-    return (_ome_zarr_cache['write_image'],
-            _ome_zarr_cache['write_plate_metadata'],
-            _ome_zarr_cache['write_well_metadata'],
-            _ome_zarr_cache['parse_url'])
+    cache = _ome_zarr_state['cache']
+    return (cache['write_image'], cache['write_plate_metadata'],
+            cache['write_well_metadata'], cache['parse_url'])
 
 # Cross-platform file locking
 try:
@@ -405,7 +380,7 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             logger.warning(f"Empty data list for chunk {chunk_name}")
             return
 
-        if not OME_ZARR_AVAILABLE:
+        if not _ome_zarr_state['available']:
             raise ImportError("ome-zarr package is required. Install with: pip install ome-zarr")
 
         # Use _split_store_and_key to get store path from first output path

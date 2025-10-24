@@ -16,7 +16,7 @@ from .backend_registry import (
 from .disk import DiskStorageBackend
 from .filemanager import FileManager
 from .memory import MemoryStorageBackend
-from .metadata_writer import AtomicMetadataWriter, MetadataWriteError, get_metadata_path
+from .metadata_writer import AtomicMetadataWriter, MetadataWriteError, get_metadata_path, get_subdirectory_name
 from .metadata_migration import detect_legacy_format, migrate_legacy_metadata, migrate_plate_metadata
 from .pipeline_migration import detect_legacy_pipeline, migrate_pipeline_file, load_pipeline_with_migration
 from .streaming import StreamingBackend
@@ -52,6 +52,7 @@ __all__ = [
     'AtomicMetadataWriter',
     'MetadataWriteError',
     'get_metadata_path',
+    'get_subdirectory_name',
     'detect_legacy_format',
     'migrate_legacy_metadata',
     'migrate_plate_metadata',
@@ -61,6 +62,14 @@ __all__ = [
 ]
 
 
+# Registry for lazy-loaded GPU-heavy backends
+_LAZY_BACKEND_REGISTRY = {
+    'NapariStreamingBackend': ('openhcs.io.napari_stream', 'NapariStreamingBackend'),
+    'FijiStreamingBackend': ('openhcs.io.fiji_stream', 'FijiStreamingBackend'),
+    'ZarrStorageBackend': ('openhcs.io.zarr', 'ZarrStorageBackend'),
+}
+
+
 def __getattr__(name):
     """
     Lazy import of GPU-heavy backend classes.
@@ -68,26 +77,21 @@ def __getattr__(name):
     This prevents blocking imports during `import openhcs.io` while
     still allowing code to import backend classes when needed.
     """
-    # Check if we're in subprocess runner mode
-    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-        # Subprocess runner mode - create placeholder classes
-        if name in ('NapariStreamingBackend', 'FijiStreamingBackend', 'ZarrStorageBackend'):
-            class PlaceholderBackend:
-                """Placeholder for subprocess runner mode."""
-                pass
-            PlaceholderBackend.__name__ = name
-            PlaceholderBackend.__qualname__ = name
-            return PlaceholderBackend
-    else:
-        # Normal mode - lazy import the real classes
-        if name == 'NapariStreamingBackend':
-            from openhcs.io.napari_stream import NapariStreamingBackend
-            return NapariStreamingBackend
-        elif name == 'FijiStreamingBackend':
-            from openhcs.io.fiji_stream import FijiStreamingBackend
-            return FijiStreamingBackend
-        elif name == 'ZarrStorageBackend':
-            from openhcs.io.zarr import ZarrStorageBackend
-            return ZarrStorageBackend
+    # Check if name is in lazy backend registry
+    if name not in _LAZY_BACKEND_REGISTRY:
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+    # Subprocess runner mode - create placeholder
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        class PlaceholderBackend:
+            """Placeholder for subprocess runner mode."""
+            pass
+        PlaceholderBackend.__name__ = name
+        PlaceholderBackend.__qualname__ = name
+        return PlaceholderBackend
+
+    # Normal mode - lazy import from registry
+    module_path, class_name = _LAZY_BACKEND_REGISTRY[name]
+    import importlib
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
