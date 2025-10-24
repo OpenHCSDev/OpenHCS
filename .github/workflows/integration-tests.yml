@@ -65,6 +65,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       matrix:
+        # Python 3.14 uses NumPy < 2.2 due to histogram/bincount bug (see pyproject.toml)
         python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
@@ -98,6 +99,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       matrix:
+        # Python 3.14 uses NumPy < 2.2 due to histogram/bincount bug (see pyproject.toml)
         python-version: ["3.11", "3.12", "3.13", "3.14"]
         backend: [disk, zarr]
         microscope: [ImageXpress, OperaPhenix]
