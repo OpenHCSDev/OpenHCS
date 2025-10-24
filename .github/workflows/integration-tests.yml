@@ -18,16 +18,16 @@ on:
 
 jobs:
   # Group 1: Python version boundary testing (4 jobs)
-  # Test oldest (3.11) and newest (3.14) Python on both OSes
+  # Test oldest (3.11) and newest (3.13) Python on both OSes
+  # Python 3.14 excluded: no pre-built NumPy wheels yet (builds from source stall on Windows)
   python-boundary-tests:
     runs-on: ${{ matrix.os }}
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
-        # Boundary testing: oldest and newest supported versions
-        # Python 3.14 uses NumPy < 2.2 due to histogram/bincount bug (see pyproject.toml and issue #34)
-        python-version: ["3.11", "3.14"]
+        # Boundary testing: oldest and newest well-supported versions
+        python-version: ["3.11", "3.13"]
         os: [ubuntu-latest, windows-latest]
 
     steps:

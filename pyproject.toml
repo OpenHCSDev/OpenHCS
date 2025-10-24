@@ -34,10 +34,7 @@ classifiers = [
 # Core dependencies
 dependencies = [
     # Core image processing and scientific computing
-    # NumPy 2.2.x has a bug with Python 3.14 in histogram/bincount (ValueError: broadcast shapes)
-    # Pin to < 2.2 for Python 3.14 until upstream fix is released
-    "numpy>=1.26.4,<2.2; python_version>='3.14'",
-    "numpy>=1.26.4; python_version<'3.14'",
+    "numpy>=1.26.4",
     "scikit-image>=0.25.2",
     "scikit-learn>=1.7.1",
     "scipy>=1.12.0",
