@@ -437,6 +437,38 @@ class OpenHCSMetadataGenerator:
         self.atomic_writer = AtomicMetadataWriter()
         self.logger = logging.getLogger(__name__)
 
+    def ensure_metadata(
+        self,
+        context: 'ProcessingContext',
+        output_dir: str,
+        write_backend: str,
+        is_main: bool = False,
+        plate_root: str = None,
+        sub_dir: str = None,
+        results_dir: str = None
+    ) -> None:
+        """Ensure complete OpenHCS metadata exists, creating it if missing or incomplete.
+
+        Checks if metadata already exists and is complete (has channels field).
+        If not, creates complete metadata from context.
+        """
+        plate_root_path = Path(plate_root)
+        metadata_path = get_metadata_path(plate_root_path)
+
+        # Check if metadata already exists and is complete for this subdirectory
+        if metadata_path.exists():
+            import json
+            with open(metadata_path, 'r') as f:
+                existing = json.load(f)
+
+            subdir_data = existing.get('subdirectories', {}).get(sub_dir, {})
+            if subdir_data.get('channels'):
+                self.logger.debug(f"Metadata for {sub_dir} already complete, skipping")
+                return
+
+        # Create complete metadata
+        self.create_metadata(context, output_dir, write_backend, is_main, plate_root, sub_dir, results_dir)
+
     def create_metadata(
         self,
         context: 'ProcessingContext',

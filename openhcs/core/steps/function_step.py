@@ -1366,13 +1366,13 @@ def _update_metadata_for_zarr_conversion(
     from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
 
     if zarr_subdir:
-        # Use OpenHCSMetadataGenerator to create complete metadata for zarr subdirectory
+        # Ensure complete metadata exists for zarr subdirectory
         zarr_dir = plate_root / zarr_subdir
         metadata_generator = OpenHCSMetadataGenerator(context.filemanager)
-        metadata_generator.create_metadata(
+        metadata_generator.ensure_metadata(
             context,
             str(zarr_dir),
-            "virtual_workspace",
+            "zarr",  # Zarr subdirectory uses zarr backend
             is_main=True,
             plate_root=str(plate_root),
             sub_dir=zarr_subdir
@@ -1382,7 +1382,7 @@ def _update_metadata_for_zarr_conversion(
         metadata_path = get_metadata_path(plate_root)
         writer = AtomicMetadataWriter()
         writer.merge_subdirectory_metadata(metadata_path, {original_subdir: {"main": False}})
-        logger.info(f"Created complete metadata for {zarr_subdir}, set {original_subdir} main=false")
+        logger.info(f"Ensured complete metadata for {zarr_subdir}, set {original_subdir} main=false")
     else:
         # Shared subdirectory - add zarr to available_backends
         metadata_path = get_metadata_path(plate_root)

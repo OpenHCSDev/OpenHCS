@@ -621,6 +621,9 @@ class PipelineOrchestrator(ContextProvider):
                 self._component_keys_cache
             )
 
+            # Ensure complete OpenHCS metadata exists
+            self._ensure_openhcs_metadata()
+
             logger.info("PipelineOrchestrator fully initialized with cached component keys and metadata.")
             return self
         except Exception as e:
@@ -630,6 +633,28 @@ class PipelineOrchestrator(ContextProvider):
 
     def is_initialized(self) -> bool:
         return self._initialized
+
+    def _ensure_openhcs_metadata(self) -> None:
+        """Ensure complete OpenHCS metadata exists for the plate."""
+        from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
+
+        # Determine the subdirectory name
+        subdir_name = self.input_dir.relative_to(self.plate_path).parts[0] if self.input_dir != self.plate_path else "Images"
+
+        # Create a minimal context for metadata generation
+        context = self.create_context(axis_id="metadata_init")
+        context.metadata_cache = self._component_keys_cache
+
+        # Ensure metadata exists (will skip if already complete)
+        generator = OpenHCSMetadataGenerator(self.filemanager)
+        generator.ensure_metadata(
+            context,
+            str(self.input_dir),
+            "disk",
+            is_main=True,
+            plate_root=str(self.plate_path),
+            sub_dir=subdir_name
+        )
 
     def get_results_path(self) -> Path:
         """Get the results directory path for this orchestrator's plate.
