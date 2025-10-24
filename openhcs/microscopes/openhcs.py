@@ -634,12 +634,17 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
 
 
     @property
-    def common_dirs(self) -> List[str]:
+    def root_dir(self) -> str:
         """
-        OpenHCS format expects images in the root of the plate folder.
-        No common subdirectories are applicable.
+        Root directory for OpenHCS is determined from metadata.
+
+        OpenHCS plates can have multiple subdirectories (e.g., "zarr", "images", ".").
+        The root_dir is determined dynamically from the main subdirectory in metadata.
+        This property returns a placeholder - actual root_dir is determined at runtime.
         """
-        return []
+        # This is determined dynamically from metadata in initialize_workspace
+        # Return empty string as placeholder (not used for virtual workspace)
+        return ""
 
     @property
     def microscope_type(self) -> str:

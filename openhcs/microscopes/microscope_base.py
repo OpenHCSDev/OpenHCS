@@ -103,10 +103,18 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
 
     @property
     @abstractmethod
-    def common_dirs(self) -> List[str]:
+    def root_dir(self) -> str:
         """
-        Canonical subdirectory names where image data may reside.
-        Example: ['Images', 'TimePoint', 'Data']
+        Root directory where virtual workspace preparation starts.
+
+        This defines:
+        1. The starting point for virtual workspace operations (flattening, remapping)
+        2. The subdirectory key used when saving virtual workspace metadata
+
+        Examples:
+        - ImageXpress: "." (plate root - TimePoint/ZStep folders are flattened from plate root)
+        - OperaPhenix: "Images" (field remapping applied to Images/ subdirectory)
+        - OpenHCS: Determined from metadata (e.g., "zarr", "images")
         """
         pass
 

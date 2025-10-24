@@ -45,9 +45,14 @@ class OperaPhenixHandler(MicroscopeHandler):
         super().__init__(parser=self.parser, metadata_handler=self.metadata_handler)
 
     @property
-    def common_dirs(self) -> List[str]:
-        """Subdirectory names commonly used by Opera Phenix."""
-        return ['Images']
+    def root_dir(self) -> str:
+        """
+        Root directory for Opera Phenix virtual workspace preparation.
+
+        Returns "Images" because Opera Phenix field remapping is applied
+        to images in the Images/ subdirectory, and virtual paths include Images/ prefix.
+        """
+        return "Images"
 
     @property
     def microscope_type(self) -> str:
@@ -87,18 +92,13 @@ class OperaPhenixHandler(MicroscopeHandler):
 
         logger.info(f"🔄 BUILDING VIRTUAL MAPPING: Opera Phenix field remapping for {plate_path}")
 
-        # Find the image directory using the common_dirs property
-        entries = filemanager.list_dir(plate_path, Backend.DISK.value)
+        # Apply virtual workspace preparation starting from root_dir
+        # For Opera Phenix, root_dir is "Images"
+        image_dir = plate_path / self.root_dir
 
-        # Look for a directory matching any of the common_dirs patterns
-        image_dir = plate_path
-        for entry in entries:
-            entry_lower = entry.lower()
-            if any(common_dir.lower() in entry_lower for common_dir in self.common_dirs):
-                # Found a matching directory
-                image_dir = Path(plate_path) / entry
-                logger.info("Found directory matching common_dirs pattern: %s", image_dir)
-                break
+        if not image_dir.exists():
+            logger.warning(f"Root directory {self.root_dir} not found in {plate_path}, using plate root")
+            image_dir = plate_path
 
         # Default to empty field mapping (no remapping)
         field_mapping = {}
@@ -163,11 +163,11 @@ class OperaPhenixHandler(MicroscopeHandler):
 
         logger.info(f"Built {len(workspace_mapping)} virtual path mappings for Opera Phenix")
 
-        # Save virtual workspace mapping to metadata using EXISTING method
+        # Save virtual workspace mapping to metadata using root_dir as subdirectory key
         metadata_path = plate_path / "openhcs_metadata.json"
         writer = AtomicMetadataWriter()
         writer.merge_subdirectory_metadata(metadata_path, {
-            "Images": {
+            self.root_dir: {
                 "workspace_mapping": workspace_mapping,  # Plate-relative paths
                 "available_backends": {"disk": True, "virtual_workspace": True}
             }
@@ -528,9 +528,6 @@ class OperaPhenixMetadataHandler(MetadataHandler):
 
     Handles finding and parsing Index.xml files for Opera Phenix microscopes.
     """
-    # Microscope-specific directory structure constants
-    COMMON_DIRS = ['Images']      # Subdirectories where images are typically stored
-    WORKSPACE_DIR = 'workspace'   # Workspace directory name (created by initialize_workspace)
 
     def __init__(self, filemanager: FileManager):
         """
@@ -768,62 +765,7 @@ class OperaPhenixMetadataHandler(MetadataHandler):
         """
         return None
 
-    def get_image_files(self, plate_path: Union[str, Path]) -> List[str]:
-        """
-        Get list of image files from the Images directory.
-
-        For Opera Phenix, this lists all image files from the Images subdirectory.
-
-        Args:
-            plate_path: Path to the plate folder (str or Path)
-
-        Returns:
-            List of image filenames (basenames, not full paths)
-
-        Raises:
-            TypeError: If plate_path is not a valid path type
-            FileNotFoundError: If plate path does not exist
-        """
-        # Ensure plate_path is a Path object
-        if isinstance(plate_path, str):
-            plate_path = Path(plate_path)
-        elif not isinstance(plate_path, Path):
-            raise TypeError(f"Expected str or Path, got {type(plate_path).__name__}")
-
-        # Ensure the path exists
-        if not plate_path.exists():
-            raise FileNotFoundError(f"Plate path does not exist: {plate_path}")
-
-        # For Opera Phenix, after workspace preparation, images are in workspace/Images
-        # Check for workspace subdirectory first (created by MicroscopeHandler.initialize_workspace)
-        workspace_dir = plate_path / self.WORKSPACE_DIR
-
-        if workspace_dir.exists() and workspace_dir.is_dir():
-            # Look for common_dirs inside workspace
-            image_dir = workspace_dir
-            for common_dir in self.COMMON_DIRS:
-                potential_dir = workspace_dir / common_dir
-                if potential_dir.exists() and potential_dir.is_dir():
-                    image_dir = potential_dir
-                    break
-        else:
-            # Fallback to plate root or common_dirs subdirectory
-            image_dir = plate_path
-            for common_dir in self.COMMON_DIRS:
-                potential_dir = plate_path / common_dir
-                if potential_dir.exists() and potential_dir.is_dir():
-                    image_dir = potential_dir
-                    break
-
-        # List all image files in the directory
-        image_files = self.filemanager.list_image_files(
-            image_dir,
-            Backend.DISK.value,
-            recursive=False
-        )
-
-        # Return paths relative to plate_path
-        return [str(Path(f).relative_to(plate_path)) for f in image_files]
+    # Uses default get_image_files() implementation from MetadataHandler ABC
 
     def create_xml_parser(self, xml_path: Union[str, Path]):
         """
