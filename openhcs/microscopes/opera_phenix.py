@@ -223,13 +223,17 @@ class OperaPhenixHandler(MicroscopeHandler):
 
             # Note: plane_id in XML corresponds to z_index in filenames
             # For timepoint, we default to 1 as XML doesn't always have explicit timepoint info
+            # Use ORIGINAL Opera Phenix padding (1-digit site, 2-digit z-index)
+            # NOT the standardized 3-digit padding used in virtual workspace mapping
             filename = self.parser.construct_filename(
                 well=well,
                 site=remapped_field,
                 channel=img_data['channel_id'],
                 z_index=img_data['plane_id'],
                 timepoint=1,  # Default timepoint
-                extension='.tiff'
+                extension='.tiff',
+                site_padding=1,  # Original Opera Phenix format
+                z_padding=2      # Original Opera Phenix format
             )
             expected_files.add(filename)
 
