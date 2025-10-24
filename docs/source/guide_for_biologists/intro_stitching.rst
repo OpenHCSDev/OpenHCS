@@ -16,9 +16,10 @@ A plate (like a 96-well plate) contains multiple wells, each with multiple image
 
 For now, we will use a synthetic dataset included with OpenHCS. Under "View" in the main menu, click "Generate Synthetic plate", or click Ctrl+Shift+G. Click confirm in the dialog that appears.
 
-<!-- IMAGE: Screenshot guide of above-->
+.. figure:: ../_static/generate_plate_tut.png
+   :alt: Synthetic Plate Dialog
 
-This creates a synthetic plate with random data, and creates a sample stitching + analysis pipeline. Hit "Init" in the plate manager to initialize the plate. 
+This creates a synthetic plate with random data, and creates a sample stitching + analysis pipeline. **Hit "Init" in the plate manager to initialize the plate.**
 
 .. dropdown:: Uploading your own data
 
@@ -34,6 +35,7 @@ Step 2: Exploring the Image Browser & Metadata Viewer
 ----------------------------
 
 **Image Browser**
+
 The Image Browser lets you view and explore images in your plate. Click on "Meta" in the plate manager to open it. (Note: This wont work unless you've initialized a plate first. Hit the "Init" button if the Meta button is greyed out).
 
 .. figure:: ../_static/image_browser.png
@@ -44,12 +46,13 @@ The Image Browser lets you view and explore images in your plate. Click on "Meta
 This table in the middle shows all images in the plate. You can filter images by well, field, channel, timepoint, etc. using the filters on the left. On the right, the configuration for either the Napari or Fiji streaming viewer can be adjusted. For details on each configuration option, refer to :doc:`configuration_reference`, or hover over the (?) button next to each option for a tooltip.
 
 **Metadata Viewer**
+
 If you switch to the "Metadata" tab at the top, you can view metadata associated with your images, such as acquisition settings, experimental conditions, and annotations, as well as edit it.
 
 .. figure:: ../_static/metadata_viewer.png
    :alt: Metadata Viewer
 
-   *In the Metadata tab, you can view and edit metadata associated with your images, such as acquisition settings, experimental conditions, and annotations.*
+   *In the Metadata tab, you can view and edit metadata associated with your images, such as grid dimensions, channels, and other experimental details.*
 
 Now, let's look at how to do things with these images. Open the Pipeline editor by clicking view on the main menu and clicking "Pipeline Editor".
 
@@ -67,7 +70,7 @@ Each pipeline is made of multiple steps. A step in OpenHCS is a single operation
 
    *The Pipeline Editor shows the sequence of steps that make up your image processing workflow.* 
 
-.. dropdown:: Sharing/Importing Pipelines
+.. dropdown:: Tip: Sharing/Importing Pipelines
 
    The best way to share pipelines is by clicking the "Code" button and copying the generated code. Anyone else can paste it into their own code viewer and load your pipeline, and vice versa.
 
@@ -77,12 +80,10 @@ Each pipeline is made of multiple steps. A step in OpenHCS is a single operation
 Lets take a look at a individual step by opening the Step Editor. Double-click on the first step in the pipeline (named "Image Enhancement Processing") to open it.
 
 
-
-
 There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Lets look at step settings for now.
 
-
-<!-- IMAGE: Screenshot of Step Editor with "Step Settings" tab highlighted, and each section numbered --> 
+.. figure:: ../_static/step_settings.png
+   :alt: Step Editor
 
 1. **Step Name**: This is the name of the step. You can change it to something more descriptive if you want.
 2. **Step Description**: A brief description of what this step does.
@@ -90,7 +91,7 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 
    - These tell OpenHCS how to split up images before processing.
 
-   - Typical image microscopy plates have many "dimensions", such like which well they came from, which site in the well, which channel (DAPI, FITC, TL-20), which timepoint (for live imaging), or which z dimension it was on (for 3D image, commonly reffered to as a "z-slice   ").
+   - Typical image microscopy plates have many "dimensions", such like which well they came from, which site in the well, which wavelength channel (DAPI, FITC, TL-20), which timepoint (for live imaging), or which z-dimension it was on (for 3D image, commonly reffered to as a "z-stack").
   
    - OpenHCS groups images into "piles" based on the variable components you select. Each pile is processed separately. 
    
@@ -147,17 +148,47 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 8. **Napari/Fiji Streaming Config**: Visualize step results in Napari or Fiji (inherits from global config as well).
 
 For more details on each configuration option, refer to :doc:`configuration_reference`, or hover over the (?) button next to each option for a tooltip.
-why does the above :doc: thingy not work 
+ 
 **Function Pattern Tab**
 
-Click "Function Pattern" at top. A step's function pattern is its series of operations.
+Hit save to close this step's editor. Open the step named "Cell Counting", and then click "Function Pattern" at top. A step's function pattern is its series of operations.
 
-- Add/remove/edit functions as needed
-- This step applies filters to prepare images for stitching
-- Use arrows (top-left) to cycle through channels and see channel-specific processing
-- Example: (need new example for synthetic data)
+.. figure:: ../_static/function_pattern.png
+   :alt: Function Pattern
+
+This step runs a cell counting analysis on images. The function pattern shows the sequence of functions applied to the images in this step. Steps can include multiple functions, but typically you should just have one main function per step for clarity.
+
+Note: The component you can cycle through/select is the component selected to "Group By" in the step settings. You can change what functions are applied to each component by cycling through them using the arrows at top-right.
 
 **Pipeline Overview**
 Now that we've explored one step, let's look at the overall pipeline. This pipeline is designed for stitching and analyzing images. It processes images, stitches them together, and then analyzes the stitched images to extract useful information (in this case, it runs a simple cell-counting analysis on the stitched images).
 
-(In progress)
+The pipeline consists of the following steps:
+
+1. **Image Enhancement Processing**: Prepares images for stitching by applying filters.
+
+2. **Create Composite** With the variable component as channel, this step creates a composite image using both channels for each site of each Z-Stack of each well, so that there is only 1 image for each position. This is needed because stitching requires just one image per position, but with multi-channel images, there are multiple images per position (one for each channel).
+
+3. **Z-Stack Flattening** This does the same as Create Composite, but for z-stacks (3d heights). It flattens multiple z-slices into a single 2D image per position.
+
+4. **Position Computation**: Computes the positions of each image for stitching.
+
+5. **Secondary Enhancement**: Further enhances images post-stitching. We do a second processing step because the stitching process prefers different image characteristics than analysis steps do. Note that this step takes the original images as input, not the stitched images.
+
+6. **CPU assembly**: Stitches images together based on computed positions from step 4, using images from step 5.
+
+7. **Z-Stack Flattening**: Flattens z-stacks of stitched images into single 2D images. We do this to make the final analysis better.
+
+8. **Simple Cell Counting Analysis**: Analyzes the stitched images to count cells and extract statistics.
+
+
+Conclusion
+----------
+
+You can try running the pipeline now to see how it performs. To run a pipeline, hit "Compile", and then "Run". You can modify where the output goes to in the plate configuration, by hitting edit on the plate manager. See :doc:`configuration_reference` for details on changing output directories and other configurations.
+ 
+ 
+The steps described above cover the simplest stitch and analyze workflow and will be suitable for most projects — just add any extra analysis steps you need for your experiment, and tweak image processing filters in Steps 1 and 5 as needed. You also might need to add/remove compositing or z-flattening steps depending on what variable components your data has available.
+
+
+If you encounter major issues, regressions, or missing features, please open an issue on the project's GitHub with a short description, reproduction steps, and any relevant logs or sample data. (Link: https://github.com/trissim/openhcs/issues)
