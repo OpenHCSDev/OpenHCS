@@ -480,19 +480,31 @@ class OpenHCSMetadataGenerator:
         sub_dir: str = None,
         results_dir: str = None
     ) -> None:
-        """Create or update subdirectory-keyed OpenHCS metadata file."""
+        """Create or update subdirectory-keyed OpenHCS metadata file.
+
+        Only updates fields that are non-None to preserve existing metadata fields
+        like workspace_mapping and available_backends set by initialize_workspace().
+        """
         plate_root_path = Path(plate_root)
         metadata_path = get_metadata_path(plate_root_path)
 
         current_metadata = self._extract_metadata_from_disk_state(context, output_dir, write_backend, is_main, sub_dir, results_dir)
         metadata_dict = asdict(current_metadata)
 
-        self.atomic_writer.merge_subdirectory_metadata(metadata_path, {sub_dir: metadata_dict})
+        # Filter out None values to avoid overwriting existing fields
+        # This preserves workspace_mapping and available_backends set by initialize_workspace()
+        filtered_dict = {k: v for k, v in metadata_dict.items() if v is not None}
+
+        self.atomic_writer.merge_subdirectory_metadata(metadata_path, {sub_dir: filtered_dict})
 
 
 
     def _extract_metadata_from_disk_state(self, context: 'ProcessingContext', output_dir: str, write_backend: str, is_main: bool, sub_dir: str, results_dir: str = None) -> OpenHCSMetadata:
-        """Extract metadata reflecting current disk state after processing."""
+        """Extract metadata reflecting current disk state after processing.
+
+        Returns OpenHCSMetadata with None for fields that should be preserved from existing metadata.
+        The caller filters out None values before merging to avoid overwriting existing fields.
+        """
         handler = context.microscope_handler
         cache = context.metadata_cache or {}
 
@@ -520,6 +532,7 @@ class OpenHCSMetadataGenerator:
             z_indexes=cache.get(AllComponents.Z_INDEX),
             timepoints=cache.get(AllComponents.TIMEPOINT),
             available_backends={write_backend: True},
+            workspace_mapping=None,  # Preserve existing - filtered out by create_metadata()
             main=is_main if is_main else None,
             results_dir=relative_results_dir
         )

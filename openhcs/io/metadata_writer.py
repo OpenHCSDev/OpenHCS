@@ -68,12 +68,12 @@ class AtomicMetadataWriter:
     def merge_subdirectory_metadata(self, metadata_path: Union[str, Path], subdirectory_updates: Dict[str, Dict[str, Any]]) -> None:
         """Atomically merge multiple subdirectory metadata updates.
 
-        Performs deep merge - updates fields within subdirectories without replacing entire entries.
+        Performs deep merge for nested dicts (like available_backends), shallow update for other fields.
 
         Example:
             Existing: {"TimePoint_1": {"available_backends": {"disk": True}, "main": True}}
-            Updates:  {"TimePoint_1": {"main": False}}
-            Result:   {"TimePoint_1": {"available_backends": {"disk": True}, "main": False}}
+            Updates:  {"TimePoint_1": {"available_backends": {"zarr": True}, "main": False}}
+            Result:   {"TimePoint_1": {"available_backends": {"disk": True, "zarr": True}, "main": False}}
         """
         def update_func(data):
             data = self._ensure_subdirectories_structure(data)
@@ -83,7 +83,15 @@ class AtomicMetadataWriter:
             for subdir_name, updates in subdirectory_updates.items():
                 if subdir_name in subdirs:
                     # Merge into existing subdirectory
-                    subdirs[subdir_name].update(updates)
+                    existing = subdirs[subdir_name]
+                    for key, value in updates.items():
+                        # Deep merge for available_backends dict
+                        if key == METADATA_CONFIG.AVAILABLE_BACKENDS_KEY and isinstance(value, dict):
+                            existing_backends = existing.get(key, {})
+                            existing[key] = {**existing_backends, **value}
+                        else:
+                            # Shallow update for other fields
+                            existing[key] = value
                 else:
                     # Create new subdirectory
                     subdirs[subdir_name] = updates
