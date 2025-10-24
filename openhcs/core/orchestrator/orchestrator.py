@@ -40,14 +40,19 @@ from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_fo
 from openhcs.microscopes import create_microscope_handler
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 
-# Conditional analysis import - skip in subprocess runner mode
-if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-    # Subprocess runner mode - create placeholder
-    def consolidate_analysis_results(*args, **kwargs):
-        """Placeholder for subprocess runner mode."""
-        raise RuntimeError("Analysis consolidation not available in subprocess runner mode")
-else:
-    from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
+# Lazy import of consolidate_analysis_results to avoid blocking GUI startup
+# This function imports GPU libraries, so we defer it until first use
+def _get_consolidate_analysis_results():
+    """Lazy import of consolidate_analysis_results function."""
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        # Subprocess runner mode - create placeholder
+        def consolidate_analysis_results(*args, **kwargs):
+            """Placeholder for subprocess runner mode."""
+            raise RuntimeError("Analysis consolidation not available in subprocess runner mode")
+        return consolidate_analysis_results
+    else:
+        from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
+        return consolidate_analysis_results
 
 # Import generic component system - required for orchestrator functionality
 
@@ -1142,7 +1147,8 @@ class PipelineOrchestrator(ContextProvider):
                             logger.info(f"🔄 CONSOLIDATION: Using well IDs: {axis_ids}")
 
                             logger.info("🔥 ORCHESTRATOR: Calling consolidate_analysis_results()...")
-                            consolidate_analysis_results(
+                            consolidate_fn = _get_consolidate_analysis_results()
+                            consolidate_fn(
                                 results_directory=str(results_dir),
                                 well_ids=axis_ids,
                                 consolidation_config=shared_context.analysis_consolidation_config,

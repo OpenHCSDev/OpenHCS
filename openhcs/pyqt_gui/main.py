@@ -63,9 +63,6 @@ class OpenHCSMainWindow(QMainWindow):
         # Settings for window state persistence
         self.settings = QSettings("OpenHCS", "PyQt6GUI")
 
-        # Initialize Log Viewer on startup (hidden) for continuous log monitoring
-        self._initialize_log_viewer()
-        
         # Initialize UI
         self.setup_ui()
         self.setup_dock_system()
@@ -80,11 +77,34 @@ class OpenHCSMainWindow(QMainWindow):
         # Restore window state
         self.restore_window_state()
 
-        # Show default windows (plate manager and pipeline editor visible by default)
+        logger.info("OpenHCS PyQt6 main window initialized (deferred initialization pending)")
+
+    def _deferred_initialization(self):
+        """
+        Deferred initialization that happens after window is visible.
+
+        This includes:
+        - System monitor (shows immediately with "Loading..." placeholder) - IMMEDIATE
+        - Log viewer initialization (file I/O) - IMMEDIATE
+        - Default windows (pipeline editor with config cache warming) - IMMEDIATE
+        """
+        # Create system monitor widget immediately (it will show loading placeholder)
+        # The widget itself doesn't import pyqtgraph - that happens asynchronously
+        from openhcs.pyqt_gui.widgets.system_monitor import SystemMonitorWidget
+        self.system_monitor = SystemMonitorWidget()
+        self.central_layout.addWidget(self.system_monitor)
+        logger.info("System monitor created (graphs will load asynchronously)")
+
+        # Initialize Log Viewer (hidden) for continuous log monitoring - IMMEDIATE
+        self._initialize_log_viewer()
+
+        # Show default windows (plate manager and pipeline editor visible by default) - IMMEDIATE
         self.show_default_windows()
 
-        logger.info("OpenHCS PyQt6 main window initialized")
-    
+        logger.info("Deferred initialization complete (UI ready)")
+
+
+
     def setup_ui(self):
         """Setup basic UI structure."""
         self.setWindowTitle("OpenHCS")
@@ -92,17 +112,15 @@ class OpenHCSMainWindow(QMainWindow):
 
         # Make main window floating (not tiled) like other OpenHCS components
         self.setWindowFlags(Qt.WindowType.Dialog)
-        
-        # Central widget with system monitor background
+
+        # Central widget (system monitor will be added in deferred initialization)
         central_widget = QWidget()
         central_layout = QVBoxLayout(central_widget)
         central_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # System monitor widget (background)
-        from openhcs.pyqt_gui.widgets.system_monitor import SystemMonitorWidget
-        self.system_monitor = SystemMonitorWidget()
-        central_layout.addWidget(self.system_monitor)
-        
+
+        # Store layout for deferred system monitor creation
+        self.central_layout = central_layout
+
         self.setCentralWidget(central_widget)
 
     def apply_initial_theme(self):
@@ -141,12 +159,13 @@ class OpenHCSMainWindow(QMainWindow):
         self.floating_windows = {}  # Track created windows
 
     def show_default_windows(self):
-        """Show plate manager and pipeline editor by default (like Textual TUI)."""
+        """Show plate manager by default."""
         # Show plate manager by default
         self.show_plate_manager()
 
-        # Show pipeline editor by default
-        self.show_pipeline_editor()
+        # Pipeline editor is NOT shown by default because it imports ALL GPU libraries
+        # (torch, tensorflow, jax, cupy, pyclesperanto) which takes 8+ seconds
+        # User can open it from View menu when needed
 
     def show_plate_manager(self):
         """Show plate manager window (mirrors Textual TUI pattern)."""
@@ -441,7 +460,6 @@ class OpenHCSMainWindow(QMainWindow):
         view_menu.addAction(generate_plate_action)
 
         view_menu.addSeparator()
-
 
         # Help menu
         help_menu = menubar.addMenu("&Help")
