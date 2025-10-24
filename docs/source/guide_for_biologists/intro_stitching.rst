@@ -12,7 +12,7 @@ A plate (like a 96-well plate) contains multiple wells, each with multiple image
 
 **Supported formats:** ImageXpress, Opera Phenix, OpenHCS ZARR (example dataset format)
 
-** Adding a plate:**
+**Adding a plate:**
 
 For now, we will use a synthetic dataset included with OpenHCS. Under "View" in the main menu, click "Generate Synthetic plate", or click Ctrl+Shift+G. Click confirm in the dialog that appears.
 
@@ -112,7 +112,7 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
       - For example: One pile might have all papers from Class A, Seat #1, across all sessions
       - Another pile would have Science papers from Class B, seat #15, and so on.
       
-      
+
       In our microscopy example where "site" is the Variable Component:
 
       - We create separate processing groups where only the site varies
@@ -150,6 +150,7 @@ There are 2 tabs in the Step Editor: "Step Settings" and "Function Pattern". Let
 For more details on each configuration option, refer to :doc:`configuration_reference`, or hover over the (?) button next to each option for a tooltip.
  
 **Function Pattern Tab**
+```````````````````````````````
 
 Hit save to close this step's editor. Open the step named "Cell Counting", and then click "Function Pattern" at top. A step's function pattern is its series of operations.
 
@@ -161,6 +162,8 @@ This step runs a cell counting analysis on images. The function pattern shows th
 Note: The component you can cycle through/select is the component selected to "Group By" in the step settings. You can change what functions are applied to each component by cycling through them using the arrows at top-right.
 
 **Pipeline Overview**
+```````````````````````````````
+
 Now that we've explored one step, let's look at the overall pipeline. This pipeline is designed for stitching and analyzing images. It processes images, stitches them together, and then analyzes the stitched images to extract useful information (in this case, it runs a simple cell-counting analysis on the stitched images).
 
 The pipeline consists of the following steps:

@@ -13,7 +13,7 @@ In OpenHCS, there are multiple levels of configuration that determine how the so
 3. **Step Configuration**: each step within a plate's pipeline can have its own configuration settings.
 4. **Materialization / Viewer Configuration**: for each individual step you can materialize its output to disk or stream it to a viewer (Napari/Fiji); this has its own configuration.
 
-Configurations automatically inherit from higher levels and can be overridden at lower levels. Some options also inherit horizontally; those behaviours are explained in the relevant sections. Some levels do not expose all configuration options (for example, materialization has only materialization-relevant options).
+Configurations automatically inherit from higher levels and can be overridden at lower levels. For example, you can run your analysis on all wells, but then open only one well in Napari to look at by using the well filter config at the Napari materialization level. Some options also inherit horizontally; those behaviours are explained in the relevant sections. Some levels do not expose all configuration options (for example, materialization has only materialization-relevant options).
 
 
 Appendix: Relevant Configuration Options
@@ -26,7 +26,7 @@ GlobalPipelineConfig (main app / pipeline defaults)
 
 - ``num_workers``
   
-  How many parallel workers to run for processing (higher = more CPU usage).
+  How many parallel workers to run for processing (higher = more CPU usage, but faster run times).
 
 - ``materialization_results_path``
   
@@ -34,7 +34,7 @@ GlobalPipelineConfig (main app / pipeline defaults)
 
 - ``use_threading``
   
-  If true, use threads instead of processes (useful for debugging or some environments).
+  If true, use threads instead of processes (useful for some environments, don't touch this unless you know what you're doing).
 
 WellFilterConfig
 ~~~~~~~~~~~~~~~~~
@@ -59,7 +59,7 @@ VFSConfig (virtual file system)
 
 - ``read_backend``
   
-  Backend used to read input files (auto-detected or explicit choice).
+  Backend used to read input files (auto-detected or explicit choice, don't touch this unless you know what you are doing).
 
 - ``intermediate_backend``
   
@@ -85,16 +85,17 @@ AnalysisConsolidationConfig
 - ``well_pattern``, ``file_extensions``, ``exclude_patterns``, ``output_filename``
   
   Controls for which files to include/exclude and the consolidated output name.
+  
 
 PlateMetadataConfig
--------------------
+~~~~~~~~~~~~~~~~~~~
 
 - ``barcode``, ``plate_name``, ``plate_id``, ``description``, ``acquisition_user``
   
-  Optional metadata fields for the plate; auto-filled if ``None``.
+  Optional metadata fields for the plate.
 
 PathPlanningConfig (directory / output naming)
---------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - ``well_filter`` / ``well_filter_mode``
   
@@ -113,7 +114,7 @@ PathPlanningConfig (directory / output naming)
   Subdirectory name used for image outputs inside a workspace.
 
 StepWellFilterConfig and StepMaterializationConfig
---------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - Step-level versions of well filtering and path planning. They inherit from higher levels unless overridden.
 
@@ -122,21 +123,21 @@ StepWellFilterConfig and StepMaterializationConfig
   Default folder for step-level materializations (default ``"checkpoints"``).
 
 VisualizerConfig
-----------------
+~~~~~~~~~~~~~~~~~
 
 - ``temp_directory``
   
   Directory for temporary visualization files (if ``None``, system temp is used).
 
 StreamingConfig (abstract)
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - ``persistent``
   
   If true, keeps the streaming service open after initial use.
 
 NapariStreamingConfig
----------------------
+~~~~~~~~~~~~~~~~~~~~~
 
 - ``colormap``
   
@@ -155,7 +156,7 @@ NapariStreamingConfig
   Network settings for Napari streaming.
 
 FijiStreamingConfig
--------------------
+~~~~~~~~~~~~~~~~~~~
 
 - ``lut``
   
@@ -165,11 +166,15 @@ FijiStreamingConfig
   
   If true, applies auto-contrast to images.
 
+- ``site``, ``channel``, ``timepoint``, ``well``, ``z_index``, ``step_name``, ``step_index``, ``source_mode``
+  
+  Options for whether you'd like to group different variables by slice or stack.
+
 - ``fiji_port``, ``fiji_host``, ``fiji_executable_path``
   
   Settings for Fiji/ImageJ streaming and the local executable location.
 
 Notes
------
+~~~~~~
 
 The above lists the configuration options most relevant to biologists using OpenHCS. There are many additional developer-level options in the code documentation (see ``openhcs/core/config.py`` for global defaults). If you don't know what an option does, it's usually best to leave it at its default value.
