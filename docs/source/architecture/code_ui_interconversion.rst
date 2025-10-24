@@ -307,10 +307,6 @@ See Also
 
 - :doc:`function_pattern_system` - Function pattern architecture
 - :doc:`pipeline_compilation_system` - Pipeline compilation integration
-- :doc:`configuration_system_architecture` - Configuration system integration
-
-**Practical Usage**:
-
-- :doc:`../guides/complete_examples` - Complete workflow examples
-- :doc:`../user_guide/code_ui_editing` - Code/UI editing patterns
+- :doc:`configuration_framework` - Configuration system integration
+- :doc:`service-layer-architecture` - Service layer patterns
 - :doc:`../development/extending` - Extending the code generation system

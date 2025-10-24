@@ -60,21 +60,21 @@ The analysis consolidation system integrates directly with the ``PipelineOrchest
    # In orchestrator.py
    def run_compiled_plate(self, compiled_contexts: Dict[str, Any]) -> Dict[str, Any]:
        # ... execute pipeline ...
-       
+
        # Run automatic analysis consolidation if enabled
        shared_context = get_current_global_config(GlobalPipelineConfig)
-       if shared_context.analysis_consolidation.enabled:
+       if shared_context.analysis_consolidation_config.enabled:
            # Find results directory from compiled contexts
            results_dir = self._find_results_directory(compiled_contexts)
-           
+
            if results_dir and results_dir.exists():
                csv_files = list(results_dir.glob("*.csv"))
                if csv_files:
                    consolidate_analysis_results(
                        results_directory=str(results_dir),
-                       axis_ids=list(compiled_contexts.keys()),
-                       consolidation_config=shared_context.analysis_consolidation,
-                       plate_metadata_config=shared_context.plate_metadata
+                       well_ids=axis_ids,  # List of well IDs to consolidate
+                       consolidation_config=shared_context.analysis_consolidation_config,
+                       plate_metadata_config=shared_context.plate_metadata_config
                    )
 
 **Automatic Triggering**: The system automatically detects when analysis results are available and triggers consolidation without user intervention.

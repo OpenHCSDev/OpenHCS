@@ -88,6 +88,6 @@ Pattern for global config editing where resolution falls back to static defaults
 
 See Also
 --------
-- :doc:`lazy_class_system` - High-level lazy dataclass system overview
-- :doc:`configuration_resolution` - Resolution patterns used by generated classes
-- :doc:`field_path_detection` - Automatic field path discovery for factory
+- :doc:`context_system` - Thread-local context system for lazy resolution
+- :doc:`configuration_framework` - Configuration framework overview
+- :doc:`orchestrator_configuration_management` - Orchestrator configuration patterns

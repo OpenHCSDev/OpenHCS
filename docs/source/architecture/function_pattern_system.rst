@@ -301,44 +301,28 @@ OpenHCS evolved the pattern system with:
 -  **Performance optimization**: Zero-copy conversions and intelligent
    materialization
 
-Why This System Is Genius
+Pattern System Properties
 -------------------------
 
-Composability Without Complexity
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Composability
+~~~~~~~~~~~~~
 
-The pattern system enables complex workflows through simple composition:
+Patterns compose through nesting:
 
 .. code:: python
 
-   # This simple pattern definition...
    func = {
        "dapi": [gaussian_blur, threshold_otsu, binary_opening],
        "calcein": [enhance_contrast, detect_cells],
        "brightfield": [normalize_illumination]
    }
 
-   # ...automatically handles:
-   # - Channel routing
-   # - Sequential processing  
-   # - Memory type conversions
-   # - GPU resource management
-   # - Error isolation
-   # - Performance optimization
+The system handles channel routing, sequential processing, memory type conversions, GPU resource management, and error isolation.
 
-Type Safety and Validation
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Compilation-Time Validation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Unlike traditional scientific computing tools that fail at runtime,
-OpenHCS validates patterns at compilation time, preventing entire
-classes of errors before execution begins.
-
-Universal Interface
-~~~~~~~~~~~~~~~~~~~
-
-The same ``FunctionStep`` interface handles everything from simple
-single-function processing to complex multi-channel, multi-step
-workflows with automatic optimization.
+Patterns are validated during compilation, not at runtime. Invalid patterns fail before execution begins.
 
 Performance Characteristics
 ---------------------------
@@ -358,39 +342,48 @@ Future Enhancements
 -  **Distributed Patterns**: Multi-node pattern execution
 -  **Pattern Caching**: Compiled pattern reuse across executions
 
-Stack Processing Evolution
---------------------------
+Virtual Module System
+---------------------
 
-The Bridge Between Single-Image and Stack-Based Processing
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Registry-Based Function Re-Export
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code:: python
-
-   from openhcs.core.memory.stack_utils import stack_slices, unstack_slices
-   from skimage.filters import gaussian
-
-   # Problem: gaussian() works on single images, but we have image stacks
-   # Solution: stack/unstack pattern in OpenHCS
-   # (Note: stack() utility evolved into stack_slices/unstack_slices system)
-   func = gaussian  # Applied per-slice automatically by OpenHCS
-
-Automatic Stack Handling
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-OpenHCS automatically handles the stack/unstack operations:
+OpenHCS re-exports external library functions under the ``openhcs`` namespace as virtual modules. This provides automatic slice-by-slice processing for 2D functions.
 
 .. code:: python
 
-   # Function operates on 2D slices
-   @numpy_func
-   def process_single_slice(image_2d, param=1.0):
-       return skimage.filters.gaussian(image_2d, sigma=param)
+   # Import from virtual module (automatic slice-by-slice processing)
+   from openhcs.skimage.filters import gaussian
+
+   # Use directly in FunctionStep
+   step = FunctionStep(func=(gaussian, {'sigma': 2.0}))
 
    # OpenHCS automatically:
    # 1. Unstacks 3D array into 2D slices
-   # 2. Applies function to each slice
+   # 2. Applies gaussian() to each slice
    # 3. Restacks results into 3D array
    # 4. Maintains memory type consistency
+
+**Important**: Direct imports from external libraries (``from skimage.filters import gaussian``) are NOT automatically wrapped. You must either:
+
+1. Import from the virtual module: ``from openhcs.skimage.filters import gaussian``
+2. Manually wrap with decorators: ``@numpy_func``
+
+Virtual Module Creation
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Virtual modules are created automatically during registry initialization:
+
+.. code:: python
+
+   # Registry system creates virtual modules like:
+   # - openhcs.skimage.filters
+   # - openhcs.skimage.morphology
+   # - openhcs.cucim.skimage.filters
+   # - openhcs.pyclesperanto
+
+   # Each function is wrapped with slice_by_slice processing
+   # and proper memory type handling
 
 Real-World Usage Examples
 -------------------------
@@ -611,9 +604,4 @@ See Also
 - :doc:`special_io_system` - Cross-step communication patterns
 - :doc:`compilation_system_detailed` - Deep dive into pattern compilation
 
---------------
 
-**The function pattern system represents a fundamental breakthrough in
-scientific computing architecture - providing the composability of
-functional programming with the performance and type safety required for
-production research workflows.**

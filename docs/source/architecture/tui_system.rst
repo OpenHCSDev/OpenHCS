@@ -410,7 +410,7 @@ See Also
 
 - :doc:`pipeline_compilation_system` - TUI integration with pipeline compilation
 - :doc:`function_registry_system` - TUI function discovery and help system
-- :doc:`configuration_system_architecture` - TUI configuration management
+- :doc:`configuration_framework` - TUI configuration management
 
 **Practical Usage**:
 
@@ -423,4 +423,4 @@ See Also
 - :doc:`code_ui_interconversion` - Bidirectional code/UI editing system
 - :doc:`system_integration` - TUI integration with other OpenHCS systems
 - :doc:`concurrency_model` - TUI coordination with multi-processing
-- :doc:`vfs_system` - TUI integration with VFS backends
+- :doc:`storage_and_memory_system` - TUI integration with storage backends

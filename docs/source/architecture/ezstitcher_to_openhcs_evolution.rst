@@ -251,8 +251,8 @@ OpenHCS introduces several revolutionary systems that make it
 fundamentally different from traditional scientific computing tools.
 Each system is documented in detail in dedicated architecture documents:
 
-🔥 `Function Registry System <function-registry-system.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+🔥 `Function Registry System <function_registry_system.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Unified GPU function ecosystem with type-safe contracts**
 
@@ -261,8 +261,8 @@ computing, automatically discovering and unifying functions from
 pyclesperanto, scikit-image, CuCIM, and other libraries with consistent
 interfaces and memory type safety.
 
-🖥️ `TUI System <tui-system.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+🖥️ `TUI System <tui_system.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Advanced terminal interface**
 
@@ -271,8 +271,8 @@ works - unprecedented for scientific computing tools. Includes real-time
 pipeline editing, live configuration management, integrated help, and
 professional log monitoring.
 
-💾 `Memory Backend System <memory-backend-system.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+💾 `Storage and Memory System <storage_and_memory_system.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Intelligent data management for 100GB+ datasets**
 
@@ -280,8 +280,8 @@ Advanced Virtual File System with memory overlay capabilities, OME-ZARR
 compression, and smart backend switching that automatically scales from
 small experiments to massive high-content screening datasets.
 
-⚡ `Fail-Loud Philosophy <fail-loud-philosophy.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+⚡ `Memory Type System <memory_type_system.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Zero tolerance for silent failures**
 
@@ -289,14 +289,13 @@ Comprehensive architecture that prevents the silent failures plaguing
 academic software through explicit validation, mandatory contracts, and
 clear error handling with actionable solutions.
 
-🧬 `Research Impact <research-impact.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+🧬 `External Integrations Overview <external_integrations_overview.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Production neuroscience research deployment**
 
 Real-world deployment handling 100GB+ datasets in production
-neuroscience research, with quantified productivity improvements and
-scientific contributions targeting Nature Methods publication.
+neuroscience research with seamless integration with Napari, Fiji, and OMERO.
 
 These innovations work together to create a scientific computing
 platform that is fundamentally different from traditional academic tools

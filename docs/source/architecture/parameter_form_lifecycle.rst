@@ -142,9 +142,9 @@ This pattern ensures proper cleanup regardless of how the dialog closes (Save bu
 
 See Also
 --------
-- :doc:`placeholder_resolution_system` - Placeholder generation using form context
-- :doc:`context_management_system` - Thread-local context management patterns
+- :doc:`context_system` - Thread-local context management patterns
 - :doc:`service-layer-architecture` - Service layer integration with forms
+- :doc:`code_ui_interconversion` - Code/UI interconversion patterns
 - :py:class:`~openhcs.pyqt_gui.windows.base_form_dialog.BaseFormDialog` - Base class for dialog cleanup
 - :py:class:`~openhcs.pyqt_gui.windows.config_window.ConfigWindow` - Example BaseFormDialog implementation
 - :py:class:`~openhcs.pyqt_gui.windows.dual_editor_window.DualEditorWindow` - Example BaseFormDialog implementation

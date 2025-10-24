@@ -439,5 +439,5 @@ See Also
 **Advanced Topics**:
 
 - :doc:`compilation_system_detailed` - Deep dive into 5-phase compilation
-- :doc:`pipeline_debugging_guide` - Debugging compilation issues
+- :doc:`multiprocessing_coordination_system` - Multiprocessing coordination
 - :doc:`gpu_resource_management` - GPU resource assignment details

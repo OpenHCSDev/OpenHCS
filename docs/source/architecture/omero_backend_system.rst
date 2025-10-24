@@ -49,7 +49,7 @@ Key Design Principles
 Automatic Backend Selection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Critical Design Rule**: OMERO plates MUST use ``omero_local`` backend for both input (read) and output (materialization). The system automatically enforces this regardless of user configuration.
+**Critical Design Rule**: OMERO plates MUST use ``omero_local`` backend for both input (read) and output (materialization). The system automatically enforces this through the microscope handler's backend compatibility system.
 
 **Why This Matters**:
 
@@ -57,31 +57,28 @@ Automatic Backend Selection
 - Attempting to read/write using ``disk`` or ``zarr`` backends will fail with permission errors
 - OMERO output must be saved as FileAnnotations attached to OMERO objects, not as files
 
-**Automatic Override Logic**:
+**Automatic Backend Selection Logic**:
 
-The compiler automatically detects OMERO plates and overrides backend configuration:
+The backend selection happens through the microscope handler's ``compatible_backends`` property:
 
 .. code-block:: python
 
-   # User configuration (will be overridden for OMERO)
-   vfs_config = VFSConfig(
-       read_backend=Backend.AUTO,              # Default
-       materialization_backend=MaterializationBackend.DISK  # Default
-   )
+   class OMEROHandler(MicroscopeHandler):
+       @property
+       def compatible_backends(self) -> List[Backend]:
+           """OMERO is only compatible with OMERO_LOCAL backend."""
+           return [Backend.OMERO_LOCAL]
 
-   # Compiler detects OMERO plate and overrides BOTH backends
-   if microscope_type == 'omero':
-       vfs_config = VFSConfig(
-           read_backend=Backend.OMERO_LOCAL,              # Forced
-           materialization_backend=MaterializationBackend.OMERO_LOCAL  # Forced
-       )
+When the compiler calls ``get_primary_backend()``, it returns the first compatible backend, which for OMERO is always ``omero_local``. This applies to both read and materialization backends:
 
-**Log Output**:
+.. code-block:: python
 
-.. code-block:: text
+   # Compiler backend selection (in MaterializationFlagPlanner)
+   read_backend = context.microscope_handler.get_primary_backend(plate_path, filemanager)
+   # Returns: 'omero_local' (first compatible backend for OMERO)
 
-   🔧 OMERO plate detected - overriding backends to omero_local
-      (read: auto → omero_local, materialization: disk → omero_local)
+   materialization_backend = context.microscope_handler.get_primary_backend(plate_path, filemanager)
+   # Returns: 'omero_local' (same logic)
 
 **User Impact**:
 
@@ -91,9 +88,9 @@ The compiler automatically detects OMERO plates and overrides backend configurat
 
 **Contrast with Other Microscopes**:
 
-- **ImageXpress/Opera Phenix**: Read from disk → Write to OpenHCS format (disk or zarr based on ``materialization_backend``)
-- **OpenHCS**: Read from zarr/disk (auto-detected from metadata) → Write to OpenHCS format (disk or zarr based on ``materialization_backend``)
-- **OMERO**: Read from omero_local → Write to omero_local (``materialization_backend`` choice ignored)
+- **ImageXpress/Opera Phenix**: Compatible with disk backend → Read from disk → Write to OpenHCS format (disk or zarr based on ``materialization_backend``)
+- **OpenHCS**: Compatible with disk/zarr/virtual_workspace → Read from auto-detected backend → Write to OpenHCS format (disk or zarr based on ``materialization_backend``)
+- **OMERO**: Compatible with omero_local only → Read from omero_local → Write to omero_local (``materialization_backend`` choice ignored)
 
 VirtualBackend ABC
 ~~~~~~~~~~~~~~~~~~
@@ -155,22 +152,14 @@ Implementation Strategy
        def __getstate__(self):
            """Exclude unpicklable connection object."""
            state = self.__dict__.copy()
-           # Store connection params, not connection
-           state['_omero_conn'] = None
-           state['_conn_params'] = {
-               'host': self._host,
-               'port': self._port,
-               'username': self._username,
-               'password': self._password
-           }
+           # Remove unpicklable connection
+           state['_initial_conn'] = None
            return state
-       
+
        def __setstate__(self, state):
-           """Recreate connection in worker process."""
+           """Restore state after unpickling."""
            self.__dict__.update(state)
-           # Reconnect using stored params
-           if state['_conn_params']:
-               self._reconnect(state['_conn_params'])
+           # Connection will be retrieved from global registry in worker process
 
 See ``openhcs/io/omero_local.py`` lines 93-150 for complete implementation.
 

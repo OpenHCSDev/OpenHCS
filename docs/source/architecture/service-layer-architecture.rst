@@ -201,6 +201,6 @@ Benefits
 See Also
 --------
 
-- :doc:`configuration_system_architecture` - Configuration system architecture used by services
+- :doc:`configuration_framework` - Configuration system architecture used by services
 - :doc:`step-editor-generalization` - Step editors that use service layer patterns
-- :doc:`../development/ui-patterns` - UI patterns that leverage service layer architecture
+- :doc:`code_ui_interconversion` - Code/UI interconversion patterns

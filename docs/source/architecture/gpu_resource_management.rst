@@ -34,6 +34,9 @@ The core of the system is a thread-safe global GPU registry:
    _registry_lock = threading.Lock()
    _registry_initialized = False
 
+   # Note: "active" count was removed - GPU assignment happens at compilation time,
+   # not at runtime. No runtime coordination exists.
+
 Registry Initialization
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -81,34 +84,48 @@ The registry is initialized once during application startup:
 GPU Detection
 ~~~~~~~~~~~~~
 
-Multi-library GPU detection with fallback strategy:
+Multi-library GPU detection across supported frameworks:
 
 .. code:: python
 
    def _detect_available_gpus() -> List[int]:
-       """Detect available GPUs across multiple libraries."""
+       """Detect available GPUs across all supported frameworks."""
 
        available_gpus = set()
 
-       # Check PyTorch GPUs
-       torch_gpu = check_torch_gpu_available()
-       if torch_gpu is not None:
-           available_gpus.add(torch_gpu)
-
        # Check CuPy GPUs
-       cupy_gpu = check_cupy_gpu_available()
-       if cupy_gpu is not None:
-           available_gpus.add(cupy_gpu)
+       try:
+           cupy_gpu = check_cupy_gpu_available()
+           if cupy_gpu is not None:
+               available_gpus.add(cupy_gpu)
+       except Exception as e:
+           logger.debug("Cupy GPU detection failed: %s", e)
+
+       # Check PyTorch GPUs
+       try:
+           torch_gpu = check_torch_gpu_available()
+           if torch_gpu is not None:
+               available_gpus.add(torch_gpu)
+       except Exception as e:
+           logger.debug("Torch GPU detection failed: %s", e)
 
        # Check TensorFlow GPUs
-       tf_gpu = check_tf_gpu_available()
-       if tf_gpu is not None:
-           available_gpus.add(tf_gpu)
+       try:
+           tf_gpu = check_tf_gpu_available()
+           if tf_gpu is not None:
+               available_gpus.add(tf_gpu)
+       except Exception as e:
+           logger.debug("TensorFlow GPU detection failed: %s", e)
 
-       # Check JAX GPUs
-       jax_gpu = check_jax_gpu_available()
-       if jax_gpu is not None:
-           available_gpus.add(jax_gpu)
+       # Check JAX GPUs using lazy detection
+       # JAX is checked via lazy import to defer jax.devices() call until needed
+       # This avoids thread explosion (54+ threads) during startup
+       try:
+           jax_gpu = check_jax_gpu_available()
+           if jax_gpu is not None:
+               available_gpus.add(jax_gpu)
+       except Exception as e:
+           logger.debug("JAX GPU detection failed: %s", e)
 
        return sorted(list(available_gpus))
 
@@ -146,45 +163,59 @@ GPU devices are assigned during pipeline compilation, not execution:
        """Validates GPU memory types and assigns GPU devices."""
 
        @staticmethod
-       def validate_step_plans(step_plans: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-           """Validate GPU memory types and assign GPU IDs."""
+       def validate_step_plans(step_plans: Dict[int, Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
+           """Validate GPU memory types in step plans and assign GPU IDs."""
 
            # 1. Check if any step requires GPU
-           requires_gpu = any(
-               step_plan.get('input_memory_type') in VALID_GPU_MEMORY_TYPES or
-               step_plan.get('output_memory_type') in VALID_GPU_MEMORY_TYPES
-               for step_plan in step_plans.values()
-           )
+           requires_gpu = False
+           required_libraries = set()
 
+           for step_index, step_plan in step_plans.items():
+               input_memory_type = step_plan.get('input_memory_type')
+               output_memory_type = step_plan.get('output_memory_type')
+
+               if input_memory_type in VALID_GPU_MEMORY_TYPES:
+                   requires_gpu = True
+                   required_libraries.add(input_memory_type)
+
+               if output_memory_type in VALID_GPU_MEMORY_TYPES:
+                   requires_gpu = True
+                   required_libraries.add(output_memory_type)
+
+           # If no step requires GPU, return empty assignments
            if not requires_gpu:
-               return {}  # No GPU assignment needed
+               return {}
 
-           # 2. Get GPU registry status
+           # 2. Validate that required libraries are installed
+           _validate_required_libraries(required_libraries)
+
+           # 3. Get GPU registry status
            gpu_registry = get_gpu_registry_status()
            if not gpu_registry:
                raise ValueError(
                    "🔥 COMPILATION FAILED: No GPUs available in registry but pipeline contains GPU-decorated functions!"
                )
 
-           # 3. Assign first available GPU (simplified assignment)
+           # 4. Assign first available GPU (simplified assignment)
            # All steps in pipeline use same GPU for affinity
            gpu_id = list(gpu_registry.keys())[0]
 
-           # 4. Assign GPU to all GPU-requiring steps
-           for step_id, step_plan in step_plans.items():
+           # 5. Assign GPU to all GPU-requiring steps
+           gpu_assignments = {}
+           for step_index, step_plan in step_plans.items():
                input_type = step_plan.get('input_memory_type')
                output_type = step_plan.get('output_memory_type')
 
                if (input_type in VALID_GPU_MEMORY_TYPES or
                    output_type in VALID_GPU_MEMORY_TYPES):
 
-                   step_plan['gpu_id'] = gpu_id
+                   gpu_assignments[step_index] = {'gpu_id': gpu_id}
                    logger.debug(
                        "Step %s assigned gpu_id %s for memory types: %s/%s",
-                       step_id, gpu_id, input_type, output_type
+                       step_index, gpu_id, input_type, output_type
                    )
 
-           return {}  # No additional assignments needed
+           return gpu_assignments
 
 GPU Affinity Strategy
 ~~~~~~~~~~~~~~~~~~~~~
@@ -206,23 +237,25 @@ GPU Registry Status
 .. code:: python
 
    def get_gpu_registry_status() -> Dict[int, Dict[str, int]]:
-       """Get current GPU registry status."""
+       """Get the current status of the GPU registry.
 
+       Thread-safe: Uses a lock to ensure consistent access to the global registry.
+
+       Returns:
+           Copy of the GPU registry
+
+       Raises:
+           RuntimeError: If the GPU registry is not initialized
+       """
        with _registry_lock:
            if not _registry_initialized:
-               return {}
+               raise RuntimeError(
+                   "Clause 295 Violation: GPU registry not initialized. "
+                   "Must call initialize_gpu_registry() first."
+               )
 
-           # Return deep copy to prevent external modification
-           return {
-               gpu_id: info.copy()
-               for gpu_id, info in GPU_REGISTRY.items()
-           }
-
-   def is_gpu_registry_initialized() -> bool:
-       """Check if the GPU registry has been initialized."""
-
-       with _registry_lock:
-           return _registry_initialized
+           # Return a copy of the registry to prevent external modification
+           return {gpu_id: info.copy() for gpu_id, info in GPU_REGISTRY.items()}
 
 Memory Type Integration
 -----------------------
@@ -251,6 +284,7 @@ Implemented Features
 -  ✅ GPU affinity enforcement (same GPU per pipeline)
 -  ✅ Multi-library GPU detection (PyTorch, CuPy, TensorFlow, JAX)
 -  ✅ Thread-safe registry access
+-  ✅ Lazy JAX GPU detection (defers jax.devices() call to avoid thread explosion)
 
 Future Enhancements
 ~~~~~~~~~~~~~~~~~~~

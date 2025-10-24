@@ -741,7 +741,7 @@ The materialization system integrates with the OpenHCS configuration hierarchy t
 - **Step Materialization Configuration**: Controls per-step materialization behavior and directory naming
 - **Configuration Resolution**: Follows the standard OpenHCS hierarchy (step → pipeline → global)
 
-For complete configuration details and examples, see :doc:`../api/config` and :doc:`configuration_system_architecture`.
+For complete configuration details and examples, see :doc:`configuration_framework`.
 
 **Architectural Pattern**: The configuration system provides declarative control over materialization behavior without requiring code changes. The same materialization function can save to different backends based purely on configuration settings.
 
@@ -1133,12 +1133,12 @@ Benefits and Design Principles
 See Also
 --------
 
-- :doc:`configuration_system_architecture` - Configuration hierarchy that controls storage behavior
+- :doc:`configuration_framework` - Configuration hierarchy that controls storage behavior
 - :doc:`pipeline_compilation_system` - How storage and memory decisions are made during compilation
 - :doc:`function_pattern_system` - How functions declare memory type requirements
 - :doc:`special_io_system` - Special input/output system that uses materialization
 - :doc:`gpu_resource_management` - GPU device management and allocation
-- :doc:`../guides/memory_type_integration` - Practical guide to memory type decorators and GPU optimization
+- :doc:`memory_type_system` - Memory type system and conversions
 - :doc:`../api/processing_backends` - Memory type system integration with processing functions
 - :doc:`../guides/large_datasets` - Practical guide to handling large datasets
 
