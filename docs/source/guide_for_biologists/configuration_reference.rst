@@ -20,134 +20,102 @@ Configurations automatically inherit from higher levels, and can be overridden a
 Some levels do not have all configuration options - for example, the materialization configuration only has options relevant to materialization.
 
 
-Appendix: Relevant Configuration Options (Ripped straight from config.py, needs work)
+Appendix: Relevant Configuration Options
 --------------------------------------------------
 
 There are several configuration options available in OpenHCS. Below is a list of some of the most commonly used options:
 (Note: Each configuration option also has a tooltip in the GUI that explains its purpose and usage. Hit the (?) button next to any option to see its tooltip.)
 
-Top-level enums and choices
-- ZarrCompressor
-  - Which compressor to use for Zarr storage (blosc, zlib, lz4, zstd, or none).
-- ZarrChunkStrategy
-  - How to chunk Zarr arrays: per-well (good for batching) or per-file (good for random access).
-- MaterializationBackend
-  - Where to write materialized outputs: automatic choice, zarr, plain disk, or OMERO local.
-- WellFilterMode
-  - Whether a well list is an INCLUDE list (only those wells) or an EXCLUDE list (skip those wells).
-
 GlobalPipelineConfig (main app/pipeline defaults)
-- num_workers
+- Num Workers
   - How many parallel workers to run for processing (higher = more CPU usage).
-- materialization_results_path
+- Materialization Results Path
   - Directory name where non-image analysis results (CSV/JSON) are written by default.
-- microscope
-  - Default microscope type for auto-detection (uses constants like AUTO).
-- use_threading
+- Use Threading
   - If true, use threads instead of processes (useful for debugging or some environments).
-
-Display / streaming helper enums
-- NapariColormap, NapariDimensionMode, NapariVariableSizeHandling
-  - Controls how Napari shows images: color maps, whether to show slices or stacks, and how to handle images of different sizes.
-- FijiLUT, FijiDimensionMode
-  - Similar controls for Fiji/ImageJ display mapping (LUTs and channel/slice/frame choices).
 
 WellFilterConfig
 - well_filter
   - List, pattern, or integer limiting which wells are included (None = all wells).
 - well_filter_mode
-  - INCLUDE or EXCLUDE behavior for the well_filter field.
+  - INCLUDE or EXCLUDE the above wells.
 
 ZarrConfig
-- compressor
-  - Which Zarr compressor to use for image storage.
-- compression_level
+- Compression Level
   - Compression level (higher = smaller files but slower).
-- chunk_strategy
-  - Choose WELL or FILE chunking strategy.
 
 VFSConfig
-- read_backend
-  - Backend used to read input files (auto-detected or explicit choice).
-- intermediate_backend
-  - Backend for temporary intermediate results (memory, disk, etc.).
-- materialization_backend
+- Read Backend
+  - Backend used to read input files (should typically leave as Auto).
+- Intermediate Backend
+  - Backend for storing temporary intermediate results (memory, disk, etc.).
+- Materialization Backend
   - Backend used for explicit materialized outputs (e.g., zarr vs disk).
 
+For the above 2 options, the 3 choices that should be used is typically ZARR, Disk, or Memory. Memory stores to the temporary system memory (RAM), Disk and ZARR both store to disk, but ZARR uses the Zarr format which is more efficient and takes up less storage, while DISK uses Tiff files.
+
 AnalysisConsolidationConfig
-- enabled
+- Enabled
   - Run automatic consolidation of step outputs into summary files.
-- metaxpress_style
+- MetaXpress Summary
   - Produce MetaXpress-compatible summary format.
 - well_pattern, file_extensions, exclude_patterns, output_filename
   - Controls for which files to include/exclude and the consolidated output name.
 
 PlateMetadataConfig
-- barcode, plate_name, plate_id, description
+- Barcode, Plate Name, Plate ID, Description, Acquisition User
   - Optional metadata fields for the plate; auto-filled if None.
-- acquisition_user
-  - User string to record as the data acquirer.
-- z_step
-  - Z-step string used for MetaXpress compatibility.
-
-ExperimentalAnalysisConfig
-- enabled
-  - Toggle the experimental analysis pipeline features.
-- config_file_name, design_sheet_name, plate_groups_sheet_name
-  - Names/locations for Excel sheets that define experiment design.
-- normalization_method
-  - How to normalize results (e.g., fold_change or z_score).
-- export_raw_results, export_heatmaps
-  - Whether to produce raw CSVs and heatmap visualizations.
-- auto_detect_format, default_format
-  - Try to detect microscope format automatically; fallback format if detection fails.
-- enable_wells_exclusion, metaxpress_summary_enabled
-  - Extra toggles for analysis behavior and outputs.
 
 PathPlanningConfig (directory / output naming)
-- output_dir_suffix
-  - Suffix appended to generated output folders (default "_openhcs").
-- global_output_folder
+- Well Filter/Well Filter Mode
+  - Inherited from StepWellFilterConfig unless overridden.
+- Output Dir Suffix
+  - Suffix appended to generated output folders (default "_openhcs").  For example, if your input folder is "data/plate1", the output folder will be "data/plate1_openhcs".
+- Global Output Folder
   - Optional root folder to place all plate workspaces and outputs.
-- sub_dir
+- Sub Dir
   - Subdirectory name used for image outputs inside a workspace.
 
 StepWellFilterConfig and StepMaterializationConfig
 - Step-level versions of well filtering and path planning.
+- Inherits from higher levels unless overridden. (Materialization config inherits from global path planning config).
 - StepMaterializationConfig.sub_dir
   - Default folder for step-level materializations (default "checkpoints").
-
-FunctionRegistryConfig
-- enable_scalar_functions
-  - Whether functions that return scalars are included in the registry (affects available functions).
 
 VisualizerConfig
 - temp_directory
   - Directory for temporary visualization files (if None, system temp is used).
 
-StreamingDefaults
-- persistent
-  - Whether streamed viewers stay open after a pipeline finishes.
-
 StreamingConfig (abstract)
-- Abstract base for streaming backends (Napari, Fiji). Concrete configs provide:
-  - backend: enum identifying the streaming backend
-  - step_plan_output_key: key used to store streaming artifacts in the plan
-  - get_streaming_kwargs / create_visualizer: helper methods used at runtime
+- Persistent
+  - If true, keeps the streaming service open after initial use.
 
 NapariStreamingConfig
+- Colormap
+  - Colormap to use for visualization.
+- Variable size handling
+  - How to handle variable-sized images (pad, rescale, etc.).
+- Site/Channel/Timepoint/Well/Z-Index/Step Name/Step Index/Source Mode
+  - Options for whether you'd like to group different variables by slice or stack.
+- Persistent
+  - If true, keeps the streaming service open after initial use.
+- Well Filter/Well Filter Mode
+  - Inherited from StepWellFilterConfig unless overridden.  
 - napari_port, napari_host
   - Network settings for Napari streaming.
-- backend / step_plan_output_key
-  - Backend enum and plan key used internally.
 
 FijiStreamingConfig
+- Lut
+  - Colormap to use for visualization.
+- Auto Contrast
+  - If true, applies auto-contrast to images.
+- Site/Channel/Timepoint/Well/Z-Index/Step Name/Step Index/Source Mode
+  - Options for whether you'd like to group different variables by slice or stack.
+- Persistent
+  - If true, keeps the streaming service open after initial use.
+- Well Filter/Well Filter Mode
+  - Inherited from StepWellFilterConfig unless overridden.
 - fiji_port, fiji_host, fiji_executable_path
   - Settings for Fiji/ImageJ streaming and the local executable location.
 
-Notes and where to change things
-- Global defaults live in openhcs/core/config.py and are wired into the config framework.
-- Per-plate or per-step overrides can be saved with plate metadata or step materialization configs.
-- For environment-level changes (install path, GPU choices) edit GlobalPipelineConfig or provide overrides at app startup.
-- If you plan to change defaults that affect storage or GPU backends, test on a small dataset first.
-
+Note: The above mentions all the configuration options that are relevant to biologists using OpenHCS. There are many more configuration options available for advanced users and developers, which can be found in the code documentation. If you don't know what something does, its usually best to leave it at its default value.
