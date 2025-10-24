@@ -412,9 +412,65 @@ class OperaPhenixXmlParser:
         elem = parent_elem.find(f"{self.namespace}{tag_name}")
         return elem.get(attr_name) if elem is not None else None
 
-    def get_field_positions(self) -> Dict[int, Tuple[float, float]]:
+    def detect_orphan_fields(self, positions: Dict[int, Tuple[float, float]],
+                            distance_threshold_multiplier: float = 3.0) -> set:
+        """
+        Detect orphan fields that are significantly far from the main grid.
+
+        An orphan field is one whose distance to its nearest neighbor is much larger
+        than the typical spacing between fields in the grid.
+
+        Args:
+            positions: Dictionary mapping field IDs to (x, y) position tuples
+            distance_threshold_multiplier: How many times the median spacing to consider orphan
+
+        Returns:
+            set: Set of field IDs that are orphans
+        """
+        if len(positions) < 3:
+            return set()  # Need at least 3 fields to detect orphans
+
+        import numpy as np
+
+        # Calculate distance from each field to its nearest neighbor
+        field_ids = list(positions.keys())
+        nearest_distances = {}
+
+        for field_id in field_ids:
+            x1, y1 = positions[field_id]
+            min_dist = float('inf')
+
+            for other_id in field_ids:
+                if other_id == field_id:
+                    continue
+                x2, y2 = positions[other_id]
+                dist = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                min_dist = min(min_dist, dist)
+
+            nearest_distances[field_id] = min_dist
+
+        # Calculate median nearest-neighbor distance
+        distances = list(nearest_distances.values())
+        median_distance = np.median(distances)
+
+        # Fields with nearest-neighbor distance > threshold are orphans
+        threshold = median_distance * distance_threshold_multiplier
+        orphans = {fid for fid, dist in nearest_distances.items() if dist > threshold}
+
+        if orphans:
+            logger.warning(f"Detected {len(orphans)} orphan field(s): {sorted(orphans)}")
+            logger.warning(f"Median field spacing: {median_distance:.6f}, threshold: {threshold:.6f}")
+            for fid in sorted(orphans):
+                logger.warning(f"  Field {fid}: nearest neighbor distance = {nearest_distances[fid]:.6f}")
+
+        return orphans
+
+    def get_field_positions(self, exclude_orphans: bool = False) -> Dict[int, Tuple[float, float]]:
         """
         Extract field IDs and their X,Y positions from the Index.xml file.
+
+        Args:
+            exclude_orphans: If True, exclude fields that are far from the main grid
 
         Returns:
             dict: Mapping of field IDs to (x, y) position tuples
@@ -453,6 +509,13 @@ class OperaPhenixXmlParser:
                     # Skip entries with wrong type
                     logger.debug("Skipping field with wrong type: %s", e)
                     continue
+
+        # Detect and exclude orphan fields if requested
+        if exclude_orphans and len(field_positions) > 2:
+            orphans = self.detect_orphan_fields(field_positions)
+            if orphans:
+                logger.info(f"Excluding {len(orphans)} orphan field(s) from mapping: {sorted(orphans)}")
+                field_positions = {fid: pos for fid, pos in field_positions.items() if fid not in orphans}
 
         return field_positions
 
@@ -506,15 +569,18 @@ class OperaPhenixXmlParser:
 
         return sorted_field_ids
 
-    def get_field_id_mapping(self) -> Dict[int, int]:
+    def get_field_id_mapping(self, exclude_orphans: bool = True) -> Dict[int, int]:
         """
         Generate a mapping from original field IDs to new field IDs based on position data.
+
+        Args:
+            exclude_orphans: If True, exclude orphan fields from the mapping
 
         Returns:
             dict: Mapping of original field IDs to new field IDs
         """
-        # Get field positions
-        field_positions = self.get_field_positions()
+        # Get field positions (excluding orphans if requested)
+        field_positions = self.get_field_positions(exclude_orphans=exclude_orphans)
 
         # Sort fields by position
         sorted_field_ids = self.sort_fields_by_position(field_positions)
