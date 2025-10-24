@@ -489,7 +489,7 @@ class SyntheticMicroscopyGenerator:
 
         Real Opera Phenix microscopes acquire fields starting from the center,
         then follow a snake pattern. Field 1 is always at the center, field 2
-        is top-left, then continues in a snake pattern.
+        is bottom-left, then continues in a snake pattern.
 
         Args:
             grid_rows: Number of rows in the grid
@@ -507,18 +507,18 @@ class SyntheticMicroscopyGenerator:
         # Field 1 is always at center
         field_pattern = {1: (center_row, center_col)}
 
-        # Field 2 is always top-left
-        field_pattern[2] = (0, 0)
+        # Field 2 is always bottom-left
+        field_pattern[2] = (grid_rows - 1, 0)
 
         # Generate remaining fields in snake pattern (left-to-right, then right-to-left)
         field_id = 3
-        for row in range(grid_rows):
+        for row in range(grid_rows - 1, -1, -1):  # Start from bottom row, go up
             # Skip center row for now
             if row == center_row:
                 continue
-            # Skip top row (already has field 2 at top-left)
-            if row == 0:
-                # Fill rest of top row left-to-right, starting from col 1
+            # Skip bottom row (already has field 2 at bottom-left)
+            if row == grid_rows - 1:
+                # Fill rest of bottom row left-to-right, starting from col 1
                 for col in range(1, grid_cols):
                     if (row, col) != (center_row, center_col):  # Skip center
                         field_pattern[field_id] = (row, col)
