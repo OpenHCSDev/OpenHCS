@@ -34,6 +34,24 @@ def get_subdirectory_name(input_dir: Union[str, Path], plate_path: Union[str, Pa
     return "." if input_path == plate_path else input_path.name
 
 
+def resolve_subdirectory_path(subdir_name: str, plate_path: Union[str, Path]) -> Path:
+    """
+    Convert subdirectory name from metadata to actual path.
+
+    Inverse of get_subdirectory_name(). Returns plate_path if subdir_name is ".",
+    otherwise returns plate_path / subdir_name.
+
+    Args:
+        subdir_name: Subdirectory name from metadata ("." for plate root)
+        plate_path: Plate root path
+
+    Returns:
+        Resolved path (plate_path for ".", plate_path/subdir_name otherwise)
+    """
+    plate_path = Path(plate_path)
+    return plate_path if subdir_name == "." else plate_path / subdir_name
+
+
 @dataclass(frozen=True)
 class MetadataConfig:
     """Configuration constants for metadata operations."""

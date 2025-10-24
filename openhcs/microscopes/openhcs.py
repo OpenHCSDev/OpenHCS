@@ -709,9 +709,14 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
             plate_path: Input directory (may be subdirectory like zarr/)
             filemanager: FileManager instance for backend registration
         """
-        # Use plate_folder (plate root) for metadata operations, not the input_dir
-        actual_plate_root = self.plate_folder if self.plate_folder else Path(plate_path)
-        available_backends_dict = self.metadata_handler.get_available_backends(actual_plate_root)
+        # plate_folder must be set before calling this method
+        if self.plate_folder is None:
+            raise RuntimeError(
+                "OpenHCSHandler.determine_backend_preference: plate_folder not set. "
+                "Call determine_input_dir() or post_workspace() first."
+            )
+
+        available_backends_dict = self.metadata_handler.get_available_backends(self.plate_folder)
 
         # Preference hierarchy: zarr > virtual_workspace > disk
         # 1. Prefer zarr if available (best performance for large datasets)

@@ -260,19 +260,28 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
             # When skipping, we need to determine image_dir from metadata
             # Read metadata to get the subdirectory key
             from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+            from openhcs.io.exceptions import MetadataNotFoundError
+            from openhcs.io.metadata_writer import resolve_subdirectory_path
+
             openhcs_metadata_handler = OpenHCSMetadataHandler(filemanager)
             metadata = openhcs_metadata_handler._load_metadata_dict(plate_path)
             subdirs = metadata.get("subdirectories", {})
 
             # Find the subdirectory with workspace_mapping (should be "." or "Images")
-            image_dir = plate_path  # Default to plate root
-            for subdir_name in subdirs.keys():
-                if "workspace_mapping" in subdirs[subdir_name]:
-                    if subdir_name == ".":
-                        image_dir = plate_path
-                    else:
-                        image_dir = plate_path / subdir_name
-                    break
+            subdir_with_mapping = next(
+                (name for name, data in subdirs.items() if "workspace_mapping" in data),
+                None
+            )
+
+            # Fail if no workspace_mapping found
+            if subdir_with_mapping is None:
+                raise MetadataNotFoundError(
+                    f"skip_preparation=True but no workspace_mapping found in metadata for {plate_path}. "
+                    "Virtual workspace must be prepared before skipping."
+                )
+
+            # Convert subdirectory name to path (handles "." -> plate_path)
+            image_dir = resolve_subdirectory_path(subdir_with_mapping, plate_path)
         else:
             logger.info("🔄 APPLYING PREPARATION: Building virtual mapping")
             # _build_virtual_mapping() returns the image directory
