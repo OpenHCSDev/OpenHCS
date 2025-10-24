@@ -488,8 +488,12 @@ class SyntheticMicroscopyGenerator:
         Generate Opera Phenix center-first snake pattern for field IDs.
 
         Real Opera Phenix microscopes acquire fields starting from the center,
-        then follow a snake pattern. Field 1 is always at the center, field 2
-        is bottom-left, then continues in a snake pattern.
+        then follow a snake/boustrophedon pattern skipping the center position.
+
+        For 3x3 grid:
+        2  3  4
+        6  1  5
+        7  8  9
 
         Args:
             grid_rows: Number of rows in the grid
@@ -498,8 +502,6 @@ class SyntheticMicroscopyGenerator:
         Returns:
             dict: Mapping of field_id -> (row_idx, col_idx) in grid coordinates
         """
-        total_fields = grid_rows * grid_cols
-
         # Calculate center position
         center_row = grid_rows // 2
         center_col = grid_cols // 2
@@ -507,50 +509,22 @@ class SyntheticMicroscopyGenerator:
         # Field 1 is always at center
         field_pattern = {1: (center_row, center_col)}
 
-        # Field 2 is always bottom-left
-        field_pattern[2] = (grid_rows - 1, 0)
+        field_id = 2
 
-        # Generate remaining fields in snake pattern (left-to-right, then right-to-left)
-        field_id = 3
-        for row in range(grid_rows - 1, -1, -1):  # Start from bottom row, go up
-            # Skip center row for now
-            if row == center_row:
-                continue
-            # Skip bottom row (already has field 2 at bottom-left)
-            if row == grid_rows - 1:
-                # Fill rest of bottom row left-to-right, starting from col 1
-                for col in range(1, grid_cols):
+        # Snake pattern: even rows go left-to-right, odd rows go right-to-left
+        for row in range(grid_rows):
+            if row % 2 == 0:
+                # Even row: left to right
+                for col in range(grid_cols):
                     if (row, col) != (center_row, center_col):  # Skip center
                         field_pattern[field_id] = (row, col)
                         field_id += 1
             else:
-                # Snake pattern: even rows go left-to-right, odd rows go right-to-left
-                if row % 2 == 0:
-                    # Even row: left to right
-                    for col in range(grid_cols):
-                        if (row, col) != (center_row, center_col):  # Skip center
-                            field_pattern[field_id] = (row, col)
-                            field_id += 1
-                else:
-                    # Odd row: right to left
-                    for col in range(grid_cols - 1, -1, -1):
-                        if (row, col) != (center_row, center_col):  # Skip center
-                            field_pattern[field_id] = (row, col)
-                            field_id += 1
-
-        # Fill center row last (snake pattern)
-        if center_row % 2 == 0:
-            # Even row: left to right
-            for col in range(grid_cols):
-                if (center_row, col) != (center_row, center_col):  # Skip center (already field 1)
-                    field_pattern[field_id] = (center_row, col)
-                    field_id += 1
-        else:
-            # Odd row: right to left
-            for col in range(grid_cols - 1, -1, -1):
-                if (center_row, col) != (center_row, center_col):  # Skip center (already field 1)
-                    field_pattern[field_id] = (center_row, col)
-                    field_id += 1
+                # Odd row: right to left
+                for col in range(grid_cols - 1, -1, -1):
+                    if (row, col) != (center_row, center_col):  # Skip center
+                        field_pattern[field_id] = (row, col)
+                        field_id += 1
 
         return field_pattern
 
@@ -694,8 +668,11 @@ class SyntheticMicroscopyGenerator:
 
                 # Calculate position in meters (typical Opera Phenix values)
                 # These are arbitrary values for demonstration
-                pos_x = 0.000576762 + site_col * 0.001  # Arbitrary X position
-                pos_y = 0.000576762 + site_row * 0.001  # Arbitrary Y position
+                # NOTE: In microscope stage coordinates, Y increases upward (higher Y = top row)
+                # But in array coordinates, row index increases downward (higher row = bottom)
+                # So we need to invert: stage_y = (grid_rows - 1 - array_row)
+                pos_x = 0.000576762 + site_col * 0.001  # X: left to right
+                pos_y = 0.000576762 + (self.grid_size[0] - 1 - site_row) * 0.001  # Y: inverted (higher = top)
 
                 for z in range(1, self.z_stack_levels + 1):
                     # Calculate Z position based on Z level
