@@ -96,13 +96,9 @@ class ImageXpressHandler(MicroscopeHandler):
         # Initialize mapping dict (PLATE-RELATIVE paths)
         workspace_mapping = {}
 
-        # Apply virtual workspace preparation starting from root_dir
-        # For ImageXpress, root_dir is "." (plate root), so we process the plate directly
-        start_dir = plate_path if self.root_dir == "." else plate_path / self.root_dir
-
-        # Flatten TimePoint and ZStep folders virtually
-        self._flatten_timepoints(start_dir, filemanager, workspace_mapping, plate_path)
-        self._flatten_zsteps(start_dir, filemanager, workspace_mapping, plate_path)
+        # Flatten TimePoint and ZStep folders virtually (starting from plate root)
+        self._flatten_timepoints(plate_path, filemanager, workspace_mapping, plate_path)
+        self._flatten_zsteps(plate_path, filemanager, workspace_mapping, plate_path)
 
         logger.info(f"Built {len(workspace_mapping)} virtual path mappings for ImageXpress")
 

@@ -92,13 +92,8 @@ class OperaPhenixHandler(MicroscopeHandler):
 
         logger.info(f"🔄 BUILDING VIRTUAL MAPPING: Opera Phenix field remapping for {plate_path}")
 
-        # Apply virtual workspace preparation starting from root_dir
-        # For Opera Phenix, root_dir is "Images"
+        # Opera Phenix images are always in Images/ subdirectory
         image_dir = plate_path / self.root_dir
-
-        if not image_dir.exists():
-            logger.warning(f"Root directory {self.root_dir} not found in {plate_path}, using plate root")
-            image_dir = plate_path
 
         # Default to empty field mapping (no remapping)
         field_mapping = {}
