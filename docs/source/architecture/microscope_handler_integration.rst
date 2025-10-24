@@ -211,13 +211,10 @@ Each microscope format requires different workspace preparation to normalize dir
            """Build virtual workspace mapping for nested folder structures."""
            workspace_mapping = {}
 
-           # Apply virtual workspace preparation starting from root_dir
-           # For ImageXpress, root_dir is "." (plate root), so we process the plate directly
-           start_dir = plate_path if self.root_dir == "." else plate_path / self.root_dir
-
            # Flatten TimePoint and ZStep folders virtually (no physical file operations)
-           self._flatten_timepoints(start_dir, filemanager, workspace_mapping, plate_path)
-           self._flatten_zsteps(start_dir, filemanager, workspace_mapping, plate_path)
+           # Starting from plate root since root_dir is "."
+           self._flatten_timepoints(plate_path, filemanager, workspace_mapping, plate_path)
+           self._flatten_zsteps(plate_path, filemanager, workspace_mapping, plate_path)
 
            # Save virtual workspace mapping to metadata using root_dir as subdirectory key
            writer.merge_subdirectory_metadata(metadata_path, {
@@ -235,22 +232,45 @@ Each microscope format requires different workspace preparation to normalize dir
            # Uses filemanager for all file operations to respect VFS boundaries
 
    class OperaPhenixHandler(MicroscopeHandler):
-       def _prepare_workspace(self, workspace_path: Path, filemanager: FileManager) -> Path:
-           """Apply spatial layout remapping to Opera Phenix filenames."""
-           # Check if already processed (temp directory exists)
-           temp_dir_name = "__opera_phenix_temp"
-           entries = filemanager.list_dir(workspace_path, Backend.DISK.value)
+       @property
+       def root_dir(self) -> str:
+           """Root directory for Opera Phenix virtual workspace preparation.
 
-           for entry in entries:
-               entry_path = Path(workspace_path) / entry
-               if entry_path.is_dir() and entry_path.name == temp_dir_name:
-                   return workspace_path  # Already processed
+           Returns "Images" because Opera Phenix field remapping is applied
+           to images in the Images/ subdirectory.
+           """
+           return "Images"
 
-           # Apply spatial remapping using XML metadata
-           # Creates temporary directory, processes files, then replaces originals
-           # Uses filemanager for all operations to maintain VFS compliance
+       def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
+           """Build Opera Phenix virtual workspace mapping with field remapping."""
+           image_dir = plate_path / self.root_dir
+           workspace_mapping = {}
 
-           return workspace_path
+           # Load field mapping from Index.xml
+           xml_parser = OperaPhenixXmlParser(plate_path / "Images" / "Index.xml")
+           field_mapping = xml_parser.get_field_id_mapping(exclude_orphans=True)
+
+           # Build virtual mapping with field remapping
+           for real_file in filemanager.list_image_files(image_dir, Backend.DISK.value):
+               # Parse original filename to get field ID
+               parsed = self.parser.parse(real_file)
+               original_field = parsed['site']
+
+               # Map to virtual field position
+               if original_field in field_mapping:
+                   virtual_field = field_mapping[original_field]
+                   virtual_file = real_file.replace(f"f{original_field:02d}", f"f{virtual_field:02d}")
+                   workspace_mapping[virtual_file] = real_file
+
+           # Save mapping to metadata
+           writer.merge_subdirectory_metadata(metadata_path, {
+               self.root_dir: {
+                   "workspace_mapping": workspace_mapping,
+                   "available_backends": {"disk": True, "virtual_workspace": True}
+               }
+           })
+
+           return image_dir
 
 This workspace preparation ensures pipelines always see a consistent flat structure regardless of the original microscope organization.
 
