@@ -254,11 +254,14 @@ class PipelineCompiler:
                 if not already_zarr:
                     # Determine if input uses virtual workspace
                     from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+                    from openhcs.io.metadata_writer import get_subdirectory_name
+
                     openhcs_metadata_handler = OpenHCSMetadataHandler(context.filemanager)
                     metadata = openhcs_metadata_handler._load_metadata_dict(plate_path)
                     subdirs = metadata["subdirectories"]
-                    # Get actual subdirectory from input_dir (e.g., "TimePoint_1" for ImageXpress)
-                    original_subdir = Path(context.input_dir).name
+
+                    # Get actual subdirectory from input_dir
+                    original_subdir = get_subdirectory_name(context.input_dir, plate_path)
                     uses_virtual_workspace = Backend.VIRTUAL_WORKSPACE.value in subdirs[original_subdir]["available_backends"]
 
                     zarr_subdir = "zarr" if uses_virtual_workspace else original_subdir

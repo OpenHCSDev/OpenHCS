@@ -17,13 +17,10 @@ from typing import Any, List, Optional, Tuple
 import pkg_resources
 
 from openhcs.core.memory.decorators import tensorflow as tensorflow_func
-from openhcs.core.utils import optional_import
+from openhcs.core.lazy_gpu_imports import tf
 
 # Define error variable
 TENSORFLOW_ERROR = ""
-
-# Import TensorFlow as an optional dependency
-tf = optional_import("tensorflow")
 
 # Check TensorFlow version for DLPack compatibility if available
 if tf is not None:

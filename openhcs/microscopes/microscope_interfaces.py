@@ -229,22 +229,62 @@ class MetadataHandler(ABC):
         """
         pass
 
-    @abstractmethod
     def get_image_files(self, plate_path: Union[str, Path]) -> list[str]:
         """
-        Get list of image files for the plate.
+        Get list of image files from OpenHCS metadata.
+
+        Default implementation reads from openhcs_metadata.json after virtual workspace preparation.
+        Derives image list from workspace_mapping keys if available, otherwise from image_files list.
+
+        Subclasses can override if they need different behavior (e.g., OpenHCS reads directly from metadata).
 
         Args:
             plate_path: Path to the plate folder (str or Path)
 
         Returns:
-            List of image filenames (basenames, not full paths)
+            List of image filenames with subdirectory prefix (e.g., "Images/file.tif" or "file.tif")
 
         Raises:
             TypeError: If plate_path is not a valid path type
-            FileNotFoundError: If plate path does not exist
+            FileNotFoundError: If plate path does not exist or no metadata found
         """
-        pass
+        from pathlib import Path
+
+        # Ensure plate_path is a Path object
+        if isinstance(plate_path, str):
+            plate_path = Path(plate_path)
+        elif not isinstance(plate_path, Path):
+            raise TypeError(f"Expected str or Path, got {type(plate_path).__name__}")
+
+        # Ensure the path exists
+        if not plate_path.exists():
+            raise FileNotFoundError(f"Plate path does not exist: {plate_path}")
+
+        # Read from OpenHCS metadata (unified approach for all microscopes)
+        from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+        openhcs_handler = OpenHCSMetadataHandler(self.filemanager)
+
+        try:
+            metadata = openhcs_handler._load_metadata_dict(plate_path)
+            subdirs = metadata.get("subdirectories", {})
+
+            # Find main subdirectory
+            main_subdir_key = next((key for key, data in subdirs.items() if data.get("main")), None)
+            if not main_subdir_key:
+                main_subdir_key = next(iter(subdirs.keys()))
+
+            subdir_data = subdirs[main_subdir_key]
+
+            # Prefer workspace_mapping keys (virtual paths) if available
+            if workspace_mapping := subdir_data.get("workspace_mapping"):
+                return list(workspace_mapping.keys())
+
+            # Otherwise use image_files list
+            return subdir_data.get("image_files", [])
+
+        except Exception:
+            # Fallback: no metadata yet, return empty list
+            return []
 
     def parse_metadata(self, plate_path: Union[str, Path]) -> Dict[str, Dict[str, Optional[str]]]:
         """

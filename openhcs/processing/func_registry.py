@@ -602,8 +602,12 @@ def get_all_function_names(memory_type: str) -> List[str]:
     return [func.__name__ for func in functions]
 
 
-# Auto-initialize the registry on module import (following storage_registry pattern)
-# Skip initialization in subprocess runner mode for faster startup
+# LAZY INITIALIZATION: Don't auto-initialize on import to avoid blocking GUI startup
+# The registry will auto-initialize on first access (when get_functions_by_memory_type is called)
+# This prevents importing GPU libraries (cupy, torch, etc.) during module import, which
+# blocks the main thread due to Python's GIL even when done in a background thread.
+#
+# For subprocess runner mode, set OPENHCS_SUBPROCESS_NO_GPU=1 to skip GPU library imports entirely.
 import os
-if not os.environ.get('OPENHCS_SUBPROCESS_NO_GPU'):
-    _auto_initialize_registry()
+# if not os.environ.get('OPENHCS_SUBPROCESS_NO_GPU'):
+#     _auto_initialize_registry()

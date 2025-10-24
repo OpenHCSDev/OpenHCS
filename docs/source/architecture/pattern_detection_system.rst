@@ -56,23 +56,23 @@ ImageXpress Handler
 
 .. code:: python
 
-   def _prepare_workspace(self, workspace_path, filemanager):
-       """Flatten ImageXpress Z-step directory structure."""
-       
-       # 1. Find TimePoint_1 directories
-       entries = filemanager.list_dir(workspace_path, "disk")
-       for entry in entries:
-           if "TimePoint_1" in entry:
-               # 2. Process Z-step subdirectories
-               self._flatten_zsteps(entry, filemanager)
-       
-       return workspace_path
+   def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
+       """Build virtual workspace mapping for nested folder structures."""
+       workspace_mapping = {}
 
-   def _flatten_zsteps(self, directory, filemanager):
-       """Flatten ZStep_N directories into parent directory."""
-       
-       # 1. Find ZStep directories (ZStep_1, ZStep_2, etc.)
-       zstep_pattern = re.compile(r"ZStep[_-]?(\d+)", re.IGNORECASE)
+       # Flatten TimePoint and ZStep folders virtually (no physical file operations)
+       self._flatten_timepoints(plate_path, filemanager, workspace_mapping, plate_path)
+       self._flatten_zsteps(plate_path, filemanager, workspace_mapping, plate_path)
+
+       # Save virtual workspace mapping to metadata
+       writer.merge_subdirectory_metadata(metadata_path, {
+           self.root_dir: {
+               "workspace_mapping": workspace_mapping,
+               "available_backends": {"disk": True, "virtual_workspace": True}
+           }
+       })
+
+       return plate_path
        subdirs = filemanager.list_dir(directory, "disk")
        
        for subdir in subdirs:

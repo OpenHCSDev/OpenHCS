@@ -5,11 +5,11 @@ from typing import Dict, List, Optional, Tuple
 
 from openhcs.utils.import_utils import optional_import, create_placeholder_class
 from openhcs.core.memory.decorators import torch as torch_backend_func
+from openhcs.core.lazy_gpu_imports import torch
 
 # Import torch modules as optional dependencies
-torch = optional_import("torch")
-nn = optional_import("torch.nn") if torch is not None else None
-F = optional_import("torch.nn.functional") if torch is not None else None
+nn = optional_import("torch.nn") if torch else None
+F = optional_import("torch.nn.functional") if torch else None
 models = optional_import("torchvision.models") if optional_import("torchvision") is not None else None
 
 nnModule = create_placeholder_class(

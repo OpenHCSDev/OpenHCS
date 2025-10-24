@@ -910,7 +910,8 @@ class FunctionStep(AbstractStep):
                 _update_metadata_for_zarr_conversion(
                     conversion_dir.parent,
                     step_plan["input_conversion_original_subdir"],
-                    zarr_subdir
+                    zarr_subdir,
+                    context
                 )
 
             # 🔍 VRAM TRACKING: Log memory at step start
@@ -1353,37 +1354,39 @@ class FunctionStep(AbstractStep):
 def _update_metadata_for_zarr_conversion(
     plate_root: Path,
     original_subdir: str,
-    zarr_subdir: str | None
+    zarr_subdir: str | None,
+    context: 'ProcessingContext'
 ) -> None:
     """Update metadata after zarr conversion.
 
     If zarr_subdir is None: add zarr to original_subdir's available_backends
-    If zarr_subdir is set: create new zarr subdirectory, set original main=false
+    If zarr_subdir is set: create complete metadata for zarr subdirectory, set original main=false
     """
     from openhcs.io.metadata_writer import get_metadata_path, AtomicMetadataWriter
-
-    metadata_path = get_metadata_path(plate_root)
-    writer = AtomicMetadataWriter()
+    from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
 
     if zarr_subdir:
-        # Separate zarr subdirectory - update both subdirectories atomically
-        updates = {
-            zarr_subdir: {
-                "available_backends": {"zarr": True},
-                "main": True
-            },
-            original_subdir: {
-                "main": False
-            }
-        }
-        writer.merge_subdirectory_metadata(metadata_path, updates)
-        logger.info(f"Updated metadata: {original_subdir} main=false, {zarr_subdir} main=true")
+        # Create complete metadata for zarr subdirectory (skip if already complete)
+        zarr_dir = plate_root / zarr_subdir
+        metadata_generator = OpenHCSMetadataGenerator(context.filemanager)
+        metadata_generator.create_metadata(
+            context,
+            str(zarr_dir),
+            "zarr",  # Zarr subdirectory uses zarr backend
+            is_main=True,
+            plate_root=str(plate_root),
+            sub_dir=zarr_subdir,
+            skip_if_complete=True
+        )
+
+        # Set original subdirectory to main=false
+        metadata_path = get_metadata_path(plate_root)
+        writer = AtomicMetadataWriter()
+        writer.merge_subdirectory_metadata(metadata_path, {original_subdir: {"main": False}})
+        logger.info(f"Ensured complete metadata for {zarr_subdir}, set {original_subdir} main=false")
     else:
         # Shared subdirectory - add zarr to available_backends
-        updates = {
-            original_subdir: {
-                "available_backends": {"zarr": True}
-            }
-        }
-        writer.merge_subdirectory_metadata(metadata_path, updates)
+        metadata_path = get_metadata_path(plate_root)
+        writer = AtomicMetadataWriter()
+        writer.merge_subdirectory_metadata(metadata_path, {original_subdir: {"available_backends": {"zarr": True}}})
         logger.info(f"Updated metadata: {original_subdir} now has zarr backend")

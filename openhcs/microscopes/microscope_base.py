@@ -103,10 +103,18 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
 
     @property
     @abstractmethod
-    def common_dirs(self) -> List[str]:
+    def root_dir(self) -> str:
         """
-        Canonical subdirectory names where image data may reside.
-        Example: ['Images', 'TimePoint', 'Data']
+        Root directory where virtual workspace preparation starts.
+
+        This defines:
+        1. The starting point for virtual workspace operations (flattening, remapping)
+        2. The subdirectory key used when saving virtual workspace metadata
+
+        Examples:
+        - ImageXpress: "." (plate root - TimePoint/ZStep folders are flattened from plate root)
+        - OperaPhenix: "Images" (field remapping applied to Images/ subdirectory)
+        - OpenHCS: Determined from metadata (e.g., "zarr", "images")
         """
         pass
 
@@ -187,6 +195,24 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         logger.info(f"⚠️ Using backend '{available_backends[0].value}' from compatible backends (virtual workspace not registered)")
         return available_backends[0].value
 
+    def _register_virtual_workspace_backend(self, plate_path: Union[str, Path], filemanager: FileManager) -> None:
+        """
+        Register virtual workspace backend if not already registered.
+
+        Centralized registration logic to avoid duplication across handlers.
+
+        Args:
+            plate_path: Path to plate directory
+            filemanager: FileManager instance
+        """
+        from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
+        from openhcs.constants.constants import Backend
+
+        if Backend.VIRTUAL_WORKSPACE.value not in filemanager.registry:
+            backend = VirtualWorkspaceBackend(plate_root=Path(plate_path))
+            filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
+            logger.info(f"Registered virtual workspace backend for {plate_path}")
+
     def initialize_workspace(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
         Initialize plate by creating virtual mapping in metadata.
@@ -201,9 +227,6 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         Returns:
             Path to image directory (determined from plate structure)
         """
-        from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
-        from openhcs.constants.constants import Backend
-
         plate_path = Path(plate_path)
 
         # Set plate_folder for this handler
@@ -213,11 +236,8 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         # This builds the plate-relative mapping dict and saves to metadata
         self._build_virtual_mapping(plate_path, filemanager)
 
-        # Register virtual workspace backend in FileManager's local registry
-        backend = VirtualWorkspaceBackend(plate_root=plate_path)
-        filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
-
-        logger.info(f"Registered virtual workspace backend for {plate_path}")
+        # Register virtual workspace backend
+        self._register_virtual_workspace_backend(plate_path, filemanager)
 
         # Return image directory using post_workspace
         # skip_preparation=True because _build_virtual_mapping() already ran
@@ -244,12 +264,40 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         # NO existence check - virtual workspaces are metadata-only
 
         # Apply microscope-specific preparation logic
+        # _build_virtual_mapping() returns the correct image directory for each microscope:
+        # - ImageXpress: plate_path (images are at plate root with TimePoint_X/ prefix in mapping)
+        # - OperaPhenix: plate_path/Images (images are in Images/ subdirectory)
         if skip_preparation:
             logger.info("📁 SKIPPING PREPARATION: Virtual mapping already built")
-            prepared_dir = plate_path
+            # When skipping, we need to determine image_dir from metadata
+            # Read metadata to get the subdirectory key
+            from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+            from openhcs.io.exceptions import MetadataNotFoundError
+            from openhcs.io.metadata_writer import resolve_subdirectory_path
+
+            openhcs_metadata_handler = OpenHCSMetadataHandler(filemanager)
+            metadata = openhcs_metadata_handler._load_metadata_dict(plate_path)
+            subdirs = metadata.get("subdirectories", {})
+
+            # Find the subdirectory with workspace_mapping (should be "." or "Images")
+            subdir_with_mapping = next(
+                (name for name, data in subdirs.items() if "workspace_mapping" in data),
+                None
+            )
+
+            # Fail if no workspace_mapping found
+            if subdir_with_mapping is None:
+                raise MetadataNotFoundError(
+                    f"skip_preparation=True but no workspace_mapping found in metadata for {plate_path}. "
+                    "Virtual workspace must be prepared before skipping."
+                )
+
+            # Convert subdirectory name to path (handles "." -> plate_path)
+            image_dir = resolve_subdirectory_path(subdir_with_mapping, plate_path)
         else:
             logger.info("🔄 APPLYING PREPARATION: Building virtual mapping")
-            prepared_dir = self._build_virtual_mapping(plate_path, filemanager)
+            # _build_virtual_mapping() returns the image directory
+            image_dir = self._build_virtual_mapping(plate_path, filemanager)
 
         # Determine backend - check if virtual workspace backend is registered
         if Backend.VIRTUAL_WORKSPACE.value in filemanager.registry:
@@ -257,44 +305,10 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         else:
             backend_type = Backend.DISK.value
 
-        # List contents
-        entries = filemanager.list_dir(plate_path, backend_type)
-
-        # Filter entries to get only directories
-        subdirs = []
-        for entry in entries:
-            entry_path = Path(plate_path) / entry
-            if filemanager.is_dir(entry_path, backend_type):
-                subdirs.append(entry_path)
-
-        # Look for a directory matching any of the common_dirs patterns
-        image_dir = None
-        for item in subdirs:
-            # FileManager should return strings, but handle Path objects too
-            if isinstance(item, str):
-                item_name = os.path.basename(item)
-            elif isinstance(item, Path):
-                item_name = item.name
-            else:
-                # Skip any unexpected types
-                logger.warning("Unexpected directory path type: %s", type(item).__name__)
-                continue
-
-            if any(dir_name.lower() in item_name.lower() for dir_name in self.common_dirs):
-                # Found a matching directory
-                logger.info("Found directory matching common_dirs pattern: %s", item)
-                image_dir = item
-                break
-
-        # If no matching directory found, use the prepared directory
-        if image_dir is None:
-            logger.info("No directory matching common_dirs found, using prepared directory: %s", prepared_dir)
-            image_dir = prepared_dir
-
         # Ensure parser is provided
         parser = self.parser
 
-        # Get all image files in the directory - use same backend as determined above
+        # Get all image files in the directory
         image_files = filemanager.list_image_files(image_dir, backend_type)
 
         # Map original filenames to reconstructed filenames
@@ -635,7 +649,7 @@ def validate_backend_compatibility(handler: MicroscopeHandler, backend: Backend)
 
 def _try_metadata_detection(handler_class, filemanager: FileManager, plate_folder: Path) -> Optional[Path]:
     """
-    Try metadata detection with a handler, normalizing return types and exceptions.
+    Try metadata detection with a handler, normalizing return types.
 
     Args:
         handler_class: MetadataHandler class to try
@@ -643,20 +657,16 @@ def _try_metadata_detection(handler_class, filemanager: FileManager, plate_folde
         plate_folder: Path to plate directory
 
     Returns:
-        Path if metadata found, None if not found (regardless of handler's native behavior)
+        Path if metadata found, None if metadata not found
+
+    Raises:
+        Any exception from the handler (fail-loud behavior)
     """
-    try:
-        handler = handler_class(filemanager)
-        result = handler.find_metadata_file(plate_folder)
+    handler = handler_class(filemanager)
+    result = handler.find_metadata_file(plate_folder)
 
-        # Normalize return type: convert any truthy result to Path, falsy to None
-        return Path(result) if result else None
-
-    except (FileNotFoundError, Exception) as e:
-        # Expected exceptions for "not found" - convert to None
-        # Note: Using broad Exception catch for now, can be refined based on actual handler exceptions
-        logger.debug(f"Metadata detection failed for {handler_class.__name__}: {e}")
-        return None
+    # Normalize return type: convert any truthy result to Path, falsy to None
+    return Path(result) if result else None
 
 
 def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
@@ -676,39 +686,46 @@ def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
 
     Raises:
         ValueError: If microscope type cannot be determined
+        MetadataNotFoundError: If metadata files are missing
+        Any other exception from metadata handlers (fail-loud)
     """
-    try:
-        # Ensure all handlers are discovered before auto-detection
-        from openhcs.microscopes.handler_registry_service import discover_all_handlers
-        discover_all_handlers()
+    # Ensure all handlers are discovered before auto-detection
+    from openhcs.microscopes.handler_registry_service import discover_all_handlers
+    from openhcs.io.exceptions import MetadataNotFoundError
+    discover_all_handlers()
 
-        # Build detection order: openhcsdata first, then filtered/ordered list
-        detection_order = ['openhcsdata']  # Always first, always included (correct registration name)
+    # Build detection order: openhcsdata first, then filtered/ordered list
+    detection_order = ['openhcsdata']  # Always first, always included (correct registration name)
 
-        if allowed_types is None:
-            # Use all registered handlers in registration order
-            detection_order.extend([name for name in METADATA_HANDLERS.keys() if name != 'openhcsdata'])
-        else:
-            # Use filtered list, but ensure openhcsdata is first
-            filtered_types = [name for name in allowed_types if name != 'openhcsdata' and name in METADATA_HANDLERS]
-            detection_order.extend(filtered_types)
+    if allowed_types is None:
+        # Use all registered handlers in registration order
+        detection_order.extend([name for name in METADATA_HANDLERS.keys() if name != 'openhcsdata'])
+    else:
+        # Use filtered list, but ensure openhcsdata is first
+        filtered_types = [name for name in allowed_types if name != 'openhcsdata' and name in METADATA_HANDLERS]
+        detection_order.extend(filtered_types)
 
-        # Try detection in order
-        for handler_name in detection_order:
-            handler_class = METADATA_HANDLERS.get(handler_name)
-            if handler_class and _try_metadata_detection(handler_class, filemanager, plate_folder):
+    # Try detection in order - only catch expected "not found" exceptions
+    for handler_name in detection_order:
+        handler_class = METADATA_HANDLERS.get(handler_name)
+        if not handler_class:
+            continue
+
+        try:
+            result = _try_metadata_detection(handler_class, filemanager, plate_folder)
+            if result:
                 logger.info(f"Auto-detected {handler_name} microscope type")
                 return handler_name
+        except (FileNotFoundError, MetadataNotFoundError):
+            # Expected - this handler's metadata not found, try next
+            logger.debug(f"{handler_name} metadata not found in {plate_folder}")
+            continue
 
-        # No handler succeeded - provide detailed error message
-        available_types = list(METADATA_HANDLERS.keys())
-        msg = (f"Could not auto-detect microscope type in {plate_folder}. "
-               f"Tried: {detection_order}. "
-               f"Available types: {available_types}. "
-               f"Ensure metadata files are present for supported formats.")
-        logger.error(msg)
-        raise ValueError(msg)
-
-    except Exception as e:
-        # Wrap exception with clear context
-        raise ValueError(f"Error during microscope type auto-detection in {plate_folder}: {e}") from e
+    # No handler succeeded - provide detailed error message
+    available_types = list(METADATA_HANDLERS.keys())
+    msg = (f"Could not auto-detect microscope type in {plate_folder}. "
+           f"Tried: {detection_order}. "
+           f"Available types: {available_types}. "
+           f"Ensure metadata files are present for supported formats.")
+    logger.error(msg)
+    raise ValueError(msg)

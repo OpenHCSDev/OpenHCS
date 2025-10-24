@@ -38,11 +38,7 @@ if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
     tf = None
     logger.info("Subprocess runner mode - skipping GPU library imports in disk backend")
 else:
-    torch = optional_import("torch")
-    jax = optional_import("jax")
-    jnp = optional_import("jax.numpy")
-    cupy = optional_import("cupy")
-    tf = optional_import("tensorflow")
+    from openhcs.core.lazy_gpu_imports import torch, jax, jnp, cupy, tf
 tifffile = optional_import("tifffile")
 
 class FileFormatRegistry:
@@ -626,30 +622,19 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         Raises:
             FileNotFoundError: If the path or symlink target does not exist
             NotADirectoryError: If the resolved target is not a directory
-            StorageResolutionError: For unexpected filesystem resolution errors
         """
-        from pathlib import Path
+        path = Path(path)
 
-        try:
-            path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Path does not exist: {path}")
 
-            if not path.exists():
-                raise FileNotFoundError(f"Path does not exist: {path}")
+        # Follow symlinks to final real target
+        resolved = path.resolve(strict=True)
 
-            # Follow symlinks to final real target
-            resolved = path.resolve(strict=True)
+        if not resolved.is_dir():
+            raise NotADirectoryError(f"Path is not a directory: {path}")
 
-            if not resolved.is_dir():
-                raise NotADirectoryError(f"Path is not a directory: {path}")
-
-            return True
-
-        except FileNotFoundError:
-            raise  # broken symlink or missing path
-        except NotADirectoryError:
-            raise
-        except Exception as e:
-            raise StorageResolutionError(f"Failed to resolve directory: {path}") from e
+        return True
 
     def move(self, src: Union[str, Path], dst: Union[str, Path]) -> None:
         """

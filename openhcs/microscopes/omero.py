@@ -347,9 +347,12 @@ class OMEROHandler(MicroscopeHandler):
         super().__init__(parser=parser, metadata_handler=metadata_handler)
 
     @property
-    def common_dirs(self) -> List[str]:
-        """Virtual subdirectory for OMERO (purely for path compatibility)."""
-        return ["Images"]
+    def root_dir(self) -> str:
+        """Root directory for OMERO virtual workspace.
+
+        Returns "Images" for path compatibility with OMERO virtual paths.
+        """
+        return "Images"
 
     @property
     def microscope_type(self) -> str:

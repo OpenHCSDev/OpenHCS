@@ -7,9 +7,9 @@ from openhcs.utils.import_utils import optional_import, create_placeholder_class
 from openhcs.core.memory.decorators import torch as torch_func
 
 # Import torch modules as optional dependencies
-torch = optional_import("torch")
-nn = optional_import("torch.nn") if torch is not None else None
-F = optional_import("torch.nn.functional") if torch is not None else None
+from openhcs.core.lazy_gpu_imports import torch
+nn = optional_import("torch.nn") if torch else None
+F = optional_import("torch.nn.functional") if torch else None
 
 nnModule = create_placeholder_class(
     "Module", # Name for the placeholder if generated

@@ -30,6 +30,7 @@ from typing import Dict, List, Optional
 from openhcs.core.memory.gpu_utils import (check_cupy_gpu_available,
                                                check_tf_gpu_available,
                                                check_torch_gpu_available)
+from openhcs.core.lazy_gpu_imports import check_installed_gpu_libraries
 # Import necessary config classes
 from openhcs.core.config import GlobalPipelineConfig
 

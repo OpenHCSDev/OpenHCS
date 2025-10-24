@@ -24,12 +24,8 @@ if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
     pyclesperanto = None
     logger.info("Subprocess runner mode - skipping GPU library imports in gpu_cleanup")
 else:
-    # Normal mode - import GPU frameworks as optional dependencies
-    torch = optional_import("torch")
-    cupy = optional_import("cupy")
-    tensorflow = optional_import("tensorflow")
-    jax = optional_import("jax")
-    pyclesperanto = optional_import("pyclesperanto")
+    # Normal mode - import GPU frameworks as lazy dependencies
+    from openhcs.core.lazy_gpu_imports import torch, cupy, tensorflow, jax, pyclesperanto
 
 # --- Cleanup functions ---
 

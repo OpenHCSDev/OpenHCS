@@ -40,14 +40,19 @@ from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_fo
 from openhcs.microscopes import create_microscope_handler
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 
-# Conditional analysis import - skip in subprocess runner mode
-if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-    # Subprocess runner mode - create placeholder
-    def consolidate_analysis_results(*args, **kwargs):
-        """Placeholder for subprocess runner mode."""
-        raise RuntimeError("Analysis consolidation not available in subprocess runner mode")
-else:
-    from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
+# Lazy import of consolidate_analysis_results to avoid blocking GUI startup
+# This function imports GPU libraries, so we defer it until first use
+def _get_consolidate_analysis_results():
+    """Lazy import of consolidate_analysis_results function."""
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        # Subprocess runner mode - create placeholder
+        def consolidate_analysis_results(*args, **kwargs):
+            """Placeholder for subprocess runner mode."""
+            raise RuntimeError("Analysis consolidation not available in subprocess runner mode")
+        return consolidate_analysis_results
+    else:
+        from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_analysis_results
+        return consolidate_analysis_results
 
 # Import generic component system - required for orchestrator functionality
 
@@ -419,7 +424,9 @@ class PipelineOrchestrator(ContextProvider):
             logger.info("PipelineOrchestrator using provided StorageRegistry instance.")
         else:
             # Create a copy of the global registry to avoid modifying shared state
-            from openhcs.io.base import storage_registry as global_storage_registry
+            from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
+            # Ensure registry is initialized before copying
+            ensure_storage_registry()
             self.registry = global_storage_registry.copy()
             logger.info("PipelineOrchestrator created its own StorageRegistry instance (copy of global).")
 
@@ -614,6 +621,9 @@ class PipelineOrchestrator(ContextProvider):
                 self._component_keys_cache
             )
 
+            # Ensure complete OpenHCS metadata exists
+            self._ensure_openhcs_metadata()
+
             logger.info("PipelineOrchestrator fully initialized with cached component keys and metadata.")
             return self
         except Exception as e:
@@ -623,6 +633,43 @@ class PipelineOrchestrator(ContextProvider):
 
     def is_initialized(self) -> bool:
         return self._initialized
+
+    def _ensure_openhcs_metadata(self) -> None:
+        """Ensure complete OpenHCS metadata exists for the plate.
+
+        Uses the same context creation logic as pipeline execution to get full metadata
+        with channel names from metadata files (HTD, Index.xml, etc).
+
+        Skips OMERO and other non-disk-based microscope handlers since they don't have
+        real disk directories.
+        """
+        from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
+
+        # Skip metadata creation for OMERO and other non-disk-based handlers
+        # OMERO uses virtual paths like /omero/plate_1 which are not real directories
+        if self.microscope_handler.microscope_type == 'omero':
+            logger.debug("Skipping metadata creation for OMERO plate (uses virtual paths)")
+            return
+
+        # For plates with virtual workspace, metadata is already created by _build_virtual_mapping()
+        # We just need to add the component metadata to the existing "." subdirectory
+        from openhcs.io.metadata_writer import get_subdirectory_name
+        subdir_name = get_subdirectory_name(self.input_dir, self.plate_path)
+
+        # Create context using SAME logic as create_context() to get full metadata
+        context = self.create_context(axis_id="metadata_init")
+
+        # Create metadata (will skip if already complete)
+        generator = OpenHCSMetadataGenerator(self.filemanager)
+        generator.create_metadata(
+            context,
+            str(self.input_dir),
+            "disk",
+            is_main=True,
+            plate_root=str(self.plate_path),
+            sub_dir=subdir_name,
+            skip_if_complete=True
+        )
 
     def get_results_path(self) -> Path:
         """Get the results directory path for this orchestrator's plate.
@@ -1142,7 +1189,8 @@ class PipelineOrchestrator(ContextProvider):
                             logger.info(f"🔄 CONSOLIDATION: Using well IDs: {axis_ids}")
 
                             logger.info("🔥 ORCHESTRATOR: Calling consolidate_analysis_results()...")
-                            consolidate_analysis_results(
+                            consolidate_fn = _get_consolidate_analysis_results()
+                            consolidate_fn(
                                 results_directory=str(results_dir),
                                 well_ids=axis_ids,
                                 consolidation_config=shared_context.analysis_consolidation_config,

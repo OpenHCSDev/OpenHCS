@@ -482,6 +482,52 @@ class SyntheticMicroscopyGenerator:
 
             return htd_path
 
+    @staticmethod
+    def generate_opera_phenix_field_pattern(grid_rows: int, grid_cols: int) -> Dict[int, Tuple[int, int]]:
+        """
+        Generate Opera Phenix center-first snake pattern for field IDs.
+
+        Real Opera Phenix microscopes acquire fields starting from the center,
+        then follow a snake/boustrophedon pattern skipping the center position.
+
+        For 3x3 grid:
+        2  3  4
+        6  1  5
+        7  8  9
+
+        Args:
+            grid_rows: Number of rows in the grid
+            grid_cols: Number of columns in the grid
+
+        Returns:
+            dict: Mapping of field_id -> (row_idx, col_idx) in grid coordinates
+        """
+        # Calculate center position
+        center_row = grid_rows // 2
+        center_col = grid_cols // 2
+
+        # Field 1 is always at center
+        field_pattern = {1: (center_row, center_col)}
+
+        field_id = 2
+
+        # Snake pattern: even rows go left-to-right, odd rows go right-to-left
+        for row in range(grid_rows):
+            if row % 2 == 0:
+                # Even row: left to right
+                for col in range(grid_cols):
+                    if (row, col) != (center_row, center_col):  # Skip center
+                        field_pattern[field_id] = (row, col)
+                        field_id += 1
+            else:
+                # Odd row: right to left
+                for col in range(grid_cols - 1, -1, -1):
+                    if (row, col) != (center_row, center_col):  # Skip center
+                        field_pattern[field_id] = (row, col)
+                        field_id += 1
+
+        return field_pattern
+
     def generate_opera_phenix_index_xml(self, plate_name):
         """Generate Index.xml file for Opera Phenix format."""
         # Create the Index.xml file in the Images directory
@@ -611,17 +657,22 @@ class SyntheticMicroscopyGenerator:
       <MagnificationRatio>1.0</MagnificationRatio>
     </PixelSizeCalibration>"""
 
+        # Generate Opera Phenix center-first snake pattern for field IDs
+        field_pattern = self.generate_opera_phenix_field_pattern(self.grid_size[0], self.grid_size[1])
+
         # Add detailed image information for each image
         for row, col in well_indices:
             for site in range(1, self.grid_size[0] * self.grid_size[1] + 1):
-                # Calculate position for this site
-                site_row = (site - 1) // self.grid_size[1]
-                site_col = (site - 1) % self.grid_size[1]
+                # Get grid position for this field ID using Opera Phenix pattern
+                site_row, site_col = field_pattern[site]
 
                 # Calculate position in meters (typical Opera Phenix values)
                 # These are arbitrary values for demonstration
-                pos_x = 0.000576762 + site_col * 0.001  # Arbitrary X position
-                pos_y = 0.000576762 + site_row * 0.001  # Arbitrary Y position
+                # NOTE: In microscope stage coordinates, Y increases upward (higher Y = top row)
+                # But in array coordinates, row index increases downward (higher row = bottom)
+                # So we need to invert: stage_y = (grid_rows - 1 - array_row)
+                pos_x = 0.000576762 + site_col * 0.001  # X: left to right
+                pos_y = 0.000576762 + (self.grid_size[0] - 1 - site_row) * 0.001  # Y: inverted (higher = top)
 
                 for z in range(1, self.z_stack_levels + 1):
                     # Calculate Z position based on Z level
@@ -723,15 +774,20 @@ class SyntheticMicroscopyGenerator:
             # Pre-generate the positions for each site to ensure consistency across Z-levels
             # This creates a mapping of site_index -> (base_x_pos, base_y_pos)
             site_positions = {}
-            site_index = 1
-            for row in range(self.grid_size[0]):
-                for col in range(self.grid_size[1]):
+
+            # For Opera Phenix, use center-first snake pattern
+            # For ImageXpress, use simple raster pattern
+            if self.format == 'OperaPhenix':
+                field_pattern = self.generate_opera_phenix_field_pattern(self.grid_size[0], self.grid_size[1])
+                for site_index in range(1, self.grid_size[0] * self.grid_size[1] + 1):
+                    # Get grid position for this field ID
+                    grid_row, grid_col = field_pattern[site_index]
+
                     # Calculate base position
-                    x = col * self.step_x
-                    y = row * self.step_y
+                    x = grid_col * self.step_x
+                    y = grid_row * self.step_y
 
                     # Add random stage positioning error
-                    # We apply this error to the base position, it will be constant across Z-steps
                     x_error = np.random.randint(-self.stage_error_px, self.stage_error_px)
                     y_error = np.random.randint(-self.stage_error_px, self.stage_error_px)
 
@@ -743,7 +799,28 @@ class SyntheticMicroscopyGenerator:
                     y_pos = max(0, min(y_pos, self.image_size[1] - self.tile_size[1]))
 
                     site_positions[site_index] = (x_pos, y_pos)
-                    site_index += 1
+            else:
+                # ImageXpress: simple raster pattern
+                site_index = 1
+                for row in range(self.grid_size[0]):
+                    for col in range(self.grid_size[1]):
+                        # Calculate base position
+                        x = col * self.step_x
+                        y = row * self.step_y
+
+                        # Add random stage positioning error
+                        x_error = np.random.randint(-self.stage_error_px, self.stage_error_px)
+                        y_error = np.random.randint(-self.stage_error_px, self.stage_error_px)
+
+                        x_pos = x + x_error
+                        y_pos = y + y_error
+
+                        # Ensure we don't go out of bounds
+                        x_pos = max(0, min(x_pos, self.image_size[0] - self.tile_size[0]))
+                        y_pos = max(0, min(y_pos, self.image_size[1] - self.tile_size[1]))
+
+                        site_positions[site_index] = (x_pos, y_pos)
+                        site_index += 1
 
             # For multiple Z-stack levels
             if self.z_stack_levels > 1:

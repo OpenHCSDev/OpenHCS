@@ -132,8 +132,13 @@ class OpenHCSMetadataHandler(MetadataHandler):
                 if not subdirs:
                     raise MetadataNotFoundError(f"Empty subdirectories in metadata file '{metadata_file_path}'")
 
-                # Merge all subdirectories: use first as base, combine all image_files
-                base_metadata = next(iter(subdirs.values())).copy()
+                # Use main subdirectory as base (marked with "main": true), fallback to first
+                main_subdir = next((data for data in subdirs.values() if data.get("main")), None)
+                if not main_subdir:
+                    # Fallback to first subdirectory if no main is marked
+                    main_subdir = next(iter(subdirs.values()))
+
+                base_metadata = main_subdir.copy()
                 base_metadata[FIELDS.IMAGE_FILES] = [
                     file for subdir in subdirs.values()
                     for file in subdir.get(FIELDS.IMAGE_FILES, [])
@@ -445,23 +450,56 @@ class OpenHCSMetadataGenerator:
         is_main: bool = False,
         plate_root: str = None,
         sub_dir: str = None,
-        results_dir: str = None
+        results_dir: str = None,
+        skip_if_complete: bool = False,
+        allow_none_override: bool = False
     ) -> None:
-        """Create or update subdirectory-keyed OpenHCS metadata file."""
+        """Create or update subdirectory-keyed OpenHCS metadata file.
+
+        Args:
+            skip_if_complete: If True, skip update if metadata already complete (has channels)
+            allow_none_override: If True, None values override existing fields;
+                               if False (default), None values are filtered out to preserve existing fields
+        """
         plate_root_path = Path(plate_root)
         metadata_path = get_metadata_path(plate_root_path)
 
+        # Check if metadata already complete (if requested)
+        if skip_if_complete and metadata_path.exists():
+            import json
+            with open(metadata_path, 'r') as f:
+                existing = json.load(f)
+
+            subdir_data = existing.get('subdirectories', {}).get(sub_dir, {})
+            if subdir_data.get('channels'):
+                self.logger.debug(f"Metadata for {sub_dir} already complete, skipping")
+                return
+
+        # Extract metadata from current state
         current_metadata = self._extract_metadata_from_disk_state(context, output_dir, write_backend, is_main, sub_dir, results_dir)
         metadata_dict = asdict(current_metadata)
+
+        # Filter None values unless override allowed
+        if not allow_none_override:
+            metadata_dict = {k: v for k, v in metadata_dict.items() if v is not None}
 
         self.atomic_writer.merge_subdirectory_metadata(metadata_path, {sub_dir: metadata_dict})
 
 
 
     def _extract_metadata_from_disk_state(self, context: 'ProcessingContext', output_dir: str, write_backend: str, is_main: bool, sub_dir: str, results_dir: str = None) -> OpenHCSMetadata:
-        """Extract metadata reflecting current disk state after processing."""
+        """Extract metadata reflecting current disk state after processing.
+
+        Returns OpenHCSMetadata with None for fields that should be preserved from existing metadata.
+        The caller filters out None values before merging to avoid overwriting existing fields.
+        """
         handler = context.microscope_handler
-        cache = context.metadata_cache or {}
+
+        # metadata_cache is always set by create_context() - fail if not present
+        if not hasattr(context, 'metadata_cache'):
+            raise RuntimeError("ProcessingContext missing metadata_cache - must be created via create_context()")
+
+        cache = context.metadata_cache
 
         actual_files = self.filemanager.list_image_files(output_dir, write_backend)
         relative_files = [f"{sub_dir}/{Path(f).name}" for f in actual_files]
@@ -487,6 +525,7 @@ class OpenHCSMetadataGenerator:
             z_indexes=cache.get(AllComponents.Z_INDEX),
             timepoints=cache.get(AllComponents.TIMEPOINT),
             available_backends={write_backend: True},
+            workspace_mapping=None,  # Preserve existing - filtered out by create_metadata()
             main=is_main if is_main else None,
             results_dir=relative_results_dir
         )
@@ -600,12 +639,17 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
 
 
     @property
-    def common_dirs(self) -> List[str]:
+    def root_dir(self) -> str:
         """
-        OpenHCS format expects images in the root of the plate folder.
-        No common subdirectories are applicable.
+        Root directory for OpenHCS is determined from metadata.
+
+        OpenHCS plates can have multiple subdirectories (e.g., "zarr", "images", ".").
+        The root_dir is determined dynamically from the main subdirectory in metadata.
+        This property returns a placeholder - actual root_dir is determined at runtime.
         """
-        return []
+        # This is determined dynamically from metadata in initialize_workspace
+        # Return empty string as placeholder (not used for virtual workspace)
+        return ""
 
     @property
     def microscope_type(self) -> str:
@@ -663,8 +707,34 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
         Get the primary backend name for OpenHCS plates.
 
         Uses metadata-based detection to determine the primary backend.
+        Preference hierarchy: zarr > virtual_workspace > disk
+        Registers virtual_workspace backend if needed.
+
+        Args:
+            plate_path: Input directory (may be subdirectory like zarr/)
+            filemanager: FileManager instance for backend registration
         """
-        available_backends_dict = self.metadata_handler.get_available_backends(plate_path)
+        # plate_folder must be set before calling this method
+        if self.plate_folder is None:
+            raise RuntimeError(
+                "OpenHCSHandler.determine_backend_preference: plate_folder not set. "
+                "Call determine_input_dir() or post_workspace() first."
+            )
+
+        available_backends_dict = self.metadata_handler.get_available_backends(self.plate_folder)
+
+        # Preference hierarchy: zarr > virtual_workspace > disk
+        # 1. Prefer zarr if available (best performance for large datasets)
+        if 'zarr' in available_backends_dict and available_backends_dict['zarr']:
+            return 'zarr'
+
+        # 2. Prefer virtual_workspace if available (for plates with workspace_mapping)
+        if 'virtual_workspace' in available_backends_dict and available_backends_dict['virtual_workspace']:
+            # Register virtual_workspace backend using centralized helper
+            self._register_virtual_workspace_backend(self.plate_folder, filemanager)
+            return 'virtual_workspace'
+
+        # 3. Fall back to first available backend (usually disk)
         return next(iter(available_backends_dict.keys()))
 
     def initialize_workspace(self, plate_path: Path, filemanager: FileManager) -> Path:
@@ -687,6 +757,14 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
         # Determine the main subdirectory from metadata - fail-loud on errors
         main_subdir = self.metadata_handler.determine_main_subdirectory(plate_path)
         input_dir = plate_path / main_subdir
+
+        # Check if workspace_mapping exists in metadata - if so, register virtual workspace backend
+        metadata_dict = self.metadata_handler._load_metadata_dict(plate_path)
+        subdir_metadata = metadata_dict.get(FIELDS.SUBDIRECTORIES, {}).get(main_subdir, {})
+
+        if subdir_metadata.get('workspace_mapping'):
+            # Register virtual_workspace backend using centralized helper
+            self._register_virtual_workspace_backend(plate_path, filemanager)
 
         # Verify the subdirectory exists - fail-loud if missing
         if not filemanager.is_dir(str(input_dir), Backend.DISK.value):

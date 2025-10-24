@@ -13,15 +13,14 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QGridLayout, QSizePolicy, QPushButton
 )
-from PyQt6.QtCore import QTimer, pyqtSignal
+from PyQt6.QtCore import QTimer, pyqtSignal, QMetaObject, Qt
 from PyQt6.QtGui import QFont, QResizeEvent
 
-# Import PyQtGraph for high-performance plotting
-try:
-    import pyqtgraph as pg
-    PYQTGRAPH_AVAILABLE = True
-except ImportError:
-    PYQTGRAPH_AVAILABLE = False
+# Lazy import of PyQtGraph to avoid blocking startup
+# PyQtGraph imports cupy at module level, which takes 8+ seconds
+# We'll import it on-demand when creating graphs
+PYQTGRAPH_AVAILABLE = None  # None = not checked, True = available, False = not available
+pg = None  # Will be set when pyqtgraph is imported
 
 # Import the SystemMonitorCore service (framework-agnostic)
 from openhcs.ui.shared.system_monitor_core import SystemMonitorCore
@@ -43,6 +42,8 @@ class SystemMonitorWidget(QWidget):
     
     # Signals
     metrics_updated = pyqtSignal(dict)  # Emitted when metrics are updated
+    _pyqtgraph_loaded = pyqtSignal()  # Internal signal for async pyqtgraph loading
+    _pyqtgraph_failed = pyqtSignal()  # Internal signal for async pyqtgraph loading failure
     
     def __init__(self,
                  color_scheme: Optional[PyQt6ColorScheme] = None,
@@ -91,6 +92,99 @@ class SystemMonitorWidget(QWidget):
         self.setup_connections()
 
         logger.debug("System monitor widget initialized")
+
+    def create_loading_placeholder(self) -> QWidget:
+        """
+        Create a simple loading placeholder shown while PyQtGraph loads.
+
+        Returns:
+            Simple loading label widget
+        """
+        from PyQt6.QtWidgets import QLabel, QVBoxLayout, QWidget
+        from PyQt6.QtCore import Qt
+
+        placeholder = QWidget()
+        layout = QVBoxLayout(placeholder)
+
+        label = QLabel("Loading system monitor...")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
+
+        return placeholder
+
+    def _load_pyqtgraph_async(self):
+        """
+        Load PyQtGraph asynchronously using QTimer to avoid blocking.
+
+        We use QTimer instead of threading because Python's GIL causes background
+        thread imports to block the main thread anyway. By using QTimer with a delay,
+        we give the user time to interact with the UI before the import happens.
+        """
+        # Load immediately - no artificial delay
+        QTimer.singleShot(0, self._import_pyqtgraph_main_thread)
+        logger.info("PyQtGraph loading...")
+
+    def _import_pyqtgraph_main_thread(self):
+        """Import PyQtGraph in main thread after delay."""
+        global PYQTGRAPH_AVAILABLE, pg
+
+        try:
+            logger.info("⏳ Loading PyQtGraph (UI will freeze for ~8 seconds)...")
+            logger.info("📦 Importing pyqtgraph module...")
+            import pyqtgraph as pg_module
+            logger.info("📦 PyQtGraph module imported")
+
+            logger.info("🔧 Initializing PyQtGraph (loading GPU libraries: cupy, numpy, etc.)...")
+            pg = pg_module
+            PYQTGRAPH_AVAILABLE = True
+            logger.info("✅ PyQtGraph loaded successfully (GPU libraries ready)")
+
+            # Flush logs so startup screen can read them
+            import logging as _logging
+            for _h in _logging.getLogger().handlers:
+                try:
+                    _h.flush()
+                except Exception:
+                    pass
+
+            # Schedule UI switch on next event loop tick so startup screen can update
+            from PyQt6.QtCore import QTimer as _QTimer
+            _QTimer.singleShot(0, self._switch_to_pyqtgraph_ui)
+        except ImportError as e:
+            logger.warning(f"❌ PyQtGraph not available: {e}")
+            PYQTGRAPH_AVAILABLE = False
+
+            # Schedule fallback switch similarly
+            from PyQt6.QtCore import QTimer as _QTimer
+            _QTimer.singleShot(0, self._switch_to_fallback_ui)
+
+    def _switch_to_pyqtgraph_ui(self):
+        """Switch from loading placeholder to PyQtGraph UI (called in main thread)."""
+        # Remove loading placeholder
+        old_widget = self.monitoring_widget
+        layout = self.layout()
+        layout.removeWidget(old_widget)
+        old_widget.deleteLater()
+
+        # Create PyQtGraph section
+        self.monitoring_widget = self.create_pyqtgraph_section()
+        layout.addWidget(self.monitoring_widget, 1)
+
+        logger.info("Switched to PyQtGraph UI")
+
+    def _switch_to_fallback_ui(self):
+        """Switch from loading placeholder to fallback UI (called in main thread)."""
+        # Remove loading placeholder
+        old_widget = self.monitoring_widget
+        layout = self.layout()
+        layout.removeWidget(old_widget)
+        old_widget.deleteLater()
+
+        # Create fallback section
+        self.monitoring_widget = self.create_fallback_section()
+        layout.addWidget(self.monitoring_widget, 1)
+
+        logger.info("Switched to fallback UI (PyQtGraph not available)")
 
     def showEvent(self, event):
         """Handle widget show event - start monitoring when widget becomes visible."""
@@ -171,16 +265,16 @@ class SystemMonitorWidget(QWidget):
         header_layout = self.create_header_section()
         layout.addLayout(header_layout)
 
-        # Monitoring section
-        if PYQTGRAPH_AVAILABLE:
-            self.monitoring_widget = self.create_pyqtgraph_section()
-        else:
-            self.monitoring_widget = self.create_fallback_section()
-
+        # Monitoring section - start with loading placeholder
+        # PyQtGraph will be loaded asynchronously to avoid blocking startup
+        self.monitoring_widget = self.create_loading_placeholder()
         layout.addWidget(self.monitoring_widget, 1)  # Stretch factor = 1 to expand
 
         # Apply centralized styling
         self.setStyleSheet(self.style_generator.generate_system_monitor_style())
+
+        # Load PyQtGraph asynchronously
+        self._load_pyqtgraph_async()
     
     def create_header_section(self) -> QHBoxLayout:
         """
@@ -530,10 +624,13 @@ class SystemMonitorWidget(QWidget):
             self.update_system_info(metrics)
 
             # Update plots or fallback display
-            if PYQTGRAPH_AVAILABLE:
+            if PYQTGRAPH_AVAILABLE is True:
+                # PyQtGraph loaded successfully - update graphs
                 self.update_pyqtgraph_plots()
-            else:
+            elif PYQTGRAPH_AVAILABLE is False:
+                # PyQtGraph failed to load - update fallback display
                 self.update_fallback_display(metrics)
+            # else: PYQTGRAPH_AVAILABLE is None - still loading, skip update
 
         except Exception as e:
             logger.warning(f"Failed to update display: {e}")

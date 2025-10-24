@@ -7,8 +7,8 @@ from openhcs.core.utils import optional_import
 from openhcs.core.memory.decorators import torch as torch_func
 
 # Import torch modules as optional dependencies
-torch = optional_import("torch")
-F = optional_import("torch.nn.functional") if torch is not None else None
+from openhcs.core.lazy_gpu_imports import torch
+F = optional_import("torch.nn.functional") if torch else None
 
 logger = logging.getLogger(__name__)
 
