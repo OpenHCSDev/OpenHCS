@@ -132,8 +132,13 @@ class OpenHCSMetadataHandler(MetadataHandler):
                 if not subdirs:
                     raise MetadataNotFoundError(f"Empty subdirectories in metadata file '{metadata_file_path}'")
 
-                # Merge all subdirectories: use first as base, combine all image_files
-                base_metadata = next(iter(subdirs.values())).copy()
+                # Use main subdirectory as base (marked with "main": true), fallback to first
+                main_subdir = next((data for data in subdirs.values() if data.get("main")), None)
+                if not main_subdir:
+                    # Fallback to first subdirectory if no main is marked
+                    main_subdir = next(iter(subdirs.values()))
+
+                base_metadata = main_subdir.copy()
                 base_metadata[FIELDS.IMAGE_FILES] = [
                     file for subdir in subdirs.values()
                     for file in subdir.get(FIELDS.IMAGE_FILES, [])
