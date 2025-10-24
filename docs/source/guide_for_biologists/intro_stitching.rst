@@ -179,11 +179,15 @@ The pipeline consists of the following steps:
 
 4. **Position Computation**: Computes the positions of each image for stitching.
 
+
 5. **Secondary Enhancement**: Further enhances images post-stitching. We do a second processing step because the stitching process prefers different image characteristics than analysis steps do. Note that this step takes the original images as input, not the stitched images.
+
 
 6. **CPU assembly**: Stitches images together based on computed positions from step 4, using images from step 5.
 
+
 7. **Z-Stack Flattening**: Flattens z-stacks of stitched images into single 2D images. We do this to make the final analysis better.
+
 
 8. **Simple Cell Counting Analysis**: Analyzes the stitched images to count cells and extract statistics.
 
