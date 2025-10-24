@@ -320,10 +320,11 @@ class ImageXpressHandler(MicroscopeHandler):
                 new_filename = self.parser.construct_filename(**metadata)
 
                 # Build PLATE-RELATIVE virtual flattened path
-                virtual_relative = str(directory.relative_to(plate_path) / new_filename)
+                # Use .as_posix() to ensure forward slashes on all platforms (Windows uses backslashes with str())
+                virtual_relative = (directory.relative_to(plate_path) / new_filename).as_posix()
 
                 # Build PLATE-RELATIVE real path (in subfolder)
-                real_relative = str(Path(img_file).relative_to(plate_path))
+                real_relative = Path(img_file).relative_to(plate_path).as_posix()
 
                 # Add to mapping (both plate-relative)
                 mapping_dict[virtual_relative] = real_relative

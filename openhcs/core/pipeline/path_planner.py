@@ -473,9 +473,12 @@ class PipelinePathPlanner:
         Returns:
             Channel-specific path
         """
-        dir_part, filename = base_path.rsplit('/', 1)
+        # Use Path for cross-platform path handling (Windows uses backslashes)
+        path = Path(base_path)
+        dir_part = path.parent
+        filename = path.name
         well_id, rest = filename.split('_', 1)
-        return f"{dir_part}/{well_id}_w{dict_key}_{rest}"
+        return str(dir_part / f"{well_id}_w{dict_key}_{rest}")
 
 
 
