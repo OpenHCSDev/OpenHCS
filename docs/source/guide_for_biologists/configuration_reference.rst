@@ -62,8 +62,8 @@ VFSConfig (virtual file system)
   Backend used to read input files (auto-detected or explicit choice, don't touch this unless you know what you are doing).
 
 - ``intermediate_backend``
-  
-  Backend for storing temporary intermediate results (memory, disk, etc.).
+
+  Backend for storing temporary intermediate results, like those streamed to viewers (memory, disk, etc.).
 
 - ``materialization_backend``
   
