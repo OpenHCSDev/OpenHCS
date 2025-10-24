@@ -83,20 +83,21 @@ jobs:
           python -m pytest tests/integration/ --it-backends ${{ matrix.backend }} --it-microscopes ${{ matrix.microscope }} --it-dims 3d --it-exec-mode multiprocessing -v --tb=short
 
   # Group 3: OMERO testing on Linux (2 jobs)
-  # Test OMERO on Linux with Python 3.11 and 3.13
-  # Python 3.14 not supported yet - zeroc-ice pre-built wheels only available up to Python 3.12
+  # Test OMERO on Linux with Python 3.11 and 3.12
+  # Python 3.13+ not supported yet - zeroc-ice pre-built wheels only available up to Python 3.12
+  # See: https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/tag/20240202
   omero-tests-linux:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.13"]
+        python-version: ["3.11", "3.12"]
         include:
           - python-version: "3.11"
             ice-wheel: "https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/download/20240202/zeroc_ice-3.6.5-cp311-cp311-manylinux_2_28_x86_64.whl"
-          - python-version: "3.13"
-            ice-wheel: "https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/download/20240202/zeroc_ice-3.6.5-cp313-cp313-manylinux_2_28_x86_64.whl"
+          - python-version: "3.12"
+            ice-wheel: "https://github.com/glencoesoftware/zeroc-ice-py-linux-x86_64/releases/download/20240202/zeroc_ice-3.6.5-cp312-cp312-manylinux_2_28_x86_64.whl"
 
     steps:
       - name: Checkout
