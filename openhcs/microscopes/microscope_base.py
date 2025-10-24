@@ -195,6 +195,24 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         logger.info(f"⚠️ Using backend '{available_backends[0].value}' from compatible backends (virtual workspace not registered)")
         return available_backends[0].value
 
+    def _register_virtual_workspace_backend(self, plate_path: Union[str, Path], filemanager: FileManager) -> None:
+        """
+        Register virtual workspace backend if not already registered.
+
+        Centralized registration logic to avoid duplication across handlers.
+
+        Args:
+            plate_path: Path to plate directory
+            filemanager: FileManager instance
+        """
+        from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
+        from openhcs.constants.constants import Backend
+
+        if Backend.VIRTUAL_WORKSPACE.value not in filemanager.registry:
+            backend = VirtualWorkspaceBackend(plate_root=Path(plate_path))
+            filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
+            logger.info(f"Registered virtual workspace backend for {plate_path}")
+
     def initialize_workspace(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
         Initialize plate by creating virtual mapping in metadata.
@@ -209,9 +227,6 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         Returns:
             Path to image directory (determined from plate structure)
         """
-        from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
-        from openhcs.constants.constants import Backend
-
         plate_path = Path(plate_path)
 
         # Set plate_folder for this handler
@@ -221,11 +236,8 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         # This builds the plate-relative mapping dict and saves to metadata
         self._build_virtual_mapping(plate_path, filemanager)
 
-        # Register virtual workspace backend in FileManager's local registry
-        backend = VirtualWorkspaceBackend(plate_root=plate_path)
-        filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
-
-        logger.info(f"Registered virtual workspace backend for {plate_path}")
+        # Register virtual workspace backend
+        self._register_virtual_workspace_backend(plate_path, filemanager)
 
         # Return image directory using post_workspace
         # skip_preparation=True because _build_virtual_mapping() already ran

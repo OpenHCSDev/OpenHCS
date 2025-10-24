@@ -730,15 +730,8 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
 
         # 2. Prefer virtual_workspace if available (for plates with workspace_mapping)
         if 'virtual_workspace' in available_backends_dict and available_backends_dict['virtual_workspace']:
-            # Register virtual_workspace backend if not already registered
-            from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
-            from openhcs.constants.constants import Backend
-
-            if Backend.VIRTUAL_WORKSPACE.value not in filemanager.registry:
-                backend = VirtualWorkspaceBackend(plate_root=Path(actual_plate_root))
-                filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
-                logger.info(f"Registered virtual workspace backend for {actual_plate_root}")
-
+            # Register virtual_workspace backend using centralized helper
+            self._register_virtual_workspace_backend(self.plate_folder, filemanager)
             return 'virtual_workspace'
 
         # 3. Fall back to first available backend (usually disk)
@@ -770,10 +763,8 @@ class OpenHCSMicroscopeHandler(MicroscopeHandler):
         subdir_metadata = metadata_dict.get(FIELDS.SUBDIRECTORIES, {}).get(main_subdir, {})
 
         if subdir_metadata.get('workspace_mapping'):
-            from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
-            backend = VirtualWorkspaceBackend(plate_root=plate_path)
-            filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
-            logger.info(f"Registered virtual workspace backend for OpenHCS plate with workspace_mapping")
+            # Register virtual_workspace backend using centralized helper
+            self._register_virtual_workspace_backend(plate_path, filemanager)
 
         # Verify the subdirectory exists - fail-loud if missing
         if not filemanager.is_dir(str(input_dir), Backend.DISK.value):
