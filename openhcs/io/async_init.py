@@ -20,15 +20,12 @@ def _background_init():
     NOTE: Due to Python's GIL, importing heavy modules in a background thread
     still blocks the main thread during imports. Therefore, we use lazy initialization
     for GPU libraries and storage backends - they'll be loaded on first use.
+
+    Currently this is a no-op placeholder. GPU registry initialization happens
+    lazily on first use, not during startup.
     """
     try:
-        logger.info("Starting background I/O initialization...")
-
-        # Use lazy GPU registry setup (no imports, deferred until first use)
-        from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry_lazy
-        setup_global_gpu_registry_lazy()
-
-        logger.info("Background I/O initialization complete (lazy mode)")
+        logger.info("Background I/O initialization complete (lazy mode - no-op)")
     except Exception as e:
         logger.error(f"Background I/O initialization failed: {e}")
     finally:
