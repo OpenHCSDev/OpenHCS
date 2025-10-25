@@ -366,12 +366,12 @@ Patterns are used during step execution:
 .. code:: python
 
    # In FunctionStep.process()
-   def process(self, context):
+   def process(self, context: 'ProcessingContext', step_index: int) -> None:
        """Execute function step using detected patterns."""
-       
-       # 1. Get patterns for this well
-       patterns_by_well = context.microscope_handler.auto_detect_patterns(
-           str(step_input_dir), [well_id], DEFAULT_IMAGE_EXTENSIONS,
+
+       # 1. Get step plan for this step
+       step_plan = context.step_plans[step_index]
+       patterns_by_well = step_plan.get('patterns_by_well', {})
            group_by, variable_components, read_backend
        )
        

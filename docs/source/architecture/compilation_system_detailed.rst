@@ -178,8 +178,8 @@ Execution: Function Pattern Retrieval
 
 .. code:: python
 
-   def process(self, context):
-       step_index = context.step_index  # Current step index
+   def process(self, context: 'ProcessingContext', step_index: int) -> None:
+       # Access step plan by index (step_plans keyed by index, not step_id)
        step_plan = context.step_plans[step_index]
 
        # Get func from step plan (stored by FuncStepContractValidator during compilation)

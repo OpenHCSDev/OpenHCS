@@ -126,9 +126,9 @@ eliminating race conditions.
    # They read configuration from immutable step_plans in ProcessingContext
    # No mutable state is stored in step objects during execution
    class FunctionStep(AbstractStep):
-       def process(self, context):
+       def process(self, context: 'ProcessingContext', step_index: int) -> None:
            # Read configuration from immutable context
-           step_plan = context.step_plans[self.step_id]
+           step_plan = context.step_plans[step_index]
            # All execution state comes from context, not step object
 
 **Thread Safety Guarantee**: Step objects with no mutable state can be
@@ -244,11 +244,11 @@ instance with isolated storage.
 
 .. code:: python
 
-   def process(self, context):
+   def process(self, context: 'ProcessingContext', step_index: int) -> None:
        """FunctionStep execution - thread-safe by design."""
-       
+
        # 1. Read immutable step plan
-       step_plan = context.step_plans[self.step_id]  # Immutable after compilation
+       step_plan = context.step_plans[step_index]  # Immutable after compilation
        
        # 2. Use thread-local FileManager
        filemanager = context.filemanager  # Thread-local instance
