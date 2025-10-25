@@ -169,67 +169,51 @@ class LibraryRegistryBase(ABC):
 
     # ===== CONTRACT HANDLING =====
     def apply_contract_wrapper(self, func: Callable, contract: ProcessingContract) -> Callable:
-        """Apply contract-specific wrapper for all contract types."""
+        """Apply contract wrapper with parameter injection (enabled + slice_by_slice for FLEXIBLE)."""
         from functools import wraps
         import inspect
 
+        original_sig = inspect.signature(func)
+        param_names = {p.name for p in original_sig.parameters.values()}
+
+        # Define injectable parameters: enabled for all, slice_by_slice for FLEXIBLE
+        injectable_params = [('enabled', True, bool)]
         if contract == ProcessingContract.FLEXIBLE:
-            # Check if function already has slice_by_slice parameter
-            original_sig = inspect.signature(func)
-            param_names = [p.name for p in original_sig.parameters.values()]
+            injectable_params.append(('slice_by_slice', False, bool))
 
-            if 'slice_by_slice' in param_names:
-                # Function already has slice_by_slice, just ensure type hint is correct
-                if hasattr(func, '__annotations__'):
-                    func.__annotations__['slice_by_slice'] = bool
-                else:
-                    func.__annotations__ = {'slice_by_slice': bool}
-                return func
+        # Filter out already-existing parameters
+        params_to_add = [(name, default, annotation) for name, default, annotation in injectable_params if name not in param_names]
 
-            # Add slice_by_slice parameter
-            new_params = list(original_sig.parameters.values())
-            slice_param = inspect.Parameter(
-                'slice_by_slice',
-                inspect.Parameter.KEYWORD_ONLY,
-                default=False,
-                annotation=bool  # Explicit bool type hint for UI
-            )
+        # If nothing to inject, return original function
+        if not params_to_add:
+            return func
 
-            # Insert before any VAR_KEYWORD (**kwargs) parameter
-            insert_index = len(new_params)
-            for i, param in enumerate(new_params):
-                if param.kind == inspect.Parameter.VAR_KEYWORD:
-                    insert_index = i
-                    break
+        # Build new parameter list (insert before **kwargs)
+        new_params = list(original_sig.parameters.values())
+        insert_index = next((i for i, p in enumerate(new_params) if p.kind == inspect.Parameter.VAR_KEYWORD), len(new_params))
 
-            new_params.insert(insert_index, slice_param)
+        for param_name, default_value, annotation in params_to_add:
+            new_params.insert(insert_index, inspect.Parameter(param_name, inspect.Parameter.KEYWORD_ONLY, default=default_value, annotation=annotation))
+            insert_index += 1
 
-            # Create the wrapper function
-            @wraps(func)
-            def flexible_wrapper(image, *args, slice_by_slice: bool = False, **kwargs):
-                func.slice_by_slice = slice_by_slice
-                return contract.execute(self, func, image, *args, **kwargs)
+        # Create wrapper
+        @wraps(func)
+        def wrapper(image, *args, **kwargs):
+            for param_name, _, _ in injectable_params:
+                if param_name in kwargs:
+                    setattr(func, param_name, kwargs[param_name])
+            return contract.execute(self, func, image, *args, **kwargs)
 
-            # Apply the modified signature AFTER @wraps
-            new_sig = original_sig.replace(parameters=new_params)
-            flexible_wrapper.__signature__ = new_sig
+        # Set defaults and signature
+        for param_name, default_value, _ in injectable_params:
+            setattr(wrapper, param_name, default_value)
 
-            # Preserve original annotations and add slice_by_slice
-            if hasattr(func, '__annotations__'):
-                flexible_wrapper.__annotations__ = func.__annotations__.copy()
-            else:
-                flexible_wrapper.__annotations__ = {}
-            flexible_wrapper.__annotations__['slice_by_slice'] = bool
+        wrapper.__signature__ = original_sig.replace(parameters=new_params)
+        wrapper.__annotations__ = getattr(func, '__annotations__', {}).copy()
+        for param_name, _, annotation in injectable_params:
+            wrapper.__annotations__[param_name] = annotation
 
-            flexible_wrapper.slice_by_slice = False
-            return flexible_wrapper
-        else:
-            # For other contracts, wrap with contract execution
-            @wraps(func)
-            def contract_wrapper(image, *args, **kwargs):
-                return contract.execute(self, func, image, *args, **kwargs)
-
-            return contract_wrapper
+        return wrapper
 
     def _inject_optional_dataclass_params(self, func: Callable) -> Callable:
         """Inject optional lazy dataclass parameters into function signature.

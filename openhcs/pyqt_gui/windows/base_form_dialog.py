@@ -16,28 +16,33 @@ This base class overrides accept(), reject(), and closeEvent() to ensure that
 form managers are always unregistered from cross-window updates, regardless of
 how the dialog is closed.
 
+The default implementation automatically discovers all ParameterFormManager
+instances in the widget tree, so subclasses don't need to manually track them.
+
 Usage:
     1. Inherit from BaseFormDialog instead of QDialog
-    2. Override _get_form_managers() to return your form manager instances
-    3. That's it! The base class handles all cleanup automatically.
+    2. That's it! All ParameterFormManager instances are automatically discovered and cleaned up.
 
 Example:
     class MyConfigDialog(BaseFormDialog):
         def __init__(self, ...):
             super().__init__(...)
             self.form_manager = ParameterFormManager(...)
-
-        def _get_form_managers(self):
-            return [self.form_manager]
+            # No need to override _get_form_managers() - automatic discovery!
 """
 
 import logging
-from typing import Optional
+from typing import Optional, Protocol
 
 from PyQt6.QtWidgets import QDialog
 from PyQt6.QtCore import QEvent
 
 logger = logging.getLogger(__name__)
+
+
+class HasUnregisterMethod(Protocol):
+    """Protocol for objects that can be unregistered from cross-window updates."""
+    def unregister_from_cross_window_updates(self) -> None: ...
 
 
 class BaseFormDialog(QDialog):
@@ -68,29 +73,70 @@ class BaseFormDialog(QDialog):
     def _get_form_managers(self):
         """
         Return a list of all ParameterFormManager instances that need to be unregistered.
-        
-        Subclasses should override this method to return their form managers.
-        
+
+        Default implementation recursively searches the widget tree for all
+        ParameterFormManager instances. Subclasses can override for custom behavior.
+
         Returns:
             List of ParameterFormManager instances
         """
-        # Default implementation: try to find common attribute names
         managers = []
-        
-        # Check common attribute names
-        for attr_name in ['form_manager', 'step_editor', 'parameter_editor']:
-            if hasattr(self, attr_name):
-                obj = getattr(self, attr_name)
-                
-                # If it's a ParameterFormManager, add it
-                if hasattr(obj, 'unregister_from_cross_window_updates'):
-                    managers.append(obj)
-                    
-                # If it's a widget that contains a form_manager, add that
-                elif hasattr(obj, 'form_manager') and hasattr(obj.form_manager, 'unregister_from_cross_window_updates'):
-                    managers.append(obj.form_manager)
-                    
+        self._collect_form_managers_recursive(self, managers, visited=set())
         return managers
+
+    def _collect_form_managers_recursive(self, widget, managers, visited):
+        """
+        Recursively collect all ParameterFormManager instances from widget tree.
+
+        This eliminates the need for manual tracking - just inherit from BaseFormDialog
+        and all nested form managers will be automatically discovered and cleaned up.
+
+        Uses Protocol-based duck typing to check for unregister method, avoiding
+        hasattr smell for guaranteed attributes while still supporting dynamic discovery.
+
+        Args:
+            widget: Widget to search
+            managers: List to append found managers to
+            visited: Set of already-visited widget IDs to prevent infinite loops
+        """
+        # Prevent infinite loops from circular references
+        widget_id = id(widget)
+        if widget_id in visited:
+            return
+        visited.add(widget_id)
+
+        # Check if this widget IS a ParameterFormManager (duck typing via Protocol)
+        # This is legitimate hasattr - we're discovering unknown widget types
+        if callable(getattr(widget, 'unregister_from_cross_window_updates', None)):
+            managers.append(widget)
+            return  # Don't recurse into the manager itself
+
+        # Check if this widget HAS a form_manager attribute
+        # This is legitimate - form_manager is an optional composition pattern
+        form_manager = getattr(widget, 'form_manager', None)
+        if form_manager is not None and callable(getattr(form_manager, 'unregister_from_cross_window_updates', None)):
+            managers.append(form_manager)
+
+        # Recursively search child widgets using Qt's children() method
+        try:
+            for child in widget.children():
+                self._collect_form_managers_recursive(child, managers, visited)
+        except (RuntimeError, AttributeError):
+            # Widget already deleted - this is expected during cleanup
+            pass
+
+        # Also check common container attributes that might hold widgets
+        # These are known patterns in our UI architecture
+        for attr_name in ['function_panes', 'step_editor', 'func_editor', 'parameter_editor']:
+            attr_value = getattr(widget, attr_name, None)
+            if attr_value is not None:
+                # Handle lists of widgets
+                if isinstance(attr_value, list):
+                    for item in attr_value:
+                        self._collect_form_managers_recursive(item, managers, visited)
+                # Handle single widget
+                else:
+                    self._collect_form_managers_recursive(attr_value, managers, visited)
     
     def _unregister_all_form_managers(self):
         """Unregister all form managers from cross-window updates."""

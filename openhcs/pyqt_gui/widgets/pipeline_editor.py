@@ -35,10 +35,11 @@ logger = logging.getLogger(__name__)
 
 class StepListItemDelegate(QStyledItemDelegate):
     """Custom delegate to render step name in white and preview text in grey without breaking hover/selection/borders."""
-    def __init__(self, name_color: QColor, preview_color: QColor, parent=None):
+    def __init__(self, name_color: QColor, preview_color: QColor, selected_text_color: QColor, parent=None):
         super().__init__(parent)
         self.name_color = name_color
         self.preview_color = preview_color
+        self.selected_text_color = selected_text_color
 
     def paint(self, painter: QPainter, option, index) -> None:
         # Prepare a copy to let style draw backgrounds, hover, selection, borders, etc.
@@ -54,10 +55,22 @@ class StepListItemDelegate(QStyledItemDelegate):
         style = opt.widget.style() if opt.widget else QApplication.style()
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
+        # Check if item is selected
+        is_selected = opt.state & QStyle.StateFlag.State_Selected
+
+        # Check if step is disabled (stored in UserRole+1)
+        is_disabled = index.data(Qt.ItemDataRole.UserRole + 1) or False
+
         # Now custom-draw the text with mixed colors
         rect = opt.rect.adjusted(6, 0, -6, 0)
-        painter.setFont(opt.font)
-        fm = QFontMetrics(opt.font)
+
+        # Use strikethrough font for disabled steps
+        font = QFont(opt.font)
+        if is_disabled:
+            font.setStrikeOut(True)
+        painter.setFont(font)
+
+        fm = QFontMetrics(font)
         baseline_y = rect.y() + (rect.height() + fm.ascent() - fm.descent()) // 2
 
         sep_idx = text.find("  (")
@@ -65,14 +78,21 @@ class StepListItemDelegate(QStyledItemDelegate):
             name_part = text[:sep_idx]
             preview_part = text[sep_idx:]
 
-            painter.setPen(QPen(self.name_color))
-            painter.drawText(rect.x(), baseline_y, name_part)
-            name_width = fm.horizontalAdvance(name_part)
+            # Use white for both parts when selected, otherwise use normal colors
+            if is_selected:
+                painter.setPen(QPen(self.selected_text_color))
+                painter.drawText(rect.x(), baseline_y, name_part)
+                name_width = fm.horizontalAdvance(name_part)
+                painter.drawText(rect.x() + name_width, baseline_y, preview_part)
+            else:
+                painter.setPen(QPen(self.name_color))
+                painter.drawText(rect.x(), baseline_y, name_part)
+                name_width = fm.horizontalAdvance(name_part)
 
-            painter.setPen(QPen(self.preview_color))
-            painter.drawText(rect.x() + name_width, baseline_y, preview_part)
+                painter.setPen(QPen(self.preview_color))
+                painter.drawText(rect.x() + name_width, baseline_y, preview_part)
         else:
-            painter.setPen(QPen(self.name_color))
+            painter.setPen(QPen(self.selected_text_color if is_selected else self.name_color))
             painter.drawText(rect.x(), baseline_y, text)
 
         painter.restore()
@@ -217,6 +237,7 @@ class PipelineEditorWidget(QWidget):
             }}
             QListWidget::item:selected {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
+                color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
             }}
             QListWidget::item:hover {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
@@ -226,7 +247,8 @@ class PipelineEditorWidget(QWidget):
         try:
             name_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_primary))
             preview_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_disabled))
-            self.step_list.setItemDelegate(StepListItemDelegate(name_color, preview_color, self.step_list))
+            selected_text_color = QColor("#FFFFFF")  # White text when selected
+            self.step_list.setItemDelegate(StepListItemDelegate(name_color, preview_color, selected_text_color, self.step_list))
         except Exception:
             # Fallback silently if color scheme isn't ready
             pass
@@ -854,19 +876,20 @@ class PipelineEditorWidget(QWidget):
     
     def update_step_list(self):
         """Update the step list widget using selection preservation mixin."""
-        def format_step_item(step):
+        def format_step_item(step, step_index):
             """Format step item for display."""
             display_text, step_name = self.format_item_for_display(step)
-            return display_text, step
+            return display_text, step_index  # Store index instead of step object
 
         def update_func():
             """Update function that clears and rebuilds the list."""
             self.step_list.clear()
 
-            for step in self.pipeline_steps:
-                display_text, step_data = format_step_item(step)
+            for step_index, step in enumerate(self.pipeline_steps):
+                display_text, index_data = format_step_item(step, step_index)
                 item = QListWidgetItem(display_text)
-                item.setData(Qt.ItemDataRole.UserRole, step_data)
+                item.setData(Qt.ItemDataRole.UserRole, index_data)  # Store index, not step
+                item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)  # Store disabled status for strikethrough
                 item.setToolTip(self._create_step_tooltip(step))
                 self.step_list.addItem(item)
 
@@ -882,15 +905,15 @@ class PipelineEditorWidget(QWidget):
     def get_selected_steps(self) -> List[FunctionStep]:
         """
         Get currently selected steps.
-        
+
         Returns:
             List of selected FunctionStep objects
         """
         selected_items = []
         for item in self.step_list.selectedItems():
-            step_data = item.data(Qt.ItemDataRole.UserRole)
-            if step_data:
-                selected_items.append(step_data)
+            step_index = item.data(Qt.ItemDataRole.UserRole)
+            if step_index is not None and 0 <= step_index < len(self.pipeline_steps):
+                selected_items.append(self.pipeline_steps[step_index])
         return selected_items
     
     def update_button_states(self):
@@ -944,8 +967,8 @@ class PipelineEditorWidget(QWidget):
 
     def on_item_double_clicked(self, item: QListWidgetItem):
         """Handle double-click on step item."""
-        step_data = item.data(Qt.ItemDataRole.UserRole)
-        if step_data:
+        step_index = item.data(Qt.ItemDataRole.UserRole)
+        if step_index is not None and 0 <= step_index < len(self.pipeline_steps):
             # Double-click triggers edit
             self.action_edit_step()
 

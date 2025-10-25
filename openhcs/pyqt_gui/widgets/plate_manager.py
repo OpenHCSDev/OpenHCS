@@ -854,12 +854,14 @@ class PlateManagerWidget(QWidget):
         """Handle Run Plate button - execute compiled plates using ZMQ."""
         selected_items = self.get_selected_plates()
         if not selected_items:
-            self.service_adapter.show_error_dialog("No plates selected to run.")
+            # Use signal for thread-safe error reporting from async context
+            self.execution_error.emit("No plates selected to run.")
             return
 
         ready_items = [item for item in selected_items if item.get('path') in self.plate_compiled_data]
         if not ready_items:
-            self.service_adapter.show_error_dialog("Selected plates are not compiled. Please compile first.")
+            # Use signal for thread-safe error reporting from async context
+            self.execution_error.emit("Selected plates are not compiled. Please compile first.")
             return
 
         await self._run_plates_zmq(ready_items)
@@ -954,10 +956,10 @@ class PlateManagerWidget(QWidget):
                     logger.info(f"Plate {plate_path} execution was cancelled")
                     self.status_message.emit(f"Execution cancelled for {plate_path}")
                 elif status != 'complete':
-                    # Actual error - show error dialog
+                    # Actual error - use signal for thread-safe error reporting
                     error_msg = response.get('message', 'Unknown error')
                     logger.error(f"Plate {plate_path} execution failed: {error_msg}")
-                    self.service_adapter.show_error_dialog(f"Execution failed for {plate_path}: {error_msg}")
+                    self.execution_error.emit(f"Execution failed for {plate_path}: {error_msg}")
 
             # Execution complete
             self.execution_state = "idle"
@@ -1107,7 +1109,8 @@ class PlateManagerWidget(QWidget):
 
             except Exception as e:
                 logger.error(f"🛑 Error cancelling ZMQ execution: {e}")
-                self.service_adapter.show_error_dialog(f"Failed to cancel execution: {e}")
+                # Use signal for thread-safe error reporting from async context
+                self.execution_error.emit(f"Failed to cancel execution: {e}")
 
         elif self.current_process and self.current_process.poll() is None:  # Still running subprocess
             try:

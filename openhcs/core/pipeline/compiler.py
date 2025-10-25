@@ -85,7 +85,10 @@ def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) 
 
 
 def _refresh_function_object(func_value):
-    """Convert function objects to picklable FunctionReference objects."""
+    """Convert function objects to picklable FunctionReference objects.
+
+    Also filters out functions with enabled=False at compile time.
+    """
     try:
         if callable(func_value) and hasattr(func_value, '__module__'):
             # Single function → FunctionReference
@@ -94,17 +97,31 @@ def _refresh_function_object(func_value):
         elif isinstance(func_value, tuple) and len(func_value) == 2:
             # Function with parameters tuple → (FunctionReference, params)
             func, params = func_value
+
+            # Check if function is disabled via enabled parameter
+            if isinstance(params, dict) and params.get('enabled', True) is False:
+                import logging
+                logger = logging.getLogger(__name__)
+                func_name = getattr(func, '__name__', str(func))
+                logger.info(f"🔧 COMPILE-TIME FILTER: Removing disabled function '{func_name}' from pipeline")
+                return None  # Mark for removal
+
             if callable(func):
                 func_ref = _refresh_function_object(func)
+                # Remove 'enabled' from params since it's not a real function parameter
+                if isinstance(params, dict) and 'enabled' in params:
+                    params = {k: v for k, v in params.items() if k != 'enabled'}
                 return (func_ref, params)
 
         elif isinstance(func_value, list):
-            # List of functions → List of FunctionReferences
-            return [_refresh_function_object(item) for item in func_value]
+            # List of functions → List of FunctionReferences (filter out None)
+            refreshed = [_refresh_function_object(item) for item in func_value]
+            return [item for item in refreshed if item is not None]
 
         elif isinstance(func_value, dict):
-            # Dict of functions → Dict of FunctionReferences
-            return {key: _refresh_function_object(value) for key, value in func_value.items()}
+            # Dict of functions → Dict of FunctionReferences (filter out None values)
+            refreshed = {key: _refresh_function_object(value) for key, value in func_value.items()}
+            return {key: value for key, value in refreshed.items() if value is not None}
 
     except Exception as e:
         import logging
@@ -216,13 +233,8 @@ class PipelineCompiler:
         # Set to None for backward compatibility with orchestrator code
         context.visualizer_config = None
 
-        # === BACKWARDS COMPATIBILITY PREPROCESSING ===
-        # Ensure all steps have complete attribute sets based on AbstractStep constructor
-        # This must happen before any other compilation logic to eliminate defensive programming
-        logger.debug("🔧 BACKWARDS COMPATIBILITY: Normalizing step attributes...")
-        _normalize_step_attributes(steps_definition)
-
-
+        # Note: _normalize_step_attributes is now called in compile_pipelines() before filtering
+        # to ensure old pickled steps have the 'enabled' attribute before we check it
 
         # Pre-initialize step_plans with basic entries for each step
         # Use step index as key instead of step_id for multiprocessing compatibility
@@ -777,6 +789,34 @@ class PipelineCompiler:
 
         if not pipeline_definition:
             raise ValueError("A valid pipeline definition (List[AbstractStep]) must be provided.")
+
+        # === BACKWARDS COMPATIBILITY PREPROCESSING ===
+        # Normalize step attributes BEFORE filtering to ensure old pickled steps have 'enabled' attribute
+        logger.debug("🔧 BACKWARDS COMPATIBILITY: Normalizing step attributes before filtering...")
+        _normalize_step_attributes(pipeline_definition)
+
+        # Filter out disabled steps at compile time (before any compilation phases)
+        original_count = len(pipeline_definition)
+        enabled_steps = []
+        for step in pipeline_definition:
+            if step.enabled:
+                enabled_steps.append(step)
+            else:
+                logger.info(f"🔧 COMPILE-TIME FILTER: Removing disabled step '{step.name}' from pipeline")
+
+        # Update pipeline_definition in-place to contain only enabled steps
+        pipeline_definition.clear()
+        pipeline_definition.extend(enabled_steps)
+
+        if original_count != len(pipeline_definition):
+            logger.info(f"🔧 COMPILE-TIME FILTER: Filtered {original_count - len(pipeline_definition)} disabled step(s), {len(pipeline_definition)} step(s) remaining")
+
+        if not pipeline_definition:
+            logger.warning("All steps were disabled. Pipeline is empty after filtering.")
+            return {
+                'pipeline_definition': pipeline_definition,
+                'compiled_contexts': {}
+            }
 
         try:
             compiled_contexts: Dict[str, ProcessingContext] = {}

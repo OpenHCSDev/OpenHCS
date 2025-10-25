@@ -120,6 +120,7 @@ class AbstractStep(abc.ABC, ContextProvider):
         *,  # Force keyword-only arguments
         name: str = None,
         description: str = None,
+        enabled: bool = True,
         variable_components: List[VariableComponents] = get_default_variable_components(),
         group_by: Optional[GroupBy] = get_default_group_by(),
         input_source: InputSource = InputSource.PREVIOUS_STEP,
@@ -136,6 +137,9 @@ class AbstractStep(abc.ABC, ContextProvider):
 
         Args:
             name: Human-readable name for the step. Defaults to class name.
+            description: Optional description of what this step does.
+            enabled: Whether this step is enabled. Disabled steps are filtered out
+                    during pipeline compilation. Defaults to True.
             variable_components: List of variable components for this step.
             group_by: Optional grouping hint for step execution.
             input_source: Input source strategy for this step. Defaults to PREVIOUS_STEP
@@ -152,6 +156,7 @@ class AbstractStep(abc.ABC, ContextProvider):
         """
         self.name = name or self.__class__.__name__
         self.description = description
+        self.enabled = enabled
         self.variable_components = variable_components
         self.group_by = group_by
         self.input_source = input_source
