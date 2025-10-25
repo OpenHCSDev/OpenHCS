@@ -169,27 +169,23 @@ class LibraryRegistryBase(ABC):
 
     # ===== CONTRACT HANDLING =====
     def apply_contract_wrapper(self, func: Callable, contract: ProcessingContract) -> Callable:
-        """Apply contract wrapper with parameter injection (enabled + slice_by_slice for FLEXIBLE)."""
+        """Apply contract wrapper with parameter injection (slice_by_slice for FLEXIBLE contracts)."""
         from functools import wraps
         import inspect
 
         original_sig = inspect.signature(func)
         param_names = {p.name for p in original_sig.parameters.values()}
 
-        # Define injectable parameters: enabled for all, slice_by_slice for FLEXIBLE
-        injectable_params = [('enabled', True, bool)]
+        # Define injectable parameters: only slice_by_slice for FLEXIBLE contracts
+        injectable_params = []
         if contract == ProcessingContract.FLEXIBLE:
             injectable_params.append(('slice_by_slice', False, bool))
 
         # Filter out already-existing parameters
         params_to_add = [(name, default, annotation) for name, default, annotation in injectable_params if name not in param_names]
 
-        # If nothing to inject, ensure type hints and return
+        # If nothing to inject, return original function
         if not params_to_add:
-            if not hasattr(func, '__annotations__'):
-                func.__annotations__ = {}
-            for name, _, annotation in injectable_params:
-                func.__annotations__[name] = annotation
             return func
 
         # Build new parameter list (insert before **kwargs)

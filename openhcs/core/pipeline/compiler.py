@@ -85,7 +85,10 @@ def _refresh_function_objects_in_steps(pipeline_definition: List[AbstractStep]) 
 
 
 def _refresh_function_object(func_value):
-    """Convert function objects to picklable FunctionReference objects."""
+    """Convert function objects to picklable FunctionReference objects.
+
+    Also filters out functions with enabled=False at compile time.
+    """
     try:
         if callable(func_value) and hasattr(func_value, '__module__'):
             # Single function → FunctionReference
@@ -94,17 +97,31 @@ def _refresh_function_object(func_value):
         elif isinstance(func_value, tuple) and len(func_value) == 2:
             # Function with parameters tuple → (FunctionReference, params)
             func, params = func_value
+
+            # Check if function is disabled via enabled parameter
+            if isinstance(params, dict) and params.get('enabled', True) is False:
+                import logging
+                logger = logging.getLogger(__name__)
+                func_name = getattr(func, '__name__', str(func))
+                logger.info(f"🔧 COMPILE-TIME FILTER: Removing disabled function '{func_name}' from pipeline")
+                return None  # Mark for removal
+
             if callable(func):
                 func_ref = _refresh_function_object(func)
+                # Remove 'enabled' from params since it's not a real function parameter
+                if isinstance(params, dict) and 'enabled' in params:
+                    params = {k: v for k, v in params.items() if k != 'enabled'}
                 return (func_ref, params)
 
         elif isinstance(func_value, list):
-            # List of functions → List of FunctionReferences
-            return [_refresh_function_object(item) for item in func_value]
+            # List of functions → List of FunctionReferences (filter out None)
+            refreshed = [_refresh_function_object(item) for item in func_value]
+            return [item for item in refreshed if item is not None]
 
         elif isinstance(func_value, dict):
-            # Dict of functions → Dict of FunctionReferences
-            return {key: _refresh_function_object(value) for key, value in func_value.items()}
+            # Dict of functions → Dict of FunctionReferences (filter out None values)
+            refreshed = {key: _refresh_function_object(value) for key, value in func_value.items()}
+            return {key: value for key, value in refreshed.items() if value is not None}
 
     except Exception as e:
         import logging
