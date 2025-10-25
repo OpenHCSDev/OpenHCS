@@ -116,12 +116,18 @@ _OPS = {
 }
 
 # Auto-generate lambdas from strings
+def _make_not_implemented(mem_type_value):
+    """Create a lambda that raises NotImplementedError with the correct signature."""
+    def not_impl(self, data, gpu_id):
+        raise NotImplementedError(f"DLPack not supported for {mem_type_value}")
+    return not_impl
+
 _TYPE_OPERATIONS = {
     mem_type: {
         method_name: (
-            eval(f'lambda data, gpu_id: {expr.format(mod=f"_ensure_module(\"{mem_type.value}\")")}')
+            eval(f'lambda self, data, gpu_id: {expr.format(mod=f"_ensure_module(\"{mem_type.value}\")")}')
             if expr is not None
-            else lambda data, gpu_id: (_ for _ in ()).throw(NotImplementedError(f"DLPack not supported for {mem_type.value}"))
+            else _make_not_implemented(mem_type.value)
         )
         for method_name, expr in ops.items()  # Iterate over dict items - self-documenting!
     }
