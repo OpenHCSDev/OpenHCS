@@ -50,7 +50,6 @@ File management, memory types, and backend systems.
    napari_streaming_system
    viewer_streaming_architecture
    image_acknowledgment_system
-   omero_backend_system
    zmq_execution_system
 
 External Integrations
@@ -63,6 +62,7 @@ Integration with external tools and platforms (Napari, OMERO, Fiji).
 
    external_integrations_overview
    napari_integration_architecture
+   omero_backend_system
    fiji_streaming_system
 
 System Integration
