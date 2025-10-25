@@ -501,9 +501,11 @@ class FunctionListWidget(QWidget):
     
     def update_function_list(self):
         """Update the function list display."""
-        # Clear existing panes
+        # Clear existing panes - CRITICAL: Call deleteLater() to ensure cleanup
+        # This ensures ParameterFormManager instances are properly unregistered
+        # from _active_form_managers when panes are destroyed
         for pane in self.function_panes:
-            pane.setParent(None)
+            pane.deleteLater()  # Schedule for deletion - triggers destroyed signal
         self.function_panes.clear()
         
         # Create new panes

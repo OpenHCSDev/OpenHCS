@@ -242,16 +242,18 @@ class FunctionListEditorWidget(QWidget):
     
     def _populate_function_list(self):
         """Populate function list with panes (mirrors Textual TUI)."""
-        # Clear existing panes
+        # Clear existing panes - CRITICAL: Call deleteLater() to ensure cleanup
+        # This ensures ParameterFormManager instances are properly unregistered
+        # from _active_form_managers when panes are destroyed
         for pane in self.function_panes:
-            pane.setParent(None)
+            pane.deleteLater()  # Schedule for deletion - triggers destroyed signal
         self.function_panes.clear()
-        
+
         # Clear layout
         while self.function_layout.count():
             child = self.function_layout.takeAt(0)
             if child.widget():
-                child.widget().setParent(None)
+                child.widget().deleteLater()  # Schedule for deletion instead of just orphaning
         
         if not self.functions:
             # Show empty state
