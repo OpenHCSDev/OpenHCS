@@ -815,11 +815,17 @@ def _napari_viewer_process(port: int, viewer_title: str, replace_layers: bool = 
 
         # Ensure Qt platform is properly set for detached processes
         import os
+        import platform
         if 'QT_QPA_PLATFORM' not in os.environ:
-            os.environ['QT_QPA_PLATFORM'] = 'xcb'
-
-        # Disable shared memory for X11 (helps with display issues in detached processes)
-        os.environ['QT_X11_NO_MITSHM'] = '1'
+            if platform.system() == 'Darwin':  # macOS
+                os.environ['QT_QPA_PLATFORM'] = 'cocoa'
+            elif platform.system() == 'Linux':
+                os.environ['QT_QPA_PLATFORM'] = 'xcb'
+                os.environ['QT_X11_NO_MITSHM'] = '1'
+            # Windows doesn't need QT_QPA_PLATFORM set
+        elif platform.system() == 'Linux':
+            # Disable shared memory for X11 (helps with display issues in detached processes)
+            os.environ['QT_X11_NO_MITSHM'] = '1'
 
         # Get the Qt application
         app = QtWidgets.QApplication.instance()
@@ -929,11 +935,17 @@ except Exception as e:
             env = os.environ.copy()  # Preserve DISPLAY and other environment variables
 
             # Ensure Qt platform is set for GUI display
+            import platform
             if 'QT_QPA_PLATFORM' not in env:
-                env['QT_QPA_PLATFORM'] = 'xcb'  # Use X11 backend
-
-            # Ensure Qt can find the display
-            env['QT_X11_NO_MITSHM'] = '1'  # Disable shared memory for X11 (helps with some display issues)
+                if platform.system() == 'Darwin':  # macOS
+                    env['QT_QPA_PLATFORM'] = 'cocoa'
+                elif platform.system() == 'Linux':
+                    env['QT_QPA_PLATFORM'] = 'xcb'
+                    env['QT_X11_NO_MITSHM'] = '1'
+                # Windows doesn't need QT_QPA_PLATFORM set
+            elif platform.system() == 'Linux':
+                # Ensure Qt can find the display
+                env['QT_X11_NO_MITSHM'] = '1'  # Disable shared memory for X11 (helps with some display issues)
 
             # Redirect stdout/stderr to log file for debugging
             log_f = open(log_file, 'w')
