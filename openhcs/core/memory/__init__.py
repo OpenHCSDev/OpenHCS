@@ -1,15 +1,8 @@
-"""
-Memory module for OpenHCS.
-
-This module provides classes and utilities for working with in-memory data arrays
-with explicit type declarations and conversion methods, enforcing Clause 251
-(Declarative Memory Conversion Interface) and Clause 106-A (Declared Memory Types).
-"""
+"""Memory module for OpenHCS."""
 
 from openhcs.constants.constants import MemoryType
-
 from .decorators import cupy, jax, memory_types, numpy, tensorflow, torch
-from .wrapper import MemoryWrapper
+from .converters import convert_memory, detect_memory_type
 
 # Define memory type constants
 MEMORY_TYPE_NUMPY = MemoryType.NUMPY.value
@@ -17,14 +10,17 @@ MEMORY_TYPE_CUPY = MemoryType.CUPY.value
 MEMORY_TYPE_TORCH = MemoryType.TORCH.value
 MEMORY_TYPE_TENSORFLOW = MemoryType.TENSORFLOW.value
 MEMORY_TYPE_JAX = MemoryType.JAX.value
+MEMORY_TYPE_PYCLESPERANTO = MemoryType.PYCLESPERANTO.value
 
 __all__ = [
-    'MemoryWrapper',
+    'convert_memory',
+    'detect_memory_type',
     'MEMORY_TYPE_NUMPY',
     'MEMORY_TYPE_CUPY',
     'MEMORY_TYPE_TORCH',
     'MEMORY_TYPE_TENSORFLOW',
     'MEMORY_TYPE_JAX',
+    'MEMORY_TYPE_PYCLESPERANTO',
     'memory_types',
     'numpy',
     'cupy',
