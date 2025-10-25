@@ -168,6 +168,13 @@ class ZMQExecutionServer(ZMQServer):
 
         logger.info(f"[{execution_id}] Starting plate {plate_id}")
 
+        # Initialize function registry BEFORE executing pipeline code
+        # (pipeline code may import virtual modules like openhcs.cucim)
+        import openhcs.processing.func_registry as func_registry_module
+        with func_registry_module._registry_lock:
+            if not func_registry_module._registry_initialized:
+                func_registry_module._auto_initialize_registry()
+
         namespace = {}
         exec(pipeline_code, namespace)
         if not (pipeline_steps := namespace.get('pipeline_steps')):

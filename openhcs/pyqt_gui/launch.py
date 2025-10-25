@@ -244,16 +244,21 @@ def main():
         if not check_dependencies():
             logging.error("Dependency check failed")
             return 1
-        
+
         # Load configuration
         config = load_configuration(args.config)
-        
+
         # Apply command line overrides
         if args.no_gpu:
             logging.info("GPU acceleration disabled by command line")
             # This would need to be implemented in the config
             # config.disable_gpu = True
-        
+
+        # Setup GPU registry (must be done before creating app)
+        from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
+        setup_global_gpu_registry(global_config=config)
+        logging.info("GPU registry setup completed")
+
         # Create and run application
         logging.info("Initializing PyQt6 application...")
         app = OpenHCSPyQtApp(sys.argv, config)
