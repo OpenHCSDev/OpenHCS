@@ -386,6 +386,5 @@ See Also
 
 - :doc:`../architecture/omero_backend_system` - OMERO backend architecture
 - :doc:`../architecture/zmq_execution_system` - ZMQ execution system
-- :doc:`../user_guide/omero_server_execution` - OMERO usage guide
 - `OMERO Documentation <https://docs.openmicroscopy.org/>`_ - Official OMERO docs
 

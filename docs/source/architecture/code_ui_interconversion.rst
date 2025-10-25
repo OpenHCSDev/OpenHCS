@@ -309,4 +309,3 @@ See Also
 - :doc:`pipeline_compilation_system` - Pipeline compilation integration
 - :doc:`configuration_framework` - Configuration system integration
 - :doc:`service-layer-architecture` - Service layer patterns
-- :doc:`../development/extending` - Extending the code generation system

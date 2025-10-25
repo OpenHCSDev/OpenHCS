@@ -507,10 +507,4 @@ See Also
 
 **Related Guides**:
 
-- :doc:`../concepts/function_patterns` - Function pattern documentation
 - :doc:`../guides/complete_examples` - Complete workflow examples
-
-**Development**:
-
-- :doc:`../development/extending` - Extending the code generation system
-- :doc:`../development/custom_functions` - Adding custom functions to pipelines

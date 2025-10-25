@@ -450,5 +450,4 @@ See Also
 - :doc:`zmq_execution_system` - ZMQ execution for remote processing
 - :doc:`storage_and_memory_system` - Storage backend architecture
 - :doc:`../guides/omero_integration` - OMERO integration guide
-- :doc:`../user_guide/omero_server_execution` - OMERO usage guide
 
