@@ -381,6 +381,13 @@ def _execute_function_core(
     input_type = type(main_data_arg).__name__
     logger.debug(f"🔍 FUNCTION INPUT: {func_callable.__name__} - shape: {input_shape}, type: {input_type}")
 
+    # Check if function is enabled (default to True if not specified)
+    enabled = final_kwargs.get('enabled', True)
+    if not enabled:
+        logger.info(f"⏭️  SKIPPED (disabled): {func_callable.__name__}")
+        # Return input data unchanged when function is disabled
+        return main_data_arg
+
     # ⚡ INFO: Terse function execution log for user feedback
     logger.info(f"⚡ Executing: {func_callable.__name__}")
 
