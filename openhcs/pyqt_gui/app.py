@@ -65,14 +65,25 @@ class OpenHCSPyQtApp(QApplication):
         """Setup application-wide configuration."""
         # Start async storage registry initialization in background thread
         import threading
-        def init_registry_background():
+        def init_storage_registry_background():
             from openhcs.io.base import ensure_storage_registry
             ensure_storage_registry()
             logger.info("Storage registry initialized in background")
 
-        thread = threading.Thread(target=init_registry_background, daemon=True, name="registry-init")
+        thread = threading.Thread(target=init_storage_registry_background, daemon=True, name="storage-registry-init")
         thread.start()
         logger.info("Storage registry initialization started in background")
+
+        # Start async function registry initialization in background thread
+        # This creates virtual modules (openhcs.cucim, openhcs.pyclesperanto, etc.)
+        def init_function_registry_background():
+            from openhcs.processing.func_registry import initialize_registry
+            initialize_registry()
+            logger.info("Function registry initialized in background - virtual modules created")
+
+        func_thread = threading.Thread(target=init_function_registry_background, daemon=True, name="function-registry-init")
+        func_thread.start()
+        logger.info("Function registry initialization started in background")
 
         # CRITICAL FIX: Establish global config context for lazy dataclass resolution
         # This was missing and caused placeholder resolution to fall back to static defaults

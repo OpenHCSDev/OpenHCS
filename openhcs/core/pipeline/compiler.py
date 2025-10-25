@@ -233,13 +233,8 @@ class PipelineCompiler:
         # Set to None for backward compatibility with orchestrator code
         context.visualizer_config = None
 
-        # === BACKWARDS COMPATIBILITY PREPROCESSING ===
-        # Ensure all steps have complete attribute sets based on AbstractStep constructor
-        # This must happen before any other compilation logic to eliminate defensive programming
-        logger.debug("🔧 BACKWARDS COMPATIBILITY: Normalizing step attributes...")
-        _normalize_step_attributes(steps_definition)
-
-
+        # Note: _normalize_step_attributes is now called in compile_pipelines() before filtering
+        # to ensure old pickled steps have the 'enabled' attribute before we check it
 
         # Pre-initialize step_plans with basic entries for each step
         # Use step index as key instead of step_id for multiprocessing compatibility
@@ -794,6 +789,34 @@ class PipelineCompiler:
 
         if not pipeline_definition:
             raise ValueError("A valid pipeline definition (List[AbstractStep]) must be provided.")
+
+        # === BACKWARDS COMPATIBILITY PREPROCESSING ===
+        # Normalize step attributes BEFORE filtering to ensure old pickled steps have 'enabled' attribute
+        logger.debug("🔧 BACKWARDS COMPATIBILITY: Normalizing step attributes before filtering...")
+        _normalize_step_attributes(pipeline_definition)
+
+        # Filter out disabled steps at compile time (before any compilation phases)
+        original_count = len(pipeline_definition)
+        enabled_steps = []
+        for step in pipeline_definition:
+            if step.enabled:
+                enabled_steps.append(step)
+            else:
+                logger.info(f"🔧 COMPILE-TIME FILTER: Removing disabled step '{step.name}' from pipeline")
+
+        # Update pipeline_definition in-place to contain only enabled steps
+        pipeline_definition.clear()
+        pipeline_definition.extend(enabled_steps)
+
+        if original_count != len(pipeline_definition):
+            logger.info(f"🔧 COMPILE-TIME FILTER: Filtered {original_count - len(pipeline_definition)} disabled step(s), {len(pipeline_definition)} step(s) remaining")
+
+        if not pipeline_definition:
+            logger.warning("All steps were disabled. Pipeline is empty after filtering.")
+            return {
+                'pipeline_definition': pipeline_definition,
+                'compiled_contexts': {}
+            }
 
         try:
             compiled_contexts: Dict[str, ProcessingContext] = {}

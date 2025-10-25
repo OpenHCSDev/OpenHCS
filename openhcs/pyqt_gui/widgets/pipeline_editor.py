@@ -854,19 +854,19 @@ class PipelineEditorWidget(QWidget):
     
     def update_step_list(self):
         """Update the step list widget using selection preservation mixin."""
-        def format_step_item(step):
+        def format_step_item(step, step_index):
             """Format step item for display."""
             display_text, step_name = self.format_item_for_display(step)
-            return display_text, step
+            return display_text, step_index  # Store index instead of step object
 
         def update_func():
             """Update function that clears and rebuilds the list."""
             self.step_list.clear()
 
-            for step in self.pipeline_steps:
-                display_text, step_data = format_step_item(step)
+            for step_index, step in enumerate(self.pipeline_steps):
+                display_text, index_data = format_step_item(step, step_index)
                 item = QListWidgetItem(display_text)
-                item.setData(Qt.ItemDataRole.UserRole, step_data)
+                item.setData(Qt.ItemDataRole.UserRole, index_data)  # Store index, not step
                 item.setToolTip(self._create_step_tooltip(step))
                 self.step_list.addItem(item)
 
@@ -882,15 +882,15 @@ class PipelineEditorWidget(QWidget):
     def get_selected_steps(self) -> List[FunctionStep]:
         """
         Get currently selected steps.
-        
+
         Returns:
             List of selected FunctionStep objects
         """
         selected_items = []
         for item in self.step_list.selectedItems():
-            step_data = item.data(Qt.ItemDataRole.UserRole)
-            if step_data:
-                selected_items.append(step_data)
+            step_index = item.data(Qt.ItemDataRole.UserRole)
+            if step_index is not None and 0 <= step_index < len(self.pipeline_steps):
+                selected_items.append(self.pipeline_steps[step_index])
         return selected_items
     
     def update_button_states(self):
