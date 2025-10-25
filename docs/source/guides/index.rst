@@ -24,7 +24,7 @@ System Integration Guides
    memory_type_integration
    pipeline_compilation_workflow
    omero_integration
-   napari_viewer_management
+   viewer_management
    fiji_viewer_management
    testing_guide
 
@@ -49,12 +49,12 @@ Complete server-side execution support for OpenHCS on OMERO servers with zero da
 
 :doc:`omero_integration`
 
-Napari Viewer Management
-^^^^^^^^^^^^^^^^^^^^^^^^^
+Viewer Management
+^^^^^^^^^^^^^^^^^
 
-Learn how to manage Napari viewer processes across OpenHCS components. Understand viewer reuse, parallel startup, persistent viewers, and automatic reconnection for real-time visualization workflows.
+Learn how to manage Napari and Fiji viewer processes across OpenHCS components. Understand viewer reuse, parallel startup, persistent viewers, and automatic reconnection for real-time visualization workflows.
 
-:doc:`napari_viewer_management`
+:doc:`viewer_management`
 
 Fiji Viewer Management
 ^^^^^^^^^^^^^^^^^^^^^^

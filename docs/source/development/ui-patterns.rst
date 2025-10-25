@@ -885,7 +885,7 @@ See Also
 
 - :doc:`../architecture/step-editor-generalization` - Step editors that use functional dispatch
 - :doc:`../architecture/service-layer-architecture` - Service layer patterns for UI development
-- :doc:`../architecture/field-path-detection` - Type introspection that enables dispatch patterns
+- :doc:`../architecture/archive/field-path-detection` - Type introspection that enables dispatch patterns
 
 **Use Service Layer When:**
 - You have multiple UI frameworks or might add more
