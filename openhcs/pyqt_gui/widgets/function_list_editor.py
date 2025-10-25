@@ -242,10 +242,15 @@ class FunctionListEditorWidget(QWidget):
     
     def _populate_function_list(self):
         """Populate function list with panes (mirrors Textual TUI)."""
-        # Clear existing panes - CRITICAL: Call deleteLater() to ensure cleanup
-        # This ensures ParameterFormManager instances are properly unregistered
-        # from _active_form_managers when panes are destroyed
+        # Clear existing panes - CRITICAL: Manually unregister form managers BEFORE deleteLater()
+        # This prevents RuntimeError when new widgets try to connect to deleted managers
         for pane in self.function_panes:
+            # Explicitly unregister the form manager before scheduling deletion
+            if hasattr(pane, 'form_manager') and pane.form_manager is not None:
+                try:
+                    pane.form_manager.unregister_from_cross_window_updates()
+                except RuntimeError:
+                    pass  # Already deleted
             pane.deleteLater()  # Schedule for deletion - triggers destroyed signal
         self.function_panes.clear()
 
@@ -253,7 +258,14 @@ class FunctionListEditorWidget(QWidget):
         while self.function_layout.count():
             child = self.function_layout.takeAt(0)
             if child.widget():
-                child.widget().deleteLater()  # Schedule for deletion instead of just orphaning
+                # Unregister form manager if it exists
+                widget = child.widget()
+                if hasattr(widget, 'form_manager') and widget.form_manager is not None:
+                    try:
+                        widget.form_manager.unregister_from_cross_window_updates()
+                    except RuntimeError:
+                        pass  # Already deleted
+                widget.deleteLater()  # Schedule for deletion instead of just orphaning
         
         if not self.functions:
             # Show empty state

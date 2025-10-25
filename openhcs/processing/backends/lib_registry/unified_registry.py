@@ -169,15 +169,15 @@ class LibraryRegistryBase(ABC):
 
     # ===== CONTRACT HANDLING =====
     def apply_contract_wrapper(self, func: Callable, contract: ProcessingContract) -> Callable:
-        """Apply contract wrapper with parameter injection (slice_by_slice for FLEXIBLE contracts)."""
+        """Apply contract wrapper with parameter injection (enabled + slice_by_slice for FLEXIBLE)."""
         from functools import wraps
         import inspect
 
         original_sig = inspect.signature(func)
         param_names = {p.name for p in original_sig.parameters.values()}
 
-        # Define injectable parameters: only slice_by_slice for FLEXIBLE contracts
-        injectable_params = []
+        # Define injectable parameters: enabled for all, slice_by_slice for FLEXIBLE
+        injectable_params = [('enabled', True, bool)]
         if contract == ProcessingContract.FLEXIBLE:
             injectable_params.append(('slice_by_slice', False, bool))
 
