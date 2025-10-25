@@ -425,6 +425,9 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             # Include both regular files and symlinks (even broken ones)
             files = [p for p in disk_directory.glob(glob_pattern) if p.is_file() or p.is_symlink()]
 
+        # Filter out macOS metadata files (._* files) that interfere with parsing
+        files = [f for f in files if not f.name.startswith('._')]
+
         # Filter by extensions if provided
         if extensions:
             # Convert extensions to lowercase for case-insensitive comparison
@@ -461,6 +464,9 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
                 # Get all entries in current directory
                 for entry in current_dir.iterdir():
                     if entry.is_file():
+                        # Filter out macOS metadata files (._* files) that interfere with parsing
+                        if entry.name.startswith('._'):
+                            continue
                         # Check if file matches pattern
                         if pattern is None or entry.match(pattern):
                             files.append((entry, depth))
