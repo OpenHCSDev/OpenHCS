@@ -21,9 +21,15 @@ def _check_cuda_available(lib) -> bool:
 
 
 def _check_jax_gpu(lib) -> bool:
-    """Check JAX GPU availability."""
-    devices = lib.devices()
-    return any(d.platform == 'gpu' for d in devices)
+    """Check JAX GPU availability.
+
+    Uses lazy detection: only checks if JAX is installed, defers actual
+    jax.devices() call to avoid thread explosion during startup.
+    Returns True if JAX is installed (actual GPU check happens at runtime).
+    """
+    # JAX is installed - assume GPU availability will be checked at runtime
+    # This avoids calling jax.devices() which creates 54+ threads
+    return True
 
 
 def _check_tf_gpu(lib) -> bool:

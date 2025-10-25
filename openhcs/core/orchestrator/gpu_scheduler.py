@@ -29,7 +29,8 @@ from typing import Dict, List, Optional
 # DEFAULT_NUM_WORKERS removed
 from openhcs.core.memory.gpu_utils import (check_cupy_gpu_available,
                                                check_tf_gpu_available,
-                                               check_torch_gpu_available)
+                                               check_torch_gpu_available,
+                                               check_jax_gpu_available)
 from openhcs.core.lazy_gpu_imports import check_installed_gpu_libraries
 # Import necessary config classes
 from openhcs.core.config import GlobalPipelineConfig
@@ -148,11 +149,14 @@ def _detect_available_gpus() -> List[int]:
     except Exception as e:
         logger.debug("TensorFlow GPU detection failed: %s", e)
 
-    # Skip JAX GPU detection to prevent thread explosion
-    # JAX creates 54+ threads during jax.devices() call
-    # JAX GPU detection will be done lazily only when JAX functions are actually used
-    # TODO: Add JAX GPU detection back when we have proper lazy initialization
-    logger.debug("Skipping JAX GPU detection to prevent thread explosion")
+    # Check JAX GPUs using lazy detection
+    # JAX is checked via lazy import to defer jax.devices() call until needed
+    try:
+        jax_gpu = check_jax_gpu_available()
+        if jax_gpu is not None:
+            available_gpus.add(jax_gpu)
+    except Exception as e:
+        logger.debug("JAX GPU detection failed: %s", e)
 
     return sorted(list(available_gpus))
 

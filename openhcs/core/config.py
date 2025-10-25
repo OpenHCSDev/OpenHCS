@@ -74,6 +74,19 @@ class WellFilterMode(Enum):
     INCLUDE = "include"  # Materialize only specified wells
     EXCLUDE = "exclude"  # Materialize all wells except specified ones
 
+
+class NormalizationMethod(Enum):
+    """Normalization methods for experimental analysis."""
+    FOLD_CHANGE = "fold_change"  # value / control_mean
+    Z_SCORE = "z_score"  # (value - control_mean) / control_std
+    PERCENT_CONTROL = "percent_control"  # (value / control_mean) * 100
+
+
+class MicroscopeFormat(Enum):
+    """Supported microscope formats for experimental analysis."""
+    EDDU_CX5 = "EDDU_CX5"  # ThermoFisher CX5 format
+    EDDU_METAXPRESS = "EDDU_metaxpress"  # Molecular Devices MetaXpress format
+
 @auto_create_decorator
 @dataclass(frozen=True)
 class GlobalPipelineConfig:
@@ -323,9 +336,6 @@ class PlateMetadataConfig:
 @dataclass(frozen=True)
 class ExperimentalAnalysisConfig:
     """Configuration for experimental analysis system."""
-    enabled: bool = True
-    """Whether experimental analysis is enabled."""
-
     config_file_name: str = "config.xlsx"
     """Name of the experimental configuration Excel file."""
 
@@ -335,8 +345,8 @@ class ExperimentalAnalysisConfig:
     plate_groups_sheet_name: str = "plate_groups"
     """Name of the sheet containing plate group mappings."""
 
-    normalization_method: str = "fold_change"
-    """Normalization method: fold_change, z_score, percent_control."""
+    normalization_method: NormalizationMethod = NormalizationMethod.FOLD_CHANGE
+    """Normalization method for control-based normalization."""
 
     export_raw_results: bool = True
     """Whether to export raw (non-normalized) results."""
@@ -347,14 +357,8 @@ class ExperimentalAnalysisConfig:
     auto_detect_format: bool = True
     """Whether to automatically detect microscope format."""
 
-    default_format: Optional[str] = None
+    default_format: Optional[MicroscopeFormat] = None
     """Default format to use if auto-detection fails."""
-
-    enable_wells_exclusion: bool = True
-    """Whether to support wells exclusion from analysis (via 'Exclude Wells' row in config)."""
-
-    metaxpress_summary_enabled: bool = True
-    """Whether to generate MetaXpress-style summary output by default."""
 
 
 @global_pipeline_config
@@ -412,26 +416,6 @@ class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     sub_dir: str = "checkpoints"
     """Subdirectory for materialized outputs (different from global 'images')."""
 
-
-@global_pipeline_config
-@dataclass(frozen=True)
-class FunctionRegistryConfig:
-    """Configuration for function registry behavior across all libraries."""
-    enable_scalar_functions: bool = True
-    """
-    Whether to register functions that return scalars.
-    When True: Scalar-returning functions are wrapped as (array, scalar) tuples.
-    When False: Scalar-returning functions are filtered out entirely.
-    Applies uniformly to all libraries (CuPy, scikit-image, pyclesperanto).
-    """
-
-
-@global_pipeline_config
-@dataclass(frozen=True)
-class VisualizerConfig:
-    """Configuration for shared visualization system settings."""
-    temp_directory: Optional[Path] = None
-    """Directory for temporary visualization files. If None, will auto-create in system temp."""
 
 @global_pipeline_config
 @dataclass(frozen=True)

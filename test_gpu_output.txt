@@ -1,0 +1,144 @@
+2025-10-24 12:51:44,999 - openhcs.constants.constants - INFO - 🔧 ENUM CREATION: Creating AllComponents in process 1488488
+2025-10-24 12:51:44,999 - openhcs.constants.constants - INFO - 🔧 _create_enums() CALLED in process 1488488
+2025-10-24 12:51:44,999 - openhcs.constants.constants - INFO - 🔧 _create_enums() cache_info: CacheInfo(hits=0, misses=1, maxsize=1, currsize=0)
+2025-10-24 12:51:45,001 - openhcs.constants.constants - INFO - 🔧 _create_enums() STACK TRACE:
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/pytest/__main__.py", line 9, in <module>
+    raise SystemExit(pytest.console_main())
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 201, in console_main
+    code = main()
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 156, in main
+    config = _prepareconfig(args, plugins)
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 341, in _prepareconfig
+    config = pluginmanager.hook.pytest_cmdline_parse(
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 1140, in pytest_cmdline_parse
+    self.parse(args)
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 1494, in parse
+    self._preparse(args, addopts=addopts)
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 1398, in _preparse
+    self.hook.pytest_load_initial_conftests(
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/pluggy/_hooks.py", line 512, in __call__
+    return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/pluggy/_manager.py", line 120, in _hookexec
+    return self._inner_hookexec(hook_name, methods, kwargs, firstresult)
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 1222, in pytest_load_initial_conftests
+    self.pluginmanager._set_initial_conftests(
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 581, in _set_initial_conftests
+    self._try_load_conftest(
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 619, in _try_load_conftest
+    self._loadconftestmodules(
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 659, in _loadconftestmodules
+    mod = self._importconftest(
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 710, in _importconftest
+    mod = import_path(
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/pathlib.py", line 587, in import_path
+    importlib.import_module(module_name)
+  File "/home/ts/.pyenv/versions/3.12.3/lib/python3.12/importlib/__init__.py", line 90, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "<frozen importlib._bootstrap>", line 1387, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "/home/ts/code/projects/openhcs/.venv/lib/python3.12/site-packages/_pytest/assertion/rewrite.py", line 185, in exec_module
+    exec(co, module.__dict__)
+  File "/home/ts/code/projects/openhcs/tests/conftest.py", line 124, in <module>
+    from tests.integration.helpers.fixture_utils import (
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/ts/code/projects/openhcs/tests/integration/helpers/fixture_utils.py", line 16, in <module>
+    from openhcs.core.orchestrator import PipelineOrchestrator
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/ts/code/projects/openhcs/openhcs/core/__init__.py", line 4, in <module>
+    from openhcs.core.context.processing_context import ProcessingContext
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1310, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/ts/code/projects/openhcs/openhcs/core/context/__init__.py", line 5, in <module>
+    from .processing_context import ProcessingContext
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/ts/code/projects/openhcs/openhcs/core/context/processing_context.py", line 9, in <module>
+    from openhcs.core.config import GlobalPipelineConfig, VFSConfig, PathPlanningConfig
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/ts/code/projects/openhcs/openhcs/core/config.py", line 16, in <module>
+    from openhcs.constants import Microscope, VirtualComponents
+  File "<frozen importlib._bootstrap>", line 1360, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1331, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 935, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/ts/code/projects/openhcs/openhcs/constants/__init__.py", line 8, in <module>
+    from openhcs.constants.constants import (  # Backend constants; Memory constants; I/O constants; Pipeline constants; Default constants
+  File "/home/ts/code/projects/openhcs/openhcs/constants/constants.py", line 128, in __getattr__
+    all_components, vc, gb = _create_enums()
+  File "/home/ts/code/projects/openhcs/openhcs/constants/constants.py", line 49, in _create_enums
+    logger.info(f"🔧 _create_enums() STACK TRACE:\n{''.join(traceback.format_stack())}")
+
+2025-10-24 12:51:45,003 - openhcs.constants.constants - INFO - 🔧 _create_enums() RETURNING in process 1488488: AllComponents=94160149139872, VariableComponents=94160149141648, GroupBy=94160149144208
+2025-10-24 12:51:45,003 - openhcs.constants.constants - INFO - 🔧 _create_enums() cache_info after return: CacheInfo(hits=0, misses=1, maxsize=1, currsize=0)
+2025-10-24 12:51:45,003 - openhcs.constants.constants - INFO - 🔧 ENUM CREATION: Created enums in process 1488488: AllComponents=94160149139872, VariableComponents=94160149141648, GroupBy=94160149144208
+2025-10-24 12:51:45,003 - openhcs.constants.constants - INFO - 🔧 ENUM CREATION: VariableComponents.__module__=openhcs.constants.constants, __qualname__=VariableComponents
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.3.5, pluggy-1.6.0 -- /home/ts/code/projects/openhcs/.venv/bin/python
+cachedir: .pytest_cache
+PyQt6 6.9.1 -- Qt runtime 6.9.1 -- Qt compiled 6.9.0
+rootdir: /home/ts/code/projects/openhcs
+configfile: pytest.ini
+plugins: asyncio-1.0.0, napari-0.6.1, napari-plugin-engine-0.2.0, anyio-4.9.0, langsmith-0.4.37, cov-6.1.1, npe2-0.7.8, qt-4.5.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... 2025-10-24 12:51:48.640593: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1761324708.656651 1488488 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1761324708.661570 1488488 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1761324708.674255 1488488 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1761324708.674285 1488488 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1761324708.674287 1488488 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1761324708.674290 1488488 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-10-24 12:51:48.677883: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+2025-10-24 12:51:51,672 - openhcs.processing.backends.processors.pyclesperanto_processor - INFO - pyclesperanto available - GPU acceleration enabled
+collected 6 items / 1 error
+
+==================================== ERRORS ====================================
+_ ERROR collecting tests/integration/tests_data/openhcs_pipeline/test_main[OpenHCS]/zstack_plate/test_pipeline.py _
+import file mismatch:
+imported module 'test_pipeline' has this __file__ attribute:
+  /home/ts/code/projects/openhcs/tests/integration/tests_data/imagexpress_pipeline/test_main[ImageXpress]/zstack_plate/test_pipeline.py
+which is not the same as the test file we want to collect:
+  /home/ts/code/projects/openhcs/tests/integration/tests_data/openhcs_pipeline/test_main[OpenHCS]/zstack_plate/test_pipeline.py
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules
+=========================== short test summary info ============================
+ERROR tests/integration/tests_data/openhcs_pipeline/test_main[OpenHCS]/zstack_plate/test_pipeline.py
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 6.90s ===============================

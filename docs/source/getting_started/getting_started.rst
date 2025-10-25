@@ -179,3 +179,29 @@ Common Patterns
         ],
         variable_components=[VariableComponents.SITE]
     )
+
+1-minute Quick Start
+--------------------
+
+If you want to try OpenHCS quickly with minimal setup, copy this tiny pipeline into a file named `quickstart.py` and run it with a small folder of images (or a single image for testing):
+
+.. code-block:: python
+
+    # quickstart.py — minimal pipeline
+    from openhcs.core.pipeline import Pipeline
+    from openhcs.core.steps.function_step import FunctionStep
+    from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
+    from openhcs.core.config import GlobalPipelineConfig
+    from openhcs.processing.backends.processors.torch_processor import stack_percentile_normalize
+    from openhcs.processing.backends.analysis.cell_counting_cpu import count_cells_single_channel
+
+    pipeline = Pipeline([
+        FunctionStep(func=(stack_percentile_normalize, {'low_percentile':1.0,'high_percentile':99.0}), name='normalize'),
+        FunctionStep(func=(count_cells_single_channel, {}), name='count_cells')
+    ])
+
+    config = GlobalPipelineConfig(num_workers=1)
+    orchestrator = PipelineOrchestrator(plate_path='path/to/images', global_config=config)
+    orchestrator.run_pipeline(pipeline)
+
+This runs a normalization step followed by a simple per-site cell counting analysis. Use `path/to/images` to point to a folder with one or more test images. The snippet is intentionally minimal — see the full "Basic Example" above for more realistic configurations.

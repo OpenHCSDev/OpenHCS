@@ -155,3 +155,10 @@ Quick Start Paths
 **System Integration?** Jump to :doc:`system_integration` → :doc:`special_io_system` → :doc:`microscope_handler_integration`
 
 **Performance Optimization?** Focus on :doc:`gpu_resource_management` → :doc:`compilation_system_detailed` → :doc:`multiprocessing_coordination_system`
+
+**Architecture Quick Start**: A short, curated orientation is available at :doc:`quick_start` — three recommended reading paths (Core systems, Integrations, UI) to get developers productive quickly.
+
+.. toctree::
+   :maxdepth: 1
+
+   quick_start
