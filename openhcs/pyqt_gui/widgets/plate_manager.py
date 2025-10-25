@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
-    QListWidgetItem, QLabel, QProgressBar,
+    QListWidgetItem, QLabel,
     QSplitter
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
@@ -62,7 +62,7 @@ class PlateManagerWidget(QWidget):
     subprocess_log_stopped = pyqtSignal()
     clear_subprocess_logs = pyqtSignal()
 
-    # Progress update signals (thread-safe UI updates)
+    # Progress update signals (thread-safe UI updates) - routed to status bar
     progress_started = pyqtSignal(int)  # max_value
     progress_updated = pyqtSignal(int)  # current_value
     progress_finished = pyqtSignal()
@@ -112,7 +112,6 @@ class PlateManagerWidget(QWidget):
         self.plate_list: Optional[QListWidget] = None
         self.buttons: Dict[str, QPushButton] = {}
         self.status_label: Optional[QLabel] = None
-        self.progress_bar: Optional[QProgressBar] = None
         
         # Setup UI
         self.setup_ui()
@@ -184,11 +183,6 @@ class PlateManagerWidget(QWidget):
         # Button panel
         button_panel = self.create_button_panel()
         splitter.addWidget(button_panel)
-
-        # Progress bar (below splitter)
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
 
         # Set splitter proportions - make button panel much smaller
         splitter.setSizes([400, 80])
@@ -469,17 +463,32 @@ class PlateManagerWidget(QWidget):
                 ensure_global_config_context(GlobalPipelineConfig, self.global_config)
                 return orchestrator.initialize()
 
-            await asyncio.get_event_loop().run_in_executor(
-                None,
-                initialize_with_context
-            )
+            try:
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    initialize_with_context
+                )
 
-            self.orchestrators[plate_path] = orchestrator
-            self.orchestrator_state_changed.emit(plate_path, "READY")
+                self.orchestrators[plate_path] = orchestrator
+                self.orchestrator_state_changed.emit(plate_path, "READY")
 
-            if not self.selected_plate_path:
-                self.selected_plate_path = plate_path
-                self.plate_selected.emit(plate_path)
+                if not self.selected_plate_path:
+                    self.selected_plate_path = plate_path
+                    self.plate_selected.emit(plate_path)
+
+            except Exception as e:
+                logger.error(f"Failed to initialize plate {plate_path}: {e}", exc_info=True)
+                # Create a failed orchestrator to track the error state
+                failed_orchestrator = PipelineOrchestrator(
+                    plate_path=plate_path,
+                    storage_registry=self.file_manager.registry
+                )
+                failed_orchestrator._state = OrchestratorState.INIT_FAILED
+                self.orchestrators[plate_path] = failed_orchestrator
+                # Emit signal to update UI with failed state
+                self.orchestrator_state_changed.emit(plate_path, OrchestratorState.INIT_FAILED.value)
+                # Show error dialog
+                self.initialization_error.emit(plate['name'], str(e))
 
             self.progress_updated.emit(i + 1)
 
@@ -490,7 +499,15 @@ class PlateManagerWidget(QWidget):
         ])
 
         self.progress_finished.emit()
-        self.status_message.emit(f"Initialized {len(selected_items)} plate(s)")
+
+        # Count successes and failures
+        success_count = len([p for p in selected_items if self.orchestrators.get(p['path']) and self.orchestrators[p['path']].state == OrchestratorState.READY])
+        error_count = len([p for p in selected_items if self.orchestrators.get(p['path']) and self.orchestrators[p['path']].state == OrchestratorState.INIT_FAILED])
+
+        if error_count == 0:
+            self.status_message.emit(f"Successfully initialized {success_count} plate(s)")
+        else:
+            self.status_message.emit(f"Initialized {success_count} plate(s), {error_count} error(s)")
     
     # Additional action methods would be implemented here following the same pattern...
     # (compile_plate, run_plate, code_plate, view_metadata, edit_config)
@@ -1459,6 +1476,8 @@ class PlateManagerWidget(QWidget):
                     status_indicators.append("🔄 Running")
                 elif orchestrator.state == OrchestratorState.COMPLETED:
                     status_indicators.append("✅ Complete")
+                elif orchestrator.state == OrchestratorState.INIT_FAILED:
+                    status_indicators.append("🚫 Init Failed")
                 elif orchestrator.state == OrchestratorState.COMPILE_FAILED:
                     status_indicators.append("❌ Compile Failed")
                 elif orchestrator.state == OrchestratorState.EXEC_FAILED:
@@ -1714,18 +1733,22 @@ class PlateManagerWidget(QWidget):
             await asyncio.sleep(1)  # Check every second
 
     def _on_progress_started(self, max_value: int):
-        """Handle progress started signal (main thread)."""
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setMaximum(max_value)
-        self.progress_bar.setValue(0)
+        """Handle progress started signal - route to status bar."""
+        # Progress is now displayed in the status bar instead of a separate widget
+        # This method is kept for signal compatibility but doesn't need to do anything
+        pass
 
     def _on_progress_updated(self, value: int):
-        """Handle progress updated signal (main thread)."""
-        self.progress_bar.setValue(value)
+        """Handle progress updated signal - route to status bar."""
+        # Progress is now displayed in the status bar instead of a separate widget
+        # This method is kept for signal compatibility but doesn't need to do anything
+        pass
 
     def _on_progress_finished(self):
-        """Handle progress finished signal (main thread)."""
-        self.progress_bar.setVisible(False)
+        """Handle progress finished signal - route to status bar."""
+        # Progress is now displayed in the status bar instead of a separate widget
+        # This method is kept for signal compatibility but doesn't need to do anything
+        pass
 
     def _handle_compilation_error(self, plate_name: str, error_message: str):
         """Handle compilation error on main thread (slot)."""

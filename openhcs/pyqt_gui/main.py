@@ -188,6 +188,27 @@ class OpenHCSMainWindow(QMainWindow):
 
             self.floating_windows["plate_manager"] = window
 
+            # Connect progress signals to status bar
+            if hasattr(self, 'status_bar') and self.status_bar:
+                # Create progress bar in status bar if it doesn't exist
+                if not hasattr(self, '_status_progress_bar'):
+                    from PyQt6.QtWidgets import QProgressBar
+                    self._status_progress_bar = QProgressBar()
+                    self._status_progress_bar.setMaximumWidth(200)
+                    self._status_progress_bar.setVisible(False)
+                    self.status_bar.addPermanentWidget(self._status_progress_bar)
+
+                # Connect progress signals
+                plate_widget.progress_started.connect(
+                    lambda max_val: self._on_plate_progress_started(max_val)
+                )
+                plate_widget.progress_updated.connect(
+                    lambda val: self._on_plate_progress_updated(val)
+                )
+                plate_widget.progress_finished.connect(
+                    lambda: self._on_plate_progress_finished()
+                )
+
             # Connect to pipeline editor if it exists (mirrors Textual TUI)
             self._connect_plate_to_pipeline_manager(plate_widget)
 
@@ -872,3 +893,20 @@ class OpenHCSMainWindow(QMainWindow):
                     "Theme Save Error",
                     f"Failed to save theme to {Path(file_path).name}"
                 )
+
+    def _on_plate_progress_started(self, max_value: int):
+        """Handle plate manager progress started signal."""
+        if hasattr(self, '_status_progress_bar'):
+            self._status_progress_bar.setMaximum(max_value)
+            self._status_progress_bar.setValue(0)
+            self._status_progress_bar.setVisible(True)
+
+    def _on_plate_progress_updated(self, value: int):
+        """Handle plate manager progress updated signal."""
+        if hasattr(self, '_status_progress_bar'):
+            self._status_progress_bar.setValue(value)
+
+    def _on_plate_progress_finished(self):
+        """Handle plate manager progress finished signal."""
+        if hasattr(self, '_status_progress_bar'):
+            self._status_progress_bar.setVisible(False)
