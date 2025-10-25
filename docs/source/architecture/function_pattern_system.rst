@@ -11,7 +11,7 @@ processing pipelines.
 OpenHCS implements four fundamental patterns that provide a unified
 interface for different execution strategies, allowing the same
 ``FunctionStep`` class to handle various processing scenarios through
-elegant pattern matching.
+pattern matching.
 
 **Note**: This document describes the actual function pattern
 implementation in OpenHCS, including enhancements and evolution from the

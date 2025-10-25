@@ -314,6 +314,6 @@ Files and Line Numbers Reference
 -  **Execution retrieval**:
    ``openhcs/core/steps/function_step.py:550-556``
 
-This architecture enables powerful patterns like lazy loading, metadata
+This architecture enables patterns like lazy loading, metadata
 injection, and stateless execution while maintaining clean separation of
 concerns between compilation and execution phases.

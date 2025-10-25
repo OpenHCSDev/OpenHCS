@@ -54,14 +54,14 @@ Intelligent file grouping based on microscopy metadata patterns.
    # Groups: Files with same (well, site, z_index) but different channel
    # Result: [ch1.tif, ch2.tif] → stack → composite → single.tif
 
-**Why This Was Genius**: It automatically solved the complex pattern
-recognition problem that plagued microscopy image processing - how to
-intelligently group related images for batch processing.
+This pattern automatically solves the image grouping problem - how to
+intelligently group related images for batch processing without manual
+specification of grouping logic.
 
 3. Function Pattern System
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-**The Hidden Masterpiece**: EZStitcher’s most sophisticated innovation
+**Function Pattern System**: EZStitcher’s most sophisticated innovation
 was its function pattern system:
 
 .. code:: python
@@ -234,11 +234,11 @@ Architectural Continuity
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 **What OpenHCS Preserved from EZStitcher**: - Pipeline → Step hierarchy
-(proven architecture) - Variable components pattern (brilliant grouping
+(proven architecture) - Variable components pattern (intelligent grouping
 logic) - Group-by functionality (channel-specific processing) - Modular
 step design (composable workflows)
 
-**What OpenHCS Revolutionized**: - Memory management (explicit types vs
+**What OpenHCS Changed**: - Memory management (explicit types vs
 implicit NumPy) - Error handling (fail loudly vs silent failures) -
 Performance (GPU-native vs CPU-only) - Validation (compile-time checks
 vs runtime surprises) - Function ecosystem (unified GPU library access
@@ -247,7 +247,7 @@ vs manual integration)
 Key Innovations and Differentiators
 -----------------------------------
 
-OpenHCS introduces several revolutionary systems that make it
+OpenHCS introduces several new systems that make it
 fundamentally different from traditional scientific computing tools.
 Each system is documented in detail in dedicated architecture documents:
 
@@ -437,7 +437,7 @@ Methodological Directions
 Conclusion
 ----------
 
-The evolution from EZStitcher to OpenHCS demonstrates that revolutionary
+The evolution from EZStitcher to OpenHCS demonstrates that effective
 scientific software can emerge from the combination of:
 
 1. **Deep domain expertise** (understanding real research problems)
