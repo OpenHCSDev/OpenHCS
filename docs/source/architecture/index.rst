@@ -50,6 +50,7 @@ File management, memory types, and backend systems.
    napari_streaming_system
    viewer_streaming_architecture
    image_acknowledgment_system
+   omero_backend_system
    zmq_execution_system
 
 External Integrations
