@@ -211,10 +211,10 @@ class PipelineCompiler:
             context.step_plans = {} # Ensure step_plans dict exists
 
         # === VISUALIZER CONFIG EXTRACTION ===
-        # Extract visualizer config from orchestrator.pipeline_config
-        # The caller has already set up config_context(orchestrator.pipeline_config)
-        # so we can just access the field directly - lazy resolution happens automatically
-        context.visualizer_config = orchestrator.pipeline_config.visualizer_config
+        # visualizer_config is a legacy parameter that's passed to visualizers but never used
+        # The actual display configuration comes from the display_config parameter
+        # Set to None for backward compatibility with orchestrator code
+        context.visualizer_config = None
 
         # === BACKWARDS COMPATIBILITY PREPROCESSING ===
         # Ensure all steps have complete attribute sets based on AbstractStep constructor
