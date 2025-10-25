@@ -321,7 +321,8 @@ class MagicGuiWidgetFactory:
                             widget = native_widget
             except Exception as e:
                 # Fallback to string widget for any type magicgui cannot handle
-                logger.warning(f"Widget creation failed for {param_name} ({resolved_type}): {e}", exc_info=True)
+                # Use DEBUG level since this is expected for complex Union types (e.g., well_filter)
+                logger.debug(f"Widget creation failed for {param_name} ({resolved_type}): {e}")
                 widget = create_string_fallback_widget(current_value=extracted_value)
 
         # Functional configuration dispatch
