@@ -10,22 +10,14 @@ REFACTORED: Uses enum-driven metaprogramming to eliminate 67% of code duplicatio
 
 import gc
 import logging
-import os
 from typing import Optional
 from openhcs.core.utils import optional_import
-from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES, MemoryType
+from openhcs.constants.constants import MemoryType
 from openhcs.core.memory.framework_config import _FRAMEWORK_CONFIG
 
 logger = logging.getLogger(__name__)
 
-# Check if we're in subprocess runner mode and should skip GPU imports
-if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-    # Subprocess runner mode - skip GPU imports
-    torch = None
-    logger.info("Subprocess runner mode - skipping GPU library imports in gpu_cleanup")
-else:
-    # Normal mode - import torch for VRAM logging
-    from openhcs.core.lazy_gpu_imports import torch
+
 
 
 
@@ -138,37 +130,12 @@ def cleanup_all_gpu_frameworks(device_id: Optional[int] = None) -> None:
     logger.debug("🔥 GPU CLEANUP: Completed cleanup for all GPU frameworks")
 
 
-def log_gpu_memory_usage(context: str = "") -> None:
-    """
-    Log GPU memory usage for PyTorch (primary framework for VRAM tracking).
 
-    This is a lightweight logging function used by orchestrator and function_step
-    for debugging VRAM usage. Only logs PyTorch memory since that's the primary
-    GPU framework used in OpenHCS.
-
-    Args:
-        context: Description of when/where this memory check is happening
-    """
-    context_str = f" ({context})" if context else ""
-
-    if torch is not None:
-        try:
-            if torch.cuda.is_available():
-                for i in range(torch.cuda.device_count()):
-                    allocated = torch.cuda.memory_allocated(i) / 1024**3
-                    reserved = torch.cuda.memory_reserved(i) / 1024**3
-                    free_memory = torch.cuda.get_device_properties(i).total_memory / 1024**3 - reserved
-                    logger.debug(f"🔍 VRAM{context_str} GPU {i}: {allocated:.2f}GB alloc, {reserved:.2f}GB reserved, {free_memory:.2f}GB free")
-            else:
-                logger.debug(f"🔍 VRAM{context_str}: No CUDA available")
-        except Exception as e:
-            logger.warning(f"🔍 VRAM{context_str}: Error checking PyTorch memory - {e}")
 
 
 # Export all cleanup functions and utilities
 __all__ = [
     'cleanup_all_gpu_frameworks',
-    'log_gpu_memory_usage',
     'MEMORY_TYPE_CLEANUP_REGISTRY',
     'cleanup_numpy_gpu',
     'cleanup_cupy_gpu',

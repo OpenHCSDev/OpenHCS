@@ -67,9 +67,8 @@ except ImportError:
 
 # Optional GPU memory management imports
 try:
-    from openhcs.core.memory.gpu_cleanup import log_gpu_memory_usage, cleanup_all_gpu_frameworks
+    from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
 except ImportError:
-    log_gpu_memory_usage = None
     cleanup_all_gpu_frameworks = None
 
 
@@ -987,13 +986,6 @@ class PipelineOrchestrator(ContextProvider):
 
         self._state = OrchestratorState.EXECUTING
         logger.info(f"Starting execution for {len(compiled_contexts)} axis values with max_workers={actual_max_workers}.")
-
-        # 🔍 VRAM TRACKING: Log initial memory state
-        try:
-            if log_gpu_memory_usage:
-                log_gpu_memory_usage("plate execution start")
-        except Exception:
-            pass
 
         try:
             execution_results: Dict[str, Dict[str, Any]] = {}

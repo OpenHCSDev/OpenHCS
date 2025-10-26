@@ -913,19 +913,6 @@ class FunctionStep(AbstractStep):
                     context
                 )
 
-            # 🔍 VRAM TRACKING: Log memory at step start
-            try:
-                from openhcs.core.memory.gpu_cleanup import log_gpu_memory_usage
-                log_gpu_memory_usage(f"step {step_name} start")
-            except ImportError:
-                pass  # GPU cleanup not available
-
-
-
-                log_gpu_memory_usage(f"step {step_name} start")
-            except Exception:
-                pass
-
             logger.info(f"🔥 STEP: Starting processing for '{step_name}' well {axis_id} (group_by={group_by.name if group_by else None}, variable_components={[vc.name for vc in variable_components] if variable_components else []})")
 
             if axis_id not in patterns_by_well:
