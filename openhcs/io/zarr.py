@@ -10,8 +10,9 @@ for materializing data to disk when needed.
 import fnmatch
 import logging
 import threading
+from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import zarr
@@ -20,6 +21,52 @@ import zarr
 _ome_zarr_state = {'available': None, 'cache': {}, 'event': threading.Event(), 'thread': None}
 
 logger = logging.getLogger(__name__)
+
+
+# Decorator for passthrough to disk backend
+def passthrough_to_disk(*extensions: str):
+    """
+    Decorator to automatically passthrough certain file types to disk backend.
+
+    Zarr only supports array data, so non-array files (JSON, CSV, TXT, ROI.ZIP, etc.)
+    are automatically delegated to the disk backend.
+
+    Args:
+        *extensions: File extensions to passthrough (e.g., '.json', '.csv', '.txt')
+
+    Usage:
+        @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip')
+        def save(self, data, output_path, **kwargs):
+            # Zarr-specific save logic here
+            ...
+    """
+    def decorator(method: Callable) -> Callable:
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            # Extract path from args (could be first or second arg depending on method)
+            # For save: (data, output_path, **kwargs)
+            # For load/exists/delete: (file_path, **kwargs)
+            path_arg = None
+
+            # Try to find path in args
+            for arg in args:
+                if isinstance(arg, (str, Path)):
+                    path_arg = str(arg)
+                    break
+
+            # Check if path matches passthrough extensions
+            if path_arg and any(path_arg.endswith(ext) for ext in extensions):
+                from openhcs.constants.constants import Backend
+                from openhcs.io.backend_registry import get_backend_instance
+                disk_backend = get_backend_instance(Backend.DISK.value)
+                # Call the same method on disk backend
+                return getattr(disk_backend, method.__name__)(*args, **kwargs)
+
+            # Otherwise, call the original method
+            return method(self, *args, **kwargs)
+
+        return wrapper
+    return decorator
 
 
 def _load_ome_zarr():
@@ -216,6 +263,7 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         store = zarr.DirectoryStore(str(store_path), dimension_separator='/')
         return store, relative_key
 
+    @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip')
     def save(self, data: Any, output_path: Union[str, Path], **kwargs):
         """
         Save data to Zarr at the given output_path.
@@ -227,17 +275,7 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             FileExistsError: If destination key already exists
             StorageResolutionError: If creation fails
         """
-        # Passthrough to disk backend for non-array files (text files, ROI files, etc.)
-        # Zarr only supports array data
-        path_str = str(output_path)
-        if path_str.endswith(('.json', '.csv', '.txt', '.roi.zip', '.zip')):
-            from openhcs.io.backend_registry import get_backend_instance
-            disk_backend = get_backend_instance(Backend.DISK.value)
-            # Ensure parent directory exists before saving
-            parent_dir = Path(output_path).parent
-            disk_backend.ensure_directory(parent_dir)
-            return disk_backend.save(data, output_path, **kwargs)
-
+        # Zarr-specific save logic (non-array files automatically passthrough to disk)
         store, key = self._split_store_and_key(output_path)
         group = zarr.group(store=store)
 
@@ -840,14 +878,9 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         except Exception as e:
             raise StorageResolutionError(f"Failed to recursively delete Zarr path: {path}") from e
 
+    @passthrough_to_disk('.json', '.csv', '.txt')
     def exists(self, path: Union[str, Path]) -> bool:
-        # Passthrough to disk backend for text files (JSON, CSV, TXT)
-        path_str = str(path)
-        if path_str.endswith(('.json', '.csv', '.txt')):
-            from openhcs.io.backend_registry import get_backend_instance
-            disk_backend = get_backend_instance(Backend.DISK.value)
-            return disk_backend.exists(path)
-
+        # Zarr-specific existence check (text files automatically passthrough to disk)
         path = Path(path)
 
         # If path has no file extension, treat as directory existence check
