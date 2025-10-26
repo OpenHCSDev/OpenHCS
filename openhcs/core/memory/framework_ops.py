@@ -21,6 +21,10 @@ _FRAMEWORK_OPS = {
         'cleanup_ops': None,  # CPU, no cleanup needed
         'has_oom_recovery': False,
         'get_device_id': None,  # CPU, no device ID
+        # OOM detection (CPU doesn't have GPU OOM, but can have MemoryError)
+        'oom_exception_types': [],
+        'oom_string_patterns': ['cannot allocate memory', 'memory exhausted'],
+        'oom_clear_cache': 'import gc; gc.collect()',
     },
     MemoryType.CUPY: {
         'import_name': 'cupy',
@@ -32,6 +36,11 @@ _FRAMEWORK_OPS = {
         'cleanup_ops': '{mod}.get_default_memory_pool().free_all_blocks(); {mod}.get_default_pinned_memory_pool().free_all_blocks(); {mod}.cuda.runtime.deviceSynchronize()',
         'has_oom_recovery': True,
         'get_device_id': 'image.device.id if hasattr(image, "device") else 0',
+        # OOM detection
+        'oom_exception_types': ['{mod}.cuda.memory.OutOfMemoryError', '{mod}.cuda.runtime.CUDARuntimeError'],
+        'oom_string_patterns': ['out of memory', 'cuda_error_out_of_memory'],
+        # OOM cache clearing (with device context)
+        'oom_clear_cache': '{mod}.get_default_memory_pool().free_all_blocks(); {mod}.get_default_pinned_memory_pool().free_all_blocks(); {mod}.cuda.runtime.deviceSynchronize()',
     },
     MemoryType.TORCH: {
         'import_name': 'torch',
@@ -43,6 +52,11 @@ _FRAMEWORK_OPS = {
         'cleanup_ops': '{mod}.cuda.empty_cache(); {mod}.cuda.synchronize()',
         'has_oom_recovery': True,
         'get_device_id': 'image.device.index if hasattr(image, "device") and hasattr(image.device, "index") else 0',
+        # OOM detection
+        'oom_exception_types': ['{mod}.cuda.OutOfMemoryError'],
+        'oom_string_patterns': ['out of memory', 'cuda_error_out_of_memory'],
+        # OOM cache clearing (with device context)
+        'oom_clear_cache': '{mod}.cuda.empty_cache(); {mod}.cuda.synchronize()',
     },
     MemoryType.TENSORFLOW: {
         'import_name': 'tensorflow',
@@ -54,6 +68,11 @@ _FRAMEWORK_OPS = {
         'cleanup_ops': 'import gc; gc.collect()',  # TensorFlow doesn't have explicit cleanup
         'has_oom_recovery': True,
         'get_device_id': '0',  # TensorFlow uses device strings, default to GPU:0
+        # OOM detection
+        'oom_exception_types': ['{mod}.errors.ResourceExhaustedError', '{mod}.errors.InvalidArgumentError'],
+        'oom_string_patterns': ['out of memory', 'resource_exhausted'],
+        # OOM cache clearing
+        'oom_clear_cache': 'import gc; gc.collect()',
     },
     MemoryType.JAX: {
         'import_name': 'jax',
@@ -65,6 +84,11 @@ _FRAMEWORK_OPS = {
         'cleanup_ops': 'import gc; gc.collect(); {mod}.clear_caches()',
         'has_oom_recovery': True,
         'get_device_id': '0',  # JAX uses device objects, default to first GPU
+        # OOM detection
+        'oom_exception_types': [],  # JAX doesn't have specific OOM exception types
+        'oom_string_patterns': ['out of memory', 'oom when allocating', 'allocation failure'],
+        # OOM cache clearing
+        'oom_clear_cache': 'import gc; gc.collect(); {mod}.clear_caches()',
     },
     MemoryType.PYCLESPERANTO: {
         'import_name': 'pyclesperanto',
@@ -76,6 +100,11 @@ _FRAMEWORK_OPS = {
         'cleanup_ops': 'import gc; gc.collect()',  # OpenCL manages memory automatically
         'has_oom_recovery': True,
         'get_device_id': '0',  # pyclesperanto uses global device selection
+        # OOM detection
+        'oom_exception_types': [],  # OpenCL doesn't expose specific exception types
+        'oom_string_patterns': ['cl_mem_object_allocation_failure', 'cl_out_of_resources', 'out of memory'],
+        # OOM cache clearing
+        'oom_clear_cache': 'import gc; gc.collect()',
     },
 }
 
