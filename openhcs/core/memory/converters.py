@@ -3,11 +3,13 @@
 from typing import Any
 import numpy as np
 from openhcs.constants.constants import MemoryType
+from openhcs.core.memory.conversion_helpers import _CONVERTERS
+from openhcs.core.memory.framework_config import _FRAMEWORK_CONFIG
 
 
 def convert_memory(data: Any, source_type: str, target_type: str, gpu_id: int) -> Any:
     """
-    Convert data between memory types.
+    Convert data between memory types using the unified converter infrastructure.
 
     Args:
         data: The data to convert
@@ -23,12 +25,14 @@ def convert_memory(data: Any, source_type: str, target_type: str, gpu_id: int) -
         MemoryConversionError: If conversion fails
     """
     source_enum = MemoryType(source_type)
-    return getattr(source_enum, f"to_{target_type}")(data, gpu_id)
+    converter = _CONVERTERS[source_enum]
+    method = getattr(converter, f"to_{target_type}")
+    return method(data, gpu_id)
 
 
 def detect_memory_type(data: Any) -> str:
     """
-    Detect the memory type of data.
+    Detect the memory type of data using framework config.
 
     Args:
         data: The data to detect
@@ -39,28 +43,17 @@ def detect_memory_type(data: Any) -> str:
     Raises:
         ValueError: If memory type cannot be detected
     """
-    # NumPy
+    # NumPy special case (most common, check first)
     if isinstance(data, np.ndarray):
         return MemoryType.NUMPY.value
 
-    # CuPy
-    if type(data).__module__.startswith('cupy'):
-        return MemoryType.CUPY.value
+    # Check all frameworks using their module names from config
+    module_name = type(data).__module__
 
-    # PyTorch
-    if type(data).__module__.startswith('torch'):
-        return MemoryType.TORCH.value
+    for mem_type, config in _FRAMEWORK_CONFIG.items():
+        import_name = config['import_name']
+        # Check if module name starts with or contains the import name
+        if module_name.startswith(import_name) or import_name in module_name:
+            return mem_type.value
 
-    # TensorFlow
-    if 'tensorflow' in type(data).__module__:
-        return MemoryType.TENSORFLOW.value
-
-    # JAX
-    if type(data).__module__.startswith('jax'):
-        return MemoryType.JAX.value
-
-    # pyclesperanto
-    if 'pyclesperanto' in type(data).__module__:
-        return MemoryType.PYCLESPERANTO.value
-
-    raise ValueError(f"Unknown memory type for {type(data)}")
+    raise ValueError(f"Unknown memory type for {type(data)} (module: {module_name})")
