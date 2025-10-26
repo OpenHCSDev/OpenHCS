@@ -268,27 +268,27 @@ def _create_gpu_wrapper(func, mem_type: MemoryType, oom_recovery: bool):
             if gpu_available:
                 # Get thread-local context
                 ctx = _get_thread_gpu_context()
-                
+
                 # Get stream if framework supports it
                 stream = None
                 if mem_type == MemoryType.CUPY:
                     stream = ctx.get_cupy_stream()
                 elif mem_type == MemoryType.TORCH:
                     stream = ctx.get_torch_stream()
-                
-                # Execute with stream context and OOM recovery
-                if stream is not None:
-                    with stream:
-                        if oom_recovery and ops['has_oom_recovery']:
-                            return _execute_with_oom_recovery(func, *args, **kwargs)
-                        else:
+
+                # Define execution function that captures args/kwargs
+                def execute_with_stream():
+                    if stream is not None:
+                        with stream:
                             return func(*args, **kwargs)
-                else:
-                    # No stream support, just execute with OOM recovery if enabled
-                    if oom_recovery and ops['has_oom_recovery']:
-                        return _execute_with_oom_recovery(func, *args, **kwargs)
                     else:
                         return func(*args, **kwargs)
+
+                # Execute with OOM recovery if enabled
+                if oom_recovery and ops['has_oom_recovery']:
+                    return _execute_with_oom_recovery(execute_with_stream, mem_type.value)
+                else:
+                    return execute_with_stream()
         
         # CPU fallback or framework not available
         return func(*args, **kwargs)
