@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 # Decorator for passthrough to disk backend
-def passthrough_to_disk(*extensions: str):
+def passthrough_to_disk(*extensions: str, ensure_parent_dir: bool = False):
     """
     Decorator to automatically passthrough certain file types to disk backend.
 
@@ -33,9 +33,10 @@ def passthrough_to_disk(*extensions: str):
 
     Args:
         *extensions: File extensions to passthrough (e.g., '.json', '.csv', '.txt')
+        ensure_parent_dir: If True, ensure parent directory exists before calling disk backend (for save operations)
 
     Usage:
-        @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip')
+        @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True)
         def save(self, data, output_path, **kwargs):
             # Zarr-specific save logic here
             ...
@@ -59,6 +60,12 @@ def passthrough_to_disk(*extensions: str):
                 from openhcs.constants.constants import Backend
                 from openhcs.io.backend_registry import get_backend_instance
                 disk_backend = get_backend_instance(Backend.DISK.value)
+
+                # Ensure parent directory exists if requested (for save operations)
+                if ensure_parent_dir:
+                    parent_dir = Path(path_arg).parent
+                    disk_backend.ensure_directory(parent_dir)
+
                 # Call the same method on disk backend
                 return getattr(disk_backend, method.__name__)(*args, **kwargs)
 
@@ -263,7 +270,7 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         store = zarr.DirectoryStore(str(store_path), dimension_separator='/')
         return store, relative_key
 
-    @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip')
+    @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True)
     def save(self, data: Any, output_path: Union[str, Path], **kwargs):
         """
         Save data to Zarr at the given output_path.
