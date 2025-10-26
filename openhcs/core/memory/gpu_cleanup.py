@@ -22,27 +22,13 @@ logger = logging.getLogger(__name__)
 if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
     # Subprocess runner mode - skip GPU imports
     torch = None
-    cupy = None
-    tensorflow = None
-    jax = None
-    pyclesperanto = None
     logger.info("Subprocess runner mode - skipping GPU library imports in gpu_cleanup")
 else:
-    # Normal mode - import GPU frameworks as lazy dependencies
-    from openhcs.core.lazy_gpu_imports import torch, cupy, tensorflow, jax, pyclesperanto
+    # Normal mode - import torch for VRAM logging
+    from openhcs.core.lazy_gpu_imports import torch
 
 
-def is_gpu_memory_type(memory_type: str) -> bool:
-    """
-    Check if a memory type is a GPU memory type.
 
-    Args:
-        memory_type: Memory type string
-
-    Returns:
-        True if it's a GPU memory type, False otherwise
-    """
-    return memory_type in VALID_GPU_MEMORY_TYPES
 
 
 def _create_cleanup_function(mem_type: MemoryType):
@@ -154,7 +140,11 @@ def cleanup_all_gpu_frameworks(device_id: Optional[int] = None) -> None:
 
 def log_gpu_memory_usage(context: str = "") -> None:
     """
-    Log GPU memory usage with a specific context for tracking.
+    Log GPU memory usage for PyTorch (primary framework for VRAM tracking).
+
+    This is a lightweight logging function used by orchestrator and function_step
+    for debugging VRAM usage. Only logs PyTorch memory since that's the primary
+    GPU framework used in OpenHCS.
 
     Args:
         context: Description of when/where this memory check is happening
@@ -162,7 +152,7 @@ def log_gpu_memory_usage(context: str = "") -> None:
     context_str = f" ({context})" if context else ""
 
     if torch is not None:
-        try:  # Keep try-except for runtime CUDA availability check
+        try:
             if torch.cuda.is_available():
                 for i in range(torch.cuda.device_count()):
                     allocated = torch.cuda.memory_allocated(i) / 1024**3
@@ -175,85 +165,9 @@ def log_gpu_memory_usage(context: str = "") -> None:
             logger.warning(f"🔍 VRAM{context_str}: Error checking PyTorch memory - {e}")
 
 
-def check_gpu_memory_usage() -> dict:
-    """
-    Check GPU memory usage for all available frameworks.
-    
-    Returns:
-        Dictionary mapping framework names to memory usage info
-    """
-    memory_info = {}
-    
-    # PyTorch
-    if torch is not None and hasattr(torch, 'cuda') and torch.cuda.is_available():
-        try:
-            device_count = torch.cuda.device_count()
-            memory_info['torch'] = {
-                'device_count': device_count,
-                'devices': []
-            }
-            for i in range(device_count):
-                allocated = torch.cuda.memory_allocated(i) / 1024**3  # GB
-                reserved = torch.cuda.memory_reserved(i) / 1024**3  # GB
-                memory_info['torch']['devices'].append({
-                    'device_id': i,
-                    'allocated_gb': allocated,
-                    'reserved_gb': reserved
-                })
-        except Exception as e:
-            logger.warning(f"Failed to get PyTorch memory info: {e}")
-    
-    # CuPy
-    if cupy is not None and hasattr(cupy, 'cuda'):
-        try:
-            device_count = cupy.cuda.runtime.getDeviceCount()
-            memory_info['cupy'] = {
-                'device_count': device_count,
-                'devices': []
-            }
-            for i in range(device_count):
-                with cupy.cuda.Device(i):
-                    pool = cupy.get_default_memory_pool()
-                    used = pool.used_bytes() / 1024**3  # GB
-                    total = pool.total_bytes() / 1024**3  # GB
-                    memory_info['cupy']['devices'].append({
-                        'device_id': i,
-                        'used_gb': used,
-                        'total_gb': total
-                    })
-        except Exception as e:
-            logger.warning(f"Failed to get CuPy memory info: {e}")
-    
-    # TensorFlow
-    if tensorflow is not None:
-        try:
-            gpus = tensorflow.config.list_physical_devices('GPU')
-            memory_info['tensorflow'] = {
-                'device_count': len(gpus),
-                'devices': [{'device_id': i, 'name': gpu.name} for i, gpu in enumerate(gpus)]
-            }
-        except Exception as e:
-            logger.warning(f"Failed to get TensorFlow memory info: {e}")
-    
-    # JAX
-    if jax is not None:
-        try:
-            devices = [d for d in jax.devices() if d.platform == 'gpu']
-            memory_info['jax'] = {
-                'device_count': len(devices),
-                'devices': [{'device_id': i, 'platform': d.platform} for i, d in enumerate(devices)]
-            }
-        except Exception as e:
-            logger.warning(f"Failed to get JAX memory info: {e}")
-    
-    return memory_info
-
-
 # Export all cleanup functions and utilities
 __all__ = [
-    'is_gpu_memory_type',
     'cleanup_all_gpu_frameworks',
-    'check_gpu_memory_usage',
     'log_gpu_memory_usage',
     'MEMORY_TYPE_CLEANUP_REGISTRY',
     'cleanup_numpy_gpu',
