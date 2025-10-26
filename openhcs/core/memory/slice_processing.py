@@ -5,7 +5,8 @@ This module provides a single implementation of slice-by-slice processing
 that works for all memory types, eliminating duplication across dtype wrappers.
 """
 
-from openhcs.core.memory.stack_utils import unstack_slices, stack_slices, _detect_memory_type
+from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
+from openhcs.core.memory.converters import detect_memory_type
 
 
 def process_slices(image, func, args, kwargs):
@@ -30,7 +31,7 @@ def process_slices(image, func, args, kwargs):
         if func returns tuples
     """
     # Detect memory type and use proper OpenHCS utilities
-    memory_type = _detect_memory_type(image)
+    memory_type = detect_memory_type(image)
     gpu_id = 0  # Default GPU ID for slice processing
 
     # Unstack 3D array into 2D slices
