@@ -71,103 +71,65 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         self._register_formats()
 
     def _register_formats(self):
-        formats = []
+        """
+        Register all file format handlers.
 
-        # NumPy
-        formats.append((
-            FileFormat.NUMPY.value,
-            np.save,
-            np.load
-        ))
+        Uses enum-driven registration to eliminate boilerplate.
+        Complex formats (CSV, JSON, TIFF, ROI.ZIP, TEXT) use custom handlers.
+        Simple formats (NumPy, Torch, CuPy, JAX, TensorFlow) use library save/load directly.
+        """
+        # Format handler metadata: (FileFormat enum, module_check, writer, reader)
+        # None for writer/reader means use the format's library save/load directly
+        format_handlers = [
+            # Simple formats - use library save/load directly
+            (FileFormat.NUMPY, True, np.save, np.load),
+            (FileFormat.TORCH, torch, torch.save if torch else None, torch.load if torch else None),
+            (FileFormat.JAX, (jax and jnp), self._jax_writer, self._jax_reader),
+            (FileFormat.CUPY, cupy, self._cupy_writer, self._cupy_reader),
+            (FileFormat.TENSORFLOW, tf, self._tensorflow_writer, self._tensorflow_reader),
 
-        if torch:
-            formats.append((
-                FileFormat.TORCH.value,
-                torch.save,
-                torch.load
-            ))
+            # Complex formats - use custom handlers
+            (FileFormat.TIFF, tifffile, self._tiff_writer, self._tiff_reader),
+            (FileFormat.TEXT, True, self._text_writer, self._text_reader),
+            (FileFormat.JSON, True, self._json_writer, self._json_reader),
+            (FileFormat.CSV, True, self._csv_writer, self._csv_reader),
+            (FileFormat.ROI, True, self._roi_zip_writer, self._roi_zip_reader),
+        ]
 
-        if jax and jnp:
-            formats.append((
-                FileFormat.JAX.value,
-                self._jax_writer,
-                self._jax_reader
-            ))
+        # Register all available formats
+        for file_format, module_available, writer, reader in format_handlers:
+            if not module_available or writer is None or reader is None:
+                continue
 
-        # CuPy
-        if cupy:
-            formats.append((
-                FileFormat.CUPY.value,
-                self._cupy_writer,
-                self._cupy_reader
-            ))
-
-        # TensorFlow
-        if tf:
-            formats.append((
-                FileFormat.TENSORFLOW.value,
-                self._tensorflow_writer,
-                self._tensorflow_reader
-            ))
-
-        # TIFF
-        if tifffile:
-            formats.append((
-                FileFormat.TIFF.value,
-                self._tiff_writer,
-                self._tiff_reader
-            ))
-
-        # Plain Text
-        formats.append((
-            FileFormat.TEXT.value,
-            self._text_writer,
-            self._text_reader
-        ))
-
-        # JSON
-        formats.append((
-            FileFormat.JSON.value,
-            self._json_writer,
-            self._json_reader
-        ))
-
-        # CSV
-        formats.append((
-            FileFormat.CSV.value,
-            self._csv_writer,
-            self._csv_reader
-        ))
-
-        # ROI.ZIP (double extension for ImageJ ROI archives)
-        formats.append((
-            ['.roi.zip'],
-            self._roi_zip_writer,
-            self._roi_zip_reader
-        ))
-
-        # Register everything
-        for extensions, writer, reader in formats:
-            for ext in extensions:
-             self.format_registry.register(ext.lower(), writer, reader)
+            # Register all extensions for this format
+            for ext in file_format.value:
+                self.format_registry.register(ext.lower(), writer, reader)
 
     # Format-specific writer/reader functions (pickleable)
+    # Only needed for formats that require special handling beyond library save/load
+
     def _jax_writer(self, path, data, **kwargs):
+        """JAX arrays must be moved to CPU before saving."""
         np.save(path, jax.device_get(data))
 
     def _jax_reader(self, path):
+        """Load NumPy array and convert to JAX."""
         return jnp.array(np.load(path))
 
     def _cupy_writer(self, path, data, **kwargs):
+        """CuPy has its own save format."""
         cupy.save(path, data)
 
     def _cupy_reader(self, path):
+        """Load CuPy array from disk."""
         return cupy.load(path)
 
     def _tensorflow_writer(self, path, data, **kwargs):
+        """TensorFlow uses tensor serialization."""
         tf.io.write_file(path.as_posix(), tf.io.serialize_tensor(data))
 
     def _tensorflow_reader(self, path):
+        """Load and deserialize TensorFlow tensor."""
         return tf.io.parse_tensor(tf.io.read_file(path.as_posix()), out_type=tf.dtypes.float32)
 
     def _tiff_writer(self, path, data, **kwargs):
@@ -383,8 +345,7 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
                     data=data,
                     source_type=source_type,
                     target_type=MemoryType.NUMPY.value,
-                    gpu_id=0,  # Placeholder since numpy doesn't use GPU ID
-                    allow_cpu_roundtrip=True
+                    gpu_id=0  # Placeholder since numpy doesn't use GPU ID
                 )
                 cpu_data_list.append(numpy_data)
 

@@ -267,6 +267,26 @@ class MemoryType(Enum):
     JAX = "jax"
     PYCLESPERANTO = "pyclesperanto"
 
+    @property
+    def converter(self):
+        """Get the converter instance for this memory type."""
+        from openhcs.core.memory.conversion_helpers import _CONVERTERS
+        return _CONVERTERS[self]
+
+# Auto-generate to_X() methods on enum
+def _add_conversion_methods():
+    """Add to_X() conversion methods to MemoryType enum."""
+    for target_type in MemoryType:
+        method_name = f"to_{target_type.value}"
+        def make_method(target):
+            def method(self, data, gpu_id):
+                return getattr(self.converter, f"to_{target.value}")(data, gpu_id)
+            return method
+        setattr(MemoryType, method_name, make_method(target_type))
+
+_add_conversion_methods()
+
+
 CPU_MEMORY_TYPES: Set[MemoryType] = {MemoryType.NUMPY}
 GPU_MEMORY_TYPES: Set[MemoryType] = {
     MemoryType.CUPY,

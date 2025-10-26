@@ -18,7 +18,7 @@ from openhcs.constants.constants import (GPU_MEMORY_TYPES, MEMORY_TYPE_CUPY,
                                             MEMORY_TYPE_JAX, MEMORY_TYPE_NUMPY,
                                             MEMORY_TYPE_PYCLESPERANTO, MEMORY_TYPE_TENSORFLOW,
                                             MEMORY_TYPE_TORCH, MemoryType)
-from openhcs.core.memory import MemoryWrapper
+from openhcs.core.memory.converters import detect_memory_type
 from openhcs.core.utils import optional_import
 
 logger = logging.getLogger(__name__)
@@ -79,42 +79,8 @@ def _detect_memory_type(data: Any) -> str:
     Raises:
         ValueError: If the memory type cannot be detected
     """
-    # Check if it's a MemoryWrapper
-    if isinstance(data, MemoryWrapper):
-        return data.memory_type
-
-    # Check if it's a numpy array
-    if isinstance(data, np.ndarray):
-        return MemoryType.NUMPY.value
-
-    # Check if it's a cupy array
-    cp = optional_import("cupy")
-    if cp is not None and isinstance(data, cp.ndarray):
-        return MemoryType.CUPY.value
-
-    # Check if it's a torch tensor
-    torch = optional_import("torch")
-    if torch is not None and isinstance(data, torch.Tensor):
-        return MemoryType.TORCH.value
-
-    # Check if it's a tensorflow tensor
-    tf = optional_import("tensorflow")
-    if tf is not None and isinstance(data, tf.Tensor):
-        return MemoryType.TENSORFLOW.value
-
-    # Check if it's a JAX array
-    jax = optional_import("jax")
-    jnp = optional_import("jax.numpy") if jax is not None else None
-    if jnp is not None and isinstance(data, jnp.ndarray):
-        return MemoryType.JAX.value
-
-    # Check if it's a pyclesperanto array
-    cle = optional_import("pyclesperanto")
-    if cle is not None and hasattr(cle, 'Array') and isinstance(data, cle.Array):
-        return MemoryType.PYCLESPERANTO.value
-
-    # Fail loudly if we can't detect the type
-    raise ValueError(f"Could not detect memory type of {type(data)}")
+    # Use the centralized detect_memory_type from converters
+    return detect_memory_type(data)
 
 
 def _enforce_gpu_device_requirements(memory_type: str, gpu_id: int) -> None:
@@ -188,8 +154,7 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
                 data=first_slice,
                 source_type=first_slice_source_type,
                 target_type=memory_type,
-                gpu_id=gpu_id,
-                allow_cpu_roundtrip=True  # Allow CPU roundtrip for numpy conversion
+                gpu_id=gpu_id
             )
             result = np.empty(stack_shape, dtype=sample_converted.dtype)
         else:
@@ -213,8 +178,7 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
             data=first_slice,
             source_type=first_slice_source_type,
             target_type=memory_type,
-            gpu_id=gpu_id,
-            allow_cpu_roundtrip=False
+            gpu_id=gpu_id
         )
 
         result = torch.empty(stack_shape, dtype=sample_converted.dtype, device=sample_converted.device)
@@ -266,8 +230,7 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
                     data=slice_data,
                     source_type=source_type,
                     target_type=memory_type,
-                    gpu_id=gpu_id,
-                    allow_cpu_roundtrip=False
+                    gpu_id=gpu_id
                 )
 
             # Ensure slice is 2D, expand to 3D single slice if needed
@@ -306,7 +269,7 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
             if source_type != memory_type:
                 conversion_count += 1
 
-            # Direct conversion without MemoryWrapper overhead
+            # Direct conversion
             if source_type == memory_type:
                 converted_data = slice_data
             else:
@@ -315,8 +278,7 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
                     data=slice_data,
                     source_type=source_type,
                     target_type=memory_type,
-                    gpu_id=gpu_id,
-                    allow_cpu_roundtrip=False
+                    gpu_id=gpu_id
                 )
 
             # Assign converted slice directly to pre-allocated result array
@@ -368,24 +330,22 @@ def unstack_slices(array: Any, memory_type: str, gpu_id: int, validate_slices: b
     # Check GPU requirements
     _enforce_gpu_device_requirements(memory_type, gpu_id)
 
-    # Convert to target memory type using direct convert_memory call
-    # Bypass MemoryWrapper to eliminate object creation overhead
-    source_type = input_type  # Reuse already detected type from line 286
+    # Convert to target memory type
+    source_type = input_type  # Reuse already detected type
 
-    # Direct conversion without MemoryWrapper overhead
+    # Direct conversion
     if source_type == memory_type:
         # No conversion needed - silent success to reduce log pollution
         pass
     else:
-        # Use direct convert_memory call and log the conversion
+        # Convert and log the conversion
         from openhcs.core.memory.converters import convert_memory
         logger.debug(f"🔄 UNSTACK_SLICES: Converting array - {source_type} → {memory_type}")
         array = convert_memory(
             data=array,
             source_type=source_type,
             target_type=memory_type,
-            gpu_id=gpu_id,
-            allow_cpu_roundtrip=False
+            gpu_id=gpu_id
         )
 
     # Extract slices along axis 0 (already in the target memory type)
