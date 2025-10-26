@@ -127,7 +127,10 @@ def _make_not_implemented(mem_type_value, method_name):
 
 def _make_lambda_with_name(expr_str, mem_type, method_name):
     """Create a lambda from expression string and add proper __name__ for debugging."""
-    lambda_func = eval(f'lambda self, data, gpu_id: {expr_str.format(mod=f"_ensure_module(\"{mem_type.value}\")")}')
+    # Pre-compute the module string to avoid nested f-strings with backslashes (Python 3.11 limitation)
+    module_str = f'_ensure_module("{mem_type.value}")'
+    lambda_expr = f'lambda self, data, gpu_id: {expr_str.format(mod=module_str)}'
+    lambda_func = eval(lambda_expr)
     lambda_func.__name__ = method_name
     lambda_func.__qualname__ = f'{mem_type.value.capitalize()}Converter.{method_name}'
     return lambda_func
