@@ -151,6 +151,29 @@ def cleanup_all_gpu_frameworks(device_id: Optional[int] = None) -> None:
     logger.debug("🔥 GPU CLEANUP: Completed cleanup for all GPU frameworks")
 
 
+def log_gpu_memory_usage(context: str = "") -> None:
+    """
+    Log GPU memory usage with a specific context for tracking.
+
+    Args:
+        context: Description of when/where this memory check is happening
+    """
+    context_str = f" ({context})" if context else ""
+
+    if torch is not None:
+        try:  # Keep try-except for runtime CUDA availability check
+            if torch.cuda.is_available():
+                for i in range(torch.cuda.device_count()):
+                    allocated = torch.cuda.memory_allocated(i) / 1024**3
+                    reserved = torch.cuda.memory_reserved(i) / 1024**3
+                    free_memory = torch.cuda.get_device_properties(i).total_memory / 1024**3 - reserved
+                    logger.debug(f"🔍 VRAM{context_str} GPU {i}: {allocated:.2f}GB alloc, {reserved:.2f}GB reserved, {free_memory:.2f}GB free")
+            else:
+                logger.debug(f"🔍 VRAM{context_str}: No CUDA available")
+        except Exception as e:
+            logger.warning(f"🔍 VRAM{context_str}: Error checking PyTorch memory - {e}")
+
+
 def check_gpu_memory_usage() -> dict:
     """
     Check GPU memory usage for all available frameworks.
@@ -230,6 +253,7 @@ __all__ = [
     'is_gpu_memory_type',
     'cleanup_all_gpu_frameworks',
     'check_gpu_memory_usage',
+    'log_gpu_memory_usage',
     'MEMORY_TYPE_CLEANUP_REGISTRY',
     'cleanup_numpy_gpu',
     'cleanup_cupy_gpu',
