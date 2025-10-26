@@ -10,6 +10,7 @@ Pattern follows PR #38: pure data → eval() → single generic function.
 
 import numpy as np
 from openhcs.constants.constants import MemoryType
+from openhcs.core.memory.framework_config import _FRAMEWORK_CONFIG
 from openhcs.core.utils import optional_import
 
 
@@ -23,54 +24,13 @@ _SCALING_RANGES = {
 }
 
 
-# Pure data - framework-specific operations as strings
-_FRAMEWORK_OPS = {
-    MemoryType.NUMPY: {
-        'min': 'result.min()',
-        'max': 'result.max()',
-        'astype': 'result.astype(target_dtype)',
-        'check_float': 'np.issubdtype(result.dtype, np.floating)',
-        'check_int': 'target_dtype in [np.uint8, np.uint16, np.uint32, np.int8, np.int16, np.int32]',
-    },
-    MemoryType.CUPY: {
-        'min': 'mod.min(result)',
-        'max': 'mod.max(result)',
-        'astype': 'result.astype(target_dtype)',
-        'check_float': 'mod.issubdtype(result.dtype, mod.floating)',
-        'check_int': 'not mod.issubdtype(target_dtype, mod.floating)',
-    },
-    MemoryType.TORCH: {
-        'min': 'result.min()',
-        'max': 'result.max()',
-        'astype': 'result.to(target_dtype_mapped)',
-        'check_float': 'result.dtype in [mod.float16, mod.float32, mod.float64]',
-        'check_int': 'target_dtype_mapped in [mod.uint8, mod.int8, mod.int16, mod.int32, mod.int64]',
-        'needs_dtype_map': True,
-    },
-    MemoryType.TENSORFLOW: {
-        'min': 'mod.reduce_min(result)',
-        'max': 'mod.reduce_max(result)',
-        'astype': 'mod.cast(result, target_dtype_mapped)',
-        'check_float': 'result.dtype in [mod.float16, mod.float32, mod.float64]',
-        'check_int': 'target_dtype_mapped in [mod.uint8, mod.int8, mod.int16, mod.int32, mod.int64]',
-        'needs_dtype_map': True,
-    },
-    MemoryType.JAX: {
-        'min': 'jnp.min(result)',
-        'max': 'jnp.max(result)',
-        'astype': 'result.astype(target_dtype_mapped)',
-        'check_float': 'result.dtype in [jnp.float16, jnp.float32, jnp.float64]',
-        'check_int': 'target_dtype_mapped in [jnp.uint8, jnp.int8, jnp.int16, jnp.int32, jnp.int64]',
-        'needs_dtype_map': True,
-        'extra_import': 'jax.numpy',
-    },
-    MemoryType.PYCLESPERANTO: None,  # Custom implementation
-}
+# NOTE: Framework-specific scaling operations now defined in framework_config.py
+# This eliminates the scattered _FRAMEWORK_OPS dict
 
 
 def _scale_generic(result, target_dtype, mem_type: MemoryType):
     """
-    Generic scaling function that works for all memory types using eval().
+    Generic scaling function that works for all memory types using framework config.
 
     This single function replaces 6 nearly-identical scaling functions.
     """
@@ -78,7 +38,8 @@ def _scale_generic(result, target_dtype, mem_type: MemoryType):
     if mem_type == MemoryType.PYCLESPERANTO:
         return _scale_pyclesperanto(result, target_dtype)
 
-    ops = _FRAMEWORK_OPS[mem_type]
+    config = _FRAMEWORK_CONFIG[mem_type]
+    ops = config['scaling_ops']
     mod = optional_import(mem_type.value)  # noqa: F841 (used in eval)
     if mod is None:
         return result

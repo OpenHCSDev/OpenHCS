@@ -14,7 +14,7 @@ import os
 from typing import Optional
 from openhcs.core.utils import optional_import
 from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES, MemoryType
-from openhcs.core.memory.framework_ops import _FRAMEWORK_OPS
+from openhcs.core.memory.framework_config import _FRAMEWORK_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +48,15 @@ def is_gpu_memory_type(memory_type: str) -> bool:
 def _create_cleanup_function(mem_type: MemoryType):
     """
     Factory function that creates a cleanup function for a specific memory type.
-    
+
     This single factory replaces 6 nearly-identical cleanup functions.
     """
-    ops = _FRAMEWORK_OPS[mem_type]
-    framework_name = ops['import_name']
-    display_name = ops['display_name']
+    config = _FRAMEWORK_CONFIG[mem_type]
+    framework_name = config['import_name']
+    display_name = config['display_name']
     
     # CPU memory type - no cleanup needed
-    if ops['cleanup_ops'] is None:
+    if config['cleanup_ops'] is None:
         def cleanup(device_id: Optional[int] = None) -> None:
             """No-op cleanup for CPU memory type."""
             logger.debug(f"🔥 GPU CLEANUP: No-op for {display_name} (CPU memory type)")
@@ -81,30 +81,30 @@ def _create_cleanup_function(mem_type: MemoryType):
         
         try:
             # Check GPU availability
-            gpu_check_expr = ops['gpu_check'].format(mod=framework_name)
+            gpu_check_expr = config['gpu_check'].format(mod=framework_name)
             try:
                 gpu_available = eval(gpu_check_expr, {framework_name: framework})
             except:
                 gpu_available = False
-            
+
             if not gpu_available:
                 return
-            
+
             # Execute cleanup operations
-            if device_id is not None and ops['device_context'] is not None:
+            if device_id is not None and config['device_context'] is not None:
                 # Clean specific device with context
-                device_ctx_expr = ops['device_context'].format(device_id=device_id, mod=framework_name)
+                device_ctx_expr = config['device_context'].format(device_id=device_id, mod=framework_name)
                 device_ctx = eval(device_ctx_expr, {framework_name: framework})
-                
+
                 with device_ctx:
                     # Execute cleanup operations
-                    cleanup_expr = ops['cleanup_ops'].format(mod=framework_name)
+                    cleanup_expr = config['cleanup_ops'].format(mod=framework_name)
                     exec(cleanup_expr, {framework_name: framework, 'gc': gc})
-                
+
                 logger.debug(f"🔥 GPU CLEANUP: Cleared {display_name} for device {device_id}")
             else:
                 # Clean all devices (no device context)
-                cleanup_expr = ops['cleanup_ops'].format(mod=framework_name)
+                cleanup_expr = config['cleanup_ops'].format(mod=framework_name)
                 exec(cleanup_expr, {framework_name: framework, 'gc': gc})
                 logger.debug(f"🔥 GPU CLEANUP: Cleared {display_name} for all devices")
         
@@ -126,7 +126,7 @@ for mem_type in MemoryType:
 
 # Auto-generate cleanup registry
 MEMORY_TYPE_CLEANUP_REGISTRY = {
-    mem_type.value: globals()[f"cleanup_{_FRAMEWORK_OPS[mem_type]['import_name']}_gpu"]
+    mem_type.value: globals()[f"cleanup_{_FRAMEWORK_CONFIG[mem_type]['import_name']}_gpu"]
     for mem_type in MemoryType
 }
 
@@ -144,8 +144,8 @@ def cleanup_all_gpu_frameworks(device_id: Optional[int] = None) -> None:
     logger.debug(f"🔥 GPU CLEANUP: Starting cleanup for all GPU frameworks (device_id={device_id})")
 
     # Only cleanup GPU memory types (those with cleanup operations)
-    for mem_type, ops in _FRAMEWORK_OPS.items():
-        if ops['cleanup_ops'] is not None:
+    for mem_type, config in _FRAMEWORK_CONFIG.items():
+        if config['cleanup_ops'] is not None:
             cleanup_func = MEMORY_TYPE_CLEANUP_REGISTRY[mem_type.value]
             cleanup_func(device_id)
 
