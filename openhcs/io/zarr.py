@@ -24,34 +24,52 @@ logger = logging.getLogger(__name__)
 
 
 # Decorator for passthrough to disk backend
-def passthrough_to_disk(*extensions: str, ensure_parent_dir: bool = False, path_arg_index: int = 0):
+def passthrough_to_disk(*extensions: str, ensure_parent_dir: bool = False):
     """
     Decorator to automatically passthrough certain file types to disk backend.
 
     Zarr only supports array data, so non-array files (JSON, CSV, TXT, ROI.ZIP, etc.)
     are automatically delegated to the disk backend.
 
+    Uses introspection to automatically find the path parameter (any parameter with 'path' in its name).
+
     Args:
         *extensions: File extensions to passthrough (e.g., '.json', '.csv', '.txt')
         ensure_parent_dir: If True, ensure parent directory exists before calling disk backend (for save operations)
-        path_arg_index: Index of the path argument in *args (0 for exists/load, 1 for save)
 
     Usage:
-        @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True, path_arg_index=1)
+        @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True)
         def save(self, data, output_path, **kwargs):
             # Zarr-specific save logic here
             ...
     """
+    import inspect
+
     def decorator(method: Callable) -> Callable:
+        # Use introspection to find the path parameter index at decoration time
+        sig = inspect.signature(method)
+        path_param_index = None
+
+        for i, (param_name, param) in enumerate(sig.parameters.items()):
+            if param_name == 'self':
+                continue
+            # Find first parameter with 'path' in its name
+            if 'path' in param_name.lower():
+                # Adjust for self parameter (subtract 1 since we skip 'self' in args)
+                path_param_index = i - 1
+                break
+
+        if path_param_index is None:
+            raise ValueError(f"No path parameter found in {method.__name__} signature. "
+                           f"Expected a parameter with 'path' in its name.")
+
         @wraps(method)
         def wrapper(self, *args, **kwargs):
-            # Extract path from args at the specified index
-            # For save: args = (data, output_path, ...) -> path_arg_index=1
-            # For exists/load: args = (file_path, ...) -> path_arg_index=0
+            # Extract path from args at the discovered index
             path_arg = None
 
-            if len(args) > path_arg_index:
-                arg = args[path_arg_index]
+            if len(args) > path_param_index:
+                arg = args[path_param_index]
                 if isinstance(arg, (str, Path)):
                     path_arg = str(arg)
 
@@ -270,7 +288,7 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         store = zarr.DirectoryStore(str(store_path), dimension_separator='/')
         return store, relative_key
 
-    @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True, path_arg_index=1)
+    @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True)
     def save(self, data: Any, output_path: Union[str, Path], **kwargs):
         """
         Save data to Zarr at the given output_path.
