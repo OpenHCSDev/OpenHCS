@@ -60,26 +60,6 @@ def _is_3d(data: Any) -> bool:
     return len(data.shape) == 3
 
 
-def _detect_memory_type(data: Any) -> str:
-    """
-    Detect the memory type of the data.
-
-    STRICT VALIDATION: Fails loudly if the memory type cannot be detected.
-    No automatic fallback to a default memory type.
-
-    Args:
-        data: The data to detect the memory type of
-
-    Returns:
-        The detected memory type
-
-    Raises:
-        ValueError: If the memory type cannot be detected
-    """
-    # Use the centralized detect_memory_type from converters
-    return detect_memory_type(data)
-
-
 def _enforce_gpu_device_requirements(memory_type: str, gpu_id: int) -> None:
     """
     Enforce GPU device requirements.
@@ -156,7 +136,7 @@ def _allocate_stack_array(memory_type: str, stack_shape: tuple, first_slice: Any
 
     # Handle dtype conversion if needed
     if ops['needs_conversion']:
-        first_slice_source_type = _detect_memory_type(first_slice)
+        first_slice_source_type = detect_memory_type(first_slice)
 
         # NumPy: only convert if source is torch
         if mem_type == MemoryType.NUMPY and first_slice_source_type == MemoryType.TORCH.value:
@@ -227,7 +207,7 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
             raise ValueError(f"Slice at index {i} is not a 2D array. All slices must be 2D.")
 
     # Analyze input types for conversion planning (minimal logging)
-    input_types = [_detect_memory_type(slice_data) for slice_data in slices]
+    input_types = [detect_memory_type(slice_data) for slice_data in slices]
     unique_input_types = set(input_types)
     needs_conversion = memory_type not in unique_input_types or len(unique_input_types) > 1
 
@@ -250,7 +230,7 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
         converted_slices = []
 
         for i, slice_data in enumerate(slices):
-            source_type = _detect_memory_type(slice_data)
+            source_type = detect_memory_type(slice_data)
 
             # Track conversions for batch logging
             if source_type != memory_type:
@@ -298,7 +278,7 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
     else:
         # Standard handling for other memory types
         for i, slice_data in enumerate(slices):
-            source_type = _detect_memory_type(slice_data)
+            source_type = detect_memory_type(slice_data)
 
             # Track conversions for batch logging
             if source_type != memory_type:
@@ -354,7 +334,7 @@ def unstack_slices(array: Any, memory_type: str, gpu_id: int, validate_slices: b
         MemoryConversionError: If conversion fails
     """
     # Detect input type and check if conversion is needed
-    input_type = _detect_memory_type(array)
+    input_type = detect_memory_type(array)
     input_shape = getattr(array, 'shape', 'unknown')
     needs_conversion = input_type != memory_type
 
