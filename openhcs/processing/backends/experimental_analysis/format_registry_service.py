@@ -5,11 +5,10 @@ This module provides automatic discovery of microscope format registries
 following OpenHCS generic solution principles.
 """
 
-import pkgutil
-import importlib
 from typing import Dict, List, Optional, Type
 from pathlib import Path
 
+from openhcs.core.registry_discovery import discover_registry_classes_recursive
 from .format_registry import MicroscopeFormatRegistryBase, FormatDetectionError
 
 
@@ -27,47 +26,32 @@ class FormatRegistryService:
     @classmethod
     def _discover_registries(cls) -> Dict[str, Type[MicroscopeFormatRegistryBase]]:
         """
-        Automatically discover all format registry classes.
-        
+        Automatically discover all format registry classes using generic discovery.
+
         Returns:
             Dictionary mapping format names to registry classes
         """
         if cls._registry_cache is not None:
             return cls._registry_cache
-        
-        registries = {}
-        
+
         # Get the package path for experimental_analysis
         import openhcs.processing.backends.experimental_analysis
-        package_path = openhcs.processing.backends.experimental_analysis.__path__
-        
-        # Walk through all modules in the package
-        for importer, modname, ispkg in pkgutil.walk_packages(
-            package_path, 
-            prefix="openhcs.processing.backends.experimental_analysis."
-        ):
-            if ispkg:
-                continue
-                
-            try:
-                module = importlib.import_module(modname)
-                
-                # Find all classes that inherit from MicroscopeFormatRegistryBase
-                for attr_name in dir(module):
-                    attr = getattr(module, attr_name)
-                    
-                    if (isinstance(attr, type) and 
-                        issubclass(attr, MicroscopeFormatRegistryBase) and 
-                        attr is not MicroscopeFormatRegistryBase):
-                        
-                        # Validate that the registry has required class attributes
-                        if hasattr(attr, 'FORMAT_NAME') and attr.FORMAT_NAME:
-                            registries[attr.FORMAT_NAME] = attr
-                            
-            except ImportError:
-                # Skip modules that can't be imported
-                continue
-        
+
+        # Validation function to check for FORMAT_NAME attribute
+        def has_format_name(registry_class: Type) -> bool:
+            return hasattr(registry_class, 'FORMAT_NAME') and registry_class.FORMAT_NAME
+
+        # Discover all registry classes
+        registry_list = discover_registry_classes_recursive(
+            package_path=openhcs.processing.backends.experimental_analysis.__path__,
+            package_prefix="openhcs.processing.backends.experimental_analysis.",
+            base_class=MicroscopeFormatRegistryBase,
+            validation_func=has_format_name
+        )
+
+        # Convert list to dict keyed by FORMAT_NAME
+        registries = {registry_class.FORMAT_NAME: registry_class for registry_class in registry_list}
+
         cls._registry_cache = registries
         return registries
     

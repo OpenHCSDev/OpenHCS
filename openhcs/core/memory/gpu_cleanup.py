@@ -14,7 +14,7 @@ import os
 from typing import Optional
 from openhcs.core.utils import optional_import
 from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES, MemoryType
-from openhcs.core.memory.framework_ops import _FRAMEWORK_OPS, get_all_gpu_memory_types
+from openhcs.core.memory.framework_ops import _FRAMEWORK_OPS
 
 logger = logging.getLogger(__name__)
 
@@ -134,20 +134,21 @@ MEMORY_TYPE_CLEANUP_REGISTRY = {
 def cleanup_all_gpu_frameworks(device_id: Optional[int] = None) -> None:
     """
     Clean up GPU memory for all available frameworks.
-    
+
     This function calls cleanup for all GPU frameworks that are currently loaded.
     It's safe to call even if some frameworks aren't available.
-    
+
     Args:
         device_id: Optional GPU device ID. If None, cleans all devices.
     """
     logger.debug(f"🔥 GPU CLEANUP: Starting cleanup for all GPU frameworks (device_id={device_id})")
-    
-    # Only cleanup GPU memory types
-    for mem_type in get_all_gpu_memory_types():
-        cleanup_func = MEMORY_TYPE_CLEANUP_REGISTRY[mem_type.value]
-        cleanup_func(device_id)
-    
+
+    # Only cleanup GPU memory types (those with cleanup operations)
+    for mem_type, ops in _FRAMEWORK_OPS.items():
+        if ops['cleanup_ops'] is not None:
+            cleanup_func = MEMORY_TYPE_CLEANUP_REGISTRY[mem_type.value]
+            cleanup_func(device_id)
+
     logger.debug("🔥 GPU CLEANUP: Completed cleanup for all GPU frameworks")
 
 

@@ -14,10 +14,7 @@ from typing import Any, List
 
 import numpy as np
 
-from openhcs.constants.constants import (GPU_MEMORY_TYPES, MEMORY_TYPE_CUPY,
-                                            MEMORY_TYPE_JAX, MEMORY_TYPE_NUMPY,
-                                            MEMORY_TYPE_PYCLESPERANTO, MEMORY_TYPE_TENSORFLOW,
-                                            MEMORY_TYPE_TORCH, MemoryType)
+from openhcs.constants.constants import GPU_MEMORY_TYPES, MemoryType
 from openhcs.core.memory.converters import detect_memory_type
 from openhcs.core.utils import optional_import
 
@@ -100,6 +97,106 @@ def _enforce_gpu_device_requirements(memory_type: str, gpu_id: int) -> None:
             raise ValueError(f"Invalid GPU device ID: {gpu_id}. Must be a non-negative integer.")
 
 
+# Pure data - allocation operations for each memory type
+_ALLOCATION_OPS = {
+    MemoryType.NUMPY: {
+        'needs_conversion': True,  # May need to convert torch dtypes
+        'allocate': 'np.empty(stack_shape, dtype=dtype)',
+    },
+    MemoryType.CUPY: {
+        'needs_conversion': False,
+        'allocate': 'cupy.empty(stack_shape, dtype=first_slice.dtype)',
+        'context': 'cupy.cuda.Device(gpu_id)',
+    },
+    MemoryType.TORCH: {
+        'needs_conversion': True,  # Need to convert to get correct torch dtype
+        'allocate': 'torch.empty(stack_shape, dtype=sample_converted.dtype, device=sample_converted.device)',
+    },
+    MemoryType.TENSORFLOW: {
+        'needs_conversion': False,
+        'allocate': 'tf.zeros(stack_shape, dtype=first_slice.dtype)',  # TF doesn't have empty()
+        'context': 'tf.device(f"/device:GPU:{gpu_id}")',
+    },
+    MemoryType.JAX: {
+        'needs_conversion': False,
+        'allocate': 'jnp.empty(stack_shape, dtype=first_slice.dtype)',
+    },
+    MemoryType.PYCLESPERANTO: {
+        'needs_conversion': False,
+        'allocate': None,  # Special case: uses concatenate_along_z
+    },
+}
+
+
+def _allocate_stack_array(memory_type: str, stack_shape: tuple, first_slice: Any, gpu_id: int) -> Any:
+    """
+    Allocate a 3D array for stacking slices using enum dispatch.
+
+    Args:
+        memory_type: The target memory type
+        stack_shape: The shape of the stack (Z, Y, X)
+        first_slice: The first slice (used for dtype inference)
+        gpu_id: The GPU device ID
+
+    Returns:
+        Pre-allocated array or None for pyclesperanto
+    """
+    # Convert string to enum
+    mem_type = MemoryType(memory_type)
+    ops = _ALLOCATION_OPS[mem_type]
+
+    # Special case: pyclesperanto uses concatenate_along_z
+    if ops['allocate'] is None:
+        return None
+
+    # Import the module
+    mod = optional_import(mem_type.value)
+    if mod is None:
+        raise ValueError(f"{mem_type.value} is required for memory type {memory_type}")
+
+    # Handle dtype conversion if needed
+    if ops['needs_conversion']:
+        first_slice_source_type = _detect_memory_type(first_slice)
+
+        # NumPy: only convert if source is torch
+        if mem_type == MemoryType.NUMPY and first_slice_source_type == MemoryType.TORCH.value:
+            from openhcs.core.memory.converters import convert_memory
+            sample_converted = convert_memory(
+                data=first_slice,
+                source_type=first_slice_source_type,
+                target_type=memory_type,
+                gpu_id=gpu_id
+            )
+            dtype = sample_converted.dtype  # noqa: F841 (used in eval)
+        elif mem_type == MemoryType.NUMPY:
+            dtype = first_slice.dtype  # noqa: F841 (used in eval)
+
+        # Torch: always convert to get correct torch dtype
+        elif mem_type == MemoryType.TORCH:
+            from openhcs.core.memory.converters import convert_memory
+            sample_converted = convert_memory(  # noqa: F841 (used in eval)
+                data=first_slice,
+                source_type=first_slice_source_type,
+                target_type=memory_type,
+                gpu_id=gpu_id
+            )
+
+    # Set up local variables for eval
+    np = optional_import("numpy")  # noqa: F841 (used in eval)
+    cupy = mod if mem_type == MemoryType.CUPY else None  # noqa: F841 (used in eval)
+    torch = mod if mem_type == MemoryType.TORCH else None  # noqa: F841 (used in eval)
+    tf = mod if mem_type == MemoryType.TENSORFLOW else None  # noqa: F841 (used in eval)
+    jnp = optional_import("jax.numpy") if mem_type == MemoryType.JAX else None  # noqa: F841 (used in eval)
+
+    # Execute allocation with context if needed
+    if 'context' in ops and ops['context']:
+        context = eval(ops['context'])
+        with context:
+            return eval(ops['allocate'])
+    else:
+        return eval(ops['allocate'])
+
+
 def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
     """
     Stack 2D slices into a 3D array with the specified memory type.
@@ -141,76 +238,14 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
     first_slice = slices[0]
     stack_shape = (len(slices), first_slice.shape[0], first_slice.shape[1])
 
-    # Create pre-allocated result array in target memory type
-    if memory_type == MEMORY_TYPE_NUMPY:
-        import numpy as np
-
-        # Handle torch dtypes by converting a sample slice first
-        first_slice_source_type = _detect_memory_type(first_slice)
-        if first_slice_source_type == MEMORY_TYPE_TORCH:
-            # Convert torch tensor to numpy to get compatible dtype
-            from openhcs.core.memory.converters import convert_memory
-            sample_converted = convert_memory(
-                data=first_slice,
-                source_type=first_slice_source_type,
-                target_type=memory_type,
-                gpu_id=gpu_id
-            )
-            result = np.empty(stack_shape, dtype=sample_converted.dtype)
-        else:
-            # Use dtype directly for non-torch types
-            result = np.empty(stack_shape, dtype=first_slice.dtype)
-    elif memory_type == MEMORY_TYPE_CUPY:
-        cupy = optional_import("cupy")
-        if cupy is None:
-            raise ValueError(f"CuPy is required for memory type {memory_type}")
-        with cupy.cuda.Device(gpu_id):
-            result = cupy.empty(stack_shape, dtype=first_slice.dtype)
-    elif memory_type == MEMORY_TYPE_TORCH:
-        torch = optional_import("torch")
-        if torch is None:
-            raise ValueError(f"PyTorch is required for memory type {memory_type}")
-
-        # Convert first slice to get the correct torch dtype
-        from openhcs.core.memory.converters import convert_memory
-        first_slice_source_type = _detect_memory_type(first_slice)
-        sample_converted = convert_memory(
-            data=first_slice,
-            source_type=first_slice_source_type,
-            target_type=memory_type,
-            gpu_id=gpu_id
-        )
-
-        result = torch.empty(stack_shape, dtype=sample_converted.dtype, device=sample_converted.device)
-    elif memory_type == MEMORY_TYPE_TENSORFLOW:
-        tf = optional_import("tensorflow")
-        if tf is None:
-            raise ValueError(f"TensorFlow is required for memory type {memory_type}")
-        with tf.device(f"/device:GPU:{gpu_id}"):
-            result = tf.zeros(stack_shape, dtype=first_slice.dtype)  # TF doesn't have empty()
-    elif memory_type == MEMORY_TYPE_JAX:
-        jax = optional_import("jax")
-        if jax is None:
-            raise ValueError(f"JAX is required for memory type {memory_type}")
-        jnp = optional_import("jax.numpy")
-        if jnp is None:
-            raise ValueError(f"JAX is required for memory type {memory_type}")
-        result = jnp.empty(stack_shape, dtype=first_slice.dtype)
-    elif memory_type == MEMORY_TYPE_PYCLESPERANTO:
-        cle = optional_import("pyclesperanto")
-        if cle is None:
-            raise ValueError(f"pyclesperanto is required for memory type {memory_type}")
-        # For pyclesperanto, we'll build the result using concatenate_along_z
-        # Don't pre-allocate here, we'll handle it in the loop below
-        result = None
-    else:
-        raise ValueError(f"Unsupported memory type: {memory_type}")
+    # Create pre-allocated result array in target memory type using enum dispatch
+    result = _allocate_stack_array(memory_type, stack_shape, first_slice, gpu_id)
 
     # Convert each slice and assign to result array
     conversion_count = 0
 
     # Special handling for pyclesperanto - build using concatenate_along_z
-    if memory_type == MEMORY_TYPE_PYCLESPERANTO:
+    if memory_type == MemoryType.PYCLESPERANTO.value:
         cle = optional_import("pyclesperanto")
         converted_slices = []
 
@@ -283,7 +318,7 @@ def stack_slices(slices: List[Any], memory_type: str, gpu_id: int) -> Any:
 
             # Assign converted slice directly to pre-allocated result array
             # Handle JAX immutability
-            if memory_type == MEMORY_TYPE_JAX:
+            if memory_type == MemoryType.JAX.value:
                 result = result.at[i].set(converted_data)
             else:
                 result[i] = converted_data

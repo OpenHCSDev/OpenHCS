@@ -27,11 +27,8 @@ import threading
 from typing import Dict, List, Optional
 
 # DEFAULT_NUM_WORKERS removed
-from openhcs.core.memory.gpu_utils import (check_cupy_gpu_available,
-                                               check_tf_gpu_available,
-                                               check_torch_gpu_available,
-                                               check_jax_gpu_available)
-from openhcs.core.lazy_gpu_imports import check_installed_gpu_libraries
+from openhcs.core.lazy_gpu_imports import check_gpu_capability, check_installed_gpu_libraries
+import os
 # Import necessary config classes
 from openhcs.core.config import GlobalPipelineConfig
 
@@ -123,40 +120,20 @@ def _detect_available_gpus() -> List[int]:
     Returns:
         List of available GPU IDs
     """
+    # Skip GPU detection if in subprocess mode
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        return []
+
     available_gpus = set()
 
-    # Check cupy GPUs
-    try:
-        cupy_gpu = check_cupy_gpu_available()
-        if cupy_gpu is not None:
-            available_gpus.add(cupy_gpu)
-    except Exception as e:
-        logger.debug("Cupy GPU detection failed: %s", e)
-
-    # Check torch GPUs
-    try:
-        torch_gpu = check_torch_gpu_available()
-        if torch_gpu is not None:
-            available_gpus.add(torch_gpu)
-    except Exception as e:
-        logger.debug("Torch GPU detection failed: %s", e)
-
-    # Check tensorflow GPUs
-    try:
-        tf_gpu = check_tf_gpu_available()
-        if tf_gpu is not None:
-            available_gpus.add(tf_gpu)
-    except Exception as e:
-        logger.debug("TensorFlow GPU detection failed: %s", e)
-
-    # Check JAX GPUs using lazy detection
-    # JAX is checked via lazy import to defer jax.devices() call until needed
-    try:
-        jax_gpu = check_jax_gpu_available()
-        if jax_gpu is not None:
-            available_gpus.add(jax_gpu)
-    except Exception as e:
-        logger.debug("JAX GPU detection failed: %s", e)
+    # Check each GPU library
+    for lib_name in ['cupy', 'torch', 'tensorflow', 'jax']:
+        try:
+            gpu_id = check_gpu_capability(lib_name)
+            if gpu_id is not None:
+                available_gpus.add(gpu_id)
+        except Exception as e:
+            logger.debug(f"{lib_name.capitalize()} GPU detection failed: {e}")
 
     return sorted(list(available_gpus))
 

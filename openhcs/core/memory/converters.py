@@ -64,36 +64,3 @@ def detect_memory_type(data: Any) -> str:
         return MemoryType.PYCLESPERANTO.value
 
     raise ValueError(f"Unknown memory type for {type(data)}")
-
-
-def validate_memory_type(memory_type: str) -> None:
-    """
-    Validate that a memory type string is supported.
-
-    Args:
-        memory_type: The memory type to validate
-
-    Raises:
-        ValueError: If memory type is not supported
-    """
-    try:
-        MemoryType(memory_type)
-    except ValueError:
-        valid_types = [t.value for t in MemoryType]
-        raise ValueError(f"Invalid memory type '{memory_type}'. Valid types: {valid_types}")
-
-
-def validate_data_compatibility(data: Any, memory_type: str) -> None:
-    """
-    Validate that data matches the declared memory type.
-
-    Args:
-        data: The data to validate
-        memory_type: The declared memory type
-
-    Raises:
-        ValueError: If data doesn't match the declared type
-    """
-    detected = detect_memory_type(data)
-    if detected != memory_type:
-        raise ValueError(f"Data type mismatch: declared '{memory_type}' but detected '{detected}'")
