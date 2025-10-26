@@ -383,8 +383,7 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
                     data=data,
                     source_type=source_type,
                     target_type=MemoryType.NUMPY.value,
-                    gpu_id=0,  # Placeholder since numpy doesn't use GPU ID
-                    allow_cpu_roundtrip=True
+                    gpu_id=0  # Placeholder since numpy doesn't use GPU ID
                 )
                 cpu_data_list.append(numpy_data)
 
