@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 # Decorator for passthrough to disk backend
-def passthrough_to_disk(*extensions: str, ensure_parent_dir: bool = False):
+def passthrough_to_disk(*extensions: str, ensure_parent_dir: bool = False, path_arg_index: int = 0):
     """
     Decorator to automatically passthrough certain file types to disk backend.
 
@@ -34,9 +34,10 @@ def passthrough_to_disk(*extensions: str, ensure_parent_dir: bool = False):
     Args:
         *extensions: File extensions to passthrough (e.g., '.json', '.csv', '.txt')
         ensure_parent_dir: If True, ensure parent directory exists before calling disk backend (for save operations)
+        path_arg_index: Index of the path argument in *args (0 for exists/load, 1 for save)
 
     Usage:
-        @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True)
+        @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True, path_arg_index=1)
         def save(self, data, output_path, **kwargs):
             # Zarr-specific save logic here
             ...
@@ -44,16 +45,15 @@ def passthrough_to_disk(*extensions: str, ensure_parent_dir: bool = False):
     def decorator(method: Callable) -> Callable:
         @wraps(method)
         def wrapper(self, *args, **kwargs):
-            # Extract path from args (could be first or second arg depending on method)
-            # For save: (data, output_path, **kwargs)
-            # For load/exists/delete: (file_path, **kwargs)
+            # Extract path from args at the specified index
+            # For save: args = (data, output_path, ...) -> path_arg_index=1
+            # For exists/load: args = (file_path, ...) -> path_arg_index=0
             path_arg = None
 
-            # Try to find path in args
-            for arg in args:
+            if len(args) > path_arg_index:
+                arg = args[path_arg_index]
                 if isinstance(arg, (str, Path)):
                     path_arg = str(arg)
-                    break
 
             # Check if path matches passthrough extensions
             if path_arg and any(path_arg.endswith(ext) for ext in extensions):
@@ -270,7 +270,7 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         store = zarr.DirectoryStore(str(store_path), dimension_separator='/')
         return store, relative_key
 
-    @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True)
+    @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True, path_arg_index=1)
     def save(self, data: Any, output_path: Union[str, Path], **kwargs):
         """
         Save data to Zarr at the given output_path.
