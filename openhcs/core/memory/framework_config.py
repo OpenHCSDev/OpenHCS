@@ -169,10 +169,18 @@ _FRAMEWORK_CONFIG = {
             'check_int': 'target_dtype in [np.uint8, np.uint16, np.uint32, np.int8, np.int16, np.int32]',
         },
         
+        # Conversion operations
+        'conversion_ops': {
+            'to_numpy': 'data',
+            'from_numpy': 'data',
+            'from_dlpack': None,
+            'move_to_device': 'data',
+        },
+
         # DLPack
         'supports_dlpack': False,
         'validate_dlpack': None,
-        
+
         # GPU/Cleanup
         'lazy_getter': None,
         'gpu_check': None,
@@ -214,10 +222,18 @@ _FRAMEWORK_CONFIG = {
             'check_int': 'not mod.issubdtype(target_dtype, mod.floating)',
         },
         
+        # Conversion operations
+        'conversion_ops': {
+            'to_numpy': 'data.get()',
+            'from_numpy': '({mod}.cuda.Device(gpu_id), {mod}.array(data))[1]',
+            'from_dlpack': '{mod}.from_dlpack(data)',
+            'move_to_device': 'data if data.device.id == gpu_id else ({mod}.cuda.Device(gpu_id), {mod}.array(data))[1]',
+        },
+
         # DLPack
         'supports_dlpack': True,
         'validate_dlpack': None,
-        
+
         # GPU/Cleanup
         'lazy_getter': '_get_cupy',
         'gpu_check': '{mod} is not None and hasattr({mod}, "cuda")',
@@ -259,10 +275,18 @@ _FRAMEWORK_CONFIG = {
             'needs_dtype_map': True,
         },
         
+        # Conversion operations
+        'conversion_ops': {
+            'to_numpy': 'data.cpu().numpy()',
+            'from_numpy': '{mod}.from_numpy(data).cuda(gpu_id)',
+            'from_dlpack': '{mod}.from_dlpack(data)',
+            'move_to_device': 'data if data.device.index == gpu_id else data.cuda(gpu_id)',
+        },
+
         # DLPack
         'supports_dlpack': True,
         'validate_dlpack': None,
-        
+
         # GPU/Cleanup
         'lazy_getter': '_get_torch',
         'gpu_check': '{mod} is not None and hasattr({mod}, "cuda") and {mod}.cuda.is_available()',
@@ -303,6 +327,14 @@ _FRAMEWORK_CONFIG = {
             'check_float': 'result.dtype in [mod.float16, mod.float32, mod.float64]',
             'check_int': 'target_dtype_mapped in [mod.uint8, mod.int8, mod.int16, mod.int32, mod.int64]',
             'needs_dtype_map': True,
+        },
+
+        # Conversion operations
+        'conversion_ops': {
+            'to_numpy': 'data.numpy()',
+            'from_numpy': '{mod}.convert_to_tensor(data)',
+            'from_dlpack': '{mod}.experimental.dlpack.from_dlpack(data)',
+            'move_to_device': 'data',
         },
 
         # DLPack
@@ -351,6 +383,14 @@ _FRAMEWORK_CONFIG = {
             'extra_import': 'jax.numpy',
         },
 
+        # Conversion operations
+        'conversion_ops': {
+            'to_numpy': 'np.asarray(data)',
+            'from_numpy': '{mod}.device_put(data, {mod}.devices()[gpu_id])',
+            'from_dlpack': '{mod}.dlpack.from_dlpack(data)',
+            'move_to_device': 'data',
+        },
+
         # DLPack
         'supports_dlpack': True,
         'validate_dlpack': None,
@@ -385,6 +425,14 @@ _FRAMEWORK_CONFIG = {
         'needs_dtype_conversion': False,
         'assign_slice': None,  # Not used (custom stacking)
         'stack_handler': _pyclesperanto_stack_slices,  # Custom stacking
+
+        # Conversion operations
+        'conversion_ops': {
+            'to_numpy': '{mod}.pull(data)',
+            'from_numpy': '{mod}.push(data)',
+            'from_dlpack': None,
+            'move_to_device': 'data',
+        },
 
         # Dtype scaling (custom implementation in dtype_scaling.py)
         'scaling_ops': None,  # Custom _scale_pyclesperanto function

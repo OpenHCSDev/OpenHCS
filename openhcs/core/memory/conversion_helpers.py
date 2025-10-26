@@ -7,6 +7,7 @@ Uses enum-driven polymorphism to eliminate 1,567 lines of duplication.
 
 from abc import ABC, abstractmethod
 from openhcs.constants.constants import MemoryType
+from openhcs.core.memory.framework_config import _FRAMEWORK_CONFIG
 from openhcs.core.memory.utils import _ensure_module, _supports_dlpack
 import logging
 import numpy as np
@@ -74,46 +75,9 @@ def _add_converter_methods():
         setattr(MemoryTypeConverter, method_name, make_method(target_type))
 
 
-# Pure data - just the operations (module name from enum)
-# Using dicts instead of tuples eliminates fragile zip() with magic string lists
-_OPS = {
-    MemoryType.NUMPY: {
-        'to_numpy': 'data',
-        'from_numpy': 'data',
-        'from_dlpack': None,
-        'move_to_device': 'data',
-    },
-    MemoryType.CUPY: {
-        'to_numpy': 'data.get()',
-        'from_numpy': '({mod}.cuda.Device(gpu_id), {mod}.array(data))[1]',
-        'from_dlpack': '{mod}.from_dlpack(data)',
-        'move_to_device': 'data if data.device.id == gpu_id else ({mod}.cuda.Device(gpu_id), {mod}.array(data))[1]',
-    },
-    MemoryType.TORCH: {
-        'to_numpy': 'data.cpu().numpy()',
-        'from_numpy': '{mod}.from_numpy(data).cuda(gpu_id)',
-        'from_dlpack': '{mod}.from_dlpack(data)',
-        'move_to_device': 'data if data.device.index == gpu_id else data.cuda(gpu_id)',
-    },
-    MemoryType.TENSORFLOW: {
-        'to_numpy': 'data.numpy()',
-        'from_numpy': '{mod}.convert_to_tensor(data)',
-        'from_dlpack': '{mod}.experimental.dlpack.from_dlpack(data)',
-        'move_to_device': 'data',
-    },
-    MemoryType.JAX: {
-        'to_numpy': 'np.asarray(data)',
-        'from_numpy': '{mod}.device_put(data, {mod}.devices()[gpu_id])',
-        'from_dlpack': '{mod}.dlpack.from_dlpack(data)',
-        'move_to_device': 'data',
-    },
-    MemoryType.PYCLESPERANTO: {
-        'to_numpy': '{mod}.pull(data)',
-        'from_numpy': '{mod}.push(data)',
-        'from_dlpack': None,
-        'move_to_device': 'data',
-    },
-}
+# NOTE: Conversion operations now defined in framework_config.py under 'conversion_ops'
+# This eliminates the scattered _OPS dict
+_OPS = {mem_type: config['conversion_ops'] for mem_type, config in _FRAMEWORK_CONFIG.items()}
 
 # Auto-generate lambdas from strings
 def _make_not_implemented(mem_type_value, method_name):
