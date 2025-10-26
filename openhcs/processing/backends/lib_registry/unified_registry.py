@@ -310,8 +310,9 @@ class LibraryRegistryBase(ABC):
     def _execute_slice_by_slice(self, func, image, *args, **kwargs):
         """Shared slice-by-slice execution logic."""
         if image.ndim == 3:
-            from openhcs.core.memory.stack_utils import unstack_slices, stack_slices, _detect_memory_type
-            mem = _detect_memory_type(image)
+            from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
+            from openhcs.core.memory.converters import detect_memory_type
+            mem = detect_memory_type(image)
             slices = unstack_slices(image, mem, 0)
             results = [func(sl, *args, **kwargs) for sl in slices]
             return stack_slices(results, mem, 0)

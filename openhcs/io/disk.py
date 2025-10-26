@@ -325,14 +325,13 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             raise ValueError(f"data_list length ({len(data_list)}) must match output_paths length ({len(output_paths)})")
 
         # Convert GPU arrays to CPU numpy arrays using OpenHCS memory conversion system
-        from openhcs.core.memory.converters import convert_memory
-        from openhcs.core.memory.stack_utils import _detect_memory_type
+        from openhcs.core.memory.converters import convert_memory, detect_memory_type
         from openhcs.constants.constants import MemoryType
 
         cpu_data_list = []
         for data in data_list:
             # Detect the memory type of the data
-            source_type = _detect_memory_type(data)
+            source_type = detect_memory_type(data)
 
             # Convert to numpy if not already numpy
             if source_type == MemoryType.NUMPY.value:

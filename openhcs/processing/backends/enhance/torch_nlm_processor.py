@@ -122,10 +122,11 @@ def non_local_means_denoise_torch(
     # Handle slice_by_slice processing using OpenHCS pattern
     if slice_by_slice:
         # Process each Z-slice independently using 2D non-local means
-        from openhcs.core.memory.stack_utils import unstack_slices, stack_slices, _detect_memory_type
+        from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
+        from openhcs.core.memory.converters import detect_memory_type
 
         # Detect memory type and use proper OpenHCS utilities
-        memory_type = _detect_memory_type(image_float)
+        memory_type = detect_memory_type(image_float)
         gpu_id = 0  # Default GPU ID for slice processing
 
         # Unstack 3D array into 2D slices
