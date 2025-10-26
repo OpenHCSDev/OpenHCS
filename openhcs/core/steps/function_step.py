@@ -505,8 +505,7 @@ def _execute_chain_core(
             data=current_stack,
             source_type=current_memory_type,
             target_type=actual_callable.input_memory_type,
-            gpu_id=device_id,
-            allow_cpu_roundtrip=False
+            gpu_id=device_id
         )
 
         # Use funcplan to determine which outputs this function should save

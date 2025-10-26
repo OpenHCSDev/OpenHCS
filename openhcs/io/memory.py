@@ -3,8 +3,7 @@
 Memory storage backend module for OpenHCS.
 
 This module provides an in-memory implementation of the MicroscopyStorageBackend interface.
-It stores data in memory using MemoryWrapper objects and supports overlay operations
-for materializing data to disk when needed.
+It stores data in memory and supports overlay operations for materializing data to disk when needed.
 
 This implementation enforces Clause 106-A (Declared Memory Types) and
 Clause 251 (Declarative Memory Conversion Interface) by requiring explicit

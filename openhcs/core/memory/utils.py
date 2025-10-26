@@ -133,6 +133,48 @@ def _supports_dlpack(obj: Any) -> bool:
     return False
 
 
+# Pure data - device operations for each memory type
+_DEVICE_OPS = {
+    MemoryType.NUMPY: {
+        'get_id': None,  # CPU, no device ID
+        'set_device': None,  # CPU, no device setting
+        'move': None,  # CPU, no device movement
+    },
+    MemoryType.CUPY: {
+        'get_id': 'data.device.id',
+        'get_id_fallback': '0',  # CuPy arrays always on GPU
+        'set_device': '{mod}.cuda.Device(device_id).use()',
+        'move': 'data.copy() if data.device.id != device_id else data',
+        'move_context': '{mod}.cuda.Device(device_id)',
+    },
+    MemoryType.TORCH: {
+        'get_id': 'data.device.index if data.is_cuda else None',
+        'get_id_fallback': 'None',
+        'set_device': None,  # PyTorch handles device at tensor creation
+        'move': 'data.to(f"cuda:{device_id}") if (not data.is_cuda or data.device.index != device_id) else data',
+    },
+    MemoryType.TENSORFLOW: {
+        'get_id': 'int(data.device.lower().split(":")[-1]) if "gpu" in data.device.lower() else None',
+        'get_id_fallback': 'None',
+        'set_device': None,  # TensorFlow handles device at tensor creation
+        'move': '{mod}.identity(data)',
+        'move_context': '{mod}.device(f"/device:GPU:{device_id}")',
+    },
+    MemoryType.JAX: {
+        'get_id': 'int(str(data.device).lower().split(":")[-1]) if "gpu" in str(data.device).lower() else None',
+        'get_id_fallback': 'None',
+        'set_device': None,  # JAX handles device at array creation
+        'move': '{mod}.device_put(data, {mod}.devices("gpu")[device_id])',
+    },
+    MemoryType.PYCLESPERANTO: {
+        'get_id': None,  # Custom implementation needed
+        'get_id_fallback': '0',
+        'set_device': '{mod}.select_device(device_id)',
+        'move': None,  # Custom implementation needed
+    },
+}
+
+
 def _get_device_id(data: Any, memory_type: str) -> Optional[int]:
     """
     Get the GPU device ID from a data object.
@@ -147,73 +189,36 @@ def _get_device_id(data: Any, memory_type: str) -> Optional[int]:
     Raises:
         MemoryConversionError: If the device ID cannot be determined for a GPU memory type
     """
-    if memory_type == MemoryType.NUMPY.value:
+    # Convert string to enum
+    mem_type = MemoryType(memory_type)
+    ops = _DEVICE_OPS[mem_type]
+
+    # Handle None case (CPU memory types)
+    if ops['get_id'] is None:
+        # Special case for pyclesperanto
+        if mem_type == MemoryType.PYCLESPERANTO:
+            try:
+                cle = _ensure_module("pyclesperanto")
+                current_device = cle.get_device()
+                if hasattr(current_device, 'id'):
+                    return current_device.id
+                devices = cle.list_available_devices()
+                for i, device in enumerate(devices):
+                    if str(device) == str(current_device):
+                        return i
+                return 0
+            except Exception as e:
+                logger.warning(f"Failed to get device ID for pyclesperanto array: {str(e)}")
+                return 0
         return None
 
-    if memory_type == MemoryType.CUPY.value:
-        try:
-            return data.device.id
-        except AttributeError:
-            # Default to device 0 if not available
-            # This is a special case because CuPy arrays are always on a GPU
-            return 0
-        except Exception as e:
-            logger.warning(f"Failed to get device ID for CuPy array: {str(e)}")
-            return 0
-
-    if memory_type == MemoryType.TORCH.value:
-        try:
-            if data.is_cuda:
-                return data.device.index
-            # CPU tensor, no device ID
-            return None
-        except Exception as e:
-            logger.warning(f"Failed to get device ID for PyTorch tensor: {str(e)}")
-            return None
-
-    if memory_type == MemoryType.TENSORFLOW.value:
-        try:
-            device_str = data.device.lower()
-            if "gpu" in device_str:
-                # Extract device ID from string like "/device:gpu:0"
-                return int(device_str.split(":")[-1])
-            # CPU tensor, no device ID
-            return None
-        except Exception as e:
-            logger.warning(f"Failed to get device ID for TensorFlow tensor: {str(e)}")
-            return None
-
-    if memory_type == MemoryType.JAX.value:
-        try:
-            device_str = str(data.device).lower()
-            if "gpu" in device_str:
-                # Extract device ID from string like "gpu:0"
-                return int(device_str.split(":")[-1])
-            # CPU array, no device ID
-            return None
-        except Exception as e:
-            logger.warning(f"Failed to get device ID for JAX array: {str(e)}")
-            return None
-
-    if memory_type == MemoryType.PYCLESPERANTO.value:
-        try:
-            cle = _ensure_module("pyclesperanto")
-            current_device = cle.get_device()
-            # pyclesperanto device is an object, try to extract ID
-            if hasattr(current_device, 'id'):
-                return current_device.id
-            # Fallback: try to get device index from device list
-            devices = cle.list_available_devices()
-            for i, device in enumerate(devices):
-                if str(device) == str(current_device):
-                    return i
-            # Default to 0 if we can't determine
-            return 0
-        except Exception as e:
-            logger.warning(f"Failed to get device ID for pyclesperanto array: {str(e)}")
-            return 0
-
-    return None
+    # Execute the get_id expression
+    try:
+        mod = _ensure_module(mem_type.value)  # noqa: F841 (used in eval)
+        return eval(ops['get_id'])
+    except (AttributeError, Exception) as e:
+        logger.warning(f"Failed to get device ID for {mem_type.value} array: {str(e)}")
+        return eval(ops['get_id_fallback'])
 
 
 def _set_device(memory_type: str, device_id: int) -> None:
@@ -227,25 +232,21 @@ def _set_device(memory_type: str, device_id: int) -> None:
     Raises:
         MemoryConversionError: If the device cannot be set
     """
-    if memory_type == MemoryType.CUPY.value:
-        try:
-            cupy = _ensure_module("cupy")
-            cupy.cuda.Device(device_id).use()
-        except Exception as e:
-            raise MemoryConversionError(
-                source_type=memory_type,
-                target_type=memory_type,
-                method="device_selection",
-                reason=f"Failed to set CuPy device to {device_id}: {str(e)}"
-            ) from e
+    # Convert string to enum
+    mem_type = MemoryType(memory_type)
+    ops = _DEVICE_OPS[mem_type]
 
-    if memory_type == MemoryType.PYCLESPERANTO.value:
+    # Handle None case (frameworks that don't need global device setting)
+    if ops['set_device'] is None:
+        return
+
+    # Special validation for pyclesperanto
+    if mem_type == MemoryType.PYCLESPERANTO:
         try:
             cle = _ensure_module("pyclesperanto")
             devices = cle.list_available_devices()
             if device_id >= len(devices):
                 raise ValueError(f"Device ID {device_id} not available. Available devices: {len(devices)}")
-            cle.select_device(device_id)
         except Exception as e:
             raise MemoryConversionError(
                 source_type=memory_type,
@@ -254,11 +255,17 @@ def _set_device(memory_type: str, device_id: int) -> None:
                 reason=f"Failed to set pyclesperanto device to {device_id}: {str(e)}"
             ) from e
 
-    # JAX doesn't have a global device setting mechanism
-    # Device selection happens at array creation or device_put time
-
-    # PyTorch and TensorFlow handle device placement at tensor creation time
-    # No need to set a global device
+    # Execute the set_device expression
+    try:
+        mod = _ensure_module(mem_type.value)  # noqa: F841 (used in eval)
+        eval(ops['set_device'].format(mod='mod'))
+    except Exception as e:
+        raise MemoryConversionError(
+            source_type=memory_type,
+            target_type=memory_type,
+            method="device_selection",
+            reason=f"Failed to set {mem_type.value} device to {device_id}: {str(e)}"
+        ) from e
 
 
 def _move_to_device(data: Any, memory_type: str, device_id: int) -> Any:
@@ -276,81 +283,50 @@ def _move_to_device(data: Any, memory_type: str, device_id: int) -> Any:
     Raises:
         MemoryConversionError: If the data cannot be moved to the specified device
     """
-    if memory_type == MemoryType.CUPY.value:
-        cupy = _ensure_module("cupy")
-        try:
-            if data.device.id != device_id:
-                with cupy.cuda.Device(device_id):
-                    return data.copy()
-            return data
-        except Exception as e:
-            raise MemoryConversionError(
-                source_type=memory_type,
-                target_type=memory_type,
-                method="device_movement",
-                reason=f"Failed to move CuPy array to device {device_id}: {str(e)}"
-            ) from e
+    # Convert string to enum
+    mem_type = MemoryType(memory_type)
+    ops = _DEVICE_OPS[mem_type]
 
-    if memory_type == MemoryType.TORCH.value:
-        try:
-            if data.is_cuda and data.device.index != device_id:
-                return data.to(f"cuda:{device_id}")
-            if not data.is_cuda:
-                return data.to(f"cuda:{device_id}")
-            return data
-        except Exception as e:
-            raise MemoryConversionError(
-                source_type=memory_type,
-                target_type=memory_type,
-                method="device_movement",
-                reason=f"Failed to move PyTorch tensor to device {device_id}: {str(e)}"
-            ) from e
+    # Handle None case (CPU memory types or custom implementations)
+    if ops['move'] is None:
+        # Special case for pyclesperanto
+        if mem_type == MemoryType.PYCLESPERANTO:
+            try:
+                cle = _ensure_module("pyclesperanto")
+                current_device_id = _get_device_id(data, memory_type)
 
-    if memory_type == MemoryType.TENSORFLOW.value:
-        try:
-            tf = _ensure_module("tensorflow")
-            with tf.device(f"/device:GPU:{device_id}"):
-                return tf.identity(data)
-        except Exception as e:
-            raise MemoryConversionError(
-                source_type=memory_type,
-                target_type=memory_type,
-                method="device_movement",
-                reason=f"Failed to move TensorFlow tensor to device {device_id}: {str(e)}"
-            ) from e
+                if current_device_id != device_id:
+                    cle.select_device(device_id)
+                    result = cle.create_like(data)
+                    cle.copy(data, result)
+                    return result
+                return data
+            except Exception as e:
+                raise MemoryConversionError(
+                    source_type=memory_type,
+                    target_type=memory_type,
+                    method="device_movement",
+                    reason=f"Failed to move pyclesperanto array to device {device_id}: {str(e)}"
+                ) from e
+        # CPU memory types
+        return data
 
-    if memory_type == MemoryType.JAX.value:
-        try:
-            jax = _ensure_module("jax")
-            # JAX uses different device notation
-            return jax.device_put(data, jax.devices("gpu")[device_id])
-        except Exception as e:
-            raise MemoryConversionError(
-                source_type=memory_type,
-                target_type=memory_type,
-                method="device_movement",
-                reason=f"Failed to move JAX array to device {device_id}: {str(e)}"
-            ) from e
+    # Execute the move expression
+    try:
+        mod = _ensure_module(mem_type.value)  # noqa: F841 (used in eval)
 
-    if memory_type == MemoryType.PYCLESPERANTO.value:
-        try:
-            cle = _ensure_module("pyclesperanto")
-            # Get current device of the array
-            current_device_id = _get_device_id(data, memory_type)
-
-            if current_device_id != device_id:
-                # Select target device and copy data
-                cle.select_device(device_id)
-                result = cle.create_like(data)
-                cle.copy(data, result)
-                return result
-            return data
-        except Exception as e:
-            raise MemoryConversionError(
-                source_type=memory_type,
-                target_type=memory_type,
-                method="device_movement",
-                reason=f"Failed to move pyclesperanto array to device {device_id}: {str(e)}"
-            ) from e
-
-    return data
+        # Handle context managers for CuPy and TensorFlow
+        if 'move_context' in ops and ops['move_context']:
+            context_expr = ops['move_context'].format(mod='mod')
+            context = eval(context_expr)
+            with context:
+                return eval(ops['move'].format(mod='mod'))
+        else:
+            return eval(ops['move'].format(mod='mod'))
+    except Exception as e:
+        raise MemoryConversionError(
+            source_type=memory_type,
+            target_type=memory_type,
+            method="device_movement",
+            reason=f"Failed to move {mem_type.value} array to device {device_id}: {str(e)}"
+        ) from e
