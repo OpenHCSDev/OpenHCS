@@ -355,10 +355,16 @@ def _handle_component_aware_display(viewer, layers, component_groups, data, path
 
         layer_key = "_".join(layer_key_parts) if layer_key_parts else "default_layer"
 
+        # Log component modes for debugging
+        logger.info(f"🔍 NAPARI PROCESS: component_modes={component_modes}, layer_key='{layer_key}'")
+
         # Add "_shapes" suffix for shapes layers to distinguish from image layers
         # MUST happen BEFORE reconciliation so we check the correct layer name
         if data_type == StreamingDataType.SHAPES:
             layer_key = f"{layer_key}_shapes"
+
+        # Log layer key and component info for debugging
+        logger.info(f"🔍 NAPARI PROCESS: layer_key='{layer_key}', component_info={component_info}")
 
         # Reconcile cached layer/group state with live napari viewer after possible manual deletions
         try:
@@ -377,11 +383,21 @@ def _handle_component_aware_display(viewer, layers, component_groups, data, path
         if layer_key not in component_groups:
             component_groups[layer_key] = []
 
-        # Check if an item with the same component_info already exists
+        # Handle replace_layers mode: clear all items for this layer_key
+        if replace_layers and component_groups[layer_key]:
+            logger.info(f"🔬 NAPARI PROCESS: replace_layers=True, clearing {len(component_groups[layer_key])} existing items from layer '{layer_key}'")
+            component_groups[layer_key] = []
+
+        # Check if an item with the same component_info AND data_type already exists
         # If so, replace it instead of appending (prevents accumulation across runs)
+        # CRITICAL: Must include 'well' in comparison even if it's in STACK mode,
+        # otherwise images from different wells with same channel/z/field will be treated as duplicates
+        # CRITICAL: Must also check data_type to prevent images and ROIs from being treated as duplicates
         existing_index = None
         for i, item in enumerate(component_groups[layer_key]):
-            if item['components'] == component_info:
+            # Compare ALL components including well AND data_type
+            if item['components'] == component_info and item['data_type'] == data_type:
+                logger.info(f"🔬 NAPARI PROCESS: Found duplicate - component_info: {component_info}, data_type: {data_type} at index {i}")
                 existing_index = i
                 break
 
@@ -393,13 +409,14 @@ def _handle_component_aware_display(viewer, layers, component_groups, data, path
         }
 
         if existing_index is not None:
-            # Replace existing item with same components
+            # Replace existing item with same components and data type
+            old_data_type = component_groups[layer_key][existing_index]['data_type']
             component_groups[layer_key][existing_index] = new_item
-            logger.info(f"🔬 NAPARI PROCESS: Replaced item in component_groups[{layer_key}] at index {existing_index}, total items: {len(component_groups[layer_key])}")
+            logger.info(f"🔬 NAPARI PROCESS: Replaced {old_data_type} item in component_groups[{layer_key}] at index {existing_index}, total items: {len(component_groups[layer_key])}")
         else:
             # Add new item
             component_groups[layer_key].append(new_item)
-            logger.info(f"🔬 NAPARI PROCESS: Added to component_groups[{layer_key}], now has {len(component_groups[layer_key])} items")
+            logger.info(f"🔬 NAPARI PROCESS: Added {data_type} to component_groups[{layer_key}], now has {len(component_groups[layer_key])} items")
 
         # Get all items for this layer
         layer_items = component_groups[layer_key]
@@ -716,6 +733,9 @@ class NapariViewerServer(ZMQServer):
         data_type = image_info.get('data_type', 'image')  # 'image' or 'shapes'
         component_metadata = image_info.get('metadata', {})
 
+        # Log incoming metadata to debug well filtering issues
+        logger.info(f"🔍 NAPARI PROCESS: Received {data_type} with metadata: {component_metadata} (path: {path})")
+
         try:
             # Check if this is shapes data
             if data_type == 'shapes':
@@ -733,9 +753,29 @@ class NapariViewerServer(ZMQServer):
                 # Load image data
                 if shm_name:
                     from multiprocessing import shared_memory
-                    shm = shared_memory.SharedMemory(name=shm_name)
-                    data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
-                    shm.close()
+                    try:
+                        shm = shared_memory.SharedMemory(name=shm_name)
+                        data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                        shm.close()
+                        # Unlink shared memory after copying - viewer is responsible for cleanup
+                        try:
+                            shm.unlink()
+                        except FileNotFoundError:
+                            # Already unlinked (race condition or duplicate message)
+                            logger.debug(f"🔬 NAPARI PROCESS: Shared memory {shm_name} already unlinked")
+                        except Exception as e:
+                            logger.warning(f"🔬 NAPARI PROCESS: Failed to unlink shared memory {shm_name}: {e}")
+                    except FileNotFoundError:
+                        # Shared memory doesn't exist - likely already processed and unlinked
+                        logger.error(f"🔬 NAPARI PROCESS: Shared memory {shm_name} not found - may have been already processed")
+                        if image_id:
+                            self._send_ack(image_id, status='error', error=f'Shared memory {shm_name} not found')
+                        return
+                    except Exception as e:
+                        logger.error(f"🔬 NAPARI PROCESS: Failed to open shared memory {shm_name}: {e}")
+                        if image_id:
+                            self._send_ack(image_id, status='error', error=f'Failed to open shared memory: {e}')
+                        raise
                 elif direct_data:
                     data = np.array(direct_data, dtype=dtype).reshape(shape)
                 else:
@@ -1300,6 +1340,77 @@ class NapariStreamVisualizer:
         # Brief delay for ZMQ connection to establish
         time.sleep(0.1)
         logger.info(f"🔬 VISUALIZER: ZMQ client connected to port {self.port}")
+
+    def send_control_message(self, message_type: str, timeout: float = 2.0) -> bool:
+        """
+        Send a control message to the viewer.
+
+        Args:
+            message_type: Type of control message ('clear_state', 'shutdown', etc.)
+            timeout: Timeout in seconds for waiting for response
+
+        Returns:
+            True if message was sent and acknowledged, False otherwise
+        """
+        if not self.is_running or self.port is None:
+            logger.warning(f"🔬 VISUALIZER: Cannot send {message_type} - viewer not running")
+            return False
+
+        import zmq
+        import pickle
+
+        control_port = self.port + 1000
+        control_context = None
+        control_socket = None
+
+        try:
+            control_context = zmq.Context()
+            control_socket = control_context.socket(zmq.REQ)
+            control_socket.setsockopt(zmq.LINGER, 0)
+            control_socket.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
+            control_socket.connect(f"tcp://localhost:{control_port}")
+
+            # Send control message
+            message = {'type': message_type}
+            control_socket.send(pickle.dumps(message))
+
+            # Wait for acknowledgment
+            response = control_socket.recv()
+            response_data = pickle.loads(response)
+
+            if response_data.get('status') == 'success':
+                logger.info(f"🔬 VISUALIZER: {message_type} acknowledged by viewer")
+                return True
+            else:
+                logger.warning(f"🔬 VISUALIZER: {message_type} failed: {response_data}")
+                return False
+
+        except zmq.Again:
+            logger.warning(f"🔬 VISUALIZER: Timeout waiting for {message_type} acknowledgment")
+            return False
+        except Exception as e:
+            logger.warning(f"🔬 VISUALIZER: Failed to send {message_type}: {e}")
+            return False
+        finally:
+            if control_socket:
+                try:
+                    control_socket.close()
+                except:
+                    pass
+            if control_context:
+                try:
+                    control_context.term()
+                except:
+                    pass
+
+    def clear_viewer_state(self) -> bool:
+        """
+        Clear accumulated viewer state (component groups) for a new pipeline run.
+
+        Returns:
+            True if state was cleared successfully, False otherwise
+        """
+        return self.send_control_message('clear_state')
 
     def send_image_data(self, step_id: str, image_data: np.ndarray, axis_id: str = "unknown"):
         """

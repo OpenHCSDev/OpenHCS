@@ -1028,18 +1028,40 @@ class FunctionStep(AbstractStep):
 
                 # Load from memory (where data actually is)
                 streaming_data = filemanager.load_batch(memory_paths, Backend.MEMORY.value)
-                logger.info(f"🔍 STREAMING: Loaded {len(streaming_data)} items from memory")
+                logger.info(f"🔍 STREAMING: Loaded {len(streaming_data)} items from memory for well {axis_id}")
                 kwargs = config_instance.get_streaming_kwargs(context)  # Pass context for microscope handler access
 
-                # Add step information for proper layer naming
-                kwargs["step_index"] = step_index
-                kwargs["step_name"] = step_name
+                # Add pre-built source value for layer/window naming
+                # During pipeline execution: source = step_name
+                kwargs["source"] = step_name
 
                 # Execute streaming - use streaming_paths (materialized paths) for metadata extraction
+                logger.info(f"🔍 {config_instance.backend.name}: About to stream {len(streaming_paths)} files for step {step_name}, well {axis_id}")
                 filemanager.save_batch(streaming_data, streaming_paths, config_instance.backend.value, **kwargs)
-                logger.info(f"🔍 {config_instance.backend.name}: Streamed {len(streaming_paths)} files for step {step_name}")
+                logger.info(f"✅ {config_instance.backend.name}: Successfully streamed {len(streaming_paths)} files for step {step_name}, well {axis_id}")
+
+                # Add small delay between image and ROI streaming to prevent race conditions
+                import time
+                time.sleep(0.1)
 
             logger.info(f"FunctionStep {step_index} ({step_name}) completed for well {axis_id}.")
+
+            # 📊 DIAGNOSTIC: Check queue tracker for dropped messages
+            try:
+                from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+                registry = GlobalQueueTrackerRegistry()
+                for port, tracker in registry._trackers.items():
+                    pending = tracker.get_pending_count()
+                    processed, total = tracker.get_progress()
+                    if pending > 0:
+                        logger.warning(f"📊 QUEUE TRACKER: {tracker.viewer_type} port {port} has {pending} pending messages (processed {processed}/{total})")
+                        stuck = tracker.get_stuck_images()
+                        if stuck:
+                            logger.error(f"📊 QUEUE TRACKER: {len(stuck)} stuck images detected (no ack received):")
+                            for image_id, elapsed in stuck[:5]:  # Show first 5
+                                logger.error(f"  - {image_id}: {elapsed:.1f}s elapsed")
+            except Exception as e:
+                logger.debug(f"Queue tracker diagnostic failed: {e}")
 
             # 📄 OPENHCS METADATA: Create metadata file automatically after step completion
             # Track which backend was actually used for writing files
@@ -1250,7 +1272,7 @@ class FunctionStep(AbstractStep):
         logger.debug(f"Backend detection result: {backends}")
         return backends
 
-    def _build_analysis_filename(self, output_key: str, step_index: int, step_plan: Dict, dict_key: Optional[str] = None) -> str:
+    def _build_analysis_filename(self, output_key: str, step_index: int, step_plan: Dict, dict_key: Optional[str] = None, context=None) -> str:
         """Build analysis result filename from first image path template.
 
         Uses first image filename as template to preserve all metadata components.
@@ -1261,6 +1283,7 @@ class FunctionStep(AbstractStep):
             step_index: Pipeline step index
             step_plan: Step plan dictionary
             dict_key: Optional channel/component key for dict pattern functions
+            context: Processing context (for accessing microscope handler)
         """
         memory_paths = step_plan['get_paths_for_axis'](step_plan['output_dir'], Backend.MEMORY.value)
 
@@ -1268,9 +1291,18 @@ class FunctionStep(AbstractStep):
             return f"{step_plan['axis_id']}_{output_key}_step{step_index}.roi.zip"
 
         # Filter paths by channel if dict_key provided (for dict pattern functions)
-        if dict_key:
-            # Filter to only paths matching this channel (e.g., w1, w2)
-            filtered_paths = [p for p in memory_paths if f"_w{dict_key}_" in p]
+        if dict_key and context:
+            # Use microscope handler to parse filenames and filter by channel
+            microscope_handler = context.microscope_handler
+            parser = microscope_handler.parser
+
+            filtered_paths = []
+            for path in memory_paths:
+                filename = Path(path).name
+                metadata = parser.parse_filename(filename)
+                if metadata and str(metadata.get('channel')) == str(dict_key):
+                    filtered_paths.append(path)
+
             if filtered_paths:
                 memory_paths = filtered_paths
 
@@ -1280,6 +1312,9 @@ class FunctionStep(AbstractStep):
 
     def _materialize_special_outputs(self, filemanager, step_plan, special_outputs, backend, context):
         """Materialize special outputs (ROIs, cell counts) to disk and streaming backends."""
+        axis_id = context.axis_id
+        logger.info(f"🔍 ROI MATERIALIZATION: Starting for well {axis_id}, special_outputs: {list(special_outputs.keys())}")
+
         # Collect backends: main + streaming
         from openhcs.core.config import StreamingConfig
         backends = [backend]
@@ -1289,16 +1324,20 @@ class FunctionStep(AbstractStep):
             if isinstance(config, StreamingConfig):
                 backends.append(config.backend.value)
                 backend_kwargs[config.backend.value] = config.get_streaming_kwargs(context)
+                logger.info(f"🔍 ROI MATERIALIZATION: Added streaming backend {config.backend.value} for well {axis_id}")
 
         # Get analysis directory (pre-calculated by compiler)
         has_step_mat = 'materialized_output_dir' in step_plan
         analysis_output_dir = Path(step_plan['materialized_analysis_results_dir' if has_step_mat else 'analysis_results_dir'])
         images_dir = str(step_plan['materialized_output_dir' if has_step_mat else 'output_dir'])
 
-        # Add images_dir to all backend kwargs (OMERO needs it for ROI linking)
+        # Add images_dir and source to all backend kwargs
+        step_name = step_plan.get('step_name', 'unknown_step')
         for kwargs in backend_kwargs.values():
             kwargs['images_dir'] = images_dir
+            kwargs['source'] = step_name  # Pre-built source value for layer/window naming
 
+        logger.info(f"🔍 ROI MATERIALIZATION: Using source={step_name} for well {axis_id}")
         filemanager._materialization_context = {'images_dir': images_dir}
 
         # Get dict pattern info
@@ -1330,7 +1369,7 @@ class FunctionStep(AbstractStep):
                 data = filemanager.load(channel_path, Backend.MEMORY.value)
 
                 # Build analysis filename and path (pass dict_key for channel-specific naming)
-                filename = self._build_analysis_filename(output_key, step_index, step_plan, dict_key)
+                filename = self._build_analysis_filename(output_key, step_index, step_plan, dict_key, context)
                 analysis_path = analysis_output_dir / filename
 
                 # Materialize to all backends

@@ -19,10 +19,16 @@ class Microscope(Enum):
 
 
 class VirtualComponents(Enum):
-    """Components that don't come from filename parsing but from execution/location context."""
-    STEP_NAME = "step_name"
-    STEP_INDEX = "step_index"
-    SOURCE = "source"  # Parent directory/plate name
+    """
+    Components that don't come from filename parsing but from execution/location context.
+
+    SOURCE represents:
+    - During pipeline execution: step_name (distinguishes pipeline steps)
+    - When loading from disk: subdirectory name (distinguishes image sources)
+
+    This unifies the step/source concept across Napari and Fiji viewers.
+    """
+    SOURCE = "source"  # Unified step/source component
 
 
 def get_openhcs_config():

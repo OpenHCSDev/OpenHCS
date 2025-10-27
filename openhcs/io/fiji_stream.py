@@ -69,8 +69,7 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         publisher = self._get_publisher(host, port)
         display_config = kwargs['display_config']
         microscope_handler = kwargs['microscope_handler']
-        step_index = kwargs.get('step_index', 0)
-        step_name = kwargs.get('step_name', 'unknown_step')
+        source = kwargs.get('source', 'unknown_source')  # Pre-built source value
         images_dir = kwargs.get('images_dir')  # Source image subdirectory for ROI mapping
 
         # Prepare batch messages
@@ -89,7 +88,7 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
             # Parse component metadata using ABC helper (ONCE for all types)
             component_metadata = self._parse_component_metadata(
-                file_path, microscope_handler, step_name, step_index
+                file_path, microscope_handler, source
             )
 
             # Prepare data based on type

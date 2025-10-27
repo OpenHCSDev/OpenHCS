@@ -133,6 +133,35 @@ class GlobalPipelineConfig:
 from openhcs.utils.enum_factory import create_colormap_enum
 from openhcs.utils.display_config_factory import create_napari_display_config, create_fiji_display_config
 
+
+def _build_component_order():
+    """
+    Build canonical component order from VirtualComponents + AllComponents.
+
+    This ensures VirtualComponents is the single source of truth - if you add/remove
+    a virtual component, the component_order is automatically updated.
+
+    Returns:
+        List of component names in canonical order for layer/window naming
+    """
+    from openhcs.constants import AllComponents
+
+    # Virtual components come first (for step/source grouping)
+    virtual_component_names = [vc.value for vc in VirtualComponents]
+
+    # Then filename components in standard order
+    filename_component_names = [ac.value for ac in AllComponents]
+
+    # Combine, preserving order and avoiding duplicates
+    component_order = []
+    seen = set()
+    for name in virtual_component_names + filename_component_names:
+        if name not in seen:
+            component_order.append(name)
+            seen.add(name)
+
+    return component_order
+
 # Create colormap enum with minimal set to avoid importing napari (→ dask → GPU libs)
 # The lazy=True parameter uses a hardcoded minimal set instead of introspecting napari
 NapariColormap = create_colormap_enum(lazy=True)
@@ -152,25 +181,16 @@ class NapariVariableSizeHandling(Enum):
 
 # Create NapariDisplayConfig using factory
 # Note: Uses lazy colormap enum to avoid importing napari at module level
+# Note: component_order is automatically derived from VirtualComponents + AllComponents
+# This makes VirtualComponents the single source of truth
 NapariDisplayConfig = create_napari_display_config(
     colormap_enum=NapariColormap,
     dimension_mode_enum=NapariDimensionMode,
     variable_size_handling_enum=NapariVariableSizeHandling,
     virtual_components=VirtualComponents,
-    component_order=[
-        'step_name',
-        'step_index',
-        'source',
-        'well',
-        'site',
-        'channel',
-        'z_index',
-        'timepoint'
-    ],
+    component_order=_build_component_order(),  # Auto-generated from VirtualComponents
     virtual_component_defaults={
-        'step_name': NapariDimensionMode.SLICE,
-        'step_index': NapariDimensionMode.SLICE,
-        'source': NapariDimensionMode.SLICE
+        'source': NapariDimensionMode.SLICE  # Separate layers per step by default
     }
 )
 
@@ -213,23 +233,15 @@ class FijiDimensionMode(Enum):
 
 
 # Create FijiDisplayConfig using factory (with component-specific fields like Napari)
-# NOTE: step_name and step_index are EXCLUDED from component_order for Fiji
-# They are unreliable for ROIs (come from materialization context, not filename)
-# Only source and well are used for window grouping
+# Note: component_order is automatically derived from VirtualComponents + AllComponents
+# This makes VirtualComponents the single source of truth
 FijiDisplayConfig = create_fiji_display_config(
     lut_enum=FijiLUT,
     dimension_mode_enum=FijiDimensionMode,
     virtual_components=VirtualComponents,
-    component_order=[
-        'source',
-        'well',
-        'site',
-        'channel',
-        'z_index',
-        'timepoint'
-    ],
+    component_order=_build_component_order(),  # Auto-generated from VirtualComponents
     virtual_component_defaults={
-        # Only source is WINDOW for ROI->image mapping (well is already WINDOW in component_defaults)
+        # source is WINDOW by default for window grouping (well is already WINDOW in component_defaults)
         'source': FijiDimensionMode.WINDOW
     }
 )

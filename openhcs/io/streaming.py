@@ -77,25 +77,24 @@ class StreamingBackend(DataSink):
         return self._publishers[key]
 
     def _parse_component_metadata(self, file_path: Union[str, Path], microscope_handler,
-                                  step_name: str, step_index: int) -> dict:
+                                  source: str) -> dict:
         """
         Parse component metadata from filename (common for all streaming backends).
 
         Args:
             file_path: Path to parse
             microscope_handler: Handler with parser
-            step_name: Step name to add as virtual component
-            step_index: Step index to add as virtual component
+            source: Pre-built source value (step_name during execution, subdir when loading from disk)
 
         Returns:
-            Component metadata dict with virtual components added
+            Component metadata dict with source added
         """
         filename = os.path.basename(str(file_path))
         component_metadata = microscope_handler.parser.parse_filename(filename)
-        component_metadata['step_name'] = step_name
-        component_metadata['step_index'] = step_index
-        source_value = Path(file_path).parent.name
-        component_metadata['source'] = source_value
+
+        # Add pre-built source value directly
+        component_metadata['source'] = source
+
         return component_metadata
 
     def _detect_data_type(self, data: Any):

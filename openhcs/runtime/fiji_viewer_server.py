@@ -261,15 +261,20 @@ class FijiViewerServer(ZMQServer):
             data_type_str = item.get('data_type')
 
             # Build window key from window components
-            # For ROIs: normalize source to match image hyperstack using images_dir
+            # Note: 'source' now represents step_name during pipeline execution,
+            # so images and ROIs from the same step automatically have matching source values
             window_key_parts = []
             for comp in window_components:
                 if comp in meta:
                     value = meta[comp]
-                    # Normalize source ONLY for ROIs: use images_dir (maps 'images_results' -> 'images')
+                    # Legacy ROI normalization: only needed when loading from disk (image viewer context)
+                    # During pipeline execution, source=step_name for both images and ROIs, so they match
                     if comp == 'source' and images_dir and data_type_str == 'rois':
-                        from pathlib import Path
-                        value = Path(images_dir).name  # Extract subdirectory name from full path
+                        # Check if source looks like a subdirectory (not a step name)
+                        # Step names don't contain path separators or end with '_results'
+                        if '_results' in str(value) or '/' in str(value):
+                            from pathlib import Path
+                            value = Path(images_dir).name  # Extract subdirectory name from full path
                     window_key_parts.append(f"{comp}_{value}")
             window_key = "_".join(window_key_parts) if window_key_parts else "default_window"
 
@@ -303,36 +308,54 @@ class FijiViewerServer(ZMQServer):
             frame_components: Components mapped to Frame dimension
         """
         # STEP 1: SHARED - Collect dimension values from ALL items (all types)
-        # For images: collect from current batch and store for future ROI batches
+        # For images: collect from current batch and MERGE with stored values to expand dimensions
         # For ROIs: reuse stored values from corresponding image hyperstack
 
-        # Check if we have stored dimension values for this window (from previous image batch)
-        if window_key in self.window_dimension_values:
-            # Reuse stored values (for ROIs matching existing hyperstack)
-            stored = self.window_dimension_values[window_key]
-            channel_values = stored['channel']
-            slice_values = stored['slice']
-            frame_values = stored['frame']
-            logger.info(f"🔬 FIJI SERVER: Reusing stored dimension values for window '{window_key}'")
-        else:
-            # Collect from current batch (for new hyperstacks)
-            channel_values = self._collect_dimension_values_from_items(
-                items, channel_components
-            )
-            slice_values = self._collect_dimension_values_from_items(
-                items, slice_components
-            )
-            frame_values = self._collect_dimension_values_from_items(
-                items, frame_components
-            )
+        # Collect dimension values from current batch
+        current_channel_values = self._collect_dimension_values_from_items(
+            items, channel_components
+        )
+        current_slice_values = self._collect_dimension_values_from_items(
+            items, slice_components
+        )
+        current_frame_values = self._collect_dimension_values_from_items(
+            items, frame_components
+        )
 
-            # Store for future batches (ROIs)
-            self.window_dimension_values[window_key] = {
-                'channel': channel_values,
-                'slice': slice_values,
-                'frame': frame_values
-            }
-            logger.info(f"🔬 FIJI SERVER: Stored dimension values for window '{window_key}'")
+        # Check if we have stored dimension values for this window (from previous batches)
+        if window_key in self.window_dimension_values:
+            # Merge stored values with current values to expand dimensions
+            stored = self.window_dimension_values[window_key]
+
+            # Merge: combine stored and current, preserving order and uniqueness
+            channel_values = self._merge_dimension_values(stored['channel'], current_channel_values)
+            slice_values = self._merge_dimension_values(stored['slice'], current_slice_values)
+            frame_values = self._merge_dimension_values(stored['frame'], current_frame_values)
+
+            # Log if dimensions expanded
+            if (len(channel_values) > len(stored['channel']) or
+                len(slice_values) > len(stored['slice']) or
+                len(frame_values) > len(stored['frame'])):
+                logger.info(f"🔬 FIJI SERVER: Expanded dimensions for window '{window_key}': "
+                           f"{len(stored['channel'])}→{len(channel_values)}C, "
+                           f"{len(stored['slice'])}→{len(slice_values)}Z, "
+                           f"{len(stored['frame'])}→{len(frame_values)}T")
+            else:
+                logger.info(f"🔬 FIJI SERVER: Reusing stored dimension values for window '{window_key}'")
+        else:
+            # First batch for this window - use current values
+            channel_values = current_channel_values
+            slice_values = current_slice_values
+            frame_values = current_frame_values
+            logger.info(f"🔬 FIJI SERVER: First batch for window '{window_key}': "
+                       f"{len(channel_values)}C x {len(slice_values)}Z x {len(frame_values)}T")
+
+        # Store merged values for future batches
+        self.window_dimension_values[window_key] = {
+            'channel': channel_values,
+            'slice': slice_values,
+            'frame': frame_values
+        }
 
         # STEP 2: Group items by data_type (convert string to enum)
         items_by_type = {}
@@ -366,6 +389,22 @@ class FijiViewerServer(ZMQServer):
                 channel_components, slice_components, frame_components,
                 channel_values, slice_values, frame_values
             )
+
+    def _merge_dimension_values(self, stored_values: List[tuple],
+                                 new_values: List[tuple]) -> List[tuple]:
+        """
+        Merge stored and new dimension values, preserving order and uniqueness.
+
+        Args:
+            stored_values: Previously stored dimension values
+            new_values: New dimension values from current batch
+
+        Returns:
+            Merged list of unique dimension values, sorted
+        """
+        # Combine and deduplicate
+        merged = set(stored_values) | set(new_values)
+        return sorted(merged)
 
     def _collect_dimension_values_from_items(self, items: List[Dict[str, Any]],
                                              component_list: List[str]) -> List[tuple]:

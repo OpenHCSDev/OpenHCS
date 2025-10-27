@@ -981,6 +981,16 @@ class PipelineOrchestrator(ContextProvider):
                     not_ready = [v.napari_port for v in napari_visualizers if not v.is_running]
                     logger.warning(f"🔬 ORCHESTRATOR: Timeout waiting for napari viewers. Not ready: {not_ready}")
 
+                # Clear viewer state for new pipeline run to prevent accumulation
+                logger.info("🔬 ORCHESTRATOR: Clearing napari viewer state for new pipeline run...")
+                for vis in napari_visualizers:
+                    if hasattr(vis, 'clear_viewer_state'):
+                        success = vis.clear_viewer_state()
+                        if success:
+                            logger.info(f"🔬 ORCHESTRATOR: Cleared state for viewer on port {vis.napari_port}")
+                        else:
+                            logger.warning(f"🔬 ORCHESTRATOR: Failed to clear state for viewer on port {vis.napari_port}")
+
             # For backwards compatibility, set visualizer to the first one
             visualizer = visualizers[0] if visualizers else None
 
