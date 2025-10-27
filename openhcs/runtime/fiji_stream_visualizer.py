@@ -414,13 +414,13 @@ class FijiStreamVisualizer:
             if control_socket:
                 try:
                     control_socket.close()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to close control socket: {e}")
             if control_context:
                 try:
                     control_context.term()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to terminate control context: {e}")
 
     def clear_viewer_state(self) -> bool:
         """

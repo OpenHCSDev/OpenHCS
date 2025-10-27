@@ -3,6 +3,12 @@ Fiji streaming backend for OpenHCS.
 
 Streams image data to Fiji/ImageJ viewer using ZMQ for IPC.
 Follows same architecture as Napari streaming for consistency.
+
+SHARED MEMORY OWNERSHIP MODEL:
+- Sender (Worker): Creates shared memory, sends reference via ZMQ, closes handle (does NOT unlink)
+- Receiver (Fiji Server): Attaches to shared memory, copies data, closes handle, unlinks
+- Only receiver calls unlink() to prevent FileNotFoundError
+- REQ/REP socket pattern ensures receiver copies data before sender closes handle
 """
 
 import logging

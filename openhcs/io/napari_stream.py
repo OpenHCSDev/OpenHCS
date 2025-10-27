@@ -4,6 +4,12 @@ Napari streaming backend for real-time visualization during processing.
 This module provides a storage backend that streams image data to a napari viewer
 for real-time visualization during pipeline execution. Uses ZeroMQ for IPC
 and shared memory for efficient data transfer.
+
+SHARED MEMORY OWNERSHIP MODEL:
+- Sender (Worker): Creates shared memory, sends reference via ZMQ, closes handle (does NOT unlink)
+- Receiver (Napari Server): Attaches to shared memory, copies data, closes handle, unlinks
+- Only receiver calls unlink() to prevent FileNotFoundError
+- PUB/SUB socket pattern is non-blocking; receiver must copy data before sender closes handle
 """
 
 import logging

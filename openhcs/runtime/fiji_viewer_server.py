@@ -31,12 +31,16 @@ def register_fiji_handler(data_type: StreamingDataType):
 class FijiViewerServer(ZMQServer):
     """
     ZMQ server for Fiji viewer that receives images from clients.
-    
+
     Inherits from ZMQServer ABC to get ping/pong, port management, etc.
     Uses SUB socket to receive images from pipeline clients.
     Displays images via PyImageJ.
     """
-    
+
+    # Debouncing configuration
+    DEBOUNCE_DELAY_MS = 500  # Collect items for 500ms before processing
+    MAX_DEBOUNCE_WAIT_MS = 2000  # Maximum wait time before forcing batch processing
+
     def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None):
         """
         Initialize Fiji viewer server.
@@ -73,8 +77,8 @@ class FijiViewerServer(ZMQServer):
         self._pending_images_dir = None  # Images dir for pending batch
         self._debounce_timer = None  # Timer for debounced processing
         self._debounce_lock = threading.Lock()  # Lock for pending queue
-        self._debounce_delay = 0.5  # 500ms debounce delay
-        self._max_debounce_wait = 2.0  # Maximum 2 seconds total wait
+        self._debounce_delay = self.DEBOUNCE_DELAY_MS / 1000.0  # Convert ms to seconds
+        self._max_debounce_wait = self.MAX_DEBOUNCE_WAIT_MS / 1000.0  # Convert ms to seconds
         self._first_message_time = None  # Track when first message in batch arrived
 
     def _setup_ack_socket(self):
@@ -258,7 +262,7 @@ class FijiViewerServer(ZMQServer):
         """
         Queue items for debounced batch processing.
 
-        Collects items for 500ms before processing to batch multiple images together.
+        Collects items for DEBOUNCE_DELAY_MS before processing to batch multiple images together.
         This improves hyperstack building efficiency.
 
         Args:

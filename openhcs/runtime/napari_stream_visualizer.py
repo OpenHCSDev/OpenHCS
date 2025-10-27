@@ -40,6 +40,9 @@ if napari is None:
 
 logger = logging.getLogger(__name__)
 
+# ZMQ connection delay (ms)
+ZMQ_CONNECTION_DELAY_MS = 100  # Brief delay for ZMQ connection to establish
+
 # Global process management for napari viewer
 _global_viewer_process: Optional[multiprocessing.Process] = None
 _global_viewer_port: Optional[int] = None
@@ -1441,7 +1444,7 @@ class NapariStreamVisualizer:
         self.zmq_socket.connect(f"tcp://localhost:{self.port}")
 
         # Brief delay for ZMQ connection to establish
-        time.sleep(0.1)
+        time.sleep(ZMQ_CONNECTION_DELAY_MS / 1000.0)
         logger.info(f"🔬 VISUALIZER: ZMQ client connected to port {self.port}")
 
     def send_control_message(self, message_type: str, timeout: float = 2.0) -> bool:
@@ -1498,13 +1501,13 @@ class NapariStreamVisualizer:
             if control_socket:
                 try:
                     control_socket.close()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to close control socket: {e}")
             if control_context:
                 try:
                     control_context.term()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to terminate control context: {e}")
 
     def clear_viewer_state(self) -> bool:
         """
