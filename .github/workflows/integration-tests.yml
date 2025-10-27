@@ -79,7 +79,7 @@ jobs:
         env:
           OPENHCS_CPU_ONLY: true
         run: |
-          python -m pytest tests/integration/ --it-backends disk --it-microscopes ImageXpress --it-dims 3d --it-exec-mode multiprocessing -v --tb=short
+          python -m pytest tests/integration/ --it-backends disk --it-microscopes ImageXpress --it-dims 3d --it-exec-mode multiprocessing --it-zmq-mode zmq --it-visualizers none -v --tb=short
 
   # Group 2: Backend and microscope coverage (12 jobs)
   # Test all backend/microscope combinations on all 3 OSes with Python 3.12
@@ -111,7 +111,7 @@ jobs:
         env:
           OPENHCS_CPU_ONLY: true
         run: |
-          python -m pytest tests/integration/ --it-backends ${{ matrix.backend }} --it-microscopes ${{ matrix.microscope }} --it-dims 3d --it-exec-mode multiprocessing -v --tb=short
+          python -m pytest tests/integration/ --it-backends ${{ matrix.backend }} --it-microscopes ${{ matrix.microscope }} --it-dims 3d --it-exec-mode multiprocessing --it-zmq-mode zmq --it-visualizers none -v --tb=short
 
   # Group 3: OMERO testing on Linux (2 jobs)
   # Test OMERO on Linux with Python 3.11 and 3.12
@@ -306,6 +306,8 @@ jobs:
                 --it-microscopes ImageXpress \
                 --it-dims 3d \
                 --it-exec-mode multiprocessing \
+                --it-zmq-mode zmq \
+                --it-visualizers none \
                 -v --tb=short
 
           deactivate
