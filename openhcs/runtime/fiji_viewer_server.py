@@ -165,6 +165,7 @@ class FijiViewerServer(ZMQServer):
         Supported message types:
         - shutdown: Graceful shutdown (closes viewer)
         - force_shutdown: Force shutdown (same as shutdown for Fiji)
+        - clear_state: Clear accumulated dimension values and hyperstack metadata (for new pipeline runs)
         """
         msg_type = message.get('type')
 
@@ -176,6 +177,23 @@ class FijiViewerServer(ZMQServer):
                 'type': 'shutdown_ack',
                 'status': 'success',
                 'message': 'Fiji viewer shutting down'
+            }
+
+        elif msg_type == 'clear_state':
+            # Clear accumulated dimension values to prevent accumulation across runs
+            # Keep hyperstacks and metadata so images at same coordinates get replaced (not accumulated)
+            logger.info(f"🔬 FIJI SERVER: Clearing dimension values (had {len(self.window_dimension_values)} windows)")
+
+            # Clear only dimension values - this prevents dimension accumulation
+            # while allowing image replacement at same coordinates
+            self.window_dimension_values.clear()
+            # Note: self.hyperstacks and self.hyperstack_metadata are NOT cleared
+            # This allows the rebuild logic to replace images at same CZT coordinates
+
+            return {
+                'type': 'clear_state_ack',
+                'status': 'success',
+                'message': 'Dimension values cleared'
             }
 
         return {'status': 'ok'}

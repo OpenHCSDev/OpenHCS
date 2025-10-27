@@ -993,6 +993,18 @@ class PipelineOrchestrator(ContextProvider):
                         else:
                             logger.warning(f"🔬 ORCHESTRATOR: Failed to clear state for viewer on port {vis.napari_port}")
 
+            # Clear Fiji viewer state for new pipeline run to prevent dimension accumulation
+            fiji_visualizers = [v for v in visualizers if hasattr(v, 'fiji_port')]
+            if fiji_visualizers:
+                logger.info("🔬 ORCHESTRATOR: Clearing fiji viewer state for new pipeline run...")
+                for vis in fiji_visualizers:
+                    if hasattr(vis, 'clear_viewer_state'):
+                        success = vis.clear_viewer_state()
+                        if success:
+                            logger.info(f"🔬 ORCHESTRATOR: Cleared state for viewer on port {vis.fiji_port}")
+                        else:
+                            logger.warning(f"🔬 ORCHESTRATOR: Failed to clear state for viewer on port {vis.fiji_port}")
+
             # For backwards compatibility, set visualizer to the first one
             visualizer = visualizers[0] if visualizers else None
 
