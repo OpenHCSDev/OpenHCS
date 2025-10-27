@@ -336,7 +336,6 @@ class OpenHCSMainWindow(QMainWindow):
         """Show ZMQ server manager window."""
         if "zmq_server_manager" not in self.floating_windows:
             from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import ZMQServerManagerWidget
-            from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
 
             # Create floating window
             window = QDialog(self)

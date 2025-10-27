@@ -25,10 +25,9 @@ from qtpy.QtCore import QTimer
 
 from openhcs.io.filemanager import FileManager
 from openhcs.utils.import_utils import optional_import
-from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
 from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT, get_zmq_transport_url
 from openhcs.runtime.zmq_messages import ImageAck
-from openhcs.core.config import TransportMode
+from openhcs.core.config import TransportMode, NapariStreamingConfig
 
 # Optional napari import - this module should only be imported if napari is available
 napari = optional_import("napari")
@@ -1132,12 +1131,13 @@ class NapariStreamVisualizer:
     for Qt compatibility and true persistence across pipeline runs.
     """
 
-    def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Real-Time Visualization", persistent: bool = True, napari_port: int = DEFAULT_NAPARI_STREAM_PORT, replace_layers: bool = False, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
+    def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Real-Time Visualization", persistent: bool = True, napari_port: int = None, replace_layers: bool = False, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
         self.persistent = persistent  # If True, viewer process stays alive after pipeline completion
         self.visualizer_config = visualizer_config
-        self.napari_port = napari_port  # Port for napari streaming
+        # Use config class default if not specified
+        self.napari_port = napari_port if napari_port is not None else NapariStreamingConfig.__dataclass_fields__['port'].default
         self.replace_layers = replace_layers  # If True, replace existing layers; if False, add new layers
         self.display_config = display_config  # Configuration for display behavior
         self.transport_mode = transport_mode  # ZMQ transport mode (IPC or TCP)

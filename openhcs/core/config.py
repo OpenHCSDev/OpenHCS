@@ -14,9 +14,7 @@ from typing import Optional, Union, Any, List
 from enum import Enum
 from abc import ABC, abstractmethod
 from openhcs.constants import Microscope, VirtualComponents
-from openhcs.constants.constants import (
-    Backend, DEFAULT_NAPARI_STREAM_PORT, DEFAULT_FIJI_STREAM_PORT
-)
+from openhcs.constants.constants import Backend
 
 # Import decorator for automatic decorator creation
 from openhcs.config_framework import auto_create_decorator
@@ -495,7 +493,7 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
     Overrides base StreamingConfig.port with Napari-specific default.
     Inherits host and transport_mode from base class.
     """
-    port: int = DEFAULT_NAPARI_STREAM_PORT
+    port: int = 5555
     """Port for napari streaming communication."""
 
     @property
@@ -545,8 +543,8 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
     Overrides base StreamingConfig.port with Fiji-specific default.
     Inherits host and transport_mode from base class.
     """
-    port: int = DEFAULT_FIJI_STREAM_PORT
-    """Port for Fiji streaming communication (different default from Napari)."""
+    port: int = 5565
+    """Port for Fiji streaming communication (different default from Napari, non-overlapping with 5555-5564)."""
 
     fiji_executable_path: Optional[Path] = None
     """Path to Fiji/ImageJ executable. If None, will auto-detect."""

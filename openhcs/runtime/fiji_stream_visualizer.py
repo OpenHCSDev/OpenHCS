@@ -15,8 +15,7 @@ from typing import Optional
 from pathlib import Path
 
 from openhcs.io.filemanager import FileManager
-from openhcs.core.config import TransportMode
-from openhcs.constants.constants import DEFAULT_FIJI_STREAM_PORT
+from openhcs.core.config import TransportMode, FijiStreamingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -149,12 +148,13 @@ class FijiStreamVisualizer:
     """
 
     def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Fiji Visualization",
-                 persistent: bool = True, fiji_port: int = DEFAULT_FIJI_STREAM_PORT, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
+                 persistent: bool = True, fiji_port: int = None, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
         self.persistent = persistent
         self.visualizer_config = visualizer_config
-        self.fiji_port = fiji_port
+        # Use config class default if not specified
+        self.fiji_port = fiji_port if fiji_port is not None else FijiStreamingConfig.__dataclass_fields__['port'].default
         self.display_config = display_config
         self.transport_mode = transport_mode  # ZMQ transport mode (IPC or TCP)
         self.process: Optional[multiprocessing.Process] = None

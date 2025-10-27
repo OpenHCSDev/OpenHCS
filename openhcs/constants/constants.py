@@ -256,11 +256,8 @@ DEFAULT_PATCH_SIZE = 128
 DEFAULT_SEARCH_RADIUS = 20
 # Consolidated definition for CPU thread count
 
-# Streaming viewer constants
-DEFAULT_NAPARI_STREAM_PORT = 5555
-DEFAULT_FIJI_STREAM_PORT = 5565  # Non-overlapping with Napari (5555-5564)
-
 # ZMQ transport constants
+# Note: Streaming port defaults are defined in NapariStreamingConfig and FijiStreamingConfig
 CONTROL_PORT_OFFSET = 1000  # Control port = data port + 1000
 DEFAULT_EXECUTION_SERVER_PORT = 7777
 IPC_SOCKET_DIR_NAME = "ipc"  # ~/.openhcs/ipc/
