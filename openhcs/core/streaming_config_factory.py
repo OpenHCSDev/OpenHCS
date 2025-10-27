@@ -1,0 +1,189 @@
+"""
+Factory functions for creating streaming configuration classes.
+
+This module contains OpenHCS-specific utilities for generating streaming configs
+with minimal boilerplate. Keeps openhcs/core/config.py purely declarative.
+"""
+
+from typing import Optional, List, Type
+from pathlib import Path
+from dataclasses import dataclass
+from abc import ABC
+
+
+def create_streaming_config(
+    viewer_name: str,
+    port: int,
+    backend,  # Backend enum
+    display_config_class,
+    visualizer_module: str,
+    visualizer_class_name: str,
+    extra_fields: dict = None
+):
+    """
+    Factory to create streaming config classes with minimal boilerplate.
+    
+    Eliminates duplication between streaming configs by auto-generating classes
+    from declarative specifications. Adding a new streaming backend requires only
+    5-10 lines instead of ~50 lines of boilerplate.
+    
+    Args:
+        viewer_name: Viewer identifier ('napari', 'fiji', etc.)
+        port: Default port number
+        backend: Backend enum value
+        display_config_class: Display config class to inherit from
+        visualizer_module: Module path for visualizer class
+        visualizer_class_name: Name of visualizer class
+        extra_fields: Optional dict of {field_name: (type, default_value)}
+    
+    Returns:
+        Dynamically created streaming config class
+    
+    Example:
+        >>> NapariStreamingConfig = create_streaming_config(
+        ...     viewer_name='napari',
+        ...     port=5555,
+        ...     backend=Backend.NAPARI_STREAM,
+        ...     display_config_class=NapariDisplayConfig,
+        ...     visualizer_module='openhcs.runtime.napari_stream_visualizer',
+        ...     visualizer_class_name='NapariStreamVisualizer'
+        ... )
+    """
+    # Import here to avoid circular dependencies
+    from openhcs.core.config import StreamingConfig
+
+    # Get the global_pipeline_config decorator from config module
+    # It's created by @auto_create_decorator on GlobalPipelineConfig
+    import openhcs.core.config as config_module
+    global_pipeline_config = getattr(config_module, 'global_pipeline_config', None)
+    if global_pipeline_config is None:
+        raise RuntimeError("global_pipeline_config decorator not found. Import openhcs.core.config first.")
+    
+    # Build class namespace with methods
+    def _get_streaming_kwargs(self, context):
+        kwargs = {
+            "port": self.port,
+            "host": self.host,
+            "transport_mode": self.transport_mode,
+            "display_config": self
+        }
+        # Add extra fields to kwargs
+        if extra_fields:
+            for field_name in extra_fields:
+                kwargs[field_name] = getattr(self, field_name)
+        if context:
+            kwargs["microscope_handler"] = context.microscope_handler
+        return kwargs
+    
+    def _create_visualizer(self, filemanager, visualizer_config):
+        # Lazy import to avoid circular dependencies
+        module = __import__(visualizer_module, fromlist=[visualizer_class_name])
+        visualizer_class = getattr(module, visualizer_class_name)
+        return visualizer_class(
+            filemanager,
+            visualizer_config,
+            viewer_title=f"OpenHCS {viewer_name.title()} Visualization",
+            persistent=self.persistent,
+            port=self.port,
+            display_config=self,
+            transport_mode=self.transport_mode
+        )
+    
+    # Build class dict with properties using lambdas
+    class_dict = {
+        'port': port,
+        'backend': property(lambda self: backend),
+        'viewer_type': property(lambda self: viewer_name),
+        'step_plan_output_key': property(lambda self: f"{viewer_name}_streaming_paths"),
+        'get_streaming_kwargs': _get_streaming_kwargs,
+        'create_visualizer': _create_visualizer,
+        '__annotations__': {'port': int},
+        '__module__': 'openhcs.core.config',  # Make it appear as if defined in config.py
+    }
+    
+    # Add extra fields
+    if extra_fields:
+        for field_name, (field_type, default_val) in extra_fields.items():
+            class_dict[field_name] = default_val
+            class_dict['__annotations__'][field_name] = field_type
+    
+    # Create class dynamically
+    cls_name = f"{viewer_name.title()}StreamingConfig"
+    new_class = type(cls_name, (StreamingConfig, display_config_class), class_dict)
+    
+    # Apply decorators
+    new_class = dataclass(frozen=True)(new_class)
+    new_class = global_pipeline_config(new_class)
+    
+    return new_class
+
+
+def build_component_order():
+    """
+    Build canonical component order from VirtualComponents + AllComponents.
+
+    This ensures VirtualComponents is the single source of truth - if you add/remove
+    a virtual component, the component_order is automatically updated.
+
+    Returns:
+        List of component names in canonical order for layer/window naming
+    """
+    from openhcs.constants import AllComponents, VirtualComponents
+
+    # Virtual components come first (for step/source grouping)
+    virtual_component_names = [vc.value for vc in VirtualComponents]
+
+    # Then filename components in standard order
+    filename_component_names = [ac.value for ac in AllComponents]
+
+    # Combine, preserving order and avoiding duplicates
+    component_order = []
+    seen = set()
+    for name in virtual_component_names + filename_component_names:
+        if name not in seen:
+            component_order.append(name)
+            seen.add(name)
+
+    return component_order
+
+
+def get_all_streaming_ports(num_ports_per_type: int = 10) -> List[int]:
+    """Get all streaming ports for all registered streaming config types.
+
+    Auto-discovers all StreamingConfig subclasses and their default ports,
+    then generates port ranges. Adding a new streaming backend requires
+    no changes to this function.
+
+    Args:
+        num_ports_per_type: Number of ports to allocate per streaming type (default: 10)
+
+    Returns:
+        List of all streaming ports across all types
+    """
+    from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
+    from openhcs.core.config import StreamingConfig
+
+    # Start with execution server port
+    ports = [DEFAULT_EXECUTION_SERVER_PORT]
+
+    # Auto-discover all StreamingConfig subclasses (generic, no hardcoding)
+    def get_all_subclasses(cls):
+        """Recursively get all subclasses of a class."""
+        all_subclasses = []
+        for subclass in cls.__subclasses__():
+            all_subclasses.append(subclass)
+            all_subclasses.extend(get_all_subclasses(subclass))
+        return all_subclasses
+
+    streaming_configs = get_all_subclasses(StreamingConfig)
+
+    for config_cls in streaming_configs:
+        # Use field defaults from dataclass
+        default_port = config_cls.__dataclass_fields__['port'].default
+        # Skip abstract base classes with None port (only concrete configs have ports)
+        if default_port is not None:
+            # Generate port range for this streaming type
+            ports.extend([default_port + i for i in range(num_ports_per_type)])
+
+    return ports
+
