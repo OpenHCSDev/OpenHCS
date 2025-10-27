@@ -915,9 +915,10 @@ class LogViewerWindow(QMainWindow):
         logger.debug("Scanning for running ZMQ/streaming servers...")
         discovered_logs = []
 
-        # Scan all streaming ports using generic port discovery
+        # Scan all streaming ports using current global config
+        # This ensures we find viewers launched with custom ports
         from openhcs.core.config import get_all_streaming_ports
-        ports_to_scan = get_all_streaming_ports(num_ports_per_type=10)
+        ports_to_scan = get_all_streaming_ports(num_ports_per_type=10)  # Uses global config by default
 
         def ping_server(port: int) -> dict:
             """Ping a server and return pong response, or None if no response."""

@@ -5,10 +5,13 @@ This module contains OpenHCS-specific utilities for generating streaming configs
 with minimal boilerplate. Keeps openhcs/core/config.py purely declarative.
 """
 
-from typing import Optional, List, Type
+from typing import Optional, List, Type, Union, TYPE_CHECKING
 from pathlib import Path
 from dataclasses import dataclass
 from abc import ABC
+
+if TYPE_CHECKING:
+    from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 
 
 def create_streaming_config(
@@ -147,69 +150,57 @@ def build_component_order():
     return component_order
 
 
-def get_all_streaming_ports(num_ports_per_type: int = 10) -> List[int]:
+def get_all_streaming_ports(
+    config: 'Union[GlobalPipelineConfig, PipelineConfig]' = None,
+    num_ports_per_type: int = 10
+) -> List[int]:
     """Get all streaming ports for all registered streaming config types.
 
-    Auto-discovers all StreamingConfig subclasses and resolves their ports using
-    the current GlobalPipelineConfig context. This ensures the scanner finds viewers
-    launched with custom ports.
-
-    IMPORTANT: This function uses the current GlobalPipelineConfig context to resolve
-    ports. If a user sets custom ports in GlobalPipelineConfig, those custom ports
-    will be used for scanning. This is correct because all viewers are launched
-    through the orchestrator which respects GlobalPipelineConfig.
+    Extracts actual configured ports from the provided config (GlobalPipelineConfig
+    or PipelineConfig). This ensures the scanner finds viewers launched with custom
+    ports from the orchestrator.
 
     Args:
+        config: GlobalPipelineConfig or PipelineConfig to extract ports from.
+                If None, uses current GlobalPipelineConfig from context.
         num_ports_per_type: Number of ports to allocate per streaming type (default: 10)
 
     Returns:
         List of all streaming ports across all types
     """
     from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
-    from openhcs.core.config import StreamingConfig
+    from openhcs.core.config import StreamingConfig, GlobalPipelineConfig
+    from openhcs.config_framework.global_config import get_current_global_config
 
     # Start with execution server port
     ports = [DEFAULT_EXECUTION_SERVER_PORT]
 
-    # NOTE: Lazy configs will automatically resolve from GlobalPipelineConfig context
-    # if it's been set. All viewers are launched through orchestrator which sets this
-    # context, so custom ports will be respected automatically.
+    # Get config to extract ports from
+    if config is None:
+        config = get_current_global_config(GlobalPipelineConfig)
+        if config is None:
+            # No config available - return just execution server port
+            return ports
 
-    # Auto-discover all StreamingConfig subclasses (generic, no hardcoding)
-    def get_all_subclasses(cls):
-        """Recursively get all subclasses of a class."""
-        all_subclasses = []
-        for subclass in cls.__subclasses__():
-            all_subclasses.append(subclass)
-            all_subclasses.extend(get_all_subclasses(subclass))
-        return all_subclasses
+    # Extract all streaming config fields from the config
+    # Works for both GlobalPipelineConfig and PipelineConfig
+    import dataclasses
+    for field in dataclasses.fields(config):
+        field_value = getattr(config, field.name)
 
-    streaming_configs = get_all_subclasses(StreamingConfig)
+        # Check if this field is a StreamingConfig
+        if field_value is not None and isinstance(field_value, StreamingConfig):
+            port = field_value.port
 
-    for config_cls in streaming_configs:
-        # Skip abstract classes (including lazy wrappers with abstract methods)
-        import inspect
-        if inspect.isabstract(config_cls):
-            continue
+            # Fail-loud if concrete config has None port (configuration error)
+            if port is None:
+                raise ValueError(
+                    f"Streaming config {field.name} has None port. "
+                    f"All StreamingConfig instances must have a port."
+                )
 
-        # Access port via instance to trigger lazy resolution
-        # Lazy configs will inherit from GlobalPipelineConfig if available
-        try:
-            instance = config_cls()
-            default_port = instance.port
-        except Exception:
-            # Skip configs that can't be instantiated (likely abstract or incomplete)
-            continue
-
-        # Fail-loud if concrete config has None port (configuration error)
-        if default_port is None:
-            raise ValueError(
-                f"Concrete streaming config {config_cls.__name__} has None port. "
-                f"All concrete StreamingConfig subclasses must define a port."
-            )
-
-        # Generate port range for this streaming type
-        ports.extend([default_port + i for i in range(num_ports_per_type)])
+            # Generate port range for this streaming type
+            ports.extend([port + i for i in range(num_ports_per_type)])
 
     return ports
 

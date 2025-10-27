@@ -346,10 +346,10 @@ class OpenHCSMainWindow(QMainWindow):
             # Add widget to window
             layout = QVBoxLayout(window)
 
-            # Scan all streaming ports using generic port discovery
-            # Automatically includes execution server + all registered streaming types
+            # Scan all streaming ports using current global config
+            # This ensures we find viewers launched with custom ports
             from openhcs.core.config import get_all_streaming_ports
-            ports_to_scan = get_all_streaming_ports(num_ports_per_type=10)
+            ports_to_scan = get_all_streaming_ports(num_ports_per_type=10)  # Uses global config by default
 
             zmq_manager_widget = ZMQServerManagerWidget(
                 ports_to_scan=ports_to_scan,
