@@ -482,6 +482,65 @@ class PipelineOrchestrator(ContextProvider):
         """Get the current orchestrator state."""
         return self._state
 
+    def _get_visualizer_key(self, config):
+        """
+        Generate unique key for visualizer tracking.
+
+        Uses polymorphic attributes to avoid type-specific logic.
+
+        Args:
+            config: Visualizer config (StreamingConfig or other)
+
+        Returns:
+            Tuple key for tracking visualizers
+        """
+        from openhcs.core.config import StreamingConfig
+
+        if isinstance(config, StreamingConfig):
+            return (config.viewer_type, config.port)
+        else:
+            backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
+            return (backend_name,)
+
+    def _collect_unique_visualizer_configs(self, compiled_contexts):
+        """
+        Collect unique visualizer configs from compiled contexts.
+
+        Deduplicates configs by key and logs conflicts.
+
+        Args:
+            compiled_contexts: Dict of compiled ProcessingContext objects
+
+        Returns:
+            Dict mapping keys to (config, vis_config) tuples
+        """
+        from openhcs.core.config import StreamingConfig
+
+        unique_configs = {}
+
+        for ctx in compiled_contexts.values():
+            for visualizer_info in ctx.required_visualizers:
+                config = visualizer_info['config']
+                key = self._get_visualizer_key(config)
+
+                if key not in unique_configs:
+                    # First time seeing this key
+                    if isinstance(config, StreamingConfig):
+                        logger.info(f"🔬 ORCHESTRATOR: Found config for {config.viewer_type} port {config.port}: persistent={config.persistent}")
+                    else:
+                        logger.info(f"🔬 ORCHESTRATOR: Found config for {key}: persistent={config.persistent}")
+                    unique_configs[key] = (config, ctx.visualizer_config)
+                else:
+                    # Check for conflicts
+                    existing_config = unique_configs[key][0]
+                    if existing_config.persistent != config.persistent:
+                        if isinstance(config, StreamingConfig):
+                            logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for {config.viewer_type} port {config.port}: existing={existing_config.persistent}, new={config.persistent}")
+                        else:
+                            logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for {key}: existing={existing_config.persistent}, new={config.persistent}")
+
+        return unique_configs
+
     def get_or_create_visualizer(self, config, vis_config=None):
         """
         Get existing visualizer or create a new one for the given config.
@@ -510,12 +569,8 @@ class PipelineOrchestrator(ContextProvider):
             registry.get_or_create_tracker(config.port, config.viewer_type)
             logger.info(f"🔬 ORCHESTRATOR: Pre-created queue tracker for {config.viewer_type} on port {config.port}")
 
-            # Generate key using polymorphic attributes
-            key = (config.viewer_type, config.port)
-        else:
-            # Non-streaming config fallback
-            backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
-            key = (backend_name,)
+        # Generate key using helper method (eliminates duplication)
+        key = self._get_visualizer_key(config)
 
         # Check if we already have a visualizer for this key
         if key in self._visualizers:
@@ -920,61 +975,15 @@ class PipelineOrchestrator(ContextProvider):
             actual_max_workers = 1
 
         # 🔬 AUTOMATIC VISUALIZER CREATION: Create visualizers if compiler detected streaming
-        # Support multiple viewer instances based on unique (backend, port) combinations
         visualizers = []
         if visualizer is None:
-            # Collect all unique streaming ports across all compiled contexts
             from openhcs.core.config import StreamingConfig
-            unique_streaming_ports = set()
-            for ctx in compiled_contexts.values():
-                for visualizer_info in ctx.required_visualizers:
-                    config = visualizer_info['config']
-                    # Use polymorphic StreamingConfig check instead of hasattr
-                    if isinstance(config, StreamingConfig):
-                        unique_streaming_ports.add((config.backend.name, config.port))
 
-            logger.info(f"🔬 ORCHESTRATOR: Found {len(unique_streaming_ports)} unique streaming viewers: {unique_streaming_ports}")
-
-            # Collect all unique visualizer configs across all contexts
-            # Key: (backend_name, port) for napari, (backend_name,) for others
-            # Value: config object
-            unique_visualizer_configs = {}
-
-            for ctx in compiled_contexts.values():
-                for visualizer_info in ctx.required_visualizers:
-                    config = visualizer_info['config']
-
-                    # Generic port-based key generation using polymorphic StreamingConfig attributes
-                    # All StreamingConfig subclasses inherit 'port', 'viewer_type', and 'backend' attributes
-                    from openhcs.core.config import StreamingConfig
-
-                    if isinstance(config, StreamingConfig):
-                        # Use polymorphic attributes from StreamingConfig base class
-                        key = (config.viewer_type, config.port)
-                    else:
-                        # Fallback for non-streaming visualizers
-                        backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
-                        key = (backend_name,)
-
-                    # Store the first config we see for each key
-                    # All configs for the same key should be identical after resolution
-                    if key not in unique_visualizer_configs:
-                        if isinstance(config, StreamingConfig):
-                            logger.info(f"🔬 ORCHESTRATOR: Found first config for {config.viewer_type} port {config.port}: persistent={config.persistent}")
-                        else:
-                            logger.info(f"🔬 ORCHESTRATOR: Found first config for {key}: persistent={config.persistent}")
-                        unique_visualizer_configs[key] = (config, ctx.visualizer_config)
-                    else:
-                        # Log if we see a different config for the same key
-                        existing_config = unique_visualizer_configs[key][0]
-                        if existing_config.persistent != config.persistent:
-                            if isinstance(config, StreamingConfig):
-                                logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for {config.viewer_type} port {config.port}: existing={existing_config.persistent}, new={config.persistent}")
-                            else:
-                                logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for {key}: existing={existing_config.persistent}, new={config.persistent}")
+            # Collect unique visualizer configs using helper method (eliminates duplication)
+            unique_visualizer_configs = self._collect_unique_visualizer_configs(compiled_contexts)
 
             # Create and start all visualizers using shared infrastructure
-            for key, (config, vis_config) in unique_visualizer_configs.items():
+            for config, vis_config in unique_visualizer_configs.values():
                 vis = self.get_or_create_visualizer(config, vis_config)
                 visualizers.append(vis)
 
