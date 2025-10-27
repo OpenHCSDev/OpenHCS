@@ -724,8 +724,23 @@ class PipelineCompiler:
         microscope_handler = orchestrator.microscope_handler
         pipeline_config = orchestrator.pipeline_config
 
-        # Get configured backend
-        configured_backend = pipeline_config.vfs_config.materialization_backend
+        # Get configured backend - handle case where vfs_config is None (inherits from global)
+        if pipeline_config.vfs_config is None:
+            # vfs_config is None, which means it inherits from global config
+            # Get the merged config to access the actual vfs_config value
+            from openhcs.config_framework.context_manager import get_base_global_config
+
+            global_config = get_base_global_config()
+            if global_config is None:
+                # No global config available - skip validation
+                logger.debug("No global config available, skipping backend compatibility validation")
+                return
+
+            vfs_config = global_config.vfs_config
+        else:
+            vfs_config = pipeline_config.vfs_config
+
+        configured_backend = vfs_config.materialization_backend
 
         # Skip validation if backend is AUTO (will be resolved later)
         if configured_backend == MaterializationBackend.AUTO:
@@ -758,11 +773,19 @@ class PipelineCompiler:
                 from openhcs.core.config import MaterializationBackend as MB, VFSConfig, PipelineConfig
                 from dataclasses import replace
 
-                # Create new VFSConfig with corrected backend
-                new_vfs_config = replace(
-                    pipeline_config.vfs_config,
-                    materialization_backend=MB(required_backend.value)
-                )
+                # If pipeline_config.vfs_config was None, we need to create a new VFSConfig
+                # Otherwise, we replace the existing one
+                if pipeline_config.vfs_config is None:
+                    # Create new VFSConfig with only the backend set (other fields use defaults)
+                    new_vfs_config = VFSConfig(
+                        materialization_backend=MB(required_backend.value)
+                    )
+                else:
+                    # Replace existing VFSConfig with corrected backend
+                    new_vfs_config = replace(
+                        pipeline_config.vfs_config,
+                        materialization_backend=MB(required_backend.value)
+                    )
 
                 # Replace vfs_config in pipeline_config (also frozen, so use replace)
                 orchestrator.pipeline_config = replace(
