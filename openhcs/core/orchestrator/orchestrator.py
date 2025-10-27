@@ -507,12 +507,11 @@ class PipelineOrchestrator(ContextProvider):
             # Pre-create queue tracker using polymorphic attributes
             from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
             registry = GlobalQueueTrackerRegistry()
-            viewer_type = config.backend.name.replace('_STREAM', '').lower()
-            registry.get_or_create_tracker(config.port, viewer_type)
-            logger.info(f"🔬 ORCHESTRATOR: Pre-created queue tracker for {viewer_type} on port {config.port}")
+            registry.get_or_create_tracker(config.port, config.viewer_type)
+            logger.info(f"🔬 ORCHESTRATOR: Pre-created queue tracker for {config.viewer_type} on port {config.port}")
 
             # Generate key using polymorphic attributes
-            key = (viewer_type, config.port)
+            key = (config.viewer_type, config.port)
         else:
             # Non-streaming config fallback
             backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
@@ -946,14 +945,12 @@ class PipelineOrchestrator(ContextProvider):
                     config = visualizer_info['config']
 
                     # Generic port-based key generation using polymorphic StreamingConfig attributes
-                    # All StreamingConfig subclasses inherit 'port' and 'backend' attributes
+                    # All StreamingConfig subclasses inherit 'port', 'viewer_type', and 'backend' attributes
                     from openhcs.core.config import StreamingConfig
 
                     if isinstance(config, StreamingConfig):
                         # Use polymorphic attributes from StreamingConfig base class
-                        port = config.port
-                        viewer_type = config.backend.name.replace('_STREAM', '').lower()
-                        key = (viewer_type, port)
+                        key = (config.viewer_type, config.port)
                     else:
                         # Fallback for non-streaming visualizers
                         backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
@@ -962,8 +959,8 @@ class PipelineOrchestrator(ContextProvider):
                     # Store the first config we see for each key
                     # All configs for the same key should be identical after resolution
                     if key not in unique_visualizer_configs:
-                        if port is not None:
-                            logger.info(f"🔬 ORCHESTRATOR: Found first config for {viewer_type} port {port}: persistent={config.persistent}")
+                        if isinstance(config, StreamingConfig):
+                            logger.info(f"🔬 ORCHESTRATOR: Found first config for {config.viewer_type} port {config.port}: persistent={config.persistent}")
                         else:
                             logger.info(f"🔬 ORCHESTRATOR: Found first config for {key}: persistent={config.persistent}")
                         unique_visualizer_configs[key] = (config, ctx.visualizer_config)
@@ -971,8 +968,8 @@ class PipelineOrchestrator(ContextProvider):
                         # Log if we see a different config for the same key
                         existing_config = unique_visualizer_configs[key][0]
                         if existing_config.persistent != config.persistent:
-                            if port is not None:
-                                logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for {viewer_type} port {port}: existing={existing_config.persistent}, new={config.persistent}")
+                            if isinstance(config, StreamingConfig):
+                                logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for {config.viewer_type} port {config.port}: existing={existing_config.persistent}, new={config.persistent}")
                             else:
                                 logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for {key}: existing={existing_config.persistent}, new={config.persistent}")
 

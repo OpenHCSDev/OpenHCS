@@ -470,6 +470,12 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
 
     @property
     @abstractmethod
+    def viewer_type(self) -> str:
+        """Viewer type identifier (e.g., 'napari', 'fiji') for queue tracking and logging."""
+        pass
+
+    @property
+    @abstractmethod
     def step_plan_output_key(self) -> str:
         """Key to use in step_plan for this config's output paths."""
         pass
@@ -499,6 +505,10 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
     @property
     def backend(self) -> Backend:
         return Backend.NAPARI_STREAM
+
+    @property
+    def viewer_type(self) -> str:
+        return 'napari'
 
     @property
     def step_plan_output_key(self) -> str:
@@ -554,6 +564,10 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
         return Backend.FIJI_STREAM
 
     @property
+    def viewer_type(self) -> str:
+        return 'fiji'
+
+    @property
     def step_plan_output_key(self) -> str:
         return "fiji_streaming_paths"
 
@@ -597,8 +611,9 @@ _inject_all_pending_fields()
 def get_all_streaming_ports(num_ports_per_type: int = 10) -> List[int]:
     """Get all streaming ports for all registered streaming config types.
 
-    Uses polymorphic StreamingConfig.port attribute to discover default ports
-    for each streaming type, then generates port ranges.
+    Auto-discovers all StreamingConfig subclasses and their default ports,
+    then generates port ranges. Adding a new streaming backend requires
+    no changes to this function.
 
     Args:
         num_ports_per_type: Number of ports to allocate per streaming type (default: 10)
@@ -611,11 +626,18 @@ def get_all_streaming_ports(num_ports_per_type: int = 10) -> List[int]:
     # Start with execution server port
     ports = [DEFAULT_EXECUTION_SERVER_PORT]
 
-    # Get all StreamingConfig subclasses and their default ports
-    streaming_configs = [NapariStreamingConfig, FijiStreamingConfig]
+    # Auto-discover all StreamingConfig subclasses (generic, no hardcoding)
+    def get_all_subclasses(cls):
+        """Recursively get all subclasses of a class."""
+        all_subclasses = []
+        for subclass in cls.__subclasses__():
+            all_subclasses.append(subclass)
+            all_subclasses.extend(get_all_subclasses(subclass))
+        return all_subclasses
+
+    streaming_configs = get_all_subclasses(StreamingConfig)
 
     for config_cls in streaming_configs:
-        # Create a temporary instance to get the default port
         # Use field defaults from dataclass
         default_port = config_cls.__dataclass_fields__['port'].default
         # Generate port range for this streaming type
