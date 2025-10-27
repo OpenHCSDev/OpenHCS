@@ -437,8 +437,9 @@ class ImageBrowserWidget(QWidget):
         # Scan Napari and Fiji ports
         # Napari: 5555-5564 (10 ports)
         # Fiji: 5565-5574 (10 ports, non-overlapping with Napari)
+        from openhcs.constants.constants import DEFAULT_FIJI_STREAM_PORT
         napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]  # 5555-5564
-        fiji_ports = [5565 + i for i in range(10)]  # 5565-5574 (avoid overlap with Napari)
+        fiji_ports = [DEFAULT_FIJI_STREAM_PORT + i for i in range(10)]  # 5565-5574 (avoid overlap with Napari)
         ports_to_scan = napari_ports + fiji_ports
 
         # Create ZMQ server manager widget

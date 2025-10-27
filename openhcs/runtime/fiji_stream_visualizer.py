@@ -15,6 +15,7 @@ from typing import Optional
 from pathlib import Path
 
 from openhcs.io.filemanager import FileManager
+from openhcs.core.config import TransportMode
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,18 @@ def _cleanup_global_fiji_viewer() -> None:
             _global_fiji_process = None
 
 
-def _spawn_detached_fiji_process(port: int, viewer_title: str, display_config) -> subprocess.Popen:
+def _spawn_detached_fiji_process(port: int, viewer_title: str, display_config, transport_mode: TransportMode = TransportMode.IPC) -> subprocess.Popen:
     """
     Spawn a completely detached Fiji viewer process that survives parent termination.
 
     This creates a subprocess that runs independently and won't be terminated when
     the parent process exits, enabling true persistence across pipeline runs.
+
+    Args:
+        port: ZMQ port to listen on
+        viewer_title: Title for the Fiji viewer window
+        display_config: Display configuration
+        transport_mode: ZMQ transport mode (IPC or TCP)
     """
     import sys
     import os
@@ -68,7 +75,9 @@ sys.path.insert(0, "{current_dir}")
 
 try:
     from openhcs.runtime.fiji_viewer_server import _fiji_viewer_server_process
-    _fiji_viewer_server_process({port}, "{viewer_title}", None, "{current_dir}/.fiji_log_path_placeholder")
+    from openhcs.core.config import TransportMode
+    transport_mode = TransportMode.{transport_mode.name}
+    _fiji_viewer_server_process({port}, "{viewer_title}", None, "{current_dir}/.fiji_log_path_placeholder", transport_mode)
 except Exception as e:
     import logging
     logger = logging.getLogger("openhcs.runtime.fiji_detached")
@@ -139,13 +148,14 @@ class FijiStreamVisualizer:
     """
 
     def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Fiji Visualization",
-                 persistent: bool = True, fiji_port: int = 5565, display_config=None):
+                 persistent: bool = True, fiji_port: int = 5565, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
         self.persistent = persistent
         self.visualizer_config = visualizer_config
         self.fiji_port = fiji_port
         self.display_config = display_config
+        self.transport_mode = transport_mode  # ZMQ transport mode (IPC or TCP)
         self.process: Optional[multiprocessing.Process] = None
         self._is_running = False
         self._connected_to_existing = False
@@ -199,13 +209,16 @@ class FijiStreamVisualizer:
         """Quick ping check to verify viewer is responsive (for connected viewers)."""
         import zmq
         import pickle
+        from openhcs.runtime.zmq_base import get_zmq_transport_url
+        from openhcs.constants.constants import CONTROL_PORT_OFFSET
 
         try:
             ctx = zmq.Context()
             sock = ctx.socket(zmq.REQ)
             sock.setsockopt(zmq.LINGER, 0)
             sock.setsockopt(zmq.RCVTIMEO, 200)  # 200ms timeout for quick check
-            sock.connect(f"tcp://localhost:{self.fiji_port + 1000}")
+            control_url = get_zmq_transport_url(self.fiji_port + CONTROL_PORT_OFFSET, self.transport_mode, 'localhost')
+            sock.connect(control_url)
             sock.send(pickle.dumps({'type': 'ping'}))
             response = pickle.loads(sock.recv())
             sock.close()
@@ -261,7 +274,7 @@ class FijiStreamVisualizer:
             # so they don't block parent process exit. The difference is only whether
             # we terminate them during cleanup.
             logger.info(f"🔬 FIJI VISUALIZER: Creating {'persistent' if self.persistent else 'non-persistent'} Fiji viewer (detached)")
-            self.process = _spawn_detached_fiji_process(self.fiji_port, self.viewer_title, self.display_config)
+            self.process = _spawn_detached_fiji_process(self.fiji_port, self.viewer_title, self.display_config, self.transport_mode)
 
             # Only track non-persistent viewers in global variable for test cleanup
             if not self.persistent:
@@ -306,13 +319,16 @@ class FijiStreamVisualizer:
         """Try to connect to an existing Fiji viewer and verify it's responsive."""
         import zmq
         import pickle
+        from openhcs.runtime.zmq_base import get_zmq_transport_url
+        from openhcs.constants.constants import CONTROL_PORT_OFFSET
 
         try:
             ctx = zmq.Context()
             sock = ctx.socket(zmq.REQ)
             sock.setsockopt(zmq.LINGER, 0)
             sock.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
-            sock.connect(f"tcp://localhost:{self.fiji_port + 1000}")
+            control_url = get_zmq_transport_url(self.fiji_port + CONTROL_PORT_OFFSET, self.transport_mode, 'localhost')
+            sock.connect(control_url)
 
             # Send ping
             sock.send(pickle.dumps({'type': 'ping'}))
@@ -329,6 +345,8 @@ class FijiStreamVisualizer:
         """Wait for Fiji server to be ready via ping/pong."""
         import zmq
         import pickle
+        from openhcs.runtime.zmq_base import get_zmq_transport_url
+        from openhcs.constants.constants import CONTROL_PORT_OFFSET
 
         logger.info(f"🔬 FIJI VISUALIZER: Waiting for server on port {self.fiji_port} to be ready...")
 
@@ -340,7 +358,8 @@ class FijiStreamVisualizer:
                 sock = ctx.socket(zmq.REQ)
                 sock.setsockopt(zmq.LINGER, 0)
                 sock.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
-                sock.connect(f"tcp://localhost:{self.fiji_port + 1000}")
+                control_url = get_zmq_transport_url(self.fiji_port + CONTROL_PORT_OFFSET, self.transport_mode, 'localhost')
+                sock.connect(control_url)
 
                 # Send ping
                 sock.send(pickle.dumps({'type': 'ping'}))
@@ -377,8 +396,10 @@ class FijiStreamVisualizer:
 
         import zmq
         import pickle
+        from openhcs.runtime.zmq_base import get_zmq_transport_url
+        from openhcs.constants.constants import CONTROL_PORT_OFFSET
 
-        control_port = self.fiji_port + 1000
+        control_port = self.fiji_port + CONTROL_PORT_OFFSET
         control_context = None
         control_socket = None
 
@@ -387,7 +408,8 @@ class FijiStreamVisualizer:
             control_socket = control_context.socket(zmq.REQ)
             control_socket.setsockopt(zmq.LINGER, 0)
             control_socket.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
-            control_socket.connect(f"tcp://localhost:{control_port}")
+            control_url = get_zmq_transport_url(control_port, self.transport_mode, 'localhost')
+            control_socket.connect(control_url)
 
             # Send control message
             message = {'type': message_type}

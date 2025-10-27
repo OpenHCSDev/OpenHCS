@@ -348,12 +348,13 @@ class OpenHCSMainWindow(QMainWindow):
             layout = QVBoxLayout(window)
 
             # Scan common ports:
-            # - 7777: Default ZMQ execution server
+            # - DEFAULT_EXECUTION_SERVER_PORT: Default ZMQ execution server
             # - 5555-5564: Napari viewers (10 ports)
             # - 5565-5574: Fiji viewers (10 ports, non-overlapping with Napari)
+            from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT, DEFAULT_FIJI_STREAM_PORT
             napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]
-            fiji_ports = [5565 + i for i in range(10)]  # 5565-5574 (avoid overlap with Napari)
-            ports_to_scan = [7777] + napari_ports + fiji_ports
+            fiji_ports = [DEFAULT_FIJI_STREAM_PORT + i for i in range(10)]  # 5565-5574 (avoid overlap with Napari)
+            ports_to_scan = [DEFAULT_EXECUTION_SERVER_PORT] + napari_ports + fiji_ports
 
             zmq_manager_widget = ZMQServerManagerWidget(
                 ports_to_scan=ports_to_scan,

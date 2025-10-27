@@ -10,9 +10,10 @@ import time
 import threading
 from typing import Dict, Any, List
 
-from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT
+from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT, get_zmq_transport_url
 from openhcs.runtime.zmq_messages import ImageAck
 from openhcs.constants.streaming import StreamingDataType
+from openhcs.core.config import TransportMode
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class FijiViewerServer(ZMQServer):
     DEBOUNCE_DELAY_MS = 500  # Collect items for 500ms before processing
     MAX_DEBOUNCE_WAIT_MS = 2000  # Maximum wait time before forcing batch processing
 
-    def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None):
+    def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None, transport_mode: TransportMode = TransportMode.IPC):
         """
         Initialize Fiji viewer server.
 
@@ -50,12 +51,13 @@ class FijiViewerServer(ZMQServer):
             viewer_title: Title for the Fiji viewer window
             display_config: FijiDisplayConfig with LUT, dimension modes, etc.
             log_file_path: Path to log file (for client discovery)
+            transport_mode: ZMQ transport mode (IPC or TCP)
         """
         import zmq
 
         # Initialize with REP socket for receiving images (synchronous request/reply)
         # REP socket forces workers to wait for acknowledgment before closing shared memory
-        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.REP)
+        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.REP, transport_mode=transport_mode)
 
         self.viewer_title = viewer_title
         self.display_config = display_config
@@ -85,10 +87,12 @@ class FijiViewerServer(ZMQServer):
         """Setup PUSH socket for sending acknowledgments."""
         import zmq
         try:
+            ack_url = get_zmq_transport_url(SHARED_ACK_PORT, self.transport_mode, 'localhost')
+
             context = zmq.Context.instance()
             self.ack_socket = context.socket(zmq.PUSH)
-            self.ack_socket.connect(f"tcp://localhost:{SHARED_ACK_PORT}")
-            logger.info(f"🔬 FIJI SERVER: Connected ack socket to port {SHARED_ACK_PORT}")
+            self.ack_socket.connect(ack_url)
+            logger.info(f"🔬 FIJI SERVER: Connected ack socket to {ack_url}")
         except Exception as e:
             logger.warning(f"🔬 FIJI SERVER: Failed to setup ack socket: {e}")
             self.ack_socket = None
@@ -1142,23 +1146,24 @@ FijiViewerServer._handle_images_for_window = _handle_images_for_window
 FijiViewerServer._handle_rois_for_window = _handle_rois_for_window
 
 
-def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, log_file_path: str = None):
+def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, log_file_path: str = None, transport_mode: TransportMode = TransportMode.IPC):
     """
     Fiji viewer server process function.
-    
+
     Runs in separate process to manage Fiji instance and handle incoming image data.
-    
+
     Args:
         port: ZMQ port to listen on
         viewer_title: Title for the Fiji viewer window
         display_config: FijiDisplayConfig instance
         log_file_path: Path to log file (for client discovery via ping/pong)
+        transport_mode: ZMQ transport mode (IPC or TCP)
     """
     try:
         import zmq
-        
+
         # Create ZMQ server instance (inherits from ZMQServer ABC)
-        server = FijiViewerServer(port, viewer_title, display_config, log_file_path)
+        server = FijiViewerServer(port, viewer_title, display_config, log_file_path, transport_mode)
         
         # Start the server (binds sockets, initializes PyImageJ)
         server.start()

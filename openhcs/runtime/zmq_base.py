@@ -11,6 +11,10 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import pickle
 from openhcs.runtime.zmq_messages import ControlMessageType, ResponseType, MessageFields, PongResponse, SocketType, ImageAck
+from openhcs.constants.constants import (
+    CONTROL_PORT_OFFSET, IPC_SOCKET_DIR_NAME, IPC_SOCKET_PREFIX, IPC_SOCKET_EXTENSION
+)
+from openhcs.core.config import TransportMode
 
 logger = logging.getLogger(__name__)
 
@@ -20,28 +24,76 @@ logger = logging.getLogger(__name__)
 SHARED_ACK_PORT = 7555
 
 
+def get_zmq_transport_url(port: int, transport_mode: TransportMode, host: str = 'localhost') -> str:
+    """Generate ZMQ transport URL based on mode and platform.
+
+    Args:
+        port: Port number (used for both IPC and TCP)
+        transport_mode: IPC or TCP
+        host: Host for TCP mode (ignored for IPC)
+
+    Returns:
+        ZMQ transport URL string
+
+    Raises:
+        ValueError: If transport_mode is invalid (fail-loud)
+
+    Examples:
+        >>> get_zmq_transport_url(5555, TransportMode.IPC)  # Windows
+        'ipc://openhcs-zmq-5555'
+
+        >>> get_zmq_transport_url(5555, TransportMode.IPC)  # Unix/Mac
+        'ipc:///home/user/.openhcs/ipc/openhcs-zmq-5555.sock'
+
+        >>> get_zmq_transport_url(5555, TransportMode.TCP, 'localhost')
+        'tcp://localhost:5555'
+    """
+    if transport_mode == TransportMode.IPC:
+        if platform.system() == 'Windows':
+            # Windows named pipes: ipc://openhcs-zmq-{port}
+            return f"ipc://{IPC_SOCKET_PREFIX}-{port}"
+        else:
+            # Unix domain sockets: ipc:///home/user/.openhcs/ipc/openhcs-zmq-{port}.sock
+            ipc_dir = Path.home() / ".openhcs" / IPC_SOCKET_DIR_NAME
+            ipc_dir.mkdir(parents=True, exist_ok=True)  # Fail-loud if permission denied
+            socket_name = f"{IPC_SOCKET_PREFIX}-{port}{IPC_SOCKET_EXTENSION}"
+            return f"ipc://{ipc_dir}/{socket_name}"
+    elif transport_mode == TransportMode.TCP:
+        return f"tcp://{host}:{port}"
+    else:
+        # Fail-loud for invalid enum (should never happen with proper typing)
+        raise ValueError(f"Invalid transport_mode: {transport_mode}")
+
+
 # Global ack listener singleton
 _ack_listener_thread = None
 _ack_listener_lock = threading.Lock()
 _ack_listener_running = False
+_ack_listener_transport_mode = None
 
 
-def start_global_ack_listener():
+def start_global_ack_listener(transport_mode: TransportMode = None):
     """Start the global ack listener thread (singleton).
 
     This thread listens on SHARED_ACK_PORT for acknowledgments from all viewers
     and routes them to the appropriate queue trackers.
 
     Safe to call multiple times - only starts once.
+
+    Args:
+        transport_mode: Transport mode to use (IPC or TCP). Defaults to IPC.
     """
-    global _ack_listener_thread, _ack_listener_running
+    global _ack_listener_thread, _ack_listener_running, _ack_listener_transport_mode
 
     with _ack_listener_lock:
         if _ack_listener_running:
             logger.debug("Ack listener already running")
             return
 
-        logger.info(f"Starting global ack listener on port {SHARED_ACK_PORT}")
+        # Set transport mode (default to IPC if not specified)
+        _ack_listener_transport_mode = transport_mode or TransportMode.IPC
+
+        logger.info(f"Starting global ack listener on port {SHARED_ACK_PORT} with {_ack_listener_transport_mode.value} transport")
         _ack_listener_running = True
         _ack_listener_thread = threading.Thread(
             target=_ack_listener_loop,
@@ -65,8 +117,9 @@ def _ack_listener_loop():
 
     try:
         socket = context.socket(zmq.PULL)
-        socket.bind(f"tcp://*:{SHARED_ACK_PORT}")
-        logger.info(f"✅ Ack listener bound to port {SHARED_ACK_PORT}")
+        ack_url = get_zmq_transport_url(SHARED_ACK_PORT, _ack_listener_transport_mode, '*')
+        socket.bind(ack_url)
+        logger.info(f"✅ Ack listener bound to {ack_url}")
 
         while _ack_listener_running:
             try:
@@ -132,13 +185,14 @@ def stop_global_ack_listener():
 class ZMQServer(ABC):
     """ABC for ZMQ servers - dual-channel pattern with ping/pong handshake."""
 
-    def __init__(self, port, host='*', log_file_path=None, data_socket_type=None):
+    def __init__(self, port, host='*', log_file_path=None, data_socket_type=None, transport_mode=None):
         import zmq
         self.port = port
         self.host = host
-        self.control_port = port + 1000
+        self.control_port = port + CONTROL_PORT_OFFSET
         self.log_file_path = log_file_path
         self.data_socket_type = data_socket_type if data_socket_type is not None else zmq.PUB
+        self.transport_mode = transport_mode or TransportMode.IPC
         self.zmq_context = None
         self.data_socket = None
         self.control_socket = None
@@ -163,14 +217,17 @@ class ZMQServer(ABC):
                 socket_type_name = "SUB" if self.data_socket_type == zmq.SUB else "PULL"
                 logger.info(f"ZMQ {socket_type_name} socket RCVHWM set to 100000 to prevent drops during blocking operations")
 
-            self.data_socket.bind(f"tcp://{self.host}:{self.port}")
+            data_url = get_zmq_transport_url(self.port, self.transport_mode, self.host)
+            control_url = get_zmq_transport_url(self.control_port, self.transport_mode, self.host)
+
+            self.data_socket.bind(data_url)
             if self.data_socket_type == zmq.SUB:
                 self.data_socket.setsockopt(zmq.SUBSCRIBE, b"")
             self.control_socket = self.zmq_context.socket(zmq.REP)
             self.control_socket.setsockopt(zmq.LINGER, 0)
-            self.control_socket.bind(f"tcp://{self.host}:{self.control_port}")
+            self.control_socket.bind(control_url)
             self._running = True
-            logger.info(f"ZMQ Server started on {self.port} ({SocketType.from_zmq_constant(self.data_socket_type).get_display_name()}), control {self.control_port}")
+            logger.info(f"ZMQ Server started on {data_url} ({SocketType.from_zmq_constant(self.data_socket_type).get_display_name()}), control {control_url}")
 
     def stop(self):
         with self._lock:
@@ -238,7 +295,8 @@ class ZMQServer(ABC):
                 for line in result.stdout.split('\n'):
                     if f':{port}' in line and 'LISTENING' in line:
                         try:
-                            subprocess.run(['taskkill', '/F', '/PID', line.split()[-1]], timeout=1)
+                            # Graceful termination (no /F flag) - works without UAC for user processes
+                            subprocess.run(['taskkill', '/PID', line.split()[-1]], timeout=1)
                             killed += 1
                         except:
                             pass
@@ -358,11 +416,12 @@ class ZMQServer(ABC):
 class ZMQClient(ABC):
     """ABC for ZMQ clients - dual-channel pattern with auto-spawning."""
 
-    def __init__(self, port, host='localhost', persistent=True):
+    def __init__(self, port, host='localhost', persistent=True, transport_mode=None):
         self.port = port
         self.host = host
-        self.control_port = port + 1000
+        self.control_port = port + CONTROL_PORT_OFFSET
         self.persistent = persistent
+        self.transport_mode = transport_mode or TransportMode.IPC
         self.zmq_context = None
         self.data_socket = None
         self.control_socket = None
@@ -416,9 +475,11 @@ class ZMQClient(ABC):
     def _setup_client_sockets(self):
         import zmq
         self.zmq_context = zmq.Context()
+        data_url = get_zmq_transport_url(self.port, self.transport_mode, self.host)
+
         self.data_socket = self.zmq_context.socket(zmq.SUB)
         self.data_socket.setsockopt(zmq.LINGER, 0)
-        self.data_socket.connect(f"tcp://{self.host}:{self.port}")
+        self.data_socket.connect(data_url)
         self.data_socket.setsockopt(zmq.SUBSCRIBE, b"")
         time.sleep(0.1)
 
@@ -437,11 +498,13 @@ class ZMQClient(ABC):
     def _try_connect_to_existing(self, port):
         import zmq
         try:
+            control_url = get_zmq_transport_url(port + CONTROL_PORT_OFFSET, self.transport_mode, self.host)
+
             ctx = zmq.Context()
             sock = ctx.socket(zmq.REQ)
             sock.setsockopt(zmq.LINGER, 0)
             sock.setsockopt(zmq.RCVTIMEO, 500)
-            sock.connect(f"tcp://{self.host}:{port + 1000}")
+            sock.connect(control_url)
             sock.send(pickle.dumps({'type': 'ping'}))
             response = pickle.loads(sock.recv())
             return response.get('type') == 'pong' and response.get('ready')
@@ -463,6 +526,8 @@ class ZMQClient(ABC):
             time.sleep(0.2)
         else:
             return False
+        control_url = get_zmq_transport_url(self.control_port, self.transport_mode, self.host)
+
         start = time.time()
         while time.time() - start < timeout:
             try:
@@ -470,7 +535,7 @@ class ZMQClient(ABC):
                 sock = ctx.socket(zmq.REQ)
                 sock.setsockopt(zmq.LINGER, 0)
                 sock.setsockopt(zmq.RCVTIMEO, 1000)
-                sock.connect(f"tcp://{self.host}:{self.control_port}")
+                sock.connect(control_url)
                 sock.send(pickle.dumps({'type': 'ping'}))
                 response = pickle.loads(sock.recv())
                 if response.get('type') == 'pong' and response.get('ready'):
@@ -490,17 +555,31 @@ class ZMQClient(ABC):
         return False
 
     def _is_port_in_use(self, port):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.1)
-        try:
-            sock.bind(('localhost', port))
-            sock.close()
-            return False
-        except OSError:
-            sock.close()
-            return True
-        except:
-            return False
+        if self.transport_mode == TransportMode.IPC:
+            # For IPC mode, check if socket file exists
+            if platform.system() == 'Windows':
+                # Windows named pipes - always return False (can't easily check)
+                return False
+            else:
+                # Unix domain sockets - check if socket file exists
+                from pathlib import Path
+                ipc_dir = Path.home() / ".openhcs" / IPC_SOCKET_DIR_NAME
+                socket_name = f"{IPC_SOCKET_PREFIX}-{port}{IPC_SOCKET_EXTENSION}"
+                socket_path = ipc_dir / socket_name
+                return socket_path.exists()
+        else:
+            # TCP mode - check if port is bound
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.1)
+            try:
+                sock.bind(('localhost', port))
+                sock.close()
+                return False
+            except OSError:
+                sock.close()
+                return True
+            except:
+                return False
 
     def _find_free_port(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -509,6 +588,22 @@ class ZMQClient(ABC):
 
     def _kill_processes_on_port(self, port):
         try:
+            # For IPC mode, remove stale socket files
+            if self.transport_mode == TransportMode.IPC:
+                if platform.system() != 'Windows':
+                    from pathlib import Path
+                    ipc_dir = Path.home() / ".openhcs" / IPC_SOCKET_DIR_NAME
+                    socket_name = f"{IPC_SOCKET_PREFIX}-{port}{IPC_SOCKET_EXTENSION}"
+                    socket_path = ipc_dir / socket_name
+                    if socket_path.exists():
+                        try:
+                            socket_path.unlink()
+                            logger.info(f"🧹 Removed stale IPC socket: {socket_path}")
+                        except Exception as e:
+                            logger.warning(f"Failed to remove stale IPC socket {socket_path}: {e}")
+                return  # IPC mode doesn't use TCP ports, so skip process killing
+
+            # TCP mode - kill processes using the port
             system = platform.system()
             if system in ["Linux", "Darwin"]:
                 result = subprocess.run(['lsof', '-ti', f'TCP:{port}', '-sTCP:LISTEN'], capture_output=True, text=True, timeout=2)
@@ -523,28 +618,33 @@ class ZMQClient(ABC):
                 for line in result.stdout.split('\n'):
                     if f':{port}' in line and 'LISTENING' in line:
                         try:
-                            subprocess.run(['taskkill', '/F', '/PID', line.split()[-1]], timeout=1)
+                            # Graceful termination (no /F flag) - works without UAC for user processes
+                            subprocess.run(['taskkill', '/PID', line.split()[-1]], timeout=1)
                         except:
                             pass
         except:
             pass
 
     @staticmethod
-    def scan_servers(ports, host='localhost', timeout_ms=200):
+    def scan_servers(ports, host='localhost', timeout_ms=200, transport_mode=None):
         import zmq
+        transport_mode = transport_mode or TransportMode.IPC
         servers = []
         for port in ports:
             try:
+                control_port = port + CONTROL_PORT_OFFSET
+                control_url = get_zmq_transport_url(control_port, transport_mode, host)
+
                 ctx = zmq.Context()
                 sock = ctx.socket(zmq.REQ)
                 sock.setsockopt(zmq.LINGER, 0)
                 sock.setsockopt(zmq.RCVTIMEO, timeout_ms)
-                sock.connect(f"tcp://{host}:{port + 1000}")
+                sock.connect(control_url)
                 sock.send(pickle.dumps({'type': 'ping'}))
                 pong = pickle.loads(sock.recv())
                 if pong.get('type') == 'pong':
                     pong['port'] = port
-                    pong['control_port'] = port + 1000
+                    pong['control_port'] = control_port
                     servers.append(pong)
             except:
                 pass

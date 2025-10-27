@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any, List, Union
 import os
 
+from openhcs.core.config import TransportMode
+
 import numpy as np
 
 from openhcs.io.streaming import StreamingBackend
@@ -77,7 +79,8 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         # Extract kwargs using class attributes
         host = kwargs.get(self.HOST_PARAM, 'localhost')
         port = kwargs[self.PORT_PARAM]
-        publisher = self._get_publisher(host, port)
+        transport_mode = kwargs.get('transport_mode', TransportMode.IPC)
+        publisher = self._get_publisher(host, port, transport_mode)
         display_config = kwargs['display_config']
         microscope_handler = kwargs['microscope_handler']
         source = kwargs.get('source', 'unknown_source')  # Pre-built source value
@@ -135,15 +138,16 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             'timestamp': time.time()
         }
 
+        # Register sent images with queue tracker BEFORE sending
+        # This prevents race condition with IPC mode where acks arrive before registration
+        self._register_with_queue_tracker(port, image_ids)
+
         # Send non-blocking to prevent hanging if Napari is slow to process (matches Fiji pattern)
         import zmq
         send_succeeded = False
         try:
             publisher.send_json(message, flags=zmq.NOBLOCK)
             send_succeeded = True
-
-            # Register sent images with queue tracker using ABC helper
-            self._register_with_queue_tracker(port, image_ids)
 
         except zmq.Again:
             logger.warning(f"Napari viewer busy, dropped batch of {len(batch_images)} images (port {port})")

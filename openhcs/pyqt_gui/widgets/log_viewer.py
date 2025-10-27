@@ -916,8 +916,9 @@ class LogViewerWindow(QMainWindow):
         discovered_logs = []
 
         # Common ports to scan
-        zmq_execution_ports = [7777]  # Default ZMQ execution server port
-        napari_ports = [5555 + i for i in range(5)]  # Scan Napari ports 5555-5559
+        from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT, DEFAULT_NAPARI_STREAM_PORT
+        zmq_execution_ports = [DEFAULT_EXECUTION_SERVER_PORT]  # Default ZMQ execution server port
+        napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(5)]  # Scan Napari ports 5555-5559
 
         def ping_server(port: int) -> dict:
             """Ping a server and return pong response, or None if no response."""

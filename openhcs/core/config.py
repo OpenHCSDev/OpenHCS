@@ -14,7 +14,9 @@ from typing import Optional, Union, Any, List
 from enum import Enum
 from abc import ABC, abstractmethod
 from openhcs.constants import Microscope, VirtualComponents
-from openhcs.constants.constants import Backend
+from openhcs.constants.constants import (
+    Backend, DEFAULT_NAPARI_STREAM_PORT, DEFAULT_FIJI_STREAM_PORT
+)
 
 # Import decorator for automatic decorator creation
 from openhcs.config_framework import auto_create_decorator
@@ -86,6 +88,13 @@ class MicroscopeFormat(Enum):
     """Supported microscope formats for experimental analysis."""
     EDDU_CX5 = "EDDU_CX5"  # ThermoFisher CX5 format
     EDDU_METAXPRESS = "EDDU_metaxpress"  # Molecular Devices MetaXpress format
+
+
+class TransportMode(Enum):
+    """ZMQ transport modes for local vs remote communication."""
+    IPC = "ipc"  # Inter-process communication (local only, no firewall prompts)
+    TCP = "tcp"  # Network sockets (supports remote, triggers firewall)
+
 
 @auto_create_decorator
 @dataclass(frozen=True)
@@ -470,11 +479,14 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
 @dataclass(frozen=True)
 class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
     """Configuration for napari streaming."""
-    napari_port: int = 5555
+    napari_port: int = DEFAULT_NAPARI_STREAM_PORT
     """Port for napari streaming communication."""
 
     napari_host: str = 'localhost'
     """Host for napari streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
+
+    transport_mode: TransportMode = TransportMode.IPC
+    """ZMQ transport mode: IPC (local only, no firewall) or TCP (remote support, firewall prompts)."""
 
     @property
     def backend(self) -> Backend:
@@ -488,6 +500,7 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
         kwargs = {
             "napari_port": self.napari_port,
             "napari_host": self.napari_host,
+            "transport_mode": self.transport_mode,
             "display_config": self  # self is now the display config
         }
 
@@ -505,7 +518,8 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
             viewer_title="OpenHCS Pipeline Visualization",
             persistent=self.persistent,
             napari_port=self.napari_port,
-            display_config=self  # self is now the display config
+            display_config=self,  # self is now the display config
+            transport_mode=self.transport_mode
         )
 
 
@@ -518,7 +532,7 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
     Inherits from both StreamingConfig and FijiDisplayConfig to provide
     feature parity with NapariStreamingConfig.
     """
-    fiji_port: int = 5565  # Non-overlapping with Napari (5555-5564)
+    fiji_port: int = DEFAULT_FIJI_STREAM_PORT
     """Port for Fiji streaming communication (different default from Napari)."""
 
     fiji_host: str = 'localhost'
@@ -526,6 +540,9 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
 
     fiji_executable_path: Optional[Path] = None
     """Path to Fiji/ImageJ executable. If None, will auto-detect."""
+
+    transport_mode: TransportMode = TransportMode.IPC
+    """ZMQ transport mode: IPC (local only, no firewall) or TCP (remote support, firewall prompts)."""
 
     @property
     def backend(self) -> Backend:
@@ -541,6 +558,7 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
             "fiji_port": self.fiji_port,
             "fiji_host": self.fiji_host,
             "fiji_executable_path": self.fiji_executable_path,
+            "transport_mode": self.transport_mode,
             "display_config": self  # self is now the display config
         }
 
@@ -558,7 +576,8 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
             viewer_title="OpenHCS Fiji Visualization",
             persistent=self.persistent,
             fiji_port=self.fiji_port,
-            display_config=self
+            display_config=self,
+            transport_mode=self.transport_mode
         )
 
 # Inject all accumulated fields at the end of module loading

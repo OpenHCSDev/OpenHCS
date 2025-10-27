@@ -9,8 +9,8 @@
         "--it-exec-mode=multiprocessing",
         // Keep default data types
         "--it-dims=3d",
-        // Keep default ZMQ mode
-        "--it-zmq-mode=direct",
+        // Include both ZMQ modes (direct, zmq) for VSCode test discovery
+        "--it-zmq-mode=direct,zmq",
         // Include all visualizer options (none, napari, fiji, napari+fiji) for VSCode test discovery
         "--it-visualizers=none,napari,fiji,napari+fiji"
     ],

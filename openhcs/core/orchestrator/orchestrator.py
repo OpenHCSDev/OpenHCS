@@ -498,6 +498,25 @@ class PipelineOrchestrator(ContextProvider):
         """
         from openhcs.core.config import NapariStreamingConfig, FijiStreamingConfig
 
+        # Start global ack listener if this is a streaming config
+        # Must be started before any viewers connect their ack sockets
+        if isinstance(config, (NapariStreamingConfig, FijiStreamingConfig)):
+            from openhcs.runtime.zmq_base import start_global_ack_listener
+            start_global_ack_listener(config.transport_mode)
+
+            # Create queue tracker for this viewer BEFORE starting the viewer
+            # This ensures the tracker exists when acks start arriving
+            from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+            registry = GlobalQueueTrackerRegistry()
+            if isinstance(config, NapariStreamingConfig):
+                viewer_type = 'napari'
+                port = config.napari_port
+            else:  # FijiStreamingConfig
+                viewer_type = 'fiji'
+                port = config.fiji_port
+            registry.get_or_create_tracker(port, viewer_type)
+            logger.info(f"🔬 ORCHESTRATOR: Pre-created queue tracker for {viewer_type} on port {port}")
+
         # Determine key based on config type (use isinstance for type checking)
         if isinstance(config, NapariStreamingConfig):
             key = ('napari', config.napari_port)

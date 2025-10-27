@@ -13,6 +13,8 @@ from typing import Any, List, Union
 import numpy as np
 
 from openhcs.io.base import DataSink
+from openhcs.runtime.zmq_base import get_zmq_transport_url
+from openhcs.core.config import TransportMode
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ class StreamingBackend(DataSink):
         self._context = None
         self._shared_memory_blocks = {}
 
-    def _get_publisher(self, host: str, port: int):
+    def _get_publisher(self, host: str, port: int, transport_mode: TransportMode = TransportMode.IPC):
         """
         Lazy initialization of ZeroMQ publisher (common for all streaming backends).
 
@@ -53,13 +55,17 @@ class StreamingBackend(DataSink):
         and PUB socket for Napari (broadcast pattern).
 
         Args:
-            host: Host to connect to
+            host: Host to connect to (ignored for IPC mode)
             port: Port to connect to
+            transport_mode: IPC or TCP transport
 
         Returns:
             ZeroMQ publisher socket
         """
-        key = f"{host}:{port}"
+        # Generate transport URL using centralized function
+        url = get_zmq_transport_url(port, transport_mode, host)
+
+        key = url  # Use URL as key instead of host:port
         if key not in self._publishers:
             try:
                 import zmq
@@ -74,9 +80,9 @@ class StreamingBackend(DataSink):
                 if socket_type == zmq.PUB:
                     publisher.setsockopt(zmq.SNDHWM, 100000)  # Only for PUB sockets
 
-                publisher.connect(f"tcp://{host}:{port}")
+                publisher.connect(url)
                 socket_name = "REQ" if socket_type == zmq.REQ else "PUB"
-                logger.info(f"{self.VIEWER_TYPE} streaming {socket_name} socket connected to {host}:{port}")
+                logger.info(f"{self.VIEWER_TYPE} streaming {socket_name} socket connected to {url}")
                 time.sleep(0.1)
                 self._publishers[key] = publisher
 
