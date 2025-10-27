@@ -118,7 +118,7 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
             global_value = getattr(global_config, field.name)
             merged_config_values[field.name] = global_value
             if field.name == 'step_well_filter_config':
-                logger.debug(f"MERGE DEBUG: Using global_config value: {global_value}")
+                print(f"🔍 MERGE DEBUG: Using global_config value: {global_value}")
 
     result = GlobalPipelineConfig(**merged_config_values)
 
@@ -127,7 +127,7 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
         step_config = getattr(result, 'step_well_filter_config')
         if hasattr(step_config, 'well_filter'):
             well_filter_value = getattr(step_config, 'well_filter')
-            logger.debug(f"MERGE DEBUG: Final result has step_well_filter_config.well_filter = {well_filter_value}")
+            print(f"🔍 MERGE DEBUG: Final result has step_well_filter_config.well_filter = {well_filter_value}")
 
     return result
 
