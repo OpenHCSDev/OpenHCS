@@ -116,7 +116,17 @@ class ZMQExecutionServer(ZMQServer):
                 record[MessageFields.ERROR] = str(e)
                 logger.error(f"[{execution_id}] ✗ Failed: {e}", exc_info=True)
         finally:
+            # Clean up orchestrator reference
             record.pop('orchestrator', None)
+
+            # Kill any remaining worker processes to ensure clean state for next execution
+            # This prevents zombie workers from interfering with subsequent executions
+            logger.info(f"[{execution_id}] Cleaning up worker processes...")
+            killed = self._kill_worker_processes()
+            if killed > 0:
+                logger.info(f"[{execution_id}] Killed {killed} worker processes during cleanup")
+            else:
+                logger.info(f"[{execution_id}] No worker processes to clean up")
     
     def _handle_status(self, msg):
         execution_id = StatusRequest.from_dict(msg).execution_id

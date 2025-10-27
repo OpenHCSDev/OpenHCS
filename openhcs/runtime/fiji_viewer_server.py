@@ -404,7 +404,17 @@ class FijiViewerServer(ZMQServer):
         """
         # Combine and deduplicate
         merged = set(stored_values) | set(new_values)
-        return sorted(merged)
+
+        # Sort with custom key that handles mixed types (int/str) in tuples
+        # Convert each element to (type_priority, str_value) for comparison
+        # This ensures consistent ordering even with mixed types
+        def sort_key(value_tuple):
+            return tuple(
+                (0 if isinstance(v, (int, float)) else 1, str(v))
+                for v in value_tuple
+            )
+
+        return sorted(merged, key=sort_key)
 
     def _collect_dimension_values_from_items(self, items: List[Dict[str, Any]],
                                              component_list: List[str]) -> List[tuple]:
@@ -429,7 +439,15 @@ class FijiViewerServer(ZMQServer):
             value_tuple = tuple(meta[comp] for comp in component_list)
             unique_values.add(value_tuple)
 
-        return sorted(unique_values)
+        # Sort with custom key that handles mixed types (int/str) in tuples
+        # Convert each element to (type_priority, str_value) for comparison
+        def sort_key(value_tuple):
+            return tuple(
+                (0 if isinstance(v, (int, float)) else 1, str(v))
+                for v in value_tuple
+            )
+
+        return sorted(unique_values, key=sort_key)
 
     def _get_dimension_index(self, metadata: Dict[str, Any],
                              component_list: List[str],

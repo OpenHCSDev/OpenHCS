@@ -378,14 +378,17 @@ def _handle_component_aware_display(viewer, layers, component_groups, data, path
         logger.info(f"🔍 NAPARI PROCESS: layer_key='{layer_key}', component_info={component_info}")
 
         # Reconcile cached layer/group state with live napari viewer after possible manual deletions
+        # CRITICAL: Only purge if the layer WAS in our cache but is now missing from viewer
+        # (user manually deleted it). Do NOT purge if layer was never created yet (debounced update pending).
         try:
             current_layer_names = {l.name for l in viewer.layers}
-            if layer_key not in current_layer_names:
-                # Drop any stale references so we will recreate the layer
+            if layer_key not in current_layer_names and layer_key in layers:
+                # Layer was in our cache but is now missing from viewer - user deleted it
+                # Drop stale references so we will recreate the layer
                 num_items = len(component_groups.get(layer_key, []))
                 layers.pop(layer_key, None)
                 component_groups.pop(layer_key, None)
-                logger.info(f"🔬 NAPARI PROCESS: Reconciling state — '{layer_key}' not in viewer; purged stale caches (had {num_items} items in component_groups)")
+                logger.info(f"🔬 NAPARI PROCESS: Reconciling state — '{layer_key}' was deleted from viewer; purged stale caches (had {num_items} items in component_groups)")
         except Exception:
             # Fail-loud elsewhere; reconciliation is best-effort and must not mask display
             pass
@@ -487,7 +490,7 @@ class NapariViewerServer(ZMQServer):
         import threading
         self.layer_update_lock = threading.Lock()  # Prevent concurrent updates
         self.pending_updates = {}  # layer_key -> QTimer (debounce)
-        self.update_delay_ms = 200  # Wait 200ms for more items before rebuilding
+        self.update_delay_ms = 1000  # Wait 200ms for more items before rebuilding
 
         # Create PUSH socket for sending acknowledgments to shared ack port
         self.ack_socket = None
