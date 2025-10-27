@@ -16,6 +16,7 @@ from pathlib import Path
 
 from openhcs.io.filemanager import FileManager
 from openhcs.core.config import TransportMode
+from openhcs.constants.constants import DEFAULT_FIJI_STREAM_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ class FijiStreamVisualizer:
     """
 
     def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Fiji Visualization",
-                 persistent: bool = True, fiji_port: int = 5565, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
+                 persistent: bool = True, fiji_port: int = DEFAULT_FIJI_STREAM_PORT, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
         self.persistent = persistent

@@ -957,30 +957,17 @@ class PipelineOrchestrator(ContextProvider):
                 for visualizer_info in ctx.required_visualizers:
                     config = visualizer_info['config']
 
-                    # Generic port-based key generation for all streaming configs
-                    # Check for port attributes in order: napari_port, fiji_port, or any other *_port
-                    port = None
-                    viewer_type = None
+                    # Generic port-based key generation using polymorphic StreamingConfig attributes
+                    # All StreamingConfig subclasses inherit 'port' and 'backend' attributes
+                    from openhcs.core.config import StreamingConfig
 
-                    if hasattr(config, 'napari_port'):
-                        port = config.napari_port
-                        viewer_type = 'napari'
-                    elif hasattr(config, 'fiji_port'):
-                        port = config.fiji_port
-                        viewer_type = 'fiji'
-                    else:
-                        # For future viewer types, check for any attribute ending in '_port'
-                        for attr in dir(config):
-                            if attr.endswith('_port') and not attr.startswith('_'):
-                                port = getattr(config, attr)
-                                viewer_type = attr.replace('_port', '')
-                                break
-
-                    # Create key based on whether we found a port
-                    if port is not None:
+                    if isinstance(config, StreamingConfig):
+                        # Use polymorphic attributes from StreamingConfig base class
+                        port = config.port
+                        viewer_type = config.backend.name.replace('_STREAM', '').lower()
                         key = (viewer_type, port)
                     else:
-                        # Fallback for non-port-based visualizers
+                        # Fallback for non-streaming visualizers
                         backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
                         key = (backend_name,)
 

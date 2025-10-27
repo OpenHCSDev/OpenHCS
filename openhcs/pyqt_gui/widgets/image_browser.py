@@ -432,15 +432,14 @@ class ImageBrowserWidget(QWidget):
     def _create_instance_manager_panel(self):
         """Create the viewer instance manager panel using ZMQServerManagerWidget."""
         from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import ZMQServerManagerWidget
-        from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
+        from openhcs.core.config import get_all_streaming_ports
 
-        # Scan Napari and Fiji ports
-        # Napari: 5555-5564 (10 ports)
-        # Fiji: 5565-5574 (10 ports, non-overlapping with Napari)
-        from openhcs.constants.constants import DEFAULT_FIJI_STREAM_PORT
-        napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]  # 5555-5564
-        fiji_ports = [DEFAULT_FIJI_STREAM_PORT + i for i in range(10)]  # 5565-5574 (avoid overlap with Napari)
-        ports_to_scan = napari_ports + fiji_ports
+        # Scan all streaming ports using generic port discovery
+        # Automatically includes all registered streaming types (Napari, Fiji, etc.)
+        # Exclude execution server port (only want viewer ports)
+        from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
+        all_ports = get_all_streaming_ports(num_ports_per_type=10)
+        ports_to_scan = [p for p in all_ports if p != DEFAULT_EXECUTION_SERVER_PORT]
 
         # Create ZMQ server manager widget
         zmq_manager = ZMQServerManagerWidget(

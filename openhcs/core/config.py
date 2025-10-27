@@ -450,7 +450,19 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
 
     Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
     Inherited fields are automatically set to None by @global_pipeline_config(inherit_as_none=True).
+
+    Defines common attributes (host, port, transport_mode) that all streaming configs inherit,
+    enabling polymorphic access without type-specific attribute names.
     """
+
+    host: str = 'localhost'
+    """Host for streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
+
+    port: int = None  # Subclasses must override with their specific default
+    """Port for streaming communication. Each streamer type has its own default."""
+
+    transport_mode: TransportMode = TransportMode.IPC
+    """ZMQ transport mode: IPC (local only, no firewall) or TCP (remote support, firewall prompts)."""
 
     @property
     @abstractmethod
@@ -478,15 +490,13 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
 @global_pipeline_config
 @dataclass(frozen=True)
 class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
-    """Configuration for napari streaming."""
-    napari_port: int = DEFAULT_NAPARI_STREAM_PORT
+    """Configuration for napari streaming.
+
+    Overrides base StreamingConfig.port with Napari-specific default.
+    Inherits host and transport_mode from base class.
+    """
+    port: int = DEFAULT_NAPARI_STREAM_PORT
     """Port for napari streaming communication."""
-
-    napari_host: str = 'localhost'
-    """Host for napari streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
-
-    transport_mode: TransportMode = TransportMode.IPC
-    """ZMQ transport mode: IPC (local only, no firewall) or TCP (remote support, firewall prompts)."""
 
     @property
     def backend(self) -> Backend:
@@ -498,8 +508,8 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
 
     def get_streaming_kwargs(self, context) -> dict:
         kwargs = {
-            "napari_port": self.napari_port,
-            "napari_host": self.napari_host,
+            "napari_port": self.port,  # Use polymorphic port attribute
+            "napari_host": self.host,  # Use polymorphic host attribute
             "transport_mode": self.transport_mode,
             "display_config": self  # self is now the display config
         }
@@ -517,7 +527,7 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
             visualizer_config,
             viewer_title="OpenHCS Pipeline Visualization",
             persistent=self.persistent,
-            napari_port=self.napari_port,
+            napari_port=self.port,  # Use polymorphic port attribute
             display_config=self,  # self is now the display config
             transport_mode=self.transport_mode
         )
@@ -531,18 +541,15 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
 
     Inherits from both StreamingConfig and FijiDisplayConfig to provide
     feature parity with NapariStreamingConfig.
-    """
-    fiji_port: int = DEFAULT_FIJI_STREAM_PORT
-    """Port for Fiji streaming communication (different default from Napari)."""
 
-    fiji_host: str = 'localhost'
-    """Host for Fiji streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
+    Overrides base StreamingConfig.port with Fiji-specific default.
+    Inherits host and transport_mode from base class.
+    """
+    port: int = DEFAULT_FIJI_STREAM_PORT
+    """Port for Fiji streaming communication (different default from Napari)."""
 
     fiji_executable_path: Optional[Path] = None
     """Path to Fiji/ImageJ executable. If None, will auto-detect."""
-
-    transport_mode: TransportMode = TransportMode.IPC
-    """ZMQ transport mode: IPC (local only, no firewall) or TCP (remote support, firewall prompts)."""
 
     @property
     def backend(self) -> Backend:
@@ -555,8 +562,8 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
     def get_streaming_kwargs(self, context) -> dict:
         """Return kwargs needed for Fiji streaming backend (matches Napari pattern)."""
         kwargs = {
-            "fiji_port": self.fiji_port,
-            "fiji_host": self.fiji_host,
+            "fiji_port": self.port,  # Use polymorphic port attribute
+            "fiji_host": self.host,  # Use polymorphic host attribute
             "fiji_executable_path": self.fiji_executable_path,
             "transport_mode": self.transport_mode,
             "display_config": self  # self is now the display config
@@ -575,7 +582,7 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
             visualizer_config,
             viewer_title="OpenHCS Fiji Visualization",
             persistent=self.persistent,
-            fiji_port=self.fiji_port,
+            fiji_port=self.port,  # Use polymorphic port attribute
             display_config=self,
             transport_mode=self.transport_mode
         )
@@ -583,6 +590,40 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
 # Inject all accumulated fields at the end of module loading
 from openhcs.config_framework.lazy_factory import _inject_all_pending_fields
 _inject_all_pending_fields()
+
+
+# ============================================================================
+# Streaming Port Utilities
+# ============================================================================
+
+def get_all_streaming_ports(num_ports_per_type: int = 10) -> List[int]:
+    """Get all streaming ports for all registered streaming config types.
+
+    Uses polymorphic StreamingConfig.port attribute to discover default ports
+    for each streaming type, then generates port ranges.
+
+    Args:
+        num_ports_per_type: Number of ports to allocate per streaming type (default: 10)
+
+    Returns:
+        List of all streaming ports across all types
+    """
+    from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
+
+    # Start with execution server port
+    ports = [DEFAULT_EXECUTION_SERVER_PORT]
+
+    # Get all StreamingConfig subclasses and their default ports
+    streaming_configs = [NapariStreamingConfig, FijiStreamingConfig]
+
+    for config_cls in streaming_configs:
+        # Create a temporary instance to get the default port
+        # Use field defaults from dataclass
+        default_port = config_cls.__dataclass_fields__['port'].default
+        # Generate port range for this streaming type
+        ports.extend([default_port + i for i in range(num_ports_per_type)])
+
+    return ports
 
 
 # ============================================================================

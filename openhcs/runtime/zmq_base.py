@@ -9,6 +9,7 @@ import threading
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Optional
 import pickle
 from openhcs.runtime.zmq_messages import ControlMessageType, ResponseType, MessageFields, PongResponse, SocketType, ImageAck
 from openhcs.constants.constants import (
@@ -22,6 +23,48 @@ logger = logging.getLogger(__name__)
 # All viewers send acks to this port via PUSH sockets
 # Client listens on this port via PULL socket
 SHARED_ACK_PORT = 7555
+
+
+# ============================================================================
+# ZMQ Transport Utilities
+# ============================================================================
+
+def _get_ipc_socket_path(port: int) -> Optional[Path]:
+    """Get IPC socket path for a given port (Unix/Mac only).
+
+    Args:
+        port: Port number to generate socket path for
+
+    Returns:
+        Path to IPC socket file, or None on Windows
+    """
+    if platform.system() == 'Windows':
+        return None  # Windows uses named pipes, not file paths
+
+    ipc_dir = Path.home() / ".openhcs" / IPC_SOCKET_DIR_NAME
+    socket_name = f"{IPC_SOCKET_PREFIX}-{port}{IPC_SOCKET_EXTENSION}"
+    return ipc_dir / socket_name
+
+
+def _remove_ipc_socket(port: int) -> bool:
+    """Remove stale IPC socket file for a given port.
+
+    Args:
+        port: Port number whose socket should be removed
+
+    Returns:
+        True if socket was removed, False otherwise
+    """
+    socket_path = _get_ipc_socket_path(port)
+    if socket_path and socket_path.exists():
+        try:
+            socket_path.unlink()
+            logger.info(f"🧹 Removed stale IPC socket: {socket_path}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to remove stale IPC socket {socket_path}: {e}")
+            return False
+    return False
 
 
 def get_zmq_transport_url(port: int, transport_mode: TransportMode, host: str = 'localhost') -> str:
@@ -53,11 +96,10 @@ def get_zmq_transport_url(port: int, transport_mode: TransportMode, host: str = 
             # Windows named pipes: ipc://openhcs-zmq-{port}
             return f"ipc://{IPC_SOCKET_PREFIX}-{port}"
         else:
-            # Unix domain sockets: ipc:///home/user/.openhcs/ipc/openhcs-zmq-{port}.sock
-            ipc_dir = Path.home() / ".openhcs" / IPC_SOCKET_DIR_NAME
-            ipc_dir.mkdir(parents=True, exist_ok=True)  # Fail-loud if permission denied
-            socket_name = f"{IPC_SOCKET_PREFIX}-{port}{IPC_SOCKET_EXTENSION}"
-            return f"ipc://{ipc_dir}/{socket_name}"
+            # Unix domain sockets: use helper to get path and ensure directory exists
+            socket_path = _get_ipc_socket_path(port)
+            socket_path.parent.mkdir(parents=True, exist_ok=True)  # Fail-loud if permission denied
+            return f"ipc://{socket_path}"
     elif transport_mode == TransportMode.TCP:
         return f"tcp://{host}:{port}"
     else:
@@ -556,17 +598,9 @@ class ZMQClient(ABC):
 
     def _is_port_in_use(self, port):
         if self.transport_mode == TransportMode.IPC:
-            # For IPC mode, check if socket file exists
-            if platform.system() == 'Windows':
-                # Windows named pipes - always return False (can't easily check)
-                return False
-            else:
-                # Unix domain sockets - check if socket file exists
-                from pathlib import Path
-                ipc_dir = Path.home() / ".openhcs" / IPC_SOCKET_DIR_NAME
-                socket_name = f"{IPC_SOCKET_PREFIX}-{port}{IPC_SOCKET_EXTENSION}"
-                socket_path = ipc_dir / socket_name
-                return socket_path.exists()
+            # Use helper function to check IPC socket existence
+            socket_path = _get_ipc_socket_path(port)
+            return socket_path.exists() if socket_path else False
         else:
             # TCP mode - check if port is bound
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -588,19 +622,9 @@ class ZMQClient(ABC):
 
     def _kill_processes_on_port(self, port):
         try:
-            # For IPC mode, remove stale socket files
+            # For IPC mode, remove stale socket files using helper function
             if self.transport_mode == TransportMode.IPC:
-                if platform.system() != 'Windows':
-                    from pathlib import Path
-                    ipc_dir = Path.home() / ".openhcs" / IPC_SOCKET_DIR_NAME
-                    socket_name = f"{IPC_SOCKET_PREFIX}-{port}{IPC_SOCKET_EXTENSION}"
-                    socket_path = ipc_dir / socket_name
-                    if socket_path.exists():
-                        try:
-                            socket_path.unlink()
-                            logger.info(f"🧹 Removed stale IPC socket: {socket_path}")
-                        except Exception as e:
-                            logger.warning(f"Failed to remove stale IPC socket {socket_path}: {e}")
+                _remove_ipc_socket(port)
                 return  # IPC mode doesn't use TCP ports, so skip process killing
 
             # TCP mode - kill processes using the port

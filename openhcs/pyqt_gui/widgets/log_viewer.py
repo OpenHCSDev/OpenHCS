@@ -912,13 +912,12 @@ class LogViewerWindow(QMainWindow):
         import zmq
         import pickle
 
-        logger.debug("Scanning for running ZMQ/Napari servers...")
+        logger.debug("Scanning for running ZMQ/streaming servers...")
         discovered_logs = []
 
-        # Common ports to scan
-        from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT, DEFAULT_NAPARI_STREAM_PORT
-        zmq_execution_ports = [DEFAULT_EXECUTION_SERVER_PORT]  # Default ZMQ execution server port
-        napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(5)]  # Scan Napari ports 5555-5559
+        # Scan all streaming ports using generic port discovery
+        from openhcs.core.config import get_all_streaming_ports
+        ports_to_scan = get_all_streaming_ports(num_ports_per_type=10)
 
         def ping_server(port: int) -> dict:
             """Ping a server and return pong response, or None if no response."""
@@ -945,25 +944,16 @@ class LogViewerWindow(QMainWindow):
                 logger.debug(f"Port {port} no response: {e}")
                 return None
 
-        # Scan ZMQ execution servers
-        for port in zmq_execution_ports:
+        # Scan all ports (execution server + all streaming types)
+        for port in ports_to_scan:
             pong = ping_server(port)
             if pong and pong.get('log_file_path'):
                 log_path = Path(pong['log_file_path'])
                 if log_path.exists():
                     log_info = classify_log_file(log_path, None, False)
                     discovered_logs.append(log_info)
-                    logger.debug(f"Discovered ZMQ server log: {log_path}")
-
-        # Scan Napari viewers
-        for port in napari_ports:
-            pong = ping_server(port)
-            if pong and pong.get('viewer') == 'napari' and pong.get('log_file_path'):
-                log_path = Path(pong['log_file_path'])
-                if log_path.exists():
-                    log_info = classify_log_file(log_path, None, False)
-                    discovered_logs.append(log_info)
-                    logger.debug(f"Discovered Napari viewer log: {log_path}")
+                    viewer_type = pong.get('viewer', 'ZMQ server')
+                    logger.debug(f"Discovered {viewer_type} log: {log_path}")
 
         return discovered_logs
 
