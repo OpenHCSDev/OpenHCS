@@ -49,6 +49,9 @@ class StreamingBackend(DataSink):
         """
         Lazy initialization of ZeroMQ publisher (common for all streaming backends).
 
+        Uses REQ socket for Fiji (synchronous request/reply with blocking)
+        and PUB socket for Napari (broadcast pattern).
+
         Args:
             host: Host to connect to
             port: Port to connect to
@@ -63,10 +66,17 @@ class StreamingBackend(DataSink):
                 if self._context is None:
                     self._context = zmq.Context()
 
-                publisher = self._context.socket(zmq.PUB)
-                publisher.setsockopt(zmq.SNDHWM, 10000)
+                # Use REQ socket for Fiji (synchronous request/reply - worker blocks until Fiji acks)
+                # Use PUB socket for Napari (broadcast pattern)
+                socket_type = zmq.REQ if self.VIEWER_TYPE == 'fiji' else zmq.PUB
+                publisher = self._context.socket(socket_type)
+
+                if socket_type == zmq.PUB:
+                    publisher.setsockopt(zmq.SNDHWM, 100000)  # Only for PUB sockets
+
                 publisher.connect(f"tcp://{host}:{port}")
-                logger.info(f"{self.VIEWER_TYPE} streaming publisher connected to {host}:{port}")
+                socket_name = "REQ" if socket_type == zmq.REQ else "PUB"
+                logger.info(f"{self.VIEWER_TYPE} streaming {socket_name} socket connected to {host}:{port}")
                 time.sleep(0.1)
                 self._publishers[key] = publisher
 
@@ -77,25 +87,24 @@ class StreamingBackend(DataSink):
         return self._publishers[key]
 
     def _parse_component_metadata(self, file_path: Union[str, Path], microscope_handler,
-                                  step_name: str, step_index: int) -> dict:
+                                  source: str) -> dict:
         """
         Parse component metadata from filename (common for all streaming backends).
 
         Args:
             file_path: Path to parse
             microscope_handler: Handler with parser
-            step_name: Step name to add as virtual component
-            step_index: Step index to add as virtual component
+            source: Pre-built source value (step_name during execution, subdir when loading from disk)
 
         Returns:
-            Component metadata dict with virtual components added
+            Component metadata dict with source added
         """
         filename = os.path.basename(str(file_path))
         component_metadata = microscope_handler.parser.parse_filename(filename)
-        component_metadata['step_name'] = step_name
-        component_metadata['step_index'] = step_index
-        source_value = Path(file_path).parent.name
-        component_metadata['source'] = source_value
+
+        # Add pre-built source value directly
+        component_metadata['source'] = source
+
         return component_metadata
 
     def _detect_data_type(self, data: Any):
@@ -190,7 +199,10 @@ class StreamingBackend(DataSink):
         """
         Clean up shared memory and ZeroMQ resources (common for all streaming backends).
         """
+        logger.info(f"🔥 CLEANUP: Starting cleanup for {self.VIEWER_TYPE}")
+
         # Clean up shared memory blocks
+        logger.info(f"🔥 CLEANUP: About to clean {len(self._shared_memory_blocks)} shared memory blocks")
         for shm_name, shm in self._shared_memory_blocks.items():
             try:
                 shm.close()
@@ -198,21 +210,28 @@ class StreamingBackend(DataSink):
             except Exception as e:
                 logger.warning(f"Failed to cleanup shared memory {shm_name}: {e}")
         self._shared_memory_blocks.clear()
+        logger.info(f"🔥 CLEANUP: Shared memory cleanup complete")
 
         # Close publishers
+        logger.info(f"🔥 CLEANUP: About to close {len(self._publishers)} publishers")
         for key, publisher in self._publishers.items():
             try:
+                logger.info(f"🔥 CLEANUP: Closing publisher {key}")
                 publisher.close()
+                logger.info(f"🔥 CLEANUP: Publisher {key} closed")
             except Exception as e:
                 logger.warning(f"Failed to close publisher {key}: {e}")
         self._publishers.clear()
+        logger.info(f"🔥 CLEANUP: Publishers cleanup complete")
 
         # Terminate context
         if self._context:
             try:
+                logger.info(f"🔥 CLEANUP: About to terminate ZMQ context")
                 self._context.term()
+                logger.info(f"🔥 CLEANUP: ZMQ context terminated")
             except Exception as e:
                 logger.warning(f"Failed to terminate ZMQ context: {e}")
             self._context = None
 
-        logger.debug(f"{self.VIEWER_TYPE} streaming backend cleaned up")
+        logger.info(f"🔥 CLEANUP: {self.VIEWER_TYPE} streaming backend cleaned up")

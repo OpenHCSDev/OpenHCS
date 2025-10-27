@@ -116,7 +116,16 @@ class ZMQExecutionServer(ZMQServer):
                 record[MessageFields.ERROR] = str(e)
                 logger.error(f"[{execution_id}] ✗ Failed: {e}", exc_info=True)
         finally:
+            # Clean up orchestrator reference
             record.pop('orchestrator', None)
+
+            # Kill all worker processes to ensure clean state for next execution
+            # This prevents resource conflicts and deadlocks between consecutive executions
+            killed = self._kill_worker_processes()
+            if killed > 0:
+                logger.info(f"[{execution_id}] Killed {killed} worker processes during cleanup")
+
+            logger.info(f"[{execution_id}] Execution cleanup complete")
     
     def _handle_status(self, msg):
         execution_id = StatusRequest.from_dict(msg).execution_id
@@ -138,9 +147,10 @@ class ZMQExecutionServer(ZMQServer):
             return error
         if request.execution_id not in self.active_executions:
             return ExecuteResponse(ResponseType.ERROR, error=f'Execution {request.execution_id} not found').to_dict()
-        record = self.active_executions[request.execution_id]
-        record[MessageFields.STATUS] = ExecutionStatus.CANCELLED.value
-        record[MessageFields.END_TIME] = time.time()
+
+        # Use the same logic as Quit button: cancel all executions and kill workers
+        # This ensures workers are actually killed and the server stays alive
+        self._cancel_all_executions()
         killed = self._kill_worker_processes()
         logger.info(f"[{request.execution_id}] Cancelled - killed {killed} workers")
         return {MessageFields.STATUS: ResponseType.OK.value, MessageFields.MESSAGE: f'Cancelled - killed {killed} workers',
@@ -226,18 +236,29 @@ class ZMQExecutionServer(ZMQServer):
             pass
 
         reset_memory_backend()
+
+        # Trigger GPU cleanup (cache clearing) AFTER reset_memory_backend() returns
+        # NOTE: We do NOT call gc.collect() here because:
+        # 1. gc.collect() is synchronous and blocks until all __del__ methods complete
+        # 2. __del__ methods can acquire locks (e.g., streaming backends call context.term())
+        # 3. This creates deadlock potential if any lock is held when gc.collect() is called
+        # 4. Python's automatic GC will collect objects eventually without blocking
+        try:
+            from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+            cleanup_all_gpu_frameworks()
+        except Exception as cleanup_error:
+            logger.warning(f"[{execution_id}] Failed to trigger GPU cleanup: {cleanup_error}")
+
         setup_global_gpu_registry(global_config=global_config)
         ensure_global_config_context(type(global_config), global_config)
 
         # Convert OMERO plate IDs to virtual paths
-        # Check if plate_id is an integer or a string that converts to an integer
         plate_path_str = str(plate_id)
         is_omero_plate_id = False
         try:
             int(plate_path_str)
             is_omero_plate_id = True
         except ValueError:
-            # Not an integer, check if it's already an OMERO virtual path
             is_omero_plate_id = plate_path_str.startswith("/omero/")
 
         # Connect to OMERO and convert plate ID to virtual path if needed
@@ -248,22 +269,38 @@ class ZMQExecutionServer(ZMQServer):
             storage_registry['omero_local'] = OMEROLocalBackend(omero_conn=omero_manager.conn)
 
             # Convert integer plate ID to virtual path format
-            # OMERO handler expects format: /omero/plate_<id> not /omero/plate/<id>
             if not plate_path_str.startswith("/omero/"):
                 plate_path_str = f"/omero/plate_{plate_path_str}"
 
         orchestrator = PipelineOrchestrator(
             plate_path=Path(plate_path_str),
             pipeline_config=pipeline_config,
-            progress_callback=lambda axis_id, step, status, metadata: self.send_progress_update(axis_id, step, status)
+            progress_callback=lambda axis_id, step, status, _metadata: self.send_progress_update(axis_id, step, status)
         )
         orchestrator.initialize()
         self.active_executions[execution_id]['orchestrator'] = orchestrator
 
+        # Check for cancellation after initialization (which can be slow for large plates)
+        if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
+            logger.info(f"[{execution_id}] Execution cancelled after initialization, aborting")
+            raise RuntimeError("Execution cancelled by user")
+
         wells = config_params.get('well_filter') if config_params else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
         compilation = orchestrator.compile_pipelines(pipeline_definition=pipeline_steps, well_filter=wells)
+
+        # Check for cancellation after compilation (which can be slow for complex pipelines)
+        if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
+            logger.info(f"[{execution_id}] Execution cancelled after compilation, aborting")
+            raise RuntimeError("Execution cancelled by user")
+
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check if execution was cancelled before starting worker processes
+        if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
+            logger.info(f"[{execution_id}] Execution cancelled before starting workers, aborting")
+            raise RuntimeError("Execution cancelled by user")
+
         return orchestrator.execute_compiled_plate(pipeline_definition=pipeline_steps,
                                                    compiled_contexts=compilation['compiled_contexts'],
                                                    log_file_base=str(log_dir / f"zmq_worker_exec_{execution_id}"))
@@ -284,7 +321,8 @@ class ZMQExecutionServer(ZMQServer):
                     if not (cmdline and 'python' in cmdline[0].lower()):
                         continue
                     cmdline_str = ' '.join(cmdline)
-                    if any(x in cmdline_str.lower() for x in ['napari', 'resource_tracker', 'semaphore_tracker']) or child.pid == os.getpid():
+                    # Exclude Napari, Fiji viewers, and process trackers
+                    if any(x in cmdline_str.lower() for x in ['napari', 'fiji', 'resource_tracker', 'semaphore_tracker']) or child.pid == os.getpid():
                         continue
                     workers.append({'pid': child.pid, 'status': child.status(), 'cpu_percent': child.cpu_percent(interval=0),
                                    'memory_mb': child.memory_info().rss / 1024 / 1024, 'create_time': child.create_time()})
@@ -319,9 +357,11 @@ class ZMQExecutionServer(ZMQServer):
         try:
             import psutil
 
-            # Find all child processes that are Python workers (exclude Napari viewers)
+            # Find all child processes that are Python workers (exclude Napari and Fiji viewers)
             workers = [c for c in psutil.Process(os.getpid()).children(recursive=False)
-                      if (cmd := c.cmdline()) and 'python' in cmd[0].lower() and 'napari' not in ' '.join(cmd).lower()]
+                      if (cmd := c.cmdline()) and 'python' in cmd[0].lower()
+                      and 'napari' not in ' '.join(cmd).lower()
+                      and 'fiji' not in ' '.join(cmd).lower()]
 
             if not workers:
                 logger.info("No worker processes found to kill")

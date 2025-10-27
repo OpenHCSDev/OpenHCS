@@ -1028,16 +1028,18 @@ class FunctionStep(AbstractStep):
 
                 # Load from memory (where data actually is)
                 streaming_data = filemanager.load_batch(memory_paths, Backend.MEMORY.value)
-                logger.info(f"🔍 STREAMING: Loaded {len(streaming_data)} items from memory")
                 kwargs = config_instance.get_streaming_kwargs(context)  # Pass context for microscope handler access
 
-                # Add step information for proper layer naming
-                kwargs["step_index"] = step_index
-                kwargs["step_name"] = step_name
+                # Add pre-built source value for layer/window naming
+                # During pipeline execution: source = step_name
+                kwargs["source"] = step_name
 
                 # Execute streaming - use streaming_paths (materialized paths) for metadata extraction
                 filemanager.save_batch(streaming_data, streaming_paths, config_instance.backend.value, **kwargs)
-                logger.info(f"🔍 {config_instance.backend.name}: Streamed {len(streaming_paths)} files for step {step_name}")
+
+                # Add small delay between image and ROI streaming to prevent race conditions
+                import time
+                time.sleep(0.1)
 
             logger.info(f"FunctionStep {step_index} ({step_name}) completed for well {axis_id}.")
 
@@ -1250,7 +1252,7 @@ class FunctionStep(AbstractStep):
         logger.debug(f"Backend detection result: {backends}")
         return backends
 
-    def _build_analysis_filename(self, output_key: str, step_index: int, step_plan: Dict, dict_key: Optional[str] = None) -> str:
+    def _build_analysis_filename(self, output_key: str, step_index: int, step_plan: Dict, dict_key: Optional[str] = None, context=None) -> str:
         """Build analysis result filename from first image path template.
 
         Uses first image filename as template to preserve all metadata components.
@@ -1261,6 +1263,7 @@ class FunctionStep(AbstractStep):
             step_index: Pipeline step index
             step_plan: Step plan dictionary
             dict_key: Optional channel/component key for dict pattern functions
+            context: Processing context (for accessing microscope handler)
         """
         memory_paths = step_plan['get_paths_for_axis'](step_plan['output_dir'], Backend.MEMORY.value)
 
@@ -1268,9 +1271,18 @@ class FunctionStep(AbstractStep):
             return f"{step_plan['axis_id']}_{output_key}_step{step_index}.roi.zip"
 
         # Filter paths by channel if dict_key provided (for dict pattern functions)
-        if dict_key:
-            # Filter to only paths matching this channel (e.g., w1, w2)
-            filtered_paths = [p for p in memory_paths if f"_w{dict_key}_" in p]
+        if dict_key and context:
+            # Use microscope handler to parse filenames and filter by channel
+            microscope_handler = context.microscope_handler
+            parser = microscope_handler.parser
+
+            filtered_paths = []
+            for path in memory_paths:
+                filename = Path(path).name
+                metadata = parser.parse_filename(filename)
+                if metadata and str(metadata.get('channel')) == str(dict_key):
+                    filtered_paths.append(path)
+
             if filtered_paths:
                 memory_paths = filtered_paths
 
@@ -1295,9 +1307,11 @@ class FunctionStep(AbstractStep):
         analysis_output_dir = Path(step_plan['materialized_analysis_results_dir' if has_step_mat else 'analysis_results_dir'])
         images_dir = str(step_plan['materialized_output_dir' if has_step_mat else 'output_dir'])
 
-        # Add images_dir to all backend kwargs (OMERO needs it for ROI linking)
+        # Add images_dir and source to all backend kwargs
+        step_name = step_plan.get('step_name', 'unknown_step')
         for kwargs in backend_kwargs.values():
             kwargs['images_dir'] = images_dir
+            kwargs['source'] = step_name  # Pre-built source value for layer/window naming
 
         filemanager._materialization_context = {'images_dir': images_dir}
 
@@ -1330,7 +1344,7 @@ class FunctionStep(AbstractStep):
                 data = filemanager.load(channel_path, Backend.MEMORY.value)
 
                 # Build analysis filename and path (pass dict_key for channel-specific naming)
-                filename = self._build_analysis_filename(output_key, step_index, step_plan, dict_key)
+                filename = self._build_analysis_filename(output_key, step_index, step_plan, dict_key, context)
                 analysis_path = analysis_output_dir / filename
 
                 # Materialize to all backends

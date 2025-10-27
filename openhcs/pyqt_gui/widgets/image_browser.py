@@ -455,6 +455,11 @@ class ImageBrowserWidget(QWidget):
         """Set the orchestrator and load images."""
         self.orchestrator = orchestrator
 
+        # Use orchestrator's FileManager (has plate-specific backends like VirtualWorkspaceBackend)
+        if orchestrator:
+            self.filemanager = orchestrator.filemanager
+            logger.debug("Image browser now using orchestrator's FileManager")
+
         # Update config form contexts to use new pipeline_config
         if self.napari_config_form and orchestrator:
             self.napari_config_form.context_obj = orchestrator.pipeline_config
@@ -676,13 +681,17 @@ class ImageBrowserWidget(QWidget):
             return
 
         try:
+            logger.info("IMAGE BROWSER: Starting load_images()")
             # Get metadata handler from orchestrator
             handler = self.orchestrator.microscope_handler
             metadata_handler = handler.metadata_handler
+            logger.info(f"IMAGE BROWSER: Got metadata handler: {type(metadata_handler).__name__}")
 
             # Get image files from metadata
             plate_path = self.orchestrator.plate_path
+            logger.info(f"IMAGE BROWSER: Calling get_image_files for plate: {plate_path}")
             image_files = metadata_handler.get_image_files(plate_path)
+            logger.info(f"IMAGE BROWSER: get_image_files returned {len(image_files) if image_files else 0} files")
 
             if not image_files:
                 self.info_label.setText("No images found")
@@ -699,8 +708,10 @@ class ImageBrowserWidget(QWidget):
                     metadata.update(parsed)
                 self.all_images[filename] = metadata
 
+            logger.info(f"IMAGE BROWSER: Built all_images dict with {len(self.all_images)} entries")
+
         except Exception as e:
-            logger.error(f"Failed to load images: {e}")
+            logger.error(f"Failed to load images: {e}", exc_info=True)
             QMessageBox.warning(self, "Error", f"Failed to load images: {e}")
             self.info_label.setText("Error loading images")
             self.all_images = {}
@@ -1277,13 +1288,16 @@ class ImageBrowserWidget(QWidget):
                 # Use the napari streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
+                # Build source from subdirectory name (image viewer context)
+                # Use first file path to determine subdirectory
+                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+
                 # Prepare metadata for streaming
                 metadata = {
                     'napari_port': viewer.napari_port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
-                    'step_index': 0,
-                    'step_name': 'image_browser'
+                    'source': source
                 }
 
                 # Stream batch to Napari
@@ -1343,13 +1357,16 @@ class ImageBrowserWidget(QWidget):
                 # Use the napari streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
+                # Build source from subdirectory name (image viewer context)
+                # Use first file path to determine subdirectory
+                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+
                 # Prepare metadata for streaming
                 metadata = {
                     'napari_port': viewer.napari_port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
-                    'step_index': 0,
-                    'step_name': 'image_browser'
+                    'source': source
                 }
 
                 # Stream batch to Napari
@@ -1436,13 +1453,16 @@ class ImageBrowserWidget(QWidget):
                 # Use the Fiji streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
+                # Build source from subdirectory name (image viewer context)
+                # Use first file path to determine subdirectory
+                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+
                 # Prepare metadata for streaming
                 metadata = {
                     'fiji_port': viewer.fiji_port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
-                    'step_index': 0,
-                    'step_name': 'image_browser'
+                    'source': source
                 }
 
                 # Stream batch to Fiji
@@ -1503,13 +1523,16 @@ class ImageBrowserWidget(QWidget):
                 # Use the Fiji streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
 
+                # Build source from subdirectory name (image viewer context)
+                # Use first file path to determine subdirectory
+                source = Path(file_paths[0]).parent.name if file_paths else 'unknown_source'
+
                 # Prepare metadata for streaming
                 metadata = {
                     'fiji_port': viewer.fiji_port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
-                    'step_index': 0,
-                    'step_name': 'image_browser'
+                    'source': source
                 }
 
                 # Stream batch to Fiji
@@ -1561,6 +1584,11 @@ class ImageBrowserWidget(QWidget):
             # Stream ROIs using filemanager.save() - same as pipeline execution
             # Pass display_config and microscope_handler just like image streaming does
             from openhcs.constants.constants import Backend as BackendEnum
+            from pathlib import Path
+
+            # Build source from subdirectory name (image viewer context)
+            source = Path(roi_json_path).parent.name
+
             self.filemanager.save(
                 rois,
                 roi_json_path,
@@ -1569,8 +1597,7 @@ class ImageBrowserWidget(QWidget):
                 napari_port=napari_config.napari_port,
                 display_config=napari_config,
                 microscope_handler=self.orchestrator.microscope_handler,
-                step_index=0,
-                step_name='image_browser'
+                source=source
             )
 
             logger.info(f"Streamed {len(rois)} ROIs to Napari on port {napari_config.napari_port}")
@@ -1600,6 +1627,11 @@ class ImageBrowserWidget(QWidget):
             # Stream ROIs using filemanager.save() - same as pipeline execution
             # Pass display_config and microscope_handler just like image streaming does
             from openhcs.constants.constants import Backend as BackendEnum
+            from pathlib import Path
+
+            # Build source from subdirectory name (image viewer context)
+            source = Path(roi_json_path).parent.name
+
             self.filemanager.save(
                 rois,
                 roi_json_path,
@@ -1608,8 +1640,7 @@ class ImageBrowserWidget(QWidget):
                 fiji_port=fiji_config.fiji_port,
                 display_config=fiji_config,
                 microscope_handler=self.orchestrator.microscope_handler,
-                step_index=0,
-                step_name='image_browser'
+                source=source
             )
 
             logger.info(f"Streamed {len(rois)} ROIs to Fiji on port {fiji_config.fiji_port}")

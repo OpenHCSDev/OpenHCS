@@ -262,25 +262,33 @@ class MetadataHandler(ABC):
 
         # Read from OpenHCS metadata (unified approach for all microscopes)
         from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+        import logging
+        logger = logging.getLogger(__name__)
+
         openhcs_handler = OpenHCSMetadataHandler(self.filemanager)
 
         try:
             metadata = openhcs_handler._load_metadata_dict(plate_path)
             subdirs = metadata.get("subdirectories", {})
+            logger.info(f"get_image_files: Found {len(subdirs)} subdirectories")
 
             # Find main subdirectory
             main_subdir_key = next((key for key, data in subdirs.items() if data.get("main")), None)
             if not main_subdir_key:
                 main_subdir_key = next(iter(subdirs.keys()))
 
+            logger.info(f"get_image_files: Using main subdirectory '{main_subdir_key}'")
             subdir_data = subdirs[main_subdir_key]
 
             # Prefer workspace_mapping keys (virtual paths) if available
             if workspace_mapping := subdir_data.get("workspace_mapping"):
+                logger.info(f"get_image_files: Returning {len(workspace_mapping)} files from workspace_mapping")
                 return list(workspace_mapping.keys())
 
             # Otherwise use image_files list
-            return subdir_data.get("image_files", [])
+            image_files = subdir_data.get("image_files", [])
+            logger.info(f"get_image_files: Returning {len(image_files)} files from image_files list")
+            return image_files
 
         except Exception:
             # Fallback: no metadata yet, return empty list

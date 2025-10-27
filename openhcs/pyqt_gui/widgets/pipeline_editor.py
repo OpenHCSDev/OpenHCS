@@ -286,8 +286,7 @@ class PipelineEditorWidget(QWidget):
             ("Add", "add_step", "Add new pipeline step"),
             ("Del", "del_step", "Delete selected steps"),
             ("Edit", "edit_step", "Edit selected step"),
-            ("Load", "load_pipeline", "Load pipeline from file"),
-            ("Save", "save_pipeline", "Save pipeline to file"),
+            ("Auto", "auto_load_pipeline", "Load basic_pipeline.py"),
             ("Code", "code_pipeline", "Edit pipeline as Python code"),
         ]
 
@@ -342,8 +341,7 @@ class PipelineEditorWidget(QWidget):
             "add_step": self.action_add_step,
             "del_step": self.action_delete_step,
             "edit_step": self.action_edit_step,
-            "load_pipeline": self.action_load_pipeline,
-            "save_pipeline": self.action_save_pipeline,
+            "auto_load_pipeline": self.action_auto_load_pipeline,
             "code_pipeline": self.action_code_pipeline,
         }
         
@@ -623,41 +621,45 @@ class PipelineEditorWidget(QWidget):
         editor.show()
         editor.raise_()
         editor.activateWindow()
-    
-    def action_load_pipeline(self):
-        """Handle Load Pipeline button (adapted from Textual version)."""
 
-        from openhcs.core.path_cache import PathCacheKey
-
-        # Use cached file dialog (mirrors Textual TUI pattern)
-        file_path = self.service_adapter.show_cached_file_dialog(
-            cache_key=PathCacheKey.PIPELINE_FILES,
-            title="Load Pipeline",
-            file_filter="Pipeline Files (*.pipeline);;All Files (*)",
-            mode="open"
-        )
-
-        if file_path:
-            self.load_pipeline_from_file(file_path)
-    
-    def action_save_pipeline(self):
-        """Handle Save Pipeline button (adapted from Textual version)."""
-        if not self.pipeline_steps:
-            self.service_adapter.show_error_dialog("No pipeline steps to save.")
+    def action_auto_load_pipeline(self):
+        """Handle Auto button - load basic_pipeline.py automatically."""
+        if not self.current_plate:
+            self.service_adapter.show_error_dialog("No plate selected")
             return
 
-        from openhcs.core.path_cache import PathCacheKey
+        try:
+            from pathlib import Path
 
-        # Use cached file dialog (mirrors Textual TUI pattern)
-        file_path = self.service_adapter.show_cached_file_dialog(
-            cache_key=PathCacheKey.PIPELINE_FILES,
-            title="Save Pipeline",
-            file_filter="Pipeline Files (*.pipeline);;All Files (*)",
-            mode="save"
-        )
+            # Hardcoded path to basic_pipeline.py
+            pipeline_file = Path("/home/ts/code/projects/openhcs/openhcs/tests/basic_pipeline.py")
 
-        if file_path:
-            self.save_pipeline_to_file(file_path)
+            if not pipeline_file.exists():
+                self.service_adapter.show_error_dialog(f"Pipeline file not found: {pipeline_file}")
+                return
+
+            # Read the file content
+            python_code = pipeline_file.read_text()
+
+            # Execute the code to get pipeline_steps (same as _handle_edited_pipeline_code)
+            namespace = {}
+            with self._patch_lazy_constructors():
+                exec(python_code, namespace)
+
+            # Get the pipeline_steps from the namespace
+            if 'pipeline_steps' in namespace:
+                new_pipeline_steps = namespace['pipeline_steps']
+                # Update the pipeline with new steps
+                self.pipeline_steps = new_pipeline_steps
+                self.update_step_list()
+                self.pipeline_changed.emit(self.pipeline_steps)
+                self.status_message.emit(f"Auto-loaded {len(new_pipeline_steps)} steps from basic_pipeline.py")
+            else:
+                raise ValueError("No 'pipeline_steps = [...]' assignment found in basic_pipeline.py")
+
+        except Exception as e:
+            logger.error(f"Failed to auto-load basic_pipeline.py: {e}")
+            self.service_adapter.show_error_dialog(f"Failed to auto-load pipeline: {str(e)}")
     
     def action_code_pipeline(self):
         """Handle Code Pipeline button - edit pipeline as Python code."""
@@ -928,10 +930,9 @@ class PipelineEditorWidget(QWidget):
         # - Step operations require steps to exist
         # - Edit requires valid selection
         self.buttons["add_step"].setEnabled(has_plate and is_initialized)
-        self.buttons["load_pipeline"].setEnabled(has_plate and is_initialized)
+        self.buttons["auto_load_pipeline"].setEnabled(has_plate and is_initialized)
         self.buttons["del_step"].setEnabled(has_steps)
         self.buttons["edit_step"].setEnabled(has_steps and has_selection)
-        self.buttons["save_pipeline"].setEnabled(has_steps)
         self.buttons["code_pipeline"].setEnabled(has_plate and is_initialized)  # Same as add button - orchestrator init is sufficient
     
     def update_status(self, message: str):

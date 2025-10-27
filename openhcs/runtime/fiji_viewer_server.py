@@ -7,6 +7,7 @@ via PyImageJ. Inherits from ZMQServer ABC for ping/pong handshake and dual-chann
 
 import logging
 import time
+import threading
 from typing import Dict, Any, List
 
 from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT
@@ -30,12 +31,16 @@ def register_fiji_handler(data_type: StreamingDataType):
 class FijiViewerServer(ZMQServer):
     """
     ZMQ server for Fiji viewer that receives images from clients.
-    
+
     Inherits from ZMQServer ABC to get ping/pong, port management, etc.
     Uses SUB socket to receive images from pipeline clients.
     Displays images via PyImageJ.
     """
-    
+
+    # Debouncing configuration
+    DEBOUNCE_DELAY_MS = 500  # Collect items for 500ms before processing
+    MAX_DEBOUNCE_WAIT_MS = 2000  # Maximum wait time before forcing batch processing
+
     def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None):
         """
         Initialize Fiji viewer server.
@@ -48,8 +53,9 @@ class FijiViewerServer(ZMQServer):
         """
         import zmq
 
-        # Initialize with SUB socket for receiving images
-        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.SUB)
+        # Initialize with REP socket for receiving images (synchronous request/reply)
+        # REP socket forces workers to wait for acknowledgment before closing shared memory
+        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.REP)
 
         self.viewer_title = viewer_title
         self.display_config = display_config
@@ -64,6 +70,16 @@ class FijiViewerServer(ZMQServer):
         # Create PUSH socket for sending acknowledgments to shared ack port
         self.ack_socket = None
         self._setup_ack_socket()
+
+        # Debouncing for batched processing
+        self._pending_items = []  # Queue of copied items waiting to be processed
+        self._pending_display_config = None  # Display config for pending batch
+        self._pending_images_dir = None  # Images dir for pending batch
+        self._debounce_timer = None  # Timer for debounced processing
+        self._debounce_lock = threading.Lock()  # Lock for pending queue
+        self._debounce_delay = self.DEBOUNCE_DELAY_MS / 1000.0  # Convert ms to seconds
+        self._max_debounce_wait = self.MAX_DEBOUNCE_WAIT_MS / 1000.0  # Convert ms to seconds
+        self._first_message_time = None  # Track when first message in batch arrived
 
     def _setup_ack_socket(self):
         """Setup PUSH socket for sending acknowledgments."""
@@ -127,6 +143,25 @@ class FijiViewerServer(ZMQServer):
         except ImportError:
             raise ImportError("PyImageJ not available. Install with: pip install 'openhcs[viz]'")
     
+    def _create_pong_response(self) -> Dict[str, Any]:
+        """Override to add Fiji-specific fields and memory usage."""
+        response = super()._create_pong_response()
+        response['viewer'] = 'fiji'
+        response['openhcs'] = True
+        response['server'] = 'FijiViewerServer'
+
+        # Add memory usage
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            response['memory_mb'] = process.memory_info().rss / 1024 / 1024
+            response['cpu_percent'] = process.cpu_percent(interval=0)
+        except Exception:
+            pass
+
+        return response
+
     def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle control messages beyond ping/pong.
@@ -134,6 +169,7 @@ class FijiViewerServer(ZMQServer):
         Supported message types:
         - shutdown: Graceful shutdown (closes viewer)
         - force_shutdown: Force shutdown (same as shutdown for Fiji)
+        - clear_state: Clear accumulated dimension values and hyperstack metadata (for new pipeline runs)
         """
         msg_type = message.get('type')
 
@@ -147,51 +183,198 @@ class FijiViewerServer(ZMQServer):
                 'message': 'Fiji viewer shutting down'
             }
 
+        elif msg_type == 'clear_state':
+            # Clear accumulated dimension values to prevent accumulation across runs
+            # Keep hyperstacks and metadata so images at same coordinates get replaced (not accumulated)
+            logger.info(f"🔬 FIJI SERVER: Clearing dimension values (had {len(self.window_dimension_values)} windows)")
+
+            # Clear only dimension values - this prevents dimension accumulation
+            # while allowing image replacement at same coordinates
+            self.window_dimension_values.clear()
+            # Note: self.hyperstacks and self.hyperstack_metadata are NOT cleared
+            # This allows the rebuild logic to replace images at same CZT coordinates
+
+            return {
+                'type': 'clear_state_ack',
+                'status': 'success',
+                'message': 'Dimension values cleared'
+            }
+
         return {'status': 'ok'}
     
     def handle_data_message(self, message: Dict[str, Any]):
         """Handle incoming image data - called by process_messages()."""
         pass
-    
-    def process_image_message(self, message: bytes):
-        """
-        Process incoming image data message.
 
-        Builds 5D hyperstacks organized by (step_name, well).
-        Each hyperstack has dimensions organized as: channels, slices (z), frames (time).
-        Sites are treated as additional channels.
+    def _copy_items_from_shared_memory(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Copy data from shared memory to local memory for all items.
+
+        This MUST be called before sending ack to worker, so worker doesn't close shared memory.
+
+        Args:
+            items: List of items with shared memory references
+
+        Returns:
+            List of items with copied data (shared memory replaced with numpy arrays)
+        """
+        import numpy as np
+        from multiprocessing import shared_memory
+
+        copied_items = []
+        for item in items:
+            copied_item = item.copy()
+
+            # Only copy shared memory for image items (not ROIs)
+            if item.get('data_type') == 'image' and 'shm_name' in item:
+                shm_name = item['shm_name']
+                shape = tuple(item['shape'])
+                dtype = np.dtype(item['dtype'])
+
+                try:
+                    # Attach to shared memory and copy data
+                    shm = shared_memory.SharedMemory(name=shm_name)
+                    np_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                    shm.close()
+                    shm.unlink()  # Clean up shared memory
+
+                    # Replace shared memory reference with actual data
+                    copied_item['data'] = np_data
+                    del copied_item['shm_name']  # No longer needed
+                    del copied_item['shape']  # No longer needed
+                    del copied_item['dtype']  # No longer needed
+
+                    logger.debug(f"📋 FIJI SERVER: Copied image data from shared memory {shm_name}")
+
+                except Exception as e:
+                    logger.error(f"📋 FIJI SERVER: Failed to copy from shared memory {shm_name}: {e}")
+                    # Send error ack for this image
+                    image_id = item.get('image_id')
+                    if image_id:
+                        self._send_ack(image_id, status='error', error=str(e))
+                    continue
+
+            copied_items.append(copied_item)
+
+        return copied_items
+
+    def _queue_for_debounced_processing(self, items: List[Dict[str, Any]], display_config_dict: Dict[str, Any], images_dir: str):
+        """
+        Queue items for debounced batch processing.
+
+        Collects items for DEBOUNCE_DELAY_MS before processing to batch multiple images together.
+        This improves hyperstack building efficiency.
+
+        Args:
+            items: List of items with copied data
+            display_config_dict: Display configuration
+            images_dir: Source image subdirectory
+        """
+        with self._debounce_lock:
+            # Add items to pending queue
+            self._pending_items.extend(items)
+            self._pending_display_config = display_config_dict
+            self._pending_images_dir = images_dir
+
+            # Track first message time for max wait enforcement
+            if self._first_message_time is None:
+                self._first_message_time = time.time()
+
+            # Cancel existing timer if any
+            if self._debounce_timer is not None:
+                self._debounce_timer.cancel()
+
+            # Check if we've exceeded max wait time
+            elapsed = time.time() - self._first_message_time
+            if elapsed >= self._max_debounce_wait:
+                # Process immediately, don't wait any longer
+                logger.info(f"⏱️  FIJI SERVER: Max debounce wait ({self._max_debounce_wait}s) exceeded, processing {len(self._pending_items)} items immediately")
+                self._process_pending_batch()
+            else:
+                # Start new debounce timer
+                remaining_wait = min(self._debounce_delay, self._max_debounce_wait - elapsed)
+                logger.debug(f"⏱️  FIJI SERVER: Debouncing {len(self._pending_items)} items for {remaining_wait:.3f}s")
+                self._debounce_timer = threading.Timer(remaining_wait, self._process_pending_batch)
+                self._debounce_timer.start()
+
+    def _process_pending_batch(self):
+        """Process all pending items as a batch (called by debounce timer)."""
+        with self._debounce_lock:
+            if not self._pending_items:
+                return
+
+            items = self._pending_items
+            display_config_dict = self._pending_display_config
+            images_dir = self._pending_images_dir
+
+            # Clear pending queue
+            self._pending_items = []
+            self._pending_display_config = None
+            self._pending_images_dir = None
+            self._debounce_timer = None
+            self._first_message_time = None
+
+            logger.info(f"🔄 FIJI SERVER: Processing debounced batch of {len(items)} items")
+
+        # Process batch (outside lock to avoid blocking new messages)
+        try:
+            self._process_items_from_batch(items, display_config_dict, images_dir)
+        except Exception as e:
+            logger.error(f"🔄 FIJI SERVER: Error processing debounced batch: {e}", exc_info=True)
+
+    def process_image_message(self, message: bytes) -> dict:
+        """
+        Process incoming image data message with debouncing.
+
+        IMMEDIATELY copies data from shared memory and queues for debounced processing.
+        This allows worker to close shared memory quickly while Fiji batches processing.
 
         Args:
             message: Raw ZMQ message containing image data
+
+        Returns:
+            Acknowledgment dict with status
         """
         import json
 
-        # Parse JSON message
-        data = json.loads(message.decode('utf-8'))
+        try:
+            # Parse JSON message
+            data = json.loads(message.decode('utf-8'))
 
-        msg_type = data.get('type')
+            msg_type = data.get('type')
 
-        # Check message type
-        if msg_type == 'batch':
-            items = data.get('images', [])
-            display_config_dict = data.get('display_config', {})
-            images_dir = data.get('images_dir')
+            # Check message type
+            if msg_type == 'batch':
+                items = data.get('images', [])
+                display_config_dict = data.get('display_config', {})
+                images_dir = data.get('images_dir')
 
-            logger.info(f"📨 FIJI SERVER: Received batch message with {len(items)} items")
+                logger.info(f"📨 FIJI SERVER: Received batch message with {len(items)} items")
 
-            if not items:
-                return
+                if not items:
+                    return {'status': 'success', 'message': 'Empty batch'}
 
-            # Process all items through unified pipeline
-            self._process_items_from_batch(items, display_config_dict, images_dir)
+                # CRITICAL: Copy data from shared memory IMMEDIATELY
+                # This must happen before we send ack, so worker doesn't close shared memory
+                copied_items = self._copy_items_from_shared_memory(items)
 
-        else:
-            # Single image message (fallback)
-            self._process_items_from_batch(
-                [data],
-                data.get('display_config', {}),
-                data.get('images_dir')
-            )
+                # Queue copied items for debounced processing
+                self._queue_for_debounced_processing(copied_items, display_config_dict, images_dir)
+
+            else:
+                # Single image message (fallback)
+                copied_items = self._copy_items_from_shared_memory([data])
+                self._queue_for_debounced_processing(
+                    copied_items,
+                    data.get('display_config', {}),
+                    data.get('images_dir')
+                )
+
+            return {'status': 'success', 'message': 'Data copied, queued for processing'}
+
+        except Exception as e:
+            logger.error(f"📨 FIJI SERVER: Error processing message: {e}", exc_info=True)
+            return {'status': 'error', 'message': str(e)}
 
     def _process_items_from_batch(self, items: List[Dict[str, Any]], display_config_dict: Dict[str, Any], images_dir: str = None):
         """
@@ -261,15 +444,20 @@ class FijiViewerServer(ZMQServer):
             data_type_str = item.get('data_type')
 
             # Build window key from window components
-            # For ROIs: normalize source to match image hyperstack using images_dir
+            # Note: 'source' now represents step_name during pipeline execution,
+            # so images and ROIs from the same step automatically have matching source values
             window_key_parts = []
             for comp in window_components:
                 if comp in meta:
                     value = meta[comp]
-                    # Normalize source ONLY for ROIs: use images_dir (maps 'images_results' -> 'images')
+                    # Legacy ROI normalization: only needed when loading from disk (image viewer context)
+                    # During pipeline execution, source=step_name for both images and ROIs, so they match
                     if comp == 'source' and images_dir and data_type_str == 'rois':
-                        from pathlib import Path
-                        value = Path(images_dir).name  # Extract subdirectory name from full path
+                        # Check if source looks like a subdirectory (not a step name)
+                        # Step names don't contain path separators or end with '_results'
+                        if '_results' in str(value) or '/' in str(value):
+                            from pathlib import Path
+                            value = Path(images_dir).name  # Extract subdirectory name from full path
                     window_key_parts.append(f"{comp}_{value}")
             window_key = "_".join(window_key_parts) if window_key_parts else "default_window"
 
@@ -303,36 +491,54 @@ class FijiViewerServer(ZMQServer):
             frame_components: Components mapped to Frame dimension
         """
         # STEP 1: SHARED - Collect dimension values from ALL items (all types)
-        # For images: collect from current batch and store for future ROI batches
+        # For images: collect from current batch and MERGE with stored values to expand dimensions
         # For ROIs: reuse stored values from corresponding image hyperstack
 
-        # Check if we have stored dimension values for this window (from previous image batch)
-        if window_key in self.window_dimension_values:
-            # Reuse stored values (for ROIs matching existing hyperstack)
-            stored = self.window_dimension_values[window_key]
-            channel_values = stored['channel']
-            slice_values = stored['slice']
-            frame_values = stored['frame']
-            logger.info(f"🔬 FIJI SERVER: Reusing stored dimension values for window '{window_key}'")
-        else:
-            # Collect from current batch (for new hyperstacks)
-            channel_values = self._collect_dimension_values_from_items(
-                items, channel_components
-            )
-            slice_values = self._collect_dimension_values_from_items(
-                items, slice_components
-            )
-            frame_values = self._collect_dimension_values_from_items(
-                items, frame_components
-            )
+        # Collect dimension values from current batch
+        current_channel_values = self._collect_dimension_values_from_items(
+            items, channel_components
+        )
+        current_slice_values = self._collect_dimension_values_from_items(
+            items, slice_components
+        )
+        current_frame_values = self._collect_dimension_values_from_items(
+            items, frame_components
+        )
 
-            # Store for future batches (ROIs)
-            self.window_dimension_values[window_key] = {
-                'channel': channel_values,
-                'slice': slice_values,
-                'frame': frame_values
-            }
-            logger.info(f"🔬 FIJI SERVER: Stored dimension values for window '{window_key}'")
+        # Check if we have stored dimension values for this window (from previous batches)
+        if window_key in self.window_dimension_values:
+            # Merge stored values with current values to expand dimensions
+            stored = self.window_dimension_values[window_key]
+
+            # Merge: combine stored and current, preserving order and uniqueness
+            channel_values = self._merge_dimension_values(stored['channel'], current_channel_values)
+            slice_values = self._merge_dimension_values(stored['slice'], current_slice_values)
+            frame_values = self._merge_dimension_values(stored['frame'], current_frame_values)
+
+            # Log if dimensions expanded
+            if (len(channel_values) > len(stored['channel']) or
+                len(slice_values) > len(stored['slice']) or
+                len(frame_values) > len(stored['frame'])):
+                logger.info(f"🔬 FIJI SERVER: Expanded dimensions for window '{window_key}': "
+                           f"{len(stored['channel'])}→{len(channel_values)}C, "
+                           f"{len(stored['slice'])}→{len(slice_values)}Z, "
+                           f"{len(stored['frame'])}→{len(frame_values)}T")
+            else:
+                logger.info(f"🔬 FIJI SERVER: Reusing stored dimension values for window '{window_key}'")
+        else:
+            # First batch for this window - use current values
+            channel_values = current_channel_values
+            slice_values = current_slice_values
+            frame_values = current_frame_values
+            logger.info(f"🔬 FIJI SERVER: First batch for window '{window_key}': "
+                       f"{len(channel_values)}C x {len(slice_values)}Z x {len(frame_values)}T")
+
+        # Store merged values for future batches
+        self.window_dimension_values[window_key] = {
+            'channel': channel_values,
+            'slice': slice_values,
+            'frame': frame_values
+        }
 
         # STEP 2: Group items by data_type (convert string to enum)
         items_by_type = {}
@@ -367,6 +573,32 @@ class FijiViewerServer(ZMQServer):
                 channel_values, slice_values, frame_values
             )
 
+    def _merge_dimension_values(self, stored_values: List[tuple],
+                                 new_values: List[tuple]) -> List[tuple]:
+        """
+        Merge stored and new dimension values, preserving order and uniqueness.
+
+        Args:
+            stored_values: Previously stored dimension values
+            new_values: New dimension values from current batch
+
+        Returns:
+            Merged list of unique dimension values, sorted
+        """
+        # Combine and deduplicate
+        merged = set(stored_values) | set(new_values)
+
+        # Sort with custom key that handles mixed types (int/str) in tuples
+        # Convert each element to (type_priority, str_value) for comparison
+        # This ensures consistent ordering even with mixed types
+        def sort_key(value_tuple):
+            return tuple(
+                (0 if isinstance(v, (int, float)) else 1, str(v))
+                for v in value_tuple
+            )
+
+        return sorted(merged, key=sort_key)
+
     def _collect_dimension_values_from_items(self, items: List[Dict[str, Any]],
                                              component_list: List[str]) -> List[tuple]:
         """
@@ -390,7 +622,15 @@ class FijiViewerServer(ZMQServer):
             value_tuple = tuple(meta[comp] for comp in component_list)
             unique_values.add(value_tuple)
 
-        return sorted(unique_values)
+        # Sort with custom key that handles mixed types (int/str) in tuples
+        # Convert each element to (type_priority, str_value) for comparison
+        def sort_key(value_tuple):
+            return tuple(
+                (0 if isinstance(v, (int, float)) else 1, str(v))
+                for v in value_tuple
+            )
+
+        return sorted(unique_values, key=sort_key)
 
     def _get_dimension_index(self, metadata: Dict[str, Any],
                              component_list: List[str],
@@ -778,8 +1018,21 @@ def _handle_images_for_window(self, window_key: str, items: List[Dict[str, Any]]
 
     Builds or updates ImageJ hyperstack using shared coordinate space.
     """
-    # Load images from shared memory
-    image_data_list = self.load_images_from_shared_memory(items, error_callback=self._send_ack)
+    # Items may already have 'data' (from debounced processing) or 'shm_name' (direct processing)
+    # Convert to standard format expected by hyperstack builder
+    image_data_list = []
+    for item in items:
+        if 'data' in item:
+            # Already copied from shared memory (debounced path)
+            image_data_list.append({
+                'data': item['data'],
+                'metadata': item.get('metadata', {}),
+                'image_id': item.get('image_id')
+            })
+        elif 'shm_name' in item:
+            # Need to load from shared memory (direct path - shouldn't happen with debouncing)
+            loaded = self.load_images_from_shared_memory([item], error_callback=self._send_ack)
+            image_data_list.extend(loaded)
 
     if not image_data_list:
         return
@@ -912,23 +1165,33 @@ def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, lo
         
         logger.info(f"🔬 FIJI SERVER: Server started on port {port}, control port {port + 1000}")
         logger.info("🔬 FIJI SERVER: Waiting for images...")
-        
+
         # Message processing loop
+        # REP socket requires sending reply after each receive (synchronous request/reply)
         while not server._shutdown_requested:
             # Process control messages (ping/pong handled by ABC)
             server.process_messages()
-            
+
             # Process data messages (images) if ready
             if server._ready:
-                # Process multiple messages per iteration for better throughput
-                for _ in range(10):
-                    try:
-                        message = server.data_socket.recv(zmq.NOBLOCK)
-                        server.process_image_message(message)
-                    except zmq.Again:
-                        break
-            
-            time.sleep(0.01)  # 10ms sleep to prevent busy-waiting
+                # REP socket is synchronous - process one message at a time
+                # Worker blocks until we send reply, ensuring no shared memory race conditions
+                try:
+                    message = server.data_socket.recv(zmq.NOBLOCK)
+
+                    # Process the message and get acknowledgment
+                    ack_response = server.process_image_message(message)
+
+                    # Send acknowledgment back to worker (REP socket requires reply)
+                    # Worker will only close shared memory after receiving this
+                    server.data_socket.send_json(ack_response)
+                    logger.info(f"🔬 FIJI SERVER: Sent ack to worker: {ack_response['status']}")
+
+                except zmq.Again:
+                    # No messages available
+                    pass
+
+            time.sleep(0.001)  # 1ms sleep - faster polling for multiprocessing
         
         logger.info("🔬 FIJI SERVER: Shutting down...")
         server.stop()

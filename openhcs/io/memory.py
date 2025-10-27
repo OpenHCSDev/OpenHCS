@@ -554,14 +554,12 @@ class MemoryStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         the same processing context while maintaining the directory structure
         needed for subsequent operations.
 
-        Enhanced with explicit GPU memory cleanup to ensure VRAM is freed when
-        objects are deleted from the memory backend.
-
         Note:
             - Directories (entries with None values) are preserved
             - Files (entries with non-None values) are deleted
             - Symlinks are also deleted as they are considered file-like objects
-            - GPU objects are explicitly deleted and VRAM is cleared
+            - GPU objects are explicitly deleted before removal
+            - Caller is responsible for calling gc.collect() and GPU cleanup after this method
         """
         try:
             # Collect keys and objects to delete (preserve directories)
@@ -582,20 +580,8 @@ class MemoryStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             for key in files_to_delete:
                 del self._memory_store[key]
 
-            # Force garbage collection to ensure GPU objects are freed
-            import gc
-            collected = gc.collect()
-
-            # Trigger GPU memory cleanup for all frameworks
-            try:
-                from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
-                cleanup_all_gpu_frameworks()
-                logger.debug("🔥 GPU CLEANUP: Triggered comprehensive GPU cleanup after memory backend clear")
-            except Exception as cleanup_error:
-                logger.warning(f"Failed to trigger GPU cleanup after memory backend clear: {cleanup_error}")
-
             logger.debug(f"Cleared {len(files_to_delete)} files from memory backend (including {gpu_objects_found} GPU objects), "
-                        f"preserved {len(self._memory_store)} directories, collected {collected} objects")
+                        f"preserved {len(self._memory_store)} directories")
 
         except Exception as e:
             raise StorageResolutionError("Failed to clear files from memory store") from e

@@ -581,11 +581,13 @@ class PipelineOrchestrator(ContextProvider):
         Must be called before other processing methods.
         Returns self for chaining.
         """
+        logger.info(f"🔥 INIT: initialize() called for plate: {self.plate_path}")
         if self._initialized:
             logger.info("Orchestrator already initialized.")
             return self
 
         try:
+            logger.info(f"🔥 INIT: About to call initialize_microscope_handler()")
             self.initialize_microscope_handler()
 
             # Delegate workspace initialization to microscope handler
@@ -980,6 +982,28 @@ class PipelineOrchestrator(ContextProvider):
                     # Timeout - log which viewers aren't ready
                     not_ready = [v.napari_port for v in napari_visualizers if not v.is_running]
                     logger.warning(f"🔬 ORCHESTRATOR: Timeout waiting for napari viewers. Not ready: {not_ready}")
+
+                # Clear viewer state for new pipeline run to prevent accumulation
+                logger.info("🔬 ORCHESTRATOR: Clearing napari viewer state for new pipeline run...")
+                for vis in napari_visualizers:
+                    if hasattr(vis, 'clear_viewer_state'):
+                        success = vis.clear_viewer_state()
+                        if success:
+                            logger.info(f"🔬 ORCHESTRATOR: Cleared state for viewer on port {vis.napari_port}")
+                        else:
+                            logger.warning(f"🔬 ORCHESTRATOR: Failed to clear state for viewer on port {vis.napari_port}")
+
+            # Clear Fiji viewer state for new pipeline run to prevent dimension accumulation
+            fiji_visualizers = [v for v in visualizers if hasattr(v, 'fiji_port')]
+            if fiji_visualizers:
+                logger.info("🔬 ORCHESTRATOR: Clearing fiji viewer state for new pipeline run...")
+                for vis in fiji_visualizers:
+                    if hasattr(vis, 'clear_viewer_state'):
+                        success = vis.clear_viewer_state()
+                        if success:
+                            logger.info(f"🔬 ORCHESTRATOR: Cleared state for viewer on port {vis.fiji_port}")
+                        else:
+                            logger.warning(f"🔬 ORCHESTRATOR: Failed to clear state for viewer on port {vis.fiji_port}")
 
             # For backwards compatibility, set visualizer to the first one
             visualizer = visualizers[0] if visualizers else None

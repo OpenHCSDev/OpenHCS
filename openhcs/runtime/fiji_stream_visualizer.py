@@ -360,6 +360,77 @@ class FijiStreamVisualizer:
         logger.warning(f"🔬 FIJI VISUALIZER: Timeout waiting for server on port {self.fiji_port}")
         return False
 
+    def send_control_message(self, message_type: str, timeout: float = 2.0) -> bool:
+        """
+        Send a control message to the Fiji viewer.
+
+        Args:
+            message_type: Type of control message ('clear_state', 'shutdown', etc.)
+            timeout: Timeout in seconds for waiting for response
+
+        Returns:
+            True if message was sent and acknowledged, False otherwise
+        """
+        if not self.is_running or self.fiji_port is None:
+            logger.warning(f"🔬 FIJI VISUALIZER: Cannot send {message_type} - viewer not running")
+            return False
+
+        import zmq
+        import pickle
+
+        control_port = self.fiji_port + 1000
+        control_context = None
+        control_socket = None
+
+        try:
+            control_context = zmq.Context()
+            control_socket = control_context.socket(zmq.REQ)
+            control_socket.setsockopt(zmq.LINGER, 0)
+            control_socket.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
+            control_socket.connect(f"tcp://localhost:{control_port}")
+
+            # Send control message
+            message = {'type': message_type}
+            control_socket.send(pickle.dumps(message))
+
+            # Wait for acknowledgment
+            response = control_socket.recv()
+            response_data = pickle.loads(response)
+
+            if response_data.get('status') == 'success':
+                logger.info(f"🔬 FIJI VISUALIZER: {message_type} acknowledged by viewer")
+                return True
+            else:
+                logger.warning(f"🔬 FIJI VISUALIZER: {message_type} failed: {response_data}")
+                return False
+
+        except zmq.Again:
+            logger.warning(f"🔬 FIJI VISUALIZER: Timeout waiting for {message_type} acknowledgment")
+            return False
+        except Exception as e:
+            logger.warning(f"🔬 FIJI VISUALIZER: Failed to send {message_type}: {e}")
+            return False
+        finally:
+            if control_socket:
+                try:
+                    control_socket.close()
+                except Exception as e:
+                    logger.debug(f"Failed to close control socket: {e}")
+            if control_context:
+                try:
+                    control_context.term()
+                except Exception as e:
+                    logger.debug(f"Failed to terminate control context: {e}")
+
+    def clear_viewer_state(self) -> bool:
+        """
+        Clear accumulated viewer state (dimension values, hyperstack metadata) for a new pipeline run.
+
+        Returns:
+            True if state was cleared successfully, False otherwise
+        """
+        return self.send_control_message('clear_state')
+
     def stop_viewer(self) -> None:
         """Stop Fiji viewer server (only if not persistent)."""
         global _global_fiji_process

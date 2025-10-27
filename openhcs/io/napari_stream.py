@@ -4,6 +4,12 @@ Napari streaming backend for real-time visualization during processing.
 This module provides a storage backend that streams image data to a napari viewer
 for real-time visualization during pipeline execution. Uses ZeroMQ for IPC
 and shared memory for efficient data transfer.
+
+SHARED MEMORY OWNERSHIP MODEL:
+- Sender (Worker): Creates shared memory, sends reference via ZMQ, closes handle (does NOT unlink)
+- Receiver (Napari Server): Attaches to shared memory, copies data, closes handle, unlinks
+- Only receiver calls unlink() to prevent FileNotFoundError
+- PUB/SUB socket pattern is non-blocking; receiver must copy data before sender closes handle
 """
 
 import logging
@@ -74,8 +80,7 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         publisher = self._get_publisher(host, port)
         display_config = kwargs['display_config']
         microscope_handler = kwargs['microscope_handler']
-        step_index = kwargs.get('step_index', 0)
-        step_name = kwargs.get('step_name', 'unknown_step')
+        source = kwargs.get('source', 'unknown_source')  # Pre-built source value
 
         # Prepare batch of images/ROIs
         batch_images = []
@@ -92,7 +97,7 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
             # Parse component metadata using ABC helper (ONCE for all types)
             component_metadata = self._parse_component_metadata(
-                file_path, microscope_handler, step_name, step_index
+                file_path, microscope_handler, source
             )
 
             # Prepare data based on type
@@ -130,10 +135,44 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             'timestamp': time.time()
         }
 
-        publisher.send_json(message)
+        # Send non-blocking to prevent hanging if Napari is slow to process (matches Fiji pattern)
+        import zmq
+        send_succeeded = False
+        try:
+            publisher.send_json(message, flags=zmq.NOBLOCK)
+            send_succeeded = True
 
-        # Register sent images with queue tracker using ABC helper
-        self._register_with_queue_tracker(port, image_ids)
+            # Register sent images with queue tracker using ABC helper
+            self._register_with_queue_tracker(port, image_ids)
+
+        except zmq.Again:
+            logger.warning(f"Napari viewer busy, dropped batch of {len(batch_images)} images (port {port})")
+
+        except Exception as e:
+            logger.error(f"Failed to send batch to Napari on port {port}: {e}", exc_info=True)
+            raise  # Re-raise the exception so the pipeline knows it failed
+
+        finally:
+            # Unified cleanup: close our handle after successful send, close+unlink after failure
+            self._cleanup_shared_memory(batch_images, unlink=not send_succeeded)
+
+    def _cleanup_shared_memory(self, batch_images, unlink=False):
+        """Clean up shared memory blocks for a batch of images.
+
+        Args:
+            batch_images: List of image dictionaries with optional 'shm_name' keys
+            unlink: If True, both close and unlink. If False, only close (viewer will unlink)
+        """
+        for img in batch_images:
+            shm_name = img.get('shm_name')  # ROI items don't have shm_name
+            if shm_name and shm_name in self._shared_memory_blocks:
+                try:
+                    shm = self._shared_memory_blocks.pop(shm_name)
+                    shm.close()
+                    if unlink:
+                        shm.unlink()
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup shared memory {shm_name}: {e}")
 
     # cleanup() now inherited from ABC
 
