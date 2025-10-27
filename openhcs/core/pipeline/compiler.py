@@ -708,6 +708,82 @@ class PipelineCompiler:
                 setattr(context, attr_name, resolved_value)
 
     @staticmethod
+    def validate_backend_compatibility(orchestrator) -> None:
+        """
+        Validate that the configured materialization backend is compatible with the microscope.
+
+        For microscopes with only one compatible backend (like OMERO), automatically sets
+        the backend to the required value.
+
+        Args:
+            orchestrator: PipelineOrchestrator instance with initialized microscope_handler
+
+        Raises:
+            ValueError: If configured backend is incompatible and cannot be auto-corrected
+        """
+        microscope_handler = orchestrator.microscope_handler
+        pipeline_config = orchestrator.pipeline_config
+
+        # Get configured backend
+        configured_backend = pipeline_config.vfs_config.materialization_backend
+
+        # Skip validation if backend is AUTO (will be resolved later)
+        if configured_backend == MaterializationBackend.AUTO:
+            logger.debug(f"Backend is AUTO, will be resolved during materialization planning")
+            return
+
+        # Get compatible backends from microscope handler
+        compatible_backends = microscope_handler.compatible_backends
+
+        # Convert MaterializationBackend enum to Backend enum for comparison
+        # MaterializationBackend values: 'disk', 'zarr', 'omero_local'
+        # Backend values: 'disk', 'zarr', 'omero_local', 'memory', 'auto', 'virtual_workspace'
+        configured_backend_value = configured_backend.value
+
+        # Check if configured backend is compatible
+        is_compatible = any(b.value == configured_backend_value for b in compatible_backends)
+
+        if not is_compatible:
+            # If microscope has only one compatible backend, auto-set it
+            if len(compatible_backends) == 1:
+                required_backend = compatible_backends[0]
+                logger.warning(
+                    f"Configured materialization_backend '{configured_backend_value}' is incompatible with "
+                    f"{microscope_handler.microscope_type} microscope. Auto-setting to '{required_backend.value}' "
+                    f"(only compatible backend)."
+                )
+                # Set the backend on the vfs_config
+                # Convert Backend enum to MaterializationBackend enum
+                # VFSConfig is frozen, so we must create a new instance
+                from openhcs.core.config import MaterializationBackend as MB, VFSConfig, PipelineConfig
+                from dataclasses import replace
+
+                # Create new VFSConfig with corrected backend
+                new_vfs_config = replace(
+                    pipeline_config.vfs_config,
+                    materialization_backend=MB(required_backend.value)
+                )
+
+                # Replace vfs_config in pipeline_config (also frozen, so use replace)
+                orchestrator.pipeline_config = replace(
+                    pipeline_config,
+                    vfs_config=new_vfs_config
+                )
+            else:
+                # Multiple compatible backends - raise error for explicit choice
+                compatible_values = [b.value for b in compatible_backends]
+                raise ValueError(
+                    f"Incompatible materialization_backend '{configured_backend_value}' for "
+                    f"{microscope_handler.microscope_type} microscope. "
+                    f"Compatible backends: {compatible_values}"
+                )
+        else:
+            logger.debug(
+                f"Backend '{configured_backend_value}' is compatible with "
+                f"{microscope_handler.microscope_type} microscope"
+            )
+
+    @staticmethod
     def ensure_analysis_materialization(pipeline_definition: List[AbstractStep]) -> None:
         """
         Ensure intermediate steps with analysis outputs have step_materialization_config.
@@ -837,6 +913,12 @@ class PipelineCompiler:
             # Ensure intermediate steps with analysis outputs have step_materialization_config
             # This preserves metadata coherence (ROIs must match image structure they were created from)
             PipelineCompiler.ensure_analysis_materialization(pipeline_definition)
+
+            # === BACKEND COMPATIBILITY VALIDATION ===
+            # Validate that configured backend is compatible with microscope
+            # For microscopes with only one compatible backend (e.g., OMERO), auto-set it
+            logger.debug("🔧 BACKEND VALIDATION: Validating backend compatibility with microscope...")
+            PipelineCompiler.validate_backend_compatibility(orchestrator)
 
             # === GLOBAL AXIS FILTER RESOLUTION ===
             # Resolve axis filters once for all axis values to ensure step-level inheritance works
