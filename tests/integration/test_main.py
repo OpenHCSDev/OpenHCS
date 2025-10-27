@@ -584,12 +584,16 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
         global_config = _create_pipeline_config(test_config)
 
         # Create pipeline config with lazy configs
+        # CRITICAL: Set vfs_config=None to inherit from global config
+        # Without this, PipelineConfig auto-creates a VFSConfig with default values (materialization_backend=DISK)
+        # which overrides the global config's omero_local backend for OMERO tests
         from openhcs.core.config import LazyPathPlanningConfig, LazyStepWellFilterConfig
         pipeline_config = PipelineConfig(
             path_planning_config=LazyPathPlanningConfig(
                 output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
             ),
             step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+            vfs_config=None,  # Inherit from global config
         )
 
         return _execute_pipeline_zmq(test_config, pipeline, global_config, pipeline_config)
