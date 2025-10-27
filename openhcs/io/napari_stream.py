@@ -131,49 +131,42 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
         # Send non-blocking to prevent hanging if Napari is slow to process (matches Fiji pattern)
         import zmq
+        send_succeeded = False
         try:
             publisher.send_json(message, flags=zmq.NOBLOCK)
+            send_succeeded = True
 
             # Register sent images with queue tracker using ABC helper
             self._register_with_queue_tracker(port, image_ids)
 
-            # Clean up backend's shared memory handles after successful send (like Fiji pattern)
-            # Viewer will unlink after copying the data
-            for img in batch_images:
-                shm_name = img.get('shm_name')  # ROI items don't have shm_name
-                if shm_name and shm_name in self._shared_memory_blocks:
-                    try:
-                        shm = self._shared_memory_blocks.pop(shm_name)
-                        shm.close()  # Close our handle, but don't unlink - viewer will do that
-                    except Exception as e:
-                        logger.warning(f"Failed to close shared memory handle {shm_name}: {e}")
-
         except zmq.Again:
             logger.warning(f"Napari viewer busy, dropped batch of {len(batch_images)} images (port {port})")
-            # Clean up shared memory for dropped images (both close and unlink since receiver never got them)
-            for img in batch_images:
-                shm_name = img.get('shm_name')  # ROI items don't have shm_name
-                if shm_name and shm_name in self._shared_memory_blocks:
-                    try:
-                        shm = self._shared_memory_blocks.pop(shm_name)
-                        shm.close()
-                        shm.unlink()
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup dropped shared memory {shm_name}: {e}")
 
         except Exception as e:
-            logger.error(f"❌ NAPARI BACKEND: Failed to send batch to Napari on port {port}: {e}", exc_info=True)
-            # Clean up shared memory for failed send (both close and unlink since receiver never got them)
-            for img in batch_images:
-                shm_name = img.get('shm_name')  # ROI items don't have shm_name
-                if shm_name and shm_name in self._shared_memory_blocks:
-                    try:
-                        shm = self._shared_memory_blocks.pop(shm_name)
-                        shm.close()
-                        shm.unlink()
-                    except Exception as cleanup_error:
-                        logger.warning(f"Failed to cleanup shared memory after error {shm_name}: {cleanup_error}")
+            logger.error(f"Failed to send batch to Napari on port {port}: {e}", exc_info=True)
             raise  # Re-raise the exception so the pipeline knows it failed
+
+        finally:
+            # Unified cleanup: close our handle after successful send, close+unlink after failure
+            self._cleanup_shared_memory(batch_images, unlink=not send_succeeded)
+
+    def _cleanup_shared_memory(self, batch_images, unlink=False):
+        """Clean up shared memory blocks for a batch of images.
+
+        Args:
+            batch_images: List of image dictionaries with optional 'shm_name' keys
+            unlink: If True, both close and unlink. If False, only close (viewer will unlink)
+        """
+        for img in batch_images:
+            shm_name = img.get('shm_name')  # ROI items don't have shm_name
+            if shm_name and shm_name in self._shared_memory_blocks:
+                try:
+                    shm = self._shared_memory_blocks.pop(shm_name)
+                    shm.close()
+                    if unlink:
+                        shm.unlink()
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup shared memory {shm_name}: {e}")
 
     # cleanup() now inherited from ABC
 
