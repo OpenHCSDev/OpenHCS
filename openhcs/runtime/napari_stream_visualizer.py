@@ -21,7 +21,7 @@ import time
 import zmq
 import numpy as np
 from typing import Any, Dict, Optional
-from qtpy.QtCore import QTimer, QThread, Signal, QObject
+from qtpy.QtCore import QTimer
 
 from openhcs.io.filemanager import FileManager
 from openhcs.utils.import_utils import optional_import
@@ -47,35 +47,6 @@ _global_process_lock = threading.Lock()
 
 # Registry of data type handlers (will be populated after helper functions are defined)
 _DATA_TYPE_HANDLERS = None
-
-
-class ShapesWorker(QObject):
-    """Worker for building shapes data in background thread."""
-    finished = Signal(str, object, object, object)  # layer_key, shapes_data, shape_types, properties
-    error = Signal(str, str)  # layer_key, error_message
-
-    def __init__(self):
-        super().__init__()
-        self.layer_key = None
-        self.layer_items = None
-        self.stack_components = None
-
-    def process(self, layer_key, layer_items, stack_components):
-        """Build shapes data in background thread."""
-        self.layer_key = layer_key
-        self.layer_items = layer_items
-        self.stack_components = stack_components
-
-        try:
-            logger.info(f"🔬 NAPARI WORKER: Building shapes data for {layer_key} in background thread")
-            shapes_data, shape_types, properties = _build_nd_shapes(layer_items, stack_components)
-            logger.info(f"🔬 NAPARI WORKER: Finished building {len(shapes_data)} shapes for {layer_key}")
-            self.finished.emit(layer_key, shapes_data, shape_types, properties)
-        except Exception as e:
-            logger.error(f"🔬 NAPARI WORKER: Error building shapes for {layer_key}: {e}")
-            import traceback
-            logger.error(f"🔬 NAPARI WORKER: Traceback: {traceback.format_exc()}")
-            self.error.emit(layer_key, str(e))
 
 
 def _cleanup_global_viewer() -> None:
@@ -518,10 +489,6 @@ class NapariViewerServer(ZMQServer):
         self.pending_updates = {}  # layer_key -> QTimer (debounce)
         self.update_delay_ms = 100  # Wait 100ms for more items before rebuilding
 
-        # Background thread management for shapes processing
-        self.shapes_thread = None
-        self.shapes_worker = None
-
         # Create PUSH socket for sending acknowledgments to shared ack port
         self.ack_socket = None
         self._setup_ack_socket()
@@ -643,75 +610,86 @@ class NapariViewerServer(ZMQServer):
         _create_or_update_image_layer(self.viewer, self.layers, layer_key, stacked_data, colormap)
 
     def _update_shapes_layer(self, layer_key, layer_items, stack_components, component_modes):
-        """Update a shapes layer with the current items using background thread."""
-        logger.info(f"🔬 NAPARI PROCESS: Starting background thread to build shapes for {layer_key} from {len(layer_items)} items")
+        """Update a shapes layer - use labels instead of shapes for efficiency."""
+        logger.info(f"🔬 NAPARI PROCESS: Converting shapes to labels for {layer_key} from {len(layer_items)} items")
 
-        # If a thread is already running, wait for it to finish
-        try:
-            if self.shapes_thread is not None and self.shapes_thread.isRunning():
-                logger.info(f"🔬 NAPARI PROCESS: Waiting for previous shapes thread to finish")
-                self.shapes_thread.quit()
-                self.shapes_thread.wait()
-        except RuntimeError:
-            # Thread was already deleted, ignore
-            pass
+        # Convert shapes to label masks (much faster than individual shapes)
+        # This happens synchronously but is fast because we're just creating arrays
+        labels_data = self._shapes_to_labels(layer_items, stack_components)
 
-        # Create new thread and worker
-        self.shapes_thread = QThread()
-        self.shapes_worker = ShapesWorker()
-        self.shapes_worker.moveToThread(self.shapes_thread)
-
-        # Connect signals
-        self.shapes_worker.finished.connect(self._on_shapes_ready)
-        self.shapes_worker.error.connect(self._on_shapes_error)
-        # Don't use deleteLater - we'll manage thread lifecycle manually
-
-        # Start processing
-        # Make a deep copy of layer_items to avoid thread safety issues
-        import copy
-        layer_items_copy = copy.deepcopy(layer_items)
-
-        self.shapes_thread.started.connect(
-            lambda: self.shapes_worker.process(layer_key, layer_items_copy, stack_components)
-        )
-        self.shapes_thread.start()
-
-    def _on_shapes_ready(self, layer_key, shapes_data, shape_types, properties):
-        """Called when shapes data is ready from background thread."""
-        logger.info(f"🔬 NAPARI PROCESS: Shapes data ready for {layer_key}, creating layer on main thread")
-
-        # Remove existing layer if it exists (shapes layers need to be recreated)
+        # Remove existing layer if it exists
         if layer_key in self.layers:
             try:
                 self.viewer.layers.remove(self.layers[layer_key])
-                logger.info(f"🔬 NAPARI PROCESS: Removed existing shapes layer {layer_key} for recreation")
+                logger.info(f"🔬 NAPARI PROCESS: Removed existing labels layer {layer_key} for recreation")
             except Exception as e:
-                logger.warning(f"Failed to remove existing shapes layer {layer_key}: {e}")
+                logger.warning(f"Failed to remove existing labels layer {layer_key}: {e}")
 
-        # Create new shapes layer on main thread
-        _create_or_update_shapes_layer(self.viewer, self.layers, layer_key, shapes_data, shape_types, properties)
+        # Create new labels layer
+        new_layer = self.viewer.add_labels(labels_data, name=layer_key)
+        self.layers[layer_key] = new_layer
+        logger.info(f"🔬 NAPARI PROCESS: Created labels layer {layer_key} with shape {labels_data.shape}")
 
-        # Clean up thread
-        try:
-            if self.shapes_thread:
-                self.shapes_thread.quit()
-                self.shapes_thread.wait()
-        except RuntimeError:
-            # Thread already deleted
-            pass
+    def _shapes_to_labels(self, layer_items, stack_components):
+        """Convert shapes data to label masks."""
+        from skimage import draw
 
-    def _on_shapes_error(self, layer_key, error_message):
-        """Called when shapes processing fails."""
-        logger.error(f"🔬 NAPARI PROCESS: Failed to build shapes for {layer_key}: {error_message}")
+        # Build component value to index mapping
+        component_values = {}
+        for comp in stack_components:
+            values = sorted(set(item['components'].get(comp, 0) for item in layer_items))
+            component_values[comp] = values
 
-        # Clean up thread
-        try:
-            if self.shapes_thread:
-                self.shapes_thread.quit()
-                self.shapes_thread.wait()
-        except RuntimeError:
-            # Thread already deleted
-            pass
+        # Determine output shape
+        # Get image shape from first item's shapes data
+        first_shapes = layer_items[0]['data']
+        if not first_shapes:
+            # No shapes, return empty array
+            return np.zeros((1, 1, 512, 512), dtype=np.uint16)
+
+        # Estimate image size from shape coordinates
+        max_y, max_x = 0, 0
+        for shape_dict in first_shapes:
+            if shape_dict['type'] == 'polygon':
+                coords = np.array(shape_dict['coordinates'])
+                max_y = max(max_y, int(np.max(coords[:, 0])) + 1)
+                max_x = max(max_x, int(np.max(coords[:, 1])) + 1)
+
+        # Build nD shape
+        nd_shape = []
+        for comp in stack_components:
+            nd_shape.append(len(component_values[comp]))
+        nd_shape.extend([max_y, max_x])
+
+        # Create empty label array
+        labels_array = np.zeros(nd_shape, dtype=np.uint16)
+
+        # Fill in labels for each item
+        label_id = 1
+        for item in layer_items:
+            # Get indices for this item
+            indices = []
+            for comp in stack_components:
+                comp_value = item['components'].get(comp, 0)
+                idx = component_values[comp].index(comp_value)
+                indices.append(idx)
+
+            # Get shapes data
+            shapes_data = item['data']
+
+            # Draw each shape into the label mask
+            for shape_dict in shapes_data:
+                if shape_dict['type'] == 'polygon':
+                    coords = np.array(shape_dict['coordinates'])
+                    rr, cc = draw.polygon(coords[:, 0], coords[:, 1], shape=labels_array.shape[-2:])
+
+                    # Set label at the correct nD position
+                    full_indices = tuple(indices) + (rr, cc)
+                    labels_array[full_indices] = label_id
+                    label_id += 1
+
+        logger.info(f"🔬 NAPARI PROCESS: Created labels array with shape {labels_array.shape} and {label_id-1} labels")
+        return labels_array
 
     def _send_ack(self, image_id: str, status: str = 'success', error: str = None):
         """Send acknowledgment that an image was processed.
