@@ -75,6 +75,8 @@ extensions = [
     'sphinx.ext.mathjax',
     'sphinx.ext.doctest',
     'sphinx_rtd_theme',
+    'sphinx_toolbox.collapse',
+    'sphinx_design',
 ]
 
 # Add any paths that contain templates here, relative to this directory.
