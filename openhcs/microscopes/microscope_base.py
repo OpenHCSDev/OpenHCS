@@ -103,10 +103,18 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
 
     @property
     @abstractmethod
-    def common_dirs(self) -> List[str]:
+    def root_dir(self) -> str:
         """
-        Canonical subdirectory names where image data may reside.
-        Example: ['Images', 'TimePoint', 'Data']
+        Root directory where virtual workspace preparation starts.
+
+        This defines:
+        1. The starting point for virtual workspace operations (flattening, remapping)
+        2. The subdirectory key used when saving virtual workspace metadata
+
+        Examples:
+        - ImageXpress: "." (plate root - TimePoint/ZStep folders are flattened from plate root)
+        - OperaPhenix: "Images" (field remapping applied to Images/ subdirectory)
+        - OpenHCS: Determined from metadata (e.g., "zarr", "images")
         """
         pass
 
@@ -157,174 +165,151 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         """
         return self.compatible_backends
 
-    def get_primary_backend(self, plate_path: Union[str, Path]) -> str:
+    def get_primary_backend(self, plate_path: Union[str, Path], filemanager: 'FileManager') -> str:
         """
         Get the primary backend name for this plate.
 
-        Default implementation returns the first compatible backend.
+        Checks FileManager registry first for registered backends (like virtual_workspace),
+        then falls back to compatible backends.
+
         Override this method only if you need custom backend selection logic
         (like OpenHCS which reads from metadata).
 
         Args:
-            plate_path: Path to the plate folder
+            plate_path: Path to the plate folder (or subdirectory)
+            filemanager: FileManager instance to check for registered backends
 
         Returns:
-            Backend name string (e.g., 'disk', 'zarr')
+            Backend name string (e.g., 'disk', 'zarr', 'virtual_workspace')
         """
+        # Check if virtual workspace backend is registered in FileManager
+        # This takes priority over compatible backends
+        if Backend.VIRTUAL_WORKSPACE.value in filemanager.registry:
+            logger.info(f"✅ Using backend '{Backend.VIRTUAL_WORKSPACE.value}' from FileManager registry")
+            return Backend.VIRTUAL_WORKSPACE.value
+
+        # Fall back to compatible backends
         available_backends = self.get_available_backends(plate_path)
         if not available_backends:
             raise RuntimeError(f"No available backends for {self.microscope_type} microscope at {plate_path}")
+        logger.info(f"⚠️ Using backend '{available_backends[0].value}' from compatible backends (virtual workspace not registered)")
         return available_backends[0].value
 
-    def initialize_workspace(self, plate_path: Path, workspace_path: Optional[Path], filemanager: FileManager) -> Path:
+    def _register_virtual_workspace_backend(self, plate_path: Union[str, Path], filemanager: FileManager) -> None:
         """
-        Default workspace initialization: create workspace in plate folder and mirror with symlinks.
+        Register virtual workspace backend if not already registered.
 
-        Most microscope handlers need workspace mirroring. Override this method only if different behavior is needed.
+        Centralized registration logic to avoid duplication across handlers.
 
         Args:
-            plate_path: Path to the original plate directory
-            workspace_path: Optional workspace path (creates default in plate folder if None)
-            filemanager: FileManager instance for file operations
-
-        Returns:
-            Path to the actual directory containing images to process
+            plate_path: Path to plate directory
+            filemanager: FileManager instance
         """
+        from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
         from openhcs.constants.constants import Backend
 
-        # Create workspace path in plate folder if not provided
-        if workspace_path is None:
-            workspace_path = plate_path / "workspace"
+        if Backend.VIRTUAL_WORKSPACE.value not in filemanager.registry:
+            backend = VirtualWorkspaceBackend(plate_root=Path(plate_path))
+            filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
+            logger.info(f"Registered virtual workspace backend for {plate_path}")
 
-        # Check if workspace already exists - skip mirroring if it does
-        workspace_already_exists = workspace_path.exists()
-        if workspace_already_exists:
-            logger.info(f"📁 EXISTING WORKSPACE FOUND: {workspace_path} - skipping mirror operation")
-            num_links = 0  # No new links created
-        else:
-            # Ensure workspace directory exists
-            filemanager.ensure_directory(str(workspace_path), Backend.DISK.value)
-
-            # Mirror plate directory with symlinks
-            logger.info(f"Mirroring plate directory {plate_path} to workspace {workspace_path}...")
-            try:
-                num_links = filemanager.mirror_directory_with_symlinks(
-                    source_dir=str(plate_path),
-                    target_dir=str(workspace_path),
-                    backend=Backend.DISK.value,
-                    recursive=True,
-                    overwrite_symlinks_only=True,
-                )
-                logger.info(f"Created {num_links} symlinks in workspace.")
-            except Exception as mirror_error:
-                # If mirroring fails, clean up and try again with fail-loud
-                logger.warning(f"⚠️ MIRROR FAILED: {mirror_error}. Cleaning workspace and retrying...")
-                try:
-                    import shutil
-                    shutil.rmtree(workspace_path)
-                    logger.info(f"🧹 Cleaned up failed workspace: {workspace_path}")
-
-                    # Recreate directory and try mirroring again
-                    filemanager.ensure_directory(str(workspace_path), Backend.DISK.value)
-                    num_links = filemanager.mirror_directory_with_symlinks(
-                        source_dir=str(plate_path),
-                        target_dir=str(workspace_path),
-                        backend=Backend.DISK.value,
-                        recursive=True,
-                        overwrite_symlinks_only=True,
-                    )
-                    logger.info(f"✅ RETRY SUCCESS: Created {num_links} symlinks in workspace.")
-                except Exception as retry_error:
-                    # Fail loud on second attempt
-                    error_msg = f"Failed to mirror plate directory to workspace after cleanup: {retry_error}"
-                    logger.error(error_msg)
-                    raise RuntimeError(error_msg) from retry_error
-
-        # Set plate_folder for this handler
-        self.plate_folder = workspace_path
-
-        # Prepare workspace and return final image directory
-        return self.post_workspace(workspace_path, filemanager, skip_preparation=workspace_already_exists)
-
-    def post_workspace(self, workspace_path: Union[str, Path], filemanager: FileManager, width: int = 3, skip_preparation: bool = False):
+    def initialize_workspace(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
-        Hook called after workspace symlink creation.
-        Applies normalization logic followed by consistent filename padding.
+        Initialize plate by creating virtual mapping in metadata.
 
-        This method requires a disk-backed path and should only be called
-        from steps with requires_fs_input=True.
+        No physical workspace directory is created - mapping is purely metadata-based.
+        All paths are relative to plate_path.
 
         Args:
-            workspace_path: Path to the workspace (string or Path object)
-            filemanager: FileManager instance for file operations
-            width: Width for padding (default: 3)
-            skip_preparation: If True, skip microscope-specific preparation (default: False)
+            plate_path: Path to plate directory
+            filemanager: FileManager instance
 
         Returns:
-            Path to the normalized image directory
-
-        Raises:
-            FileNotFoundError: If workspace_path does not exist
+            Path to image directory (determined from plate structure)
         """
-        # Ensure workspace_path is a Path object
-        if isinstance(workspace_path, str):
-            workspace_path = Path(workspace_path)
+        plate_path = Path(plate_path)
 
-        # Ensure the path exists
-        if not workspace_path.exists():
-            raise FileNotFoundError(f"Workspace path does not exist: {workspace_path}")
+        # Set plate_folder for this handler
+        self.plate_folder = plate_path
 
-        # Apply microscope-specific preparation logic (skip if workspace already existed)
+        # Call microscope-specific virtual mapping builder
+        # This builds the plate-relative mapping dict and saves to metadata
+        self._build_virtual_mapping(plate_path, filemanager)
+
+        # Register virtual workspace backend
+        self._register_virtual_workspace_backend(plate_path, filemanager)
+
+        # Return image directory using post_workspace
+        # skip_preparation=True because _build_virtual_mapping() already ran
+        return self.post_workspace(plate_path, filemanager, skip_preparation=True)
+
+    def post_workspace(self, plate_path: Union[str, Path], filemanager: FileManager, skip_preparation: bool = False) -> Path:
+        """
+        Apply post-workspace processing using virtual mapping.
+
+        All operations use plate_path - no workspace directory concept.
+
+        Args:
+            plate_path: Path to plate directory
+            filemanager: FileManager instance
+            skip_preparation: Skip microscope-specific preparation (default: False)
+
+        Returns:
+            Path to image directory
+        """
+        # Ensure plate_path is a Path object
+        if isinstance(plate_path, str):
+            plate_path = Path(plate_path)
+
+        # NO existence check - virtual workspaces are metadata-only
+
+        # Apply microscope-specific preparation logic
+        # _build_virtual_mapping() returns the correct image directory for each microscope:
+        # - ImageXpress: plate_path (images are at plate root with TimePoint_X/ prefix in mapping)
+        # - OperaPhenix: plate_path/Images (images are in Images/ subdirectory)
         if skip_preparation:
-            logger.info("📁 SKIPPING PREPARATION: Workspace already existed - using as-is")
-            prepared_dir = workspace_path
+            logger.info("📁 SKIPPING PREPARATION: Virtual mapping already built")
+            # When skipping, we need to determine image_dir from metadata
+            # Read metadata to get the subdirectory key
+            from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+            from openhcs.io.exceptions import MetadataNotFoundError
+            from openhcs.io.metadata_writer import resolve_subdirectory_path
+
+            openhcs_metadata_handler = OpenHCSMetadataHandler(filemanager)
+            metadata = openhcs_metadata_handler._load_metadata_dict(plate_path)
+            subdirs = metadata.get("subdirectories", {})
+
+            # Find the subdirectory with workspace_mapping (should be "." or "Images")
+            subdir_with_mapping = next(
+                (name for name, data in subdirs.items() if "workspace_mapping" in data),
+                None
+            )
+
+            # Fail if no workspace_mapping found
+            if subdir_with_mapping is None:
+                raise MetadataNotFoundError(
+                    f"skip_preparation=True but no workspace_mapping found in metadata for {plate_path}. "
+                    "Virtual workspace must be prepared before skipping."
+                )
+
+            # Convert subdirectory name to path (handles "." -> plate_path)
+            image_dir = resolve_subdirectory_path(subdir_with_mapping, plate_path)
         else:
-            logger.info("🔄 APPLYING PREPARATION: Processing new workspace")
-            prepared_dir = self._prepare_workspace(workspace_path, filemanager)
+            logger.info("🔄 APPLYING PREPARATION: Building virtual mapping")
+            # _build_virtual_mapping() returns the image directory
+            image_dir = self._build_virtual_mapping(plate_path, filemanager)
 
-        # Deterministically resolve the image directory based on common_dirs
-        # Clause 245: Workspace operations are disk-only by design
-        # This call is structurally hardcoded to use the "disk" backend
-        entries = filemanager.list_dir(workspace_path, Backend.DISK.value)
-
-        # Filter entries to get only directories
-        subdirs = []
-        for entry in entries:
-            entry_path = Path(workspace_path) / entry
-            if entry_path.is_dir():
-                subdirs.append(entry_path)
-
-        # Look for a directory matching any of the common_dirs patterns
-        image_dir = None
-        for item in subdirs:
-            # FileManager should return strings, but handle Path objects too
-            if isinstance(item, str):
-                item_name = os.path.basename(item)
-            elif isinstance(item, Path):
-                item_name = item.name
-            else:
-                # Skip any unexpected types
-                logger.warning("Unexpected directory path type: %s", type(item).__name__)
-                continue
-
-            if any(dir_name.lower() in item_name.lower() for dir_name in self.common_dirs):
-                # Found a matching directory
-                logger.info("Found directory matching common_dirs pattern: %s", item)
-                image_dir = item
-                break
-
-        # If no matching directory found, use the prepared directory
-        if image_dir is None:
-            logger.info("No directory matching common_dirs found, using prepared directory: %s", prepared_dir)
-            image_dir = prepared_dir
+        # Determine backend - check if virtual workspace backend is registered
+        if Backend.VIRTUAL_WORKSPACE.value in filemanager.registry:
+            backend_type = Backend.VIRTUAL_WORKSPACE.value
+        else:
+            backend_type = Backend.DISK.value
 
         # Ensure parser is provided
         parser = self.parser
 
         # Get all image files in the directory
-        # Clause 245: Workspace operations are disk-only by design
-        # This call is structurally hardcoded to use the "disk" backend
-        image_files = filemanager.list_image_files(image_dir, Backend.DISK.value)
+        image_files = filemanager.list_image_files(image_dir, backend_type)
 
         # Map original filenames to reconstructed filenames
         rename_map = {}
@@ -408,32 +393,32 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
 
         return image_dir
 
-    @abstractmethod
-    def _prepare_workspace(self, workspace_path: Path, filemanager: FileManager):
+    def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
-        Microscope-specific preparation logic before image directory resolution.
+        Build microscope-specific virtual workspace mapping.
 
-        This method performs any necessary preprocessing on the workspace but does NOT
-        determine the final image directory. It may return a suggested directory, but
-        the final image directory will be determined by post_workspace() based on
-        common_dirs matching.
+        This method creates a plate-relative mapping dict and saves it to metadata.
+        All paths in the mapping are relative to plate_path.
 
-        Override in subclasses. Default implementation just returns the workspace path.
-
-        This method requires a disk-backed path and should only be called
-        from steps with requires_fs_input=True.
+        Override in subclasses that need virtual workspace mapping (e.g., ImageXpress, Opera Phenix).
+        Handlers that override initialize_workspace() completely (e.g., OMERO, OpenHCS) don't need
+        to implement this method.
 
         Args:
-            workspace_path: Path to the symlinked workspace
+            plate_path: Path to plate directory
             filemanager: FileManager instance for file operations
 
         Returns:
-            Path: A suggested directory for further processing (not necessarily the final image directory)
+            Path: Suggested directory for further processing
 
         Raises:
-            FileNotFoundError: If workspace_path does not exist
+            NotImplementedError: If called on a handler that doesn't support virtual workspace mapping
         """
-        return workspace_path
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not implement _build_virtual_mapping(). "
+            f"This method is only needed for handlers that use the base class initialize_workspace(). "
+            f"Handlers that override initialize_workspace() completely (like OMERO, OpenHCS) don't need this."
+        )
 
 
     # Delegate methods to parser
@@ -664,7 +649,7 @@ def validate_backend_compatibility(handler: MicroscopeHandler, backend: Backend)
 
 def _try_metadata_detection(handler_class, filemanager: FileManager, plate_folder: Path) -> Optional[Path]:
     """
-    Try metadata detection with a handler, normalizing return types and exceptions.
+    Try metadata detection with a handler, normalizing return types.
 
     Args:
         handler_class: MetadataHandler class to try
@@ -672,20 +657,16 @@ def _try_metadata_detection(handler_class, filemanager: FileManager, plate_folde
         plate_folder: Path to plate directory
 
     Returns:
-        Path if metadata found, None if not found (regardless of handler's native behavior)
+        Path if metadata found, None if metadata not found
+
+    Raises:
+        Any exception from the handler (fail-loud behavior)
     """
-    try:
-        handler = handler_class(filemanager)
-        result = handler.find_metadata_file(plate_folder)
+    handler = handler_class(filemanager)
+    result = handler.find_metadata_file(plate_folder)
 
-        # Normalize return type: convert any truthy result to Path, falsy to None
-        return Path(result) if result else None
-
-    except (FileNotFoundError, Exception) as e:
-        # Expected exceptions for "not found" - convert to None
-        # Note: Using broad Exception catch for now, can be refined based on actual handler exceptions
-        logger.debug(f"Metadata detection failed for {handler_class.__name__}: {e}")
-        return None
+    # Normalize return type: convert any truthy result to Path, falsy to None
+    return Path(result) if result else None
 
 
 def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
@@ -705,39 +686,46 @@ def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
 
     Raises:
         ValueError: If microscope type cannot be determined
+        MetadataNotFoundError: If metadata files are missing
+        Any other exception from metadata handlers (fail-loud)
     """
-    try:
-        # Ensure all handlers are discovered before auto-detection
-        from openhcs.microscopes.handler_registry_service import discover_all_handlers
-        discover_all_handlers()
+    # Ensure all handlers are discovered before auto-detection
+    from openhcs.microscopes.handler_registry_service import discover_all_handlers
+    from openhcs.io.exceptions import MetadataNotFoundError
+    discover_all_handlers()
 
-        # Build detection order: openhcsdata first, then filtered/ordered list
-        detection_order = ['openhcsdata']  # Always first, always included (correct registration name)
+    # Build detection order: openhcsdata first, then filtered/ordered list
+    detection_order = ['openhcsdata']  # Always first, always included (correct registration name)
 
-        if allowed_types is None:
-            # Use all registered handlers in registration order
-            detection_order.extend([name for name in METADATA_HANDLERS.keys() if name != 'openhcsdata'])
-        else:
-            # Use filtered list, but ensure openhcsdata is first
-            filtered_types = [name for name in allowed_types if name != 'openhcsdata' and name in METADATA_HANDLERS]
-            detection_order.extend(filtered_types)
+    if allowed_types is None:
+        # Use all registered handlers in registration order
+        detection_order.extend([name for name in METADATA_HANDLERS.keys() if name != 'openhcsdata'])
+    else:
+        # Use filtered list, but ensure openhcsdata is first
+        filtered_types = [name for name in allowed_types if name != 'openhcsdata' and name in METADATA_HANDLERS]
+        detection_order.extend(filtered_types)
 
-        # Try detection in order
-        for handler_name in detection_order:
-            handler_class = METADATA_HANDLERS.get(handler_name)
-            if handler_class and _try_metadata_detection(handler_class, filemanager, plate_folder):
+    # Try detection in order - only catch expected "not found" exceptions
+    for handler_name in detection_order:
+        handler_class = METADATA_HANDLERS.get(handler_name)
+        if not handler_class:
+            continue
+
+        try:
+            result = _try_metadata_detection(handler_class, filemanager, plate_folder)
+            if result:
                 logger.info(f"Auto-detected {handler_name} microscope type")
                 return handler_name
+        except (FileNotFoundError, MetadataNotFoundError):
+            # Expected - this handler's metadata not found, try next
+            logger.debug(f"{handler_name} metadata not found in {plate_folder}")
+            continue
 
-        # No handler succeeded - provide detailed error message
-        available_types = list(METADATA_HANDLERS.keys())
-        msg = (f"Could not auto-detect microscope type in {plate_folder}. "
-               f"Tried: {detection_order}. "
-               f"Available types: {available_types}. "
-               f"Ensure metadata files are present for supported formats.")
-        logger.error(msg)
-        raise ValueError(msg)
-
-    except Exception as e:
-        # Wrap exception with clear context
-        raise ValueError(f"Error during microscope type auto-detection in {plate_folder}: {e}") from e
+    # No handler succeeded - provide detailed error message
+    available_types = list(METADATA_HANDLERS.keys())
+    msg = (f"Could not auto-detect microscope type in {plate_folder}. "
+           f"Tried: {detection_order}. "
+           f"Available types: {available_types}. "
+           f"Ensure metadata files are present for supported formats.")
+    logger.error(msg)
+    raise ValueError(msg)

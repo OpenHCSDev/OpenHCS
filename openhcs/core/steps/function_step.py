@@ -505,8 +505,7 @@ def _execute_chain_core(
             data=current_stack,
             source_type=current_memory_type,
             target_type=actual_callable.input_memory_type,
-            gpu_id=device_id,
-            allow_cpu_roundtrip=False
+            gpu_id=device_id
         )
 
         # Use funcplan to determine which outputs this function should save
@@ -904,18 +903,15 @@ class FunctionStep(AbstractStep):
 
                 logger.info(f"🔬 Converted {len(conversion_paths)} input files to {input_conversion_dir}")
 
-            # 🔍 VRAM TRACKING: Log memory at step start
-            try:
-                from openhcs.core.memory.gpu_cleanup import log_gpu_memory_usage
-                log_gpu_memory_usage(f"step {step_name} start")
-            except ImportError:
-                pass  # GPU cleanup not available
-
-
-
-                log_gpu_memory_usage(f"step {step_name} start")
-            except Exception:
-                pass
+                # Update metadata after conversion
+                conversion_dir = Path(step_plan["input_conversion_dir"])
+                zarr_subdir = conversion_dir.name if step_plan["input_conversion_uses_virtual_workspace"] else None
+                _update_metadata_for_zarr_conversion(
+                    conversion_dir.parent,
+                    step_plan["input_conversion_original_subdir"],
+                    zarr_subdir,
+                    context
+                )
 
             logger.info(f"🔥 STEP: Starting processing for '{step_name}' well {axis_id} (group_by={group_by.name if group_by else None}, variable_components={[vc.name for vc in variable_components] if variable_components else []})")
 
@@ -1240,8 +1236,9 @@ class FunctionStep(AbstractStep):
 
         backends = {Backend.ZARR.value: False, Backend.DISK.value: False}
 
-        # Check for zarr stores
-        if list(output_dir.glob("*.zarr")):
+        # Check for zarr stores - look for .zarray or .zgroup files (zarr metadata)
+        # Zarr stores don't need .zarr extension - any directory with zarr metadata is a store
+        if list(output_dir.glob("**/.zarray")) or list(output_dir.glob("**/.zgroup")):
             backends[Backend.ZARR.value] = True
 
         # Check for image files
@@ -1340,5 +1337,42 @@ class FunctionStep(AbstractStep):
                 mat_func(data, str(analysis_path), filemanager, backends, backend_kwargs)
 
 
+def _update_metadata_for_zarr_conversion(
+    plate_root: Path,
+    original_subdir: str,
+    zarr_subdir: str | None,
+    context: 'ProcessingContext'
+) -> None:
+    """Update metadata after zarr conversion.
 
+    If zarr_subdir is None: add zarr to original_subdir's available_backends
+    If zarr_subdir is set: create complete metadata for zarr subdirectory, set original main=false
+    """
+    from openhcs.io.metadata_writer import get_metadata_path, AtomicMetadataWriter
+    from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
 
+    if zarr_subdir:
+        # Create complete metadata for zarr subdirectory (skip if already complete)
+        zarr_dir = plate_root / zarr_subdir
+        metadata_generator = OpenHCSMetadataGenerator(context.filemanager)
+        metadata_generator.create_metadata(
+            context,
+            str(zarr_dir),
+            "zarr",  # Zarr subdirectory uses zarr backend
+            is_main=True,
+            plate_root=str(plate_root),
+            sub_dir=zarr_subdir,
+            skip_if_complete=True
+        )
+
+        # Set original subdirectory to main=false
+        metadata_path = get_metadata_path(plate_root)
+        writer = AtomicMetadataWriter()
+        writer.merge_subdirectory_metadata(metadata_path, {original_subdir: {"main": False}})
+        logger.info(f"Ensured complete metadata for {zarr_subdir}, set {original_subdir} main=false")
+    else:
+        # Shared subdirectory - add zarr to available_backends
+        metadata_path = get_metadata_path(plate_root)
+        writer = AtomicMetadataWriter()
+        writer.merge_subdirectory_metadata(metadata_path, {original_subdir: {"available_backends": {"zarr": True}}})
+        logger.info(f"Updated metadata: {original_subdir} now has zarr backend")

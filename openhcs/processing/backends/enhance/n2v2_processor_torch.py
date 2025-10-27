@@ -8,11 +8,11 @@ from typing import List, Optional
 
 from openhcs.utils.import_utils import optional_import, create_placeholder_class
 from openhcs.core.memory.decorators import torch as torch_func
+from openhcs.core.lazy_gpu_imports import torch
 
 # Import torch modules as optional dependencies
-torch = optional_import("torch")
-nn = optional_import("torch.nn") if torch is not None else None
-F = optional_import("torch.nn.functional") if torch is not None else None
+nn = optional_import("torch.nn") if torch else None
+F = optional_import("torch.nn.functional") if torch else None
 
 Module = create_placeholder_class(
     "Module",

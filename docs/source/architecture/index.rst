@@ -31,15 +31,10 @@ Lazy configuration, dual-axis resolution, inheritance detection, and field path 
 .. toctree::
    :maxdepth: 1
 
-   configuration_system_architecture
-   lazy_class_system
-   configuration_resolution
-   composition_detection_system
-   context_management_system
-   placeholder_resolution_system
+   configuration_framework
    dynamic_dataclass_factory
+   context_system
    orchestrator_configuration_management
-   field_path_detection
    component_configuration_framework
 
 Storage and Memory
@@ -53,7 +48,7 @@ File management, memory types, and backend systems.
    storage_and_memory_system
    memory_type_system
    napari_streaming_system
-   fiji_streaming_system
+   viewer_streaming_architecture
    image_acknowledgment_system
    omero_backend_system
    zmq_execution_system
@@ -68,6 +63,7 @@ Integration with external tools and platforms (Napari, OMERO, Fiji).
 
    external_integrations_overview
    napari_integration_architecture
+   omero_backend_system
    fiji_streaming_system
 
 System Integration
@@ -144,18 +140,25 @@ Practical tools for OpenHCS development workflows.
 Quick Start Paths
 ==================
 
-**New to OpenHCS?** Start with :doc:`function_pattern_system` → :doc:`configuration_system_architecture` → :doc:`storage_and_memory_system`
+**New to OpenHCS?** Start with :doc:`function_pattern_system` → :doc:`configuration_framework` → :doc:`storage_and_memory_system`
 
-**Configuration Systems?** Focus on :doc:`lazy_class_system` → :doc:`configuration_resolution` → :doc:`composition_detection_system` → :doc:`context_management_system`
+**Configuration Systems?** Focus on :doc:`dynamic_dataclass_factory` → :doc:`context_system` → :doc:`orchestrator_configuration_management`
 
-**Real-Time Visualization?** Begin with :doc:`napari_integration_architecture` → :doc:`napari_streaming_system` → :doc:`fiji_streaming_system` → :doc:`roi_system` → :doc:`storage_and_memory_system`
+**Real-Time Visualization?** Begin with :doc:`napari_integration_architecture` → :doc:`napari_streaming_system` → :doc:`viewer_streaming_architecture` → :doc:`roi_system` → :doc:`storage_and_memory_system`
 
 **OMERO Integration?** Start with :doc:`omero_backend_system` → :doc:`zmq_execution_system` → :doc:`storage_and_memory_system`
 
 **External Integrations?** Start with :doc:`external_integrations_overview` → :doc:`napari_integration_architecture` → :doc:`fiji_streaming_system` → :doc:`omero_backend_system`
 
-**UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`placeholder_resolution_system` → :doc:`tui_system` → :doc:`code_ui_interconversion`
+**UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`service-layer-architecture` → :doc:`tui_system` → :doc:`code_ui_interconversion`
 
 **System Integration?** Jump to :doc:`system_integration` → :doc:`special_io_system` → :doc:`microscope_handler_integration`
 
 **Performance Optimization?** Focus on :doc:`gpu_resource_management` → :doc:`compilation_system_detailed` → :doc:`multiprocessing_coordination_system`
+
+**Architecture Quick Start**: A short, curated orientation is available at :doc:`quick_start` — three recommended reading paths (Core systems, Integrations, UI) to get developers productive quickly.
+
+.. toctree::
+   :maxdepth: 1
+
+   quick_start

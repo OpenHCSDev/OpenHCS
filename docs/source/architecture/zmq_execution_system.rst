@@ -422,5 +422,4 @@ See Also
 - :doc:`napari_streaming_system` - Napari streaming architecture (ZMQ pattern origin)
 - :doc:`omero_backend_system` - OMERO integration using ZMQ execution
 - :doc:`multiprocessing_coordination_system` - Multiprocessing patterns
-- :doc:`../guides/remote_execution` - Remote execution guide
 

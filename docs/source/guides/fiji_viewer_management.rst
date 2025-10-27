@@ -431,5 +431,5 @@ See Also
 
 - :doc:`../architecture/fiji_streaming_system` - Fiji streaming architecture
 - :doc:`../architecture/external_integrations_overview` - Integration overview
-- :doc:`napari_viewer_management` - Napari viewer management (similar patterns)
+- :doc:`viewer_management` - Viewer management guide (covers both Napari and Fiji)
 

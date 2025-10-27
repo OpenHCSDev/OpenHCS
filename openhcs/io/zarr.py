@@ -9,18 +9,148 @@ for materializing data to disk when needed.
 
 import fnmatch
 import logging
+import threading
+from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import zarr
 
-try:
-    from ome_zarr.writer import write_image, write_plate_metadata, write_well_metadata
-    from ome_zarr.io import parse_url
-    OME_ZARR_AVAILABLE = True
-except ImportError:
-    OME_ZARR_AVAILABLE = False
+# Lazy ome-zarr loading to avoid dask → GPU library chain at import time
+_ome_zarr_state = {'available': None, 'cache': {}, 'event': threading.Event(), 'thread': None}
+
+logger = logging.getLogger(__name__)
+
+
+# Decorator for passthrough to disk backend
+def passthrough_to_disk(*extensions: str, ensure_parent_dir: bool = False):
+    """
+    Decorator to automatically passthrough certain file types to disk backend.
+
+    Zarr only supports array data, so non-array files (JSON, CSV, TXT, ROI.ZIP, etc.)
+    are automatically delegated to the disk backend.
+
+    Uses introspection to automatically find the path parameter (any parameter with 'path' in its name).
+
+    Args:
+        *extensions: File extensions to passthrough (e.g., '.json', '.csv', '.txt')
+        ensure_parent_dir: If True, ensure parent directory exists before calling disk backend (for save operations)
+
+    Usage:
+        @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True)
+        def save(self, data, output_path, **kwargs):
+            # Zarr-specific save logic here
+            ...
+    """
+    import inspect
+
+    def decorator(method: Callable) -> Callable:
+        # Use introspection to find the path parameter index at decoration time
+        sig = inspect.signature(method)
+        path_param_index = None
+
+        for i, (param_name, param) in enumerate(sig.parameters.items()):
+            if param_name == 'self':
+                continue
+            # Find first parameter with 'path' in its name
+            if 'path' in param_name.lower():
+                # Adjust for self parameter (subtract 1 since we skip 'self' in args)
+                path_param_index = i - 1
+                break
+
+        if path_param_index is None:
+            raise ValueError(f"No path parameter found in {method.__name__} signature. "
+                           f"Expected a parameter with 'path' in its name.")
+
+        @wraps(method)
+        def wrapper(self, *args, **kwargs):
+            # Extract path from args at the discovered index
+            path_arg = None
+
+            if len(args) > path_param_index:
+                arg = args[path_param_index]
+                if isinstance(arg, (str, Path)):
+                    path_arg = str(arg)
+
+            # Check if path matches passthrough extensions
+            if path_arg and any(path_arg.endswith(ext) for ext in extensions):
+                from openhcs.constants.constants import Backend
+                from openhcs.io.backend_registry import get_backend_instance
+                disk_backend = get_backend_instance(Backend.DISK.value)
+
+                # Ensure parent directory exists if requested (for save operations)
+                if ensure_parent_dir:
+                    parent_dir = Path(path_arg).parent
+                    disk_backend.ensure_directory(parent_dir)
+
+                # Call the same method on disk backend
+                return getattr(disk_backend, method.__name__)(*args, **kwargs)
+
+            # Otherwise, call the original method
+            return method(self, *args, **kwargs)
+
+        return wrapper
+    return decorator
+
+
+def _load_ome_zarr():
+    """Load ome-zarr and cache imports."""
+    try:
+        logger.info("Loading ome-zarr...")
+        from ome_zarr.writer import write_image, write_plate_metadata, write_well_metadata
+        from ome_zarr.io import parse_url
+
+        _ome_zarr_state['cache'] = {
+            'write_image': write_image,
+            'write_plate_metadata': write_plate_metadata,
+            'write_well_metadata': write_well_metadata,
+            'parse_url': parse_url
+        }
+        _ome_zarr_state['available'] = True
+        logger.info("ome-zarr loaded successfully")
+    except ImportError as e:
+        _ome_zarr_state['available'] = False
+        logger.warning(f"ome-zarr not available: {e}")
+    finally:
+        _ome_zarr_state['event'].set()
+
+
+def start_ome_zarr_loading_async():
+    """Start loading ome-zarr in background thread (safe to call multiple times)."""
+    if _ome_zarr_state['thread'] is None and _ome_zarr_state['available'] is None:
+        _ome_zarr_state['thread'] = threading.Thread(
+            target=_load_ome_zarr, daemon=True, name="ome-zarr-loader"
+        )
+        _ome_zarr_state['thread'].start()
+        logger.info("Started ome-zarr background loading")
+
+
+def _ensure_ome_zarr(timeout: float = 30.0):
+    """
+    Ensure ome-zarr is loaded, waiting for background load if needed.
+
+    Returns: Tuple of (write_image, write_plate_metadata, write_well_metadata, parse_url)
+    Raises: ImportError if ome-zarr not available, TimeoutError if loading times out
+    """
+    # Load synchronously if not started
+    if _ome_zarr_state['available'] is None and _ome_zarr_state['thread'] is None:
+        logger.warning("ome-zarr not pre-loaded, loading synchronously (will block)")
+        _load_ome_zarr()
+
+    # Wait for background loading
+    if not _ome_zarr_state['event'].is_set():
+        logger.info("Waiting for ome-zarr background loading...")
+        if not _ome_zarr_state['event'].wait(timeout):
+            raise TimeoutError(f"ome-zarr loading timed out after {timeout}s")
+
+    # Check availability
+    if not _ome_zarr_state['available']:
+        raise ImportError("ome-zarr library not available. Install with: pip install ome-zarr")
+
+    cache = _ome_zarr_state['cache']
+    return (cache['write_image'], cache['write_plate_metadata'],
+            cache['write_well_metadata'], cache['parse_url'])
 
 # Cross-platform file locking
 try:
@@ -34,8 +164,6 @@ from openhcs.constants.constants import Backend
 from openhcs.io.base import StorageBackend
 from openhcs.io.backend_registry import StorageBackendMeta
 from openhcs.io.exceptions import StorageResolutionError
-
-logger = logging.getLogger(__name__)
 
 
 class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
@@ -131,32 +259,36 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
 
     def _split_store_and_key(self, path: Union[str, Path]) -> Tuple[Any, str]:
         """
-        Split path into zarr store and key without auto-injection.
-        Path planner now provides the complete storage path.
+        Split path into zarr store and key.
 
-        Maps paths to zarr store and key:
-        - Directory: "/path/to/plate/images.zarr" → Store: "/path/to/plate/images.zarr", Key: ""
-        - File: "/path/to/plate/images.zarr/A01.tif" → Store: "/path/to/plate/images.zarr", Key: "A01.tif"
+        The zarr store is always the directory containing the image files, regardless of backend.
+        For example:
+        - "/path/to/plate_outputs/images/A01.tif" → Store: "/path/to/plate_outputs/images", Key: "A01.tif"
+        - "/path/to/plate.zarr/images/A01.tif" → Store: "/path/to/plate.zarr/images", Key: "A01.tif"
+
+        The images directory itself becomes the zarr store - zarr files are added within it.
+        A zarr store doesn't need to have a folder name ending in .zarr.
 
         Returns a DirectoryStore with dimension_separator='/' for OME-ZARR compatibility.
         """
         path = Path(path)
 
-        # If path has no extension or ends with .zarr, treat as directory (zarr store)
-        if not path.suffix or path.suffix == '.zarr':
+        # If path has a file extension (like .tif), the parent directory is the zarr store
+        if path.suffix:
+            # File path - parent directory (e.g., "images") is the zarr store
+            store_path = path.parent
+            relative_key = path.name
+        else:
             # Directory path - treat as zarr store
             store_path = path
             relative_key = ""
-        else:
-            # File path - parent is zarr store, filename is key
-            store_path = path.parent
-            relative_key = path.name
 
         # CRITICAL: Create DirectoryStore with dimension_separator='/' for OME-ZARR compatibility
         # This ensures chunk paths use '/' instead of '.' (e.g., '0/0/0' not '0.0.0')
         store = zarr.DirectoryStore(str(store_path), dimension_separator='/')
         return store, relative_key
 
+    @passthrough_to_disk('.json', '.csv', '.txt', '.roi.zip', '.zip', ensure_parent_dir=True)
     def save(self, data: Any, output_path: Union[str, Path], **kwargs):
         """
         Save data to Zarr at the given output_path.
@@ -168,17 +300,7 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             FileExistsError: If destination key already exists
             StorageResolutionError: If creation fails
         """
-        # Passthrough to disk backend for non-array files (text files, ROI files, etc.)
-        # Zarr only supports array data
-        path_str = str(output_path)
-        if path_str.endswith(('.json', '.csv', '.txt', '.roi.zip', '.zip')):
-            from openhcs.io.backend_registry import get_backend_instance
-            disk_backend = get_backend_instance(Backend.DISK.value)
-            # Ensure parent directory exists before saving
-            parent_dir = Path(output_path).parent
-            disk_backend.ensure_directory(parent_dir)
-            return disk_backend.save(data, output_path, **kwargs)
-
+        # Zarr-specific save logic (non-array files automatically passthrough to disk)
         store, key = self._split_store_and_key(output_path)
         group = zarr.group(store=store)
 
@@ -292,6 +414,9 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             **kwargs: Must include chunk_name, n_channels, n_z, n_fields, row, col
         """
 
+        # Ensure ome-zarr is loaded (waits for background load if needed)
+        write_image, write_plate_metadata, write_well_metadata, _ = _ensure_ome_zarr()
+
         # Extract required parameters from kwargs
         chunk_name = kwargs.get('chunk_name')
         n_channels = kwargs.get('n_channels')
@@ -318,7 +443,7 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             logger.warning(f"Empty data list for chunk {chunk_name}")
             return
 
-        if not OME_ZARR_AVAILABLE:
+        if not _ome_zarr_state['available']:
             raise ImportError("ome-zarr package is required. Install with: pip install ome-zarr")
 
         # Use _split_store_and_key to get store path from first output path
@@ -411,6 +536,16 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             logger.warning(f"Data count mismatch: got {len(data_list)}, expected {total_expected} "
                          f"(fields={n_fields}, channels={n_channels}, z={n_z})")
 
+        # Log detailed shape information before reshape
+        logger.info(f"🔍 ZARR RESHAPE DEBUG:")
+        logger.info(f"  - Input: {len(data_list)} images")
+        logger.info(f"  - Stacked shape: {stacked_data.shape}")
+        logger.info(f"  - Stacked size: {stacked_data.size}")
+        logger.info(f"  - Target shape: {target_shape}")
+        logger.info(f"  - Target size: {np.prod(target_shape)}")
+        logger.info(f"  - Sample image shape: {sample_image.shape}")
+        logger.info(f"  - Dimensions: fields={n_fields}, channels={n_channels}, z={n_z}, h={height}, w={width}")
+
         # Always reshape to 5D structure
         reshaped_data = stacked_data.reshape(target_shape)
 
@@ -494,6 +629,9 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
 
     def _ensure_plate_metadata(self, root: zarr.Group, row: str, col: str) -> None:
         """Ensure plate-level metadata includes ALL existing wells in the store."""
+
+        # Ensure ome-zarr is loaded
+        _, write_plate_metadata, _, _ = _ensure_ome_zarr()
 
         # Scan the store for all existing wells
         all_rows = set()
@@ -765,14 +903,9 @@ class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         except Exception as e:
             raise StorageResolutionError(f"Failed to recursively delete Zarr path: {path}") from e
 
+    @passthrough_to_disk('.json', '.csv', '.txt')
     def exists(self, path: Union[str, Path]) -> bool:
-        # Passthrough to disk backend for text files (JSON, CSV, TXT)
-        path_str = str(path)
-        if path_str.endswith(('.json', '.csv', '.txt')):
-            from openhcs.io.backend_registry import get_backend_instance
-            disk_backend = get_backend_instance(Backend.DISK.value)
-            return disk_backend.exists(path)
-
+        # Zarr-specific existence check (text files automatically passthrough to disk)
         path = Path(path)
 
         # If path has no file extension, treat as directory existence check

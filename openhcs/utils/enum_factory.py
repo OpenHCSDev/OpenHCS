@@ -36,9 +36,13 @@ def get_available_colormaps() -> List[str]:
     raise ImportError("Neither napari nor matplotlib colormaps are available. Install napari or matplotlib.")
 
 
-def create_colormap_enum() -> Enum:
+def create_colormap_enum(lazy: bool = False) -> Enum:
     """
     Create a dynamic enum for available colormaps using pure introspection.
+
+    Args:
+        lazy: If True, use minimal colormap set without importing napari/matplotlib.
+              This avoids blocking imports (napari → dask → GPU libs).
 
     Returns:
         Enum class with colormap names as members
@@ -46,7 +50,11 @@ def create_colormap_enum() -> Enum:
     Raises:
         ValueError: If no colormaps are available or no valid identifiers could be created
     """
-    available_cmaps = get_available_colormaps()
+    if lazy:
+        # Use minimal set without importing visualization libraries
+        available_cmaps = ['gray', 'viridis', 'magma', 'inferno', 'plasma', 'cividis']
+    else:
+        available_cmaps = get_available_colormaps()
 
     if not available_cmaps:
         raise ValueError("No colormaps available for enum creation")

@@ -1,93 +1,107 @@
 Dynamic Dataclass Factory System
 ================================
 
-**Runtime dataclass generation with method binding and resolution chains.**
+**Runtime dataclass generation with contextvars-based lazy resolution.**
 
 *Status: STABLE*
-*Module: openhcs.core.lazy_config*
+*Module: openhcs.config_framework.lazy_factory*
 
 Overview
 --------
-Traditional dataclasses have fixed behavior at definition time, but lazy configuration requires runtime behavior customization based on context. The dynamic factory system generates dataclasses with custom resolution methods and configurable fallback chains.
+Traditional dataclasses have fixed behavior at definition time, but lazy configuration requires runtime behavior customization based on context. The dynamic factory system generates dataclasses with custom resolution methods that use Python's contextvars to look up values from the current configuration context.
 
-:py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory._create_lazy_dataclass_unified` works like a dataclass compiler. It takes a regular dataclass definition and generates a new class with the same fields and interface, but replaces the field access behavior. Instead of returning stored values, field access triggers custom resolution logic that can look up values from thread-local context, parent configurations, or static defaults.
-
-This enables the same dataclass interface with different resolution behavior for different contexts - step editors resolve against pipeline config, pipeline configs resolve against global config, and global configs use static defaults.
+:py:meth:`~openhcs.config_framework.lazy_factory.LazyDataclassFactory.make_lazy_simple` creates a lazy dataclass from a regular dataclass. When you access a field on a lazy dataclass instance, instead of returning a stored value, it triggers resolution logic that looks up the value from the current context using :py:func:`~openhcs.config_framework.context_manager.config_context`. This enables the same dataclass interface with different resolution behavior for different contexts - step editors resolve against pipeline config, pipeline configs resolve against global config, and global configs use static defaults.
 
 LazyDataclassFactory Architecture
 ---------------------------------
-The factory uses a unified creation pattern with declarative configuration.
+The factory uses a simplified creation pattern focused on contextvars-based resolution.
 
 Core Factory Method
 ~~~~~~~~~~~~~~~~~~
-:py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory._create_lazy_dataclass_unified` orchestrates the entire generation process. It first introspects the base dataclass to understand its fields, creates a resolution configuration that defines where to look for values, uses :py:func:`~dataclasses.make_dataclass` to generate a new class with the same fields, then attaches custom methods that implement the lazy resolution behavior.
+:py:meth:`~openhcs.config_framework.lazy_factory.LazyDataclassFactory.make_lazy_simple` is the primary public API. It takes a regular dataclass and generates a new lazy class with the same fields and interface. The generated class uses :py:func:`~dataclasses.make_dataclass` to create a new class that inherits from the base dataclass, then attaches custom methods that implement lazy resolution behavior using contextvars.
 
 Method Binding System
 ~~~~~~~~~~~~~~~~~~~~
-:py:class:`~openhcs.core.lazy_config.LazyMethodBindings` acts like a method factory. It creates the actual functions that get attached to generated classes - `_resolve_field_value()` for looking up field values, `__getattribute__()` for intercepting field access, and `to_base_config()` for converting back to concrete values. These methods are created as closures that capture the resolution configuration, then attached to the class using :py:func:`setattr`.
+:py:class:`~openhcs.config_framework.lazy_factory.LazyMethodBindings` acts like a method factory. It creates the actual functions that get attached to generated classes:
 
-Resolution Chain Configuration
-------------------------------
-The factory configures fallback chains for different resolution strategies.
+- ``__getattribute__()`` - Intercepts field access and triggers resolution
+- ``_resolve_field_value()`` - Looks up field values from current context
+- ``to_base_config()`` - Converts lazy instances back to concrete values
 
-Fallback Chain Creation
-~~~~~~~~~~~~~~~~~~~~~~
-:py:class:`~openhcs.core.lazy_config.ResolutionConfig` defines the lookup order for field values. It creates a chain of functions that are tried in sequence: first the instance provider (thread-local context or custom context provider), then static field extractor (base class defaults). Each function in the chain takes a field name and returns either a value or None. The resolution system tries each function until one returns a non-None value.
+These methods are created as closures that capture the resolution logic, then attached to the class using :py:func:`setattr`.
 
-Field-Level Auto-Hierarchy
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-:py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory.make_lazy_with_field_level_auto_hierarchy` automates the complex setup for hierarchical configs. It uses :py:func:`~openhcs.core.field_path_detection.find_field_path_for_type` to automatically discover where each config type should live in the global config hierarchy (like finding that `StepMaterializationConfig` maps to `materialization_defaults`), then creates the appropriate context provider that resolves against that specific field path.
+Contextvars-Based Resolution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The factory uses Python's :py:mod:`contextvars` module for context management. When a field is accessed on a lazy dataclass, the ``__getattribute__()`` method calls :py:func:`~openhcs.config_framework.context_manager.current_temp_global.get()` to retrieve the current merged configuration context. The :py:func:`~openhcs.config_framework.dual_axis_resolver.resolve_field_inheritance` function then searches this context for the field value using a two-axis resolution strategy.
 
 Recursive Lazy Dataclass Creation
 ---------------------------------
 The factory automatically creates lazy versions of nested dataclasses.
 
-:py:meth:`~openhcs.core.lazy_config.LazyDataclassFactory._introspect_dataclass_fields` examines each field of the base dataclass. When it finds a field whose type is itself a dataclass, it recursively calls the factory to create a lazy version of that nested type. This creates a tree of lazy dataclasses where each level can have its own resolution behavior while maintaining the original nested structure.
+:py:meth:`~openhcs.config_framework.lazy_factory.LazyDataclassFactory._introspect_dataclass_fields` examines each field of the base dataclass. When it finds a field whose type is itself a dataclass, it recursively calls :py:meth:`~openhcs.config_framework.lazy_factory.LazyDataclassFactory.make_lazy_simple` to create a lazy version of that nested type. This creates a tree of lazy dataclasses where each level can have its own resolution behavior while maintaining the original nested structure.
+
+For example, if ``GlobalPipelineConfig`` has a field ``well_filter_config: WellFilterConfig``, the factory automatically creates a lazy version of ``WellFilterConfig`` and uses that as the field type in the lazy ``GlobalPipelineConfig``. When you access ``lazy_global_config.well_filter_config``, you get a lazy instance that resolves its fields from the current context.
 
 Type Registry Integration
 ------------------------
 Generated classes are automatically registered for type mapping.
 
-:py:func:`~openhcs.core.lazy_config.register_lazy_type_mapping` maintains a bidirectional mapping between lazy classes and their base classes. This allows the system to recognize that `LazyPipelineConfig` instances should be treated as `PipelineConfig` for type checking purposes, and enables conversion functions to automatically find the right base type when serializing lazy configs back to concrete values.
+:py:func:`~openhcs.config_framework.lazy_factory.register_lazy_type_mapping` maintains a bidirectional mapping between lazy classes and their base classes. This allows the system to recognize that ``LazyPipelineConfig`` instances should be treated as ``PipelineConfig`` for type checking purposes, and enables conversion functions to automatically find the right base type when serializing lazy configs back to concrete values.
 
-UI Context Integration
----------------------
-The factory creates different lazy dataclass variants for different UI contexts.
+The registry is populated automatically when :py:meth:`~openhcs.config_framework.lazy_factory.LazyDataclassFactory.make_lazy_simple` creates a new lazy class. You can retrieve the base type using :py:func:`~openhcs.config_framework.lazy_factory.get_base_type_for_lazy`.
 
-Step Editor Integration
-~~~~~~~~~~~~~~~~~~~~~~
-Step editors require lazy dataclasses that resolve against their parent pipeline configuration. The factory creates step-specific lazy configs with custom context providers that isolate step configuration from other UI components while maintaining proper inheritance from pipeline settings.
+Dual-Axis Resolution Strategy
+-----------------------------
+The factory uses a two-axis resolution strategy to find field values.
 
-Pipeline Editor Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-Pipeline editors (plate manager style) use lazy dataclasses that resolve against thread-local context. The factory creates pipeline-level lazy configs that inherit from global configuration while allowing pipeline-specific overrides.
+X-Axis: Context Hierarchy
+~~~~~~~~~~~~~~~~~~~~~~~~~
+The X-axis searches up the configuration hierarchy. When resolving a field, the system first checks the current context (from contextvars), then checks parent contexts if available. For example, when editing a step config, it first checks the step config's values, then the pipeline config's values, then the global config's values.
 
-Pipeline Config Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-Pipeline config editing (accessed from plate manager) uses lazy dataclasses that resolve against the current pipeline's thread-local context. This enables proper inheritance display while maintaining isolation between different pipeline configurations.
-
-Global Config Integration
-~~~~~~~~~~~~~~~~~~~~~~~~
-Global config editing (accessed from main window) uses lazy dataclasses that show static defaults since there's no higher-level context to resolve against. The factory creates global-level lazy configs that display base class default values.
-
-Context Provider Patterns
--------------------------
-The factory supports different context provider patterns for different UI scenarios.
-
-Thread-Local Context Provider
+Y-Axis: Sibling Inheritance
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Standard pattern for pipeline and global config editing where resolution uses the current thread-local context stored in :py:class:`~openhcs.core.context.global_config._global_config_contexts`.
+The Y-axis searches across related configuration types at the same level. The :py:func:`~openhcs.config_framework.dual_axis_resolver.resolve_field_inheritance` function uses the MRO (Method Resolution Order) to find concrete values in related config types. This enables fields to inherit from sibling configs when the current config doesn't have a concrete value.
 
-Custom Context Provider
-~~~~~~~~~~~~~~~~~~~~~~
-Pattern for step editors where resolution uses a custom lambda function that returns the parent pipeline configuration. This enables step-level isolation while maintaining proper inheritance chains.
+The resolution strategy is implemented in :py:mod:`openhcs.config_framework.dual_axis_resolver` as a pure function that takes the object, field name, and available configs, then returns the resolved value.
 
-Static Context Provider
-~~~~~~~~~~~~~~~~~~~~~~
-Pattern for global config editing where resolution falls back to static defaults without any dynamic context lookup.
+Context Management with Contextvars
+-----------------------------------
+The factory integrates with Python's contextvars system for context scoping.
+
+Context Scoping
+~~~~~~~~~~~~~~~
+The :py:func:`~openhcs.config_framework.context_manager.config_context` context manager creates a new scope where a specific configuration is merged into the current context. When you enter a ``config_context(pipeline_config)`` block, the pipeline config's fields are merged into the current global config, and this merged config becomes the active context for all lazy dataclass resolutions within that block.
+
+Config Merging
+~~~~~~~~~~~~~~
+The :py:func:`~openhcs.config_framework.context_manager.merge_configs` function recursively merges nested dataclass fields. When merging, None values are treated as "don't override" by default, allowing inheritance to work correctly. This enables step configs to override only specific fields while inheriting others from the pipeline config.
+
+Usage Pattern
+~~~~~~~~~~~~~
+The typical usage pattern is:
+
+.. code-block:: python
+
+    from openhcs.config_framework.context_manager import config_context
+
+    # Create lazy versions of configs
+    lazy_global = LazyDataclassFactory.make_lazy_simple(GlobalPipelineConfig)
+    lazy_pipeline = LazyDataclassFactory.make_lazy_simple(PipelineConfig)
+
+    # Use config_context to set the active context
+    with config_context(pipeline_config):
+        # Within this block, lazy_pipeline fields resolve from pipeline_config
+        # and inherit from global_config for missing values
+        value = lazy_pipeline.some_field  # Resolves from context
 
 See Also
 --------
-- :doc:`lazy_class_system` - High-level lazy dataclass system overview
-- :doc:`configuration_resolution` - Resolution patterns used by generated classes
-- :doc:`field_path_detection` - Automatic field path discovery for factory
+- :doc:`configuration_framework` - Configuration framework overview
+- :doc:`concurrency_model` - Contextvars and thread-local context system
+- :doc:`code_ui_interconversion` - How lazy configs are used in UI code generation
+
+**Implementation References:**
+
+- ``openhcs/config_framework/lazy_factory.py`` - LazyDataclassFactory and LazyMethodBindings
+- ``openhcs/config_framework/dual_axis_resolver.py`` - Dual-axis resolution strategy
+- ``openhcs/config_framework/context_manager.py`` - Contextvars-based context management

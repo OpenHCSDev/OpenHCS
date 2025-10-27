@@ -25,10 +25,10 @@ from openhcs.utils.import_utils import optional_import
 from openhcs.core.memory.decorators import jax as jax_func
 
 # Import JAX modules as optional dependencies
-jax = optional_import("jax")
-jnp = optional_import("jax.numpy") if jax is not None else None
-lax = jax.lax if jax is not None else None
-tree_util = jax.tree_util if jax is not None else None
+from openhcs.core.lazy_gpu_imports import jax
+jnp = optional_import("jax.numpy") if jax else None
+lax = jax.lax if jax else None
+tree_util = jax.tree_util if jax else None
 
 logger = logging.getLogger(__name__)
 

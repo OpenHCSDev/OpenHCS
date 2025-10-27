@@ -54,14 +54,14 @@ Intelligent file grouping based on microscopy metadata patterns.
    # Groups: Files with same (well, site, z_index) but different channel
    # Result: [ch1.tif, ch2.tif] → stack → composite → single.tif
 
-**Why This Was Genius**: It automatically solved the complex pattern
-recognition problem that plagued microscopy image processing - how to
-intelligently group related images for batch processing.
+This pattern automatically solves the image grouping problem - how to
+intelligently group related images for batch processing without manual
+specification of grouping logic.
 
 3. Function Pattern System
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-**The Hidden Masterpiece**: EZStitcher’s most sophisticated innovation
+**Function Pattern System**: EZStitcher’s most sophisticated innovation
 was its function pattern system:
 
 .. code:: python
@@ -234,11 +234,11 @@ Architectural Continuity
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 **What OpenHCS Preserved from EZStitcher**: - Pipeline → Step hierarchy
-(proven architecture) - Variable components pattern (brilliant grouping
+(proven architecture) - Variable components pattern (intelligent grouping
 logic) - Group-by functionality (channel-specific processing) - Modular
 step design (composable workflows)
 
-**What OpenHCS Revolutionized**: - Memory management (explicit types vs
+**What OpenHCS Changed**: - Memory management (explicit types vs
 implicit NumPy) - Error handling (fail loudly vs silent failures) -
 Performance (GPU-native vs CPU-only) - Validation (compile-time checks
 vs runtime surprises) - Function ecosystem (unified GPU library access
@@ -247,12 +247,12 @@ vs manual integration)
 Key Innovations and Differentiators
 -----------------------------------
 
-OpenHCS introduces several revolutionary systems that make it
+OpenHCS introduces several new systems that make it
 fundamentally different from traditional scientific computing tools.
 Each system is documented in detail in dedicated architecture documents:
 
-🔥 `Function Registry System <function-registry-system.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+🔥 `Function Registry System <function_registry_system.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Unified GPU function ecosystem with type-safe contracts**
 
@@ -261,8 +261,8 @@ computing, automatically discovering and unifying functions from
 pyclesperanto, scikit-image, CuCIM, and other libraries with consistent
 interfaces and memory type safety.
 
-🖥️ `TUI System <tui-system.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+🖥️ `TUI System <tui_system.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Advanced terminal interface**
 
@@ -271,8 +271,8 @@ works - unprecedented for scientific computing tools. Includes real-time
 pipeline editing, live configuration management, integrated help, and
 professional log monitoring.
 
-💾 `Memory Backend System <memory-backend-system.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+💾 `Storage and Memory System <storage_and_memory_system.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Intelligent data management for 100GB+ datasets**
 
@@ -280,8 +280,8 @@ Advanced Virtual File System with memory overlay capabilities, OME-ZARR
 compression, and smart backend switching that automatically scales from
 small experiments to massive high-content screening datasets.
 
-⚡ `Fail-Loud Philosophy <fail-loud-philosophy.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+⚡ `Memory Type System <memory_type_system.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Zero tolerance for silent failures**
 
@@ -289,14 +289,13 @@ Comprehensive architecture that prevents the silent failures plaguing
 academic software through explicit validation, mandatory contracts, and
 clear error handling with actionable solutions.
 
-🧬 `Research Impact <research-impact.md>`__
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+🧬 `External Integrations Overview <external_integrations_overview.rst>`__
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Production neuroscience research deployment**
 
 Real-world deployment handling 100GB+ datasets in production
-neuroscience research, with quantified productivity improvements and
-scientific contributions targeting Nature Methods publication.
+neuroscience research with seamless integration with Napari, Fiji, and OMERO.
 
 These innovations work together to create a scientific computing
 platform that is fundamentally different from traditional academic tools
@@ -438,7 +437,7 @@ Methodological Directions
 Conclusion
 ----------
 
-The evolution from EZStitcher to OpenHCS demonstrates that revolutionary
+The evolution from EZStitcher to OpenHCS demonstrates that effective
 scientific software can emerge from the combination of:
 
 1. **Deep domain expertise** (understanding real research problems)

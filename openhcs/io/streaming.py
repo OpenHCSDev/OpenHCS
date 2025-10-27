@@ -129,9 +129,15 @@ class StreamingBackend(DataSink):
         np_data = data.cpu().numpy() if hasattr(data, 'cpu') else \
                   data.get() if hasattr(data, 'get') else np.asarray(data)
 
-        # Create shared memory
+        # Create shared memory with hash-based naming to avoid "File name too long" errors
+        # Hash the timestamp and object ID to create a short, unique name
         from multiprocessing import shared_memory, resource_tracker
-        shm_name = f"{self.SHM_PREFIX}{id(data)}_{time.time_ns()}"
+        import hashlib
+        timestamp = time.time_ns()
+        obj_id = id(data)
+        hash_input = f"{obj_id}_{timestamp}"
+        hash_suffix = hashlib.md5(hash_input.encode()).hexdigest()[:8]
+        shm_name = f"{self.SHM_PREFIX}{hash_suffix}"
         shm = shared_memory.SharedMemory(create=True, size=np_data.nbytes, name=shm_name)
 
         # Unregister from resource tracker - we manage cleanup manually

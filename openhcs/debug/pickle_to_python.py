@@ -75,7 +75,22 @@ def _get_function_library_name(func):
 
 
 def _create_openhcs_library_modules():
-    """Create virtual modules that mirror external library structure under openhcs namespace."""
+    """
+    Create virtual modules that mirror external library structure under openhcs namespace.
+
+    This enables namespace-based distinction between raw and OpenHCS-wrapped functions:
+
+    - `from skimage.filters import gaussian` → Raw function (NOT pipeline-compatible)
+    - `from openhcs.skimage.filters import gaussian` → Wrapped, tested, pipeline-ready
+
+    The virtual modules contain only functions that have been:
+    1. Runtime tested for OpenHCS compatibility
+    2. Characterized for memory types and GPU support
+    3. Wrapped with appropriate OpenHCS decorators
+
+    This prevents accidental use of unwrapped functions in pipelines and makes
+    import statements self-documenting about pipeline compatibility.
+    """
     import types
     from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 

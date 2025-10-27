@@ -8,7 +8,7 @@ import os
 
 # Essential imports (always available)
 from .atomic import file_lock, atomic_write_json, atomic_update_json, FileLockError, FileLockTimeoutError
-from .base import DataSink, StorageBackend, storage_registry, reset_memory_backend
+from .base import DataSink, StorageBackend, storage_registry, reset_memory_backend, ensure_storage_registry, get_backend
 from .backend_registry import (
     StorageBackendMeta, get_backend_instance, discover_all_backends,
     cleanup_backend_connections, cleanup_all_backends, STORAGE_BACKENDS
@@ -16,29 +16,14 @@ from .backend_registry import (
 from .disk import DiskStorageBackend
 from .filemanager import FileManager
 from .memory import MemoryStorageBackend
-from .metadata_writer import AtomicMetadataWriter, MetadataWriteError, MetadataUpdateRequest, get_metadata_path
+from .metadata_writer import AtomicMetadataWriter, MetadataWriteError, get_metadata_path, get_subdirectory_name
 from .metadata_migration import detect_legacy_format, migrate_legacy_metadata, migrate_plate_metadata
 from .pipeline_migration import detect_legacy_pipeline, migrate_pipeline_file, load_pipeline_with_migration
 from .streaming import StreamingBackend
 
-# GPU-heavy imports (only in normal mode)
-if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') != '1':
-    from .napari_stream import NapariStreamingBackend
-    from .fiji_stream import FijiStreamingBackend
-    from .zarr import ZarrStorageBackend
-else:
-    # Subprocess runner mode - create placeholder classes to avoid import errors
-    class NapariStreamingBackend:
-        """Placeholder for subprocess runner mode."""
-        pass
-
-    class FijiStreamingBackend:
-        """Placeholder for subprocess runner mode."""
-        pass
-
-    class ZarrStorageBackend:
-        """Placeholder for subprocess runner mode."""
-        pass
+# GPU-heavy backend classes are imported lazily via __getattr__ below
+# This prevents blocking imports of zarr (→ ome-zarr → dask → GPU libs)
+# and streaming backends (→ napari/fiji)
 
 __all__ = [
     'DataSink',
@@ -46,6 +31,8 @@ __all__ = [
     'StreamingBackend',
     'storage_registry',
     'reset_memory_backend',
+    'ensure_storage_registry',
+    'get_backend',
     'StorageBackendMeta',
     'get_backend_instance',
     'discover_all_backends',
@@ -64,8 +51,8 @@ __all__ = [
     'FileLockTimeoutError',
     'AtomicMetadataWriter',
     'MetadataWriteError',
-    'MetadataUpdateRequest',
     'get_metadata_path',
+    'get_subdirectory_name',
     'detect_legacy_format',
     'migrate_legacy_metadata',
     'migrate_plate_metadata',
@@ -73,3 +60,38 @@ __all__ = [
     'migrate_pipeline_file',
     'load_pipeline_with_migration'
 ]
+
+
+# Registry for lazy-loaded GPU-heavy backends
+_LAZY_BACKEND_REGISTRY = {
+    'NapariStreamingBackend': ('openhcs.io.napari_stream', 'NapariStreamingBackend'),
+    'FijiStreamingBackend': ('openhcs.io.fiji_stream', 'FijiStreamingBackend'),
+    'ZarrStorageBackend': ('openhcs.io.zarr', 'ZarrStorageBackend'),
+}
+
+
+def __getattr__(name):
+    """
+    Lazy import of GPU-heavy backend classes.
+
+    This prevents blocking imports during `import openhcs.io` while
+    still allowing code to import backend classes when needed.
+    """
+    # Check if name is in lazy backend registry
+    if name not in _LAZY_BACKEND_REGISTRY:
+        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+    # Subprocess runner mode - create placeholder
+    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
+        class PlaceholderBackend:
+            """Placeholder for subprocess runner mode."""
+            pass
+        PlaceholderBackend.__name__ = name
+        PlaceholderBackend.__qualname__ = name
+        return PlaceholderBackend
+
+    # Normal mode - lazy import from registry
+    module_path, class_name = _LAZY_BACKEND_REGISTRY[name]
+    import importlib
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)

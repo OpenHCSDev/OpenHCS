@@ -88,10 +88,143 @@ OpenHCS defines a hierarchy of backend abstractions to support different storage
 **Examples**:
 
 - **StorageBackend**: DiskStorageBackend, MemoryStorageBackend, ZarrStorageBackend
-- **VirtualBackend**: OMEROLocalBackend (generates paths from OMERO plate structure)
+- **VirtualBackend**: OMEROLocalBackend (generates paths from OMERO plate structure), VirtualWorkspaceBackend (metadata-based path mapping)
 - **StreamingBackend**: NapariStreamBackend, FijiStreamBackend (real-time visualization)
 
 See :doc:`omero_backend_system` for detailed VirtualBackend architecture and OMERO integration.
+
+Virtual Workspace Backend
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**Purpose**: Metadata-based workspace initialization without physical file operations
+
+**When to Use**: Microscope formats with complex directory structures (TimePoint folders, ZStep folders) that need flattening for processing.
+
+**The Problem**: Some microscope formats (ImageXpress, Opera Phenix) organize images in nested folders (e.g., ``TimePoint_1/ZStep_2/image.tif``). Traditional workspace preparation creates physical symlinks or copies files to flatten the structure, which is slow and wastes disk space.
+
+**The Solution**: VirtualWorkspaceBackend stores a plate-relative path mapping in ``openhcs_metadata.json`` that translates virtual flattened paths to real nested paths without any physical file operations.
+
+**Architecture**:
+
+.. code-block:: python
+
+   # Metadata-based mapping (stored in openhcs_metadata.json)
+   {
+     "workspace_mapping": {
+       "images/A01_s001_w1_z001_t001.tif": "TimePoint_1/ZStep_1/A01_s001_w1.tif",
+       "images/A01_s001_w1_z001_t002.tif": "TimePoint_2/ZStep_1/A01_s001_w1.tif"
+     }
+   }
+
+   # VirtualWorkspaceBackend translates paths on-the-fly
+   backend.load("images/A01_s001_w1_z001_t001.tif")
+   # → Actually loads "TimePoint_1/ZStep_1/A01_s001_w1.tif"
+
+**Key Features**:
+
+- **Read-only**: Virtual workspace is only for reading original data, not writing outputs
+- **Plate-relative paths**: All paths in mapping are relative to plate root for portability
+- **Zero disk overhead**: No symlinks, no file copies, just metadata
+- **Transparent**: Processing code sees flattened structure, backend handles translation
+
+**Integration with Microscope Handlers**:
+
+Microscope handlers that need virtual workspace mapping (e.g., ImageXpress, Opera Phenix) implement ``_build_virtual_mapping()`` to generate the workspace mapping. This method is **optional** and only needed for handlers that use the base class ``initialize_workspace()`` implementation.
+
+Handlers that override ``initialize_workspace()`` completely (like OMERO and OpenHCS) don't need to implement this method because they handle workspace initialization differently:
+
+- **OMERO**: Uses database-backed virtual filesystem, doesn't need file-based mapping
+- **OpenHCS**: Already uses normalized format, doesn't need directory flattening
+
+**Example Implementation** (ImageXpress, Opera Phenix):
+
+.. code-block:: python
+
+   def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
+       """Build virtual workspace mapping for nested folder structures."""
+       workspace_mapping = {}
+
+       # Scan for TimePoint/ZStep folders and build mappings
+       for subdir in subdirs:
+           self._flatten_timepoints(subdir, filemanager, workspace_mapping, plate_path)
+           self._flatten_zsteps(subdir, filemanager, workspace_mapping, plate_path)
+
+       # Save mapping to metadata
+       metadata_writer.update_metadata(
+           plate_path,
+           {"workspace_mapping": workspace_mapping}
+       )
+
+       return plate_path
+
+**Backend Selection and Preference Hierarchy**:
+
+OpenHCS uses a strict backend preference hierarchy when multiple backends are available:
+
+**Preference Order**: ``zarr`` > ``virtual_workspace`` > ``disk``
+
+This hierarchy ensures that:
+
+1. **Zarr backend** is preferred when available (optimized for large datasets, compressed storage)
+2. **Virtual workspace** is used for original nested microscope data (when zarr not available)
+3. **Disk backend** is the fallback (standard TIFF files)
+
+**Main Subdirectory Selection**:
+
+When loading metadata with multiple subdirectories, OpenHCS selects the subdirectory marked with ``"main": true``:
+
+.. code-block:: json
+
+   {
+     "subdirectories": {
+       ".": {
+         "workspace_mapping": {...},
+         "available_backends": {"disk": true, "virtual_workspace": true},
+         "main": false
+       },
+       "zarr": {
+         "image_files": [...],
+         "available_backends": {"zarr": true},
+         "main": true
+       }
+     }
+   }
+
+The main subdirectory determines:
+
+- Which backend is used by ``get_primary_backend()``
+- Which image list is returned by ``get_image_files()``
+- Which metadata is used for pipeline execution
+
+**Automatic Backend Selection**:
+
+The virtual workspace backend is automatically selected when:
+
+1. Microscope handler's ``get_available_backends()`` detects ``workspace_mapping`` in metadata
+2. FileManager registers VirtualWorkspaceBackend in local registry
+3. ``get_primary_backend()`` returns ``"virtual_workspace"`` for reading original data (if zarr not available)
+
+**Materialization Compatibility**:
+
+Virtual workspace works seamlessly with materialization backends:
+
+- **Read backend**: ``virtual_workspace`` (for original nested data)
+- **Write backend**: ``disk`` or ``zarr`` (for flattened outputs)
+
+This enables processing pipelines to read from nested structures while writing to flattened outputs without any physical workspace preparation.
+
+**Performance**:
+
+- **Initialization**: ~100ms to build mapping for 1000 files (vs ~10s for symlink creation)
+- **Runtime overhead**: Negligible (simple dictionary lookup per file access)
+- **Disk space**: Zero overhead (no symlinks or copies)
+
+**Supported Microscope Formats**:
+
+- **ImageXpress**: TimePoint and ZStep folder flattening
+- **Opera Phenix**: Nested field/plane folder flattening
+
+See :doc:`microscope_handler_integration` for microscope-specific implementation details.
 
 Path Virtualization
 ~~~~~~~~~~~~~~~~~~~
@@ -608,7 +741,7 @@ The materialization system integrates with the OpenHCS configuration hierarchy t
 - **Step Materialization Configuration**: Controls per-step materialization behavior and directory naming
 - **Configuration Resolution**: Follows the standard OpenHCS hierarchy (step → pipeline → global)
 
-For complete configuration details and examples, see :doc:`../api/config` and :doc:`configuration_system_architecture`.
+For complete configuration details and examples, see :doc:`configuration_framework`.
 
 **Architectural Pattern**: The configuration system provides declarative control over materialization behavior without requiring code changes. The same materialization function can save to different backends based purely on configuration settings.
 
@@ -787,6 +920,39 @@ The FileManager provides comprehensive file and directory operations beyond basi
    # Global singleton storage registry
    from openhcs.io.base import storage_registry  # Created at module import
 
+**Lazy Backend Discovery**: The backend discovery system uses lazy imports to avoid loading GPU-heavy backends during startup:
+
+.. code:: python
+
+   # openhcs/io/__init__.py
+   def __getattr__(name: str):
+       """Lazy import for GPU-heavy backends."""
+       if name in ['zarr', 'napari_stream', 'fiji_stream']:
+           # Return the class without importing the module
+           # Module import happens later during discover_all_backends()
+           return getattr(sys.modules[__name__], name)
+       raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+   # Backend registration happens during module import via metaclass
+   def discover_all_backends() -> None:
+       """Discover and register all available backends.
+
+       Uses importlib.import_module() to directly import GPU-heavy backend modules,
+       ensuring metaclass registration happens even with lazy imports.
+       """
+       # Import GPU-heavy backends directly from their modules (not via __getattr__)
+       # This ensures the module is imported and metaclass registration happens
+       importlib.import_module('openhcs.io.zarr')
+       importlib.import_module('openhcs.io.napari_stream')
+       importlib.import_module('openhcs.io.fiji_stream')
+
+**Key Design Points**:
+
+- **Lazy Loading**: GPU-heavy backends (zarr, napari_stream, fiji_stream) are not imported during ``openhcs.io`` module load
+- **Explicit Discovery**: ``discover_all_backends()`` uses ``importlib.import_module()`` to trigger module imports
+- **Metaclass Registration**: Backend classes register themselves via ``StorageBackendMeta`` during module import
+- **Startup Performance**: Defers GPU library imports (ome-zarr, napari, fiji) until first use
+
 **Subprocess Runner Mode**: The backend discovery system supports a special subprocess runner mode that avoids importing GPU-heavy backends:
 
 .. code:: python
@@ -799,8 +965,9 @@ The FileManager provides comprehensive file and directory operations beyond basi
        from openhcs.io import disk, memory
        # Skips: zarr, napari_stream, fiji_stream (avoid GPU library imports)
    else:
-       # Normal mode - import all backend modules to trigger metaclass registration
-       from openhcs.io import disk, memory, zarr, napari_stream, fiji_stream
+       # Normal mode - discover all backends (including GPU-heavy ones)
+       from openhcs.io.backend_registry import discover_all_backends
+       discover_all_backends()
 
 This prevents GPU library imports in subprocess workers, which is critical for multiprocessing execution where worker processes don't need GPU access.
 
@@ -966,14 +1133,13 @@ Benefits and Design Principles
 See Also
 --------
 
-- :doc:`configuration_system_architecture` - Configuration hierarchy that controls storage behavior
+- :doc:`configuration_framework` - Configuration hierarchy that controls storage behavior
 - :doc:`pipeline_compilation_system` - How storage and memory decisions are made during compilation
 - :doc:`function_pattern_system` - How functions declare memory type requirements
 - :doc:`special_io_system` - Special input/output system that uses materialization
 - :doc:`gpu_resource_management` - GPU device management and allocation
-- :doc:`../guides/memory_type_integration` - Practical guide to memory type decorators and GPU optimization
-- :doc:`../api/processing_backends` - Memory type system integration with processing functions
-- :doc:`../guides/large_datasets` - Practical guide to handling large datasets
+- :doc:`memory_type_system` - Memory type system and conversions
+- :doc:`../api/index` - API reference (autogenerated from source code)
 
 Archived Documentation
 -----------------------

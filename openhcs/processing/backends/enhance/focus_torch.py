@@ -6,8 +6,8 @@ from openhcs.core.utils import optional_import
 from openhcs.core.memory.decorators import torch as torch_decorator
 
 # Import torch modules as optional dependencies
-torch = optional_import("torch")
-F = optional_import("torch.nn.functional") if torch is not None else None
+from openhcs.core.lazy_gpu_imports import torch
+F = optional_import("torch.nn.functional") if torch else None
 
 
 def laplacian(image: "torch.Tensor") -> "torch.Tensor":

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Union, Type, Tuple
 from openhcs.constants.constants import Backend
 from openhcs.microscopes.opera_phenix_xml_parser import OperaPhenixXmlParser
 from openhcs.io.filemanager import FileManager
+from openhcs.io.metadata_writer import AtomicMetadataWriter
 from openhcs.microscopes.microscope_base import MicroscopeHandler
 from openhcs.microscopes.microscope_interfaces import (FilenameParser,
                                                             MetadataHandler)
@@ -44,9 +45,14 @@ class OperaPhenixHandler(MicroscopeHandler):
         super().__init__(parser=self.parser, metadata_handler=self.metadata_handler)
 
     @property
-    def common_dirs(self) -> List[str]:
-        """Subdirectory names commonly used by Opera Phenix."""
-        return ['Images']
+    def root_dir(self) -> str:
+        """
+        Root directory for Opera Phenix virtual workspace preparation.
+
+        Returns "Images" because Opera Phenix field remapping is applied
+        to images in the Images/ subdirectory, and virtual paths include Images/ prefix.
+        """
+        return "Images"
 
     @property
     def microscope_type(self) -> str:
@@ -71,57 +77,31 @@ class OperaPhenixHandler(MicroscopeHandler):
 
     # Uses default workspace initialization from base class
 
-    def _prepare_workspace(self, workspace_path: Path, filemanager: FileManager):
+    def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
-        Renames Opera Phenix images to follow a consistent field order
-        based on spatial layout extracted from Index.xml. Uses remapped
-        filenames and replaces the directory in-place.
-
-        This method performs preparation but does not determine the final image directory.
+        Build Opera Phenix virtual workspace mapping using plate-relative paths.
 
         Args:
-            workspace_path: Path to the symlinked workspace
+            plate_path: Path to plate directory
             filemanager: FileManager instance for file operations
 
         Returns:
-            Path to the normalized image directory.
+            Path to image directory
         """
+        plate_path = Path(plate_path)  # Ensure Path object
 
-        # Check if workspace has already been processed by looking for temp directory
-        # If temp directory exists, workspace was already processed - skip processing
-        temp_dir_name = "__opera_phenix_temp"
-        for entry in filemanager.list_dir(workspace_path, Backend.DISK.value):
-            entry_path = Path(workspace_path) / entry
-            if entry_path.is_dir() and entry_path.name == temp_dir_name:
-                logger.info(f"📁 WORKSPACE ALREADY PROCESSED: Found {temp_dir_name} - skipping Opera Phenix preparation")
-                return workspace_path
+        logger.info(f"🔄 BUILDING VIRTUAL MAPPING: Opera Phenix field remapping for {plate_path}")
 
-        logger.info(f"🔄 PROCESSING WORKSPACE: Applying Opera Phenix name remapping to {workspace_path}")
-        # Find the image directory using the common_dirs property
-        # Clause 245: Workspace operations are disk-only by design
-        # This call is structurally hardcoded to use the "disk" backend
-
-        # Get all entries in the directory
-        entries = filemanager.list_dir(workspace_path, Backend.DISK.value)
-
-        # Look for a directory matching any of the common_dirs patterns
-        image_dir = workspace_path
-        for entry in entries:
-            entry_lower = entry.lower()
-            if any(common_dir.lower() in entry_lower for common_dir in self.common_dirs):
-                # Found a matching directory
-                image_dir = Path(workspace_path) / entry if isinstance(workspace_path, (str, Path)) else workspace_path / entry
-                logger.info("Found directory matching common_dirs pattern: %s", image_dir)
-                break
+        # Opera Phenix images are always in Images/ subdirectory
+        image_dir = plate_path / self.root_dir
 
         # Default to empty field mapping (no remapping)
         field_mapping = {}
 
         # Try to load field mapping from Index.xml if available
+        xml_parser = None
         try:
-            # Clause 245: Workspace operations are disk-only by design
-            # This call is structurally hardcoded to use the "disk" backend
-            index_xml = filemanager.find_file_recursive(workspace_path, "Index.xml", Backend.DISK.value)
+            index_xml = filemanager.find_file_recursive(plate_path, "Index.xml", Backend.DISK.value)
             if index_xml:
                 xml_parser = OperaPhenixXmlParser(index_xml)
                 field_mapping = xml_parser.get_field_id_mapping()
@@ -132,65 +112,30 @@ class OperaPhenixHandler(MicroscopeHandler):
             logger.error("Error loading Index.xml: %s", e)
             logger.debug("Using default field mapping due to error.")
 
-        # Get all image files in the directory BEFORE creating temp directory
-        # This prevents recursive mirroring of the temp directory
-        # Clause 245: Workspace operations are disk-only by design
-        # This call is structurally hardcoded to use the "disk" backend
+        # Fill missing images BEFORE building virtual mapping
+        # This handles autofocus failures by creating black placeholder images
+        if xml_parser:
+            num_filled = self._fill_missing_images(image_dir, xml_parser, filemanager)
+            if num_filled > 0:
+                logger.info(f"Created {num_filled} placeholder images for autofocus failures")
+
+        # Get all image files in the directory (including newly created placeholders)
         image_files = filemanager.list_image_files(image_dir, Backend.DISK.value)
 
-        # Create a uniquely named temporary directory for renamed files
-        # Use "__opera_phenix_temp" to make it clearly identifiable
-        if isinstance(image_dir, str):
-            temp_dir = os.path.join(image_dir, "__opera_phenix_temp")
-        else:  # Path object
-            temp_dir = image_dir / "__opera_phenix_temp"
-
-        # SAFETY CHECK: Ensure temp directory is within workspace
-        if not str(temp_dir).startswith(str(workspace_path)):
-            logger.error("SAFETY VIOLATION: Temp directory would be created outside workspace: %s", temp_dir)
-            raise RuntimeError(f"Temp directory would be created outside workspace: {temp_dir}")
-
-        # Clause 245: Workspace operations are disk-only by design
-        # This call is structurally hardcoded to use the "disk" backend
-        filemanager.ensure_directory(temp_dir, Backend.DISK.value)
-
-        logger.debug("Created temporary directory for Opera Phenix workspace preparation: %s", temp_dir)
+        # Initialize mapping dict (PLATE-RELATIVE paths)
+        workspace_mapping = {}
 
         # Process each file
         for file_path in image_files:
             # FileManager should return strings, but handle Path objects too
             if isinstance(file_path, str):
                 file_name = os.path.basename(file_path)
-                file_path_obj = Path(file_path)
             elif isinstance(file_path, Path):
                 file_name = file_path.name
-                file_path_obj = file_path
             else:
                 # Skip any unexpected types
                 logger.warning("Unexpected file path type: %s", type(file_path).__name__)
                 continue
-
-            # Check if this is a symlink
-            if file_path_obj.is_symlink():
-                try:
-                    # Get the target of the symlink (what it points to)
-                    real_file_path = file_path_obj.resolve()
-                    if not real_file_path.exists():
-                        logger.warning("Broken symlink detected: %s -> %s", file_path, real_file_path)
-                        continue
-                    # Store both the symlink path and the real file path
-                    source_path = str(real_file_path)
-                    symlink_target = str(real_file_path)
-                except Exception as e:
-                    logger.warning("Failed to resolve symlink %s: %s", file_path, e)
-                    continue
-            else:
-                # This should never happen in a properly mirrored workspace
-                logger.error("SAFETY VIOLATION: Found real file in workspace (should be symlink): %s", file_path)
-                raise RuntimeError(f"Workspace contains real file instead of symlink: {file_path}")
-                
-            # Store the original symlink path for reference
-            original_symlink_path = str(file_path_obj)
 
             # Parse file metadata
             metadata = self.parser.parse_filename(file_name)
@@ -205,154 +150,25 @@ class OperaPhenixHandler(MicroscopeHandler):
             metadata['site'] = new_field_id  # Update site with remapped value
             new_name = self.parser.construct_filename(**metadata)
 
-            # Create the new path in the temporary directory
-            if isinstance(temp_dir, str):
-                new_path = os.path.join(temp_dir, new_name)
-            else:  # Path object
-                new_path = temp_dir / new_name
+            # Build PLATE-RELATIVE mapping (no workspace directory)
+            # Use .as_posix() to ensure forward slashes on all platforms (Windows uses backslashes with str())
+            virtual_relative = (Path("Images") / new_name).as_posix()
+            real_relative = (Path("Images") / file_name).as_posix()
+            workspace_mapping[virtual_relative] = real_relative
 
-            # Check if destination already exists in temp directory
-            try:
-                # Clause 245: Workspace operations are disk-only by design
-                # This call is structurally hardcoded to use the "disk" backend
-                if filemanager.exists(new_path, Backend.DISK.value):
-                    # For temp directory, we can be more aggressive and delete any existing file
-                    logger.debug("File exists in temp directory, removing before copy: %s", new_path)
-                    filemanager.delete(new_path, Backend.DISK.value)
-                
-                # Create a symlink in the temp directory pointing to the original file
-                # Clause 245: Workspace operations are disk-only by design
-                # This call is structurally hardcoded to use the "disk" backend
-                filemanager.create_symlink(source_path, new_path, Backend.DISK.value)
-                logger.debug("Created symlink in temp directory: %s -> %s", new_path, source_path)
-                
-            except Exception as e:
-                logger.error("Failed to copy file to temp directory: %s -> %s: %s", 
-                             source_path, new_path, e)
-                raise RuntimeError(f"Failed to copy file to temp directory: {e}") from e
+        logger.info(f"Built {len(workspace_mapping)} virtual path mappings for Opera Phenix")
 
-        # Clean up and replace old files - ONLY delete symlinks in workspace, NEVER original files
-        for file_path in image_files:
-            # Convert to Path object for symlink checking
-            file_path_obj = Path(file_path) if isinstance(file_path, str) else file_path
+        # Save virtual workspace mapping to metadata using root_dir as subdirectory key
+        metadata_path = plate_path / "openhcs_metadata.json"
+        writer = AtomicMetadataWriter()
+        writer.merge_subdirectory_metadata(metadata_path, {
+            self.root_dir: {
+                "workspace_mapping": workspace_mapping,  # Plate-relative paths
+                "available_backends": {"disk": True, "virtual_workspace": True}
+            }
+        })
 
-            # SAFETY CHECK: Only delete if it's within the workspace directory
-            if not str(file_path_obj).startswith(str(workspace_path)):
-                logger.error("SAFETY VIOLATION: Attempted to delete file outside workspace: %s", file_path)
-                raise RuntimeError(f"Workspace preparation tried to delete file outside workspace: {file_path}")
-
-            # SAFETY CHECK: In workspace, only delete symlinks, never real files
-            if file_path_obj.is_symlink():
-                # Safe to delete - it's a symlink in the workspace
-                logger.debug("Deleting symlink in workspace: %s", file_path)
-                filemanager.delete(file_path, Backend.DISK.value)
-            elif file_path_obj.is_file():
-                # This should never happen in a properly mirrored workspace
-                logger.error("SAFETY VIOLATION: Found real file in workspace (should be symlink): %s", file_path)
-                raise RuntimeError(f"Workspace contains real file instead of symlink: {file_path}")
-            else:
-                logger.warning("File not found or not accessible: %s", file_path)
-
-        # Get all files in the temporary directory
-        # Clause 245: Workspace operations are disk-only by design
-        # This call is structurally hardcoded to use the "disk" backend
-        temp_files = filemanager.list_files(temp_dir, Backend.DISK.value)
-
-        # Move files from temporary directory to image directory
-        for temp_file in temp_files:
-            # FileManager should return strings, but handle Path objects too
-            if isinstance(temp_file, str):
-                temp_file_name = os.path.basename(temp_file)
-            elif isinstance(temp_file, Path):
-                temp_file_name = temp_file.name
-            else:
-                # Skip any unexpected types
-                logger.warning("Unexpected file path type: %s", type(temp_file).__name__)
-                continue
-            if isinstance(image_dir, str):
-                dest_path = os.path.join(image_dir, temp_file_name)
-            else:  # Path object
-                dest_path = image_dir / temp_file_name
-
-            try:
-                # Check if destination already exists in image directory
-                # Clause 245: Workspace operations are disk-only by design
-                # This call is structurally hardcoded to use the "disk" backend
-                if filemanager.exists(dest_path, Backend.DISK.value):
-                    # If destination is a symlink, ok to remove and replace
-                    if filemanager.is_symlink(dest_path, Backend.DISK.value):
-                        logger.debug("Destination is a symlink, removing before copy: %s", dest_path)
-                        filemanager.delete(dest_path, Backend.DISK.value)
-                    else:
-                        # Not a symlink - could be a real file
-                        logger.error("SAFETY VIOLATION: Destination exists and is not a symlink: %s", dest_path)
-                        raise FileExistsError(f"Destination exists and is not a symlink: {dest_path}")
-                
-                # First, if the temp file is a symlink, get its target
-                temp_file_obj = Path(temp_file) if isinstance(temp_file, str) else temp_file
-                if temp_file_obj.is_symlink():
-                    try:
-                        # Get the target that the temp symlink points to
-                        real_target = temp_file_obj.resolve()
-                        real_target_path = str(real_target)
-                        
-                        # Create a new symlink in the image directory pointing to the original file
-                        # Clause 245: Workspace operations are disk-only by design
-                        # This call is structurally hardcoded to use the "disk" backend
-                        filemanager.create_symlink(real_target_path, dest_path, Backend.DISK.value)
-                        logger.debug("Created symlink in image directory: %s -> %s", dest_path, real_target_path)
-                    except Exception as e:
-                        logger.error("Failed to resolve symlink in temp directory: %s: %s", temp_file, e)
-                        raise RuntimeError(f"Failed to resolve symlink: {e}") from e
-                else:
-                    # This should never happen if we're using symlinks consistently
-                    logger.warning("Temp file is not a symlink: %s", temp_file)
-                    # Fall back to copying the file
-                    filemanager.copy(temp_file, dest_path, Backend.DISK.value)
-                    logger.debug("Copied file (not symlink) to image directory: %s -> %s", temp_file, dest_path)
-                
-                # Remove the file from the temporary directory
-                # Clause 245: Workspace operations are disk-only by design
-                # This call is structurally hardcoded to use the "disk" backend
-                filemanager.delete(temp_file, Backend.DISK.value)
-                
-            except FileExistsError as e:
-                # Re-raise with clear message
-                logger.error("Cannot copy to destination: %s", e)
-                raise
-            except Exception as e:
-                logger.error("Error copying from temp to destination: %s -> %s: %s", 
-                             temp_file, dest_path, e)
-                raise RuntimeError(f"Failed to process file from temp directory: {e}") from e
-
-        # SAFETY CHECK: Validate temp directory before deletion 
-        if not str(temp_dir).startswith(str(workspace_path)):
-            logger.error("SAFETY VIOLATION: Attempted to delete temp directory outside workspace: %s", temp_dir)
-            raise RuntimeError(f"Attempted to delete temp directory outside workspace: {temp_dir}")
-            
-        if "__opera_phenix_temp" not in str(temp_dir):
-            logger.error("SAFETY VIOLATION: Attempted to delete non-temp directory: %s", temp_dir)
-            raise RuntimeError(f"Attempted to delete non-temp directory: {temp_dir}")
-            
-        # Remove the temporary directory
-        # Clause 245: Workspace operations are disk-only by design
-        # This call is structurally hardcoded to use the "disk" backend
-        try:
-            filemanager.delete(temp_dir, Backend.DISK.value)
-            logger.debug("Successfully removed temporary directory: %s", temp_dir)
-        except Exception as e:
-            # Non-fatal error, just log it
-            logger.warning("Failed to remove temporary directory %s: %s", temp_dir, e)
-
-        # Fill in missing images with black pixels (Opera Phenix autofocus failures)
-        if index_xml:
-            try:
-                xml_parser = OperaPhenixXmlParser(index_xml)
-                missing_count = self._fill_missing_images(image_dir, xml_parser, filemanager)
-                if missing_count > 0:
-                    logger.info(f"✅ Created {missing_count} missing images with black pixels")
-            except Exception as e:
-                logger.warning(f"Failed to fill missing images: {e}")
+        logger.info(f"✅ Saved virtual workspace mapping to {metadata_path}")
 
         return image_dir
 
@@ -402,13 +218,17 @@ class OperaPhenixHandler(MicroscopeHandler):
 
             # Note: plane_id in XML corresponds to z_index in filenames
             # For timepoint, we default to 1 as XML doesn't always have explicit timepoint info
+            # Use ORIGINAL Opera Phenix padding (1-digit site, 2-digit z-index)
+            # NOT the standardized 3-digit padding used in virtual workspace mapping
             filename = self.parser.construct_filename(
                 well=well,
                 site=remapped_field,
                 channel=img_data['channel_id'],
                 z_index=img_data['plane_id'],
                 timepoint=1,  # Default timepoint
-                extension='.tiff'
+                extension='.tiff',
+                site_padding=1,  # Original Opera Phenix format
+                z_padding=2      # Original Opera Phenix format
             )
             expected_files.add(filename)
 
@@ -707,9 +527,6 @@ class OperaPhenixMetadataHandler(MetadataHandler):
 
     Handles finding and parsing Index.xml files for Opera Phenix microscopes.
     """
-    # Microscope-specific directory structure constants
-    COMMON_DIRS = ['Images']      # Subdirectories where images are typically stored
-    WORKSPACE_DIR = 'workspace'   # Workspace directory name (created by initialize_workspace)
 
     def __init__(self, filemanager: FileManager):
         """
@@ -947,62 +764,7 @@ class OperaPhenixMetadataHandler(MetadataHandler):
         """
         return None
 
-    def get_image_files(self, plate_path: Union[str, Path]) -> List[str]:
-        """
-        Get list of image files from the Images directory.
-
-        For Opera Phenix, this lists all image files from the Images subdirectory.
-
-        Args:
-            plate_path: Path to the plate folder (str or Path)
-
-        Returns:
-            List of image filenames (basenames, not full paths)
-
-        Raises:
-            TypeError: If plate_path is not a valid path type
-            FileNotFoundError: If plate path does not exist
-        """
-        # Ensure plate_path is a Path object
-        if isinstance(plate_path, str):
-            plate_path = Path(plate_path)
-        elif not isinstance(plate_path, Path):
-            raise TypeError(f"Expected str or Path, got {type(plate_path).__name__}")
-
-        # Ensure the path exists
-        if not plate_path.exists():
-            raise FileNotFoundError(f"Plate path does not exist: {plate_path}")
-
-        # For Opera Phenix, after workspace preparation, images are in workspace/Images
-        # Check for workspace subdirectory first (created by MicroscopeHandler.initialize_workspace)
-        workspace_dir = plate_path / self.WORKSPACE_DIR
-
-        if workspace_dir.exists() and workspace_dir.is_dir():
-            # Look for common_dirs inside workspace
-            image_dir = workspace_dir
-            for common_dir in self.COMMON_DIRS:
-                potential_dir = workspace_dir / common_dir
-                if potential_dir.exists() and potential_dir.is_dir():
-                    image_dir = potential_dir
-                    break
-        else:
-            # Fallback to plate root or common_dirs subdirectory
-            image_dir = plate_path
-            for common_dir in self.COMMON_DIRS:
-                potential_dir = plate_path / common_dir
-                if potential_dir.exists() and potential_dir.is_dir():
-                    image_dir = potential_dir
-                    break
-
-        # List all image files in the directory
-        image_files = self.filemanager.list_image_files(
-            image_dir,
-            Backend.DISK.value,
-            recursive=False
-        )
-
-        # Return paths relative to plate_path
-        return [str(Path(f).relative_to(plate_path)) for f in image_files]
+    # Uses default get_image_files() implementation from MetadataHandler ABC
 
     def create_xml_parser(self, xml_path: Union[str, Path]):
         """

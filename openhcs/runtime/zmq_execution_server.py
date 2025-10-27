@@ -98,11 +98,14 @@ class ZMQExecutionServer(ZMQServer):
             results = self._execute_pipeline(execution_id, request.plate_id, request.pipeline_code,
                                             request.config_params, request.config_code,
                                             request.pipeline_config_code, request.client_address)
+            logger.info(f"[{execution_id}] Pipeline execution returned, updating status to COMPLETE")
             record[MessageFields.STATUS] = ExecutionStatus.COMPLETE.value
             record[MessageFields.END_TIME] = time.time()
             record[MessageFields.RESULTS_SUMMARY] = {MessageFields.WELL_COUNT: len(results) if isinstance(results, dict) else 0,
                                                      MessageFields.WELLS: list(results.keys()) if isinstance(results, dict) else []}
             logger.info(f"[{execution_id}] ✓ Completed in {record[MessageFields.END_TIME] - record[MessageFields.START_TIME]:.1f}s")
+            logger.info(f"[{execution_id}] Record status after update: {record[MessageFields.STATUS]}")
+            logger.info(f"[{execution_id}] Active executions status: {self.active_executions[execution_id][MessageFields.STATUS]}")
         except Exception as e:
             from concurrent.futures.process import BrokenProcessPool
             if isinstance(e, BrokenProcessPool) and record[MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
@@ -167,6 +170,13 @@ class ZMQExecutionServer(ZMQServer):
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
 
         logger.info(f"[{execution_id}] Starting plate {plate_id}")
+
+        # Initialize function registry BEFORE executing pipeline code
+        # (pipeline code may import virtual modules like openhcs.cucim)
+        import openhcs.processing.func_registry as func_registry_module
+        with func_registry_module._registry_lock:
+            if not func_registry_module._registry_initialized:
+                func_registry_module._auto_initialize_registry()
 
         namespace = {}
         exec(pipeline_code, namespace)

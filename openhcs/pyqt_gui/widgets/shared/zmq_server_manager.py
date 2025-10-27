@@ -675,7 +675,6 @@ class ZMQServerManagerWidget(QWidget):
         def kill_servers():
             from openhcs.runtime.zmq_base import ZMQServer
             from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
-            failed_ports = []
             registry = GlobalQueueTrackerRegistry()
 
             for port in ports_to_kill:
@@ -689,21 +688,24 @@ class ZMQServerManagerWidget(QWidget):
 
                     if killed > 0:
                         logger.info(f"✅ Force killed {killed} process(es) on port {port}")
-                        # Clear queue tracker for this viewer
-                        registry.remove_tracker(port)
-                        self.server_killed.emit(port)
                     else:
-                        failed_ports.append(port)
-                        logger.warning(f"❌ No processes found on port {port}")
-                except Exception as e:
-                    failed_ports.append(port)
-                    logger.error(f"❌ Error force killing server on port {port}: {e}")
+                        # No processes found on port - this is SUCCESS, not failure!
+                        # The goal is to ensure no process is running, and that's achieved.
+                        logger.info(f"✅ No processes found on port {port} (already dead or never existed)")
 
-            # Emit completion signal
-            if failed_ports:
-                self._kill_complete.emit(False, f"Failed to force kill servers on ports: {failed_ports}")
-            else:
-                self._kill_complete.emit(True, "All servers force killed successfully")
+                    # Clear queue tracker for this viewer (always, regardless of kill result)
+                    registry.remove_tracker(port)
+                    self.server_killed.emit(port)
+
+                except Exception as e:
+                    logger.error(f"❌ Error force killing server on port {port}: {e}")
+                    # Still emit signal to trigger refresh and cleanup, even on error
+                    registry.remove_tracker(port)
+                    self.server_killed.emit(port)
+
+            # Always emit success - we've done our best to kill the processes
+            # The refresh will remove any dead entries from the list
+            self._kill_complete.emit(True, "Force kill operation completed (list will refresh)")
 
         thread = threading.Thread(target=kill_servers, daemon=True)
         thread.start()

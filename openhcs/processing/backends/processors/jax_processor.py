@@ -18,9 +18,9 @@ from openhcs.core.memory.decorators import jax as jax_func
 from openhcs.core.utils import optional_import
 
 # Import JAX as an optional dependency
-jax = optional_import("jax")
-jnp = optional_import("jax.numpy") if jax is not None else None
-lax = jax.lax if jax is not None else None
+from openhcs.core.lazy_gpu_imports import jax
+jnp = optional_import("jax.numpy") if jax else None
+lax = jax.lax if jax else None
 
 logger = logging.getLogger(__name__)
 

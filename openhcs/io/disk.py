@@ -38,11 +38,7 @@ if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
     tf = None
     logger.info("Subprocess runner mode - skipping GPU library imports in disk backend")
 else:
-    torch = optional_import("torch")
-    jax = optional_import("jax")
-    jnp = optional_import("jax.numpy")
-    cupy = optional_import("cupy")
-    tf = optional_import("tensorflow")
+    from openhcs.core.lazy_gpu_imports import torch, jax, jnp, cupy, tf
 tifffile = optional_import("tifffile")
 
 class FileFormatRegistry:
@@ -75,103 +71,65 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         self._register_formats()
 
     def _register_formats(self):
-        formats = []
+        """
+        Register all file format handlers.
 
-        # NumPy
-        formats.append((
-            FileFormat.NUMPY.value,
-            np.save,
-            np.load
-        ))
+        Uses enum-driven registration to eliminate boilerplate.
+        Complex formats (CSV, JSON, TIFF, ROI.ZIP, TEXT) use custom handlers.
+        Simple formats (NumPy, Torch, CuPy, JAX, TensorFlow) use library save/load directly.
+        """
+        # Format handler metadata: (FileFormat enum, module_check, writer, reader)
+        # None for writer/reader means use the format's library save/load directly
+        format_handlers = [
+            # Simple formats - use library save/load directly
+            (FileFormat.NUMPY, True, np.save, np.load),
+            (FileFormat.TORCH, torch, torch.save if torch else None, torch.load if torch else None),
+            (FileFormat.JAX, (jax and jnp), self._jax_writer, self._jax_reader),
+            (FileFormat.CUPY, cupy, self._cupy_writer, self._cupy_reader),
+            (FileFormat.TENSORFLOW, tf, self._tensorflow_writer, self._tensorflow_reader),
 
-        if torch:
-            formats.append((
-                FileFormat.TORCH.value,
-                torch.save,
-                torch.load
-            ))
+            # Complex formats - use custom handlers
+            (FileFormat.TIFF, tifffile, self._tiff_writer, self._tiff_reader),
+            (FileFormat.TEXT, True, self._text_writer, self._text_reader),
+            (FileFormat.JSON, True, self._json_writer, self._json_reader),
+            (FileFormat.CSV, True, self._csv_writer, self._csv_reader),
+            (FileFormat.ROI, True, self._roi_zip_writer, self._roi_zip_reader),
+        ]
 
-        if jax and jnp:
-            formats.append((
-                FileFormat.JAX.value,
-                self._jax_writer,
-                self._jax_reader
-            ))
+        # Register all available formats
+        for file_format, module_available, writer, reader in format_handlers:
+            if not module_available or writer is None or reader is None:
+                continue
 
-        # CuPy
-        if cupy:
-            formats.append((
-                FileFormat.CUPY.value,
-                self._cupy_writer,
-                self._cupy_reader
-            ))
-
-        # TensorFlow
-        if tf:
-            formats.append((
-                FileFormat.TENSORFLOW.value,
-                self._tensorflow_writer,
-                self._tensorflow_reader
-            ))
-
-        # TIFF
-        if tifffile:
-            formats.append((
-                FileFormat.TIFF.value,
-                self._tiff_writer,
-                self._tiff_reader
-            ))
-
-        # Plain Text
-        formats.append((
-            FileFormat.TEXT.value,
-            self._text_writer,
-            self._text_reader
-        ))
-
-        # JSON
-        formats.append((
-            FileFormat.JSON.value,
-            self._json_writer,
-            self._json_reader
-        ))
-
-        # CSV
-        formats.append((
-            FileFormat.CSV.value,
-            self._csv_writer,
-            self._csv_reader
-        ))
-
-        # ROI.ZIP (double extension for ImageJ ROI archives)
-        formats.append((
-            ['.roi.zip'],
-            self._roi_zip_writer,
-            self._roi_zip_reader
-        ))
-
-        # Register everything
-        for extensions, writer, reader in formats:
-            for ext in extensions:
-             self.format_registry.register(ext.lower(), writer, reader)
+            # Register all extensions for this format
+            for ext in file_format.value:
+                self.format_registry.register(ext.lower(), writer, reader)
 
     # Format-specific writer/reader functions (pickleable)
+    # Only needed for formats that require special handling beyond library save/load
+
     def _jax_writer(self, path, data, **kwargs):
+        """JAX arrays must be moved to CPU before saving."""
         np.save(path, jax.device_get(data))
 
     def _jax_reader(self, path):
+        """Load NumPy array and convert to JAX."""
         return jnp.array(np.load(path))
 
     def _cupy_writer(self, path, data, **kwargs):
+        """CuPy has its own save format."""
         cupy.save(path, data)
 
     def _cupy_reader(self, path):
+        """Load CuPy array from disk."""
         return cupy.load(path)
 
     def _tensorflow_writer(self, path, data, **kwargs):
+        """TensorFlow uses tensor serialization."""
         tf.io.write_file(path.as_posix(), tf.io.serialize_tensor(data))
 
     def _tensorflow_reader(self, path):
+        """Load and deserialize TensorFlow tensor."""
         return tf.io.parse_tensor(tf.io.read_file(path.as_posix()), out_type=tf.dtypes.float32)
 
     def _tiff_writer(self, path, data, **kwargs):
@@ -367,14 +325,13 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             raise ValueError(f"data_list length ({len(data_list)}) must match output_paths length ({len(output_paths)})")
 
         # Convert GPU arrays to CPU numpy arrays using OpenHCS memory conversion system
-        from openhcs.core.memory.converters import convert_memory
-        from openhcs.core.memory.stack_utils import _detect_memory_type
+        from openhcs.core.memory.converters import convert_memory, detect_memory_type
         from openhcs.constants.constants import MemoryType
 
         cpu_data_list = []
         for data in data_list:
             # Detect the memory type of the data
-            source_type = _detect_memory_type(data)
+            source_type = detect_memory_type(data)
 
             # Convert to numpy if not already numpy
             if source_type == MemoryType.NUMPY.value:
@@ -387,8 +344,7 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
                     data=data,
                     source_type=source_type,
                     target_type=MemoryType.NUMPY.value,
-                    gpu_id=0,  # Placeholder since numpy doesn't use GPU ID
-                    allow_cpu_roundtrip=True
+                    gpu_id=0  # Placeholder since numpy doesn't use GPU ID
                 )
                 cpu_data_list.append(numpy_data)
 
@@ -429,6 +385,9 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             # Include both regular files and symlinks (even broken ones)
             files = [p for p in disk_directory.glob(glob_pattern) if p.is_file() or p.is_symlink()]
 
+        # Filter out macOS metadata files (._* files) that interfere with parsing
+        files = [f for f in files if not f.name.startswith('._')]
+
         # Filter by extensions if provided
         if extensions:
             # Convert extensions to lowercase for case-insensitive comparison
@@ -465,6 +424,9 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
                 # Get all entries in current directory
                 for entry in current_dir.iterdir():
                     if entry.is_file():
+                        # Filter out macOS metadata files (._* files) that interfere with parsing
+                        if entry.name.startswith('._'):
+                            continue
                         # Check if file matches pattern
                         if pattern is None or entry.match(pattern):
                             files.append((entry, depth))
@@ -588,7 +550,9 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
             link_name.unlink()  # Remove existing file/symlink only if overwrite=True
 
         link_name.parent.mkdir(parents=True, exist_ok=True)
-        link_name.symlink_to(source)
+        # On Windows, symlink_to() requires target_is_directory to be set correctly
+        # On Unix, this parameter is ignored, so it's safe to always specify it
+        link_name.symlink_to(source, target_is_directory=source.is_dir())
 
 
     def is_symlink(self, path: Union[str, Path]) -> bool:
@@ -624,30 +588,19 @@ class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
         Raises:
             FileNotFoundError: If the path or symlink target does not exist
             NotADirectoryError: If the resolved target is not a directory
-            StorageResolutionError: For unexpected filesystem resolution errors
         """
-        from pathlib import Path
+        path = Path(path)
 
-        try:
-            path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Path does not exist: {path}")
 
-            if not path.exists():
-                raise FileNotFoundError(f"Path does not exist: {path}")
+        # Follow symlinks to final real target
+        resolved = path.resolve(strict=True)
 
-            # Follow symlinks to final real target
-            resolved = path.resolve(strict=True)
+        if not resolved.is_dir():
+            raise NotADirectoryError(f"Path is not a directory: {path}")
 
-            if not resolved.is_dir():
-                raise NotADirectoryError(f"Path is not a directory: {path}")
-
-            return True
-
-        except FileNotFoundError:
-            raise  # broken symlink or missing path
-        except NotADirectoryError:
-            raise
-        except Exception as e:
-            raise StorageResolutionError(f"Failed to resolve directory: {path}") from e
+        return True
 
     def move(self, src: Union[str, Path], dst: Union[str, Path]) -> None:
         """

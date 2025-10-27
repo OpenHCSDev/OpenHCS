@@ -126,9 +126,9 @@ eliminating race conditions.
    # They read configuration from immutable step_plans in ProcessingContext
    # No mutable state is stored in step objects during execution
    class FunctionStep(AbstractStep):
-       def process(self, context):
+       def process(self, context: 'ProcessingContext', step_index: int) -> None:
            # Read configuration from immutable context
-           step_plan = context.step_plans[self.step_id]
+           step_plan = context.step_plans[step_index]
            # All execution state comes from context, not step object
 
 **Thread Safety Guarantee**: Step objects with no mutable state can be
@@ -244,11 +244,11 @@ instance with isolated storage.
 
 .. code:: python
 
-   def process(self, context):
+   def process(self, context: 'ProcessingContext', step_index: int) -> None:
        """FunctionStep execution - thread-safe by design."""
-       
+
        # 1. Read immutable step plan
-       step_plan = context.step_plans[self.step_id]  # Immutable after compilation
+       step_plan = context.step_plans[step_index]  # Immutable after compilation
        
        # 2. Use thread-local FileManager
        filemanager = context.filemanager  # Thread-local instance
@@ -392,36 +392,59 @@ reads with locks - GPU assignment during compilation phase (thread-safe)
        for well_id, context in compiled_contexts.items():
            execution_results[well_id] = self._execute_single_well(pipeline_definition, context, visualizer)
 
-**🎯 Why This Model is Brilliant**
-----------------------------------
+**Design Rationale**
+--------------------
 
-**1. Eliminates Complex Locking**
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The concurrency model achieves thread safety through architectural constraints rather than complex locking:
 
--  **Immutable State**: No need to lock shared data structures
+**Immutable State Design**
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  **Frozen ProcessingContext**: Cannot be modified after compilation
 -  **Thread Isolation**: No shared mutable resources between threads
 -  **Minimal Coordination**: Only GPU registry requires locking
 
-**2. Excellent Error Isolation**
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+**Error Isolation**
+~~~~~~~~~~~~~~~~~~~
 
 -  **Well-Level Failures**: One well failure doesn’t affect others
 -  **Resource Cleanup**: Guaranteed cleanup per thread
 -  **Exception Propagation**: Clear error reporting per well
 
-**3. Predictable Performance**
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+**Performance Characteristics**
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  **Linear Scaling**: Performance scales with number of cores/GPUs
 -  **No Lock Contention**: Minimal synchronization overhead
 -  **Resource Efficiency**: Optimal utilization of available hardware
 
-**4. Simple Mental Model**
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+**Metadata JSON Writing**
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
--  **Easy to Reason About**: Each well is independent
--  **Debugging Friendly**: Clear thread boundaries and isolated state
--  **Maintainable**: No complex synchronization logic
+During step execution, after data is written to disk or zarr backends, OpenHCS automatically generates ``openhcs_metadata.json`` files:
+
+.. code:: python
+
+   # In FunctionStep.process() after writing output data
+   if actual_write_backend not in [Backend.OMERO_LOCAL.value, Backend.MEMORY.value]:
+       from openhcs.microscopes.openhcs import OpenHCSMetadataGenerator
+       metadata_generator = OpenHCSMetadataGenerator(context.filemanager)
+
+       # Create metadata reflecting actual disk state
+       metadata_generator.create_metadata(
+           context,
+           step_plan['output_dir'],
+           actual_write_backend,
+           is_main=is_pipeline_output,
+           plate_root=step_plan['output_plate_root'],
+           sub_dir=step_plan['sub_dir']
+       )
+
+This metadata generation is thread-safe because:
+
+-  **Per-Thread FileManager**: Each thread has isolated file operations
+-  **Atomic Writes**: Metadata uses atomic writer to prevent corruption
+-  **No Cross-Thread Coordination**: Each well writes its own metadata independently
 
 **Current Implementation Status**
 ---------------------------------
@@ -449,7 +472,7 @@ reads with locks - GPU assignment during compilation phase (thread-safe)
 5. **Adaptive Threading**: Dynamic thread pool sizing based on workload
 6. **Memory Pool Management**: Shared memory pools for large datasets
 
-This concurrency model provides **solid parallel processing
-architecture** that achieves good performance while maintaining
-simplicity and thread safety through careful design rather than complex
-synchronization.
+This concurrency model achieves thread safety and performance through
+immutable compilation artifacts and thread-local resource isolation,
+eliminating the need for complex synchronization logic while maintaining
+predictable scaling characteristics.

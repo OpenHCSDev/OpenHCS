@@ -285,7 +285,7 @@ CI running visualizer tests
 See Also
 ========
 
-- :doc:`napari_viewer_management` - Napari viewer lifecycle and configuration
+- :doc:`viewer_management` - Viewer lifecycle and configuration
 - :doc:`fiji_viewer_management` - Fiji viewer lifecycle and configuration
 - :doc:`omero_integration` - OMERO backend integration guide
 

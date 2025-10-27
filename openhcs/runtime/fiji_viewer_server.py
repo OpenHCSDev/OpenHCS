@@ -110,11 +110,20 @@ class FijiViewerServer(ZMQServer):
         try:
             import imagej
             logger.info("🔬 FIJI SERVER: Initializing PyImageJ...")
-            self.ij = imagej.init(mode='interactive')
 
-            # Show Fiji UI so users can interact with images and menus
-            self.ij.ui().showUI()
-            logger.info("🔬 FIJI SERVER: PyImageJ initialized and UI shown")
+            # Try interactive mode first, fall back to headless mode on macOS
+            try:
+                self.ij = imagej.init(mode='interactive')
+                # Show Fiji UI so users can interact with images and menus
+                self.ij.ui().showUI()
+                logger.info("🔬 FIJI SERVER: PyImageJ initialized in interactive mode with UI shown")
+            except OSError as e:
+                if "Cannot enable interactive mode" in str(e):
+                    logger.warning("🔬 FIJI SERVER: Interactive mode failed (likely macOS), using headless mode")
+                    self.ij = imagej.init(mode='headless')
+                    logger.info("🔬 FIJI SERVER: PyImageJ initialized in headless mode")
+                else:
+                    raise
         except ImportError:
             raise ImportError("PyImageJ not available. Install with: pip install 'openhcs[viz]'")
     

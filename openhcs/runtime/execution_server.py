@@ -274,6 +274,13 @@ class OpenHCSExecutionServer:
 
             logger.info(f"[{execution_id}] Starting execution for plate {plate_id}")
 
+            # Initialize function registry BEFORE executing pipeline code
+            # (pipeline code may import virtual modules like openhcs.cucim)
+            import openhcs.processing.func_registry as func_registry_module
+            with func_registry_module._registry_lock:
+                if not func_registry_module._registry_initialized:
+                    func_registry_module._auto_initialize_registry()
+
             # Reconstruct pipeline by executing the exact generated Python code (same as UI)
             # Use an empty namespace so imports resolve naturally to module-level symbols
             namespace: Dict[str, Any] = {}

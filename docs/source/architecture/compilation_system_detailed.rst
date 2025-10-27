@@ -39,11 +39,13 @@ Entry Point: ``PipelineOrchestrator.compile_pipelines()``
        context = self.create_context(well_id)
 
        # 5-Phase Compilation (actual implementation)
-       PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, metadata_writer=is_responsible, plate_path=self.plate_path)
-       PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, self)
-       PipelineCompiler.plan_materialization_flags_for_context(context, pipeline_definition, self)
-       PipelineCompiler.validate_memory_contracts_for_context(context, pipeline_definition, self)
-       PipelineCompiler.assign_gpu_resources_for_context(context)
+       # All phases wrapped in config_context for lazy resolution
+       with config_context(orchestrator.pipeline_config):
+           PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
+           PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, orchestrator)
+           PipelineCompiler.plan_materialization_flags_for_context(context, pipeline_definition, orchestrator)
+           PipelineCompiler.validate_memory_contracts_for_context(context, pipeline_definition, orchestrator)
+           PipelineCompiler.assign_gpu_resources_for_context(context)
 
        context.freeze()
        compiled_contexts[well_id] = context
@@ -51,29 +53,29 @@ Entry Point: ``PipelineOrchestrator.compile_pipelines()``
 Phase 1: Step Plan Initialization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**File**: ``openhcs/core/pipeline/compiler.py:54-85``
+**File**: ``openhcs/core/pipeline/compiler.py:229-282``
 
 .. code:: python
 
-   def initialize_step_plans_for_context(context, steps_definition):
-       # Pre-initialize basic step_plans
-       for step in steps_definition:
-           context.step_plans[step.step_id] = {
+   def initialize_step_plans_for_context(context, steps_definition, orchestrator, metadata_writer=False, plate_path=None):
+       # Pre-initialize basic step_plans using step index as key
+       for step_index, step in enumerate(steps_definition):
+           context.step_plans[step_index] = {
                "step_name": step.name,
                "step_type": step.__class__.__name__,
-               "well_id": context.well_id,
+               "axis_id": context.axis_id,
            }
-       
+
        # Call path planner - THIS IS WHERE METADATA INJECTION HAPPENS
-       PipelinePathPlanner.prepare_pipeline_paths(context, steps_definition)
-       
+       PipelinePathPlanner.prepare_pipeline_paths(context, steps_definition, orchestrator.pipeline_config)
+
        # Post-path-planner processing (stores func_name but NOT func)
-       for step in steps_definition:
+       for step_index, step in enumerate(steps_definition):
            if isinstance(step, FunctionStep):
-               current_plan = context.step_plans[step.step_id]
+               current_plan = context.step_plans[step_index]
                if hasattr(step, 'func'):
                    current_plan["func_name"] = getattr(step.func, '__name__', str(step.func))
-                   # NOTE: step.func is NOT stored here - happens in Phase 3
+                   # NOTE: step.func is NOT stored here - happens in Phase 4
 
 Critical Sub-Phase: Metadata Injection in Path Planner
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -120,21 +122,22 @@ etc.) in ``step_plans``. It does NOT touch function patterns.
 Phase 4: Memory Contract Validation (THE CRITICAL PHASE)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**File**: ``openhcs/core/pipeline/compiler.py:194-221``
+**File**: ``openhcs/core/pipeline/compiler.py:566-596``
 
 .. code:: python
 
-   def validate_memory_contracts_for_context(context, steps_definition):
+   def validate_memory_contracts_for_context(context, steps_definition, orchestrator=None):
        # Validator processes steps and returns memory types + function patterns
        step_memory_types = FuncStepContractValidator.validate_pipeline(
            steps=steps_definition,
-           pipeline_context=context
+           pipeline_context=context,
+           orchestrator=orchestrator
        )
-       
+
        # Store memory types AND function patterns in step_plans
-       for step_id, memory_types in step_memory_types.items():
-           if step_id in context.step_plans:
-               context.step_plans[step_id].update(memory_types)  # ← FUNCTION STORED HERE!
+       for step_index, memory_types in step_memory_types.items():
+           if step_index in context.step_plans:
+               context.step_plans[step_index].update(memory_types)  # ← FUNCTION STORED HERE!
 
 The Function Storage Mechanism
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -171,18 +174,19 @@ This phase only assigns GPU IDs and doesn’t affect function patterns.
 Execution: Function Pattern Retrieval
 -------------------------------------
 
-**File**: ``openhcs/core/steps/function_step.py:550-556``
+**File**: ``openhcs/core/steps/function_step.py`` (process method)
 
 .. code:: python
 
-   def process(self, context):
-       step_plan = context.step_plans[step_id]
-       
+   def process(self, context: 'ProcessingContext', step_index: int) -> None:
+       # Access step plan by index (step_plans keyed by index, not step_id)
+       step_plan = context.step_plans[step_index]
+
        # Get func from step plan (stored by FuncStepContractValidator during compilation)
        func_from_plan = step_plan.get('func')  # ← RETRIEVES MODIFIED PATTERN
        if func_from_plan is None:
            raise ValueError(f"Step plan missing 'func' for step: {step_plan.get('step_name', 'Unknown')}")
-       
+
        # Process the function pattern
        grouped_patterns, comp_to_funcs, comp_to_base_args = prepare_patterns_and_functions(
            patterns_by_well[well_id], func_from_plan, component=group_by.value if group_by else None
@@ -310,6 +314,6 @@ Files and Line Numbers Reference
 -  **Execution retrieval**:
    ``openhcs/core/steps/function_step.py:550-556``
 
-This architecture enables powerful patterns like lazy loading, metadata
+This architecture enables patterns like lazy loading, metadata
 injection, and stateless execution while maintaining clean separation of
 concerns between compilation and execution phases.

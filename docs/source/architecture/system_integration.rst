@@ -189,10 +189,10 @@ During execution, the three systems work together seamlessly:
 
 .. code:: python
 
-   def process(self, context: ProcessingContext):
+   def process(self, context: ProcessingContext, step_index: int):
        """Complete execution flow showing system integration (FunctionStep.process)."""
 
-       step_plan = context.step_plans[self.step_id]
+       step_plan = context.step_plans[step_index]
 
        # 1. VFS: Load images from storage
        raw_slices = []

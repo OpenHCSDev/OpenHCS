@@ -347,9 +347,12 @@ class OMEROHandler(MicroscopeHandler):
         super().__init__(parser=parser, metadata_handler=metadata_handler)
 
     @property
-    def common_dirs(self) -> List[str]:
-        """Virtual subdirectory for OMERO (purely for path compatibility)."""
-        return ["Images"]
+    def root_dir(self) -> str:
+        """Root directory for OMERO virtual workspace.
+
+        Returns "Images" for path compatibility with OMERO virtual paths.
+        """
+        return "Images"
 
     @property
     def microscope_type(self) -> str:
@@ -378,7 +381,7 @@ class OMEROHandler(MicroscopeHandler):
         """
         return workspace_path
 
-    def initialize_workspace(self, plate_path: Union[int, Path], workspace_path: Optional[Path], filemanager: FileManager) -> Path:
+    def initialize_workspace(self, plate_path: Union[int, Path], filemanager: FileManager) -> Path:
         """
         OMERO creates a virtual path for the plate.
 
@@ -388,7 +391,6 @@ class OMEROHandler(MicroscopeHandler):
 
         Args:
             plate_path: OMERO plate_id (int) or Path (for compatibility)
-            workspace_path: Unused for OMERO
             filemanager: Unused for OMERO
 
         Returns:

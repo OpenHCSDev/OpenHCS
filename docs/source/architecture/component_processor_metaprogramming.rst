@@ -31,7 +31,7 @@ The metaclass generates abstract methods for each component × pattern combinati
 
 .. code-block:: python
 
-   class DynamicInterfaceMeta(ABCMeta):
+   class DynamicInterfaceMeta(type):
        """Metaclass that generates component processing interfaces."""
 
        def __new__(mcs, name, bases, namespace, component_enum=None, method_patterns=None, **kwargs):
@@ -41,7 +41,14 @@ The metaclass generates abstract methods for each component × pattern combinati
                for component in component_enum:
                    for pattern in method_patterns:
                        method_name = f"{pattern}_{component.value}"
-                       namespace[method_name] = mcs._create_abstract_method(method_name)
+                       # Create abstract method dynamically
+                       def create_abstract_method(method_name=method_name):
+                           @abstractmethod
+                           def abstract_method(self, context, **kwargs):
+                               raise NotImplementedError(f"Method {method_name} must be implemented")
+                           abstract_method.__name__ = method_name
+                           return abstract_method
+                       namespace[method_name] = create_abstract_method()
 
            return super().__new__(mcs, name, bases, namespace)
 

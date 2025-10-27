@@ -130,7 +130,7 @@ Merged vs Resolved Configuration
 Integration with Lazy Configuration System
 ------------------------------------------
 
-The orchestrator configuration management integrates seamlessly with the lazy configuration system documented in :doc:`lazy_class_system`.
+The orchestrator configuration management integrates seamlessly with the lazy configuration system documented in :doc:`dynamic_dataclass_factory`.
 
 Thread-Local Context Flow
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -180,6 +180,6 @@ Benefits and Design Rationale
 See Also
 --------
 
-- :doc:`lazy_class_system` - Lazy configuration system that orchestrator integrates with
-- :doc:`configuration_resolution` - Thread-local context management patterns
-- :doc:`../development/openhcs-systematic-refactoring-framework` - Architectural principles followed in this implementation
+- :doc:`dynamic_dataclass_factory` - Lazy configuration system that orchestrator integrates with
+- :doc:`context_system` - Thread-local context management patterns
+- :doc:`configuration_framework` - Configuration framework overview

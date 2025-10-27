@@ -311,7 +311,7 @@ Streaming Backends
 UI Integration
 --------------
 
-See :doc:`../user_guide/viewer_management` for UI usage.
+See :doc:`../guides/viewer_management` for UI usage.
 
 Port Allocation
 ---------------

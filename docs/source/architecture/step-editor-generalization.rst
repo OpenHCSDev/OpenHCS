@@ -478,6 +478,6 @@ This architecture ensures that OpenHCS UI development remains maintainable and e
 See Also
 --------
 
-- :doc:`configuration_system_architecture` - Configuration system architecture that enables zero-hardcoding
+- :doc:`configuration_framework` - Configuration system architecture that enables zero-hardcoding
 - :doc:`service-layer-architecture` - Framework-agnostic service patterns used in step editors
-- :doc:`../development/ui-patterns` - UI patterns and functional dispatch used in implementation
+- :doc:`code_ui_interconversion` - Code/UI interconversion patterns

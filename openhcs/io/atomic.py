@@ -136,7 +136,9 @@ def atomic_write_json(
 
     try:
         tmp_path = _write_to_temp_file(file_path, data, indent)
-        os.rename(tmp_path, str(file_path))
+        # Use os.replace() instead of os.rename() for atomic replacement on all platforms
+        # os.rename() fails on Windows if destination exists, os.replace() works on both Unix and Windows
+        os.replace(tmp_path, str(file_path))
         logger.debug(f"Atomically wrote JSON to {file_path}")
     except Exception as e:
         raise FileLockError(f"Atomic JSON write failed for {file_path}: {e}") from e

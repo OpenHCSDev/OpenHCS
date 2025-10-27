@@ -22,16 +22,26 @@ The handler system uses composition rather than monolithic inheritance, separati
 
 .. code:: python
 
-   class MicroscopeHandler(ABC):
-       @property
-       @abstractmethod
-       def parser(self) -> FilenameParser:
-           """Extracts well, field, channel from filenames."""
+   class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
+       """Composed class for handling microscope-specific functionality."""
+
+       def __init__(self, parser: Optional[FilenameParser], metadata_handler: MetadataHandler):
+           """Initialize with parser and metadata handler instances."""
+           self.parser = parser
+           self.metadata_handler = metadata_handler
+           self.plate_folder: Optional[Path] = None
 
        @property
        @abstractmethod
-       def metadata_handler(self) -> MetadataHandler:
-           """Reads acquisition parameters and plate layout."""
+       def root_dir(self) -> str:
+           """Root directory where virtual workspace preparation starts."""
+           pass
+
+       @property
+       @abstractmethod
+       def compatible_backends(self) -> List[Backend]:
+           """Storage backends this handler is compatible with, in priority order."""
+           pass
 
 This design enables:
 
@@ -59,7 +69,8 @@ Each microscope format has unique filename conventions. Parsers extract semantic
        # by the FilenameParser.__init__() → GenericFilenameParser.__init__() chain
 
        # Actual regex pattern from codebase - supports placeholders and optional components
-       _pattern = re.compile(r'(?:.*?_)?([A-Z]\d+)(?:_s(\d+|\{[^\}]*\}))?(?:_w(\d+|\{[^\}]*\}))?(?:_z(\d+|\{[^\}]*\}))?(\.\w+)?$')
+       # Supports: well, site, channel, z_index, timepoint
+       _pattern = re.compile(r'(?:.*?_)?([A-Z]\d+)(?:_s(\d+|\{[^\}]*\}))?(?:_w(\d+|\{[^\}]*\}))?(?:_z(\d+|\{[^\}]*\}))?(?:_t(\d+|\{[^\}]*\}))?(?:_.*?)?(\.\w+)?$')
 
        def parse_filename(self, filename: str) -> Optional[Dict[str, Any]]:
            """Parse ImageXpress filename, handling placeholders like {iii}."""
@@ -67,7 +78,7 @@ Each microscope format has unique filename conventions. Parsers extract semantic
            match = self._pattern.match(basename)
 
            if match:
-               well, site_str, channel_str, z_str, ext = match.groups()
+               well, site_str, channel_str, z_str, t_str, ext = match.groups()
 
                # Helper to parse components or return None for placeholders
                parse_comp = lambda s: None if not s or '{' in s else int(s)
@@ -77,6 +88,7 @@ Each microscope format has unique filename conventions. Parsers extract semantic
                    'site': parse_comp(site_str),
                    'channel': parse_comp(channel_str),
                    'z_index': parse_comp(z_str),
+                   'timepoint': parse_comp(t_str),
                    'extension': ext if ext else '.tif'
                }
            return None
@@ -92,8 +104,9 @@ Each microscope format has unique filename conventions. Parsers extract semantic
        # FILENAME_COMPONENTS is automatically set to AllComponents + ['extension']
        # by the FilenameParser.__init__() → GenericFilenameParser.__init__() chain
 
-       # Actual regex pattern - much more complex than documentation showed
-       _pattern = re.compile(r"r(\d{1,2})c(\d{1,2})f(\d+|\{[^\}]*\})p(\d+|\{[^\}]*\})-ch(\d+|\{[^\}]*\})(?:sk\d+)?(?:fk\d+)?(?:fl\d+)?(\.\w+)$", re.I)
+       # Actual regex pattern - supports row, col, site (field), z_index (plane), channel, timepoint (sk)
+       # sk = stack/timepoint, fk = field stack, fl = focal level (optional)
+       _pattern = re.compile(r"r(\d{1,2})c(\d{1,2})f(\d+|\{[^\}]*\})p(\d+|\{[^\}]*\})-ch(\d+|\{[^\}]*\})(?:sk(\d+|\{[^\}]*\}))?(?:fk\d+)?(?:fl\d+)?(?:_.*?)?(\.\w+)$", re.I)
 
        def parse_filename(self, filename: str) -> Optional[Dict[str, Any]]:
            """Parse Opera Phenix filename with row/col to well conversion."""
@@ -101,7 +114,7 @@ Each microscope format has unique filename conventions. Parsers extract semantic
            match = self._pattern.match(basename)
 
            if match:
-               row, col, site_str, z_str, channel_str, ext = match.groups()
+               row, col, site_str, z_str, channel_str, sk_str, ext = match.groups()
 
                # Helper function for placeholder handling
                def parse_comp(s):
@@ -118,6 +131,7 @@ Each microscope format has unique filename conventions. Parsers extract semantic
                    'channel': parse_comp(channel_str),
                    'wavelength': parse_comp(channel_str),  # Backward compatibility
                    'z_index': parse_comp(z_str),
+                   'timepoint': parse_comp(sk_str),  # sk = stack/timepoint
                    'extension': ext if ext else '.tif'
                }
            return None
@@ -130,62 +144,96 @@ Each microscope format has unique filename conventions. Parsers extract semantic
 Metadata Handler Implementation
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Metadata handlers extract acquisition parameters and plate layout information:
+Metadata handlers extract acquisition parameters and plate layout information. All handlers implement the :class:`MetadataHandler` ABC:
 
 .. code-block:: python
+
+   class MetadataHandler(ABC):
+       """Abstract base class for handling microscope metadata."""
+
+       @abstractmethod
+       def find_metadata_file(self, plate_path: Union[str, Path]) -> Path:
+           """Find the metadata file for a plate (e.g., .HTD, .xml)."""
+           pass
+
+       @abstractmethod
+       def get_grid_dimensions(self, plate_path: Union[str, Path]) -> Tuple[int, int]:
+           """Get grid dimensions for stitching from metadata."""
+           pass
+
+       @abstractmethod
+       def get_pixel_size(self, plate_path: Union[str, Path]) -> float:
+           """Get the pixel size from metadata in micrometers."""
+           pass
+
+       @abstractmethod
+       def get_channel_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
+           """Get channel key→name mapping from metadata."""
+           pass
+
+       @abstractmethod
+       def get_well_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
+           """Get well key→name mapping from metadata."""
+           pass
+
+       @abstractmethod
+       def get_site_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
+           """Get site key→name mapping from metadata."""
+           pass
+
+       @abstractmethod
+       def get_z_index_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
+           """Get z_index key→name mapping from metadata."""
+           pass
+
+       def get_image_files(self, plate_path: Union[str, Path]) -> list[str]:
+           """Get list of image files from OpenHCS metadata (default implementation)."""
+           pass
+
+       def parse_metadata(self, plate_path: Union[str, Path]) -> Dict[str, Dict[str, Optional[str]]]:
+           """Parse all metadata using dynamic method resolution (default implementation)."""
+           pass
 
    class ImageXpressMetadataHandler(MetadataHandler):
        """Handles ImageXpress .HTD and .MES files."""
 
-       def read_plate_metadata(self, plate_dir: Path) -> PlateMetadata:
-           htd_file = plate_dir / f"{plate_dir.name}.HTD"
+       def find_metadata_file(self, plate_path: Union[str, Path]) -> Path:
+           """Find .HTD file for the plate."""
+           plate_path = Path(plate_path)
+           htd_file = plate_path / f"{plate_path.name}.HTD"
            if not htd_file.exists():
                raise FileNotFoundError(f"HTD file not found: {htd_file}")
+           return htd_file
 
-           # Parse HTD file for plate layout
-           with open(htd_file, 'r') as f:
-               htd_data = self._parse_htd_format(f.read())
+       def get_pixel_size(self, plate_path: Union[str, Path]) -> float:
+           """Extract pixel size from HTD metadata."""
+           # Parses HTD file and returns pixel size in micrometers
+           pass
 
-           return PlateMetadata(
-               plate_name=htd_data['PlateName'],
-               wells=htd_data['Wells'],
-               sites_per_well=htd_data['SitesPerWell'],
-               channels=htd_data['Wavelengths'],
-               acquisition_date=htd_data['AcquisitionDate']
-           )
-
-       def read_acquisition_metadata(self, image_path: Path) -> AcquisitionMetadata:
-           """Extract metadata from MES files or TIFF tags."""
-           mes_file = image_path.with_suffix('.MES')
-           if mes_file.exists():
-               return self._parse_mes_file(mes_file)
-           else:
-               # Fallback to TIFF metadata
-               return self._extract_tiff_metadata(image_path)
+       def get_channel_values(self, plate_path: Union[str, Path]) -> Optional[Dict[str, Optional[str]]]:
+           """Extract channel names from HTD metadata."""
+           # Returns mapping like {"1": "HOECHST 33342", "2": "Calcein"}
+           pass
 
    class OperaPhenixMetadataHandler(MetadataHandler):
        """Handles Opera Phenix XML metadata files."""
 
-       def read_plate_metadata(self, plate_dir: Path) -> PlateMetadata:
-           # Opera Phenix uses XML files for metadata
-           xml_files = list(plate_dir.glob("*.xml"))
+       def find_metadata_file(self, plate_path: Union[str, Path]) -> Path:
+           """Find XML metadata file (usually Index.idx.xml)."""
+           plate_path = Path(plate_path)
+           xml_files = list(plate_path.glob("*.xml"))
            if not xml_files:
                raise FileNotFoundError("No XML metadata files found")
+           return xml_files[0]
 
-           metadata_xml = xml_files[0]  # Usually Index.idx.xml
-           tree = ET.parse(metadata_xml)
-           root = tree.getroot()
+       def get_grid_dimensions(self, plate_path: Union[str, Path]) -> Tuple[int, int]:
+           """Extract grid dimensions from XML metadata."""
+           # Parses XML and returns (grid_x, grid_y) for stitching
+           pass
 
-           # Extract plate information from XML structure
-           wells = self._extract_wells_from_xml(root)
-           channels = self._extract_channels_from_xml(root)
-
-           return PlateMetadata(
-               plate_name=root.get('PlateName', 'Unknown'),
-               wells=wells,
-               channels=channels,
-               acquisition_date=self._parse_xml_timestamp(root)
-           )
+       def get_pixel_size(self, plate_path: Union[str, Path]) -> float:
+           """Extract pixel size from XML metadata."""
+           pass
 
 Key Architectural Components
 ----------------------------
@@ -193,109 +241,204 @@ Key Architectural Components
 Workspace Preparation
 ~~~~~~~~~~~~~~~~~~~~~
 
-Each microscope format requires different workspace preparation to normalize directory structures for pipeline processing:
+Each microscope format requires different workspace preparation to normalize directory structures for pipeline processing. The key method is :meth:`_build_virtual_mapping()` which creates a virtual mapping dict (plate-relative paths) and saves it to ``openhcs_metadata.json``:
 
 .. code-block:: python
 
    class ImageXpressHandler(MicroscopeHandler):
        @property
-       def common_dirs(self) -> List[str]:
-           """Directories that indicate ImageXpress format."""
-           return ['TimePoint_1']
+       def root_dir(self) -> str:
+           """Root directory where virtual workspace preparation starts.
 
-       def _prepare_workspace(self, workspace_path: Path, filemanager: FileManager) -> Path:
-           """Flatten Z-step directory structure and normalize filenames."""
-           # Find subdirectories using filemanager
-           entries = filemanager.list_dir(workspace_path, Backend.DISK.value)
-           subdirs = [Path(workspace_path) / entry for entry in entries
-                     if (Path(workspace_path) / entry).is_dir()]
+           Returns "." (plate root) because ImageXpress TimePoint/ZStep folders
+           are flattened starting from the plate root, and virtual paths have no prefix.
+           """
+           return "."
 
-           # Check for common directories (TimePoint_1, etc.)
-           common_dir_found = False
-           for subdir in subdirs:
-               if any(common_dir in subdir.name for common_dir in self.common_dirs):
-                   self._flatten_zsteps(subdir, filemanager)
-                   common_dir_found = True
+       def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
+           """Build virtual workspace mapping by flattening nested folder structures.
 
-           # If no common directory found, process workspace directly
-           if not common_dir_found:
-               self._flatten_zsteps(workspace_path, filemanager)
+           Creates plate-relative mappings for TimePoint and Z-step folders.
+           No physical file operations - all virtual.
+           """
+           workspace_mapping = {}
 
-           return workspace_path
+           # Flatten TimePoint and ZStep folders virtually
+           self._flatten_timepoints(plate_path, filemanager, workspace_mapping, plate_path)
+           self._flatten_zsteps(plate_path, filemanager, workspace_mapping, plate_path)
 
-       def _flatten_zsteps(self, directory: Path, filemanager: FileManager):
-           """Flatten ZStep_N directories and normalize filenames."""
-           # Implementation handles Z-step flattening and filename normalization
-           # Uses filemanager for all file operations to respect VFS boundaries
+           # Save to metadata using root_dir as subdirectory key
+           metadata_path = plate_path / "openhcs_metadata.json"
+           writer = AtomicMetadataWriter()
+           writer.merge_subdirectory_metadata(metadata_path, {
+               self.root_dir: {
+                   "workspace_mapping": workspace_mapping,  # Plate-relative paths
+                   "available_backends": {"disk": True, "virtual_workspace": True}
+               }
+           })
+
+           return plate_path
 
    class OperaPhenixHandler(MicroscopeHandler):
-       def _prepare_workspace(self, workspace_path: Path, filemanager: FileManager) -> Path:
-           """Apply spatial layout remapping to Opera Phenix filenames."""
-           # Check if already processed (temp directory exists)
-           temp_dir_name = "__opera_phenix_temp"
-           entries = filemanager.list_dir(workspace_path, Backend.DISK.value)
+       @property
+       def root_dir(self) -> str:
+           """Root directory for Opera Phenix virtual workspace preparation.
 
-           for entry in entries:
-               entry_path = Path(workspace_path) / entry
-               if entry_path.is_dir() and entry_path.name == temp_dir_name:
-                   return workspace_path  # Already processed
+           Returns "Images" because field remapping is applied to images
+           in the Images/ subdirectory.
+           """
+           return "Images"
 
-           # Apply spatial remapping using XML metadata
-           # Creates temporary directory, processes files, then replaces originals
-           # Uses filemanager for all operations to maintain VFS compliance
+       def _build_virtual_mapping(self, plate_path: Path, filemanager: FileManager) -> Path:
+           """Build virtual workspace mapping with field remapping.
 
-           return workspace_path
+           Remaps field IDs to follow top-left to bottom-right pattern
+           based on spatial layout from Index.xml.
+           """
+           image_dir = plate_path / self.root_dir
+           workspace_mapping = {}
+
+           # Load field mapping from Index.xml
+           xml_parser = OperaPhenixXmlParser(image_dir / "Index.xml")
+           field_mapping = xml_parser.get_field_id_mapping(exclude_orphans=True)
+
+           # Build virtual mapping with field remapping
+           for real_file in filemanager.list_files(image_dir, Backend.DISK.value):
+               parsed = self.parser.parse_filename(real_file)
+               if not parsed or parsed['site'] is None:
+                   continue
+
+               original_field = parsed['site']
+               if original_field in field_mapping:
+                   virtual_field = field_mapping[original_field]
+                   parsed['site'] = virtual_field
+                   virtual_filename = self.parser.construct_filename(**parsed)
+
+                   # Build plate-relative paths
+                   virtual_path = (Path(self.root_dir) / virtual_filename).as_posix()
+                   real_path = (Path(self.root_dir) / real_file).as_posix()
+                   workspace_mapping[virtual_path] = real_path
+
+           # Save to metadata
+           metadata_path = plate_path / "openhcs_metadata.json"
+           writer = AtomicMetadataWriter()
+           writer.merge_subdirectory_metadata(metadata_path, {
+               self.root_dir: {
+                   "workspace_mapping": workspace_mapping,
+                   "available_backends": {"disk": True, "virtual_workspace": True}
+               }
+           })
+
+           return image_dir
 
 This workspace preparation ensures pipelines always see a consistent flat structure regardless of the original microscope organization.
+
+Unified Image File Discovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+All microscope handlers use a unified approach to discover image files by reading from OpenHCS metadata:
+
+.. code-block:: python
+
+   class MetadataHandler(ABC):
+       def get_image_files(self, plate_path: Union[str, Path]) -> list[str]:
+           """Get list of image files from OpenHCS metadata.
+
+           Default implementation reads from openhcs_metadata.json after virtual workspace preparation.
+           Derives image list from workspace_mapping keys if available, otherwise from image_files list.
+           """
+           # Read from OpenHCS metadata (unified approach for all microscopes)
+           from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+           openhcs_handler = OpenHCSMetadataHandler(self.filemanager)
+
+           metadata = openhcs_handler._load_metadata_dict(plate_path)
+           subdirs = metadata.get("subdirectories", {})
+
+           # Find main subdirectory (marked with "main": true)
+           main_subdir_key = next((key for key, data in subdirs.items() if data.get("main")), None)
+           if not main_subdir_key:
+               main_subdir_key = next(iter(subdirs.keys()))
+
+           subdir_data = subdirs[main_subdir_key]
+
+           # Prefer workspace_mapping keys (virtual paths) if available
+           if workspace_mapping := subdir_data.get("workspace_mapping"):
+               return list(workspace_mapping.keys())
+
+           # Otherwise use image_files list
+           return subdir_data.get("image_files", [])
+
+**Key Design Points**:
+
+- **Single Source of Truth**: Metadata is authoritative, not filesystem
+- **No Filesystem Searching**: Eliminates defensive directory detection logic
+- **Unified API**: workspace_mapping keys and image_files use same format (subdirectory/filename)
+- **Fail-Loud**: No fallback logic - if metadata doesn't exist, return empty list
+
+**Image Path Format**:
+
+- **ImageXpress**: ``"A01_s001_w1_z001_t001.tif"`` (no prefix, root_dir is ``"."``)
+- **OperaPhenix**: ``"Images/remapped_file.tif"`` (includes ``Images/`` prefix, root_dir is ``"Images"``)
+- **Zarr**: ``"zarr/A01_s001_w1_z001_t001.tif"`` (includes ``zarr/`` prefix)
 
 Pattern Detection and File Discovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Handlers implement automatic pattern detection to identify image files and extract metadata:
+Handlers delegate pattern detection to the :class:`PatternDiscoveryEngine`, which uses the parser to identify and group image files:
 
 .. code-block:: python
 
    class MicroscopeHandler(ABC):
-       def auto_detect_patterns(self, input_dir: Path, well_id: str) -> List[ImagePattern]:
-           """Detect all image patterns for a specific well."""
-           patterns = []
+       def auto_detect_patterns(self, folder_path: Union[str, Path], filemanager: FileManager, backend: str,
+                               extensions=None, group_by=None, variable_components=None, **kwargs):
+           """Detect all image patterns in a folder.
 
-           # Use parser to identify files belonging to this well
-           for image_file in input_dir.glob("*.tif*"):
-               try:
-                   parsed = self.parser.parse_filename(image_file.name)
-                   if parsed.well == well_id:
-                       # Group by site and channel to create patterns
-                       pattern = ImagePattern(
-                           well=parsed.well,
-                           site=parsed.site,
-                           channel=parsed.channel,
-                           file_path=image_file
-                       )
-                       patterns.append(pattern)
-               except ValueError:
-                   # Skip files that don't match expected pattern
-                   continue
+           Args:
+               folder_path: Path to folder containing images
+               filemanager: FileManager instance for file operations
+               backend: Backend to use (e.g., 'disk', 'virtual_workspace')
+               extensions: Optional list of file extensions to include
+               group_by: GroupBy enum to group patterns by (e.g., GroupBy.CHANNEL)
+               variable_components: List of components that can vary (e.g., ['site', 'z_index'])
+               **kwargs: Dynamic filter parameters (e.g., well_filter=['A01', 'A02'])
 
-           return self._group_patterns_by_acquisition(patterns)
+           Returns:
+               Dict mapping well IDs to lists of pattern strings
+           """
+           from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
+           pattern_engine = PatternDiscoveryEngine(self.parser, filemanager)
 
-       def path_list_from_pattern(self, pattern: ImagePattern, input_dir: Path) -> List[Path]:
-           """Generate file paths matching a specific pattern."""
-           file_paths = []
+           return pattern_engine.auto_detect_patterns(
+               folder_path,
+               extensions=extensions,
+               group_by=group_by,
+               variable_components=variable_components,
+               backend=backend,
+               **kwargs
+           )
 
-           # Use parser to construct expected filenames
-           for site in pattern.sites:
-               for channel in pattern.channels:
-                   filename = self.parser.construct_filename(
-                       well=pattern.well,
-                       site=site,
-                       channel=channel
-                   )
-                   file_path = input_dir / filename
-                   if file_path.exists():
-                       file_paths.append(file_path)
+       def path_list_from_pattern(self, directory: Union[str, Path], pattern: str,
+                                 filemanager: FileManager, backend: str,
+                                 variable_components: Optional[List[str]] = None) -> List[str]:
+           """Generate file paths matching a specific pattern.
 
-           return file_paths
+           Args:
+               directory: Directory to search
+               pattern: Pattern string with optional {iii} placeholders
+               filemanager: FileManager instance for file operations
+               backend: Backend to use for file operations
+               variable_components: List of components that can vary
+
+           Returns:
+               List of matching filenames
+           """
+           from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
+           pattern_engine = PatternDiscoveryEngine(self.parser, filemanager)
+
+           return pattern_engine.path_list_from_pattern(
+               directory, pattern, backend=backend,
+               variable_components=variable_components
+           )
 
 This abstraction allows pipelines to discover images without knowing the underlying filename conventions or directory structures.
 
@@ -385,48 +528,51 @@ Integration with Pipeline System
 Handler Factory and Selection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-OpenHCS automatically selects the appropriate handler based on directory structure analysis:
+OpenHCS provides a factory function that creates the appropriate handler based on explicit type or automatic detection:
 
 .. code-block:: python
 
-   class MicroscopeHandlerFactory:
-       @staticmethod
-       def create_handler(input_dir: Path, microscope_type: Optional[str] = None) -> MicroscopeHandler:
-           """Create appropriate handler based on directory structure or explicit type."""
+   def create_microscope_handler(microscope_type: str = 'auto',
+                                 plate_folder: Optional[Union[str, Path]] = None,
+                                 filemanager: Optional[FileManager] = None,
+                                 pattern_format: Optional[str] = None,
+                                 allowed_auto_types: Optional[List[str]] = None) -> MicroscopeHandler:
+       """
+       Factory function to create a microscope handler.
 
-           if microscope_type:
-               # Explicit selection
-               return MicroscopeHandlerFactory._create_explicit_handler(microscope_type)
+       Enforces explicit dependency injection by requiring a FileManager instance.
 
-           # Automatic detection based on directory structure
-           if MicroscopeHandlerFactory._is_imagexpress_format(input_dir):
-               return ImageXpressHandler()
-           elif MicroscopeHandlerFactory._is_opera_phenix_format(input_dir):
-               return OperaPhenixHandler()
-           elif MicroscopeHandlerFactory._is_openhcs_format(input_dir):
-               return OpenHCSHandler()
-           else:
-               # Fallback to generic handler
-               return GenericHandler()
+       Args:
+           microscope_type: 'auto', 'imagexpress', 'opera_phenix', 'openhcs'
+           plate_folder: Required for 'auto' detection
+           filemanager: FileManager instance (required, no fallback)
+           pattern_format: Optional pattern format name
+           allowed_auto_types: For 'auto' mode, limit detection to these types
 
-       @staticmethod
-       def _is_imagexpress_format(input_dir: Path) -> bool:
-           """Detect ImageXpress format by looking for TimePoint directories and .HTD files."""
-           has_timepoint_dirs = any(input_dir.glob("TimePoint_*"))
-           has_htd_file = any(input_dir.glob("*.HTD"))
-           return has_timepoint_dirs or has_htd_file
+       Returns:
+           Initialized MicroscopeHandler instance
 
-       @staticmethod
-       def _is_opera_phenix_format(input_dir: Path) -> bool:
-           """Detect Opera Phenix format by looking for XML metadata and filename patterns."""
-           has_xml_metadata = any(input_dir.glob("*.xml"))
-           has_opera_filenames = any(input_dir.glob("*r??c??f??p??-ch*.tiff"))
-           return has_xml_metadata and has_opera_filenames
+       Raises:
+           ValueError: If filemanager is None or microscope_type cannot be determined
+       """
+       if filemanager is None:
+           raise ValueError("FileManager must be provided to create_microscope_handler")
 
-       @staticmethod
-       def _is_openhcs_format(input_dir: Path) -> bool:
-           """Detect OpenHCS format by looking for openhcsmetadata.json."""
-           return (input_dir / "openhcsmetadata.json").exists()
+       # Auto-detect microscope type if needed
+       if microscope_type == 'auto':
+           if not plate_folder:
+               raise ValueError("plate_folder is required for auto-detection")
+
+           microscope_type = _auto_detect_microscope_type(plate_folder, filemanager,
+                                                         allowed_types=allowed_auto_types)
+
+       # Get handler class from registry
+       handler_class = MICROSCOPE_HANDLERS.get(microscope_type.lower())
+       if not handler_class:
+           raise ValueError(f"Unsupported microscope type: {microscope_type}")
+
+       # Create and return handler
+       return handler_class(filemanager, pattern_format=pattern_format)
 
 FileManager Integration
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -616,13 +762,30 @@ Create a new handler class implementing the required abstract methods:
 .. code:: python
 
    class NewMicroscopeHandler(MicroscopeHandler):
-       @property
-       def parser(self) -> FilenameParser:
-           return NewMicroscopeParser()
+       _microscope_type = 'new_format'
+       _metadata_handler_class = None  # Set after class definition
+
+       def __init__(self, filemanager: FileManager, pattern_format: Optional[str] = None):
+           self.parser = NewMicroscopeParser(filemanager, pattern_format)
+           self.metadata_handler = NewMicroscopeMetadataHandler(filemanager)
+           super().__init__(parser=self.parser, metadata_handler=self.metadata_handler)
 
        @property
-       def metadata_handler(self) -> MetadataHandler:
-           return NewMicroscopeMetadataHandler()
+       def root_dir(self) -> str:
+           """Root directory for virtual workspace preparation."""
+           return "."  # or "Images" or other subdirectory
+
+       @property
+       def microscope_type(self) -> str:
+           return 'new_format'
+
+       @property
+       def metadata_handler_class(self) -> Type[MetadataHandler]:
+           return NewMicroscopeMetadataHandler
+
+       @property
+       def compatible_backends(self) -> List[Backend]:
+           return [Backend.DISK]  # or [Backend.ZARR, Backend.DISK]
 
 2. Define Format-Specific Logic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -666,6 +829,5 @@ See Also
 - :doc:`parser_metaprogramming_system` - Dynamic interface generation for filename parsers
 - :doc:`component_configuration_framework` - Generic component configuration system
 - :doc:`component_validation_system` - Component validation and constraint checking
-- :doc:`../api/microscope_handlers` - Complete microscope handler API reference
-- :doc:`../development/adding-microscope-formats` - Guide for adding new microscope formats
+- :doc:`../api/index` - API reference (autogenerated from source code)
 

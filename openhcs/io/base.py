@@ -8,6 +8,7 @@ that all storage backends must fulfill.
 """
 
 import logging
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
@@ -484,29 +485,94 @@ def _create_storage_registry() -> Dict[str, DataSink]:
     return create_storage_registry()
 
 
-# Global singleton storage registry - created lazily to avoid GPU imports in subprocess mode
+class _LazyStorageRegistry(dict):
+    """
+    Storage registry that auto-initializes on first access.
+
+    This maintains backward compatibility with existing code that
+    directly accesses storage_registry without calling ensure_storage_registry().
+    All read operations trigger lazy initialization, while write operations
+    (like OMERO backend registration) work without initialization.
+    """
+
+    def __getitem__(self, key):
+        ensure_storage_registry()
+        return super().__getitem__(key)
+
+    def __setitem__(self, key, value):
+        # Allow setting without initialization (for OMERO backend registration)
+        return super().__setitem__(key, value)
+
+    def __contains__(self, key):
+        ensure_storage_registry()
+        return super().__contains__(key)
+
+    def get(self, key, default=None):
+        ensure_storage_registry()
+        return super().get(key, default)
+
+    def keys(self):
+        ensure_storage_registry()
+        return super().keys()
+
+    def values(self):
+        ensure_storage_registry()
+        return super().values()
+
+    def items(self):
+        ensure_storage_registry()
+        return super().items()
+
+
+# Global singleton storage registry - created lazily on first access
 # This is the shared registry instance that all components should use
-import os
-if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-    # Subprocess runner mode - create minimal registry with only essential backends
-    storage_registry: Dict[str, DataSink] = {}
-    logger.info("Subprocess runner mode - storage registry will be created lazily")
-else:
-    # Normal mode - create full registry at import time
-    storage_registry: Dict[str, DataSink] = _create_storage_registry()
+storage_registry: Dict[str, DataSink] = _LazyStorageRegistry()
+_registry_initialized = False
+_registry_lock = threading.Lock()
 
 
 def ensure_storage_registry() -> None:
     """
     Ensure storage registry is initialized.
 
-    In subprocess runner mode, the registry is created lazily to avoid
-    importing GPU libraries during subprocess runner initialization.
+    Lazily creates the registry on first access to avoid importing
+    GPU-heavy backends during module import. This provides instant
+    imports while maintaining backward compatibility.
+
+    Thread-safe: Multiple threads can call this simultaneously.
     """
-    global storage_registry
-    if not storage_registry:
-        storage_registry.update(_create_storage_registry())
-        logger.info("Lazily created storage registry")
+    global _registry_initialized
+
+    # Double-checked locking pattern for thread safety
+    if not _registry_initialized:
+        with _registry_lock:
+            if not _registry_initialized:
+                storage_registry.update(_create_storage_registry())
+                _registry_initialized = True
+                logger.info("Lazily initialized storage registry")
+
+
+def get_backend(backend_type: str) -> DataSink:
+    """
+    Get a backend by type, ensuring registry is initialized.
+
+    Args:
+        backend_type: Backend type (e.g., 'disk', 'memory', 'zarr')
+
+    Returns:
+        Backend instance
+
+    Raises:
+        KeyError: If backend type not found
+    """
+    ensure_storage_registry()
+
+    backend_key = backend_type.lower()
+    if backend_key not in storage_registry:
+        raise KeyError(f"Backend '{backend_type}' not found. "
+                      f"Available: {list(storage_registry.keys())}")
+
+    return storage_registry[backend_key]
 
 
 def reset_memory_backend() -> None:

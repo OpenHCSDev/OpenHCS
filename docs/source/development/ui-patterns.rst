@@ -1,7 +1,7 @@
 UI Patterns
 ===========
 
-UI patterns and architectural approaches for OpenHCS framework-agnostic interfaces.
+UI patterns and architectural approaches for the OpenHCS PyQt6 GUI.
 
 .. contents:: Table of Contents
    :local:
@@ -10,11 +10,11 @@ UI patterns and architectural approaches for OpenHCS framework-agnostic interfac
 Overview
 --------
 
-The OpenHCS UI system uses key patterns for framework independence:
+The OpenHCS PyQt6 GUI uses key patterns for maintainability and extensibility:
 
 - **Functional Dispatch**: Type-based dispatch tables instead of if/elif chains
-- **Service Layer**: Framework-agnostic business logic extraction
-- **Utility Classes**: Shared components for cross-framework compatibility
+- **Service Layer**: Business logic extraction from UI code
+- **Widget Strategies**: Declarative widget-to-handler mapping
 - **Async Widget Creation**: Progressive widget instantiation for large forms
 
 Performance Optimizations
@@ -218,26 +218,31 @@ Complex scenarios use nested dispatch for different operation types:
 Functional Widget Value Extraction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Widget value operations use functional dispatch for framework independence:
+Widget value operations use functional dispatch in the actual codebase:
 
 .. code-block:: python
 
-    # Value extraction dispatch - works across PyQt6 and Textual
-    WIDGET_VALUE_STRATEGIES: Dict[Type, Callable] = {
-        QCheckBox: lambda w: w.isChecked(),
-        QComboBox: lambda w: w.itemData(w.currentIndex()),
-        QSpinBox: lambda w: w.value(),
-        QLineEdit: lambda w: w.text(),
-        # Textual widgets
-        Checkbox: lambda w: w.value,
-        Input: lambda w: w.value,
-        Select: lambda w: w.value,
-    }
+    # From openhcs/pyqt_gui/widgets/shared/parameter_form_manager.py
+    # Dispatch table for widget value updates
+    WIDGET_UPDATE_DISPATCH = [
+        (QComboBox, 'update_combo_box'),
+        ('get_selected_values', 'update_checkbox_group'),
+        ('set_value', lambda w, v: w.set_value(v)),  # Custom widgets
+        ('setValue', lambda w, v: w.setValue(v if v is not None else w.minimum())),
+        ('setText', lambda w, v: v is not None and w.setText(str(v)) or (v is None and w.clear())),
+        ('set_path', lambda w, v: w.set_path(v)),  # EnhancedPathWidget
+    ]
 
-    def get_widget_value(widget: Any) -> Any:
-        """Extract value using functional dispatch."""
-        strategy = WIDGET_VALUE_STRATEGIES.get(type(widget))
-        return strategy(widget) if strategy else None
+    def update_widget_value(widget: Any, value: Any):
+        """Update widget using functional dispatch."""
+        for condition, updater in WIDGET_UPDATE_DISPATCH:
+            if isinstance(condition, type) and isinstance(widget, condition):
+                # Type-based dispatch
+                break
+            elif hasattr(widget, condition):
+                # Attribute-based dispatch
+                updater(widget, value)
+                break
 
 Elimination of If/Elif Chains
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -393,34 +398,41 @@ Functional dispatch provides significant performance improvements:
 - **Memory usage**: Dispatch tables use ~40% less memory due to function reuse
 - **Code size**: 60-80% reduction in conditional logic
 
-Cross-Framework Dispatch Patterns
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+PyQt6 Widget Factory Pattern
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Dispatch patterns enable true framework independence:
+The actual widget factory uses type-based dispatch for PyQt6:
 
 .. code-block:: python
 
-    # Universal widget creation - works with PyQt6, Textual, and future frameworks
-    FRAMEWORK_WIDGET_FACTORIES = {
-        'pyqt6': {
-            bool: lambda: QCheckBox(),
-            int: lambda: NoScrollSpinBox(),
-            str: lambda: QLineEdit(),
-            Path: lambda: EnhancedPathWidget(),
-        },
-        'textual': {
-            bool: lambda: Checkbox(),
-            int: lambda: Input(type="integer"),
-            str: lambda: Input(type="text"),
-            Path: lambda: Input(type="text"),  # Textual doesn't have path widget
-        }
+    # From openhcs/pyqt_gui/widgets/shared/widget_strategies.py
+    # Functional configuration registry
+    CONFIGURATION_REGISTRY: Dict[Type, callable] = {
+        int: lambda widget: widget.setRange(NUMERIC_RANGE_MIN, NUMERIC_RANGE_MAX)
+            if hasattr(widget, 'setRange') else None,
+        float: lambda widget: (
+            widget.setRange(NUMERIC_RANGE_MIN, NUMERIC_RANGE_MAX),
+            widget.setDecimals(FLOAT_PRECISION)
+        )[-1] if hasattr(widget, 'setRange') else None,
     }
 
-    def create_widget_universal(param_type: Type, framework: str) -> Any:
-        """Create widget for any framework using dispatch."""
-        factories = FRAMEWORK_WIDGET_FACTORIES.get(framework, {})
-        factory = factories.get(param_type)
-        return factory() if factory else None
+    class MagicGuiWidgetFactory:
+        """OpenHCS widget factory using functional mapping dispatch."""
+
+        def create_widget(self, param_name: str, param_type: Type,
+                         current_value: Any, widget_id: str) -> Any:
+            """Create widget using functional registry dispatch."""
+            resolved_type = resolve_optional(param_type)
+
+            # Handle List[Enum] types - create multi-selection checkbox group
+            if is_list_of_enums(resolved_type):
+                return self._create_checkbox_group_widget(param_name, resolved_type, current_value)
+
+            # Functional configuration dispatch
+            configurator = CONFIGURATION_REGISTRY.get(resolved_type, lambda w: w)
+            configurator(widget)
+
+            return widget
 
 Maintainability Benefits
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -669,238 +681,125 @@ When to Apply These Patterns
 **Use Functional Dispatch When:**
 - You have 3+ different types that need different handling
 - You find yourself writing the same if/elif pattern repeatedly
-- You need to add new types frequently
+- You need to add new widget types frequently
 - Performance matters (dispatch is O(1) vs O(n) for if/elif)
+- You want to avoid defensive programming with hasattr checks
+
+**Use Service Layer When:**
+- Business logic is mixed with UI code
+- You're duplicating logic across different widgets
+- You want to unit test logic without UI dependencies
+- You need to reuse logic in multiple places
+
+**Use Widget Strategies When:**
+- You have multiple widget types with similar operations
+- You want to add new widget types without modifying existing code
+- You need consistent behavior across all widgets
 
 Complete Integration Example
 ---------------------------
 
-This example shows how all UI patterns work together in a real-world implementation.
+This example shows how all UI patterns work together in the actual PyQt6 implementation.
 
-Full-Stack UI Pattern Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+PyQt6 Parameter Form Integration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-    # Complete UI implementation using all patterns
-    class ModernParameterForm:
-        """Parameter form using all new UI patterns."""
+    # From openhcs/pyqt_gui/widgets/shared/parameter_form_manager.py
+    # Complete parameter form using all patterns
+    class ParameterFormManager(QWidget):
+        """PyQt6 parameter form manager with functional dispatch patterns."""
 
-        def __init__(self, framework: str = "pyqt6"):
-            self.framework = framework
+        def __init__(self, object_instance: Any, field_id: str, parent=None,
+                    context_obj=None, exclude_params=None):
+            super().__init__(parent)
 
             # Service layer for business logic
-            self.parameter_service = ParameterFormService()
+            self.service = ParameterFormService()
 
-            # Functional utilities
-            from openhcs.ui.shared.ui_utils import (
-                format_param_name, format_field_id, get_widget_value
-            )
-            self.utils = {
-                'format_name': format_param_name,
-                'format_id': format_field_id,
-                'get_value': get_widget_value
-            }
-
-            # Functional dispatch tables
-            self._setup_dispatch_tables()
-
-        def _setup_dispatch_tables(self):
-            """Setup all functional dispatch tables."""
-
-            # Widget creation dispatch
-            if self.framework == "pyqt6":
-                self.widget_factories = {
-                    bool: lambda: QCheckBox(),
-                    int: lambda: NoScrollSpinBox(),
-                    str: lambda: QLineEdit(),
-                    Path: lambda: EnhancedPathWidget(),
-                }
-            else:  # textual
-                self.widget_factories = {
-                    bool: lambda: Checkbox(),
-                    int: lambda: Input(type="integer"),
-                    str: lambda: Input(type="text"),
-                    Path: lambda: Input(type="text"),
-                }
-
-            # Value extraction dispatch
-            self.value_extractors = {
-                QCheckBox: lambda w: w.isChecked(),
-                QLineEdit: lambda w: w.text(),
-                NoScrollSpinBox: lambda w: w.value(),
-                # Textual widgets
-                Checkbox: lambda w: w.value,
-                Input: lambda w: w.value,
-            }
-
-            # Reset operation dispatch
-            self.reset_strategies = [
-                (lambda w: hasattr(w, 'setChecked'), lambda w, v: w.setChecked(bool(v))),
-                (lambda w: hasattr(w, 'setValue'), lambda w, v: w.setValue(v)),
-                (lambda w: hasattr(w, 'setText'), lambda w, v: w.setText(str(v))),
-            ]
-
-        def create_form(self, parameters: Dict[str, Type],
-                       current_values: Dict[str, Any]) -> Dict[str, Any]:
-            """Create complete form using all patterns."""
-
-            # 1. Service layer analysis
-            form_structure = self.parameter_service.analyze_parameters(
-                current_values, parameters, "main_form"
+            # Analyze form structure using service
+            parameter_info = getattr(self, '_parameter_descriptions', {})
+            self.form_structure = self.service.analyze_parameters(
+                self.parameters, self.parameter_types, field_id,
+                parameter_info, self.dataclass_type
             )
 
-            # 2. Functional dispatch for widget creation
-            widgets = {}
-            for param_info in form_structure.parameters:
-                widget = self._create_widget_functional(param_info)
-                widgets[param_info.name] = widget
+            # Widget factory using functional dispatch
+            self.widget_factory = MagicGuiWidgetFactory()
 
-            # 3. Cross-framework compatibility
-            configured_widgets = self._apply_cross_framework_config(widgets, parameters)
+            # Placeholder strategies (declarative mapping)
+            self.placeholder_strategies = WIDGET_PLACEHOLDER_STRATEGIES
 
-            # 4. Functional utilities for formatting
-            labeled_widgets = self._apply_functional_formatting(configured_widgets)
+        def _create_widgets(self):
+            """Create widgets using functional dispatch."""
+            for param_info in self.form_structure.parameters:
+                # Functional dispatch for widget creation
+                widget = self.widget_factory.create_widget(
+                    param_info.name,
+                    param_info.param_type,
+                    param_info.default_value,
+                    param_info.widget_id
+                )
 
-            return {
-                'widgets': labeled_widgets,
-                'form_structure': form_structure,
-                'framework': self.framework
-            }
+                # Apply placeholder using declarative strategy mapping
+                if param_info.placeholder_text:
+                    PyQt6WidgetEnhancer.apply_placeholder_text(
+                        widget, param_info.placeholder_text
+                    )
 
-        def _create_widget_functional(self, param_info: ParameterInfo) -> Any:
-            """Create widget using functional dispatch."""
-            factory = self.widget_factories.get(param_info.param_type)
-            if factory:
-                widget = factory()
-                # Set initial value using dispatch
-                self._set_widget_value_functional(widget, param_info.default_value)
-                return widget
+                self.widgets[param_info.name] = widget
 
-            # Fallback for unknown types
-            return self.widget_factories[str]()
-
-        def _set_widget_value_functional(self, widget: Any, value: Any):
-            """Set widget value using functional dispatch."""
-            for condition, setter in self.reset_strategies:
-                if condition(widget):
-                    setter(widget, value)
+        def _update_widget_value(self, widget: Any, value: Any):
+            """Update widget using functional dispatch."""
+            # Use WIDGET_UPDATE_DISPATCH for type-based and attribute-based dispatch
+            for condition, updater in WIDGET_UPDATE_DISPATCH:
+                if isinstance(condition, type) and isinstance(widget, condition):
                     break
-
-        def _apply_cross_framework_config(self, widgets: Dict[str, Any],
-                                        parameters: Dict[str, Type]) -> Dict[str, Any]:
-            """Apply framework-specific configuration."""
-
-            # Configuration dispatch table
-            config_dispatch = {
-                int: self._configure_numeric_widget,
-                float: self._configure_float_widget,
-                str: self._configure_text_widget,
-            }
-
-            for param_name, widget in widgets.items():
-                param_type = parameters[param_name]
-                configurator = config_dispatch.get(param_type)
-                if configurator:
-                    configurator(widget)
-
-            return widgets
-
-        def _configure_numeric_widget(self, widget: Any):
-            """Configure numeric widget using attribute dispatch."""
-            if hasattr(widget, 'setRange'):
-                widget.setRange(-999999, 999999)
-            if hasattr(widget, 'range'):  # Textual
-                widget.range = (-999999, 999999)
-
-        def _configure_float_widget(self, widget: Any):
-            """Configure float widget using attribute dispatch."""
-            self._configure_numeric_widget(widget)
-            if hasattr(widget, 'setDecimals'):
-                widget.setDecimals(6)
-
-        def _configure_text_widget(self, widget: Any):
-            """Configure text widget using attribute dispatch."""
-            if hasattr(widget, 'setPlaceholderText'):
-                widget.setPlaceholderText("Enter text...")
-            if hasattr(widget, 'placeholder'):  # Textual
-                widget.placeholder = "Enter text..."
-
-        def _apply_functional_formatting(self, widgets: Dict[str, Any]) -> Dict[str, Any]:
-            """Apply functional utilities for consistent formatting."""
-            formatted = {}
-
-            for param_name, widget in widgets.items():
-                # Use functional utilities
-                display_name = self.utils['format_name'](param_name)
-                widget_id = self.utils['format_id']("form", param_name)
-
-                # Set widget properties
-                if hasattr(widget, 'setObjectName'):
-                    widget.setObjectName(widget_id)
-                if hasattr(widget, 'id'):  # Textual
-                    widget.id = widget_id
-
-                formatted[param_name] = {
-                    'widget': widget,
-                    'label': display_name,
-                    'id': widget_id
-                }
-
-            return formatted
-
-        def get_form_values(self, widgets: Dict[str, Any]) -> Dict[str, Any]:
-            """Extract form values using functional dispatch."""
-            values = {}
-
-            for param_name, widget_info in widgets.items():
-                widget = widget_info['widget']
-
-                # Use functional dispatch for value extraction
-                extractor = self.value_extractors.get(type(widget))
-                if extractor:
-                    values[param_name] = extractor(widget)
-                else:
-                    # Fallback using functional utility
-                    values[param_name] = self.utils['get_value'](widget)
-
-            return values
+                elif hasattr(widget, condition):
+                    updater(widget, value)
+                    break
 
 Pattern Integration Benefits
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This comprehensive example demonstrates:
+The actual PyQt6 implementation demonstrates:
 
-1. **Service Layer** - Framework-agnostic business logic
-2. **Functional Dispatch** - Type-based widget operations
-3. **Cross-Framework Compatibility** - Same code works with PyQt6 and Textual
-4. **Functional Utilities** - Consistent formatting and operations
-5. **Attribute-Based Dispatch** - Flexible widget configuration
-6. **Performance Optimization** - O(1) dispatch vs O(n) conditionals
+1. **Service Layer** - Business logic separated from UI code
+   - ``ParameterFormService`` analyzes parameters independently
+   - Services can be tested without UI dependencies
 
-**Result**: A parameter form system that works across frameworks, uses functional patterns throughout, and integrates all new architectural concepts seamlessly.
+2. **Functional Dispatch** - Type-based and attribute-based dispatch
+   - ``WIDGET_UPDATE_DISPATCH`` handles multiple widget types
+   - ``CONFIGURATION_REGISTRY`` applies type-specific configuration
+   - ``WIDGET_PLACEHOLDER_STRATEGIES`` maps widget types to placeholder handlers
+
+3. **Widget Strategies** - Declarative widget-to-handler mapping
+   - ``MagicGuiWidgetFactory`` creates widgets using dispatch
+   - ``PyQt6WidgetEnhancer`` applies enhancements using dispatch
+   - New widget types added by extending registries, not modifying code
+
+4. **Performance Optimization** - O(1) dispatch vs O(n) conditionals
+   - Dictionary lookups instead of if/elif chains
+   - Attribute-based fallback for custom widgets
+
+**Result**: A maintainable parameter form system that scales to new widget types without modifying existing code.
 
 See Also
 --------
 
-- :doc:`../architecture/step-editor-generalization` - Step editors that use functional dispatch
-- :doc:`../architecture/service-layer-architecture` - Service layer patterns for UI development
-- :doc:`../architecture/field-path-detection` - Type introspection that enables dispatch patterns
+- :doc:`../architecture/code_ui_interconversion` - Code/UI bidirectional editing system
+- :doc:`../architecture/tui_system` - TUI system architecture (legacy)
+- :doc:`../guides/viewer_management` - Viewer management and streaming
 
-**Use Service Layer When:**
-- You have multiple UI frameworks or might add more
-- Business logic is mixed with presentation code
-- You're duplicating logic across different parts of the system
-- You want to unit test business logic without UI dependencies
+**Implementation References:**
 
-**Use Utility Classes When:**
-- You have related functions scattered across multiple files
-- The same formatting/conversion logic appears in multiple places
-- You need consistent behavior across different frameworks
-- You want to eliminate magic strings and hardcoded values
+- ``openhcs/pyqt_gui/widgets/shared/widget_strategies.py`` - Actual dispatch tables and widget factory
+- ``openhcs/pyqt_gui/widgets/shared/parameter_form_manager.py`` - ParameterFormManager implementation
+- ``openhcs/pyqt_gui/services/service_adapter.py`` - Service layer adapter for PyQt6
 
 **Signs You Need These Patterns:**
-- Copy-pasting code between UI implementations
+- Copy-pasting code between widget implementations
 - Bugs that require fixes in multiple places
 - Difficulty testing business logic
 - Long if/elif chains for type checking

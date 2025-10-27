@@ -15,36 +15,146 @@ The experimental analysis system handles the complete workflow from experimental
 
 ## Architecture Components
 
-### Core Modules
+### Modern Registry-Based Architecture
+
+The experimental analysis system uses a registry pattern to eliminate code duplication and provide a unified interface for multiple microscope formats.
+
+**openhcs.processing.backends.experimental_analysis.unified_analysis_engine**
+  Main entry point - ``ExperimentalAnalysisEngine`` class provides unified analysis with automatic format detection
+
+**openhcs.processing.backends.experimental_analysis.format_registry_service**
+  ``FormatRegistryService`` - automatic discovery and management of format handlers
+
+**openhcs.processing.backends.experimental_analysis.format_registry**
+  ``MicroscopeFormatRegistryBase`` - abstract base class defining the registry interface
+
+**openhcs.processing.backends.experimental_analysis.cx5_registry**
+  ``CX5FormatRegistry`` - ThermoFisher CX5 format implementation
+
+**openhcs.processing.backends.experimental_analysis.metaxpress_registry**
+  ``MetaXpressFormatRegistry`` - Molecular Devices MetaXpress format implementation
+
+### Legacy Modules (Deprecated)
 
 **openhcs.formats.experimental_analysis**
-  Primary analysis pipeline with comprehensive experimental design support
+  Legacy analysis functions - use ``ExperimentalAnalysisEngine`` for new code
 
 **openhcs.formats.metaxpress**
-  MetaXpress format compatibility and legacy analysis support
+  Legacy MetaXpress support - integrated into registry system
 
-**openhcs.processing.backends.analysis.cx5_format**
-  ThermoFisher CX5 format support and analysis functions
+### Registry System Architecture
 
-### Configuration System
+The experimental analysis system uses a registry pattern to handle multiple microscope formats through a unified interface.
+
+#### ExperimentalAnalysisEngine
+
+The main entry point for experimental analysis:
+
+.. code-block:: python
+
+   from openhcs.processing.backends.experimental_analysis import ExperimentalAnalysisEngine
+   from openhcs.core.config import ExperimentalAnalysisConfig
+
+   # Create configuration
+   config = ExperimentalAnalysisConfig(
+       normalization_method=NormalizationMethod.FOLD_CHANGE,
+       export_heatmaps=True,
+       auto_detect_format=True
+   )
+
+   # Initialize engine
+   engine = ExperimentalAnalysisEngine(config)
+
+   # Run analysis with automatic format detection
+   results = engine.run_analysis(
+       results_path="microscope_results.xlsx",
+       config_file="config.xlsx",
+       compiled_results_path="compiled_results.xlsx",
+       heatmap_path="heatmaps.xlsx"
+   )
+
+**Key Features**:
+- Automatic microscope format detection
+- Configuration-driven processing
+- Unified interface for all formats
+- Eliminates format-specific code duplication
+
+#### FormatRegistryService
+
+Automatic discovery and management of format handlers:
+
+.. code-block:: python
+
+   from openhcs.processing.backends.experimental_analysis import FormatRegistryService
+
+   # Get all available formats
+   registries = FormatRegistryService.get_all_format_registries()
+   # Returns: {'EDDU_CX5': CX5FormatRegistry, 'EDDU_metaxpress': MetaXpressFormatRegistry}
+
+   # Get specific format handler
+   cx5_registry = FormatRegistryService.get_registry_instance_for_format('EDDU_CX5')
+
+   # Automatic format detection from file
+   format_name = FormatRegistryService.detect_format_from_file('results.xlsx')
+
+**Discovery Mechanism**:
+- Uses ``pkgutil.walk_packages`` to find all registry implementations
+- No hardcoded imports required
+- Automatically registers new format handlers
+- Caches registry instances for performance
+
+#### MicroscopeFormatRegistryBase
+
+Abstract base class defining the registry interface:
+
+.. code-block:: python
+
+   class MicroscopeFormatRegistryBase(ABC):
+       FORMAT_NAME: str
+       SHEET_NAME: Optional[str]
+       SUPPORTED_EXTENSIONS: Tuple[str, ...]
+
+       @abstractmethod
+       def extract_features(self, raw_df: pd.DataFrame) -> List[str]:
+           """Extract feature column names from raw data."""
+
+       @abstractmethod
+       def extract_plate_names(self, raw_df: pd.DataFrame) -> List[str]:
+           """Extract plate identifiers from raw data."""
+
+       @abstractmethod
+       def create_plates_dict(self, raw_df: pd.DataFrame) -> Dict:
+           """Create nested dictionary structure for plate data."""
+
+       def process_data(self, results_path: str) -> Dict:
+           """Complete data processing pipeline."""
+
+**Registry Pattern Benefits**:
+- Single interface for all formats
+- Format-specific logic isolated in subclasses
+- Easy to add new formats
+- Testable and maintainable
+
+### Excel Configuration Files
 
 The system uses Excel-based configuration files with a structured format:
 
 .. code-block:: python
 
-   def read_plate_layout(config_path):
+   def read_plate_layout(config_path, design_sheet_name='drug_curve_map'):
        """Parse experimental configuration from Excel file."""
        xls = pd.ExcelFile(config_path)
-       df = pd.read_excel(xls, 'drug_curve_map', index_col=0, header=None)
-       
+       # Sheet name is configurable via ExperimentalAnalysisConfig.design_sheet_name
+       df = pd.read_excel(xls, design_sheet_name, index_col=0, header=None)
+
        # Parse global parameters
        N = None          # Number of biological replicates
        scope = None      # Microscope format (EDDU_CX5, EDDU_metaxpress)
-       
+
        # Parse experimental conditions
        conditions = []   # List of experimental conditions
        layout = {}       # Condition-to-wells mapping
-       
+
        # Parse control definitions
        ctrl_positions = None  # Control well positions for normalization
 
@@ -52,7 +162,7 @@ The system uses Excel-based configuration files with a structured format:
 - **Global parameters**: N (replicates), Scope (microscope format)
 - **Control definitions**: Control wells for normalization
 - **Condition blocks**: Experimental conditions with dose-response mapping
-- **Plate groups**: Biological replicate to physical plate mapping
+- **Plate groups**: Biological replicate to physical plate mapping (configurable via ``plate_groups_sheet_name``)
 
 ### Data Processing Pipeline
 
@@ -191,10 +301,10 @@ The system supports control-based normalization for plate-to-plate variation cor
                    )
                    experiment_dict_values[condition][replicate][dose] = normalized_values
 
-**Normalization Methods**:
-- **Z-score normalization**: ``(value - control_mean) / control_std``
-- **Percent of control**: ``(value / control_mean) * 100``
-- **Fold change**: ``value / control_mean``
+**Normalization Methods** (configured via :class:`~openhcs.core.config.NormalizationMethod`):
+- **FOLD_CHANGE**: ``value / control_mean`` (default)
+- **Z_SCORE**: ``(value - control_mean) / control_std``
+- **PERCENT_CONTROL**: ``(value / control_mean) * 100``
 
 ### Feature Extraction System
 
@@ -281,14 +391,53 @@ The experimental analysis system can be configured through the global configurat
 
 .. code-block:: python
 
+   from enum import Enum
+   from dataclasses import dataclass
+   from typing import Optional
+
+   class NormalizationMethod(Enum):
+       """Normalization methods for experimental analysis."""
+       FOLD_CHANGE = "fold_change"      # value / control_mean
+       Z_SCORE = "z_score"              # (value - control_mean) / control_std
+       PERCENT_CONTROL = "percent_control"  # (value / control_mean) * 100
+
+   class MicroscopeFormat(Enum):
+       """Supported microscope formats for experimental analysis."""
+       EDDU_CX5 = "EDDU_CX5"                # ThermoFisher CX5 format
+       EDDU_METAXPRESS = "EDDU_metaxpress"  # Molecular Devices MetaXpress format
+
    @dataclass(frozen=True)
    class ExperimentalAnalysisConfig:
        """Configuration for experimental analysis system."""
-       enabled: bool = True
-       config_file: str = "config.xlsx"
-       normalization_method: str = "z_score"  # z_score, percent_control, fold_change
+       config_file_name: str = "config.xlsx"
+       """Name of the experimental configuration Excel file."""
+
+       design_sheet_name: str = "drug_curve_map"
+       """Name of the sheet containing experimental design."""
+
+       plate_groups_sheet_name: str = "plate_groups"
+       """Name of the sheet containing plate group mappings."""
+
+       normalization_method: NormalizationMethod = NormalizationMethod.FOLD_CHANGE
+       """Normalization method for control-based normalization."""
+
+       export_raw_results: bool = True
+       """Whether to export raw (non-normalized) results."""
+
        export_heatmaps: bool = True
-       statistical_tests: bool = True
+       """Whether to generate heatmap visualizations."""
+
+       auto_detect_format: bool = True
+       """Whether to automatically detect microscope format."""
+
+       default_format: Optional[MicroscopeFormat] = None
+       """Default format to use if auto-detection fails."""
+
+**Configuration Features**:
+- **Enum-based type safety**: Normalization methods and formats use enums to prevent invalid values
+- **Configurable sheet names**: Excel sheet names can be customized for different workflows
+- **Automatic format detection**: System can detect CX5 vs MetaXpress automatically
+- **Flexible export options**: Control which outputs are generated
 
 ## Performance Characteristics
 

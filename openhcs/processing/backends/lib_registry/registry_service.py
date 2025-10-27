@@ -5,11 +5,9 @@ Provides unified access to all registry implementations with automatic discovery
 Follows OpenHCS generic solution principle - automatically adapts to new registries.
 """
 
-import pkgutil
-import importlib
-import inspect
 import logging
 from typing import Dict, List, Optional
+from openhcs.core.registry_discovery import discover_registry_classes
 from .unified_registry import LibraryRegistryBase, FunctionMetadata
 
 logger = logging.getLogger(__name__)
@@ -69,36 +67,15 @@ class RegistryService:
     
     @classmethod
     def _discover_registries(cls) -> List[type]:
-        """Automatically discover all registry implementations."""
-        registry_classes = []
-        
-        # Scan lib_registry package for modules
+        """Automatically discover all registry implementations using generic discovery."""
         import openhcs.processing.backends.lib_registry as registry_package
-        registry_path = registry_package.__path__
-        registry_prefix = registry_package.__name__ + "."
-        
-        for importer, module_name, ispkg in pkgutil.iter_modules(registry_path, registry_prefix):
-            # Skip unified_registry (contains base classes)
-            if module_name.endswith('.unified_registry'):
-                continue
-                
-            try:
-                module = importlib.import_module(module_name)
-                
-                # Find registry classes in module
-                for name, obj in inspect.getmembers(module, inspect.isclass):
-                    if (issubclass(obj, LibraryRegistryBase) and 
-                        obj is not LibraryRegistryBase and
-                        obj.__module__ == module_name):
-                        
-                        registry_classes.append(obj)
-                        
-            except Exception as e:
-                logger.warning(f"Failed to load registry module {module_name}: {e}")
-                continue
-        
-        logger.info(f"Discovered {len(registry_classes)} registry implementations")
-        return registry_classes
+
+        return discover_registry_classes(
+            package_path=registry_package.__path__,
+            package_prefix=registry_package.__name__ + ".",
+            base_class=LibraryRegistryBase,
+            exclude_modules={'unified_registry'}
+        )
     
     @classmethod
     def clear_metadata_cache(cls) -> None:

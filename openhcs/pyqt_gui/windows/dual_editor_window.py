@@ -582,8 +582,5 @@ class DualEditorWindow(BaseFormDialog):
 
         super().closeEvent(event)  # BaseFormDialog handles unregistration
 
-    def _get_form_managers(self):
-        """Return list of form managers to unregister (required by BaseFormDialog)."""
-        if hasattr(self, 'step_editor') and hasattr(self.step_editor, 'form_manager'):
-            return [self.step_editor.form_manager]
-        return []
+    # No need to override _get_form_managers() - BaseFormDialog automatically
+    # discovers all ParameterFormManager instances recursively in the widget tree

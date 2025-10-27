@@ -136,13 +136,13 @@ class ExperimentalAnalysisEngine:
     def _determine_format(self, results_path: str) -> str:
         """
         Determine microscope format for results file.
-        
+
         Args:
             results_path: Path to results file
-            
+
         Returns:
             Format name
-            
+
         Raises:
             FormatDetectionError: If format cannot be determined
         """
@@ -151,10 +151,10 @@ class ExperimentalAnalysisEngine:
                 return self.format_service.detect_format_from_file(results_path)
             except FormatDetectionError:
                 if self.config.default_format:
-                    return self.config.default_format
+                    return self.config.default_format.value
                 raise
         elif self.config.default_format:
-            return self.config.default_format
+            return self.config.default_format.value
         else:
             raise FormatDetectionError(
                 "Auto-detection disabled and no default format specified"

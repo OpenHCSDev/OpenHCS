@@ -107,13 +107,13 @@ Manages the lifecycle of Napari viewer processes, including spawning, connection
    # Start persistent viewer
    visualizer = NapariStreamVisualizer(
        filemanager,
-       viewer_title="OpenHCS Pipeline Visualization"
+       visualizer_config,  # Configuration for streaming behavior
+       viewer_title="OpenHCS Pipeline Visualization",
+       persistent=True,
+       napari_port=5555,
+       replace_layers=False
    )
    visualizer.start_viewer(async_mode=True)  # Non-blocking startup
-   
-   # Reuse existing viewer
-   if visualizer._try_connect_to_existing_viewer(port=5555):
-       print("Connected to existing viewer")
 
 Viewer Process
 ~~~~~~~~~~~~~~
@@ -320,6 +320,6 @@ See Also
 
 - :doc:`napari_streaming_system` - Materialization-aware streaming
 - :doc:`zmq_execution_system` - ZMQ execution pattern
-- :doc:`../guides/napari_viewer_management` - Viewer management guide
+- :doc:`../guides/viewer_management` - Viewer management guide
 - :doc:`../user_guide/real_time_visualization` - Real-time visualization guide
 
