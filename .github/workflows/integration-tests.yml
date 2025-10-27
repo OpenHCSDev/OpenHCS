@@ -81,6 +81,31 @@ jobs:
         run: |
           python -m pytest tests/integration/ --it-backends disk --it-microscopes ImageXpress --it-dims 3d --it-exec-mode multiprocessing --it-zmq-mode zmq --it-visualizers none -v --tb=short
 
+      - name: Show ZMQ server logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== ZMQ Server Logs ==="
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            LOG_DIR="$USERPROFILE/.local/share/openhcs/logs"
+          else
+            LOG_DIR="$HOME/.local/share/openhcs/logs"
+          fi
+          if [ -d "$LOG_DIR" ]; then
+            echo "Log directory: $LOG_DIR"
+            ls -la "$LOG_DIR" || dir "$LOG_DIR"
+            echo ""
+            for log in "$LOG_DIR"/openhcs_zmq_server_*.log; do
+              if [ -f "$log" ]; then
+                echo "=== $log ==="
+                cat "$log"
+                echo ""
+              fi
+            done
+          else
+            echo "Log directory not found: $LOG_DIR"
+          fi
+
   # Group 2: Backend and microscope coverage (12 jobs)
   # Test all backend/microscope combinations on all 3 OSes with Python 3.12
   backend-microscope-tests:
@@ -112,6 +137,31 @@ jobs:
           OPENHCS_CPU_ONLY: true
         run: |
           python -m pytest tests/integration/ --it-backends ${{ matrix.backend }} --it-microscopes ${{ matrix.microscope }} --it-dims 3d --it-exec-mode multiprocessing --it-zmq-mode zmq --it-visualizers none -v --tb=short
+
+      - name: Show ZMQ server logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== ZMQ Server Logs ==="
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            LOG_DIR="$USERPROFILE/.local/share/openhcs/logs"
+          else
+            LOG_DIR="$HOME/.local/share/openhcs/logs"
+          fi
+          if [ -d "$LOG_DIR" ]; then
+            echo "Log directory: $LOG_DIR"
+            ls -la "$LOG_DIR" || dir "$LOG_DIR"
+            echo ""
+            for log in "$LOG_DIR"/openhcs_zmq_server_*.log; do
+              if [ -f "$log" ]; then
+                echo "=== $log ==="
+                cat "$log"
+                echo ""
+              fi
+            done
+          else
+            echo "Log directory not found: $LOG_DIR"
+          fi
 
   # Group 3: OMERO testing on Linux (2 jobs)
   # Test OMERO on Linux with Python 3.11 and 3.12
