@@ -346,11 +346,11 @@ _FRAMEWORK_CONFIG = {
         'gpu_check': '{mod} is not None and {mod}.config.list_physical_devices("GPU")',
         'stream_context': None,  # TensorFlow manages streams internally
         'device_context': '{mod}.device("/GPU:0")',
-        'cleanup_ops': 'import gc; gc.collect()',
+        'cleanup_ops': None,  # TensorFlow has no explicit cache clearing API
         'has_oom_recovery': True,
         'oom_exception_types': ['{mod}.errors.ResourceExhaustedError', '{mod}.errors.InvalidArgumentError'],
         'oom_string_patterns': ['out of memory', 'resource_exhausted'],
-        'oom_clear_cache': 'import gc; gc.collect()',
+        'oom_clear_cache': None,  # TensorFlow has no explicit cache clearing API
     },
 
     MemoryType.JAX: {
@@ -400,11 +400,11 @@ _FRAMEWORK_CONFIG = {
         'gpu_check': '{mod} is not None and any(d.platform == "gpu" for d in {mod}.devices())',
         'stream_context': None,  # JAX/XLA manages streams internally
         'device_context': '{mod}.default_device([d for d in {mod}.devices() if d.platform == "gpu"][0])',
-        'cleanup_ops': 'import gc; gc.collect(); {mod}.clear_caches()',
+        'cleanup_ops': '{mod}.clear_caches()',
         'has_oom_recovery': True,
         'oom_exception_types': [],
         'oom_string_patterns': ['out of memory', 'oom when allocating', 'allocation failure'],
-        'oom_clear_cache': 'import gc; gc.collect(); {mod}.clear_caches()',
+        'oom_clear_cache': '{mod}.clear_caches()',
     },
 
     MemoryType.PYCLESPERANTO: {
@@ -446,11 +446,11 @@ _FRAMEWORK_CONFIG = {
         'gpu_check': None,  # pyclesperanto always uses GPU if available
         'stream_context': None,  # OpenCL manages streams internally
         'device_context': None,  # OpenCL device selection is global
-        'cleanup_ops': 'import gc; gc.collect()',
+        'cleanup_ops': None,  # pyclesperanto/OpenCL has no explicit cache clearing API
         'has_oom_recovery': True,
         'oom_exception_types': [],
         'oom_string_patterns': ['cl_mem_object_allocation_failure', 'cl_out_of_resources', 'out of memory'],
-        'oom_clear_cache': 'import gc; gc.collect()',
+        'oom_clear_cache': None,  # pyclesperanto/OpenCL has no explicit cache clearing API
     },
 }
 

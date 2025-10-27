@@ -542,6 +542,15 @@ class ZMQServerManagerWidget(QWidget):
                         # All images processed
                         info_text = f"✅ Processed {total} images"
 
+                # If no processing info, show memory usage
+                if not info_text:
+                    mem_mb = server.get('memory_mb')
+                    cpu_percent = server.get('cpu_percent')
+                    if mem_mb is not None:
+                        info_text = f"Mem: {mem_mb:.0f}MB"
+                        if cpu_percent is not None:
+                            info_text += f" | CPU: {cpu_percent:.1f}%"
+
                 item = QTreeWidgetItem([display_text, status_text, info_text])
                 item.setData(0, Qt.ItemDataRole.UserRole, server)
                 self.server_tree.addTopLevelItem(item)

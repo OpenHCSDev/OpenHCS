@@ -189,7 +189,10 @@ class StreamingBackend(DataSink):
         """
         Clean up shared memory and ZeroMQ resources (common for all streaming backends).
         """
+        logger.info(f"🔥 CLEANUP: Starting cleanup for {self.VIEWER_TYPE}")
+
         # Clean up shared memory blocks
+        logger.info(f"🔥 CLEANUP: About to clean {len(self._shared_memory_blocks)} shared memory blocks")
         for shm_name, shm in self._shared_memory_blocks.items():
             try:
                 shm.close()
@@ -197,21 +200,28 @@ class StreamingBackend(DataSink):
             except Exception as e:
                 logger.warning(f"Failed to cleanup shared memory {shm_name}: {e}")
         self._shared_memory_blocks.clear()
+        logger.info(f"🔥 CLEANUP: Shared memory cleanup complete")
 
         # Close publishers
+        logger.info(f"🔥 CLEANUP: About to close {len(self._publishers)} publishers")
         for key, publisher in self._publishers.items():
             try:
+                logger.info(f"🔥 CLEANUP: Closing publisher {key}")
                 publisher.close()
+                logger.info(f"🔥 CLEANUP: Publisher {key} closed")
             except Exception as e:
                 logger.warning(f"Failed to close publisher {key}: {e}")
         self._publishers.clear()
+        logger.info(f"🔥 CLEANUP: Publishers cleanup complete")
 
         # Terminate context
         if self._context:
             try:
+                logger.info(f"🔥 CLEANUP: About to terminate ZMQ context")
                 self._context.term()
+                logger.info(f"🔥 CLEANUP: ZMQ context terminated")
             except Exception as e:
                 logger.warning(f"Failed to terminate ZMQ context: {e}")
             self._context = None
 
-        logger.debug(f"{self.VIEWER_TYPE} streaming backend cleaned up")
+        logger.info(f"🔥 CLEANUP: {self.VIEWER_TYPE} streaming backend cleaned up")

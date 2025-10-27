@@ -51,8 +51,7 @@ class PipelineEditorWidget(ButtonListWidget):
             ButtonConfig("Add", "add_step", disabled=True),
             ButtonConfig("Del", "del_step", disabled=True),
             ButtonConfig("Edit", "edit_step", disabled=True),
-            ButtonConfig("Load", "load_pipeline", disabled=True),
-            ButtonConfig("Save", "save_pipeline", disabled=True),
+            ButtonConfig("Auto", "auto_load_pipeline", disabled=True),
             ButtonConfig("Code", "code_pipeline", disabled=True),
         ]
 
@@ -106,10 +105,8 @@ class PipelineEditorWidget(ButtonListWidget):
             self.action_delete_step()
         elif button_id == "edit_step":
             await self.action_edit_step()
-        elif button_id == "load_pipeline":
-            await self.action_load_pipeline()
-        elif button_id == "save_pipeline":
-            await self.action_save_pipeline()
+        elif button_id == "auto_load_pipeline":
+            await self.action_auto_load_pipeline()
         elif button_id == "code_pipeline":
             await self.action_code_pipeline()
 
@@ -163,8 +160,7 @@ class PipelineEditorWidget(ButtonListWidget):
             self.query_one("#add_step").disabled = not (has_plate and is_initialized)
             self.query_one("#del_step").disabled = not has_selection
             self.query_one("#edit_step").disabled = not (len(selected_values) == 1)  # Edit requires exactly one selection
-            self.query_one("#load_pipeline").disabled = not (has_plate and is_initialized)
-            self.query_one("#save_pipeline").disabled = not has_steps
+            self.query_one("#auto_load_pipeline").disabled = not (has_plate and is_initialized)
             self.query_one("#code_pipeline").disabled = not (has_plate and is_initialized)  # Same as add button
 
         except Exception:
@@ -489,7 +485,44 @@ class PipelineEditorWidget(ButtonListWidget):
             window = DualEditorWindow(step_data=edit_step, is_new=False, on_save_callback=handle_result)
             await self.app.mount(window)
             window.open_state = True
-    
+
+    async def action_auto_load_pipeline(self) -> None:
+        """Handle Auto button - load basic_pipeline.py automatically."""
+        if not self.current_plate:
+            self.app.current_status = "No plate selected"
+            return
+
+        try:
+            from pathlib import Path
+
+            # Hardcoded path to basic_pipeline.py
+            pipeline_file = Path("/home/ts/code/projects/openhcs/openhcs/tests/basic_pipeline.py")
+
+            if not pipeline_file.exists():
+                self.app.current_status = f"Pipeline file not found: {pipeline_file}"
+                return
+
+            # Read the file content
+            python_code = pipeline_file.read_text()
+
+            # Execute the code to get pipeline_steps (same as code editor logic)
+            namespace = {}
+            exec(python_code, namespace)
+
+            # Get the pipeline_steps from the namespace
+            if 'pipeline_steps' in namespace:
+                new_pipeline_steps = namespace['pipeline_steps']
+                # Update the pipeline with new steps
+                self.pipeline_steps = new_pipeline_steps
+                self.update_step_list()
+                self.app.current_status = f"Auto-loaded {len(new_pipeline_steps)} steps from basic_pipeline.py"
+            else:
+                raise ValueError("No 'pipeline_steps = [...]' assignment found in basic_pipeline.py")
+
+        except Exception as e:
+            logger.error(f"Failed to auto-load basic_pipeline.py: {e}")
+            self.app.current_status = f"Failed to auto-load pipeline: {str(e)}"
+
     async def action_load_pipeline(self) -> None:
         """Handle Load Pipeline button - load pipeline from file."""
 

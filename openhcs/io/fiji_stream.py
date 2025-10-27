@@ -175,4 +175,8 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
     def __del__(self):
         """Cleanup on deletion."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("🔥 FIJI __del__ called, about to call cleanup()")
         self.cleanup()
+        logger.info("🔥 FIJI __del__ cleanup() returned")

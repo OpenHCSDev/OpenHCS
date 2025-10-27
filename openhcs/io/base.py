@@ -528,7 +528,9 @@ class _LazyStorageRegistry(dict):
 # This is the shared registry instance that all components should use
 storage_registry: Dict[str, DataSink] = _LazyStorageRegistry()
 _registry_initialized = False
-_registry_lock = threading.Lock()
+# Use RLock (reentrant lock) to allow same thread to acquire lock multiple times
+# This prevents deadlocks when gc.collect() triggers __del__ methods that access storage_registry
+_registry_lock = threading.RLock()
 
 
 def ensure_storage_registry() -> None:
@@ -591,6 +593,7 @@ def reset_memory_backend() -> None:
 
     Note:
         This only affects the memory backend. Other backends (disk, zarr) are not modified.
+        Caller is responsible for calling gc.collect() and GPU cleanup after this function.
     """
 
     # Clear files from existing memory backend while preserving directories

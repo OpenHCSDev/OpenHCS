@@ -195,4 +195,8 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
     def __del__(self):
         """Cleanup on deletion."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("🔥 NAPARI __del__ called, about to call cleanup()")
         self.cleanup()
+        logger.info("🔥 NAPARI __del__ cleanup() returned")

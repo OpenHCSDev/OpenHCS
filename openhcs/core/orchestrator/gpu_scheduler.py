@@ -36,7 +36,9 @@ from openhcs.core.config import GlobalPipelineConfig
 logger = logging.getLogger(__name__) # Ensure logger is consistently named if used across module
 
 # Thread-safe lock for GPU registry access
-_registry_lock = threading.Lock()
+# Use RLock (reentrant lock) to allow same thread to acquire lock multiple times
+# This prevents deadlocks when gc.collect() triggers __del__ methods that access GPU registry
+_registry_lock = threading.RLock()
 
 # GPU registry singleton
 # Structure: {gpu_id: {"max_pipelines": int}}

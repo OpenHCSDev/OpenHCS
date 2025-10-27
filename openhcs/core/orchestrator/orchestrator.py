@@ -581,11 +581,13 @@ class PipelineOrchestrator(ContextProvider):
         Must be called before other processing methods.
         Returns self for chaining.
         """
+        logger.info(f"🔥 INIT: initialize() called for plate: {self.plate_path}")
         if self._initialized:
             logger.info("Orchestrator already initialized.")
             return self
 
         try:
+            logger.info(f"🔥 INIT: About to call initialize_microscope_handler()")
             self.initialize_microscope_handler()
 
             # Delegate workspace initialization to microscope handler

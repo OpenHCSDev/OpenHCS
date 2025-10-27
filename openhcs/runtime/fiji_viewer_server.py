@@ -127,6 +127,25 @@ class FijiViewerServer(ZMQServer):
         except ImportError:
             raise ImportError("PyImageJ not available. Install with: pip install 'openhcs[viz]'")
     
+    def _create_pong_response(self) -> Dict[str, Any]:
+        """Override to add Fiji-specific fields and memory usage."""
+        response = super()._create_pong_response()
+        response['viewer'] = 'fiji'
+        response['openhcs'] = True
+        response['server'] = 'FijiViewerServer'
+
+        # Add memory usage
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            response['memory_mb'] = process.memory_info().rss / 1024 / 1024
+            response['cpu_percent'] = process.cpu_percent(interval=0)
+        except Exception:
+            pass
+
+        return response
+
     def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle control messages beyond ping/pong.

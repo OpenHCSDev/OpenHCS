@@ -254,7 +254,7 @@ def _create_or_update_shapes_layer(viewer, layers, layer_name, shapes_data, shap
     return new_layer
 
 
-def _create_or_update_image_layer(viewer, layers, layer_name, image_data, colormap):
+def _create_or_update_image_layer(viewer, layers, layer_name, image_data, colormap, axis_labels=None):
     """
     Create or update a Napari image layer.
 
@@ -264,6 +264,7 @@ def _create_or_update_image_layer(viewer, layers, layer_name, image_data, colorm
         layer_name: Name for the layer
         image_data: Image array
         colormap: Colormap name
+        axis_labels: Optional tuple of axis label strings for dimension names
 
     Returns:
         The created or updated layer
@@ -292,6 +293,13 @@ def _create_or_update_image_layer(viewer, layers, layer_name, image_data, colorm
             name=layer_name,
             colormap=colormap or 'gray'
         )
+
+        # Set axis labels on viewer.dims (add_image axis_labels parameter doesn't work)
+        # See: https://forum.image.sc/t/rename-napari-dimension-slider-labels/41974
+        if axis_labels is not None:
+            viewer.dims.axis_labels = axis_labels
+            logger.info(f"🔬 NAPARI PROCESS: Set viewer.dims.axis_labels={axis_labels}")
+
         layers[layer_name] = new_layer
         logger.info(f"🔬 NAPARI PROCESS: Created new image layer {layer_name}")
         return new_layer
@@ -609,8 +617,17 @@ class NapariViewerServer(ZMQServer):
             elif channel_value == 2:
                 colormap = 'red'
 
+        # Build axis labels for stacked dimensions
+        # Format: (component1_name, component2_name, ..., 'y', 'x')
+        # The stack components appear in the same order as in stack_components list
+        # Must be a tuple for Napari
+        axis_labels = None
+        if stack_components:
+            axis_labels = tuple(list(stack_components) + ['y', 'x'])
+            logger.info(f"🔬 NAPARI PROCESS: Built axis_labels={axis_labels} for stack_components={stack_components}")
+
         # Create or update the layer
-        _create_or_update_image_layer(self.viewer, self.layers, layer_key, stacked_data, colormap)
+        _create_or_update_image_layer(self.viewer, self.layers, layer_key, stacked_data, colormap, axis_labels)
 
     def _update_shapes_layer(self, layer_key, layer_items, stack_components, component_modes):
         """Update a shapes layer - use labels instead of shapes for efficiency."""
@@ -720,11 +737,22 @@ class NapariViewerServer(ZMQServer):
             logger.warning(f"🔬 NAPARI SERVER: Failed to send ack for {image_id}: {e}")
 
     def _create_pong_response(self) -> Dict[str, Any]:
-        """Override to add Napari-specific fields."""
+        """Override to add Napari-specific fields and memory usage."""
         response = super()._create_pong_response()
         response['viewer'] = 'napari'
         response['openhcs'] = True
         response['server'] = 'NapariViewer'
+
+        # Add memory usage
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            response['memory_mb'] = process.memory_info().rss / 1024 / 1024
+            response['cpu_percent'] = process.cpu_percent(interval=0)
+        except Exception:
+            pass
+
         return response
 
     def handle_control_message(self, message: Dict[str, Any]) -> Dict[str, Any]:

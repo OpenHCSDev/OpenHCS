@@ -120,6 +120,37 @@ class PlateManagerWidget(QWidget):
         
         logger.debug("Plate manager widget initialized")
 
+    def cleanup(self):
+        """Cleanup resources before widget destruction."""
+        logger.info("🧹 Cleaning up PlateManagerWidget resources...")
+
+        # Disconnect and cleanup ZMQ client if it exists
+        if self.zmq_client is not None:
+            try:
+                logger.info("🧹 Disconnecting ZMQ client...")
+                self.zmq_client.disconnect()
+            except Exception as e:
+                logger.warning(f"Error disconnecting ZMQ client during cleanup: {e}")
+            finally:
+                self.zmq_client = None
+
+        # Terminate any running subprocess
+        if self.current_process is not None and self.current_process.poll() is None:
+            try:
+                logger.info("🧹 Terminating running subprocess...")
+                self.current_process.terminate()
+                self.current_process.wait(timeout=2)
+            except Exception as e:
+                logger.warning(f"Error terminating subprocess during cleanup: {e}")
+                try:
+                    self.current_process.kill()
+                except:
+                    pass
+            finally:
+                self.current_process = None
+
+        logger.info("✅ PlateManagerWidget cleanup completed")
+
     # ========== UI Setup ==========
 
     def setup_ui(self):
@@ -870,6 +901,7 @@ class PlateManagerWidget(QWidget):
         """Run plates using ZMQ execution client (recommended)."""
         try:
             from openhcs.runtime.zmq_execution_client import ZMQExecutionClient
+            import asyncio
 
             plate_paths_to_run = [item['path'] for item in ready_items]
             logger.info(f"Starting ZMQ execution for {len(plate_paths_to_run)} plates")
@@ -877,7 +909,24 @@ class PlateManagerWidget(QWidget):
             # Clear subprocess logs before starting new execution
             self.clear_subprocess_logs.emit()
 
-            # Create ZMQ client (persistent mode - server stays alive like Napari)
+            # Get event loop (needed for all async operations)
+            loop = asyncio.get_event_loop()
+
+            # Always create a fresh client for each execution to avoid state conflicts
+            # Clean up old client if it exists
+            if self.zmq_client is not None:
+                logger.info("🧹 Disconnecting previous ZMQ client")
+                try:
+                    def _disconnect_old():
+                        self.zmq_client.disconnect()
+                    await loop.run_in_executor(None, _disconnect_old)
+                except Exception as e:
+                    logger.warning(f"Error disconnecting old client: {e}")
+                finally:
+                    self.zmq_client = None
+
+            # Create new ZMQ client (persistent mode - server stays alive)
+            logger.info("🔌 Creating new ZMQ client")
             self.zmq_client = ZMQExecutionClient(
                 port=7777,
                 persistent=True,  # Server persists across executions
@@ -888,14 +937,12 @@ class PlateManagerWidget(QWidget):
             def _connect():
                 return self.zmq_client.connect(timeout=15)
 
-            import asyncio
-            loop = asyncio.get_event_loop()
             connected = await loop.run_in_executor(None, _connect)
 
             if not connected:
                 raise RuntimeError("Failed to connect to ZMQ execution server")
 
-            logger.info("Connected to ZMQ execution server")
+            logger.info("✅ Connected to ZMQ execution server")
 
             # Update orchestrator states to show running state
             for plate in ready_items:
@@ -982,27 +1029,19 @@ class PlateManagerWidget(QWidget):
             self.execution_state = "idle"
 
         finally:
-            # Always disconnect from server, even if execution failed
+            # Always disconnect client after execution to avoid state conflicts
             if self.zmq_client is not None:
                 try:
                     def _disconnect():
                         self.zmq_client.disconnect()
-
                     await loop.run_in_executor(None, _disconnect)
                 except Exception as disconnect_error:
                     logger.warning(f"Failed to disconnect ZMQ client: {disconnect_error}")
                 finally:
                     self.zmq_client = None
+
             self.current_execution_id = None
             self.update_button_states()
-
-            # Cleanup ZMQ client
-            if hasattr(self, 'zmq_client') and self.zmq_client:
-                try:
-                    self.zmq_client.disconnect()
-                except:
-                    pass
-                self.zmq_client = None
 
     def _on_zmq_progress(self, message):
         """
@@ -1043,6 +1082,10 @@ class PlateManagerWidget(QWidget):
         logger.info("🛑 Stop button pressed.")
         self.status_message.emit("Terminating execution...")
 
+        # Immediately set state to "stopping" and disable the button
+        self.execution_state = "stopping"
+        self.update_button_states()
+
         # Check if using ZMQ execution
         if self.zmq_client:
             try:
@@ -1051,43 +1094,22 @@ class PlateManagerWidget(QWidget):
                 import asyncio
                 loop = asyncio.get_event_loop()
 
-                # Cancel specific execution if we have an ID
-                if self.current_execution_id:
-                    logger.info(f"🛑 Cancelling execution {self.current_execution_id}")
+                # Use the same code path as the ZMQ browser Quit button - it works perfectly!
+                # Send 'shutdown' message which kills workers but keeps server alive
+                logger.info(f"🛑 Killing workers using same code path as Quit button (port {self.zmq_client.port})")
 
-                    def _cancel():
-                        return self.zmq_client.cancel_execution(self.current_execution_id)
+                def _kill_workers():
+                    from openhcs.runtime.zmq_base import ZMQClient
+                    return ZMQClient.kill_server_on_port(self.zmq_client.port, graceful=True)
 
-                    response = await loop.run_in_executor(None, _cancel)
+                success = await loop.run_in_executor(None, _kill_workers)
 
-                    if response.get('status') == 'ok':
-                        logger.info("🛑 Cancellation request accepted, waiting for graceful shutdown...")
-                        self.status_message.emit("Cancellation requested, waiting...")
-
-                        # Wait for graceful cancellation with timeout
-                        timeout = 5  # seconds
-                        start_time = asyncio.get_event_loop().time()
-
-                        while (asyncio.get_event_loop().time() - start_time) < timeout:
-                            # Check if execution is still running
-                            def _check_status():
-                                return self.zmq_client.get_status(self.current_execution_id)
-
-                            status_response = await loop.run_in_executor(None, _check_status)
-
-                            if status_response.get('status') == 'error':
-                                # Execution no longer exists (completed or cancelled)
-                                logger.info("🛑 Execution completed/cancelled gracefully")
-                                break
-
-                            await asyncio.sleep(0.5)
-                        else:
-                            # Timeout reached - execution still running
-                            logger.warning("🛑 Graceful cancellation timeout - execution may still be running")
-                            self.status_message.emit("Cancellation timeout - execution may still be running")
-                    else:
-                        logger.warning(f"🛑 Cancellation failed: {response.get('message')}")
-                        self.status_message.emit(f"Cancellation failed: {response.get('message')}")
+                if success:
+                    logger.info("🛑 Workers killed successfully, server still alive")
+                    self.status_message.emit("Execution cancelled - workers killed")
+                else:
+                    logger.warning("🛑 Failed to kill workers")
+                    self.status_message.emit("Failed to cancel execution")
 
                 # Disconnect client
                 def _disconnect():
@@ -1562,21 +1584,28 @@ class PlateManagerWidget(QWidget):
         self.buttons["view_metadata"].setEnabled(has_initialized and not is_running)
 
         # Run button - enabled if plates are compiled or if currently running (for stop)
-        if is_running:
+        if self.execution_state == "stopping":
+            # Stopping state - keep button as "Stop" but disable it
+            self.buttons["run_plate"].setEnabled(False)
+            self.buttons["run_plate"].setText("Stop")
+        elif is_running:
+            # Running state - button is "Stop" and enabled
             self.buttons["run_plate"].setEnabled(True)
             self.buttons["run_plate"].setText("Stop")
         else:
+            # Idle state - button is "Run" and enabled if plates are compiled
             self.buttons["run_plate"].setEnabled(has_compiled)
             self.buttons["run_plate"].setText("Run")
     
     def is_any_plate_running(self) -> bool:
         """
         Check if any plate is currently running.
-        
+
         Returns:
             True if any plate is running, False otherwise
         """
-        return self.execution_state == "running"
+        # Consider both "running" and "stopping" states as "busy"
+        return self.execution_state in ("running", "stopping")
     
     def update_status(self, message: str):
         """
