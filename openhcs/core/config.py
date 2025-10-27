@@ -490,113 +490,114 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
         pass
 
 
-@global_pipeline_config
-@dataclass(frozen=True)
-class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
-    """Configuration for napari streaming.
-
-    Overrides base StreamingConfig.port with Napari-specific default.
-    Inherits host and transport_mode from base class.
+def _create_streaming_config(
+    viewer_name: str,
+    port: int,
+    backend: Backend,
+    display_config_class,
+    visualizer_module: str,
+    visualizer_class_name: str,
+    extra_fields: dict = None
+):
     """
-    port: int = 5555
-    """Port for napari streaming communication."""
+    Factory to create streaming config classes with minimal boilerplate.
 
-    @property
-    def backend(self) -> Backend:
-        return Backend.NAPARI_STREAM
+    Eliminates duplication between streaming configs by auto-generating classes
+    from declarative specifications. Adding a new streaming backend requires only
+    5-10 lines instead of ~50 lines of boilerplate.
 
-    @property
-    def viewer_type(self) -> str:
-        return 'napari'
+    Args:
+        viewer_name: Viewer identifier ('napari', 'fiji', etc.)
+        port: Default port number
+        backend: Backend enum value
+        display_config_class: Display config class to inherit from
+        visualizer_module: Module path for visualizer class
+        visualizer_class_name: Name of visualizer class
+        extra_fields: Optional dict of {field_name: (type, default_value)}
 
-    @property
-    def step_plan_output_key(self) -> str:
-        return "napari_streaming_paths"
-
-    def get_streaming_kwargs(self, context) -> dict:
+    Returns:
+        Dynamically created streaming config class
+    """
+    # Build class namespace with methods
+    def _get_streaming_kwargs(self, context):
         kwargs = {
-            "port": self.port,  # Generic polymorphic attribute
-            "host": self.host,  # Generic polymorphic attribute
+            "port": self.port,
+            "host": self.host,
             "transport_mode": self.transport_mode,
-            "display_config": self  # self is now the display config
+            "display_config": self
         }
-
-        # Include microscope handler for component parsing
+        # Add extra fields to kwargs
+        if extra_fields:
+            for field_name in extra_fields:
+                kwargs[field_name] = getattr(self, field_name)
         if context:
             kwargs["microscope_handler"] = context.microscope_handler
-
         return kwargs
 
-    def create_visualizer(self, filemanager, visualizer_config):
-        from openhcs.runtime.napari_stream_visualizer import NapariStreamVisualizer
-        return NapariStreamVisualizer(
+    def _create_visualizer(self, filemanager, visualizer_config):
+        # Lazy import to avoid circular dependencies
+        module = __import__(visualizer_module, fromlist=[visualizer_class_name])
+        visualizer_class = getattr(module, visualizer_class_name)
+        return visualizer_class(
             filemanager,
             visualizer_config,
-            viewer_title="OpenHCS Pipeline Visualization",
+            viewer_title=f"OpenHCS {viewer_name.title()} Visualization",
             persistent=self.persistent,
-            port=self.port,  # Generic polymorphic attribute
-            display_config=self,  # self is now the display config
-            transport_mode=self.transport_mode
-        )
-
-
-@global_pipeline_config
-@dataclass(frozen=True)
-class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
-    """
-    Configuration for Fiji streaming with display options.
-
-    Inherits from both StreamingConfig and FijiDisplayConfig to provide
-    feature parity with NapariStreamingConfig.
-
-    Overrides base StreamingConfig.port with Fiji-specific default.
-    Inherits host and transport_mode from base class.
-    """
-    port: int = 5565
-    """Port for Fiji streaming communication (different default from Napari, non-overlapping with 5555-5564)."""
-
-    fiji_executable_path: Optional[Path] = None
-    """Path to Fiji/ImageJ executable. If None, will auto-detect."""
-
-    @property
-    def backend(self) -> Backend:
-        return Backend.FIJI_STREAM
-
-    @property
-    def viewer_type(self) -> str:
-        return 'fiji'
-
-    @property
-    def step_plan_output_key(self) -> str:
-        return "fiji_streaming_paths"
-
-    def get_streaming_kwargs(self, context) -> dict:
-        """Return kwargs needed for Fiji streaming backend (matches Napari pattern)."""
-        kwargs = {
-            "port": self.port,  # Generic polymorphic attribute
-            "host": self.host,  # Generic polymorphic attribute
-            "fiji_executable_path": self.fiji_executable_path,
-            "transport_mode": self.transport_mode,
-            "display_config": self  # self is now the display config
-        }
-
-        # Include microscope handler for component parsing
-        if context:
-            kwargs["microscope_handler"] = context.microscope_handler
-
-        return kwargs
-
-    def create_visualizer(self, filemanager, visualizer_config):
-        from openhcs.runtime.fiji_stream_visualizer import FijiStreamVisualizer
-        return FijiStreamVisualizer(
-            filemanager,
-            visualizer_config,
-            viewer_title="OpenHCS Fiji Visualization",
-            persistent=self.persistent,
-            port=self.port,  # Generic polymorphic attribute
+            port=self.port,
             display_config=self,
             transport_mode=self.transport_mode
         )
+
+    # Build class dict with properties using lambdas
+    class_dict = {
+        'port': port,
+        'backend': property(lambda self: backend),
+        'viewer_type': property(lambda self: viewer_name),
+        'step_plan_output_key': property(lambda self: f"{viewer_name}_streaming_paths"),
+        'get_streaming_kwargs': _get_streaming_kwargs,
+        'create_visualizer': _create_visualizer,
+        '__annotations__': {'port': int},
+        '__module__': __name__,
+    }
+
+    # Add extra fields
+    if extra_fields:
+        for field_name, (field_type, default_val) in extra_fields.items():
+            class_dict[field_name] = default_val
+            class_dict['__annotations__'][field_name] = field_type
+
+    # Create class dynamically
+    cls_name = f"{viewer_name.title()}StreamingConfig"
+    new_class = type(cls_name, (StreamingConfig, display_config_class), class_dict)
+
+    # Apply decorators
+    new_class = dataclass(frozen=True)(new_class)
+    new_class = global_pipeline_config(new_class)
+
+    return new_class
+
+
+# Auto-generate streaming configs using factory (reduces ~110 lines to ~20 lines)
+NapariStreamingConfig = _create_streaming_config(
+    viewer_name='napari',
+    port=5555,
+    backend=Backend.NAPARI_STREAM,
+    display_config_class=NapariDisplayConfig,
+    visualizer_module='openhcs.runtime.napari_stream_visualizer',
+    visualizer_class_name='NapariStreamVisualizer'
+)
+
+FijiStreamingConfig = _create_streaming_config(
+    viewer_name='fiji',
+    port=5565,
+    backend=Backend.FIJI_STREAM,
+    display_config_class=FijiDisplayConfig,
+    visualizer_module='openhcs.runtime.fiji_stream_visualizer',
+    visualizer_class_name='FijiStreamVisualizer',
+    extra_fields={
+        'fiji_executable_path': (Optional[Path], None)
+    }
+)
 
 # Inject all accumulated fields at the end of module loading
 from openhcs.config_framework.lazy_factory import _inject_all_pending_fields
