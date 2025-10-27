@@ -37,8 +37,6 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
     # Configure ABC attributes
     VIEWER_TYPE = 'napari'
-    HOST_PARAM = 'napari_host'
-    PORT_PARAM = 'napari_port'
     SHM_PREFIX = 'napari_'
 
     # __init__, _get_publisher, save, cleanup now inherited from ABC
@@ -76,9 +74,9 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         if len(data_list) != len(file_paths):
             raise ValueError("data_list and file_paths must have the same length")
 
-        # Extract kwargs using class attributes
-        host = kwargs.get(self.HOST_PARAM, 'localhost')
-        port = kwargs[self.PORT_PARAM]
+        # Extract kwargs using generic polymorphic names
+        host = kwargs.get('host', 'localhost')
+        port = kwargs['port']
         transport_mode = kwargs.get('transport_mode', TransportMode.IPC)
         publisher = self._get_publisher(host, port, transport_mode)
         display_config = kwargs['display_config']

@@ -506,8 +506,8 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
 
     def get_streaming_kwargs(self, context) -> dict:
         kwargs = {
-            "napari_port": self.port,  # Use polymorphic port attribute
-            "napari_host": self.host,  # Use polymorphic host attribute
+            "port": self.port,  # Generic polymorphic attribute
+            "host": self.host,  # Generic polymorphic attribute
             "transport_mode": self.transport_mode,
             "display_config": self  # self is now the display config
         }
@@ -525,7 +525,7 @@ class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
             visualizer_config,
             viewer_title="OpenHCS Pipeline Visualization",
             persistent=self.persistent,
-            napari_port=self.port,  # Use polymorphic port attribute
+            port=self.port,  # Generic polymorphic attribute
             display_config=self,  # self is now the display config
             transport_mode=self.transport_mode
         )
@@ -560,8 +560,8 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
     def get_streaming_kwargs(self, context) -> dict:
         """Return kwargs needed for Fiji streaming backend (matches Napari pattern)."""
         kwargs = {
-            "fiji_port": self.port,  # Use polymorphic port attribute
-            "fiji_host": self.host,  # Use polymorphic host attribute
+            "port": self.port,  # Generic polymorphic attribute
+            "host": self.host,  # Generic polymorphic attribute
             "fiji_executable_path": self.fiji_executable_path,
             "transport_mode": self.transport_mode,
             "display_config": self  # self is now the display config
@@ -580,7 +580,7 @@ class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
             visualizer_config,
             viewer_title="OpenHCS Fiji Visualization",
             persistent=self.persistent,
-            fiji_port=self.port,  # Use polymorphic port attribute
+            port=self.port,  # Generic polymorphic attribute
             display_config=self,
             transport_mode=self.transport_mode
         )

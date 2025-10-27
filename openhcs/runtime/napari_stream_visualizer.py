@@ -1131,17 +1131,16 @@ class NapariStreamVisualizer:
     for Qt compatibility and true persistence across pipeline runs.
     """
 
-    def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Real-Time Visualization", persistent: bool = True, napari_port: int = None, replace_layers: bool = False, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
+    def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Real-Time Visualization", persistent: bool = True, port: int = None, replace_layers: bool = False, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
         self.persistent = persistent  # If True, viewer process stays alive after pipeline completion
         self.visualizer_config = visualizer_config
         # Use config class default if not specified
-        self.napari_port = napari_port if napari_port is not None else NapariStreamingConfig.__dataclass_fields__['port'].default
+        self.port = port if port is not None else NapariStreamingConfig.__dataclass_fields__['port'].default
         self.replace_layers = replace_layers  # If True, replace existing layers; if False, add new layers
         self.display_config = display_config  # Configuration for display behavior
         self.transport_mode = transport_mode  # ZMQ transport mode (IPC or TCP)
-        self.port: Optional[int] = None
         self.process: Optional[multiprocessing.Process] = None
         self.zmq_context: Optional[zmq.Context] = None
         self.zmq_socket: Optional[zmq.Socket] = None
@@ -1292,8 +1291,7 @@ class NapariStreamVisualizer:
                 logger.warning("Napari viewer is already running.")
                 return
 
-            # Use configured port for napari streaming
-            self.port = self.napari_port
+            # Port is already set in __init__
             logger.info(f"🔬 VISUALIZER: Starting napari viewer process on port {self.port}")
 
             # ALL viewers (persistent and non-persistent) should be detached subprocess

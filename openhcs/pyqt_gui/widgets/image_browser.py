@@ -1593,14 +1593,14 @@ class ImageBrowserWidget(QWidget):
                 rois,
                 roi_json_path,
                 BackendEnum.NAPARI_STREAM.value,
-                napari_host='localhost',
-                napari_port=napari_config.napari_port,
+                host='localhost',
+                port=napari_config.port,
                 display_config=napari_config,
                 microscope_handler=self.orchestrator.microscope_handler,
                 source=source
             )
 
-            logger.info(f"Streamed {len(rois)} ROIs to Napari on port {napari_config.napari_port}")
+            logger.info(f"Streamed {len(rois)} ROIs to Napari on port {napari_config.port}")
 
         except Exception as e:
             logger.error(f"Failed to stream ROIs to Napari: {e}")

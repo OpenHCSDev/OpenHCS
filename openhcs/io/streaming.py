@@ -28,17 +28,15 @@ class StreamingBackend(DataSink):
 
     Subclasses must define abstract class attributes:
     - VIEWER_TYPE: str (e.g., 'napari', 'fiji')
-    - HOST_PARAM: str (e.g., 'napari_host', 'fiji_host')
-    - PORT_PARAM: str (e.g., 'napari_port', 'fiji_port')
     - SHM_PREFIX: str (e.g., 'napari_', 'fiji_')
+
+    All streaming backends use generic 'host' and 'port' kwargs for polymorphism.
 
     Concrete implementations should use StorageBackendMeta for automatic registration.
     """
 
     # Abstract class attributes that subclasses must define
     VIEWER_TYPE: str = None
-    HOST_PARAM: str = None
-    PORT_PARAM: str = None
     SHM_PREFIX: str = None
 
     def __init__(self):

@@ -33,8 +33,6 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
     # Configure ABC attributes
     VIEWER_TYPE = 'fiji'
-    HOST_PARAM = 'fiji_host'
-    PORT_PARAM = 'fiji_port'
     SHM_PREFIX = 'fiji_'
 
     # __init__, _get_publisher, save, cleanup now inherited from ABC
@@ -70,9 +68,9 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
         logger.info(f"📦 FIJI BACKEND: save_batch called with {len(data_list)} items")
 
-        # Extract kwargs using class attributes
-        host = kwargs.get(self.HOST_PARAM, 'localhost')
-        port = kwargs[self.PORT_PARAM]
+        # Extract kwargs using generic polymorphic names
+        host = kwargs.get('host', 'localhost')
+        port = kwargs['port']
         transport_mode = kwargs.get('transport_mode', TransportMode.IPC)
         publisher = self._get_publisher(host, port, transport_mode)
         display_config = kwargs['display_config']
