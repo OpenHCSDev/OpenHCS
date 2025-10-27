@@ -487,7 +487,7 @@ class NapariViewerServer(ZMQServer):
         import threading
         self.layer_update_lock = threading.Lock()  # Prevent concurrent updates
         self.pending_updates = {}  # layer_key -> QTimer (debounce)
-        self.update_delay_ms = 50  # Wait 50ms for more items before rebuilding (reduced from 100ms)
+        self.update_delay_ms = 200  # Wait 200ms for more items before rebuilding
 
         # Create PUSH socket for sending acknowledgments to shared ack port
         self.ack_socket = None
