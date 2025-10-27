@@ -495,8 +495,10 @@ class PipelineEditorWidget(ButtonListWidget):
         try:
             from pathlib import Path
 
-            # Hardcoded path to basic_pipeline.py
-            pipeline_file = Path("/home/ts/code/projects/openhcs/openhcs/tests/basic_pipeline.py")
+            # Find basic_pipeline.py relative to openhcs package
+            import openhcs
+            openhcs_root = Path(openhcs.__file__).parent
+            pipeline_file = openhcs_root / "tests" / "basic_pipeline.py"
 
             if not pipeline_file.exists():
                 self.app.current_status = f"Pipeline file not found: {pipeline_file}"

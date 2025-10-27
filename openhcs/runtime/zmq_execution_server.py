@@ -142,22 +142,17 @@ class ZMQExecutionServer(ZMQServer):
                 MessageFields.EXECUTIONS: list(self.active_executions.keys())}
 
     def _handle_cancel(self, msg):
-        logger.info(f"🛑 SERVER: Received cancel request: {msg}")
         request, error = self._validate_and_parse(msg, CancelRequest)
         if error:
-            logger.warning(f"🛑 SERVER: Cancel request validation failed: {error}")
             return error
         if request.execution_id not in self.active_executions:
-            logger.warning(f"🛑 SERVER: Execution {request.execution_id} not found in active_executions")
             return ExecuteResponse(ResponseType.ERROR, error=f'Execution {request.execution_id} not found').to_dict()
 
         # Use the same logic as Quit button: cancel all executions and kill workers
         # This ensures workers are actually killed and the server stays alive
-        logger.info(f"🛑 SERVER: [{request.execution_id}] Stop button pressed - cancelling all executions and killing workers")
         self._cancel_all_executions()
-        logger.info(f"🛑 SERVER: [{request.execution_id}] All executions cancelled, now killing workers...")
         killed = self._kill_worker_processes()
-        logger.info(f"🛑 SERVER: [{request.execution_id}] Cancelled - killed {killed} workers, server still alive")
+        logger.info(f"[{request.execution_id}] Cancelled - killed {killed} workers")
         return {MessageFields.STATUS: ResponseType.OK.value, MessageFields.MESSAGE: f'Cancelled - killed {killed} workers',
                 MessageFields.WORKERS_KILLED: killed}
 
@@ -224,39 +219,23 @@ class ZMQExecutionServer(ZMQServer):
         ), PipelineConfig())
 
     def _execute_with_orchestrator(self, execution_id, plate_id, pipeline_steps, global_config, pipeline_config, config_params):
-        logger.info(f"[{execution_id}] 🔥 STEP 1: Starting _execute_with_orchestrator")
         from pathlib import Path
-        logger.info(f"[{execution_id}] 🔥 STEP 2: Imported Path")
         import multiprocessing
-        logger.info(f"[{execution_id}] 🔥 STEP 3: Imported multiprocessing")
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
-        logger.info(f"[{execution_id}] 🔥 STEP 4: Imported ensure_global_config_context")
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
-        logger.info(f"[{execution_id}] 🔥 STEP 5: Imported setup_global_gpu_registry")
         from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-        logger.info(f"[{execution_id}] 🔥 STEP 6: Imported PipelineOrchestrator")
         from openhcs.constants import AllComponents, VariableComponents, GroupBy, MULTIPROCESSING_AXIS
-        logger.info(f"[{execution_id}] 🔥 STEP 7: Imported constants")
         from openhcs.io.base import reset_memory_backend, storage_registry
-        logger.info(f"[{execution_id}] 🔥 STEP 8: Imported io.base")
         from openhcs.runtime.omero_instance_manager import OMEROInstanceManager
-        logger.info(f"[{execution_id}] 🔥 STEP 9: Imported OMEROInstanceManager")
         from openhcs.io.omero_local import OMEROLocalBackend
-        logger.info(f"[{execution_id}] 🔥 STEP 10: All imports complete")
 
         try:
-            logger.info(f"[{execution_id}] 🔥 STEP 11: Checking multiprocessing start method")
             if multiprocessing.get_start_method(allow_none=True) != 'spawn':
-                logger.info(f"[{execution_id}] 🔥 STEP 12: Setting start method to spawn")
                 multiprocessing.set_start_method('spawn', force=True)
-                logger.info(f"[{execution_id}] 🔥 STEP 13: Start method set")
         except RuntimeError:
-            logger.info(f"[{execution_id}] 🔥 STEP 14: RuntimeError setting start method (already set)")
             pass
 
-        logger.info(f"[{execution_id}] 🔥 STEP 15: About to reset_memory_backend()")
         reset_memory_backend()
-        logger.info(f"[{execution_id}] 🔥 STEP 16: Memory backend reset complete")
 
         # Trigger GPU cleanup (cache clearing) AFTER reset_memory_backend() returns
         # NOTE: We do NOT call gc.collect() here because:
@@ -264,101 +243,64 @@ class ZMQExecutionServer(ZMQServer):
         # 2. __del__ methods can acquire locks (e.g., streaming backends call context.term())
         # 3. This creates deadlock potential if any lock is held when gc.collect() is called
         # 4. Python's automatic GC will collect objects eventually without blocking
-        logger.info(f"[{execution_id}] 🔥 STEP 16a: About to cleanup GPU frameworks (no gc.collect)")
         try:
             from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
             cleanup_all_gpu_frameworks()
-            logger.info(f"[{execution_id}] 🔥 STEP 16b: GPU cleanup complete")
         except Exception as cleanup_error:
             logger.warning(f"[{execution_id}] Failed to trigger GPU cleanup: {cleanup_error}")
 
-        logger.info(f"[{execution_id}] 🔥 STEP 17: About to setup_global_gpu_registry()")
         setup_global_gpu_registry(global_config=global_config)
-        logger.info(f"[{execution_id}] 🔥 STEP 18: GPU registry setup complete")
-
-        logger.info(f"[{execution_id}] 🔥 STEP 19: About to ensure_global_config_context()")
         ensure_global_config_context(type(global_config), global_config)
-        logger.info(f"[{execution_id}] 🔥 STEP 20: Config context ensured")
 
         # Convert OMERO plate IDs to virtual paths
-        # Check if plate_id is an integer or a string that converts to an integer
-        logger.info(f"[{execution_id}] 🔥 STEP 21: Processing plate_id")
         plate_path_str = str(plate_id)
-        logger.info(f"[{execution_id}] 🔥 STEP 22: plate_path_str = {plate_path_str}")
         is_omero_plate_id = False
         try:
-            logger.info(f"[{execution_id}] 🔥 STEP 23: Checking if plate_id is integer")
             int(plate_path_str)
             is_omero_plate_id = True
-            logger.info(f"[{execution_id}] 🔥 STEP 24: plate_id is integer, is_omero=True")
         except ValueError:
-            logger.info(f"[{execution_id}] 🔥 STEP 25: plate_id is not integer, checking for /omero/ prefix")
-            # Not an integer, check if it's already an OMERO virtual path
             is_omero_plate_id = plate_path_str.startswith("/omero/")
-            logger.info(f"[{execution_id}] 🔥 STEP 26: is_omero={is_omero_plate_id}")
 
-        logger.info(f"[{execution_id}] 🔥 STEP 27: Plate path processing complete, is_omero={is_omero_plate_id}")
         # Connect to OMERO and convert plate ID to virtual path if needed
         if is_omero_plate_id:
-            logger.info(f"[{execution_id}] 🔥 STEP 28: OMERO plate detected, connecting...")
             omero_manager = OMEROInstanceManager()
-            logger.info(f"[{execution_id}] 🔥 STEP 29: OMEROInstanceManager created")
             if not omero_manager.connect(timeout=60):
                 raise RuntimeError("OMERO server not available")
-            logger.info(f"[{execution_id}] 🔥 STEP 30: OMERO connected")
             storage_registry['omero_local'] = OMEROLocalBackend(omero_conn=omero_manager.conn)
-            logger.info(f"[{execution_id}] 🔥 STEP 31: OMERO backend registered")
 
             # Convert integer plate ID to virtual path format
-            # OMERO handler expects format: /omero/plate_<id> not /omero/plate/<id>
             if not plate_path_str.startswith("/omero/"):
-                logger.info(f"[{execution_id}] 🔥 STEP 32: Converting plate_id to /omero/plate_ format")
                 plate_path_str = f"/omero/plate_{plate_path_str}"
-                logger.info(f"[{execution_id}] 🔥 STEP 33: Converted to {plate_path_str}")
-        else:
-            logger.info(f"[{execution_id}] 🔥 STEP 34: Not OMERO plate, skipping OMERO setup")
 
-        logger.info(f"[{execution_id}] 🔥 STEP 35: About to create PipelineOrchestrator")
         orchestrator = PipelineOrchestrator(
             plate_path=Path(plate_path_str),
             pipeline_config=pipeline_config,
-            progress_callback=lambda axis_id, step, status, metadata: self.send_progress_update(axis_id, step, status)
+            progress_callback=lambda axis_id, step, status, _metadata: self.send_progress_update(axis_id, step, status)
         )
-        logger.info(f"[{execution_id}] 🔥 STEP 36: PipelineOrchestrator created, about to call initialize()")
         orchestrator.initialize()
-        logger.info(f"[{execution_id}] 🔥 STEP 37: PipelineOrchestrator initialized successfully")
         self.active_executions[execution_id]['orchestrator'] = orchestrator
-        logger.info(f"[{execution_id}] 🔥 STEP 38: Orchestrator stored in active_executions")
 
         # Check for cancellation after initialization (which can be slow for large plates)
         if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-            logger.info(f"[{execution_id}] 🔥 Execution cancelled after initialization, aborting")
+            logger.info(f"[{execution_id}] Execution cancelled after initialization, aborting")
             raise RuntimeError("Execution cancelled by user")
 
-        logger.info(f"[{execution_id}] 🔥 STEP 39: Getting well filter")
         wells = config_params.get('well_filter') if config_params else orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-        logger.info(f"[{execution_id}] 🔥 STEP 40: Wells = {wells}")
-
-        logger.info(f"[{execution_id}] 🔥 STEP 41: Compiling pipelines")
         compilation = orchestrator.compile_pipelines(pipeline_definition=pipeline_steps, well_filter=wells)
-        logger.info(f"[{execution_id}] 🔥 STEP 42: Pipelines compiled")
 
         # Check for cancellation after compilation (which can be slow for complex pipelines)
         if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-            logger.info(f"[{execution_id}] 🔥 Execution cancelled after compilation, aborting")
+            logger.info(f"[{execution_id}] Execution cancelled after compilation, aborting")
             raise RuntimeError("Execution cancelled by user")
 
-        logger.info(f"[{execution_id}] 🔥 STEP 43: Creating log directory")
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"[{execution_id}] 🔥 STEP 44: Log directory ready, checking for cancellation before execution")
 
         # Check if execution was cancelled before starting worker processes
         if self.active_executions[execution_id][MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
-            logger.info(f"[{execution_id}] 🔥 Execution cancelled before starting workers, aborting")
+            logger.info(f"[{execution_id}] Execution cancelled before starting workers, aborting")
             raise RuntimeError("Execution cancelled by user")
 
-        logger.info(f"[{execution_id}] 🔥 STEP 45: Not cancelled, proceeding to execute plate")
         return orchestrator.execute_compiled_plate(pipeline_definition=pipeline_steps,
                                                    compiled_contexts=compilation['compiled_contexts'],
                                                    log_file_base=str(log_dir / f"zmq_worker_exec_{execution_id}"))

@@ -68,8 +68,6 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         if len(data_list) != len(file_paths):
             raise ValueError("data_list and file_paths must have the same length")
 
-        logger.info(f"📦 NAPARI BACKEND: save_batch called with {len(data_list)} items")
-
         # Extract kwargs using class attributes
         host = kwargs.get(self.HOST_PARAM, 'localhost')
         port = kwargs[self.PORT_PARAM]
@@ -77,8 +75,6 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         display_config = kwargs['display_config']
         microscope_handler = kwargs['microscope_handler']
         source = kwargs.get('source', 'unknown_source')  # Pre-built source value
-
-        logger.info(f"🔍 NAPARI BACKEND: Streaming to port {port}, source={source}")
 
         # Prepare batch of images/ROIs
         batch_images = []
@@ -92,7 +88,6 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
             # Detect data type using ABC helper
             data_type = self._detect_data_type(data)
-            logger.info(f"🔍 NAPARI BACKEND: Detected data type: {data_type} for path: {file_path}")
 
             # Parse component metadata using ABC helper (ONCE for all types)
             component_metadata = self._parse_component_metadata(
@@ -101,11 +96,8 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
             # Prepare data based on type
             if data_type == StreamingDataType.SHAPES:
-                logger.info(f"🔍 NAPARI BACKEND: Preparing shapes data for {file_path}")
                 item_data = self._prepare_shapes_data(data, file_path)
-                logger.info(f"🔍 NAPARI BACKEND: Shapes data prepared: {len(item_data.get('shapes', []))} shapes")
             else:  # IMAGE
-                logger.info(f"🔍 NAPARI BACKEND: Preparing image data for {file_path}")
                 item_data = self._create_shared_memory(data, file_path)
 
             # Build batch item
@@ -115,7 +107,6 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
                 'metadata': component_metadata,
                 'image_id': image_id
             })
-            logger.info(f"🔍 NAPARI BACKEND: Added {data_type.value} item to batch")
 
         # Build component modes for ALL components in component_order (including virtual components)
         component_modes = {}
@@ -138,20 +129,13 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
             'timestamp': time.time()
         }
 
-        # Log batch composition
-        data_types = [item['data_type'] for item in batch_images]
-        type_counts = {dt: data_types.count(dt) for dt in set(data_types)}
-        logger.info(f"📤 NAPARI BACKEND: Sending batch message with {len(batch_images)} items to port {port}: {type_counts}")
-
         # Send non-blocking to prevent hanging if Napari is slow to process (matches Fiji pattern)
         import zmq
         try:
             publisher.send_json(message, flags=zmq.NOBLOCK)
-            logger.info(f"✅ NAPARI BACKEND: Sent batch of {len(batch_images)} images to Napari on port {port}")
 
             # Register sent images with queue tracker using ABC helper
             self._register_with_queue_tracker(port, image_ids)
-            logger.info(f"📊 NAPARI BACKEND: Registered {len(image_ids)} image IDs with queue tracker for port {port}")
 
             # Clean up backend's shared memory handles after successful send (like Fiji pattern)
             # Viewer will unlink after copying the data
@@ -195,8 +179,4 @@ class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
     def __del__(self):
         """Cleanup on deletion."""
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info("🔥 NAPARI __del__ called, about to call cleanup()")
         self.cleanup()
-        logger.info("🔥 NAPARI __del__ cleanup() returned")
