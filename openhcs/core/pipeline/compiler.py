@@ -710,101 +710,35 @@ class PipelineCompiler:
     @staticmethod
     def validate_backend_compatibility(orchestrator) -> None:
         """
-        Validate that the configured materialization backend is compatible with the microscope.
+        Validate and auto-correct materialization backend for microscopes with single compatible backend.
 
-        For microscopes with only one compatible backend (like OMERO), automatically sets
-        the backend to the required value.
+        For microscopes with only one compatible backend (e.g., OMERO → OMERO_LOCAL),
+        automatically corrects the backend if misconfigured. For microscopes with multiple
+        compatible backends, the configured backend must be explicitly compatible.
 
         Args:
             orchestrator: PipelineOrchestrator instance with initialized microscope_handler
-
-        Raises:
-            ValueError: If configured backend is incompatible and cannot be auto-corrected
         """
+        from openhcs.core.config import VFSConfig
+        from dataclasses import replace
+
         microscope_handler = orchestrator.microscope_handler
-        pipeline_config = orchestrator.pipeline_config
+        required_backend = microscope_handler.get_required_backend()
 
-        # Get configured backend - handle case where vfs_config is None (inherits from global)
-        if pipeline_config.vfs_config is None:
-            # vfs_config is None, which means it inherits from global config
-            # Get the merged config to access the actual vfs_config value
-            from openhcs.config_framework.context_manager import get_base_global_config
+        if required_backend:
+            # Microscope has single compatible backend - auto-correct if needed
+            vfs_config = orchestrator.pipeline_config.vfs_config or VFSConfig()
 
-            global_config = get_base_global_config()
-            if global_config is None:
-                # No global config available - skip validation
-                logger.debug("No global config available, skipping backend compatibility validation")
-                return
-
-            vfs_config = global_config.vfs_config
-        else:
-            vfs_config = pipeline_config.vfs_config
-
-        configured_backend = vfs_config.materialization_backend
-
-        # Skip validation if backend is AUTO (will be resolved later)
-        if configured_backend == MaterializationBackend.AUTO:
-            logger.debug(f"Backend is AUTO, will be resolved during materialization planning")
-            return
-
-        # Get compatible backends from microscope handler
-        compatible_backends = microscope_handler.compatible_backends
-
-        # Convert MaterializationBackend enum to Backend enum for comparison
-        # MaterializationBackend values: 'disk', 'zarr', 'omero_local'
-        # Backend values: 'disk', 'zarr', 'omero_local', 'memory', 'auto', 'virtual_workspace'
-        configured_backend_value = configured_backend.value
-
-        # Check if configured backend is compatible
-        is_compatible = any(b.value == configured_backend_value for b in compatible_backends)
-
-        if not is_compatible:
-            # If microscope has only one compatible backend, auto-set it
-            if len(compatible_backends) == 1:
-                required_backend = compatible_backends[0]
+            if vfs_config.materialization_backend != required_backend:
                 logger.warning(
-                    f"Configured materialization_backend '{configured_backend_value}' is incompatible with "
-                    f"{microscope_handler.microscope_type} microscope. Auto-setting to '{required_backend.value}' "
-                    f"(only compatible backend)."
+                    f"{microscope_handler.microscope_type} requires {required_backend.value} backend. "
+                    f"Auto-correcting from {vfs_config.materialization_backend.value}."
                 )
-                # Set the backend on the vfs_config
-                # Convert Backend enum to MaterializationBackend enum
-                # VFSConfig is frozen, so we must create a new instance
-                from openhcs.core.config import MaterializationBackend as MB, VFSConfig, PipelineConfig
-                from dataclasses import replace
-
-                # If pipeline_config.vfs_config was None, we need to create a new VFSConfig
-                # Otherwise, we replace the existing one
-                if pipeline_config.vfs_config is None:
-                    # Create new VFSConfig with only the backend set (other fields use defaults)
-                    new_vfs_config = VFSConfig(
-                        materialization_backend=MB(required_backend.value)
-                    )
-                else:
-                    # Replace existing VFSConfig with corrected backend
-                    new_vfs_config = replace(
-                        pipeline_config.vfs_config,
-                        materialization_backend=MB(required_backend.value)
-                    )
-
-                # Replace vfs_config in pipeline_config (also frozen, so use replace)
+                new_vfs_config = replace(vfs_config, materialization_backend=required_backend)
                 orchestrator.pipeline_config = replace(
-                    pipeline_config,
+                    orchestrator.pipeline_config,
                     vfs_config=new_vfs_config
                 )
-            else:
-                # Multiple compatible backends - raise error for explicit choice
-                compatible_values = [b.value for b in compatible_backends]
-                raise ValueError(
-                    f"Incompatible materialization_backend '{configured_backend_value}' for "
-                    f"{microscope_handler.microscope_type} microscope. "
-                    f"Compatible backends: {compatible_values}"
-                )
-        else:
-            logger.debug(
-                f"Backend '{configured_backend_value}' is compatible with "
-                f"{microscope_handler.microscope_type} microscope"
-            )
 
     @staticmethod
     def ensure_analysis_materialization(pipeline_definition: List[AbstractStep]) -> None:

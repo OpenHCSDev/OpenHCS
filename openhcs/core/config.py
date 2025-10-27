@@ -441,18 +441,6 @@ class StreamingDefaults:
     persistent: bool = True
     """Whether viewer stays open after pipeline completion."""
 
-@global_pipeline_config(ui_hidden=True)
-@dataclass(frozen=True)
-class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
-    """Abstract base configuration for streaming to visualizers.
-
-    Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
-    Inherited fields are automatically set to None by @global_pipeline_config(inherit_as_none=True).
-
-    Defines common attributes (host, port, transport_mode) that all streaming configs inherit,
-    enabling polymorphic access without type-specific attribute names.
-    """
-
     host: str = 'localhost'
     """Host for streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
 
@@ -461,6 +449,17 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
 
     transport_mode: TransportMode = TransportMode.IPC
     """ZMQ transport mode: IPC (local only, no firewall) or TCP (remote support, firewall prompts)."""
+
+@global_pipeline_config(ui_hidden=True)
+@dataclass(frozen=True)
+class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
+    """Abstract base configuration for streaming to visualizers.
+
+    Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
+    Inherited fields (persistent, host, port, transport_mode) are automatically set to None
+    by @global_pipeline_config(inherit_as_none=True), enabling polymorphic access without
+    type-specific attribute names.
+    """
 
     @property
     @abstractmethod
