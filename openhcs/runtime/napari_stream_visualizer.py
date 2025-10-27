@@ -313,7 +313,7 @@ _DATA_TYPE_HANDLERS = {
 
 
 def _handle_component_aware_display(viewer, layers, component_groups, data, path,
-                                   colormap, display_config, replace_layers, component_metadata=None, data_type='image'):
+                                   colormap, display_config, replace_layers, component_metadata=None, data_type='image', server=None):
     """
     Handle component-aware display following OpenHCS stacking patterns.
 
@@ -322,6 +322,7 @@ def _handle_component_aware_display(viewer, layers, component_groups, data, path
 
     Args:
         data_type: 'image' for image data, 'shapes' for ROI/shapes data (string or StreamingDataType enum)
+        server: NapariViewerServer instance (needed for debounced updates)
     """
     try:
         # Convert data_type to enum if needed (for backwards compatibility)
@@ -430,8 +431,10 @@ def _handle_component_aware_display(viewer, layers, component_groups, data, path
 
         # Schedule debounced layer update instead of immediate update
         # This prevents race conditions when multiple items arrive rapidly
+        if server is None:
+            raise ValueError("Server instance required for debounced updates")
         logger.info(f"🔬 NAPARI PROCESS: Scheduling debounced update for {layer_key} (data_type={data_type})")
-        viewer._schedule_layer_update(layer_key, data_type, component_modes, component_order)
+        server._schedule_layer_update(layer_key, data_type, component_modes, component_order)
 
     except Exception as e:
         import traceback
@@ -561,10 +564,34 @@ class NapariViewerServer(ZMQServer):
 
     def _update_image_layer(self, layer_key, layer_items, stack_components, component_modes):
         """Update an image layer with the current items."""
-        # Check if images have different shapes
+        # Check if images have different shapes and pad if needed
         shapes = [item['data'].shape for item in layer_items]
         if len(set(shapes)) > 1:
             logger.info(f"🔬 NAPARI PROCESS: Images in layer {layer_key} have different shapes - padding to max size")
+
+            # Find max dimensions
+            first_shape = shapes[0]
+            max_shape = list(first_shape)
+            for img_shape in shapes:
+                for i, dim in enumerate(img_shape):
+                    max_shape[i] = max(max_shape[i], dim)
+            max_shape = tuple(max_shape)
+
+            # Pad all images to max shape
+            for img_info in layer_items:
+                img_data = img_info['data']
+                if img_data.shape != max_shape:
+                    # Calculate padding for each dimension
+                    pad_width = []
+                    for i, (current_dim, max_dim) in enumerate(zip(img_data.shape, max_shape)):
+                        pad_before = 0
+                        pad_after = max_dim - current_dim
+                        pad_width.append((pad_before, pad_after))
+
+                    # Pad with zeros
+                    padded_data = np.pad(img_data, pad_width, mode='constant', constant_values=0)
+                    img_info['data'] = padded_data
+                    logger.debug(f"🔬 NAPARI PROCESS: Padded image from {img_data.shape} to {padded_data.shape}")
 
         logger.info(f"🔬 NAPARI PROCESS: Building nD data for {layer_key} from {len(layer_items)} items")
         stacked_data = _build_nd_image_array(layer_items, stack_components)
@@ -771,7 +798,7 @@ class NapariViewerServer(ZMQServer):
             # Component-aware layer management (handles both images and shapes)
             _handle_component_aware_display(
                 self.viewer, self.layers, self.component_groups, data, path,
-                colormap, display_config_dict or {}, self.replace_layers, component_metadata, data_type
+                colormap, display_config_dict or {}, self.replace_layers, component_metadata, data_type, server=self
             )
 
             # Send acknowledgment that data was successfully displayed
