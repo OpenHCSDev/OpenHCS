@@ -132,8 +132,10 @@ def start_global_ack_listener(transport_mode: TransportMode = None):
             logger.debug("Ack listener already running")
             return
 
-        # Set transport mode (default to IPC if not specified)
-        _ack_listener_transport_mode = transport_mode or TransportMode.IPC
+        # Set transport mode (default to IPC on Unix, TCP on Windows)
+        if transport_mode is None:
+            transport_mode = TransportMode.TCP if platform.system() == 'Windows' else TransportMode.IPC
+        _ack_listener_transport_mode = transport_mode
 
         logger.info(f"Starting global ack listener on port {SHARED_ACK_PORT} with {_ack_listener_transport_mode.value} transport")
         _ack_listener_running = True
@@ -234,7 +236,10 @@ class ZMQServer(ABC):
         self.control_port = port + CONTROL_PORT_OFFSET
         self.log_file_path = log_file_path
         self.data_socket_type = data_socket_type if data_socket_type is not None else zmq.PUB
-        self.transport_mode = transport_mode or TransportMode.IPC
+        # Windows doesn't support IPC (POSIX named pipes), so use TCP with localhost
+        if transport_mode is None:
+            transport_mode = TransportMode.TCP if platform.system() == 'Windows' else TransportMode.IPC
+        self.transport_mode = transport_mode
         self.zmq_context = None
         self.data_socket = None
         self.control_socket = None
@@ -463,7 +468,10 @@ class ZMQClient(ABC):
         self.host = host
         self.control_port = port + CONTROL_PORT_OFFSET
         self.persistent = persistent
-        self.transport_mode = transport_mode or TransportMode.IPC
+        # Windows doesn't support IPC (POSIX named pipes), so use TCP with localhost
+        if transport_mode is None:
+            transport_mode = TransportMode.TCP if platform.system() == 'Windows' else TransportMode.IPC
+        self.transport_mode = transport_mode
         self.zmq_context = None
         self.data_socket = None
         self.control_socket = None
@@ -652,7 +660,9 @@ class ZMQClient(ABC):
     @staticmethod
     def scan_servers(ports, host='localhost', timeout_ms=200, transport_mode=None):
         import zmq
-        transport_mode = transport_mode or TransportMode.IPC
+        # Windows doesn't support IPC, so use TCP with localhost
+        if transport_mode is None:
+            transport_mode = TransportMode.TCP if platform.system() == 'Windows' else TransportMode.IPC
         servers = []
         for port in ports:
             try:
