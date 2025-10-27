@@ -455,6 +455,11 @@ class ImageBrowserWidget(QWidget):
         """Set the orchestrator and load images."""
         self.orchestrator = orchestrator
 
+        # Use orchestrator's FileManager (has plate-specific backends like VirtualWorkspaceBackend)
+        if orchestrator:
+            self.filemanager = orchestrator.filemanager
+            logger.debug("Image browser now using orchestrator's FileManager")
+
         # Update config form contexts to use new pipeline_config
         if self.napari_config_form and orchestrator:
             self.napari_config_form.context_obj = orchestrator.pipeline_config
@@ -676,13 +681,17 @@ class ImageBrowserWidget(QWidget):
             return
 
         try:
+            logger.info("IMAGE BROWSER: Starting load_images()")
             # Get metadata handler from orchestrator
             handler = self.orchestrator.microscope_handler
             metadata_handler = handler.metadata_handler
+            logger.info(f"IMAGE BROWSER: Got metadata handler: {type(metadata_handler).__name__}")
 
             # Get image files from metadata
             plate_path = self.orchestrator.plate_path
+            logger.info(f"IMAGE BROWSER: Calling get_image_files for plate: {plate_path}")
             image_files = metadata_handler.get_image_files(plate_path)
+            logger.info(f"IMAGE BROWSER: get_image_files returned {len(image_files) if image_files else 0} files")
 
             if not image_files:
                 self.info_label.setText("No images found")
@@ -699,8 +708,10 @@ class ImageBrowserWidget(QWidget):
                     metadata.update(parsed)
                 self.all_images[filename] = metadata
 
+            logger.info(f"IMAGE BROWSER: Built all_images dict with {len(self.all_images)} entries")
+
         except Exception as e:
-            logger.error(f"Failed to load images: {e}")
+            logger.error(f"Failed to load images: {e}", exc_info=True)
             QMessageBox.warning(self, "Error", f"Failed to load images: {e}")
             self.info_label.setText("Error loading images")
             self.all_images = {}

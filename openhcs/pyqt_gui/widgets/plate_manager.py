@@ -248,7 +248,7 @@ class PlateManagerWidget(QWidget):
             ("Compile", "compile_plate", "Compile plate pipelines"),
             ("Run", "run_plate", "Run/Stop plate execution"),
             ("Code", "code_plate", "Generate Python code"),
-            ("Meta", "view_metadata", "View plate metadata"),
+            ("Viewer", "view_metadata", "View plate metadata"),
         ]
         
         # Create buttons in rows

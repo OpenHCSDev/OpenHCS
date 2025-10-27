@@ -155,11 +155,13 @@ class ZMQServer(ABC):
             self.data_socket = self.zmq_context.socket(self.data_socket_type)
             self.data_socket.setsockopt(zmq.LINGER, 0)
 
-            # Set high water mark for SUB sockets to prevent message drops
+            # Set high water mark for SUB/PULL sockets to prevent message drops
             # when viewer is busy processing (e.g., creating shapes layers that take 2-3 seconds)
-            if self.data_socket_type == zmq.SUB:
+            # REP sockets don't need HWM since they're synchronous (one request at a time)
+            if self.data_socket_type in (zmq.SUB, zmq.PULL):
                 self.data_socket.setsockopt(zmq.RCVHWM, 100000)  # Buffer up to 100k messages
-                logger.info(f"ZMQ SUB socket RCVHWM set to 100000 to prevent drops during blocking operations")
+                socket_type_name = "SUB" if self.data_socket_type == zmq.SUB else "PULL"
+                logger.info(f"ZMQ {socket_type_name} socket RCVHWM set to 100000 to prevent drops during blocking operations")
 
             self.data_socket.bind(f"tcp://{self.host}:{self.port}")
             if self.data_socket_type == zmq.SUB:

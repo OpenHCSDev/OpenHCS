@@ -243,12 +243,8 @@ class OpenHCSMetadataHandler(MetadataHandler):
             raise ValueError(f"'{FIELDS.SOURCE_FILENAME_PARSER_NAME}' must be a non-empty string in {self.METADATA_FILENAME}")
         return parser_name
 
-    def get_image_files(self, plate_path: Union[str, Path]) -> List[str]:
-        """Get image files list from OpenHCS metadata."""
-        image_files = self._load_metadata(plate_path).get(FIELDS.IMAGE_FILES)
-        if not (isinstance(image_files, list) and all(isinstance(f, str) for f in image_files)):
-            raise ValueError(f"'{FIELDS.IMAGE_FILES}' must be a list of strings in {self.METADATA_FILENAME}")
-        return image_files
+    # Uses default get_image_files() implementation from MetadataHandler ABC
+    # (prefers workspace_mapping keys, falls back to image_files list)
 
     # Optional metadata getters
     def _get_optional_metadata_dict(self, plate_path: Union[str, Path], key: str) -> Optional[Dict[str, str]]:

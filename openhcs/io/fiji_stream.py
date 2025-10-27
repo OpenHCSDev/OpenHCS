@@ -138,38 +138,30 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         type_counts = {dt: data_types.count(dt) for dt in set(data_types)}
         logger.info(f"📤 FIJI BACKEND: Sending batch message with {len(batch_images)} items to port {port}: {type_counts}")
 
-        # Send non-blocking to prevent hanging if Fiji is slow to process
-        import zmq
-        try:
-            publisher.send_json(message, flags=zmq.NOBLOCK)
-            logger.info(f"✅ FIJI BACKEND: Sent batch of {len(batch_images)} images to Fiji on port {port}")
+        # Send with REQ socket (BLOCKING - worker waits for Fiji to acknowledge)
+        # Worker blocks until Fiji receives, copies data from shared memory, and sends ack
+        # This guarantees no messages are lost and shared memory is only closed after Fiji is done
+        logger.info(f"📤 FIJI BACKEND: Sending batch of {len(batch_images)} images to Fiji on port {port} (REQ/REP - blocking until ack)")
+        publisher.send_json(message)  # Blocking send
 
-            # Register sent images with queue tracker using ABC helper
-            self._register_with_queue_tracker(port, image_ids)
+        # Wait for acknowledgment from Fiji (REP socket)
+        # Fiji will only reply after it has copied all data from shared memory
+        ack_response = publisher.recv_json()
+        logger.info(f"✅ FIJI BACKEND: Received ack from Fiji: {ack_response.get('status', 'unknown')}")
 
-            # Clean up publisher's handles after successful send
-            # Receiver will unlink the shared memory after copying the data
-            for img in batch_images:
-                shm_name = img.get('shm_name')  # ROI items don't have shm_name
-                if shm_name and shm_name in self._shared_memory_blocks:
-                    try:
-                        shm = self._shared_memory_blocks.pop(shm_name)
-                        shm.close()  # Close our handle, but don't unlink - receiver will do that
-                    except Exception as e:
-                        logger.warning(f"Failed to close shared memory handle {shm_name}: {e}")
+        # Register sent images with queue tracker using ABC helper
+        self._register_with_queue_tracker(port, image_ids)
 
-        except zmq.Again:
-            logger.warning(f"Fiji viewer busy, dropped batch of {len(batch_images)} images (port {port})")
-            # Clean up shared memory for dropped images (both close and unlink since receiver never got them)
-            for img in batch_images:
-                shm_name = img.get('shm_name')  # ROI items don't have shm_name
-                if shm_name and shm_name in self._shared_memory_blocks:
-                    try:
-                        shm = self._shared_memory_blocks.pop(shm_name)
-                        shm.close()
-                        shm.unlink()
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup dropped shared memory {shm_name}: {e}")
+        # Clean up publisher's handles after successful send
+        # Receiver will unlink the shared memory after copying the data
+        for img in batch_images:
+            shm_name = img.get('shm_name')  # ROI items don't have shm_name
+            if shm_name and shm_name in self._shared_memory_blocks:
+                try:
+                    shm = self._shared_memory_blocks.pop(shm_name)
+                    shm.close()  # Close our handle, but don't unlink - receiver will do that
+                except Exception as e:
+                    logger.warning(f"Failed to close shared memory handle {shm_name}: {e}")
 
     # cleanup() now inherited from ABC
 

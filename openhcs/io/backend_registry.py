@@ -99,8 +99,17 @@ def create_storage_registry() -> Dict[str, DataSink]:
     # Ensure all backends are discovered
     discover_all_backends()
 
+    # Backends that require context-specific initialization (e.g., plate_root)
+    # These are registered lazily when needed, not at startup
+    SKIP_BACKENDS = {'virtual_workspace'}
+
     registry = {}
     for backend_type in STORAGE_BACKENDS.keys():
+        # Skip backends that need context-specific initialization
+        if backend_type in SKIP_BACKENDS:
+            logger.debug(f"Skipping backend '{backend_type}' - requires context-specific initialization")
+            continue
+
         try:
             registry[backend_type] = get_backend_instance(backend_type)
         except Exception as e:

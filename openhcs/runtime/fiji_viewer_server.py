@@ -7,6 +7,7 @@ via PyImageJ. Inherits from ZMQServer ABC for ping/pong handshake and dual-chann
 
 import logging
 import time
+import threading
 from typing import Dict, Any, List
 
 from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT
@@ -48,8 +49,9 @@ class FijiViewerServer(ZMQServer):
         """
         import zmq
 
-        # Initialize with SUB socket for receiving images
-        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.SUB)
+        # Initialize with REP socket for receiving images (synchronous request/reply)
+        # REP socket forces workers to wait for acknowledgment before closing shared memory
+        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.REP)
 
         self.viewer_title = viewer_title
         self.display_config = display_config
@@ -64,6 +66,16 @@ class FijiViewerServer(ZMQServer):
         # Create PUSH socket for sending acknowledgments to shared ack port
         self.ack_socket = None
         self._setup_ack_socket()
+
+        # Debouncing for batched processing
+        self._pending_items = []  # Queue of copied items waiting to be processed
+        self._pending_display_config = None  # Display config for pending batch
+        self._pending_images_dir = None  # Images dir for pending batch
+        self._debounce_timer = None  # Timer for debounced processing
+        self._debounce_lock = threading.Lock()  # Lock for pending queue
+        self._debounce_delay = 0.5  # 500ms debounce delay
+        self._max_debounce_wait = 2.0  # Maximum 2 seconds total wait
+        self._first_message_time = None  # Track when first message in batch arrived
 
     def _setup_ack_socket(self):
         """Setup PUSH socket for sending acknowledgments."""
@@ -171,46 +183,176 @@ class FijiViewerServer(ZMQServer):
     def handle_data_message(self, message: Dict[str, Any]):
         """Handle incoming image data - called by process_messages()."""
         pass
-    
-    def process_image_message(self, message: bytes):
-        """
-        Process incoming image data message.
 
-        Builds 5D hyperstacks organized by (step_name, well).
-        Each hyperstack has dimensions organized as: channels, slices (z), frames (time).
-        Sites are treated as additional channels.
+    def _copy_items_from_shared_memory(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Copy data from shared memory to local memory for all items.
+
+        This MUST be called before sending ack to worker, so worker doesn't close shared memory.
+
+        Args:
+            items: List of items with shared memory references
+
+        Returns:
+            List of items with copied data (shared memory replaced with numpy arrays)
+        """
+        import numpy as np
+        from multiprocessing import shared_memory
+
+        copied_items = []
+        for item in items:
+            copied_item = item.copy()
+
+            # Only copy shared memory for image items (not ROIs)
+            if item.get('data_type') == 'image' and 'shm_name' in item:
+                shm_name = item['shm_name']
+                shape = tuple(item['shape'])
+                dtype = np.dtype(item['dtype'])
+
+                try:
+                    # Attach to shared memory and copy data
+                    shm = shared_memory.SharedMemory(name=shm_name)
+                    np_data = np.ndarray(shape, dtype=dtype, buffer=shm.buf).copy()
+                    shm.close()
+                    shm.unlink()  # Clean up shared memory
+
+                    # Replace shared memory reference with actual data
+                    copied_item['data'] = np_data
+                    del copied_item['shm_name']  # No longer needed
+                    del copied_item['shape']  # No longer needed
+                    del copied_item['dtype']  # No longer needed
+
+                    logger.debug(f"📋 FIJI SERVER: Copied image data from shared memory {shm_name}")
+
+                except Exception as e:
+                    logger.error(f"📋 FIJI SERVER: Failed to copy from shared memory {shm_name}: {e}")
+                    # Send error ack for this image
+                    image_id = item.get('image_id')
+                    if image_id:
+                        self._send_ack(image_id, status='error', error=str(e))
+                    continue
+
+            copied_items.append(copied_item)
+
+        return copied_items
+
+    def _queue_for_debounced_processing(self, items: List[Dict[str, Any]], display_config_dict: Dict[str, Any], images_dir: str):
+        """
+        Queue items for debounced batch processing.
+
+        Collects items for 500ms before processing to batch multiple images together.
+        This improves hyperstack building efficiency.
+
+        Args:
+            items: List of items with copied data
+            display_config_dict: Display configuration
+            images_dir: Source image subdirectory
+        """
+        with self._debounce_lock:
+            # Add items to pending queue
+            self._pending_items.extend(items)
+            self._pending_display_config = display_config_dict
+            self._pending_images_dir = images_dir
+
+            # Track first message time for max wait enforcement
+            if self._first_message_time is None:
+                self._first_message_time = time.time()
+
+            # Cancel existing timer if any
+            if self._debounce_timer is not None:
+                self._debounce_timer.cancel()
+
+            # Check if we've exceeded max wait time
+            elapsed = time.time() - self._first_message_time
+            if elapsed >= self._max_debounce_wait:
+                # Process immediately, don't wait any longer
+                logger.info(f"⏱️  FIJI SERVER: Max debounce wait ({self._max_debounce_wait}s) exceeded, processing {len(self._pending_items)} items immediately")
+                self._process_pending_batch()
+            else:
+                # Start new debounce timer
+                remaining_wait = min(self._debounce_delay, self._max_debounce_wait - elapsed)
+                logger.debug(f"⏱️  FIJI SERVER: Debouncing {len(self._pending_items)} items for {remaining_wait:.3f}s")
+                self._debounce_timer = threading.Timer(remaining_wait, self._process_pending_batch)
+                self._debounce_timer.start()
+
+    def _process_pending_batch(self):
+        """Process all pending items as a batch (called by debounce timer)."""
+        with self._debounce_lock:
+            if not self._pending_items:
+                return
+
+            items = self._pending_items
+            display_config_dict = self._pending_display_config
+            images_dir = self._pending_images_dir
+
+            # Clear pending queue
+            self._pending_items = []
+            self._pending_display_config = None
+            self._pending_images_dir = None
+            self._debounce_timer = None
+            self._first_message_time = None
+
+            logger.info(f"🔄 FIJI SERVER: Processing debounced batch of {len(items)} items")
+
+        # Process batch (outside lock to avoid blocking new messages)
+        try:
+            self._process_items_from_batch(items, display_config_dict, images_dir)
+        except Exception as e:
+            logger.error(f"🔄 FIJI SERVER: Error processing debounced batch: {e}", exc_info=True)
+
+    def process_image_message(self, message: bytes) -> dict:
+        """
+        Process incoming image data message with debouncing.
+
+        IMMEDIATELY copies data from shared memory and queues for debounced processing.
+        This allows worker to close shared memory quickly while Fiji batches processing.
 
         Args:
             message: Raw ZMQ message containing image data
+
+        Returns:
+            Acknowledgment dict with status
         """
         import json
 
-        # Parse JSON message
-        data = json.loads(message.decode('utf-8'))
+        try:
+            # Parse JSON message
+            data = json.loads(message.decode('utf-8'))
 
-        msg_type = data.get('type')
+            msg_type = data.get('type')
 
-        # Check message type
-        if msg_type == 'batch':
-            items = data.get('images', [])
-            display_config_dict = data.get('display_config', {})
-            images_dir = data.get('images_dir')
+            # Check message type
+            if msg_type == 'batch':
+                items = data.get('images', [])
+                display_config_dict = data.get('display_config', {})
+                images_dir = data.get('images_dir')
 
-            logger.info(f"📨 FIJI SERVER: Received batch message with {len(items)} items")
+                logger.info(f"📨 FIJI SERVER: Received batch message with {len(items)} items")
 
-            if not items:
-                return
+                if not items:
+                    return {'status': 'success', 'message': 'Empty batch'}
 
-            # Process all items through unified pipeline
-            self._process_items_from_batch(items, display_config_dict, images_dir)
+                # CRITICAL: Copy data from shared memory IMMEDIATELY
+                # This must happen before we send ack, so worker doesn't close shared memory
+                copied_items = self._copy_items_from_shared_memory(items)
 
-        else:
-            # Single image message (fallback)
-            self._process_items_from_batch(
-                [data],
-                data.get('display_config', {}),
-                data.get('images_dir')
-            )
+                # Queue copied items for debounced processing
+                self._queue_for_debounced_processing(copied_items, display_config_dict, images_dir)
+
+            else:
+                # Single image message (fallback)
+                copied_items = self._copy_items_from_shared_memory([data])
+                self._queue_for_debounced_processing(
+                    copied_items,
+                    data.get('display_config', {}),
+                    data.get('images_dir')
+                )
+
+            return {'status': 'success', 'message': 'Data copied, queued for processing'}
+
+        except Exception as e:
+            logger.error(f"📨 FIJI SERVER: Error processing message: {e}", exc_info=True)
+            return {'status': 'error', 'message': str(e)}
 
     def _process_items_from_batch(self, items: List[Dict[str, Any]], display_config_dict: Dict[str, Any], images_dir: str = None):
         """
@@ -854,8 +996,21 @@ def _handle_images_for_window(self, window_key: str, items: List[Dict[str, Any]]
 
     Builds or updates ImageJ hyperstack using shared coordinate space.
     """
-    # Load images from shared memory
-    image_data_list = self.load_images_from_shared_memory(items, error_callback=self._send_ack)
+    # Items may already have 'data' (from debounced processing) or 'shm_name' (direct processing)
+    # Convert to standard format expected by hyperstack builder
+    image_data_list = []
+    for item in items:
+        if 'data' in item:
+            # Already copied from shared memory (debounced path)
+            image_data_list.append({
+                'data': item['data'],
+                'metadata': item.get('metadata', {}),
+                'image_id': item.get('image_id')
+            })
+        elif 'shm_name' in item:
+            # Need to load from shared memory (direct path - shouldn't happen with debouncing)
+            loaded = self.load_images_from_shared_memory([item], error_callback=self._send_ack)
+            image_data_list.extend(loaded)
 
     if not image_data_list:
         return
@@ -988,23 +1143,33 @@ def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, lo
         
         logger.info(f"🔬 FIJI SERVER: Server started on port {port}, control port {port + 1000}")
         logger.info("🔬 FIJI SERVER: Waiting for images...")
-        
+
         # Message processing loop
+        # REP socket requires sending reply after each receive (synchronous request/reply)
         while not server._shutdown_requested:
             # Process control messages (ping/pong handled by ABC)
             server.process_messages()
-            
+
             # Process data messages (images) if ready
             if server._ready:
-                # Process multiple messages per iteration for better throughput
-                for _ in range(10):
-                    try:
-                        message = server.data_socket.recv(zmq.NOBLOCK)
-                        server.process_image_message(message)
-                    except zmq.Again:
-                        break
-            
-            time.sleep(0.01)  # 10ms sleep to prevent busy-waiting
+                # REP socket is synchronous - process one message at a time
+                # Worker blocks until we send reply, ensuring no shared memory race conditions
+                try:
+                    message = server.data_socket.recv(zmq.NOBLOCK)
+
+                    # Process the message and get acknowledgment
+                    ack_response = server.process_image_message(message)
+
+                    # Send acknowledgment back to worker (REP socket requires reply)
+                    # Worker will only close shared memory after receiving this
+                    server.data_socket.send_json(ack_response)
+                    logger.info(f"🔬 FIJI SERVER: Sent ack to worker: {ack_response['status']}")
+
+                except zmq.Again:
+                    # No messages available
+                    pass
+
+            time.sleep(0.001)  # 1ms sleep - faster polling for multiprocessing
         
         logger.info("🔬 FIJI SERVER: Shutting down...")
         server.stop()

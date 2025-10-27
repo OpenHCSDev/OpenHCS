@@ -49,6 +49,9 @@ class StreamingBackend(DataSink):
         """
         Lazy initialization of ZeroMQ publisher (common for all streaming backends).
 
+        Uses REQ socket for Fiji (synchronous request/reply with blocking)
+        and PUB socket for Napari (broadcast pattern).
+
         Args:
             host: Host to connect to
             port: Port to connect to
@@ -63,10 +66,17 @@ class StreamingBackend(DataSink):
                 if self._context is None:
                     self._context = zmq.Context()
 
-                publisher = self._context.socket(zmq.PUB)
-                publisher.setsockopt(zmq.SNDHWM, 10000)
+                # Use REQ socket for Fiji (synchronous request/reply - worker blocks until Fiji acks)
+                # Use PUB socket for Napari (broadcast pattern)
+                socket_type = zmq.REQ if self.VIEWER_TYPE == 'fiji' else zmq.PUB
+                publisher = self._context.socket(socket_type)
+
+                if socket_type == zmq.PUB:
+                    publisher.setsockopt(zmq.SNDHWM, 100000)  # Only for PUB sockets
+
                 publisher.connect(f"tcp://{host}:{port}")
-                logger.info(f"{self.VIEWER_TYPE} streaming publisher connected to {host}:{port}")
+                socket_name = "REQ" if socket_type == zmq.REQ else "PUB"
+                logger.info(f"{self.VIEWER_TYPE} streaming {socket_name} socket connected to {host}:{port}")
                 time.sleep(0.1)
                 self._publishers[key] = publisher
 
