@@ -647,10 +647,14 @@ class NapariViewerServer(ZMQServer):
         logger.info(f"🔬 NAPARI PROCESS: Starting background thread to build shapes for {layer_key} from {len(layer_items)} items")
 
         # If a thread is already running, wait for it to finish
-        if self.shapes_thread is not None and self.shapes_thread.isRunning():
-            logger.info(f"🔬 NAPARI PROCESS: Waiting for previous shapes thread to finish")
-            self.shapes_thread.quit()
-            self.shapes_thread.wait()
+        try:
+            if self.shapes_thread is not None and self.shapes_thread.isRunning():
+                logger.info(f"🔬 NAPARI PROCESS: Waiting for previous shapes thread to finish")
+                self.shapes_thread.quit()
+                self.shapes_thread.wait()
+        except RuntimeError:
+            # Thread was already deleted, ignore
+            pass
 
         # Create new thread and worker
         self.shapes_thread = QThread()
@@ -660,7 +664,7 @@ class NapariViewerServer(ZMQServer):
         # Connect signals
         self.shapes_worker.finished.connect(self._on_shapes_ready)
         self.shapes_worker.error.connect(self._on_shapes_error)
-        self.shapes_thread.finished.connect(self.shapes_thread.deleteLater)
+        # Don't use deleteLater - we'll manage thread lifecycle manually
 
         # Start processing
         # Make a deep copy of layer_items to avoid thread safety issues
@@ -688,16 +692,26 @@ class NapariViewerServer(ZMQServer):
         _create_or_update_shapes_layer(self.viewer, self.layers, layer_key, shapes_data, shape_types, properties)
 
         # Clean up thread
-        if self.shapes_thread:
-            self.shapes_thread.quit()
+        try:
+            if self.shapes_thread:
+                self.shapes_thread.quit()
+                self.shapes_thread.wait()
+        except RuntimeError:
+            # Thread already deleted
+            pass
 
     def _on_shapes_error(self, layer_key, error_message):
         """Called when shapes processing fails."""
         logger.error(f"🔬 NAPARI PROCESS: Failed to build shapes for {layer_key}: {error_message}")
 
         # Clean up thread
-        if self.shapes_thread:
-            self.shapes_thread.quit()
+        try:
+            if self.shapes_thread:
+                self.shapes_thread.quit()
+                self.shapes_thread.wait()
+        except RuntimeError:
+            # Thread already deleted
+            pass
 
     def _send_ack(self, image_id: str, status: str = 'success', error: str = None):
         """Send acknowledgment that an image was processed.
