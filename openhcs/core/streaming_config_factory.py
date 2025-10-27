@@ -178,12 +178,28 @@ def get_all_streaming_ports(num_ports_per_type: int = 10) -> List[int]:
     streaming_configs = get_all_subclasses(StreamingConfig)
 
     for config_cls in streaming_configs:
-        # Use field defaults from dataclass
-        default_port = config_cls.__dataclass_fields__['port'].default
-        # Skip abstract base classes with None port (only concrete configs have ports)
-        if default_port is not None:
-            # Generate port range for this streaming type
-            ports.extend([default_port + i for i in range(num_ports_per_type)])
+        # Skip abstract classes (including lazy wrappers with abstract methods)
+        import inspect
+        if inspect.isabstract(config_cls):
+            continue
+
+        # Access port via instance to trigger lazy resolution
+        try:
+            instance = config_cls()
+            default_port = instance.port
+        except Exception:
+            # Skip configs that can't be instantiated (likely abstract or incomplete)
+            continue
+
+        # Fail-loud if concrete config has None port (configuration error)
+        if default_port is None:
+            raise ValueError(
+                f"Concrete streaming config {config_cls.__name__} has None port. "
+                f"All concrete StreamingConfig subclasses must define a port."
+            )
+
+        # Generate port range for this streaming type
+        ports.extend([default_port + i for i in range(num_ports_per_type)])
 
     return ports
 
