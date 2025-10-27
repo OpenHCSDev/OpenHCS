@@ -150,9 +150,14 @@ def build_component_order():
 def get_all_streaming_ports(num_ports_per_type: int = 10) -> List[int]:
     """Get all streaming ports for all registered streaming config types.
 
-    Auto-discovers all StreamingConfig subclasses and their default ports,
-    then generates port ranges. Adding a new streaming backend requires
-    no changes to this function.
+    Auto-discovers all StreamingConfig subclasses and resolves their ports using
+    the current GlobalPipelineConfig context. This ensures the scanner finds viewers
+    launched with custom ports.
+
+    IMPORTANT: This function uses the current GlobalPipelineConfig context to resolve
+    ports. If a user sets custom ports in GlobalPipelineConfig, those custom ports
+    will be used for scanning. This is correct because all viewers are launched
+    through the orchestrator which respects GlobalPipelineConfig.
 
     Args:
         num_ports_per_type: Number of ports to allocate per streaming type (default: 10)
@@ -165,6 +170,10 @@ def get_all_streaming_ports(num_ports_per_type: int = 10) -> List[int]:
 
     # Start with execution server port
     ports = [DEFAULT_EXECUTION_SERVER_PORT]
+
+    # NOTE: Lazy configs will automatically resolve from GlobalPipelineConfig context
+    # if it's been set. All viewers are launched through orchestrator which sets this
+    # context, so custom ports will be respected automatically.
 
     # Auto-discover all StreamingConfig subclasses (generic, no hardcoding)
     def get_all_subclasses(cls):
@@ -184,6 +193,7 @@ def get_all_streaming_ports(num_ports_per_type: int = 10) -> List[int]:
             continue
 
         # Access port via instance to trigger lazy resolution
+        # Lazy configs will inherit from GlobalPipelineConfig if available
         try:
             instance = config_cls()
             default_port = instance.port
