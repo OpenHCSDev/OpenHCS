@@ -329,9 +329,11 @@ class ZMQExecutionServer(ZMQServer):
         try:
             import psutil
 
-            # Find all child processes that are Python workers (exclude Napari viewers)
+            # Find all child processes that are Python workers (exclude Napari and Fiji viewers)
             workers = [c for c in psutil.Process(os.getpid()).children(recursive=False)
-                      if (cmd := c.cmdline()) and 'python' in cmd[0].lower() and 'napari' not in ' '.join(cmd).lower()]
+                      if (cmd := c.cmdline()) and 'python' in cmd[0].lower()
+                      and 'napari' not in ' '.join(cmd).lower()
+                      and 'fiji' not in ' '.join(cmd).lower()]
 
             if not workers:
                 logger.info("No worker processes found to kill")
