@@ -21,7 +21,7 @@ import time
 import zmq
 import numpy as np
 from typing import Any, Dict, Optional
-from qtpy.QtCore import QTimer
+from qtpy.QtCore import QTimer, QThread, Signal, QObject
 
 from openhcs.io.filemanager import FileManager
 from openhcs.utils.import_utils import optional_import
@@ -47,6 +47,35 @@ _global_process_lock = threading.Lock()
 
 # Registry of data type handlers (will be populated after helper functions are defined)
 _DATA_TYPE_HANDLERS = None
+
+
+class ShapesWorker(QObject):
+    """Worker for building shapes data in background thread."""
+    finished = Signal(str, object, object, object)  # layer_key, shapes_data, shape_types, properties
+    error = Signal(str, str)  # layer_key, error_message
+
+    def __init__(self):
+        super().__init__()
+        self.layer_key = None
+        self.layer_items = None
+        self.stack_components = None
+
+    def process(self, layer_key, layer_items, stack_components):
+        """Build shapes data in background thread."""
+        self.layer_key = layer_key
+        self.layer_items = layer_items
+        self.stack_components = stack_components
+
+        try:
+            logger.info(f"🔬 NAPARI WORKER: Building shapes data for {layer_key} in background thread")
+            shapes_data, shape_types, properties = _build_nd_shapes(layer_items, stack_components)
+            logger.info(f"🔬 NAPARI WORKER: Finished building {len(shapes_data)} shapes for {layer_key}")
+            self.finished.emit(layer_key, shapes_data, shape_types, properties)
+        except Exception as e:
+            logger.error(f"🔬 NAPARI WORKER: Error building shapes for {layer_key}: {e}")
+            import traceback
+            logger.error(f"🔬 NAPARI WORKER: Traceback: {traceback.format_exc()}")
+            self.error.emit(layer_key, str(e))
 
 
 def _cleanup_global_viewer() -> None:
@@ -489,6 +518,10 @@ class NapariViewerServer(ZMQServer):
         self.pending_updates = {}  # layer_key -> QTimer (debounce)
         self.update_delay_ms = 100  # Wait 100ms for more items before rebuilding
 
+        # Background thread management for shapes processing
+        self.shapes_thread = None
+        self.shapes_worker = None
+
         # Create PUSH socket for sending acknowledgments to shared ack port
         self.ack_socket = None
         self._setup_ack_socket()
@@ -610,9 +643,38 @@ class NapariViewerServer(ZMQServer):
         _create_or_update_image_layer(self.viewer, self.layers, layer_key, stacked_data, colormap)
 
     def _update_shapes_layer(self, layer_key, layer_items, stack_components, component_modes):
-        """Update a shapes layer with the current items."""
-        logger.info(f"🔬 NAPARI PROCESS: Building nD data for {layer_key} from {len(layer_items)} items")
-        shapes_data, shape_types, properties = _build_nd_shapes(layer_items, stack_components)
+        """Update a shapes layer with the current items using background thread."""
+        logger.info(f"🔬 NAPARI PROCESS: Starting background thread to build shapes for {layer_key} from {len(layer_items)} items")
+
+        # If a thread is already running, wait for it to finish
+        if self.shapes_thread is not None and self.shapes_thread.isRunning():
+            logger.info(f"🔬 NAPARI PROCESS: Waiting for previous shapes thread to finish")
+            self.shapes_thread.quit()
+            self.shapes_thread.wait()
+
+        # Create new thread and worker
+        self.shapes_thread = QThread()
+        self.shapes_worker = ShapesWorker()
+        self.shapes_worker.moveToThread(self.shapes_thread)
+
+        # Connect signals
+        self.shapes_worker.finished.connect(self._on_shapes_ready)
+        self.shapes_worker.error.connect(self._on_shapes_error)
+        self.shapes_thread.finished.connect(self.shapes_thread.deleteLater)
+
+        # Start processing
+        # Make a deep copy of layer_items to avoid thread safety issues
+        import copy
+        layer_items_copy = copy.deepcopy(layer_items)
+
+        self.shapes_thread.started.connect(
+            lambda: self.shapes_worker.process(layer_key, layer_items_copy, stack_components)
+        )
+        self.shapes_thread.start()
+
+    def _on_shapes_ready(self, layer_key, shapes_data, shape_types, properties):
+        """Called when shapes data is ready from background thread."""
+        logger.info(f"🔬 NAPARI PROCESS: Shapes data ready for {layer_key}, creating layer on main thread")
 
         # Remove existing layer if it exists (shapes layers need to be recreated)
         if layer_key in self.layers:
@@ -622,8 +684,20 @@ class NapariViewerServer(ZMQServer):
             except Exception as e:
                 logger.warning(f"Failed to remove existing shapes layer {layer_key}: {e}")
 
-        # Create new shapes layer
+        # Create new shapes layer on main thread
         _create_or_update_shapes_layer(self.viewer, self.layers, layer_key, shapes_data, shape_types, properties)
+
+        # Clean up thread
+        if self.shapes_thread:
+            self.shapes_thread.quit()
+
+    def _on_shapes_error(self, layer_key, error_message):
+        """Called when shapes processing fails."""
+        logger.error(f"🔬 NAPARI PROCESS: Failed to build shapes for {layer_key}: {error_message}")
+
+        # Clean up thread
+        if self.shapes_thread:
+            self.shapes_thread.quit()
 
     def _send_ack(self, image_id: str, status: str = 'success', error: str = None):
         """Send acknowledgment that an image was processed.
