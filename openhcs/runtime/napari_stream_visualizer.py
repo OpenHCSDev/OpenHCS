@@ -21,6 +21,7 @@ import time
 import zmq
 import numpy as np
 from typing import Any, Dict, Optional
+from qtpy.QtCore import QTimer
 
 from openhcs.io.filemanager import FileManager
 from openhcs.utils.import_utils import optional_import
@@ -180,10 +181,14 @@ def _build_nd_image_array(layer_items, stack_components):
             values = sorted(set(img['components'].get(comp, 0) for img in layer_items))
             component_values[comp] = values
 
+        # Log component values for debugging
+        logger.info(f"🔬 NAPARI PROCESS: Building nD array with stack_components={stack_components}, component_values={component_values}")
+
         # Create empty array with shape (comp1_size, comp2_size, ..., y, x)
         first_img = layer_items[0]['data']
         stack_shape = tuple(len(component_values[comp]) for comp in stack_components) + first_img.shape
         stacked_array = np.zeros(stack_shape, dtype=first_img.dtype)
+        logger.info(f"🔬 NAPARI PROCESS: Created nD array with shape {stack_shape} from {len(layer_items)} items")
 
         # Fill array
         for img in layer_items:
@@ -192,6 +197,7 @@ def _build_nd_image_array(layer_items, stack_components):
                 component_values[comp].index(img['components'].get(comp, 0))
                 for comp in stack_components
             )
+            logger.debug(f"🔬 NAPARI PROCESS: Placing image at indices {indices}, components={img['components']}")
             stacked_array[indices] = img['data']
 
         return stacked_array
@@ -270,11 +276,15 @@ def _create_or_update_image_layer(viewer, layers, layer_name, image_data, colorm
             break
 
     if existing_layer is not None:
+        old_shape = existing_layer.data.shape
+        new_shape = image_data.shape
+        if old_shape != new_shape:
+            logger.info(f"🔬 NAPARI PROCESS: Layer {layer_name} shape changing: {old_shape} → {new_shape}")
         existing_layer.data = image_data
         if colormap:
             existing_layer.colormap = colormap
         layers[layer_name] = existing_layer
-        logger.info(f"🔬 NAPARI PROCESS: Updated existing image layer {layer_name}")
+        logger.info(f"🔬 NAPARI PROCESS: Updated existing image layer {layer_name} (shape: {new_shape})")
         return existing_layer
     else:
         new_layer = viewer.add_image(
@@ -418,160 +428,27 @@ def _handle_component_aware_display(viewer, layers, component_groups, data, path
             component_groups[layer_key].append(new_item)
             logger.info(f"🔬 NAPARI PROCESS: Added {data_type} to component_groups[{layer_key}], now has {len(component_groups[layer_key])} items")
 
-        # Get all items for this layer
-        layer_items = component_groups[layer_key]
-
-        # Determine if we should stack or use single item
-        stack_components = [comp for comp, mode in component_modes.items()
-                          if mode == 'stack' and comp in component_info]
-
-        if len(layer_items) == 1:
-            # Single item - add directly using registry
-            layer_name = layer_key
-
-            # Prepare data based on type
-            if data_type == StreamingDataType.SHAPES:
-                from openhcs.runtime.roi_converters import NapariROIConverter
-                napari_shapes, shape_types, properties = NapariROIConverter.shapes_to_napari_format(data)
-                _create_or_update_shapes_layer(viewer, layers, layer_name, napari_shapes, shape_types, properties)
-            else:  # IMAGE
-                _create_or_update_image_layer(viewer, layers, layer_name, data, colormap)
-        else:
-            # Multiple items - handle stacking
-            try:
-                # For shapes, skip the shape checking logic (shapes don't have .shape attribute)
-                if data_type == StreamingDataType.SHAPES:
-                    all_same_shape = True  # Shapes don't need same shape
-                else:
-                    # Check if all images have the same shape
-                    first_shape = layer_items[0]['data'].shape
-                    all_same_shape = all(img['data'].shape == first_shape for img in layer_items)
-
-                if not all_same_shape:
-                    # Images have different shapes - handle based on config
-                    # Get variable size handling mode from config
-                    from openhcs.core.config import NapariVariableSizeHandling
-                    variable_size_mode = NapariVariableSizeHandling.SEPARATE_LAYERS  # Default
-
-                    if isinstance(display_config, dict):
-                        mode_str = display_config.get('variable_size_handling')
-                        if mode_str:
-                            try:
-                                variable_size_mode = NapariVariableSizeHandling(mode_str)
-                            except (ValueError, KeyError):
-                                pass
-                    elif hasattr(display_config, 'variable_size_handling'):
-                        mode_value = display_config.variable_size_handling
-                        if mode_value is not None:
-                            variable_size_mode = mode_value
-
-                    if variable_size_mode == NapariVariableSizeHandling.PAD_TO_MAX:
-                        # Pad images to max size
-                        logger.info(f"🔬 NAPARI PROCESS: Images in layer {layer_key} have different shapes - padding to max size")
-
-                        # Find max dimensions
-                        max_shape = list(first_shape)
-                        for img_info in layer_items:
-                            img_shape = img_info['data'].shape
-                            for i, dim in enumerate(img_shape):
-                                max_shape[i] = max(max_shape[i], dim)
-                        max_shape = tuple(max_shape)
-
-                        # Pad all images to max shape
-                        padded_images = []
-                        for img_info in layer_items:
-                            img_data = img_info['data']
-                            if img_data.shape != max_shape:
-                                # Calculate padding for each dimension
-                                pad_width = []
-                                for i, (current_dim, max_dim) in enumerate(zip(img_data.shape, max_shape)):
-                                    pad_before = 0
-                                    pad_after = max_dim - current_dim
-                                    pad_width.append((pad_before, pad_after))
-
-                                # Pad with zeros
-                                padded_data = np.pad(img_data, pad_width, mode='constant', constant_values=0)
-                                img_info['data'] = padded_data
-                                logger.debug(f"🔬 NAPARI PROCESS: Padded image from {img_data.shape} to {padded_data.shape}")
-
-                        # Continue with normal stacking logic below (all images now have same shape)
-
-                    else:  # SEPARATE_LAYERS mode
-                        # Create separate layers per well
-                        logger.warning(f"🔬 NAPARI PROCESS: Images in layer {layer_key} have different shapes - creating separate layers per well")
-
-                        # Group by well and create separate layers
-                        wells_in_layer = {}
-                        for img_info in layer_items:
-                            well = img_info['components'].get('well', 'unknown_well')
-                            if well not in wells_in_layer:
-                                wells_in_layer[well] = []
-                            wells_in_layer[well].append(img_info)
-
-                        # Create a layer for each well
-                        for well, well_images in wells_in_layer.items():
-                            well_layer_name = f"{layer_key}_{well}"
-
-                            # If only one image for this well, add directly
-                            if len(well_images) == 1:
-                                well_image_data = well_images[0]['data']
-                            else:
-                                # Stack images for this well (they should have same shape within a well)
-                                well_image_stack = [img['data'] for img in well_images]
-                                from openhcs.core.memory.stack_utils import stack_slices
-                                well_image_data = stack_slices(well_image_stack, memory_type='numpy', gpu_id=0)
-
-                            # Check if layer exists
-                            existing_layer = None
-                            for layer in viewer.layers:
-                                if layer.name == well_layer_name:
-                                    existing_layer = layer
-                                    break
-
-                            if existing_layer is not None:
-                                existing_layer.data = well_image_data
-                                layers[well_layer_name] = existing_layer
-                                logger.info(f"🔬 NAPARI PROCESS: Updated well-specific layer {well_layer_name} (shape: {well_image_data.shape})")
-                            else:
-                                new_layer = viewer.add_image(well_image_data, name=well_layer_name, colormap=colormap)
-                                layers[well_layer_name] = new_layer
-                                logger.info(f"🔬 NAPARI PROCESS: Created well-specific layer {well_layer_name} (shape: {well_image_data.shape})")
-
-                        # Skip the normal stacking logic below
-                        return
-
-                # Sort by stack components for consistent ordering
-                if stack_components:
-                    def sort_key(item_info):
-                        return tuple(item_info['components'].get(comp, 0) for comp in stack_components)
-                    layer_items.sort(key=sort_key)
-
-                # Build nD data using registry (UNIFIED for images and shapes)
-                logger.info(f"🔬 NAPARI PROCESS: Building nD data for {layer_key} from {len(layer_items)} items")
-                if data_type == StreamingDataType.SHAPES:
-                    stacked_data, shape_types, properties = _build_nd_shapes(layer_items, stack_components)
-                    logger.info(f"🔬 NAPARI PROCESS: Built {len(stacked_data)} shapes from {len(layer_items)} items")
-                else:  # IMAGE
-                    stacked_data = _build_nd_image_array(layer_items, stack_components)
-
-                # Create or update layer using registry (UNIFIED dispatch)
-                layer_name = layer_key
-                if data_type == StreamingDataType.SHAPES:
-                    _create_or_update_shapes_layer(viewer, layers, layer_name, stacked_data, shape_types, properties)
-                else:  # IMAGE
-                    _create_or_update_image_layer(viewer, layers, layer_name, stacked_data, colormap)
-
-            except Exception as e:
-                logger.error(f"🔬 NAPARI PROCESS: Failed to create stack for layer {layer_key}: {e}")
-                import traceback
-                logger.error(f"🔬 NAPARI PROCESS: Traceback: {traceback.format_exc()}")
-                raise
+        # Schedule debounced layer update instead of immediate update
+        # This prevents race conditions when multiple items arrive rapidly
+        logger.info(f"🔬 NAPARI PROCESS: Scheduling debounced update for {layer_key} (data_type={data_type})")
+        viewer._schedule_layer_update(layer_key, data_type, component_modes, component_order)
 
     except Exception as e:
         import traceback
         logger.error(f"🔬 NAPARI PROCESS: Component-aware display failed for {path}: {e}")
         logger.error(f"🔬 NAPARI PROCESS: Component-aware display traceback: {traceback.format_exc()}")
         raise  # Fail loud - no fallback
+
+
+def _old_immediate_update_logic_removed():
+    """
+    Old immediate update logic removed in favor of debounced updates.
+    Kept as reference for the variable size handling logic that needs to be ported.
+    """
+    pass
+    # Old code was here - removed to prevent race conditions
+    # Now using _schedule_layer_update -> _execute_layer_update -> _update_image_layer/_update_shapes_layer
+
 
 
 class NapariViewerServer(ZMQServer):
@@ -603,6 +480,12 @@ class NapariViewerServer(ZMQServer):
         self.layers = {}
         self.component_groups = {}
 
+        # Debouncing + locking for layer updates to prevent race conditions
+        import threading
+        self.layer_update_lock = threading.Lock()  # Prevent concurrent updates
+        self.pending_updates = {}  # layer_key -> QTimer (debounce)
+        self.update_delay_ms = 100  # Wait 100ms for more items before rebuilding
+
         # Create PUSH socket for sending acknowledgments to shared ack port
         self.ack_socket = None
         self._setup_ack_socket()
@@ -618,6 +501,102 @@ class NapariViewerServer(ZMQServer):
         except Exception as e:
             logger.warning(f"🔬 NAPARI SERVER: Failed to setup ack socket: {e}")
             self.ack_socket = None
+
+    def _schedule_layer_update(self, layer_key, data_type, component_modes, component_order):
+        """
+        Schedule a debounced layer update.
+
+        Cancels any pending update for this layer and schedules a new one.
+        This prevents race conditions when multiple items arrive rapidly.
+        """
+        # Cancel existing timer if any
+        if layer_key in self.pending_updates:
+            self.pending_updates[layer_key].stop()
+            logger.debug(f"🔬 NAPARI PROCESS: Cancelled pending update for {layer_key}")
+
+        # Create new timer
+        timer = QTimer()
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._execute_layer_update(layer_key, data_type, component_modes, component_order))
+        timer.start(self.update_delay_ms)
+        self.pending_updates[layer_key] = timer
+        logger.debug(f"🔬 NAPARI PROCESS: Scheduled update for {layer_key} in {self.update_delay_ms}ms")
+
+    def _execute_layer_update(self, layer_key, data_type, component_modes, component_order):
+        """
+        Execute the actual layer update after debounce delay.
+
+        Uses a lock to prevent concurrent updates to different layers.
+        """
+        # Remove timer
+        self.pending_updates.pop(layer_key, None)
+
+        # Acquire lock to prevent concurrent updates
+        with self.layer_update_lock:
+            logger.info(f"🔬 NAPARI PROCESS: Executing debounced update for {layer_key}")
+
+            # Get current items for this layer
+            layer_items = self.component_groups.get(layer_key, [])
+            if not layer_items:
+                logger.warning(f"🔬 NAPARI PROCESS: No items found for {layer_key}, skipping update")
+                return
+
+            # Log layer composition
+            wells_in_layer = set(item['components'].get('well', 'unknown') for item in layer_items)
+            logger.info(f"🔬 NAPARI PROCESS: layer_key='{layer_key}' has {len(layer_items)} items from wells: {sorted(wells_in_layer)}")
+
+            # Determine if we should stack or use single item
+            first_item = layer_items[0]
+            component_info = first_item['components']
+            stack_components = [comp for comp, mode in component_modes.items()
+                              if mode == 'stack' and comp in component_info]
+
+            # Build and update the layer based on data type
+            if data_type == StreamingDataType.IMAGE:
+                self._update_image_layer(layer_key, layer_items, stack_components, component_modes)
+            elif data_type == StreamingDataType.SHAPES:
+                self._update_shapes_layer(layer_key, layer_items, stack_components, component_modes)
+            else:
+                logger.warning(f"🔬 NAPARI PROCESS: Unknown data type {data_type} for {layer_key}")
+
+    def _update_image_layer(self, layer_key, layer_items, stack_components, component_modes):
+        """Update an image layer with the current items."""
+        # Check if images have different shapes
+        shapes = [item['data'].shape for item in layer_items]
+        if len(set(shapes)) > 1:
+            logger.info(f"🔬 NAPARI PROCESS: Images in layer {layer_key} have different shapes - padding to max size")
+
+        logger.info(f"🔬 NAPARI PROCESS: Building nD data for {layer_key} from {len(layer_items)} items")
+        stacked_data = _build_nd_image_array(layer_items, stack_components)
+
+        # Determine colormap
+        colormap = None
+        if 'channel' in component_modes and component_modes['channel'] == 'slice':
+            first_item = layer_items[0]
+            channel_value = first_item['components'].get('channel')
+            if channel_value == 1:
+                colormap = 'green'
+            elif channel_value == 2:
+                colormap = 'red'
+
+        # Create or update the layer
+        _create_or_update_image_layer(self.viewer, self.layers, layer_key, stacked_data, colormap)
+
+    def _update_shapes_layer(self, layer_key, layer_items, stack_components, component_modes):
+        """Update a shapes layer with the current items."""
+        logger.info(f"🔬 NAPARI PROCESS: Building nD data for {layer_key} from {len(layer_items)} items")
+        shapes_data, shape_types, properties = _build_nd_shapes(layer_items, stack_components)
+
+        # Remove existing layer if it exists (shapes layers need to be recreated)
+        if layer_key in self.layers:
+            try:
+                self.viewer.layers.remove(self.layers[layer_key])
+                logger.info(f"🔬 NAPARI PROCESS: Removed existing shapes layer {layer_key} for recreation")
+            except Exception as e:
+                logger.warning(f"Failed to remove existing shapes layer {layer_key}: {e}")
+
+        # Create new shapes layer
+        _create_or_update_shapes_layer(self.viewer, self.layers, layer_key, shapes_data, shape_types, properties)
 
     def _send_ack(self, image_id: str, status: str = 'success', error: str = None):
         """Send acknowledgment that an image was processed.
