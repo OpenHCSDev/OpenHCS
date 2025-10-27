@@ -938,25 +938,49 @@ class PipelineOrchestrator(ContextProvider):
                 for visualizer_info in ctx.required_visualizers:
                     config = visualizer_info['config']
 
-                    # For napari configs, use port as part of the key
+                    # Generic port-based key generation for all streaming configs
+                    # Check for port attributes in order: napari_port, fiji_port, or any other *_port
+                    port = None
+                    viewer_type = None
+
                     if hasattr(config, 'napari_port'):
-                        key = ('napari', config.napari_port)
-                        # Store the first config we see for each port
-                        # All configs for the same port should be identical after resolution
-                        if key not in unique_visualizer_configs:
-                            logger.info(f"🔬 ORCHESTRATOR: Found first config for port {config.napari_port}: persistent={config.persistent}")
-                            unique_visualizer_configs[key] = (config, ctx.visualizer_config)
-                        else:
-                            # Log if we see a different config for the same port
-                            existing_config = unique_visualizer_configs[key][0]
-                            if existing_config.persistent != config.persistent:
-                                logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for port {config.napari_port}: existing={existing_config.persistent}, new={config.persistent}")
+                        port = config.napari_port
+                        viewer_type = 'napari'
+                    elif hasattr(config, 'fiji_port'):
+                        port = config.fiji_port
+                        viewer_type = 'fiji'
                     else:
-                        # For non-napari visualizers, use backend name as key
+                        # For future viewer types, check for any attribute ending in '_port'
+                        for attr in dir(config):
+                            if attr.endswith('_port') and not attr.startswith('_'):
+                                port = getattr(config, attr)
+                                viewer_type = attr.replace('_port', '')
+                                break
+
+                    # Create key based on whether we found a port
+                    if port is not None:
+                        key = (viewer_type, port)
+                    else:
+                        # Fallback for non-port-based visualizers
                         backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
                         key = (backend_name,)
-                        if key not in unique_visualizer_configs:
-                            unique_visualizer_configs[key] = (config, ctx.visualizer_config)
+
+                    # Store the first config we see for each key
+                    # All configs for the same key should be identical after resolution
+                    if key not in unique_visualizer_configs:
+                        if port is not None:
+                            logger.info(f"🔬 ORCHESTRATOR: Found first config for {viewer_type} port {port}: persistent={config.persistent}")
+                        else:
+                            logger.info(f"🔬 ORCHESTRATOR: Found first config for {key}: persistent={config.persistent}")
+                        unique_visualizer_configs[key] = (config, ctx.visualizer_config)
+                    else:
+                        # Log if we see a different config for the same key
+                        existing_config = unique_visualizer_configs[key][0]
+                        if existing_config.persistent != config.persistent:
+                            if port is not None:
+                                logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for {viewer_type} port {port}: existing={existing_config.persistent}, new={config.persistent}")
+                            else:
+                                logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for {key}: existing={existing_config.persistent}, new={config.persistent}")
 
             # Create and start all visualizers using shared infrastructure
             for key, (config, vis_config) in unique_visualizer_configs.items():
