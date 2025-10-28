@@ -122,6 +122,48 @@ class FijiViewerServer(ZMQServer):
         except Exception as e:
             logger.warning(f"🔬 FIJI SERVER: Failed to send ack for {image_id}: {e}")
     
+    def _wait_for_swing_ui_ready(self, timeout: float = 5.0) -> bool:
+        """Wait for Java Swing UI to be fully initialized.
+
+        This is critical for IPC mode where messages arrive very fast.
+        RoiManager and other Swing components require the EDT to be ready.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            True if UI is ready, False if timeout
+        """
+        import time
+        import scyjava as sj
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # Try to access UIManager and verify UIDefaults are populated
+                # This is critical because RoiManager needs JList UI components
+                UIManager = sj.jimport('javax.swing.UIManager')
+                look_and_feel = UIManager.getLookAndFeel()
+
+                if look_and_feel is not None:
+                    # Additional check: verify UIDefaults has JList UI class
+                    # This is what RoiManager needs (it contains a JList)
+                    ui_defaults = UIManager.getDefaults()
+                    list_ui = ui_defaults.get("ListUI")
+
+                    if list_ui is not None:
+                        logger.info("🔬 FIJI SERVER: Java Swing UI is ready (UIDefaults populated)")
+                        return True
+                    else:
+                        logger.debug("🔬 FIJI SERVER: Waiting for UIDefaults to populate...")
+
+            except Exception as e:
+                logger.debug(f"🔬 FIJI SERVER: Waiting for Swing UI: {e}")
+            time.sleep(0.1)
+
+        logger.warning("🔬 FIJI SERVER: Timeout waiting for Swing UI initialization")
+        return False
+
     def start(self):
         """Start server and initialize PyImageJ."""
         super().start()
@@ -137,6 +179,13 @@ class FijiViewerServer(ZMQServer):
                 # Show Fiji UI so users can interact with images and menus
                 self.ij.ui().showUI()
                 logger.info("🔬 FIJI SERVER: PyImageJ initialized in interactive mode with UI shown")
+
+                # Wait for Java Swing UI to be fully initialized
+                # This is critical for IPC mode where messages arrive very fast
+                # RoiManager creation requires the Swing event dispatch thread to be ready
+                if not self._wait_for_swing_ui_ready(timeout=5.0):
+                    logger.warning("🔬 FIJI SERVER: Swing UI may not be fully initialized, proceeding anyway")
+
             except OSError as e:
                 if "Cannot enable interactive mode" in str(e):
                     logger.warning("🔬 FIJI SERVER: Interactive mode failed (likely macOS), using headless mode")
@@ -1067,11 +1116,31 @@ def _handle_rois_for_window(self, window_key: str, items: List[Dict[str, Any]],
     """
     from openhcs.runtime.roi_converters import FijiROIConverter
     import scyjava as sj
+    from jpype import JImplements, JOverride
 
+    # Get or create RoiManager - MUST be done on EDT to avoid Swing threading issues
     RoiManager = sj.jimport('ij.plugin.frame.RoiManager')
+
+    # Try to get existing instance first (doesn't require EDT)
     rm = RoiManager.getInstance()
+
+    # If no instance exists, create one on EDT
     if rm is None:
-        rm = RoiManager()
+        SwingUtilities = sj.jimport('javax.swing.SwingUtilities')
+
+        # Use a holder to get the RoiManager out of the Runnable
+        rm_holder = [None]
+
+        # Create a Java Runnable using JPype's JImplements decorator
+        @JImplements('java.lang.Runnable')
+        class CreateRoiManagerRunnable:
+            @JOverride
+            def run(self):
+                rm_holder[0] = RoiManager()
+
+        # Execute on EDT and wait
+        SwingUtilities.invokeAndWait(CreateRoiManagerRunnable())
+        rm = rm_holder[0]
 
     # Get or assign integer group ID for this window
     if window_key not in self.window_key_to_group_id:
