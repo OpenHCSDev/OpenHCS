@@ -1166,7 +1166,7 @@ class NapariStreamVisualizer:
         if self._connected_to_existing:
             # Quick ping check to verify viewer is still alive
             if not self._quick_ping_check():
-                logger.debug(f"🔬 VISUALIZER: Connected viewer on port {self.napari_port} is no longer responsive")
+                logger.debug(f"🔬 VISUALIZER: Connected viewer on port {self.port} is no longer responsive")
                 self._is_running = False
                 self._connected_to_existing = False
                 return False
@@ -1186,7 +1186,7 @@ class NapariStreamVisualizer:
                 alive = self.process.poll() is None
 
             if not alive:
-                logger.debug(f"🔬 VISUALIZER: Napari process on port {self.napari_port} is no longer alive")
+                logger.debug(f"🔬 VISUALIZER: Napari process on port {self.port} is no longer alive")
                 self._is_running = False
 
             return alive
@@ -1202,7 +1202,7 @@ class NapariStreamVisualizer:
         from openhcs.constants.constants import CONTROL_PORT_OFFSET
 
         try:
-            control_port = self.napari_port + CONTROL_PORT_OFFSET
+            control_port = self.port + CONTROL_PORT_OFFSET
             control_url = get_zmq_transport_url(control_port, self.transport_mode, 'localhost')
 
             ctx = zmq.Context()
@@ -1252,7 +1252,7 @@ class NapariStreamVisualizer:
             # Start viewer asynchronously in background thread
             thread = threading.Thread(target=self._start_viewer_sync, daemon=True)
             thread.start()
-            logger.info(f"🔬 VISUALIZER: Starting napari viewer asynchronously on port {self.napari_port}")
+            logger.info(f"🔬 VISUALIZER: Starting napari viewer asynchronously on port {self.port}")
         else:
             # Legacy synchronous mode
             self._start_viewer_sync()
@@ -1263,26 +1263,25 @@ class NapariStreamVisualizer:
 
         with self._lock:
             # Check if there's already a napari viewer running on the configured port
-            port_in_use = self._is_port_in_use(self.napari_port)
-            logger.info(f"🔬 VISUALIZER: Port {self.napari_port} in use: {port_in_use}")
+            port_in_use = self._is_port_in_use(self.port)
+            logger.info(f"🔬 VISUALIZER: Port {self.port} in use: {port_in_use}")
 
             if port_in_use:
                 # Try to connect to existing viewer first before killing it
-                logger.info(f"🔬 VISUALIZER: Port {self.napari_port} is in use, attempting to connect to existing viewer...")
-                self.port = self.napari_port
-                if self._try_connect_to_existing_viewer(self.napari_port):
-                    logger.info(f"🔬 VISUALIZER: Successfully connected to existing viewer on port {self.napari_port}")
+                logger.info(f"🔬 VISUALIZER: Port {self.port} is in use, attempting to connect to existing viewer...")
+                if self._try_connect_to_existing_viewer(self.port):
+                    logger.info(f"🔬 VISUALIZER: Successfully connected to existing viewer on port {self.port}")
                     self._is_running = True
                     self._connected_to_existing = True  # Mark that we connected to existing viewer
                     return
                 else:
                     # Existing viewer is unresponsive - kill it and start fresh
-                    logger.info(f"🔬 VISUALIZER: Existing viewer on port {self.napari_port} is unresponsive, killing and restarting...")
+                    logger.info(f"🔬 VISUALIZER: Existing viewer on port {self.port} is unresponsive, killing and restarting...")
                     # Use shared method from ZMQServer ABC
                     from openhcs.runtime.zmq_base import ZMQServer
                     from openhcs.constants.constants import CONTROL_PORT_OFFSET
-                    ZMQServer.kill_processes_on_port(self.napari_port)
-                    ZMQServer.kill_processes_on_port(self.napari_port + CONTROL_PORT_OFFSET)
+                    ZMQServer.kill_processes_on_port(self.port)
+                    ZMQServer.kill_processes_on_port(self.port + CONTROL_PORT_OFFSET)
                     # Wait a moment for ports to be freed
                     import time
                     time.sleep(0.5)

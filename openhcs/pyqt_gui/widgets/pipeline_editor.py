@@ -499,7 +499,7 @@ class PipelineEditorWidget(QWidget):
             config_details.append("• Materialization Config: Enabled")
         if hasattr(step, 'napari_streaming_config') and step.napari_streaming_config:
             napari_config = step.napari_streaming_config
-            port = getattr(napari_config, 'napari_port', 'default')
+            port = getattr(napari_config, 'port', 'default')
             config_details.append(f"• Napari Streaming: Port {port}")
         if hasattr(step, 'fiji_streaming_config') and step.fiji_streaming_config:
             config_details.append("• Fiji Streaming: Enabled")

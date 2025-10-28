@@ -440,8 +440,8 @@ class OpenHCSExecutionServer:
             if hasattr(step, 'napari_streaming_config') and step.napari_streaming_config:
                 new_config = replace(
                     step.napari_streaming_config,
-                    napari_host=client_host,
-                    napari_port=client_port
+                    host=client_host,
+                    port=client_port
                 )
                 step = replace(step, napari_streaming_config=new_config)
             updated_steps.append(step)
