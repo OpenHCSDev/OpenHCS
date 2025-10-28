@@ -29,7 +29,7 @@ step_1 = FunctionStep(
     name="Image Enhancement Processing",
     step_well_filter_config=LazyStepWellFilterConfig(well_filter=4),
     step_materialization_config=LazyStepMaterializationConfig(),
-    napari_streaming_config=LazyNapariStreamingConfig(napari_port=5555)
+    napari_streaming_config=LazyNapariStreamingConfig(port=5555)
 )
 pipeline_steps.append(step_1)
 
@@ -38,7 +38,7 @@ step_2 = FunctionStep(
     func=create_composite,
     name="create_composite",
     variable_components=[VariableComponents.CHANNEL],
-    napari_streaming_config=LazyNapariStreamingConfig(napari_port=5557)
+    napari_streaming_config=LazyNapariStreamingConfig(port=5557)
 )
 pipeline_steps.append(step_2)
 
@@ -104,7 +104,7 @@ step_8 = FunctionStep(
         })
     },
     name="Cell Counting",
-    napari_streaming_config=LazyNapariStreamingConfig(variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX, napari_port=5559),
+    napari_streaming_config=LazyNapariStreamingConfig(variable_size_handling=NapariVariableSizeHandling.PAD_TO_MAX, port=5559),
     fiji_streaming_config=LazyFijiStreamingConfig()
 )
 pipeline_steps.append(step_8)

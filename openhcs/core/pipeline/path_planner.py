@@ -114,7 +114,7 @@ class PathPlanner:
         # Handle optional materialization and input conversion
         # Read step_materialization_config directly from step object (not step plans, which aren't populated yet)
         materialized_output_dir = None
-        if step.step_materialization_config:
+        if step.step_materialization_config and step.step_materialization_config.enabled:
             # Check if this step has well filters and if current well should be materialized
             step_axis_filters = getattr(self.ctx, 'step_axis_filters', {}).get(sid, {})
             materialization_filter = step_axis_filters.get('step_materialization_config')
@@ -382,7 +382,7 @@ class PathPlanner:
         # Collect all materialization steps with their paths and positions
         mat_steps = [
             (step, self.plans.get(i, {}).get('pipeline_position', 0), self._build_output_path(step.step_materialization_config))
-            for i, step in enumerate(pipeline) if step.step_materialization_config
+            for i, step in enumerate(pipeline) if step.step_materialization_config and step.step_materialization_config.enabled
         ]
 
         # Group by path for conflict detection

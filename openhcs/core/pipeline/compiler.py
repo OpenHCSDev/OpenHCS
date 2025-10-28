@@ -390,7 +390,7 @@ class PipelineCompiler:
                     # No need to call to_base_config() again - that's legacy code
 
                     # Unified handling: compute inclusion for any WellFilterConfig (StreamingConfig subclasses it)
-                    is_streaming = config is not None and isinstance(config, StreamingConfig)
+                    is_streaming = config is not None and isinstance(config, StreamingConfig) and config.enabled
                     is_wellfilter = config is not None and isinstance(config, WellFilterConfig)
 
                     include_config = False
@@ -770,7 +770,7 @@ class PipelineCompiler:
             # Only auto-create for intermediate steps (not final step)
             is_intermediate_step = step_index < len(pipeline_definition) - 1
 
-            if has_special_outputs and not step.step_materialization_config and is_intermediate_step:
+            if has_special_outputs and (not step.step_materialization_config or not step.step_materialization_config.enabled) and is_intermediate_step:
                 # Auto-instantiate step materialization to preserve metadata coherence
                 # Use LazyStepMaterializationConfig to enable proper inheritance from global config
                 from openhcs.config_framework.lazy_factory import LazyStepMaterializationConfig
@@ -869,7 +869,10 @@ class PipelineCompiler:
             # === ANALYSIS MATERIALIZATION AUTO-INSTANTIATION ===
             # Ensure intermediate steps with analysis outputs have step_materialization_config
             # This preserves metadata coherence (ROIs must match image structure they were created from)
-            PipelineCompiler.ensure_analysis_materialization(pipeline_definition)
+            # CRITICAL: Must be inside config_context() for lazy resolution of .enabled field
+            from openhcs.config_framework.context_manager import config_context
+            with config_context(orchestrator.pipeline_config):
+                PipelineCompiler.ensure_analysis_materialization(pipeline_definition)
 
             # === BACKEND COMPATIBILITY VALIDATION ===
             # Validate that configured backend is compatible with microscope
