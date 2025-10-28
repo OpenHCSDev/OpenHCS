@@ -688,26 +688,21 @@ class ZMQServerManagerWidget(QWidget):
         import threading
 
         def kill_servers():
-            from openhcs.runtime.zmq_base import ZMQServer
+            from openhcs.runtime.zmq_base import ZMQClient
             from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
             registry = GlobalQueueTrackerRegistry()
 
             for port in ports_to_kill:
                 try:
-                    logger.info(f"🔥 FORCE KILL: Killing processes on port {port} (nuclear option - no ZMQ, direct process kill)")
-                    # Force kill: Skip ZMQ entirely, go straight to process killing
-                    # This is the nuclear option - it ALWAYS works
-                    from openhcs.constants.constants import CONTROL_PORT_OFFSET
-                    killed = ZMQServer.kill_processes_on_port(port)
-                    # Also try control port (port + CONTROL_PORT_OFFSET)
-                    killed += ZMQServer.kill_processes_on_port(port + CONTROL_PORT_OFFSET)
+                    logger.info(f"🔥 FORCE KILL: Force killing server on port {port} (kills workers AND server)")
+                    # Use kill_server_on_port with graceful=False
+                    # This handles both IPC and TCP modes correctly
+                    success = ZMQClient.kill_server_on_port(port, graceful=False)
 
-                    if killed > 0:
-                        logger.info(f"✅ Force killed {killed} process(es) on port {port}")
+                    if success:
+                        logger.info(f"✅ Successfully force killed server on port {port}")
                     else:
-                        # No processes found on port - this is SUCCESS, not failure!
-                        # The goal is to ensure no process is running, and that's achieved.
-                        logger.info(f"✅ No processes found on port {port} (already dead or never existed)")
+                        logger.warning(f"⚠️ Force kill returned False for port {port}, but continuing cleanup")
 
                     # Clear queue tracker for this viewer (always, regardless of kill result)
                     registry.remove_tracker(port)
