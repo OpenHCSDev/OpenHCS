@@ -219,6 +219,13 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
                 if not conn.connect():
                     raise ConnectionError(f"Failed to connect to OMERO at {self._conn_params['host']}:{self._conn_params['port']}")
 
+                # Python 3.11 compatibility: Ensure session is fully established
+                # by explicitly calling keepAlive() after connection
+                try:
+                    conn.c.sf.keepAlive(None)
+                except Exception as e:
+                    logger.warning(f"keepAlive() call failed (non-fatal): {e}")
+
                 # Cache the connection
                 self._initial_conn = conn
                 logger.info("Successfully connected to OMERO")
@@ -625,9 +632,72 @@ class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
             columns.append(col)
 
         # Create table via OMERO.tables service
-        resources = conn.c.sf.sharedResources()
-        repository_id = resources.repositories().descriptions[0].getId().getValue()
-        table = resources.newTable(repository_id, f"{table_name}.h5")
+        # Python 3.11 compatibility: In multiprocessing contexts, the sharedResources
+        # may not be immediately available after connection. Retry with exponential backoff.
+        import time
+
+        max_retries = 3
+        retry_delay = 0.1  # Start with 100ms
+
+        for attempt in range(max_retries):
+            try:
+                resources = conn.c.sf.sharedResources()
+
+                # Get repository ID - fail-loud if no repositories available
+                repositories = resources.repositories()
+                if not repositories or not repositories.descriptions:
+                    if attempt < max_retries - 1:
+                        # Retry - repositories may not be ready yet
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        raise RuntimeError(
+                            "No OMERO repositories available for table creation after retries. "
+                            "This may indicate an OMERO server configuration issue."
+                        )
+
+                # Get repository ID with explicit None checks
+                repo_desc = repositories.descriptions[0]
+                repo_id_obj = repo_desc.getId()
+
+                if repo_id_obj is None:
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    else:
+                        raise RuntimeError(
+                            f"Repository description exists but getId() returned None after retries. "
+                            f"This may be a Python 3.11/Ice compatibility issue."
+                        )
+
+                repository_id = repo_id_obj.getValue()
+
+                if repository_id is None:
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    else:
+                        raise RuntimeError(
+                            f"Repository ID object exists but getValue() returned None after retries. "
+                            f"This may be a Python 3.11/Ice compatibility issue."
+                        )
+
+                # Successfully got repository_id, create table
+                table = resources.newTable(repository_id, f"{table_name}.h5")
+                break  # Success, exit retry loop
+
+            except Exception as e:
+                if attempt < max_retries - 1 and "null table" in str(e).lower():
+                    # Retry on "null table" errors
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                else:
+                    # Re-raise on final attempt or non-retryable errors
+                    raise
 
         if table is None:
             raise RuntimeError("Failed to create OMERO.table")
