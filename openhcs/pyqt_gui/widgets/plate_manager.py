@@ -1734,8 +1734,8 @@ class PlateManagerWidget(QWidget):
         Returns:
             True if any plate is running, False otherwise
         """
-        # Consider both "running" and "stopping" states as "busy"
-        return self.execution_state in ("running", "stopping")
+        # Consider "running", "stopping", and "force_kill_ready" states as "busy"
+        return self.execution_state in ("running", "stopping", "force_kill_ready")
     
     def update_status(self, message: str):
         """
