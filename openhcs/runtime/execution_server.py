@@ -26,8 +26,11 @@ class OpenHCSExecutionServer:
         omero_port: int = 4064,
         omero_user: str = 'root',
         omero_password: str = 'omero-root-password',
-        server_port: int = 7777
+        server_port: int = None
     ):
+        from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
+        if server_port is None:
+            server_port = DEFAULT_EXECUTION_SERVER_PORT
         self.omero_data_dir = Path(omero_data_dir) if omero_data_dir else None
         self.omero_host = omero_host
         self.omero_port = omero_port
@@ -464,6 +467,7 @@ class OpenHCSExecutionServer:
 def main():
     """Entry point for execution server."""
     import argparse
+    from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
 
     parser = argparse.ArgumentParser(description='OpenHCS Execution Server')
     parser.add_argument('--omero-data-dir', type=Path, default=None,
@@ -472,7 +476,7 @@ def main():
     parser.add_argument('--omero-port', type=int, default=4064)
     parser.add_argument('--omero-user', default='root')
     parser.add_argument('--omero-password', default='omero-root-password')
-    parser.add_argument('--port', type=int, default=7777)
+    parser.add_argument('--port', type=int, default=DEFAULT_EXECUTION_SERVER_PORT)
     parser.add_argument('--log-file', type=Path)
     parser.add_argument('--log-level', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])
 

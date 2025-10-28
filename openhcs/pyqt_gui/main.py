@@ -336,7 +336,6 @@ class OpenHCSMainWindow(QMainWindow):
         """Show ZMQ server manager window."""
         if "zmq_server_manager" not in self.floating_windows:
             from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import ZMQServerManagerWidget
-            from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
 
             # Create floating window
             window = QDialog(self)
@@ -347,13 +346,10 @@ class OpenHCSMainWindow(QMainWindow):
             # Add widget to window
             layout = QVBoxLayout(window)
 
-            # Scan common ports:
-            # - 7777: Default ZMQ execution server
-            # - 5555-5564: Napari viewers (10 ports)
-            # - 5565-5574: Fiji viewers (10 ports, non-overlapping with Napari)
-            napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]
-            fiji_ports = [5565 + i for i in range(10)]  # 5565-5574 (avoid overlap with Napari)
-            ports_to_scan = [7777] + napari_ports + fiji_ports
+            # Scan all streaming ports using current global config
+            # This ensures we find viewers launched with custom ports
+            from openhcs.core.config import get_all_streaming_ports
+            ports_to_scan = get_all_streaming_ports(num_ports_per_type=10)  # Uses global config by default
 
             zmq_manager_widget = ZMQServerManagerWidget(
                 ports_to_scan=ports_to_scan,

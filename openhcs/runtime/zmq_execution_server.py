@@ -15,6 +15,8 @@ from openhcs.runtime.zmq_messages import (
     ControlMessageType, ResponseType, ExecutionStatus, MessageFields,
     PongResponse, ExecuteRequest, ExecuteResponse, StatusRequest, CancelRequest, ProgressUpdate,
 )
+from openhcs.core.config import TransportMode
+from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +24,8 @@ logger = logging.getLogger(__name__)
 class ZMQExecutionServer(ZMQServer):
     """ZMQ execution server for OpenHCS pipelines."""
 
-    def __init__(self, port=7777, host='*', log_file_path=None):
-        super().__init__(port, host, log_file_path)
+    def __init__(self, port=DEFAULT_EXECUTION_SERVER_PORT, host='*', log_file_path=None, transport_mode=TransportMode.IPC):
+        super().__init__(port, host, log_file_path, transport_mode=transport_mode)
         self.active_executions = {}
         self.start_time = None
         self.progress_queue = queue.Queue()

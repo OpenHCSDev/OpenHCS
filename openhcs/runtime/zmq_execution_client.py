@@ -10,6 +10,8 @@ import zmq
 import pickle
 from pathlib import Path
 from openhcs.runtime.zmq_base import ZMQClient
+from openhcs.core.config import TransportMode
+from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +19,8 @@ logger = logging.getLogger(__name__)
 class ZMQExecutionClient(ZMQClient):
     """ZMQ client for OpenHCS pipeline execution with progress streaming."""
 
-    def __init__(self, port=7777, host='localhost', persistent=True, progress_callback=None):
-        super().__init__(port, host, persistent)
+    def __init__(self, port=DEFAULT_EXECUTION_SERVER_PORT, host='localhost', persistent=True, progress_callback=None, transport_mode=None):
+        super().__init__(port, host, persistent, transport_mode)
         self.progress_callback = progress_callback
         self._progress_thread = None
         self._progress_stop_event = threading.Event()
@@ -183,11 +185,13 @@ class ZMQExecutionClient(ZMQClient):
         Raises:
             Exception: If request fails or times out
         """
+        from openhcs.runtime.zmq_base import get_zmq_transport_url
         ctx = zmq.Context()
         sock = ctx.socket(zmq.REQ)
         sock.setsockopt(zmq.LINGER, 0)
         sock.setsockopt(zmq.RCVTIMEO, timeout_ms)  # Set receive timeout
-        sock.connect(f"tcp://{self.host}:{self.control_port}")
+        control_url = get_zmq_transport_url(self.control_port, self.transport_mode, self.host)
+        sock.connect(control_url)
         try:
             sock.send(pickle.dumps(request))
             response = sock.recv()
@@ -209,6 +213,7 @@ class ZMQExecutionClient(ZMQClient):
         if self.persistent:
             cmd.append('--persistent')
         cmd.extend(['--log-file-path', str(log_file_path)])
+        cmd.extend(['--transport-mode', self.transport_mode.value])
         return subprocess.Popen(cmd, stdout=open(log_file_path, 'w'), stderr=subprocess.STDOUT, start_new_session=self.persistent)
 
     def disconnect(self):

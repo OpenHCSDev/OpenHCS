@@ -432,14 +432,17 @@ class ImageBrowserWidget(QWidget):
     def _create_instance_manager_panel(self):
         """Create the viewer instance manager panel using ZMQServerManagerWidget."""
         from openhcs.pyqt_gui.widgets.shared.zmq_server_manager import ZMQServerManagerWidget
-        from openhcs.constants.constants import DEFAULT_NAPARI_STREAM_PORT
+        from openhcs.core.config import get_all_streaming_ports
 
-        # Scan Napari and Fiji ports
-        # Napari: 5555-5564 (10 ports)
-        # Fiji: 5565-5574 (10 ports, non-overlapping with Napari)
-        napari_ports = [DEFAULT_NAPARI_STREAM_PORT + i for i in range(10)]  # 5555-5564
-        fiji_ports = [5565 + i for i in range(10)]  # 5565-5574 (avoid overlap with Napari)
-        ports_to_scan = napari_ports + fiji_ports
+        # Scan all streaming ports using orchestrator's pipeline config
+        # This ensures we find viewers launched with custom ports
+        # Exclude execution server port (only want viewer ports)
+        from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT
+        all_ports = get_all_streaming_ports(
+            config=self.orchestrator.pipeline_config if self.orchestrator else None,
+            num_ports_per_type=10
+        )
+        ports_to_scan = [p for p in all_ports if p != DEFAULT_EXECUTION_SERVER_PORT]
 
         # Create ZMQ server manager widget
         zmq_manager = ZMQServerManagerWidget(
@@ -1593,14 +1596,14 @@ class ImageBrowserWidget(QWidget):
                 rois,
                 roi_json_path,
                 BackendEnum.NAPARI_STREAM.value,
-                napari_host='localhost',
-                napari_port=napari_config.napari_port,
+                host='localhost',
+                port=napari_config.port,
                 display_config=napari_config,
                 microscope_handler=self.orchestrator.microscope_handler,
                 source=source
             )
 
-            logger.info(f"Streamed {len(rois)} ROIs to Napari on port {napari_config.napari_port}")
+            logger.info(f"Streamed {len(rois)} ROIs to Napari on port {napari_config.port}")
 
         except Exception as e:
             logger.error(f"Failed to stream ROIs to Napari: {e}")

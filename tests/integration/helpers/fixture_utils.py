@@ -118,7 +118,10 @@ DATA_TYPE_CONFIGS = {
 EXECUTION_MODE_CONFIGS = ["threading", "multiprocessing"]
 
 # ZMQ execution mode configurations for parametrized testing
-ZMQ_EXECUTION_MODE_CONFIGS = ["direct", "zmq"]
+# - direct: No ZMQ, use orchestrator directly
+# - zmq: ZMQ with IPC transport (default, no firewall prompts)
+# - zmq-tcp: ZMQ with TCP transport (opt-in, triggers firewall prompts)
+ZMQ_EXECUTION_MODE_CONFIGS = ["direct", "zmq", "zmq-tcp"]
 
 @pytest.fixture(scope="module")
 def microscope_config(request):

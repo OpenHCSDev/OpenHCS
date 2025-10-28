@@ -143,11 +143,35 @@ class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
         Common patterns:
         - [Backend.DISK] - Basic handlers (ImageXpress, Opera Phenix)
         - [Backend.ZARR, Backend.DISK] - Advanced handlers (OpenHCS: zarr preferred, disk fallback)
+        - [Backend.OMERO_LOCAL] - Virtual backends (OMERO: single required backend)
 
         Returns:
             List of Backend enum values this handler can work with, in priority order
         """
         pass
+
+    def get_required_backend(self) -> Optional['MaterializationBackend']:
+        """
+        Get the required materialization backend if this microscope has only one compatible backend.
+
+        For microscopes with a single compatible backend (e.g., OMERO with OMERO_LOCAL),
+        this returns the required backend for auto-correction. For microscopes with multiple
+        compatible backends, returns None (user must choose explicitly).
+
+        Returns:
+            MaterializationBackend if microscope requires a specific backend, None otherwise
+        """
+        from openhcs.core.config import MaterializationBackend
+
+        if len(self.compatible_backends) == 1:
+            backend_value = self.compatible_backends[0].value
+            # Convert Backend enum value to MaterializationBackend enum
+            try:
+                return MaterializationBackend(backend_value)
+            except ValueError:
+                # Backend not in MaterializationBackend (e.g., MEMORY, VIRTUAL_WORKSPACE)
+                return None
+        return None
 
     def get_available_backends(self, plate_path: Union[str, Path]) -> List[Backend]:
         """

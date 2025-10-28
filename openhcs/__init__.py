@@ -8,8 +8,18 @@ registrations or other side-effects.
 """
 
 import logging
+import sys
+import platform
 
 __version__ = "0.3.5"
+
+# Force UTF-8 encoding for stdout/stderr on Windows
+# This ensures emoji and Unicode characters work in console output
+if platform.system() == 'Windows':
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
 
 # Monkey patch logging.FileHandler to default to UTF-8 encoding
 # This ensures all log files support emojis and Unicode characters
