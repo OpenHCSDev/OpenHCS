@@ -1116,7 +1116,6 @@ def _handle_rois_for_window(self, window_key: str, items: List[Dict[str, Any]],
     """
     from openhcs.runtime.roi_converters import FijiROIConverter
     import scyjava as sj
-    from jpype import JImplements, JOverride
 
     # Get or create RoiManager - MUST be done on EDT to avoid Swing threading issues
     RoiManager = sj.jimport('ij.plugin.frame.RoiManager')
@@ -1126,21 +1125,31 @@ def _handle_rois_for_window(self, window_key: str, items: List[Dict[str, Any]],
 
     # If no instance exists, create one on EDT
     if rm is None:
-        SwingUtilities = sj.jimport('javax.swing.SwingUtilities')
+        # Import JPype only when needed (not at module level to avoid import errors in OMERO tests)
+        try:
+            from jpype import JImplements, JOverride
+        except ImportError:
+            # Fallback: create RoiManager directly (may cause EDT issues with IPC mode)
+            logger.warning("JPype not available, creating RoiManager without EDT safety (may fail with IPC mode)")
+            rm = RoiManager()
+        else:
+            SwingUtilities = sj.jimport('javax.swing.SwingUtilities')
 
-        # Use a holder to get the RoiManager out of the Runnable
-        rm_holder = [None]
+            # Use a holder to get the RoiManager out of the Runnable
+            rm_holder = [None]
 
-        # Create a Java Runnable using JPype's JImplements decorator
-        @JImplements('java.lang.Runnable')
-        class CreateRoiManagerRunnable:
-            @JOverride
-            def run(self):
-                rm_holder[0] = RoiManager()
+            # Create a Java Runnable using JPype's JImplements decorator
+            # Note: Decorators are evaluated at class definition time, but since this is
+            # inside an if block that only executes when rm is None, it's safe
+            @JImplements('java.lang.Runnable')
+            class CreateRoiManagerRunnable:
+                @JOverride
+                def run(self):
+                    rm_holder[0] = RoiManager()
 
-        # Execute on EDT and wait
-        SwingUtilities.invokeAndWait(CreateRoiManagerRunnable())
-        rm = rm_holder[0]
+            # Execute on EDT and wait
+            SwingUtilities.invokeAndWait(CreateRoiManagerRunnable())
+            rm = rm_holder[0]
 
     # Get or assign integer group ID for this window
     if window_key not in self.window_key_to_group_id:
