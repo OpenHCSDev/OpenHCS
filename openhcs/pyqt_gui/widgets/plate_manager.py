@@ -1165,6 +1165,11 @@ class PlateManagerWidget(QWidget):
 
         Uses EXACT same code path as ZMQ browser quit button.
         """
+        logger.info("🛑🛑🛑 action_stop_execution CALLED")
+        logger.info(f"🛑 execution_state: {self.execution_state}")
+        logger.info(f"🛑 zmq_client: {self.zmq_client}")
+        logger.info(f"🛑 Button text: {self.buttons['run_plate'].text()}")
+
         # Check if this is a force kill (button text is "Force Kill")
         is_force_kill = self.buttons["run_plate"].text() == "Force Kill"
 
