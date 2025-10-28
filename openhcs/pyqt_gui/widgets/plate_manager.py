@@ -1037,8 +1037,7 @@ class PlateManagerWidget(QWidget):
             self.execution_error.emit(f"Failed to execute: {e}")
             self.execution_state = "idle"
 
-        finally:
-            # Always disconnect client after execution to avoid state conflicts
+            # Disconnect client on error
             if self.zmq_client is not None:
                 try:
                     def _disconnect():
@@ -1094,6 +1093,16 @@ class PlateManagerWidget(QWidget):
             else:
                 error_msg = result.get('message', 'Unknown error')
                 self.execution_error.emit(f"Execution failed: {error_msg}")
+
+            # Disconnect ZMQ client on completion
+            if self.zmq_client is not None:
+                try:
+                    logger.info("Disconnecting ZMQ client after execution completion")
+                    self.zmq_client.disconnect()
+                except Exception as disconnect_error:
+                    logger.warning(f"Failed to disconnect ZMQ client: {disconnect_error}")
+                finally:
+                    self.zmq_client = None
 
             # Update state
             self.execution_state = "idle"
