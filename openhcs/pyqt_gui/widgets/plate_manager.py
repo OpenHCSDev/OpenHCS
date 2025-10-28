@@ -18,7 +18,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
     QListWidgetItem, QLabel,
-    QSplitter
+    QSplitter, QApplication
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QFont
@@ -1162,105 +1162,54 @@ class PlateManagerWidget(QWidget):
 
         First click: Graceful shutdown, button changes to "Force Kill"
         Second click: Force shutdown
+
+        Uses EXACT same code path as ZMQ browser quit button.
         """
         # Check if this is a force kill (button text is "Force Kill")
         is_force_kill = self.buttons["run_plate"].text() == "Force Kill"
 
-        if is_force_kill:
-            logger.info("🛑 Force Kill button pressed.")
-            self.status_message.emit("Force killing execution...")
-        else:
-            logger.info("🛑 Stop button pressed.")
-            self.status_message.emit("Terminating execution...")
-
         # Check if using ZMQ execution
         if self.zmq_client:
-            try:
-                import asyncio
-                loop = asyncio.get_event_loop()
+            port = self.zmq_client.port
 
-                if is_force_kill:
-                    # Force kill - use graceful=False
-                    logger.info(f"🛑 Force killing workers (port {self.zmq_client.port})")
+            # Change button to "Force Kill" IMMEDIATELY (before any async operations)
+            if not is_force_kill:
+                logger.info(f"🛑 Stop button pressed - changing to Force Kill")
+                self.execution_state = "force_kill_ready"
+                self.update_button_states()
+                # Force immediate UI update
+                QApplication.processEvents()
 
-                    def _force_kill_workers():
-                        from openhcs.runtime.zmq_base import ZMQClient
-                        return ZMQClient.kill_server_on_port(self.zmq_client.port, graceful=False)
+            # Use EXACT same code path as ZMQ browser quit button
+            import threading
 
-                    success = await loop.run_in_executor(None, _force_kill_workers)
+            def kill_server():
+                from openhcs.runtime.zmq_base import ZMQClient
+                try:
+                    graceful = not is_force_kill
+                    logger.info(f"🛑 {'Gracefully' if graceful else 'Force'} killing server on port {port}...")
+                    success = ZMQClient.kill_server_on_port(port, graceful=graceful)
 
                     if success:
-                        logger.info("🛑 Workers force killed successfully")
-                        self.status_message.emit("Execution force killed")
+                        logger.info(f"✅ Successfully {'quit' if graceful else 'force killed'} server on port {port}")
+                        # Emit signal to update UI on main thread
+                        self._execution_complete_signal.emit(
+                            {'status': 'cancelled'},
+                            []  # No ready_items needed for cancellation
+                        )
                     else:
-                        logger.warning("🛑 Failed to force kill workers")
-                        self.status_message.emit("Failed to force kill execution")
-                else:
-                    # Graceful shutdown - change button to "Force Kill" immediately, then try graceful kill
-                    logger.info(f"🛑 Gracefully killing workers (port {self.zmq_client.port})")
+                        logger.warning(f"❌ Failed to {'quit' if graceful else 'force kill'} server on port {port}")
+                        self._execution_error_signal.emit(f"Failed to stop execution on port {port}")
 
-                    # Change button to "Force Kill" immediately (before waiting for ack)
-                    self.execution_state = "force_kill_ready"
-                    self.update_button_states()
+                except Exception as e:
+                    logger.error(f"❌ Error stopping server on port {port}: {e}")
+                    self._execution_error_signal.emit(f"Error stopping execution: {e}")
 
-                    def _kill_workers():
-                        from openhcs.runtime.zmq_base import ZMQClient
-                        return ZMQClient.kill_server_on_port(self.zmq_client.port, graceful=True)
+            # Run in background thread (same as ZMQ browser)
+            thread = threading.Thread(target=kill_server, daemon=True)
+            thread.start()
 
-                    success = await loop.run_in_executor(None, _kill_workers)
-
-                    if success:
-                        # Got ack - graceful shutdown succeeded, reset to idle
-                        logger.info("🛑 Workers killed successfully, server still alive")
-                        self.status_message.emit("Execution cancelled - workers killed")
-
-                        # Disconnect client
-                        def _disconnect():
-                            self.zmq_client.disconnect()
-                        await loop.run_in_executor(None, _disconnect)
-
-                        self.zmq_client = None
-                        self.current_execution_id = None
-                        self.execution_state = "idle"
-
-                        # Update orchestrator states
-                        for orchestrator in self.orchestrators.values():
-                            if orchestrator.state == OrchestratorState.EXECUTING:
-                                orchestrator._state = OrchestratorState.COMPILED
-
-                        self.update_button_states()
-                    else:
-                        # No ack - keep button as "Force Kill" for user to retry
-                        logger.warning("🛑 Failed to kill workers - no ack received")
-                        self.status_message.emit("Failed to cancel execution - click Force Kill to retry")
-
-                    return  # Don't continue to force kill path
-
-                # Force kill path - disconnect and reset
-                def _disconnect():
-                    self.zmq_client.disconnect()
-
-                await loop.run_in_executor(None, _disconnect)
-
-                self.zmq_client = None
-                self.current_execution_id = None
-                self.execution_state = "idle"
-
-                # Update orchestrator states
-                for orchestrator in self.orchestrators.values():
-                    if orchestrator.state == OrchestratorState.EXECUTING:
-                        orchestrator._state = OrchestratorState.COMPILED
-
-                self.status_message.emit("Execution cancelled by user")
-                self.update_button_states()
-
-            except Exception as e:
-                logger.error(f"🛑 Error cancelling ZMQ execution: {e}")
-                # Use signal for thread-safe error reporting from async context
-                self.execution_error.emit(f"Failed to cancel execution: {e}")
-                # Reset state on error
-                self.execution_state = "idle"
-                self.update_button_states()
+            return
 
         elif self.current_process and self.current_process.poll() is None:  # Still running subprocess
             try:
