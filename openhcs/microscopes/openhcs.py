@@ -507,13 +507,36 @@ class OpenHCSMetadataGenerator:
             results_path = Path(results_dir)
             relative_results_dir = results_path.name  # Just the directory name, not full path
 
+        # Extract grid_dimensions and pixel_size, with fallback to existing metadata
+        grid_dimensions = handler.metadata_handler._get_with_fallback('get_grid_dimensions', context.input_dir)
+        pixel_size = handler.metadata_handler._get_with_fallback('get_pixel_size', context.input_dir)
+
+        # If grid_dimensions is None (fallback), try to get it from existing metadata
+        if grid_dimensions is None:
+            try:
+                from pathlib import Path as PathlibPath
+                plate_root = PathlibPath(context.plate_path)
+                metadata_path = get_metadata_path(plate_root)
+                if metadata_path.exists():
+                    import json
+                    with open(metadata_path, 'r') as f:
+                        existing_metadata = json.load(f)
+                    # Try to get grid_dimensions from any existing subdirectory
+                    for existing_sub_dir, sub_metadata in existing_metadata.get('subdirectories', {}).items():
+                        if sub_metadata.get('grid_dimensions'):
+                            grid_dimensions = sub_metadata['grid_dimensions']
+                            self.logger.debug(f"Preserved grid_dimensions from existing subdirectory {existing_sub_dir}: {grid_dimensions}")
+                            break
+            except Exception as e:
+                self.logger.debug(f"Could not retrieve grid_dimensions from existing metadata: {e}")
+
         # CRITICAL: Use AllComponents enum for cache lookups (cache is keyed by AllComponents)
         # GroupBy and AllComponents have same values but different hashes, so dict.get() fails with GroupBy
         return OpenHCSMetadata(
             microscope_handler_name=handler.microscope_type,
             source_filename_parser_name=handler.parser.__class__.__name__,
-            grid_dimensions=handler.metadata_handler._get_with_fallback('get_grid_dimensions', context.input_dir),
-            pixel_size=handler.metadata_handler._get_with_fallback('get_pixel_size', context.input_dir),
+            grid_dimensions=grid_dimensions,
+            pixel_size=pixel_size,
             image_files=relative_files,
             channels=cache.get(AllComponents.CHANNEL),
             wells=cache.get(AllComponents.WELL),
