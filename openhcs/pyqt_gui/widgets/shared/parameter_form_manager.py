@@ -40,6 +40,11 @@ from .clickable_help_components import GroupBoxWithHelp, LabelWithHelp
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from .layout_constants import CURRENT_LAYOUT
 
+# Import service classes for Phase 1: Service Extraction
+from openhcs.pyqt_gui.widgets.shared.services.widget_update_service import WidgetUpdateService
+from openhcs.pyqt_gui.widgets.shared.services.placeholder_refresh_service import PlaceholderRefreshService
+from openhcs.pyqt_gui.widgets.shared.services.enabled_field_styling_service import EnabledFieldStylingService
+
 # ANTI-DUCK-TYPING: Removed ALL_INPUT_WIDGET_TYPES tuple
 # Widget discovery now uses ABC-based WidgetOperations.get_all_value_widgets()
 # which automatically finds all widgets implementing ValueGettable ABC
@@ -305,6 +310,11 @@ class ParameterFormManager(QWidget):
             # ANTI-DUCK-TYPING: Initialize ABC-based widget operations
             self._widget_ops = WidgetOperations()
             self._widget_factory = WidgetFactory()
+
+            # PHASE 1: Initialize service classes for low-level operations
+            self._widget_update_service = WidgetUpdateService(self._widget_ops, PyQt6WidgetEnhancer)
+            self._placeholder_refresh_service = PlaceholderRefreshService(PyQt6WidgetEnhancer)
+            self._enabled_styling_service = EnabledFieldStylingService(self._widget_ops)
 
             # Context system handles updates automatically
             self._context_event_coordinator = None
@@ -1058,98 +1068,24 @@ class ParameterFormManager(QWidget):
 
 
     def update_widget_value(self, widget: QWidget, value: Any, param_name: str = None, skip_context_behavior: bool = False, exclude_field: str = None) -> None:
-        """Mathematical simplification: Unified widget update using shared dispatch."""
-        self._execute_with_signal_blocking(widget, lambda: self._dispatch_widget_update(widget, value))
-
-        # Only apply context behavior if not explicitly skipped (e.g., during reset operations)
-        if not skip_context_behavior:
-            self._apply_context_behavior(widget, value, param_name, exclude_field)
-
-    def _dispatch_widget_update(self, widget: QWidget, value: Any) -> None:
-        """
-        SIMPLIFIED: ABC-based widget update (no duck typing).
-
-        BEFORE: Duck typing dispatch table with hasattr checks
-        AFTER: Direct ABC-based call - fails loud if widget doesn't implement ValueSettable
-        """
-        # Use ABC-based widget operations
-        self._widget_ops.set_value(widget, value)
+        """DELEGATED: Update widget value using WidgetUpdateService."""
+        self._widget_update_service.update_widget_value(widget, value, param_name, skip_context_behavior, self)
 
     def _clear_widget_to_default_state(self, widget: QWidget) -> None:
-        """Clear widget to its default/empty state for reset operations."""
-        from PyQt6.QtWidgets import QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit
-
-        if isinstance(widget, QLineEdit):
-            widget.clear()
-        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-            widget.setValue(widget.minimum())
-        elif isinstance(widget, QComboBox):
-            widget.setCurrentIndex(-1)  # No selection
-        elif isinstance(widget, QCheckBox):
-            widget.setChecked(False)
-        elif isinstance(widget, QTextEdit):
-            widget.clear()
-        else:
-            # ANTI-DUCK-TYPING: All widgets should have clear() - fail loud if not
-            widget.clear()
+        """DELEGATED: Clear widget to default state using WidgetUpdateService."""
+        self._widget_update_service.clear_widget_to_default_state(widget)
 
     def _update_combo_box(self, widget: QComboBox, value: Any) -> None:
-        """Update combo box with value matching."""
-        widget.setCurrentIndex(-1 if value is None else
-                             next((i for i in range(widget.count()) if widget.itemData(i) == value), -1))
+        """DELEGATED: Update combo box using WidgetUpdateService."""
+        self._widget_update_service.update_combo_box(widget, value)
 
     def _update_checkbox_group(self, widget: QWidget, value: Any) -> None:
-        """
-        Update checkbox group using functional operations.
-
-        ANTI-DUCK-TYPING: Widget must have _checkboxes attribute - fail loud if not.
-        """
-        if isinstance(value, list):
-            # Functional: reset all, then set selected
-            [cb.setChecked(False) for cb in widget._checkboxes.values()]
-            [widget._checkboxes[v].setChecked(True) for v in value if v in widget._checkboxes]
-
-    def _execute_with_signal_blocking(self, widget: QWidget, operation: callable) -> None:
-        """Execute operation with signal blocking - stateless utility."""
-        widget.blockSignals(True)
-        operation()
-        widget.blockSignals(False)
-
-    def _apply_context_behavior(self, widget: QWidget, value: Any, param_name: str, exclude_field: str = None) -> None:
-        """CONSOLIDATED: Apply placeholder behavior using single resolution path."""
-        if not param_name or not self.dataclass_type:
-            return
-
-        if value is None:
-            # Allow placeholder application for nested forms even if they're not detected as lazy dataclasses
-            # The placeholder service will determine if placeholders are available
-
-            # Build overlay from current form state
-            overlay = self.get_current_values()
-
-            # Build context stack: parent context + overlay
-            with self._build_context_stack(overlay):
-                placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
-                if placeholder_text:
-                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
-        elif value is not None:
-            PyQt6WidgetEnhancer._clear_placeholder_state(widget)
-
+        """DELEGATED: Update checkbox group using WidgetUpdateService."""
+        self._widget_update_service.update_checkbox_group(widget, value)
 
     def get_widget_value(self, widget: QWidget) -> Any:
-        """
-        SIMPLIFIED: ABC-based widget value extraction (no duck typing).
-
-        BEFORE: Duck typing dispatch table with hasattr checks
-        AFTER: Direct ABC-based call - fails loud if widget doesn't implement ValueGettable
-        """
-        # CRITICAL: Check if widget is in placeholder state first
-        # If it's showing a placeholder, the actual parameter value is None
-        if widget.property("is_placeholder_state"):
-            return None
-
-        # Use ABC-based widget operations
-        return self._widget_ops.get_value(widget)
+        """DELEGATED: Get widget value using WidgetUpdateService."""
+        return self._widget_update_service.get_widget_value(widget)
 
     # Framework-specific methods for backward compatibility
 
@@ -1451,40 +1387,8 @@ class ParameterFormManager(QWidget):
         return user_modified
 
     def _reconstruct_nested_dataclasses(self, live_values: dict, base_instance=None) -> dict:
-        """
-        Reconstruct nested dataclasses from tuple format (type, dict) to instances.
-
-        get_user_modified_values() returns nested dataclasses as (type, dict) tuples
-        to preserve only user-modified fields. This function reconstructs them as instances
-        by merging the user-modified fields into the base instance's nested dataclasses.
-
-        Args:
-            live_values: Dict with values, may contain (type, dict) tuples for nested dataclasses
-            base_instance: Base dataclass instance to merge into (for nested dataclass fields)
-        """
-        reconstructed = {}
-        for field_name, value in live_values.items():
-            if isinstance(value, tuple) and len(value) == 2:
-                # Nested dataclass in tuple format: (type, dict)
-                dataclass_type, field_dict = value
-
-                # CRITICAL: If we have a base instance, merge into its nested dataclass
-                # This prevents creating fresh instances with None defaults
-                if base_instance and hasattr(base_instance, field_name):
-                    base_nested = getattr(base_instance, field_name)
-                    if base_nested is not None and is_dataclass(base_nested):
-                        # Merge user-modified fields into base nested dataclass
-                        reconstructed[field_name] = dataclasses.replace(base_nested, **field_dict)
-                    else:
-                        # No base nested dataclass, create fresh instance
-                        reconstructed[field_name] = dataclass_type(**field_dict)
-                else:
-                    # No base instance, create fresh instance
-                    reconstructed[field_name] = dataclass_type(**field_dict)
-            else:
-                # Regular value, pass through
-                reconstructed[field_name] = value
-        return reconstructed
+        """DELEGATED: Reconstruct nested dataclasses using PlaceholderRefreshService."""
+        return self._placeholder_refresh_service.reconstruct_nested_dataclasses(live_values, base_instance)
 
     def _build_context_stack(self, overlay, skip_parent_overlay: bool = False, live_context: dict = None):
         """
@@ -1522,293 +1426,20 @@ class ParameterFormManager(QWidget):
     #      ParentOverlayBuilder, CurrentOverlayBuilder
 
     def _apply_initial_enabled_styling(self) -> None:
-        """Apply initial enabled field styling based on resolved value from widget.
-
-        This is called once after all widgets are created to ensure initial styling matches the enabled state.
-        We get the resolved value from the checkbox widget, not from self.parameters, because the parameter
-        might be None (lazy) but the checkbox shows the resolved placeholder value.
-
-        CRITICAL: This should NOT be called for optional dataclass nested managers when instance is None.
-        The None state dimming is handled by the optional dataclass checkbox handler.
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-
-        # CRITICAL: Check if this is a nested manager inside an optional dataclass
-        # If the parent's parameter for this nested manager is None, skip enabled styling
-        # The optional dataclass checkbox handler already applied None-state dimming
-        if self._parent_manager is not None:
-            # Find which parameter in parent corresponds to this nested manager
-            for param_name, nested_manager in self._parent_manager.nested_managers.items():
-                if nested_manager is self:
-                    # Check if this is an optional dataclass and if the instance is None
-                    param_type = self._parent_manager.parameter_types.get(param_name)
-                    if param_type:
-                        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-                        if ParameterTypeUtils.is_optional_dataclass(param_type):
-                            # This is an optional dataclass - check if instance is None
-                            instance = self._parent_manager.parameters.get(param_name)
-                            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, optional dataclass check: param_name={param_name}, instance={instance}, is_none={instance is None}")
-                            if instance is None:
-                                logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, skipping (optional dataclass instance is None)")
-                                return
-                    break
-
-        # Get the enabled widget
-        enabled_widget = self.widgets.get('enabled')
-        if not enabled_widget:
-            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, no enabled widget found")
-            return
-
-        # ANTI-DUCK-TYPING: enabled widget is always QCheckBox, no hasattr needed
-        if isinstance(enabled_widget, QCheckBox):
-            resolved_value = enabled_widget.isChecked()
-            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, resolved_value={resolved_value} (from checkbox)")
-        else:
-            # Fallback to parameter value
-            resolved_value = self.parameters.get('enabled')
-            if resolved_value is None:
-                resolved_value = True  # Default to enabled if we can't resolve
-            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, resolved_value={resolved_value} (from parameter)")
-
-        # Call the enabled handler with the resolved value
-        self._on_enabled_field_changed_universal('enabled', resolved_value)
+        """DELEGATED: Apply initial enabled styling using EnabledFieldStylingService."""
+        self._enabled_styling_service.apply_initial_enabled_styling(self)
 
     def _is_any_ancestor_disabled(self) -> bool:
-        """
-        Check if any ancestor form has enabled=False.
-
-        This is used to determine if a nested config should remain dimmed
-        even if its own enabled field is True.
-
-        Returns:
-            True if any ancestor has enabled=False, False otherwise
-        """
-        current = self._parent_manager
-        while current is not None:
-            if 'enabled' in current.parameters:
-                enabled_widget = current.widgets.get('enabled')
-                # ANTI-DUCK-TYPING: enabled widget is always QCheckBox
-                if enabled_widget and isinstance(enabled_widget, QCheckBox):
-                    if not enabled_widget.isChecked():
-                        return True
-            current = current._parent_manager
-        return False
+        """DELEGATED: Check ancestor disabled state using EnabledFieldStylingService."""
+        return self._enabled_styling_service._is_any_ancestor_disabled(self)
 
     def _refresh_enabled_styling(self) -> None:
-        """
-        Refresh enabled styling for this form and all nested forms.
-
-        This should be called when context changes that might affect inherited enabled values.
-        Similar to placeholder refresh, but for enabled field styling.
-
-        CRITICAL: Skip optional dataclass nested managers when instance is None.
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-
-        # CRITICAL: Check if this is a nested manager inside an optional dataclass with None instance
-        # If so, skip enabled styling - the None state dimming takes precedence
-        if self._parent_manager is not None:
-            for param_name, nested_manager in self._parent_manager.nested_managers.items():
-                if nested_manager is self:
-                    param_type = self._parent_manager.parameter_types.get(param_name)
-                    if param_type:
-                        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
-                        if ParameterTypeUtils.is_optional_dataclass(param_type):
-                            instance = self._parent_manager.parameters.get(param_name)
-                            logger.info(f"[REFRESH ENABLED STYLING] field_id={self.field_id}, optional dataclass check: param_name={param_name}, instance={instance}, is_none={instance is None}")
-                            if instance is None:
-                                logger.info(f"[REFRESH ENABLED STYLING] field_id={self.field_id}, skipping (optional dataclass instance is None)")
-                                # Skip enabled styling - None state dimming is already applied
-                                return
-                    break
-
-        # Refresh this form's enabled styling if it has an enabled field
-        if 'enabled' in self.parameters:
-            # Get the enabled widget to read the CURRENT resolved value
-            enabled_widget = self.widgets.get('enabled')
-            # ANTI-DUCK-TYPING: enabled widget is always QCheckBox
-            if enabled_widget and isinstance(enabled_widget, QCheckBox):
-                # Use the checkbox's current state (which reflects resolved placeholder)
-                resolved_value = enabled_widget.isChecked()
-            else:
-                # Fallback to parameter value
-                resolved_value = self.parameters.get('enabled')
-                if resolved_value is None:
-                    resolved_value = True
-
-            # Apply styling with the resolved value
-            self._on_enabled_field_changed_universal('enabled', resolved_value)
-
-        # Recursively refresh all nested forms' enabled styling
-        for nested_manager in self.nested_managers.values():
-            nested_manager._refresh_enabled_styling()
+        """DELEGATED: Refresh enabled styling using EnabledFieldStylingService."""
+        self._enabled_styling_service.refresh_enabled_styling(self)
 
     def _on_enabled_field_changed_universal(self, param_name: str, value: Any) -> None:
-        """
-        UNIVERSAL ENABLED FIELD BEHAVIOR: Apply visual styling when 'enabled' parameter changes.
-
-        This handler is connected for ANY form that has an 'enabled' parameter (function, dataclass, etc.).
-        When enabled resolves to False (concrete or lazy), apply visual dimming WITHOUT blocking input.
-
-        This creates consistent semantics across all ParameterFormManager instances:
-        - enabled=True or lazy-resolved True: Normal styling
-        - enabled=False or lazy-resolved False: Dimmed styling, inputs stay editable
-        """
-        if param_name != 'enabled':
-            return
-
-        # DEBUG: Log when this handler is called
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"[ENABLED HANDLER CALLED] field_id={self.field_id}, param_name={param_name}, value={value}")
-
-        # Resolve lazy value: None means inherit from parent context
-        if value is None:
-            # Lazy field - get the resolved placeholder value from the widget
-            enabled_widget = self.widgets.get('enabled')
-            # ANTI-DUCK-TYPING: enabled widget is always QCheckBox
-            if enabled_widget and isinstance(enabled_widget, QCheckBox):
-                resolved_value = enabled_widget.isChecked()
-            else:
-                # Fallback: assume True if we can't resolve
-                resolved_value = True
-        else:
-            resolved_value = value
-
-        logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, resolved_value={resolved_value}")
-
-        # Apply styling to the entire form based on resolved enabled value
-        # Inputs stay editable - only visual dimming changes
-        # CRITICAL FIX: Only apply to widgets in THIS form, not nested ParameterFormManager forms
-        # This prevents crosstalk when a step has 'enabled' field and nested configs also have 'enabled' fields
-        def get_direct_widgets(parent_widget):
-            """Get widgets that belong to this form, excluding nested ParameterFormManager widgets."""
-            direct_widgets = []
-            # ANTI-DUCK-TYPING: Use ABC-based widget discovery
-            all_widgets = self._widget_ops.get_all_value_widgets(parent_widget)
-            logger.info(f"[GET_DIRECT_WIDGETS] field_id={self.field_id}, total widgets found: {len(all_widgets)}, nested_managers: {list(self.nested_managers.keys())}")
-
-            for widget in all_widgets:
-                widget_name = f"{widget.__class__.__name__}({widget.objectName() or 'no-name'})"
-                object_name = widget.objectName()
-
-                # Check if widget belongs to a nested manager by checking if its object name starts with nested manager's field_id
-                belongs_to_nested = False
-                for nested_name, nested_manager in self.nested_managers.items():
-                    nested_field_id = nested_manager.field_id
-                    if object_name and object_name.startswith(nested_field_id + '_'):
-                        belongs_to_nested = True
-                        logger.info(f"[GET_DIRECT_WIDGETS] ❌ EXCLUDE {widget_name} - belongs to nested manager {nested_field_id}")
-                        break
-
-                if not belongs_to_nested:
-                    direct_widgets.append(widget)
-                    logger.info(f"[GET_DIRECT_WIDGETS] ✅ INCLUDE {widget_name}")
-
-            logger.info(f"[GET_DIRECT_WIDGETS] field_id={self.field_id}, returning {len(direct_widgets)} direct widgets")
-            return direct_widgets
-
-        direct_widgets = get_direct_widgets(self)
-        widget_names = [f"{w.__class__.__name__}({w.objectName() or 'no-name'})" for w in direct_widgets[:5]]  # First 5
-        logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, found {len(direct_widgets)} direct widgets, first 5: {widget_names}")
-
-        # CRITICAL: For nested configs (inside GroupBox), apply styling to the GroupBox container
-        # For top-level forms (step, function), apply styling to direct widgets
-        is_nested_config = self._parent_manager is not None and any(
-            nested_manager == self for nested_manager in self._parent_manager.nested_managers.values()
-        )
-
-        if is_nested_config:
-            # This is a nested config - find the GroupBox container and apply styling to it
-            # The GroupBox is stored in parent's widgets dict
-            group_box = None
-            for param_name, nested_manager in self._parent_manager.nested_managers.items():
-                if nested_manager == self:
-                    group_box = self._parent_manager.widgets.get(param_name)
-                    break
-
-            if group_box:
-                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying to GroupBox container")
-                from PyQt6.QtWidgets import QGraphicsOpacityEffect
-
-                # CRITICAL: Check if ANY ancestor has enabled=False
-                # If any ancestor is disabled, child should remain dimmed regardless of its own enabled value
-                ancestor_is_disabled = self._is_any_ancestor_disabled()
-                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, ancestor_is_disabled={ancestor_is_disabled}")
-
-                if resolved_value and not ancestor_is_disabled:
-                    # Enabled=True AND no ancestor is disabled: Remove dimming from GroupBox
-                    logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, removing dimming from GroupBox")
-                    # Clear effects from all widgets in the GroupBox
-                    # ANTI-DUCK-TYPING: Use ABC-based widget discovery
-                    for widget in self._widget_ops.get_all_value_widgets(group_box):
-                        widget.setGraphicsEffect(None)
-                elif ancestor_is_disabled:
-                    # Ancestor is disabled - keep dimming regardless of child's enabled value
-                    logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, keeping dimming (ancestor disabled)")
-                    # ANTI-DUCK-TYPING: Use ABC-based widget discovery
-                    for widget in self._widget_ops.get_all_value_widgets(group_box):
-                        effect = QGraphicsOpacityEffect()
-                        effect.setOpacity(0.4)
-                        widget.setGraphicsEffect(effect)
-                else:
-                    # Enabled=False: Apply dimming to GroupBox widgets
-                    logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying dimming to GroupBox")
-                    # ANTI-DUCK-TYPING: Use ABC-based widget discovery
-                    for widget in self._widget_ops.get_all_value_widgets(group_box):
-                        effect = QGraphicsOpacityEffect()
-                        effect.setOpacity(0.4)
-                        widget.setGraphicsEffect(effect)
-        else:
-            # This is a top-level form (step, function) - apply styling to direct widgets + nested configs
-            if resolved_value:
-                # Enabled=True: Remove dimming from direct widgets
-                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, removing dimming (enabled=True)")
-                for widget in direct_widgets:
-                    widget.setGraphicsEffect(None)
-
-                # CRITICAL: Trigger refresh of all nested configs' enabled styling
-                # This ensures that nested configs re-evaluate their styling based on:
-                # 1. Their own enabled field value
-                # 2. Whether any ancestor is disabled (now False since parent is enabled)
-                # This handles deeply nested configs correctly
-                logger.info(f"[ENABLED HANDLER] Refreshing nested configs' enabled styling")
-                for nested_manager in self.nested_managers.values():
-                    nested_manager._refresh_enabled_styling()
-            else:
-                # Enabled=False: Apply dimming to direct widgets + ALL nested configs
-                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying dimming (enabled=False)")
-                from PyQt6.QtWidgets import QGraphicsOpacityEffect
-                for widget in direct_widgets:
-                    # Skip QLabel widgets when dimming (only dim inputs)
-                    if isinstance(widget, QLabel):
-                        continue
-                    effect = QGraphicsOpacityEffect()
-                    effect.setOpacity(0.4)
-                    widget.setGraphicsEffect(effect)
-
-                # Also dim all nested configs (entire step is disabled)
-                logger.info(f"[ENABLED HANDLER] Dimming nested configs, found {len(self.nested_managers)} nested managers")
-                logger.info(f"[ENABLED HANDLER] Available widget keys: {list(self.widgets.keys())}")
-                for param_name, nested_manager in self.nested_managers.items():
-                    group_box = self.widgets.get(param_name)
-                    logger.info(f"[ENABLED HANDLER] Checking nested config {param_name}, group_box={group_box.__class__.__name__ if group_box else 'None'}")
-                    if not group_box:
-                        logger.info(f"[ENABLED HANDLER] ⚠️ No group_box found for nested config {param_name}, trying nested_manager.field_id={nested_manager.field_id}")
-                        # Try using the nested manager's field_id instead
-                        group_box = self.widgets.get(nested_manager.field_id)
-                        if not group_box:
-                            logger.info(f"[ENABLED HANDLER] ⚠️ Still no group_box found, skipping")
-                            continue
-                    # ANTI-DUCK-TYPING: Use ABC-based widget discovery
-                    widgets_to_dim = self._widget_ops.get_all_value_widgets(group_box)
-                    logger.info(f"[ENABLED HANDLER] Applying dimming to nested config {param_name}, found {len(widgets_to_dim)} widgets")
-                    for widget in widgets_to_dim:
-                        effect = QGraphicsOpacityEffect()
-                        effect.setOpacity(0.4)
-                        widget.setGraphicsEffect(effect)
+        """DELEGATED: Handle enabled field changes using EnabledFieldStylingService."""
+        self._enabled_styling_service.on_enabled_field_changed(self, param_name, value)
 
     def _on_nested_parameter_changed(self, param_name: str, value: Any) -> None:
         """
@@ -1863,66 +1494,12 @@ class ParameterFormManager(QWidget):
         self.parameter_changed.emit(param_name, value)
 
     def _refresh_with_live_context(self, live_context: dict = None) -> None:
-        """Refresh placeholders using live context from other open windows.
-
-        This is the standard refresh method that should be used for all placeholder updates.
-        It automatically collects live values from other open windows (unless already provided).
-
-        Args:
-            live_context: Optional pre-collected live context. If None, will collect it.
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"🔍 REFRESH: {self.field_id} (id={id(self)}) refreshing with live context")
-
-        # Only root managers should collect live context (nested managers inherit from parent)
-        # If live_context is already provided (e.g., from parent), use it to avoid redundant collection
-        if live_context is None and self._parent_manager is None:
-            live_context = self._collect_live_context_from_other_windows()
-
-        # Refresh this form's placeholders
-        self._refresh_all_placeholders(live_context=live_context)
-
-        # CRITICAL: Also refresh all nested managers' placeholders
-        # Pass the same live_context to avoid redundant get_current_values() calls
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
+        """DELEGATED: Refresh placeholders using PlaceholderRefreshService."""
+        self._placeholder_refresh_service.refresh_with_live_context(self, live_context)
 
     def _refresh_all_placeholders(self, live_context: dict = None) -> None:
-        """Refresh placeholder text for all widgets in this form.
-
-        Args:
-            live_context: Optional dict mapping object instances to their live values from other open windows
-        """
-        with timer(f"_refresh_all_placeholders ({self.field_id})", threshold_ms=5.0):
-            # Allow placeholder refresh for nested forms even if they're not detected as lazy dataclasses
-            # The placeholder service will determine if placeholders are available
-            if not self.dataclass_type:
-                return
-
-            # CRITICAL FIX: Use self.parameters instead of get_current_values() for overlay
-            # get_current_values() reads widget values, but widgets don't have placeholder state set yet
-            # during initial refresh, so it reads displayed values instead of None
-            # self.parameters has the correct None values from initialization
-            overlay = self.parameters
-
-            # Build context stack: parent context + overlay (with live context from other windows)
-            with self._build_context_stack(overlay, live_context=live_context):
-                monitor = get_monitor("Placeholder resolution per field")
-                for param_name, widget in self.widgets.items():
-                    # CRITICAL: Check current value from self.parameters (has correct None values)
-                    current_value = self.parameters.get(param_name)
-
-                    # CRITICAL: Also check if widget is in placeholder state
-                    # This handles the case where live context changed and we need to re-resolve the placeholder
-                    # even though self.parameters still has None
-                    widget_in_placeholder_state = widget.property("is_placeholder_state")
-
-                    if current_value is None or widget_in_placeholder_state:
-                        with monitor.measure():
-                            placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
-                            if placeholder_text:
-                                from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-                                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+        """DELEGATED: Refresh all placeholders using PlaceholderRefreshService."""
+        self._placeholder_refresh_service.refresh_all_placeholders(self, live_context)
 
     def _apply_to_nested_managers(self, operation_func: callable) -> None:
         """Apply operation to all nested managers."""
@@ -2226,106 +1803,12 @@ class ParameterFormManager(QWidget):
         self._cross_window_refresh_timer.start(200)  # 200ms debounce
 
     def _find_live_values_for_type(self, ctx_type: type, live_context: dict) -> dict:
-        """Find live values for a context type, checking both exact type and lazy/base equivalents.
-
-        Args:
-            ctx_type: The type to find live values for
-            live_context: Dict mapping types to their live values
-
-        Returns:
-            Live values dict if found, None otherwise
-        """
-        if not live_context:
-            return None
-
-        # Check exact type match first
-        if ctx_type in live_context:
-            return live_context[ctx_type]
-
-        # Check lazy/base equivalents
-        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
-
-        # If ctx_type is lazy, check its base type
-        base_type = get_base_type_for_lazy(ctx_type)
-        if base_type and base_type in live_context:
-            return live_context[base_type]
-
-        # If ctx_type is base, check its lazy type
-        lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(ctx_type)
-        if lazy_type and lazy_type in live_context:
-            return live_context[lazy_type]
-
-        return None
+        """DELEGATED: Find live values using PlaceholderRefreshService."""
+        return self._placeholder_refresh_service.find_live_values_for_type(ctx_type, live_context)
 
     def _collect_live_context_from_other_windows(self):
-        """Collect live values from other open form managers for context resolution.
-
-        Returns a dict mapping object types to their current live values.
-        This allows matching by type rather than instance identity.
-        Maps both the actual type AND its lazy/non-lazy equivalent for flexible matching.
-
-        CRITICAL: Only collects context from PARENT types in the hierarchy, not from the same type.
-        E.g., PipelineConfig editor collects GlobalPipelineConfig but not other PipelineConfig instances.
-        This prevents a window from using its own live values for placeholder resolution.
-
-        CRITICAL: Uses get_user_modified_values() to only collect concrete (non-None) values.
-        This ensures proper inheritance: if PipelineConfig has None for a field, it won't
-        override GlobalPipelineConfig's concrete value in the Step editor's context.
-
-        CRITICAL: Only collects from managers with the SAME scope_id (same orchestrator/plate).
-        This prevents cross-contamination between different orchestrators.
-        GlobalPipelineConfig (scope_id=None) is shared across all scopes.
-        """
-        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-        from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
-        import logging
-        logger = logging.getLogger(__name__)
-
-        live_context = {}
-        my_type = type(self.object_instance)
-
-        logger.info(f"🔍 COLLECT_CONTEXT: {self.field_id} (id={id(self)}) collecting from {len(self._active_form_managers)} managers")
-
-        for manager in self._active_form_managers:
-            if manager is not self:
-                # CRITICAL: Only collect from managers in the same scope OR from global scope (None)
-                # GlobalPipelineConfig has scope_id=None and affects all orchestrators
-                # PipelineConfig/Step editors have scope_id=plate_path and only affect same orchestrator
-                if manager.scope_id is not None and self.scope_id is not None and manager.scope_id != self.scope_id:
-                    continue  # Different orchestrator - skip
-
-                logger.info(f"🔍 COLLECT_CONTEXT: Calling get_user_modified_values() on {manager.field_id} (id={id(manager)})")
-
-                # CRITICAL: Get only user-modified (concrete, non-None) values
-                # This preserves inheritance hierarchy: None values don't override parent values
-                live_values = manager.get_user_modified_values()
-                obj_type = type(manager.object_instance)
-
-                # CRITICAL: Only skip if this is EXACTLY the same type as us
-                # E.g., PipelineConfig editor should not use live values from another PipelineConfig editor
-                # But it SHOULD use live values from GlobalPipelineConfig editor (parent in hierarchy)
-                # Don't check lazy/base equivalents here - that's for type matching, not hierarchy filtering
-                if obj_type == my_type:
-                    continue
-
-                # Map by the actual type
-                live_context[obj_type] = live_values
-
-                # Also map by the base/lazy equivalent type for flexible matching
-                # E.g., PipelineConfig and LazyPipelineConfig should both match
-
-                # If this is a lazy type, also map by its base type
-                base_type = get_base_type_for_lazy(obj_type)
-                if base_type and base_type != obj_type:
-                    live_context[base_type] = live_values
-
-                # If this is a base type, also map by its lazy type
-                lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
-                if lazy_type and lazy_type != obj_type:
-                    live_context[lazy_type] = live_values
-
-        return live_context
+        """DELEGATED: Collect live context using PlaceholderRefreshService."""
+        return self._placeholder_refresh_service.collect_live_context_from_other_windows(self)
 
     def _do_cross_window_refresh(self):
         """Actually perform the cross-window placeholder refresh using live values from other windows."""
