@@ -2158,9 +2158,8 @@ class ParameterFormManager(QWidget):
         # CRITICAL: Propagate parameter change signal up the hierarchy
         # This ensures cross-window updates work for nested config changes
         # The root manager will emit context_value_changed via _emit_cross_window_change
-        # CRITICAL FIX: Don't propagate 'enabled' field changes - they're form-specific styling
-        if param_name != 'enabled':
-            self.parameter_changed.emit(param_name, value)
+        # IMPORTANT: We DO propagate 'enabled' field changes for cross-window styling updates
+        self.parameter_changed.emit(param_name, value)
 
     def _refresh_with_live_context(self, live_context: dict = None) -> None:
         """Refresh placeholders using live context from other open windows.
@@ -2613,6 +2612,11 @@ class ParameterFormManager(QWidget):
         # Refresh placeholders for this form and all nested forms using live context
         self._refresh_all_placeholders(live_context=live_context)
         self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
+
+        # CRITICAL: Also refresh enabled styling for all nested managers
+        # This ensures that when 'enabled' field changes in another window, styling updates here
+        # Example: User changes napari_streaming_config.enabled in one window, other windows update styling
+        self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
 
         # CRITICAL: Emit context_refreshed signal to cascade the refresh downstream
         # This allows Step editors to know that PipelineConfig's effective context changed
