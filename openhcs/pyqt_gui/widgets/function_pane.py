@@ -68,8 +68,6 @@ class FunctionPaneWidget(QWidget):
 
             # Store function signature defaults
             self.param_defaults = {name: info.default_value for name, info in param_info.items()}
-
-            print(f"🔍 FUNCTION PANE: func={self.func.__name__}, kwargs={self.kwargs}")
         else:
             self.param_defaults = {}
 
@@ -347,30 +345,21 @@ class FunctionPaneWidget(QWidget):
     
     def reset_all_parameters(self):
         """Reset all parameters to default values using PyQt6 form manager."""
-        logger.info(f"🔍 RESET: reset_all_parameters called for function {self.index}")
-        logger.info(f"🔍 RESET: self.param_defaults = {self.param_defaults}")
-
         if not self.form_manager:
-            logger.warning("🔍 RESET: No form_manager found!")
             return
-
-        logger.info(f"🔍 RESET: form_manager.parameters = {self.form_manager.parameters}")
 
         # Reset all parameters - form manager will use signature defaults from param_defaults
         for param_name in list(self.form_manager.parameters.keys()):
-            logger.info(f"🔍 RESET: Resetting {param_name}")
             self.form_manager.reset_parameter(param_name)
 
         # Update internal kwargs to match the reset values
         self._internal_kwargs = self.form_manager.get_current_values()
-        logger.info(f"🔍 RESET: After reset, _internal_kwargs = {self._internal_kwargs}")
 
         # Emit parameter changed signals for each reset parameter
         for param_name, default_value in self.param_defaults.items():
             self.parameter_changed.emit(self.index, param_name, default_value)
 
         self.reset_parameters.emit(self.index)
-        logger.info(f"🔍 RESET: Reset complete for function {self.index}")
     
     def update_widget_value(self, widget: QWidget, value: Any):
         """

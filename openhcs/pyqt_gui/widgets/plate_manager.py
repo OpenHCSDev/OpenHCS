@@ -1409,6 +1409,11 @@ class PlateManagerWidget(QWidget):
         """Handle edited orchestrator code and update UI state (same logic as Textual TUI)."""
         logger.debug("Orchestrator code edited, processing changes...")
         try:
+            # Ensure pipeline editor window is open before processing orchestrator code
+            main_window = self._find_main_window()
+            if main_window and hasattr(main_window, 'show_pipeline_editor'):
+                main_window.show_pipeline_editor()
+
             # CRITICAL FIX: Execute code with lazy dataclass constructor patching to preserve None vs concrete distinction
             namespace = {}
             with self._patch_lazy_constructors():
@@ -1498,7 +1503,6 @@ class PlateManagerWidget(QWidget):
 
                 # Trigger UI refresh
                 self.pipeline_data_changed.emit()
-                self.service_adapter.show_info_dialog("Orchestrator configuration updated successfully")
 
             else:
                 raise ValueError("No valid assignments found in edited code")
@@ -1815,6 +1819,15 @@ class PlateManagerWidget(QWidget):
         """
         self.pipeline_editor = pipeline_editor
         logger.debug("Pipeline editor reference set in plate manager")
+
+    def _find_main_window(self):
+        """Find the main window by traversing parent hierarchy."""
+        widget = self
+        while widget:
+            if hasattr(widget, 'floating_windows'):
+                return widget
+            widget = widget.parent()
+        return None
 
     async def _start_monitoring(self):
         """Start monitoring subprocess execution."""

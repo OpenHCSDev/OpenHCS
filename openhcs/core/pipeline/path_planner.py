@@ -397,7 +397,6 @@ class PathPlanner:
         # Resolve materialization vs materialization conflicts
         for path_key, step_list in path_groups.items():
             if len(step_list) > 1:
-                print(f"⚠️  Materialization path collision detected for {len(step_list)} steps at: {path_key}")
                 for step, pos, path in step_list:
                     self._resolve_and_update_paths(step, pos, path, f"pos {pos}")
 
@@ -409,7 +408,6 @@ class PathPlanner:
 
         # Generate unique sub_dir name instead of calculating from paths
         original_sub_dir = materialization_config.sub_dir
-        print(f"🔍 PATH_COLLISION DEBUG: step '{step.name}' original_sub_dir = '{original_sub_dir}' (type: {type(materialization_config).__name__})")
         new_sub_dir = f"{original_sub_dir}_step{position}"
 
         # Update step materialization config with new sub_dir
@@ -424,8 +422,6 @@ class PathPlanner:
             if 'materialized_output_dir' in step_plan:
                 step_plan['materialized_output_dir'] = str(resolved_path)
                 step_plan['materialized_sub_dir'] = new_sub_dir  # Update stored sub_dir
-
-        print(f"    - step '{step.name}' ({conflict_type}) → {resolved_path}")
 
 
 
