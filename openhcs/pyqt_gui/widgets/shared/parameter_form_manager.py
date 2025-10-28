@@ -784,68 +784,10 @@ class ParameterFormManager(QWidget):
     # DELETED: _create_regular_parameter_widget() - replaced with parametric dispatch
     # See widget_creation_config.py: create_widget_parametric(manager, param_info, WidgetCreationType.REGULAR)
 
-    def _create_optional_regular_widget(self, param_info) -> QWidget:
-        """Create widget for Optional[regular_type] - checkbox + regular widget."""
-        display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
-        field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
+    # DELETED: _create_optional_regular_widget() - DEAD CODE (only used in Textual TUI, not PyQt6)
+    # PyQt6 handles Optional[regular] types via REGULAR parametric dispatch with None-aware widgets
 
-        container = QWidget()
-        layout = QVBoxLayout(container)
-
-        # Checkbox (using NoneAwareCheckBox for consistency)
-        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
-        checkbox = NoneAwareCheckBox()
-        checkbox.setText(display_info['checkbox_label'])
-        checkbox.setObjectName(field_ids['optional_checkbox_id'])
-        current_value = self.parameters.get(param_info.name)
-        checkbox.setChecked(current_value is not None)
-        layout.addWidget(checkbox)
-
-        # Get inner type for the actual widget
-        inner_type = ParameterTypeUtils.get_optional_inner_type(param_info.type)
-
-        # Create the actual widget for the inner type
-        inner_widget = self._create_regular_parameter_widget_for_type(param_info.name, inner_type, current_value)
-        inner_widget.setEnabled(current_value is not None)  # Disable if None
-        layout.addWidget(inner_widget)
-
-        # Connect checkbox to enable/disable the inner widget
-        def on_checkbox_changed(checked):
-            inner_widget.setEnabled(checked)
-            if checked:
-                # Set to default value for the inner type
-                if inner_type == str:
-                    default_value = ""
-                elif inner_type == int:
-                    default_value = 0
-                elif inner_type == float:
-                    default_value = 0.0
-                elif inner_type == bool:
-                    default_value = False
-                else:
-                    default_value = None
-                self.update_parameter(param_info.name, default_value)
-            else:
-                self.update_parameter(param_info.name, None)
-
-        checkbox.toggled.connect(on_checkbox_changed)
-        return container
-
-    def _create_regular_parameter_widget_for_type(self, param_name: str, param_type: Type, current_value: Any) -> QWidget:
-        """Create a regular parameter widget for a specific type."""
-        field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_name)
-
-        # Use the existing create_widget method
-        widget = self.create_widget(param_name, param_type, current_value, field_ids['widget_id'])
-        if widget:
-            return widget
-
-        # Fallback to basic text input
-        from PyQt6.QtWidgets import QLineEdit
-        fallback_widget = QLineEdit()
-        fallback_widget.setText(str(current_value or ""))
-        fallback_widget.setObjectName(field_ids['widget_id'])
-        return fallback_widget
+    # DELETED: _create_regular_parameter_widget_for_type() - DEAD CODE (only called by _create_optional_regular_widget)
 
     # DELETED: _create_nested_dataclass_widget() - replaced with parametric dispatch
     # See widget_creation_config.py: create_widget_parametric(manager, param_info, WidgetCreationType.NESTED)
