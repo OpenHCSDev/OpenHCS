@@ -45,12 +45,12 @@ def _create_optional_dataclass_widget(self, param_info) -> QWidget:
     # ... same pattern
 ```
 
-**Metaprogramming Solution (Simplified - No New Classes!):**
+**Metaprogramming Solution (Parametric - Mirrors _FRAMEWORK_CONFIG!):**
 
 ```python
 from enum import Enum
 from dataclasses import dataclass
-from typing import Callable, Tuple
+from typing import Callable, Tuple, Optional
 
 class WidgetCreationType(Enum):
     """Enum for widget creation strategies - mirrors MemoryType pattern."""
@@ -59,92 +59,126 @@ class WidgetCreationType(Enum):
     NESTED = "nested"
     OPTIONAL_NESTED = "optional_nested"
 
-@dataclass
-class WidgetCreationConfig:
-    """Configuration for widget creation - single source of truth."""
-    param_info: Any
-    display_info: dict
-    field_ids: dict
-    current_value: Any
-    manager: 'ParameterFormManager'  # Reference to manager for callbacks
+# ============================================================================
+# WIDGET CREATION HANDLERS - Special-case logic (like framework handlers)
+# ============================================================================
 
-# Widget creation operations - pure data dict (like _OPS in memory system)
-_WIDGET_CREATION_OPS = {
+def _unwrap_optional_type(param_type: Type) -> Type:
+    """Unwrap Optional[T] to get T."""
+    return (
+        ParameterTypeUtils.get_optional_inner_type(param_type)
+        if ParameterTypeUtils.is_optional_dataclass(param_type)
+        else param_type
+    )
+
+def _create_nested_form(manager, param_name: str, param_type: Type, current_value: Any) -> QWidget:
+    """Handler for creating nested form."""
+    unwrapped_type = _unwrap_optional_type(param_type)
+    nested_manager = manager._create_nested_form_inline(param_name, unwrapped_type, current_value)
+    return nested_manager.build_form()
+
+# ============================================================================
+# UNIFIED WIDGET CREATION CONFIGURATION (like _FRAMEWORK_CONFIG)
+# ============================================================================
+
+_WIDGET_CREATION_CONFIG = {
     WidgetCreationType.REGULAR: {
+        # Metadata
         'layout_type': 'QHBoxLayout',
+        'is_nested': False,
+
+        # Widget creation operations (eval expressions or callables)
+        'create_container': 'QWidget()',
+        'setup_layout': 'layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing); layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)',
+        'create_main_widget': 'manager.create_widget(param_info.name, param_info.type, current_value, field_ids["widget_id"])',
+
+        # Feature flags
         'needs_label': True,
         'needs_reset_button': True,
         'needs_checkbox': False,
-        'create_container': lambda cfg: _create_regular_container(cfg),
-        'create_main_widget': lambda cfg: cfg.manager.create_widget(
-            cfg.param_info.name, cfg.param_info.type,
-            cfg.current_value, cfg.field_ids['widget_id']
-        ),
+        'needs_unwrap_type': False,
     },
+
     WidgetCreationType.NESTED: {
-        'layout_type': 'QVBoxLayout',
+        # Metadata
+        'layout_type': 'GroupBoxWithHelp',
+        'is_nested': True,
+
+        # Widget creation operations
+        'create_container': 'GroupBoxWithHelp(title=display_info["field_label"], help_target=unwrapped_type, color_scheme=manager.config.color_scheme or PyQt6ColorScheme())',
+        'setup_layout': None,  # GroupBox handles its own layout
+        'create_main_widget': _create_nested_form,  # Callable handler
+
+        # Feature flags
         'needs_label': False,
         'needs_reset_button': False,
         'needs_checkbox': False,
-        'create_container': lambda cfg: _create_nested_container(cfg),
-        'create_main_widget': lambda cfg: _create_nested_main_widget(cfg),
+        'needs_unwrap_type': True,
     },
+
     WidgetCreationType.OPTIONAL_REGULAR: {
+        # Metadata
         'layout_type': 'QVBoxLayout',
+        'is_nested': False,
+
+        # Widget creation operations
+        'create_container': 'QWidget()',
+        'setup_layout': None,  # Vertical layout doesn't need spacing
+        'create_main_widget': 'manager.create_widget(param_info.name, param_info.type, current_value, field_ids["widget_id"])',
+
+        # Feature flags
         'needs_label': True,
         'needs_reset_button': True,
         'needs_checkbox': True,
-        'create_container': lambda cfg: _create_regular_container(cfg),
-        'create_main_widget': lambda cfg: _create_optional_regular_main_widget(cfg),
+        'needs_unwrap_type': False,
     },
+
     WidgetCreationType.OPTIONAL_NESTED: {
-        'layout_type': 'QVBoxLayout',
+        # Metadata
+        'layout_type': 'GroupBoxWithHelp',
+        'is_nested': True,
+
+        # Widget creation operations
+        'create_container': 'GroupBoxWithHelp(title=display_info["field_label"], help_target=unwrapped_type, color_scheme=manager.config.color_scheme or PyQt6ColorScheme())',
+        'setup_layout': None,
+        'create_main_widget': _create_nested_form,  # Callable handler
+
+        # Feature flags
         'needs_label': False,
         'needs_reset_button': False,
         'needs_checkbox': True,
-        'create_container': lambda cfg: _create_nested_container(cfg),
-        'create_main_widget': lambda cfg: _create_optional_nested_main_widget(cfg),
+        'needs_unwrap_type': True,
     },
 }
 
-# Helper functions (replace class methods)
-def _create_regular_container(cfg: WidgetCreationConfig) -> Tuple[QWidget, QLayout]:
-    """Create container for regular widgets."""
-    container = QWidget()
-    layout = QHBoxLayout(container)
-    layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
-    layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
-    return container, layout
+# Auto-generate widget creation operations from config
+def _make_widget_operation(expr_str: str, creation_type: WidgetCreationType):
+    """Create operation from expression string (like _make_lambda_with_name)."""
+    if expr_str is None:
+        return None
 
-def _create_nested_container(cfg: WidgetCreationConfig) -> Tuple[QWidget, QLayout]:
-    """Create container for nested widgets."""
-    unwrapped_type = (
-        ParameterTypeUtils.get_optional_inner_type(cfg.param_info.type)
-        if ParameterTypeUtils.is_optional_dataclass(cfg.param_info.type)
-        else cfg.param_info.type
-    )
-    group_box = GroupBoxWithHelp(
-        title=cfg.display_info['field_label'],
-        help_target=unwrapped_type,
-        color_scheme=cfg.manager.config.color_scheme or PyQt6ColorScheme()
-    )
-    return group_box, group_box.layout()
+    # Create lambda with proper context
+    lambda_expr = f'lambda manager, param_info, display_info, field_ids, current_value, unwrapped_type=None: {expr_str}'
+    operation = eval(lambda_expr)
+    operation.__name__ = f'{creation_type.value}_operation'
+    return operation
 
-def _create_nested_main_widget(cfg: WidgetCreationConfig) -> QWidget:
-    """Create main widget for nested dataclass."""
-    unwrapped_type = (
-        ParameterTypeUtils.get_optional_inner_type(cfg.param_info.type)
-        if ParameterTypeUtils.is_optional_dataclass(cfg.param_info.type)
-        else cfg.param_info.type
-    )
-    nested_manager = cfg.manager._create_nested_form_inline(
-        cfg.param_info.name, unwrapped_type, cfg.current_value
-    )
-    return nested_manager.build_form()
+_WIDGET_OPERATIONS = {
+    creation_type: {
+        op_name: (
+            _make_widget_operation(expr, creation_type)
+            if isinstance(expr, str)
+            else expr  # Already a callable
+        )
+        for op_name, expr in config.items()
+        if op_name in ['create_container', 'setup_layout', 'create_main_widget']
+    }
+    for creation_type, config in _WIDGET_CREATION_CONFIG.items()
+}
 
 # UNIFIED widget creation method (replaces 5 methods)
 def _create_widget_for_param(self, param_info) -> QWidget:
-    """UNIFIED: Single widget creation method using enum dispatch."""
+    """UNIFIED: Single widget creation method using parametric dispatch."""
     # Determine creation type from param_info
     if param_info.is_optional and param_info.is_nested:
         creation_type = WidgetCreationType.OPTIONAL_NESTED
@@ -155,40 +189,50 @@ def _create_widget_for_param(self, param_info) -> QWidget:
     else:
         creation_type = WidgetCreationType.REGULAR
 
-    # Get operations for this type
-    ops = _WIDGET_CREATION_OPS[creation_type]
+    # Get config and operations for this type
+    config = _WIDGET_CREATION_CONFIG[creation_type]
+    ops = _WIDGET_OPERATIONS[creation_type]
 
-    # Build configuration
-    config = WidgetCreationConfig(
-        param_info=param_info,
-        display_info=self.service.get_parameter_display_info(
-            param_info.name, param_info.type, param_info.description
-        ),
-        field_ids=self.service.generate_field_ids_direct(self.config.field_id, param_info.name),
-        current_value=self.parameters.get(param_info.name),
-        manager=self
+    # Prepare context
+    display_info = self.service.get_parameter_display_info(
+        param_info.name, param_info.type, param_info.description
     )
+    field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
+    current_value = self.parameters.get(param_info.name)
+    unwrapped_type = _unwrap_optional_type(param_info.type) if config['needs_unwrap_type'] else None
 
     # Execute operations
-    container, layout = ops['create_container'](config)
+    container = ops['create_container'](self, param_info, display_info, field_ids, current_value, unwrapped_type)
+
+    # Setup layout
+    layout_type = config['layout_type']
+    if layout_type == 'QHBoxLayout':
+        layout = QHBoxLayout(container)
+    elif layout_type == 'QVBoxLayout':
+        layout = QVBoxLayout(container)
+    else:  # GroupBoxWithHelp
+        layout = container.layout()
+
+    if ops['setup_layout']:
+        ops['setup_layout'](self, param_info, display_info, field_ids, current_value, unwrapped_type)
 
     # Add label if needed
-    if ops['needs_label']:
+    if config['needs_label']:
         label = LabelWithHelp(
-            text=config.display_info['field_label'],
+            text=display_info['field_label'],
             param_name=param_info.name,
-            param_description=config.display_info['description'],
+            param_description=display_info['description'],
             param_type=param_info.type,
             color_scheme=self.config.color_scheme or PyQt6ColorScheme()
         )
         layout.addWidget(label)
 
     # Add main widget
-    main_widget = ops['create_main_widget'](config)
+    main_widget = ops['create_main_widget'](self, param_info, display_info, field_ids, current_value, unwrapped_type)
     layout.addWidget(main_widget, 1)
 
     # Add reset button if needed
-    if ops['needs_reset_button'] and not self.read_only:
+    if config['needs_reset_button'] and not self.read_only:
         reset_button = _create_optimized_reset_button(
             self.config.field_id,
             param_info.name,
@@ -207,13 +251,15 @@ def _create_widget_for_param(self, param_info) -> QWidget:
     return container
 ```
 
-**Impact:** 5 methods (~400 lines) → 1 method + 1 dict + 3 helpers (~120 lines) = **70% reduction**
+**Impact:** 5 methods (~400 lines) → 1 method + 1 config dict + 2 handlers (~100 lines) = **75% reduction**
 
-**Key Insight:** No new classes needed! Uses existing pattern from memory system:
-- Pure data dict (`_WIDGET_CREATION_OPS`) like `_OPS` in memory converters
-- Lambdas for simple operations
-- Helper functions for complex operations
-- Enum dispatch instead of metaclass registration
+**Key Insight:** PARAMETRIC pattern like `_FRAMEWORK_CONFIG`:
+- Single source of truth: `_WIDGET_CREATION_CONFIG` (like `_FRAMEWORK_CONFIG`)
+- Eval expressions for simple operations (like `'data.get()'` in memory system)
+- Callable handlers for complex operations (like `_pyclesperanto_move_to_device`)
+- Auto-generated operations from config (like `_TYPE_OPERATIONS`)
+- Feature flags instead of hardcoded logic (like `'supports_dlpack': True`)
+- Zero boilerplate - all behavior driven by config
 
 ---
 
@@ -286,12 +332,13 @@ for operation in RecursiveOperation:
 
 ### Implementation Plan
 
-#### Phase 1: Widget Creation Enum Dispatch (NO NEW CLASSES!)
+#### Phase 1: Widget Creation Parametric Dispatch (MIRRORS _FRAMEWORK_CONFIG!)
 1. Create `WidgetCreationType` enum
-2. Create `WidgetCreationConfig` dataclass
-3. Create `_WIDGET_CREATION_OPS` dict (pure data, like memory system)
-4. Create 3 helper functions for complex operations
-5. Replace 5 widget creation methods with unified `_create_widget_for_param()`
+2. Create `_WIDGET_CREATION_CONFIG` dict (single source of truth, like `_FRAMEWORK_CONFIG`)
+3. Create 2 handler functions for complex operations (like `_pyclesperanto_move_to_device`)
+4. Create `_make_widget_operation()` to auto-generate operations from eval expressions
+5. Auto-generate `_WIDGET_OPERATIONS` dict (like `_TYPE_OPERATIONS`)
+6. Replace 5 widget creation methods with unified `_create_widget_for_param()`
 
 #### Phase 2: Recursive Operations Auto-Generation
 1. Create `RecursiveOperation` enum
@@ -313,11 +360,11 @@ for operation in RecursiveOperation:
 
 | Component | Before | After | Reduction |
 |-----------|--------|-------|-----------|
-| Widget Creation | 5 methods, ~400 lines | 1 method + dict + 3 helpers, ~120 lines | **70%** |
+| Widget Creation | 5 methods, ~400 lines | 1 method + config + 2 handlers, ~100 lines | **75%** |
 | Recursive Operations | 3 methods, ~50 lines | 1 factory + enum, ~30 lines | **40%** |
 | Context Resolution | ~200 lines | ~120 lines | **40%** |
 | Cross-Window | ~150 lines | ~75 lines | **50%** |
-| **Total** | **2667 lines** | **~800 lines** | **70%** |
+| **Total** | **2667 lines** | **~775 lines** | **71%** |
 
 #### 3. Context Building Boilerplate (~200 lines of nested conditionals)
 
