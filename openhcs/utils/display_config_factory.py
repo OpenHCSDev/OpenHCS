@@ -158,15 +158,22 @@ def create_napari_display_config(
         mode = getattr(self, field_name, None)
 
         if mode is None:
-            return dimension_mode_enum.SLICE if component_value == 'channel' else dimension_mode_enum.STACK
+            # Default: all components are STACK (well, channel, site, z_index, timepoint)
+            return dimension_mode_enum.STACK
 
         return mode
 
     def get_colormap_name(self):
         return self.colormap.value
 
-    # Merge component defaults
-    component_defaults = {'channel': dimension_mode_enum.SLICE}
+    # Merge component defaults - all components default to STACK
+    component_defaults = {
+        'well': dimension_mode_enum.STACK,
+        'channel': dimension_mode_enum.STACK,
+        'site': dimension_mode_enum.STACK,
+        'z_index': dimension_mode_enum.STACK,
+        'timepoint': dimension_mode_enum.STACK
+    }
     if virtual_component_defaults:
         component_defaults.update(virtual_component_defaults)
 
@@ -174,7 +181,7 @@ def create_napari_display_config(
         name='NapariDisplayConfig',
         base_fields={
             'colormap': (colormap_enum, colormap_enum.GRAY),
-            'variable_size_handling': (variable_size_handling_enum, variable_size_handling_enum.SEPARATE_LAYERS),
+            'variable_size_handling': (variable_size_handling_enum, variable_size_handling_enum.PAD_TO_MAX),
         },
         component_mode_enum=dimension_mode_enum,
         component_defaults=component_defaults,
@@ -211,8 +218,8 @@ def create_fiji_display_config(
 
     Maps OpenHCS dimensions to ImageJ hyperstack dimensions (C, Z, T).
     Default mapping:
-    - well → WINDOW (separate windows per well)
-    - site → CHANNEL (sites become channels)
+    - well → FRAME (wells become frames)
+    - site → FRAME (sites become frames)
     - channel → CHANNEL (channels become channels)
     - z_index → SLICE (z-planes become slices)
     - timepoint → FRAME (timepoints become frames)
@@ -241,7 +248,7 @@ def create_fiji_display_config(
         if mode is None:
             # Default mapping for Fiji hyperstacks
             defaults = {
-                'well': dimension_mode_enum.WINDOW,
+                'well': dimension_mode_enum.FRAME,
                 'site': dimension_mode_enum.FRAME,
                 'channel': dimension_mode_enum.CHANNEL,
                 'z_index': dimension_mode_enum.SLICE,
@@ -256,7 +263,7 @@ def create_fiji_display_config(
 
     # Merge component defaults
     component_defaults = {
-        'well': dimension_mode_enum.WINDOW,
+        'well': dimension_mode_enum.FRAME,
         'site': dimension_mode_enum.FRAME,
         'channel': dimension_mode_enum.CHANNEL,
         'z_index': dimension_mode_enum.SLICE,
