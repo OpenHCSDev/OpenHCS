@@ -66,7 +66,23 @@ class ZMQExecutionClient(ZMQClient):
         except:
             pass
 
-    def execute_pipeline(self, plate_id, pipeline_steps, global_config, pipeline_config=None, config_params=None):
+    def submit_pipeline(self, plate_id, pipeline_steps, global_config, pipeline_config=None, config_params=None):
+        """
+        Submit pipeline for execution and return immediately (non-blocking).
+
+        Use this for UI applications where you want to submit and return immediately,
+        then monitor progress via progress_callback or poll status manually.
+
+        Args:
+            plate_id: Plate identifier
+            pipeline_steps: List of pipeline steps
+            global_config: GlobalPipelineConfig instance
+            pipeline_config: Optional PipelineConfig instance
+            config_params: Optional config parameters dict
+
+        Returns:
+            dict with 'status' and 'execution_id' if accepted, or error info
+        """
         if not self._connected and not self.connect():
             raise RuntimeError("Failed to connect to execution server")
         if self.progress_callback:
@@ -85,57 +101,90 @@ class ZMQExecutionClient(ZMQClient):
         logger.info("🔌 CLIENT: Sending execute request...")
         response = self._send_control_request(request)
         logger.info(f"🔌 CLIENT: Got response: {response.get('status')}")
+        return response
+
+    def wait_for_completion(self, execution_id, poll_interval=0.5, max_consecutive_errors=5):
+        """
+        Block and wait for execution to complete (blocking).
+
+        Use this for CLI/script applications where you want to wait for results.
+        For UI applications, use submit_pipeline() and monitor via progress_callback.
+
+        Args:
+            execution_id: Execution ID from submit_pipeline()
+            poll_interval: Seconds between status polls (default: 0.5)
+            max_consecutive_errors: Max consecutive errors before giving up (default: 5)
+
+        Returns:
+            dict with 'status' ('complete', 'error', 'cancelled') and results/error info
+        """
+        logger.info(f"🔌 CLIENT: Waiting for execution {execution_id} to complete...")
+        consecutive_errors = 0
+        poll_count = 0
+
+        while True:
+            time.sleep(poll_interval)
+            poll_count += 1
+
+            try:
+                logger.info(f"🔌 CLIENT: Status poll #{poll_count} for execution {execution_id}")
+                status_response = self.get_status(execution_id)
+                logger.info(f"🔌 CLIENT: Status response: {status_response}")
+                consecutive_errors = 0  # Reset error counter on success
+
+                if status_response.get('status') == 'ok':
+                    execution = status_response.get('execution', {})
+                    exec_status = execution.get('status')
+                    logger.info(f"🔌 CLIENT: Execution status: {exec_status}")
+                    if exec_status == 'complete':
+                        logger.info("🔌 CLIENT: Execution complete, returning results")
+                        return {'status': 'complete', 'execution_id': execution_id, 'results': execution.get('results_summary', {})}
+                    elif exec_status == 'failed':
+                        logger.info("🔌 CLIENT: Execution failed")
+                        return {'status': 'error', 'execution_id': execution_id, 'message': execution.get('error')}
+                    elif exec_status == 'cancelled':
+                        logger.info("🔌 CLIENT: Execution cancelled")
+                        return {'status': 'cancelled', 'execution_id': execution_id, 'message': 'Execution was cancelled'}
+                elif status_response.get('status') == 'error':
+                    # Server returned error status
+                    error_msg = status_response.get('message', 'Unknown error')
+                    logger.warning(f"Status check returned error: {error_msg}")
+                    return {'status': 'error', 'execution_id': execution_id, 'message': error_msg}
+
+            except Exception as e:
+                # Handle ZMQ errors, connection issues, etc.
+                consecutive_errors += 1
+                logger.warning(f"Error checking execution status (attempt {consecutive_errors}/{max_consecutive_errors}): {e}")
+
+                if consecutive_errors >= max_consecutive_errors:
+                    # Too many consecutive errors - assume execution failed or was cancelled
+                    logger.error(f"Failed to get execution status after {max_consecutive_errors} attempts, assuming execution was cancelled")
+                    return {'status': 'cancelled', 'execution_id': execution_id,
+                           'message': f'Lost connection to server (workers may have been killed)'}
+
+                # Wait a bit longer before retrying after error
+                time.sleep(1.0)
+
+    def execute_pipeline(self, plate_id, pipeline_steps, global_config, pipeline_config=None, config_params=None):
+        """
+        Submit pipeline and wait for completion (blocking - for backward compatibility).
+
+        This is the legacy blocking API. For UI applications, use submit_pipeline() instead.
+
+        Args:
+            plate_id: Plate identifier
+            pipeline_steps: List of pipeline steps
+            global_config: GlobalPipelineConfig instance
+            pipeline_config: Optional PipelineConfig instance
+            config_params: Optional config parameters dict
+
+        Returns:
+            dict with execution results (blocks until complete)
+        """
+        response = self.submit_pipeline(plate_id, pipeline_steps, global_config, pipeline_config, config_params)
         if response.get('status') == 'accepted':
             execution_id = response.get('execution_id')
-            logger.info(f"🔌 CLIENT: Execution accepted, ID={execution_id}, starting status polling...")
-            consecutive_errors = 0
-            max_consecutive_errors = 5
-            poll_count = 0
-
-            while True:
-                time.sleep(0.5)
-                poll_count += 1
-
-                try:
-                    logger.info(f"🔌 CLIENT: Status poll #{poll_count} for execution {execution_id}")
-                    status_response = self.get_status(execution_id)
-                    logger.info(f"🔌 CLIENT: Status response: {status_response}")
-                    consecutive_errors = 0  # Reset error counter on success
-
-                    if status_response.get('status') == 'ok':
-                        execution = status_response.get('execution', {})
-                        exec_status = execution.get('status')
-                        logger.info(f"🔌 CLIENT: Execution status: {exec_status}")
-                        if exec_status == 'complete':
-                            logger.info("🔌 CLIENT: Execution complete, returning results")
-                            return {'status': 'complete', 'execution_id': execution_id, 'results': execution.get('results_summary', {})}
-                        elif exec_status == 'failed':
-                            logger.info("🔌 CLIENT: Execution failed")
-                            return {'status': 'error', 'execution_id': execution_id, 'message': execution.get('error')}
-                        elif exec_status == 'cancelled':
-                            logger.info("🔌 CLIENT: Execution cancelled")
-                            return {'status': 'cancelled', 'execution_id': execution_id, 'message': 'Execution was cancelled'}
-                    elif status_response.get('status') == 'error':
-                        # Server returned error status
-                        error_msg = status_response.get('message', 'Unknown error')
-                        logger.warning(f"Status check returned error: {error_msg}")
-                        return {'status': 'error', 'execution_id': execution_id, 'message': error_msg}
-
-                except Exception as e:
-                    # Handle ZMQ errors, connection issues, etc.
-                    consecutive_errors += 1
-                    logger.warning(f"Error checking execution status (attempt {consecutive_errors}/{max_consecutive_errors}): {e}")
-
-                    if consecutive_errors >= max_consecutive_errors:
-                        # Too many consecutive errors - assume execution failed or was cancelled
-                        logger.error(f"Failed to get execution status after {max_consecutive_errors} attempts, assuming execution was cancelled")
-                        return {'status': 'cancelled', 'execution_id': execution_id,
-                               'message': f'Lost connection to server (workers may have been killed)'}
-
-                    # Wait a bit longer before retrying after error
-                    time.sleep(1.0)
-
-        logger.info(f"🔌 CLIENT: Returning response: {response}")
+            return self.wait_for_completion(execution_id)
         return response
 
     def get_status(self, execution_id=None):

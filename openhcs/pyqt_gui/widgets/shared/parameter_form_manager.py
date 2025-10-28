@@ -221,6 +221,8 @@ class ParameterFormManager(QWidget):
 
             # Track completion callbacks for async widget creation
             self._on_build_complete_callbacks = []
+            # Track callbacks to run after placeholder refresh (for enabled styling that needs resolved values)
+            self._on_placeholder_refresh_complete_callbacks = []
 
             # Initialize service layer first (needed for parameter extraction)
             with timer("  Service initialization", threshold_ms=1.0):
@@ -329,9 +331,9 @@ class ParameterFormManager(QWidget):
                 self.parameter_changed.connect(self._on_enabled_field_changed_universal)
                 # CRITICAL: Apply initial styling based on current enabled value
                 # This ensures styling is applied on window open, not just when toggled
-                # Register callback to run after all widgets are created (including async nested widgets)
-                # This uses the same mechanism as optional dataclass styling
-                self._on_build_complete_callbacks.append(self._apply_initial_enabled_styling)
+                # Register callback to run AFTER placeholders are refreshed (not before)
+                # because enabled styling needs the resolved placeholder value from the widget
+                self._on_placeholder_refresh_complete_callbacks.append(self._apply_initial_enabled_styling)
 
             # Register this form manager for cross-window updates (only root managers, not nested)
             if self._parent_manager is None:
@@ -709,7 +711,15 @@ class ParameterFormManager(QWidget):
                 with timer("  Nested placeholder refresh (sync)", threshold_ms=5.0):
                     self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
-                # STEP 3: Refresh enabled styling (after placeholders are resolved)
+                # STEP 3: Apply post-placeholder callbacks (enabled styling that needs resolved values)
+                with timer("  Apply post-placeholder callbacks (sync)", threshold_ms=5.0):
+                    for callback in self._on_placeholder_refresh_complete_callbacks:
+                        callback()
+                    self._on_placeholder_refresh_complete_callbacks.clear()
+                    # Also apply for nested managers
+                    self._apply_to_nested_managers(lambda name, manager: manager._apply_all_post_placeholder_callbacks())
+
+                # STEP 4: Refresh enabled styling (after placeholders are resolved)
                 with timer("  Enabled styling refresh (sync)", threshold_ms=5.0):
                     self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
             else:
@@ -2243,6 +2253,20 @@ class ParameterFormManager(QWidget):
         for nested_manager in self.nested_managers.values():
             nested_manager._apply_all_styling_callbacks()
 
+    def _apply_all_post_placeholder_callbacks(self) -> None:
+        """Recursively apply all post-placeholder callbacks for this manager and all nested managers.
+
+        This must be called AFTER placeholders are refreshed, so enabled styling can use resolved values.
+        """
+        # Apply this manager's callbacks
+        for callback in self._on_placeholder_refresh_complete_callbacks:
+            callback()
+        self._on_placeholder_refresh_complete_callbacks.clear()
+
+        # Recursively apply nested managers' callbacks
+        for nested_manager in self.nested_managers.values():
+            nested_manager._apply_all_post_placeholder_callbacks()
+
     def _on_nested_manager_complete(self, nested_manager) -> None:
         """Called by nested managers when they complete async widget creation."""
         if hasattr(self, '_pending_nested_managers'):
@@ -2267,6 +2291,10 @@ class ParameterFormManager(QWidget):
                     self._refresh_all_placeholders()
                 with timer(f"  Nested placeholder refresh (all nested ready)", threshold_ms=5.0):
                     self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+
+                # STEP 2.5: Apply post-placeholder callbacks (enabled styling that needs resolved values)
+                with timer(f"  Apply post-placeholder callbacks (async)", threshold_ms=5.0):
+                    self._apply_all_post_placeholder_callbacks()
 
                 # STEP 3: Refresh enabled styling (after placeholders are resolved)
                 # This ensures that nested configs with inherited enabled values get correct styling

@@ -978,49 +978,50 @@ class PlateManagerWidget(QWidget):
 
                 logger.info(f"Executing plate: {plate_path}")
 
-                # Execute via ZMQ (in executor to avoid blocking UI)
+                # Submit pipeline via ZMQ (non-blocking - returns immediately)
                 # Send original definition pipeline - server will compile it
-                def _execute():
-                    return self.zmq_client.execute_pipeline(
+                def _submit():
+                    return self.zmq_client.submit_pipeline(
                         plate_id=str(plate_path),
                         pipeline_steps=definition_pipeline,
                         global_config=global_config_to_send,
                         pipeline_config=pipeline_config
                     )
 
-                response = await loop.run_in_executor(None, _execute)
+                response = await loop.run_in_executor(None, _submit)
 
                 # Track execution ID for cancellation
                 if response.get('execution_id'):
                     self.current_execution_id = response['execution_id']
 
-                logger.info(f"Plate {plate_path} execution response: {response.get('status')}")
+                logger.info(f"Plate {plate_path} submission response: {response.get('status')}")
 
-                # Handle different response statuses
+                # Handle submission response (not completion - that comes via progress callback)
                 status = response.get('status')
-                if status == 'cancelled':
-                    # Cancellation is expected, not an error - just log it
-                    logger.info(f"Plate {plate_path} execution was cancelled")
-                    self.status_message.emit(f"Execution cancelled for {plate_path}")
-                elif status != 'complete':
-                    # Actual error - use signal for thread-safe error reporting
+                if status == 'accepted':
+                    # Execution submitted successfully - it's now running in background
+                    logger.info(f"Plate {plate_path} execution submitted successfully, ID={response.get('execution_id')}")
+                    self.status_message.emit(f"Executing {plate_path}... (check progress below)")
+
+                    # Start polling for completion in background (non-blocking)
+                    execution_id = response.get('execution_id')
+                    if execution_id:
+                        self._start_completion_poller(execution_id, plate_paths_to_run, ready_items)
+                else:
+                    # Submission failed - handle error
                     error_msg = response.get('message', 'Unknown error')
-                    logger.error(f"Plate {plate_path} execution failed: {error_msg}")
-                    self.execution_error.emit(f"Execution failed for {plate_path}: {error_msg}")
+                    logger.error(f"Plate {plate_path} submission failed: {error_msg}")
+                    self.execution_error.emit(f"Submission failed for {plate_path}: {error_msg}")
 
-            # Execution complete
-            self.execution_state = "idle"
-            self.current_execution_id = None
-            self.status_message.emit(f"Completed {len(ready_items)} plate(s)")
-
-            # Update orchestrator states
-            for plate in ready_items:
-                plate_path = plate['path']
-                if plate_path in self.orchestrators:
-                    self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
-                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
-
-            self.update_button_states()
+                    # Reset state on submission failure
+                    self.execution_state = "idle"
+                    self.current_execution_id = None
+                    for plate in ready_items:
+                        plate_path = plate['path']
+                        if plate_path in self.orchestrators:
+                            self.orchestrators[plate_path]._state = OrchestratorState.READY
+                            self.orchestrator_state_changed.emit(plate_path, OrchestratorState.READY.value)
+                    self.update_button_states()
 
         except Exception as e:
             logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
@@ -1042,6 +1043,91 @@ class PlateManagerWidget(QWidget):
 
             self.current_execution_id = None
             self.update_button_states()
+
+    def _start_completion_poller(self, execution_id, plate_paths, ready_items):
+        """
+        Start background thread to poll for execution completion (non-blocking).
+
+        Args:
+            execution_id: Execution ID to poll
+            plate_paths: List of plate paths being executed
+            ready_items: List of plate items being executed
+        """
+        import threading
+
+        def poll_completion():
+            """Poll for completion in background thread."""
+            try:
+                # Wait for completion (blocking in this thread, but not UI thread)
+                result = self.zmq_client.wait_for_completion(execution_id)
+
+                # Emit completion signal (thread-safe)
+                from PyQt6.QtCore import QMetaObject, Qt
+                QMetaObject.invokeMethod(
+                    self,
+                    "_on_execution_complete",
+                    Qt.ConnectionType.QueuedConnection,
+                    result,
+                    ready_items
+                )
+
+            except Exception as e:
+                logger.error(f"Error polling for completion: {e}", exc_info=True)
+                # Emit error signal
+                from PyQt6.QtCore import QMetaObject, Qt
+                QMetaObject.invokeMethod(
+                    self,
+                    "_on_execution_error",
+                    Qt.ConnectionType.QueuedConnection,
+                    str(e)
+                )
+
+        # Start polling thread
+        thread = threading.Thread(target=poll_completion, daemon=True)
+        thread.start()
+
+    @pyqtSlot(object, object)
+    def _on_execution_complete(self, result, ready_items):
+        """Handle execution completion (called from main thread via QMetaObject.invokeMethod)."""
+        try:
+            status = result.get('status')
+            logger.info(f"Execution completed with status: {status}")
+
+            if status == 'complete':
+                self.status_message.emit(f"Completed {len(ready_items)} plate(s)")
+            elif status == 'cancelled':
+                self.status_message.emit(f"Execution cancelled")
+            else:
+                error_msg = result.get('message', 'Unknown error')
+                self.execution_error.emit(f"Execution failed: {error_msg}")
+
+            # Update state
+            self.execution_state = "idle"
+            self.current_execution_id = None
+
+            # Update orchestrator states
+            for plate in ready_items:
+                plate_path = plate['path']
+                if plate_path in self.orchestrators:
+                    if status == 'complete':
+                        self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
+                        self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
+                    else:
+                        self.orchestrators[plate_path]._state = OrchestratorState.READY
+                        self.orchestrator_state_changed.emit(plate_path, OrchestratorState.READY.value)
+
+            self.update_button_states()
+
+        except Exception as e:
+            logger.error(f"Error handling execution completion: {e}", exc_info=True)
+
+    @pyqtSlot(str)
+    def _on_execution_error(self, error_msg):
+        """Handle execution error (called from main thread via QMetaObject.invokeMethod)."""
+        self.execution_error.emit(f"Execution error: {error_msg}")
+        self.execution_state = "idle"
+        self.current_execution_id = None
+        self.update_button_states()
 
     def _on_zmq_progress(self, message):
         """
