@@ -774,7 +774,8 @@ def generate_complete_orchestrator_code(plate_paths, pipeline_data, global_confi
         # Extract a readable name from the path
         path_str = str(plate_path)
         plate_name = path_str.split('/')[-1] if '/' in path_str else path_str
-        var_name = f"plate_{i}_{plate_name.replace('-', '_').replace('.', '_')}"
+        # Replace all invalid Python identifier characters with underscores
+        var_name = f"plate_{i}_{plate_name.replace('-', '_').replace('.', '_').replace(' ', '_')}"
         plate_path_vars[plate_path] = var_name
 
     code_lines.extend([

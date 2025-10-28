@@ -860,7 +860,29 @@ class PipelineCompiler:
             compiled_contexts: Dict[str, ProcessingContext] = {}
             # Get multiprocessing axis values dynamically from configuration
             from openhcs.constants import MULTIPROCESSING_AXIS
-            axis_values_to_process = orchestrator.get_component_keys(MULTIPROCESSING_AXIS, axis_filter)
+
+            # CRITICAL: Resolve well_filter_config from pipeline_config if present
+            # This allows global-level well filtering to work (e.g., well_filter_config.well_filter = 1)
+            resolved_axis_filter = axis_filter
+            if orchestrator.pipeline_config and hasattr(orchestrator.pipeline_config, 'well_filter_config'):
+                well_filter_config = orchestrator.pipeline_config.well_filter_config
+                if well_filter_config and hasattr(well_filter_config, 'well_filter') and well_filter_config.well_filter is not None:
+                    from openhcs.core.utils import WellFilterProcessor
+                    available_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
+                    resolved_wells = list(WellFilterProcessor.resolve_compilation_filter(
+                        well_filter_config.well_filter,
+                        available_wells
+                    ))
+                    logger.info(f"Resolved well_filter_config.well_filter={well_filter_config.well_filter} to {len(resolved_wells)} wells: {resolved_wells}")
+
+                    # If axis_filter was also provided, intersect them
+                    if axis_filter:
+                        resolved_axis_filter = [w for w in resolved_wells if w in axis_filter]
+                        logger.info(f"Intersected with axis_filter: {len(resolved_axis_filter)} wells remain")
+                    else:
+                        resolved_axis_filter = resolved_wells
+
+            axis_values_to_process = orchestrator.get_component_keys(MULTIPROCESSING_AXIS, resolved_axis_filter)
 
             if not axis_values_to_process:
                 logger.warning("No axis values found to process based on filter.")
