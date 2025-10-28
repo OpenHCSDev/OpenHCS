@@ -343,7 +343,7 @@ class GroupBoxWithHelp(QGroupBox):
         title_label.setFont(title_font)
         title_layout.addWidget(title_label)
 
-        # Help button for dataclass
+        # Help button for dataclass (left-aligned, next to title)
         if help_target:
             help_btn = HelpButton(help_target=help_target, text="?", color_scheme=self.color_scheme)
             help_btn.setMaximumWidth(25)
@@ -351,6 +351,9 @@ class GroupBoxWithHelp(QGroupBox):
             title_layout.addWidget(help_btn)
 
         title_layout.addStretch()
+
+        # Store title_layout so we can add more widgets later (e.g., reset button)
+        self.title_layout = title_layout
 
         # Set the custom title widget
         self.setTitle("")  # Clear default title
@@ -370,3 +373,8 @@ class GroupBoxWithHelp(QGroupBox):
     def addLayout(self, layout):
         """Add layout to the content area."""
         self.content_layout.addLayout(layout)
+
+    def addTitleWidget(self, widget):
+        """Add widget to the title area, right-aligned (after the stretch)."""
+        # Add at the end (right-aligned, after the stretch)
+        self.title_layout.addWidget(widget)

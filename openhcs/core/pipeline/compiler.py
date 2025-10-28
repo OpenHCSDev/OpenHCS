@@ -389,73 +389,73 @@ class PipelineCompiler:
                     # Configs are already resolved to base configs at line 277
                     # No need to call to_base_config() again - that's legacy code
 
-                    # Unified handling: compute inclusion for any WellFilterConfig (StreamingConfig subclasses it)
-                    is_streaming = config is not None and isinstance(config, StreamingConfig)
-                    is_wellfilter = config is not None and isinstance(config, WellFilterConfig)
+                    # Skip None configs
+                    if config is None:
+                        continue
 
-                    include_config = False
-                    if is_wellfilter:
-                        # Check if this config has a well filter and if current axis matches
-                        should_include_config = True
-                        if config.well_filter is not None:
-                            config_filter = step_axis_filters.get(attr_name)
-                            if config_filter:
-                                # Apply axis filter logic
-                                axis_in_filter = context.axis_id in config_filter['resolved_axis_values']
-                                should_include_config = (
-                                    axis_in_filter if config_filter['filter_mode'] == WellFilterMode.INCLUDE
-                                    else not axis_in_filter
-                                )
-                        if should_include_config:
-                            include_config = True
+                    # CRITICAL: Check enabled field first (fail-fast for disabled configs)
+                    if hasattr(config, 'enabled') and not config.enabled:
+                        continue
 
-                    # Only add the config to the plan if it's included (or not a WellFilterConfig)
-                    if include_config or (not is_wellfilter and config is not None):
+                    # Check well filter matching (only for WellFilterConfig instances)
+                    include_config = True
+                    if isinstance(config, WellFilterConfig) and config.well_filter is not None:
+                        config_filter = step_axis_filters.get(attr_name)
+                        if config_filter:
+                            # Apply axis filter logic
+                            axis_in_filter = context.axis_id in config_filter['resolved_axis_values']
+                            include_config = (
+                                axis_in_filter if config_filter['filter_mode'] == WellFilterMode.INCLUDE
+                                else not axis_in_filter
+                            )
+
+                    # Add config to plan if it passed all checks
+                    if include_config:
                         current_plan[attr_name] = config
 
-                    # Streaming extras only apply if the streaming config is included
-                    if is_streaming and include_config:
-                        # Validate that the visualizer can actually be created
-                        try:
-                            # Only validate configs that actually have a backend (real streaming configs)
-                            if not hasattr(config, 'backend'):
-                                continue
+                        # Add streaming extras if this is a streaming config
+                        if isinstance(config, StreamingConfig):
+                            # Validate that the visualizer can actually be created
+                            try:
+                                # Only validate configs that actually have a backend (real streaming configs)
+                                if not hasattr(config, 'backend'):
+                                    continue
 
-                            # Test visualizer creation without actually creating it
-                            if hasattr(config, 'create_visualizer'):
-                                # For napari, check if napari is available and environment supports GUI
-                                if config.backend.name == 'NAPARI_STREAM':
-                                    from openhcs.utils.import_utils import optional_import
-                                    import os
+                                # Test visualizer creation without actually creating it
+                                if hasattr(config, 'create_visualizer'):
+                                    # For napari, check if napari is available and environment supports GUI
+                                    if config.backend.name == 'NAPARI_STREAM':
+                                        from openhcs.utils.import_utils import optional_import
+                                        import os
 
-                                    # Check if running in headless/CI environment
-                                    # CPU-only mode does NOT imply headless - you can run CPU mode with napari
-                                    is_headless = (
-                                        os.getenv('CI', 'false').lower() == 'true' or
-                                        os.getenv('OPENHCS_HEADLESS', 'false').lower() == 'true' or
-                                        os.getenv('DISPLAY') is None
-                                    )
+                                        # Check if running in headless/CI environment
+                                        # CPU-only mode does NOT imply headless - you can run CPU mode with napari
+                                        is_headless = (
+                                            os.getenv('CI', 'false').lower() == 'true' or
+                                            os.getenv('OPENHCS_HEADLESS', 'false').lower() == 'true' or
+                                            os.getenv('DISPLAY') is None
+                                        )
 
-                                    if is_headless:
-                                        logger.info(f"Napari streaming disabled for step '{step.name}': running in headless environment (CI or no DISPLAY)")
-                                        continue  # Skip this streaming config
+                                        if is_headless:
+                                            logger.info(f"Napari streaming disabled for step '{step.name}': running in headless environment (CI or no DISPLAY)")
+                                            continue  # Skip this streaming config
 
-                                    napari = optional_import("napari")
-                                    if napari is None:
-                                        logger.warning(f"Napari streaming disabled for step '{step.name}': napari not installed. Install with: pip install 'openhcs[viz]' or pip install napari")
-                                        continue  # Skip this streaming config
+                                        napari = optional_import("napari")
+                                        if napari is None:
+                                            logger.warning(f"Napari streaming disabled for step '{step.name}': napari not installed. Install with: pip install 'openhcs[viz]' or pip install napari")
+                                            continue  # Skip this streaming config
 
-                            has_streaming = True
-                            # Collect visualizer info
-                            visualizer_info = {
-                                'backend': config.backend.name,
-                                'config': config
-                            }
-                            if visualizer_info not in required_visualizers:
-                                required_visualizers.append(visualizer_info)
-                        except Exception as e:
-                            logger.warning(f"Streaming disabled for step '{step.name}': {e}")
-                            continue  # Skip this streaming config
+                                has_streaming = True
+                                # Collect visualizer info
+                                visualizer_info = {
+                                    'backend': config.backend.name,
+                                    'config': config
+                                }
+                                if visualizer_info not in required_visualizers:
+                                    required_visualizers.append(visualizer_info)
+                            except Exception as e:
+                                logger.warning(f"Streaming disabled for step '{step.name}': {e}")
+                                continue  # Skip this streaming config
 
             # Set visualize flag for orchestrator if any streaming is enabled
             current_plan["visualize"] = has_streaming
@@ -770,15 +770,20 @@ class PipelineCompiler:
             # Only auto-create for intermediate steps (not final step)
             is_intermediate_step = step_index < len(pipeline_definition) - 1
 
-            if has_special_outputs and not step.step_materialization_config and is_intermediate_step:
-                # Auto-instantiate step materialization to preserve metadata coherence
-                # Use LazyStepMaterializationConfig to enable proper inheritance from global config
+            # Normalize: no config = disabled config (eliminates dual code path)
+            if not step.step_materialization_config:
+                from openhcs.config_framework.lazy_factory import LazyStepMaterializationConfig
+                step.step_materialization_config = LazyStepMaterializationConfig(enabled=False)
+
+            # Single code path: just check enabled
+            if has_special_outputs and not step.step_materialization_config.enabled and is_intermediate_step:
+                # Auto-enable materialization to preserve metadata coherence
                 from openhcs.config_framework.lazy_factory import LazyStepMaterializationConfig
                 step.step_materialization_config = LazyStepMaterializationConfig()
 
                 logger.warning(
-                    f"⚠️  Step '{step.name}' (index {step_index}) has analysis outputs but no "
-                    f"step_materialization_config. Auto-creating with defaults to preserve "
+                    f"⚠️  Step '{step.name}' (index {step_index}) has analysis outputs but lacks "
+                    f"enabled materialization config. Auto-creating with defaults to preserve "
                     f"metadata coherence (intermediate step analysis must be saved with matching images)."
                 )
                 logger.info(
@@ -869,7 +874,10 @@ class PipelineCompiler:
             # === ANALYSIS MATERIALIZATION AUTO-INSTANTIATION ===
             # Ensure intermediate steps with analysis outputs have step_materialization_config
             # This preserves metadata coherence (ROIs must match image structure they were created from)
-            PipelineCompiler.ensure_analysis_materialization(pipeline_definition)
+            # CRITICAL: Must be inside config_context() for lazy resolution of .enabled field
+            from openhcs.config_framework.context_manager import config_context
+            with config_context(orchestrator.pipeline_config):
+                PipelineCompiler.ensure_analysis_materialization(pipeline_definition)
 
             # === BACKEND COMPATIBILITY VALIDATION ===
             # Validate that configured backend is compatible with microscope

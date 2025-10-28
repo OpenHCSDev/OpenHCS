@@ -48,6 +48,19 @@ from .clickable_help_components import GroupBoxWithHelp, LabelWithHelp
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from .layout_constants import CURRENT_LAYOUT
 
+# SINGLE SOURCE OF TRUTH: All input widget types that can receive styling (dimming, etc.)
+# This includes all widgets created by the widget creation registry
+from PyQt6.QtWidgets import QLineEdit, QComboBox, QPushButton, QCheckBox, QLabel, QSpinBox, QDoubleSpinBox
+from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
+from openhcs.pyqt_gui.widgets.enhanced_path_widget import EnhancedPathWidget
+
+# Tuple of all input widget types for findChildren() calls
+ALL_INPUT_WIDGET_TYPES = (
+    QLineEdit, QComboBox, QPushButton, QCheckBox, QLabel,
+    QSpinBox, QDoubleSpinBox, NoScrollSpinBox, NoScrollDoubleSpinBox,
+    NoScrollComboBox, EnhancedPathWidget
+)
+
 # Import OpenHCS core components
 # Old field path detection removed - using simple field name matching
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
@@ -273,6 +286,9 @@ class ParameterFormManager(QWidget):
             # Track if initial form load is complete (disable live updates during initial load)
             self._initial_load_complete = False
 
+            # OPTIMIZATION: Block cross-window updates during batch operations (e.g., reset_all)
+            self._block_cross_window_updates = False
+
             # SHARED RESET STATE: Track reset fields across all nested managers within this form
             if hasattr(parent, 'shared_reset_fields'):
                 # Nested manager: use parent's shared reset state
@@ -303,7 +319,19 @@ class ParameterFormManager(QWidget):
             # When any field changes, refresh all placeholders using current form state
             # CRITICAL: Don't refresh during reset operations - reset handles placeholders itself
             # CRITICAL: Always use live context from other open windows for placeholder resolution
-            self.parameter_changed.connect(lambda param_name, value: self._refresh_with_live_context() if not getattr(self, '_in_reset', False) else None)
+            # CRITICAL: Don't refresh when 'enabled' field changes - it's styling-only and doesn't affect placeholders
+            self.parameter_changed.connect(lambda param_name, value: self._refresh_with_live_context() if not getattr(self, '_in_reset', False) and param_name != 'enabled' else None)
+
+            # UNIVERSAL ENABLED FIELD BEHAVIOR: Watch for 'enabled' parameter changes and apply styling
+            # This works for any form (function parameters, dataclass fields, etc.) that has an 'enabled' parameter
+            # When enabled resolves to False, apply visual dimming WITHOUT blocking input
+            if 'enabled' in self.parameters:
+                self.parameter_changed.connect(self._on_enabled_field_changed_universal)
+                # CRITICAL: Apply initial styling based on current enabled value
+                # This ensures styling is applied on window open, not just when toggled
+                # Register callback to run after all widgets are created (including async nested widgets)
+                # This uses the same mechanism as optional dataclass styling
+                self._on_build_complete_callbacks.append(self._apply_initial_enabled_styling)
 
             # Register this form manager for cross-window updates (only root managers, not nested)
             if self._parent_manager is None:
@@ -557,7 +585,11 @@ class ParameterFormManager(QWidget):
 
         # OPTIMIZATION: Skip style generation for nested configs (inherit from parent)
         # This saves ~1-2ms per nested config × 20 configs = 20-40ms
-        if not is_nested:
+        # ALSO: Skip if parent is a ConfigWindow (which handles styling itself)
+        qt_parent = self.parent()
+        parent_is_config_window = qt_parent is not None and qt_parent.__class__.__name__ == 'ConfigWindow'
+        should_apply_styling = not is_nested and not parent_is_config_window
+        if should_apply_styling:
             with timer("    Style generation", threshold_ms=1.0):
                 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
                 style_gen = StyleSheetGenerator(self.color_scheme)
@@ -661,18 +693,30 @@ class ParameterFormManager(QWidget):
                         widget = self._create_widget_for_param(param_info)
                         content_layout.addWidget(widget)
 
-            # For sync creation, trigger callbacks immediately
-            for callback in self._on_build_complete_callbacks:
-                callback()
-            self._on_build_complete_callbacks.clear()
-
-            # CRITICAL FIX: Refresh placeholders immediately (same as async path)
+            # For sync creation, apply styling callbacks and refresh placeholders
+            # CRITICAL: Order matters - placeholders must be resolved before enabled styling
             is_nested = self._parent_manager is not None
             if not is_nested:
+                # STEP 1: Apply styling callbacks (optional dataclass None-state dimming)
+                with timer("  Apply styling callbacks (sync)", threshold_ms=5.0):
+                    for callback in self._on_build_complete_callbacks:
+                        callback()
+                    self._on_build_complete_callbacks.clear()
+
+                # STEP 2: Refresh placeholders (resolve inherited values)
                 with timer("  Initial placeholder refresh (sync)", threshold_ms=10.0):
                     self._refresh_all_placeholders()
                 with timer("  Nested placeholder refresh (sync)", threshold_ms=5.0):
                     self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+
+                # STEP 3: Refresh enabled styling (after placeholders are resolved)
+                with timer("  Enabled styling refresh (sync)", threshold_ms=5.0):
+                    self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+            else:
+                # Nested managers just apply their callbacks
+                for callback in self._on_build_complete_callbacks:
+                    callback()
+                self._on_build_complete_callbacks.clear()
 
         return content_widget
 
@@ -766,6 +810,11 @@ class ParameterFormManager(QWidget):
         # Store widgets and connect signals
         with timer("          Store and connect signals", threshold_ms=0.5):
             self.widgets[param_info.name] = widget
+            # DEBUG: Log what we're storing
+            import logging
+            logger = logging.getLogger(__name__)
+            if param_info.is_nested:
+                logger.info(f"[STORE_WIDGET] Storing nested widget: param_info.name={param_info.name}, widget={widget.__class__.__name__}")
             PyQt6WidgetEnhancer.connect_change_signal(widget, param_info.name, self._emit_parameter_change)
 
         # PERFORMANCE OPTIMIZATION: Don't apply context behavior during widget creation
@@ -862,10 +911,28 @@ class ParameterFormManager(QWidget):
 
         nested_form = nested_manager.build_form()
 
+        # Add Reset All button to GroupBox title
+        if not self.read_only:
+            from PyQt6.QtWidgets import QPushButton
+            reset_all_button = QPushButton("Reset All")
+            reset_all_button.setMaximumWidth(80)
+            reset_all_button.setToolTip(f"Reset all parameters in {display_info['field_label']} to defaults")
+            reset_all_button.clicked.connect(lambda: nested_manager.reset_all_parameters())
+            group_box.addTitleWidget(reset_all_button)
+
         # Use GroupBoxWithHelp's addWidget method instead of creating our own layout
         group_box.addWidget(nested_form)
 
         self.nested_managers[param_info.name] = nested_manager
+
+        # CRITICAL: Store the GroupBox in self.widgets so enabled handler can find it
+        self.widgets[param_info.name] = group_box
+
+        # DEBUG: Log what we're storing
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[CREATE_NESTED_DATACLASS] param_info.name={param_info.name}, nested_manager.field_id={nested_manager.field_id}, stored GroupBoxWithHelp in self.widgets")
+
         return group_box
 
     def _create_optional_dataclass_widget(self, param_info) -> QWidget:
@@ -891,6 +958,8 @@ class ParameterFormManager(QWidget):
         checkbox = NoneAwareCheckBox()
         checkbox.setObjectName(field_ids['optional_checkbox_id'])
         current_value = self.parameters.get(param_info.name)
+        # CRITICAL: Title checkbox ONLY controls None vs Instance, NOT the enabled field
+        # Checkbox is checked if config exists (regardless of enabled field value)
         checkbox.setChecked(current_value is not None)
         checkbox.setMaximumWidth(20)
         title_layout.addWidget(checkbox)
@@ -904,14 +973,24 @@ class ParameterFormManager(QWidget):
         title_label.setCursor(Qt.CursorShape.PointingHandCursor)
         title_layout.addWidget(title_label)
 
+        title_layout.addStretch()
+
+        # Reset All button (before help button)
+        if not self.read_only:
+            from PyQt6.QtWidgets import QPushButton
+            reset_all_button = QPushButton("Reset")
+            reset_all_button.setMaximumWidth(60)
+            reset_all_button.setFixedHeight(20)
+            reset_all_button.setToolTip(f"Reset all parameters in {display_info['checkbox_label']} to defaults")
+            # Will be connected after nested_manager is created
+            title_layout.addWidget(reset_all_button)
+
         # Help button (matches GroupBoxWithHelp)
         from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton
         help_btn = HelpButton(help_target=unwrapped_type, text="?", color_scheme=self.color_scheme)
         help_btn.setMaximumWidth(25)
         help_btn.setMaximumHeight(20)
         title_layout.addWidget(help_btn)
-
-        title_layout.addStretch()
 
         # Set the custom title widget as the GroupBox title
         group_box.setLayout(QVBoxLayout())
@@ -927,39 +1006,57 @@ class ParameterFormManager(QWidget):
 
         self.nested_managers[param_info.name] = nested_manager
 
+        # Connect reset button to nested manager's reset_all_parameters
+        if not self.read_only:
+            reset_all_button.clicked.connect(lambda: nested_manager.reset_all_parameters())
+
         # Connect checkbox to enable/disable with visual feedback
         def on_checkbox_changed(checked):
+            # Title checkbox controls whether config exists (None vs instance)
+            # When checked: config exists, inputs are editable
+            # When unchecked: config is None, inputs are blocked
+            # CRITICAL: This is INDEPENDENT of the enabled field - they both use similar visual styling but are separate concepts
             nested_form.setEnabled(checked)
-            # Apply visual feedback to all input widgets
+
             if checked:
-                # Restore normal color (no explicit style needed - font is already bold)
-                title_label.setStyleSheet("")
-                help_btn.setEnabled(True)
-                # Remove dimming from all widgets
-                for widget in nested_form.findChildren(QWidget):
-                    widget.setGraphicsEffect(None)
-                # CRITICAL FIX: Only create default instance if current value is None
-                # If there's already a concrete value (e.g., on window open), preserve it
-                # This prevents replacing existing values with fresh defaults, which would
-                # cause placeholders to resolve with wrong context
+                # Config exists - create instance preserving the enabled field value
                 current_param_value = self.parameters.get(param_info.name)
                 if current_param_value is None:
-                    default_instance = unwrapped_type()
-                    self.update_parameter(param_info.name, default_instance)
-                # If current_param_value is not None, it's already set - don't replace it
+                    # Create new instance with default enabled value (from dataclass default)
+                    new_instance = unwrapped_type()
+                    self.update_parameter(param_info.name, new_instance)
+                else:
+                    # Instance already exists, no need to modify it
+                    pass
+
+                # Remove dimming for None state (title only)
+                # CRITICAL: Don't clear graphics effects on nested form widgets - let enabled field handler manage them
+                title_label.setStyleSheet("")
+                help_btn.setEnabled(True)
+
+                # CRITICAL: Trigger the nested config's enabled handler to apply enabled styling
+                # This ensures that when toggling from None to Instance, the enabled styling is applied
+                # based on the instance's enabled field value
+                if hasattr(nested_manager, '_apply_initial_enabled_styling'):
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(0, nested_manager._apply_initial_enabled_styling)
             else:
-                # Dim title text but keep help button enabled
+                # Config is None - set to None and block inputs
+                self.update_parameter(param_info.name, None)
+
+                # Apply dimming for None state
                 title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
-                help_btn.setEnabled(True)  # Keep help button clickable even when disabled
-                # Dim all input widgets
+                help_btn.setEnabled(True)
                 from PyQt6.QtWidgets import QGraphicsOpacityEffect
-                for widget in nested_form.findChildren((QLineEdit, QComboBox, QPushButton)):
+                for widget in nested_form.findChildren(ALL_INPUT_WIDGET_TYPES):
                     effect = QGraphicsOpacityEffect()
                     effect.setOpacity(0.4)
                     widget.setGraphicsEffect(effect)
-                self.update_parameter(param_info.name, None)
 
         checkbox.toggled.connect(on_checkbox_changed)
+
+        # NOTE: Enabled field styling is now handled by the universal _on_enabled_field_changed_universal handler
+        # which is connected in __init__ for any form that has an 'enabled' parameter
 
         # Apply initial styling after nested form is fully constructed
         # CRITICAL FIX: Only register callback, don't call immediately
@@ -1197,15 +1294,30 @@ class ParameterFormManager(QWidget):
         from openhcs.utils.performance_monitor import timer
 
         with timer(f"reset_all_parameters ({self.field_id})", threshold_ms=50.0):
-            param_names = list(self.parameters.keys())
-            for param_name in param_names:
-                self.reset_parameter(param_name)
+            # OPTIMIZATION: Set flag to prevent per-parameter refreshes
+            # This makes reset_all much faster by batching all refreshes to the end
+            self._in_reset = True
+
+            # OPTIMIZATION: Block cross-window updates during reset
+            # This prevents expensive _collect_live_context_from_other_windows() calls
+            # during the reset operation. We'll do a single refresh at the end.
+            self._block_cross_window_updates = True
+
+            try:
+                param_names = list(self.parameters.keys())
+                for param_name in param_names:
+                    # Call _reset_parameter_impl directly to avoid setting/clearing _in_reset per parameter
+                    self._reset_parameter_impl(param_name)
+            finally:
+                self._in_reset = False
+                self._block_cross_window_updates = False
 
             # OPTIMIZATION: Single placeholder refresh at the end instead of per-parameter
             # This is much faster than refreshing after each reset
-            # Use _refresh_with_live_context to avoid redundant get_current_values() calls
-            if not self._in_reset:
-                self._refresh_with_live_context()
+            # Use _refresh_all_placeholders directly to avoid cross-window context collection
+            # (reset to defaults doesn't need live context from other windows)
+            self._refresh_all_placeholders()
+            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
 
 
@@ -1290,13 +1402,13 @@ class ParameterFormManager(QWidget):
 
                 if param_name in self.widgets:
                     container = self.widgets[param_name]
-                    # Toggle the optional checkbox to match reset_value (None -> unchecked)
+                    # Toggle the optional checkbox to match reset_value (None -> unchecked, enabled=False -> unchecked)
                     from PyQt6.QtWidgets import QCheckBox
                     ids = self.service.generate_field_ids_direct(self.config.field_id, param_name)
                     checkbox = container.findChild(QCheckBox, ids['optional_checkbox_id'])
                     if checkbox:
                         checkbox.blockSignals(True)
-                        checkbox.setChecked(reset_value is not None)
+                        checkbox.setChecked(reset_value is not None and reset_value.enabled)
                         checkbox.blockSignals(False)
 
                 # Reset nested manager contents too
@@ -1716,6 +1828,287 @@ class ParameterFormManager(QWidget):
 
         return stack
 
+    def _apply_initial_enabled_styling(self) -> None:
+        """Apply initial enabled field styling based on resolved value from widget.
+
+        This is called once after all widgets are created to ensure initial styling matches the enabled state.
+        We get the resolved value from the checkbox widget, not from self.parameters, because the parameter
+        might be None (lazy) but the checkbox shows the resolved placeholder value.
+
+        CRITICAL: This should NOT be called for optional dataclass nested managers when instance is None.
+        The None state dimming is handled by the optional dataclass checkbox handler.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # CRITICAL: Check if this is a nested manager inside an optional dataclass
+        # If the parent's parameter for this nested manager is None, skip enabled styling
+        # The optional dataclass checkbox handler already applied None-state dimming
+        if self._parent_manager is not None:
+            # Find which parameter in parent corresponds to this nested manager
+            for param_name, nested_manager in self._parent_manager.nested_managers.items():
+                if nested_manager is self:
+                    # Check if this is an optional dataclass and if the instance is None
+                    param_type = self._parent_manager.parameter_types.get(param_name)
+                    if param_type:
+                        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+                        if ParameterTypeUtils.is_optional_dataclass(param_type):
+                            # This is an optional dataclass - check if instance is None
+                            instance = self._parent_manager.parameters.get(param_name)
+                            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, optional dataclass check: param_name={param_name}, instance={instance}, is_none={instance is None}")
+                            if instance is None:
+                                logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, skipping (optional dataclass instance is None)")
+                                return
+                    break
+
+        # Get the enabled widget
+        enabled_widget = self.widgets.get('enabled')
+        if not enabled_widget:
+            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, no enabled widget found")
+            return
+
+        # Get resolved value from widget
+        if hasattr(enabled_widget, 'isChecked'):
+            resolved_value = enabled_widget.isChecked()
+            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, resolved_value={resolved_value} (from checkbox)")
+        else:
+            # Fallback to parameter value
+            resolved_value = self.parameters.get('enabled')
+            if resolved_value is None:
+                resolved_value = True  # Default to enabled if we can't resolve
+            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, resolved_value={resolved_value} (from parameter)")
+
+        # Call the enabled handler with the resolved value
+        self._on_enabled_field_changed_universal('enabled', resolved_value)
+
+    def _is_any_ancestor_disabled(self) -> bool:
+        """
+        Check if any ancestor form has enabled=False.
+
+        This is used to determine if a nested config should remain dimmed
+        even if its own enabled field is True.
+
+        Returns:
+            True if any ancestor has enabled=False, False otherwise
+        """
+        current = self._parent_manager
+        while current is not None:
+            if 'enabled' in current.parameters:
+                enabled_widget = current.widgets.get('enabled')
+                if enabled_widget and hasattr(enabled_widget, 'isChecked'):
+                    if not enabled_widget.isChecked():
+                        return True
+            current = current._parent_manager
+        return False
+
+    def _refresh_enabled_styling(self) -> None:
+        """
+        Refresh enabled styling for this form and all nested forms.
+
+        This should be called when context changes that might affect inherited enabled values.
+        Similar to placeholder refresh, but for enabled field styling.
+
+        CRITICAL: Skip optional dataclass nested managers when instance is None.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # CRITICAL: Check if this is a nested manager inside an optional dataclass with None instance
+        # If so, skip enabled styling - the None state dimming takes precedence
+        if self._parent_manager is not None:
+            for param_name, nested_manager in self._parent_manager.nested_managers.items():
+                if nested_manager is self:
+                    param_type = self._parent_manager.parameter_types.get(param_name)
+                    if param_type:
+                        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+                        if ParameterTypeUtils.is_optional_dataclass(param_type):
+                            instance = self._parent_manager.parameters.get(param_name)
+                            logger.info(f"[REFRESH ENABLED STYLING] field_id={self.field_id}, optional dataclass check: param_name={param_name}, instance={instance}, is_none={instance is None}")
+                            if instance is None:
+                                logger.info(f"[REFRESH ENABLED STYLING] field_id={self.field_id}, skipping (optional dataclass instance is None)")
+                                # Skip enabled styling - None state dimming is already applied
+                                return
+                    break
+
+        # Refresh this form's enabled styling if it has an enabled field
+        if 'enabled' in self.parameters:
+            # Get the enabled widget to read the CURRENT resolved value
+            enabled_widget = self.widgets.get('enabled')
+            if enabled_widget and hasattr(enabled_widget, 'isChecked'):
+                # Use the checkbox's current state (which reflects resolved placeholder)
+                resolved_value = enabled_widget.isChecked()
+            else:
+                # Fallback to parameter value
+                resolved_value = self.parameters.get('enabled')
+                if resolved_value is None:
+                    resolved_value = True
+
+            # Apply styling with the resolved value
+            self._on_enabled_field_changed_universal('enabled', resolved_value)
+
+        # Recursively refresh all nested forms' enabled styling
+        for nested_manager in self.nested_managers.values():
+            nested_manager._refresh_enabled_styling()
+
+    def _on_enabled_field_changed_universal(self, param_name: str, value: Any) -> None:
+        """
+        UNIVERSAL ENABLED FIELD BEHAVIOR: Apply visual styling when 'enabled' parameter changes.
+
+        This handler is connected for ANY form that has an 'enabled' parameter (function, dataclass, etc.).
+        When enabled resolves to False (concrete or lazy), apply visual dimming WITHOUT blocking input.
+
+        This creates consistent semantics across all ParameterFormManager instances:
+        - enabled=True or lazy-resolved True: Normal styling
+        - enabled=False or lazy-resolved False: Dimmed styling, inputs stay editable
+        """
+        if param_name != 'enabled':
+            return
+
+        # DEBUG: Log when this handler is called
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[ENABLED HANDLER CALLED] field_id={self.field_id}, param_name={param_name}, value={value}")
+
+        # Resolve lazy value: None means inherit from parent context
+        if value is None:
+            # Lazy field - get the resolved placeholder value from the widget
+            enabled_widget = self.widgets.get('enabled')
+            if enabled_widget and hasattr(enabled_widget, 'isChecked'):
+                resolved_value = enabled_widget.isChecked()
+            else:
+                # Fallback: assume True if we can't resolve
+                resolved_value = True
+        else:
+            resolved_value = value
+
+        logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, resolved_value={resolved_value}")
+
+        # Apply styling to the entire form based on resolved enabled value
+        # Inputs stay editable - only visual dimming changes
+        # CRITICAL FIX: Only apply to widgets in THIS form, not nested ParameterFormManager forms
+        # This prevents crosstalk when a step has 'enabled' field and nested configs also have 'enabled' fields
+        def get_direct_widgets(parent_widget):
+            """Get widgets that belong to this form, excluding nested ParameterFormManager widgets."""
+            direct_widgets = []
+            all_widgets = parent_widget.findChildren(ALL_INPUT_WIDGET_TYPES)
+            logger.info(f"[GET_DIRECT_WIDGETS] field_id={self.field_id}, total widgets found: {len(all_widgets)}, nested_managers: {list(self.nested_managers.keys())}")
+
+            for widget in all_widgets:
+                widget_name = f"{widget.__class__.__name__}({widget.objectName() or 'no-name'})"
+                object_name = widget.objectName()
+
+                # Check if widget belongs to a nested manager by checking if its object name starts with nested manager's field_id
+                belongs_to_nested = False
+                for nested_name, nested_manager in self.nested_managers.items():
+                    nested_field_id = nested_manager.field_id
+                    if object_name and object_name.startswith(nested_field_id + '_'):
+                        belongs_to_nested = True
+                        logger.info(f"[GET_DIRECT_WIDGETS] ❌ EXCLUDE {widget_name} - belongs to nested manager {nested_field_id}")
+                        break
+
+                if not belongs_to_nested:
+                    direct_widgets.append(widget)
+                    logger.info(f"[GET_DIRECT_WIDGETS] ✅ INCLUDE {widget_name}")
+
+            logger.info(f"[GET_DIRECT_WIDGETS] field_id={self.field_id}, returning {len(direct_widgets)} direct widgets")
+            return direct_widgets
+
+        direct_widgets = get_direct_widgets(self)
+        widget_names = [f"{w.__class__.__name__}({w.objectName() or 'no-name'})" for w in direct_widgets[:5]]  # First 5
+        logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, found {len(direct_widgets)} direct widgets, first 5: {widget_names}")
+
+        # CRITICAL: For nested configs (inside GroupBox), apply styling to the GroupBox container
+        # For top-level forms (step, function), apply styling to direct widgets
+        is_nested_config = self._parent_manager is not None and any(
+            nested_manager == self for nested_manager in self._parent_manager.nested_managers.values()
+        )
+
+        if is_nested_config:
+            # This is a nested config - find the GroupBox container and apply styling to it
+            # The GroupBox is stored in parent's widgets dict
+            group_box = None
+            for param_name, nested_manager in self._parent_manager.nested_managers.items():
+                if nested_manager == self:
+                    group_box = self._parent_manager.widgets.get(param_name)
+                    break
+
+            if group_box:
+                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying to GroupBox container")
+                from PyQt6.QtWidgets import QGraphicsOpacityEffect
+
+                # CRITICAL: Check if ANY ancestor has enabled=False
+                # If any ancestor is disabled, child should remain dimmed regardless of its own enabled value
+                ancestor_is_disabled = self._is_any_ancestor_disabled()
+                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, ancestor_is_disabled={ancestor_is_disabled}")
+
+                if resolved_value and not ancestor_is_disabled:
+                    # Enabled=True AND no ancestor is disabled: Remove dimming from GroupBox
+                    logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, removing dimming from GroupBox")
+                    # Clear effects from all widgets in the GroupBox
+                    for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
+                        widget.setGraphicsEffect(None)
+                elif ancestor_is_disabled:
+                    # Ancestor is disabled - keep dimming regardless of child's enabled value
+                    logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, keeping dimming (ancestor disabled)")
+                    for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
+                        effect = QGraphicsOpacityEffect()
+                        effect.setOpacity(0.4)
+                        widget.setGraphicsEffect(effect)
+                else:
+                    # Enabled=False: Apply dimming to GroupBox widgets
+                    logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying dimming to GroupBox")
+                    for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
+                        effect = QGraphicsOpacityEffect()
+                        effect.setOpacity(0.4)
+                        widget.setGraphicsEffect(effect)
+        else:
+            # This is a top-level form (step, function) - apply styling to direct widgets + nested configs
+            if resolved_value:
+                # Enabled=True: Remove dimming from direct widgets
+                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, removing dimming (enabled=True)")
+                for widget in direct_widgets:
+                    widget.setGraphicsEffect(None)
+
+                # CRITICAL: Trigger refresh of all nested configs' enabled styling
+                # This ensures that nested configs re-evaluate their styling based on:
+                # 1. Their own enabled field value
+                # 2. Whether any ancestor is disabled (now False since parent is enabled)
+                # This handles deeply nested configs correctly
+                logger.info(f"[ENABLED HANDLER] Refreshing nested configs' enabled styling")
+                for nested_manager in self.nested_managers.values():
+                    nested_manager._refresh_enabled_styling()
+            else:
+                # Enabled=False: Apply dimming to direct widgets + ALL nested configs
+                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying dimming (enabled=False)")
+                from PyQt6.QtWidgets import QGraphicsOpacityEffect
+                for widget in direct_widgets:
+                    # Skip QLabel widgets when dimming (only dim inputs)
+                    if isinstance(widget, QLabel):
+                        continue
+                    effect = QGraphicsOpacityEffect()
+                    effect.setOpacity(0.4)
+                    widget.setGraphicsEffect(effect)
+
+                # Also dim all nested configs (entire step is disabled)
+                logger.info(f"[ENABLED HANDLER] Dimming nested configs, found {len(self.nested_managers)} nested managers")
+                logger.info(f"[ENABLED HANDLER] Available widget keys: {list(self.widgets.keys())}")
+                for param_name, nested_manager in self.nested_managers.items():
+                    group_box = self.widgets.get(param_name)
+                    logger.info(f"[ENABLED HANDLER] Checking nested config {param_name}, group_box={group_box.__class__.__name__ if group_box else 'None'}")
+                    if not group_box:
+                        logger.info(f"[ENABLED HANDLER] ⚠️ No group_box found for nested config {param_name}, trying nested_manager.field_id={nested_manager.field_id}")
+                        # Try using the nested manager's field_id instead
+                        group_box = self.widgets.get(nested_manager.field_id)
+                        if not group_box:
+                            logger.info(f"[ENABLED HANDLER] ⚠️ Still no group_box found, skipping")
+                            continue
+                    widgets_to_dim = group_box.findChildren(ALL_INPUT_WIDGET_TYPES)
+                    logger.info(f"[ENABLED HANDLER] Applying dimming to nested config {param_name}, found {len(widgets_to_dim)} widgets")
+                    for widget in widgets_to_dim:
+                        effect = QGraphicsOpacityEffect()
+                        effect.setOpacity(0.4)
+                        widget.setGraphicsEffect(effect)
+
     def _on_nested_parameter_changed(self, param_name: str, value: Any) -> None:
         """
         Handle parameter changes from nested forms.
@@ -1723,12 +2116,27 @@ class ParameterFormManager(QWidget):
         When a nested form's field changes:
         1. Refresh parent form's placeholders (in case they inherit from nested values)
         2. Refresh all sibling nested forms' placeholders
-        3. Propagate the change signal up to root for cross-window updates
+        3. Refresh enabled styling (in case siblings inherit enabled values)
+        4. Propagate the change signal up to root for cross-window updates
         """
         # OPTIMIZATION: Skip expensive placeholder refreshes during batch reset
         # The reset operation will do a single refresh at the end
         if getattr(self, '_in_reset', False):
             return
+
+        # OPTIMIZATION: Skip cross-window context collection during batch operations
+        if getattr(self, '_block_cross_window_updates', False):
+            return
+
+        # CRITICAL OPTIMIZATION: Also check if ANY nested manager is in reset mode
+        # When a nested dataclass's "Reset All" button is clicked, the nested manager
+        # sets _in_reset=True, but the parent doesn't know about it. We need to skip
+        # expensive updates while the child is resetting.
+        for nested_manager in self.nested_managers.values():
+            if getattr(nested_manager, '_in_reset', False):
+                return
+            if getattr(nested_manager, '_block_cross_window_updates', False):
+                return
 
         # Collect live context from other windows (only for root managers)
         if self._parent_manager is None:
@@ -1742,9 +2150,15 @@ class ParameterFormManager(QWidget):
         # Refresh all nested managers' placeholders (including siblings) with live context
         self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
 
+        # CRITICAL: Also refresh enabled styling for all nested managers
+        # This ensures that when one config's enabled field changes, siblings that inherit from it update their styling
+        # Example: fiji_streaming_config.enabled inherits from napari_streaming_config.enabled
+        self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+
         # CRITICAL: Propagate parameter change signal up the hierarchy
         # This ensures cross-window updates work for nested config changes
         # The root manager will emit context_value_changed via _emit_cross_window_change
+        # IMPORTANT: We DO propagate 'enabled' field changes for cross-window styling updates
         self.parameter_changed.emit(param_name, value)
 
     def _refresh_with_live_context(self, live_context: dict = None) -> None:
@@ -1854,6 +2268,11 @@ class ParameterFormManager(QWidget):
                 with timer(f"  Nested placeholder refresh (all nested ready)", threshold_ms=5.0):
                     self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
 
+                # STEP 3: Refresh enabled styling (after placeholders are resolved)
+                # This ensures that nested configs with inherited enabled values get correct styling
+                with timer(f"  Enabled styling refresh (all nested ready)", threshold_ms=5.0):
+                    self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+
     def _process_nested_values_if_checkbox_enabled(self, name: str, manager: Any, current_values: Dict[str, Any]) -> None:
         """Process nested values if checkbox is enabled - convert dict back to dataclass."""
         if not hasattr(manager, 'get_current_values'):
@@ -1872,6 +2291,11 @@ class ParameterFormManager(QWidget):
                     # Checkbox is unchecked, set to None
                     current_values[name] = None
                     return
+            # Also check if the value itself has enabled=False
+            elif current_values.get(name) and not current_values[name].enabled:
+                # Config exists but is disabled, set to None for serialization
+                current_values[name] = None
+                return
 
         # Get nested values from the nested form
         nested_values = manager.get_current_values()
@@ -1936,6 +2360,10 @@ class ParameterFormManager(QWidget):
             param_name: Name of the parameter that changed
             value: New value
         """
+        # OPTIMIZATION: Skip cross-window updates during batch operations (e.g., reset_all)
+        if getattr(self, '_block_cross_window_updates', False):
+            return
+
         field_path = f"{self.field_id}.{param_name}"
         self.context_value_changed.emit(field_path, value,
                                        self.object_instance, self.context_obj)
@@ -2184,6 +2612,11 @@ class ParameterFormManager(QWidget):
         # Refresh placeholders for this form and all nested forms using live context
         self._refresh_all_placeholders(live_context=live_context)
         self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
+
+        # CRITICAL: Also refresh enabled styling for all nested managers
+        # This ensures that when 'enabled' field changes in another window, styling updates here
+        # Example: User changes napari_streaming_config.enabled in one window, other windows update styling
+        self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
 
         # CRITICAL: Emit context_refreshed signal to cascade the refresh downstream
         # This allows Step editors to know that PipelineConfig's effective context changed
