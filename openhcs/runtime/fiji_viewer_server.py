@@ -10,9 +10,10 @@ import time
 import threading
 from typing import Dict, Any, List
 
-from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT
+from openhcs.runtime.zmq_base import ZMQServer, SHARED_ACK_PORT, get_zmq_transport_url
 from openhcs.runtime.zmq_messages import ImageAck
 from openhcs.constants.streaming import StreamingDataType
+from openhcs.core.config import TransportMode
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class FijiViewerServer(ZMQServer):
     DEBOUNCE_DELAY_MS = 500  # Collect items for 500ms before processing
     MAX_DEBOUNCE_WAIT_MS = 2000  # Maximum wait time before forcing batch processing
 
-    def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None):
+    def __init__(self, port: int, viewer_title: str, display_config, log_file_path: str = None, transport_mode: TransportMode = TransportMode.IPC):
         """
         Initialize Fiji viewer server.
 
@@ -50,12 +51,13 @@ class FijiViewerServer(ZMQServer):
             viewer_title: Title for the Fiji viewer window
             display_config: FijiDisplayConfig with LUT, dimension modes, etc.
             log_file_path: Path to log file (for client discovery)
+            transport_mode: ZMQ transport mode (IPC or TCP)
         """
         import zmq
 
         # Initialize with REP socket for receiving images (synchronous request/reply)
         # REP socket forces workers to wait for acknowledgment before closing shared memory
-        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.REP)
+        super().__init__(port, host='*', log_file_path=log_file_path, data_socket_type=zmq.REP, transport_mode=transport_mode)
 
         self.viewer_title = viewer_title
         self.display_config = display_config
@@ -85,10 +87,12 @@ class FijiViewerServer(ZMQServer):
         """Setup PUSH socket for sending acknowledgments."""
         import zmq
         try:
+            ack_url = get_zmq_transport_url(SHARED_ACK_PORT, self.transport_mode, 'localhost')
+
             context = zmq.Context.instance()
             self.ack_socket = context.socket(zmq.PUSH)
-            self.ack_socket.connect(f"tcp://localhost:{SHARED_ACK_PORT}")
-            logger.info(f"🔬 FIJI SERVER: Connected ack socket to port {SHARED_ACK_PORT}")
+            self.ack_socket.connect(ack_url)
+            logger.info(f"🔬 FIJI SERVER: Connected ack socket to {ack_url}")
         except Exception as e:
             logger.warning(f"🔬 FIJI SERVER: Failed to setup ack socket: {e}")
             self.ack_socket = None
@@ -118,6 +122,48 @@ class FijiViewerServer(ZMQServer):
         except Exception as e:
             logger.warning(f"🔬 FIJI SERVER: Failed to send ack for {image_id}: {e}")
     
+    def _wait_for_swing_ui_ready(self, timeout: float = 5.0) -> bool:
+        """Wait for Java Swing UI to be fully initialized.
+
+        This is critical for IPC mode where messages arrive very fast.
+        RoiManager and other Swing components require the EDT to be ready.
+
+        Args:
+            timeout: Maximum time to wait in seconds
+
+        Returns:
+            True if UI is ready, False if timeout
+        """
+        import time
+        import scyjava as sj
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # Try to access UIManager and verify UIDefaults are populated
+                # This is critical because RoiManager needs JList UI components
+                UIManager = sj.jimport('javax.swing.UIManager')
+                look_and_feel = UIManager.getLookAndFeel()
+
+                if look_and_feel is not None:
+                    # Additional check: verify UIDefaults has JList UI class
+                    # This is what RoiManager needs (it contains a JList)
+                    ui_defaults = UIManager.getDefaults()
+                    list_ui = ui_defaults.get("ListUI")
+
+                    if list_ui is not None:
+                        logger.info("🔬 FIJI SERVER: Java Swing UI is ready (UIDefaults populated)")
+                        return True
+                    else:
+                        logger.debug("🔬 FIJI SERVER: Waiting for UIDefaults to populate...")
+
+            except Exception as e:
+                logger.debug(f"🔬 FIJI SERVER: Waiting for Swing UI: {e}")
+            time.sleep(0.1)
+
+        logger.warning("🔬 FIJI SERVER: Timeout waiting for Swing UI initialization")
+        return False
+
     def start(self):
         """Start server and initialize PyImageJ."""
         super().start()
@@ -133,6 +179,13 @@ class FijiViewerServer(ZMQServer):
                 # Show Fiji UI so users can interact with images and menus
                 self.ij.ui().showUI()
                 logger.info("🔬 FIJI SERVER: PyImageJ initialized in interactive mode with UI shown")
+
+                # Wait for Java Swing UI to be fully initialized
+                # This is critical for IPC mode where messages arrive very fast
+                # RoiManager creation requires the Swing event dispatch thread to be ready
+                if not self._wait_for_swing_ui_ready(timeout=5.0):
+                    logger.warning("🔬 FIJI SERVER: Swing UI may not be fully initialized, proceeding anyway")
+
             except OSError as e:
                 if "Cannot enable interactive mode" in str(e):
                     logger.warning("🔬 FIJI SERVER: Interactive mode failed (likely macOS), using headless mode")
@@ -1064,10 +1117,39 @@ def _handle_rois_for_window(self, window_key: str, items: List[Dict[str, Any]],
     from openhcs.runtime.roi_converters import FijiROIConverter
     import scyjava as sj
 
+    # Get or create RoiManager - MUST be done on EDT to avoid Swing threading issues
     RoiManager = sj.jimport('ij.plugin.frame.RoiManager')
+
+    # Try to get existing instance first (doesn't require EDT)
     rm = RoiManager.getInstance()
+
+    # If no instance exists, create one on EDT
     if rm is None:
-        rm = RoiManager()
+        # Import JPype only when needed (not at module level to avoid import errors in OMERO tests)
+        try:
+            from jpype import JImplements, JOverride
+        except ImportError:
+            # Fallback: create RoiManager directly (may cause EDT issues with IPC mode)
+            logger.warning("JPype not available, creating RoiManager without EDT safety (may fail with IPC mode)")
+            rm = RoiManager()
+        else:
+            SwingUtilities = sj.jimport('javax.swing.SwingUtilities')
+
+            # Use a holder to get the RoiManager out of the Runnable
+            rm_holder = [None]
+
+            # Create a Java Runnable using JPype's JImplements decorator
+            # Note: Decorators are evaluated at class definition time, but since this is
+            # inside an if block that only executes when rm is None, it's safe
+            @JImplements('java.lang.Runnable')
+            class CreateRoiManagerRunnable:
+                @JOverride
+                def run(self):
+                    rm_holder[0] = RoiManager()
+
+            # Execute on EDT and wait
+            SwingUtilities.invokeAndWait(CreateRoiManagerRunnable())
+            rm = rm_holder[0]
 
     # Get or assign integer group ID for this window
     if window_key not in self.window_key_to_group_id:
@@ -1142,23 +1224,24 @@ FijiViewerServer._handle_images_for_window = _handle_images_for_window
 FijiViewerServer._handle_rois_for_window = _handle_rois_for_window
 
 
-def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, log_file_path: str = None):
+def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, log_file_path: str = None, transport_mode: TransportMode = TransportMode.IPC):
     """
     Fiji viewer server process function.
-    
+
     Runs in separate process to manage Fiji instance and handle incoming image data.
-    
+
     Args:
         port: ZMQ port to listen on
         viewer_title: Title for the Fiji viewer window
         display_config: FijiDisplayConfig instance
         log_file_path: Path to log file (for client discovery via ping/pong)
+        transport_mode: ZMQ transport mode (IPC or TCP)
     """
     try:
         import zmq
-        
+
         # Create ZMQ server instance (inherits from ZMQServer ABC)
-        server = FijiViewerServer(port, viewer_title, display_config, log_file_path)
+        server = FijiViewerServer(port, viewer_title, display_config, log_file_path, transport_mode)
         
         # Start the server (binds sockets, initializes PyImageJ)
         server.start()

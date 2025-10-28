@@ -21,6 +21,7 @@ import numpy as np
 from openhcs.io.streaming import StreamingBackend
 from openhcs.io.backend_registry import StorageBackendMeta
 from openhcs.constants.constants import Backend
+from openhcs.core.config import TransportMode
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +33,6 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
     # Configure ABC attributes
     VIEWER_TYPE = 'fiji'
-    HOST_PARAM = 'fiji_host'
-    PORT_PARAM = 'fiji_port'
     SHM_PREFIX = 'fiji_'
 
     # __init__, _get_publisher, save, cleanup now inherited from ABC
@@ -69,10 +68,11 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
 
         logger.info(f"📦 FIJI BACKEND: save_batch called with {len(data_list)} items")
 
-        # Extract kwargs using class attributes
-        host = kwargs.get(self.HOST_PARAM, 'localhost')
-        port = kwargs[self.PORT_PARAM]
-        publisher = self._get_publisher(host, port)
+        # Extract kwargs using generic polymorphic names
+        host = kwargs.get('host', 'localhost')
+        port = kwargs['port']
+        transport_mode = kwargs.get('transport_mode', TransportMode.IPC)
+        publisher = self._get_publisher(host, port, transport_mode)
         display_config = kwargs['display_config']
         microscope_handler = kwargs['microscope_handler']
         source = kwargs.get('source', 'unknown_source')  # Pre-built source value
@@ -144,6 +144,10 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         type_counts = {dt: data_types.count(dt) for dt in set(data_types)}
         logger.info(f"📤 FIJI BACKEND: Sending batch message with {len(batch_images)} items to port {port}: {type_counts}")
 
+        # Register sent images with queue tracker BEFORE sending
+        # This prevents race condition with IPC mode where acks arrive before registration
+        self._register_with_queue_tracker(port, image_ids)
+
         # Send with REQ socket (BLOCKING - worker waits for Fiji to acknowledge)
         # Worker blocks until Fiji receives, copies data from shared memory, and sends ack
         # This guarantees no messages are lost and shared memory is only closed after Fiji is done
@@ -154,9 +158,6 @@ class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
         # Fiji will only reply after it has copied all data from shared memory
         ack_response = publisher.recv_json()
         logger.info(f"✅ FIJI BACKEND: Received ack from Fiji: {ack_response.get('status', 'unknown')}")
-
-        # Register sent images with queue tracker using ABC helper
-        self._register_with_queue_tracker(port, image_ids)
 
         # Clean up publisher's handles after successful send
         # Receiver will unlink the shared memory after copying the data

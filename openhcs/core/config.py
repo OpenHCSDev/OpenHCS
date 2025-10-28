@@ -87,6 +87,13 @@ class MicroscopeFormat(Enum):
     EDDU_CX5 = "EDDU_CX5"  # ThermoFisher CX5 format
     EDDU_METAXPRESS = "EDDU_metaxpress"  # Molecular Devices MetaXpress format
 
+
+class TransportMode(Enum):
+    """ZMQ transport modes for local vs remote communication."""
+    IPC = "ipc"  # Inter-process communication (local only, no firewall prompts)
+    TCP = "tcp"  # Network sockets (supports remote, triggers firewall)
+
+
 @auto_create_decorator
 @dataclass(frozen=True)
 class GlobalPipelineConfig:
@@ -134,33 +141,8 @@ from openhcs.utils.enum_factory import create_colormap_enum
 from openhcs.utils.display_config_factory import create_napari_display_config, create_fiji_display_config
 
 
-def _build_component_order():
-    """
-    Build canonical component order from VirtualComponents + AllComponents.
-
-    This ensures VirtualComponents is the single source of truth - if you add/remove
-    a virtual component, the component_order is automatically updated.
-
-    Returns:
-        List of component names in canonical order for layer/window naming
-    """
-    from openhcs.constants import AllComponents
-
-    # Virtual components come first (for step/source grouping)
-    virtual_component_names = [vc.value for vc in VirtualComponents]
-
-    # Then filename components in standard order
-    filename_component_names = [ac.value for ac in AllComponents]
-
-    # Combine, preserving order and avoiding duplicates
-    component_order = []
-    seen = set()
-    for name in virtual_component_names + filename_component_names:
-        if name not in seen:
-            component_order.append(name)
-            seen.add(name)
-
-    return component_order
+# Import component order builder from factory module
+from openhcs.core.streaming_config_factory import build_component_order as _build_component_order
 
 # Create colormap enum with minimal set to avoid importing napari (→ dask → GPU libs)
 # The lazy=True parameter uses a hardcoded minimal set instead of introspecting napari
@@ -434,19 +416,36 @@ class StreamingDefaults:
     persistent: bool = True
     """Whether viewer stays open after pipeline completion."""
 
+    host: str = 'localhost'
+    """Host for streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
+
+    port: int = None  # Subclasses must override with their specific default
+    """Port for streaming communication. Each streamer type has its own default."""
+
+    transport_mode: TransportMode = TransportMode.IPC
+    """ZMQ transport mode: IPC (local only, no firewall) or TCP (remote support, firewall prompts)."""
+
 @global_pipeline_config(ui_hidden=True)
 @dataclass(frozen=True)
 class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
     """Abstract base configuration for streaming to visualizers.
 
     Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
-    Inherited fields are automatically set to None by @global_pipeline_config(inherit_as_none=True).
+    Inherited fields (persistent, host, port, transport_mode) are automatically set to None
+    by @global_pipeline_config(inherit_as_none=True), enabling polymorphic access without
+    type-specific attribute names.
     """
 
     @property
     @abstractmethod
     def backend(self) -> Backend:
         """Backend enum for this streaming type."""
+        pass
+
+    @property
+    @abstractmethod
+    def viewer_type(self) -> str:
+        """Viewer type identifier (e.g., 'napari', 'fiji') for queue tracking and logging."""
         pass
 
     @property
@@ -466,104 +465,41 @@ class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
         pass
 
 
-@global_pipeline_config
-@dataclass(frozen=True)
-class NapariStreamingConfig(StreamingConfig,NapariDisplayConfig):
-    """Configuration for napari streaming."""
-    napari_port: int = 5555
-    """Port for napari streaming communication."""
+# Auto-generate streaming configs using factory (reduces ~110 lines to ~20 lines)
+from openhcs.core.streaming_config_factory import create_streaming_config
 
-    napari_host: str = 'localhost'
-    """Host for napari streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
+NapariStreamingConfig = create_streaming_config(
+    viewer_name='napari',
+    port=5555,
+    backend=Backend.NAPARI_STREAM,
+    display_config_class=NapariDisplayConfig,
+    visualizer_module='openhcs.runtime.napari_stream_visualizer',
+    visualizer_class_name='NapariStreamVisualizer'
+)
 
-    @property
-    def backend(self) -> Backend:
-        return Backend.NAPARI_STREAM
-
-    @property
-    def step_plan_output_key(self) -> str:
-        return "napari_streaming_paths"
-
-    def get_streaming_kwargs(self, context) -> dict:
-        kwargs = {
-            "napari_port": self.napari_port,
-            "napari_host": self.napari_host,
-            "display_config": self  # self is now the display config
-        }
-
-        # Include microscope handler for component parsing
-        if context:
-            kwargs["microscope_handler"] = context.microscope_handler
-
-        return kwargs
-
-    def create_visualizer(self, filemanager, visualizer_config):
-        from openhcs.runtime.napari_stream_visualizer import NapariStreamVisualizer
-        return NapariStreamVisualizer(
-            filemanager,
-            visualizer_config,
-            viewer_title="OpenHCS Pipeline Visualization",
-            persistent=self.persistent,
-            napari_port=self.napari_port,
-            display_config=self  # self is now the display config
-        )
-
-
-@global_pipeline_config
-@dataclass(frozen=True)
-class FijiStreamingConfig(StreamingConfig, FijiDisplayConfig):
-    """
-    Configuration for Fiji streaming with display options.
-
-    Inherits from both StreamingConfig and FijiDisplayConfig to provide
-    feature parity with NapariStreamingConfig.
-    """
-    fiji_port: int = 5565  # Non-overlapping with Napari (5555-5564)
-    """Port for Fiji streaming communication (different default from Napari)."""
-
-    fiji_host: str = 'localhost'
-    """Host for Fiji streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
-
-    fiji_executable_path: Optional[Path] = None
-    """Path to Fiji/ImageJ executable. If None, will auto-detect."""
-
-    @property
-    def backend(self) -> Backend:
-        return Backend.FIJI_STREAM
-
-    @property
-    def step_plan_output_key(self) -> str:
-        return "fiji_streaming_paths"
-
-    def get_streaming_kwargs(self, context) -> dict:
-        """Return kwargs needed for Fiji streaming backend (matches Napari pattern)."""
-        kwargs = {
-            "fiji_port": self.fiji_port,
-            "fiji_host": self.fiji_host,
-            "fiji_executable_path": self.fiji_executable_path,
-            "display_config": self  # self is now the display config
-        }
-
-        # Include microscope handler for component parsing
-        if context:
-            kwargs["microscope_handler"] = context.microscope_handler
-
-        return kwargs
-
-    def create_visualizer(self, filemanager, visualizer_config):
-        from openhcs.runtime.fiji_stream_visualizer import FijiStreamVisualizer
-        return FijiStreamVisualizer(
-            filemanager,
-            visualizer_config,
-            viewer_title="OpenHCS Fiji Visualization",
-            persistent=self.persistent,
-            fiji_port=self.fiji_port,
-            display_config=self
-        )
+FijiStreamingConfig = create_streaming_config(
+    viewer_name='fiji',
+    port=5565,
+    backend=Backend.FIJI_STREAM,
+    display_config_class=FijiDisplayConfig,
+    visualizer_module='openhcs.runtime.fiji_stream_visualizer',
+    visualizer_class_name='FijiStreamVisualizer',
+    extra_fields={
+        'fiji_executable_path': (Optional[Path], None)
+    }
+)
 
 # Inject all accumulated fields at the end of module loading
 from openhcs.config_framework.lazy_factory import _inject_all_pending_fields
 _inject_all_pending_fields()
+
+
+# ============================================================================
+# Streaming Port Utilities
+# ============================================================================
+
+# Import streaming port utility from factory module
+from openhcs.core.streaming_config_factory import get_all_streaming_ports
 
 
 # ============================================================================

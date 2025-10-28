@@ -490,30 +490,34 @@ class PipelineOrchestrator(ContextProvider):
         duplicating viewer instances. Viewers are tracked by (backend_name, port) key.
 
         Args:
-            config: Streaming config (NapariStreamingConfig or FijiStreamingConfig)
+            config: Streaming config (any StreamingConfig subclass)
             vis_config: Optional visualizer config (can be None for image browser)
 
         Returns:
-            Visualizer instance (NapariStreamVisualizer or FijiStreamVisualizer)
+            Visualizer instance
         """
-        from openhcs.core.config import NapariStreamingConfig, FijiStreamingConfig
+        from openhcs.core.config import StreamingConfig
 
-        # Determine key based on config type (use isinstance for type checking)
-        if isinstance(config, NapariStreamingConfig):
-            key = ('napari', config.napari_port)
-            port = config.napari_port
-        elif isinstance(config, FijiStreamingConfig):
-            key = ('fiji', config.fiji_port)
-            port = config.fiji_port
+        # Generic streaming config handling using polymorphic attributes
+        if isinstance(config, StreamingConfig):
+            # Start global ack listener (must be before viewers connect)
+            from openhcs.runtime.zmq_base import start_global_ack_listener
+            start_global_ack_listener(config.transport_mode)
+
+            # Pre-create queue tracker using polymorphic attributes
+            from openhcs.runtime.queue_tracker import GlobalQueueTrackerRegistry
+            registry = GlobalQueueTrackerRegistry()
+            registry.get_or_create_tracker(config.port, config.viewer_type)
+            logger.info(f"🔬 ORCHESTRATOR: Pre-created queue tracker for {config.viewer_type} on port {config.port}")
+
+            key = (config.viewer_type, config.port)
         else:
             backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
             key = (backend_name,)
-            port = None
 
         # Check if we already have a visualizer for this key
         if key in self._visualizers:
             vis = self._visualizers[key]
-            # Check if it's still running
             if vis.is_running:
                 logger.info(f"🔬 ORCHESTRATOR: Reusing existing visualizer for {key}")
                 return vis
@@ -521,24 +525,23 @@ class PipelineOrchestrator(ContextProvider):
                 logger.info(f"🔬 ORCHESTRATOR: Existing visualizer for {key} is not running, creating new one")
                 del self._visualizers[key]
 
-        # Create new visualizer
+        # Create new visualizer using polymorphic create_visualizer method
         logger.info(f"🔬 ORCHESTRATOR: Creating new visualizer for {key} (persistent={config.persistent})")
         vis = config.create_visualizer(self.filemanager, vis_config)
 
-        # Start viewer asynchronously for both Napari and Fiji
-        if isinstance(config, (NapariStreamingConfig, FijiStreamingConfig)):
-            logger.info(f"🔬 ORCHESTRATOR: Starting {key[0]} visualizer asynchronously on port {port}")
+        # Start viewer asynchronously for streaming configs
+        if isinstance(config, StreamingConfig):
+            logger.info(f"🔬 ORCHESTRATOR: Starting {key[0]} visualizer asynchronously on port {config.port}")
             vis.start_viewer(async_mode=True)
 
-            # Ping the server to set it to ready state (required for Fiji to process data messages)
-            # Do this in a background thread to avoid blocking
+            # Ping server to set ready state (background thread to avoid blocking)
             import threading
             def ping_server():
                 import time
                 time.sleep(1.0)  # Give server time to start
                 if hasattr(vis, '_wait_for_server_ready'):
                     vis._wait_for_server_ready(timeout=10.0)
-                    logger.info(f"🔬 ORCHESTRATOR: {key[0]} visualizer on port {port} is ready")
+                    logger.info(f"🔬 ORCHESTRATOR: {key[0]} visualizer on port {config.port} is ready")
 
             thread = threading.Thread(target=ping_server, daemon=True)
             thread.start()
@@ -915,95 +918,51 @@ class PipelineOrchestrator(ContextProvider):
             actual_max_workers = 1
 
         # 🔬 AUTOMATIC VISUALIZER CREATION: Create visualizers if compiler detected streaming
-        # Support multiple napari instances based on unique ports
         visualizers = []
         if visualizer is None:
-            # Collect all unique napari ports across all compiled contexts
-            unique_napari_ports = set()
+            from openhcs.core.config import StreamingConfig
+
+            # Collect unique configs (deduplicate by viewer_type + port)
+            unique_configs = {}
             for ctx in compiled_contexts.values():
                 for visualizer_info in ctx.required_visualizers:
                     config = visualizer_info['config']
-                    # Check if this is a napari streaming config with a port
-                    if hasattr(config, 'napari_port'):
-                        unique_napari_ports.add(config.napari_port)
+                    key = (config.viewer_type, config.port) if isinstance(config, StreamingConfig) else (config.backend.name,)
+                    if key not in unique_configs:
+                        unique_configs[key] = (config, ctx.visualizer_config)
 
-            logger.info(f"🔬 ORCHESTRATOR: Found {len(unique_napari_ports)} unique napari ports: {unique_napari_ports}")
+            # Create visualizers
+            for config, vis_config in unique_configs.values():
+                visualizers.append(self.get_or_create_visualizer(config, vis_config))
 
-            # Collect all unique visualizer configs across all contexts
-            # Key: (backend_name, port) for napari, (backend_name,) for others
-            # Value: config object
-            unique_visualizer_configs = {}
-
-            for ctx in compiled_contexts.values():
-                for visualizer_info in ctx.required_visualizers:
-                    config = visualizer_info['config']
-
-                    # For napari configs, use port as part of the key
-                    if hasattr(config, 'napari_port'):
-                        key = ('napari', config.napari_port)
-                        # Store the first config we see for each port
-                        # All configs for the same port should be identical after resolution
-                        if key not in unique_visualizer_configs:
-                            logger.info(f"🔬 ORCHESTRATOR: Found first config for port {config.napari_port}: persistent={config.persistent}")
-                            unique_visualizer_configs[key] = (config, ctx.visualizer_config)
-                        else:
-                            # Log if we see a different config for the same port
-                            existing_config = unique_visualizer_configs[key][0]
-                            if existing_config.persistent != config.persistent:
-                                logger.warning(f"🔬 ORCHESTRATOR: Conflicting persistent values for port {config.napari_port}: existing={existing_config.persistent}, new={config.persistent}")
-                    else:
-                        # For non-napari visualizers, use backend name as key
-                        backend_name = config.backend.name if hasattr(config, 'backend') else 'unknown'
-                        key = (backend_name,)
-                        if key not in unique_visualizer_configs:
-                            unique_visualizer_configs[key] = (config, ctx.visualizer_config)
-
-            # Create and start all visualizers using shared infrastructure
-            for key, (config, vis_config) in unique_visualizer_configs.items():
-                vis = self.get_or_create_visualizer(config, vis_config)
-                visualizers.append(vis)
-
-            # Wait for all napari viewers to be ready before starting pipeline
+            # Wait for all streaming viewers to be ready before starting pipeline
             # This ensures viewers are available to receive images
-            napari_visualizers = [v for v in visualizers if hasattr(v, 'napari_port')]
-            if napari_visualizers:
-                logger.info(f"🔬 ORCHESTRATOR: Waiting for {len(napari_visualizers)} napari viewer(s) to be ready...")
+            if visualizers:
+                logger.info(f"🔬 ORCHESTRATOR: Waiting for {len(visualizers)} streaming viewer(s) to be ready...")
                 import time
                 max_wait = 30.0  # Maximum wait time in seconds
                 start_time = time.time()
 
                 while time.time() - start_time < max_wait:
-                    all_ready = all(v.is_running for v in napari_visualizers)
+                    all_ready = all(v.is_running for v in visualizers)
                     if all_ready:
-                        logger.info("🔬 ORCHESTRATOR: All napari viewers are ready!")
+                        logger.info("🔬 ORCHESTRATOR: All streaming viewers are ready!")
                         break
                     time.sleep(0.2)  # Check every 200ms
                 else:
-                    # Timeout - log which viewers aren't ready
-                    not_ready = [v.napari_port for v in napari_visualizers if not v.is_running]
-                    logger.warning(f"🔬 ORCHESTRATOR: Timeout waiting for napari viewers. Not ready: {not_ready}")
+                    # Timeout - log which viewers aren't ready (use generic port attribute)
+                    not_ready = [v.port for v in visualizers if not v.is_running]
+                    logger.warning(f"🔬 ORCHESTRATOR: Timeout waiting for streaming viewers. Not ready: {not_ready}")
 
                 # Clear viewer state for new pipeline run to prevent accumulation
-                logger.info("🔬 ORCHESTRATOR: Clearing napari viewer state for new pipeline run...")
-                for vis in napari_visualizers:
+                logger.info("🔬 ORCHESTRATOR: Clearing streaming viewer state for new pipeline run...")
+                for vis in visualizers:
                     if hasattr(vis, 'clear_viewer_state'):
                         success = vis.clear_viewer_state()
                         if success:
-                            logger.info(f"🔬 ORCHESTRATOR: Cleared state for viewer on port {vis.napari_port}")
+                            logger.info(f"🔬 ORCHESTRATOR: Cleared state for viewer on port {vis.port}")
                         else:
-                            logger.warning(f"🔬 ORCHESTRATOR: Failed to clear state for viewer on port {vis.napari_port}")
-
-            # Clear Fiji viewer state for new pipeline run to prevent dimension accumulation
-            fiji_visualizers = [v for v in visualizers if hasattr(v, 'fiji_port')]
-            if fiji_visualizers:
-                logger.info("🔬 ORCHESTRATOR: Clearing fiji viewer state for new pipeline run...")
-                for vis in fiji_visualizers:
-                    if hasattr(vis, 'clear_viewer_state'):
-                        success = vis.clear_viewer_state()
-                        if success:
-                            logger.info(f"🔬 ORCHESTRATOR: Cleared state for viewer on port {vis.fiji_port}")
-                        else:
-                            logger.warning(f"🔬 ORCHESTRATOR: Failed to clear state for viewer on port {vis.fiji_port}")
+                            logger.warning(f"🔬 ORCHESTRATOR: Failed to clear state for viewer on port {vis.port}")
 
             # For backwards compatibility, set visualizer to the first one
             visualizer = visualizers[0] if visualizers else None
