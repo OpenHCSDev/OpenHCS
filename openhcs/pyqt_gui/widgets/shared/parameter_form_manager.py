@@ -726,16 +726,26 @@ class ParameterFormManager(QWidget):
         return content_widget
 
     def _create_widget_for_param(self, param_info):
-        """Create widget for a single parameter based on its type."""
+        """
+        Create widget for a single parameter based on its type.
+
+        Uses parametric dispatch for REGULAR and NESTED types.
+        OPTIONAL_NESTED remains as dedicated method (too complex for parametrization).
+        """
+        from openhcs.pyqt_gui.widgets.shared.widget_creation_config import (
+            create_widget_parametric,
+            WidgetCreationType
+        )
+
         if param_info.is_optional and param_info.is_nested:
-            # Optional[Dataclass]: show checkbox
+            # Optional[Dataclass]: show checkbox (too complex for parametrization)
             return self._create_optional_dataclass_widget(param_info)
         elif param_info.is_nested:
-            # Direct dataclass (non-optional): nested group without checkbox
-            return self._create_nested_dataclass_widget(param_info)
+            # Direct dataclass (non-optional): use parametric dispatch
+            return create_widget_parametric(self, param_info, WidgetCreationType.NESTED)
         else:
-            # All regular types (including Optional[regular]) use regular widgets with None-aware behavior
-            return self._create_regular_parameter_widget(param_info)
+            # All regular types (including Optional[regular]): use parametric dispatch
+            return create_widget_parametric(self, param_info, WidgetCreationType.REGULAR)
 
     def _create_widgets_async(self, layout, param_infos, on_complete=None):
         """Create widgets asynchronously to avoid blocking the UI.
@@ -771,67 +781,8 @@ class ParameterFormManager(QWidget):
         # Start creating widgets
         QTimer.singleShot(0, create_next_batch)
 
-    def _create_regular_parameter_widget(self, param_info) -> QWidget:
-        """Create widget for regular parameter - DELEGATE TO SERVICE LAYER."""
-        from openhcs.utils.performance_monitor import timer
-
-        with timer(f"          Get display info for {param_info.name}", threshold_ms=0.5):
-            display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
-            field_ids = self.service.generate_field_ids_direct(self.config.field_id, param_info.name)
-
-        with timer("          Create container/layout", threshold_ms=0.5):
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
-            layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
-
-        # Label
-        with timer(f"          Create label for {param_info.name}", threshold_ms=0.5):
-            label = LabelWithHelp(
-                text=display_info['field_label'], param_name=param_info.name,
-                param_description=display_info['description'], param_type=param_info.type,
-                color_scheme=self.config.color_scheme or PyQt6ColorScheme()
-            )
-            layout.addWidget(label)
-
-        # Widget
-        with timer(f"          Create actual widget for {param_info.name}", threshold_ms=0.5):
-            current_value = self.parameters.get(param_info.name)
-            widget = self.create_widget(param_info.name, param_info.type, current_value, field_ids['widget_id'])
-            widget.setObjectName(field_ids['widget_id'])
-            layout.addWidget(widget, 1)
-
-        # Reset button (optimized factory) - skip if read-only
-        if not self.read_only:
-            with timer("          Create reset button", threshold_ms=0.5):
-                reset_button = _create_optimized_reset_button(
-                    self.config.field_id,
-                    param_info.name,
-                    lambda: self.reset_parameter(param_info.name)
-                )
-                layout.addWidget(reset_button)
-                self.reset_buttons[param_info.name] = reset_button
-
-        # Store widgets and connect signals
-        with timer("          Store and connect signals", threshold_ms=0.5):
-            self.widgets[param_info.name] = widget
-            # DEBUG: Log what we're storing
-            import logging
-            logger = logging.getLogger(__name__)
-            if param_info.is_nested:
-                logger.info(f"[STORE_WIDGET] Storing nested widget: param_info.name={param_info.name}, widget={widget.__class__.__name__}")
-            PyQt6WidgetEnhancer.connect_change_signal(widget, param_info.name, self._emit_parameter_change)
-
-        # PERFORMANCE OPTIMIZATION: Don't apply context behavior during widget creation
-        # The completion callback (_refresh_all_placeholders) will handle it when all widgets exist
-        # This eliminates 400+ expensive calls with incomplete context during async creation
-        # and fixes the wrong placeholder bug (context is complete at the end)
-
-        # Make widget read-only if in read-only mode
-        if self.read_only:
-            self._make_widget_readonly(widget)
-
-        return container
+    # DELETED: _create_regular_parameter_widget() - replaced with parametric dispatch
+    # See widget_creation_config.py: create_widget_parametric(manager, param_info, WidgetCreationType.REGULAR)
 
     def _create_optional_regular_widget(self, param_info) -> QWidget:
         """Create widget for Optional[regular_type] - checkbox + regular widget."""
@@ -896,49 +847,8 @@ class ParameterFormManager(QWidget):
         fallback_widget.setObjectName(field_ids['widget_id'])
         return fallback_widget
 
-    def _create_nested_dataclass_widget(self, param_info) -> QWidget:
-        """Create widget for nested dataclass - DELEGATE TO SERVICE LAYER."""
-        display_info = self.service.get_parameter_display_info(param_info.name, param_info.type, param_info.description)
-
-        # Always use the inner dataclass type for Optional[T] when wiring help/paths
-        unwrapped_type = (
-            ParameterTypeUtils.get_optional_inner_type(param_info.type)
-            if ParameterTypeUtils.is_optional_dataclass(param_info.type)
-            else param_info.type
-        )
-
-        group_box = GroupBoxWithHelp(
-            title=display_info['field_label'], help_target=unwrapped_type,
-            color_scheme=self.config.color_scheme or PyQt6ColorScheme()
-        )
-        current_value = self.parameters.get(param_info.name)
-        nested_manager = self._create_nested_form_inline(param_info.name, unwrapped_type, current_value)
-
-        nested_form = nested_manager.build_form()
-
-        # Add Reset All button to GroupBox title
-        if not self.read_only:
-            from PyQt6.QtWidgets import QPushButton
-            reset_all_button = QPushButton("Reset All")
-            reset_all_button.setMaximumWidth(80)
-            reset_all_button.setToolTip(f"Reset all parameters in {display_info['field_label']} to defaults")
-            reset_all_button.clicked.connect(lambda: nested_manager.reset_all_parameters())
-            group_box.addTitleWidget(reset_all_button)
-
-        # Use GroupBoxWithHelp's addWidget method instead of creating our own layout
-        group_box.addWidget(nested_form)
-
-        self.nested_managers[param_info.name] = nested_manager
-
-        # CRITICAL: Store the GroupBox in self.widgets so enabled handler can find it
-        self.widgets[param_info.name] = group_box
-
-        # DEBUG: Log what we're storing
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"[CREATE_NESTED_DATACLASS] param_info.name={param_info.name}, nested_manager.field_id={nested_manager.field_id}, stored GroupBoxWithHelp in self.widgets")
-
-        return group_box
+    # DELETED: _create_nested_dataclass_widget() - replaced with parametric dispatch
+    # See widget_creation_config.py: create_widget_parametric(manager, param_info, WidgetCreationType.NESTED)
 
     def _create_optional_dataclass_widget(self, param_info) -> QWidget:
         """Create widget for optional dataclass - checkbox integrated into GroupBox title."""
