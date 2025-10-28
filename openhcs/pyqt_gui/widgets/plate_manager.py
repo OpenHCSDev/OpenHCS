@@ -1299,8 +1299,6 @@ class PlateManagerWidget(QWidget):
                 self.status_message.emit("Execution terminated by user")
                 self.update_button_states()
                 self.subprocess_log_stopped.emit()
-        else:
-            self.service_adapter.show_info_dialog("No execution is currently running.")
     
     def action_code_plate(self):
         """Generate Python code for selected plates and their pipelines (Tier 3)."""
