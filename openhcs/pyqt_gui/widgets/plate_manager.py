@@ -1196,8 +1196,12 @@ class PlateManagerWidget(QWidget):
                         logger.warning("🛑 Failed to force kill workers")
                         self.status_message.emit("Failed to force kill execution")
                 else:
-                    # Graceful shutdown - use graceful=True, then change button to "Force Kill"
+                    # Graceful shutdown - change button to "Force Kill" immediately, then try graceful kill
                     logger.info(f"🛑 Gracefully killing workers (port {self.zmq_client.port})")
+
+                    # Change button to "Force Kill" immediately (before waiting for ack)
+                    self.execution_state = "force_kill_ready"
+                    self.update_button_states()
 
                     def _kill_workers():
                         from openhcs.runtime.zmq_base import ZMQClient
@@ -1206,18 +1210,33 @@ class PlateManagerWidget(QWidget):
                     success = await loop.run_in_executor(None, _kill_workers)
 
                     if success:
+                        # Got ack - graceful shutdown succeeded, reset to idle
                         logger.info("🛑 Workers killed successfully, server still alive")
                         self.status_message.emit("Execution cancelled - workers killed")
+
+                        # Disconnect client
+                        def _disconnect():
+                            self.zmq_client.disconnect()
+                        await loop.run_in_executor(None, _disconnect)
+
+                        self.zmq_client = None
+                        self.current_execution_id = None
+                        self.execution_state = "idle"
+
+                        # Update orchestrator states
+                        for orchestrator in self.orchestrators.values():
+                            if orchestrator.state == OrchestratorState.EXECUTING:
+                                orchestrator._state = OrchestratorState.COMPILED
+
+                        self.update_button_states()
                     else:
-                        logger.warning("🛑 Failed to kill workers")
-                        self.status_message.emit("Failed to cancel execution")
+                        # No ack - keep button as "Force Kill" for user to retry
+                        logger.warning("🛑 Failed to kill workers - no ack received")
+                        self.status_message.emit("Failed to cancel execution - click Force Kill to retry")
 
-                    # Change button to "Force Kill" and keep it enabled
-                    self.execution_state = "force_kill_ready"
-                    self.update_button_states()
-                    return  # Don't reset state yet - allow force kill
+                    return  # Don't continue to force kill path
 
-                # Disconnect client (only on force kill or after graceful success)
+                # Force kill path - disconnect and reset
                 def _disconnect():
                     self.zmq_client.disconnect()
 
