@@ -1487,7 +1487,11 @@ class ParameterFormManager(QWidget):
         return reconstructed
 
     def _build_context_stack(self, overlay, skip_parent_overlay: bool = False, live_context: dict = None):
-        """Build nested config_context() calls for placeholder resolution.
+        """
+        Build nested config_context() calls for placeholder resolution.
+
+        UNIFIED: Uses builder pattern to construct context stack.
+        See context_layer_builders.py for implementation details.
 
         Context stack order for PipelineConfig (lazy):
         1. Thread-local global config (automatic base - loaded instance)
@@ -1509,188 +1513,13 @@ class ParameterFormManager(QWidget):
         Returns:
             ExitStack with nested contexts
         """
-        from contextlib import ExitStack
-        from openhcs.config_framework.context_manager import config_context
+        from openhcs.pyqt_gui.widgets.shared.context_layer_builders import build_context_stack
+        return build_context_stack(self, overlay, skip_parent_overlay, live_context)
 
-        stack = ExitStack()
-
-        # CRITICAL: For GlobalPipelineConfig editing (root form only), apply static defaults as base context
-        # This masks the thread-local loaded instance with class defaults
-        # Only do this for the ROOT GlobalPipelineConfig form, not nested configs or step editor
-        is_root_global_config = (self.config.is_global_config_editing and
-                                 self.global_config_type is not None and
-                                 self.context_obj is None)  # No parent context = root form
-
-        if is_root_global_config:
-            static_defaults = self.global_config_type()
-            stack.enter_context(config_context(static_defaults, mask_with_none=True))
-        else:
-            # CRITICAL: Apply GlobalPipelineConfig live values FIRST (as base layer)
-            # Then parent context (PipelineConfig) will be applied AFTER, allowing it to override
-            # This ensures proper hierarchy: GlobalPipelineConfig → PipelineConfig → Step
-            #
-            # Order matters:
-            # 1. GlobalPipelineConfig live (base layer) - provides defaults
-            # 2. PipelineConfig (next layer) - overrides GlobalPipelineConfig where it has concrete values
-            # 3. Step overlay (top layer) - overrides everything
-            if live_context and self.global_config_type:
-                global_live_values = self._find_live_values_for_type(self.global_config_type, live_context)
-                if global_live_values is not None:
-                    try:
-                        # CRITICAL: Merge live values into thread-local GlobalPipelineConfig instead of creating fresh instance
-                        # This preserves all fields from thread-local and only updates concrete live values
-                        from openhcs.config_framework.context_manager import get_base_global_config
-                        import dataclasses
-                        thread_local_global = get_base_global_config()
-                        if thread_local_global is not None:
-                            # CRITICAL: Reconstruct nested dataclasses from tuple format, merging into thread-local's nested dataclasses
-                            global_live_values = self._reconstruct_nested_dataclasses(global_live_values, thread_local_global)
-
-                            global_live_instance = dataclasses.replace(thread_local_global, **global_live_values)
-                            stack.enter_context(config_context(global_live_instance))
-                    except Exception as e:
-                        logger.warning(f"Failed to apply live GlobalPipelineConfig: {e}")
-
-        # Apply parent context(s) if provided
-        if self.context_obj is not None:
-            if isinstance(self.context_obj, list):
-                # Multiple parent contexts (future: deeply nested editors)
-                for ctx in self.context_obj:
-                    # Check if we have live values for this context TYPE (or its lazy/base equivalent)
-                    ctx_type = type(ctx)
-                    live_values = self._find_live_values_for_type(ctx_type, live_context)
-                    if live_values is not None:
-                        try:
-                            # CRITICAL: Reconstruct nested dataclasses from tuple format, merging into saved instance's nested dataclasses
-                            live_values = self._reconstruct_nested_dataclasses(live_values, ctx)
-
-                            # CRITICAL: Use dataclasses.replace to merge live values into saved instance
-                            import dataclasses
-                            live_instance = dataclasses.replace(ctx, **live_values)
-                            stack.enter_context(config_context(live_instance))
-                        except:
-                            stack.enter_context(config_context(ctx))
-                    else:
-                        stack.enter_context(config_context(ctx))
-            else:
-                # Single parent context (Step Editor: pipeline_config)
-                # CRITICAL: If live_context has updated values for this context TYPE, merge them into the saved instance
-                # This preserves inheritance: only concrete (non-None) live values override the saved instance
-                ctx_type = type(self.context_obj)
-                live_values = self._find_live_values_for_type(ctx_type, live_context)
-                if live_values is not None:
-                    try:
-                        # CRITICAL: Reconstruct nested dataclasses from tuple format, merging into saved instance's nested dataclasses
-                        live_values = self._reconstruct_nested_dataclasses(live_values, self.context_obj)
-
-                        # CRITICAL: Use dataclasses.replace to merge live values into saved instance
-                        # This ensures None values in live_values don't override concrete values in self.context_obj
-                        import dataclasses
-                        live_instance = dataclasses.replace(self.context_obj, **live_values)
-                        stack.enter_context(config_context(live_instance))
-                    except Exception as e:
-                        logger.warning(f"Failed to apply live parent context: {e}")
-                        stack.enter_context(config_context(self.context_obj))
-                else:
-                    stack.enter_context(config_context(self.context_obj))
-
-        # CRITICAL: For nested forms, include parent's USER-MODIFIED values for sibling inheritance
-        # This allows live placeholder updates when sibling fields change
-        # ONLY enable this AFTER initial form load to avoid polluting placeholders with initial widget values
-        # SKIP if skip_parent_overlay=True (used during reset to prevent re-introducing old values)
-        # ANTI-DUCK-TYPING: _parent_manager always exists, parent_manager always has these attributes
-        parent_manager = self._parent_manager
-        if (not skip_parent_overlay and
-            parent_manager and
-            parent_manager._initial_load_complete):  # Check PARENT's initial load flag
-
-            # Get only user-modified values from parent (not all values)
-            # This prevents polluting context with stale/default values
-            parent_user_values = parent_manager.get_user_modified_values()
-
-            if parent_user_values and parent_manager.dataclass_type:
-                # CRITICAL: Exclude the current nested config from parent overlay
-                # This prevents the parent from re-introducing old values when resetting fields in nested form
-                # Example: When resetting well_filter in StepMaterializationConfig, don't include
-                # step_materialization_config from parent's user-modified values
-                # CRITICAL FIX: Also exclude params from parent's exclude_params list (e.g., 'func' for FunctionStep)
-                # ANTI-DUCK-TYPING: parent_manager always has exclude_params
-                excluded_keys = {self.field_id}
-                if parent_manager.exclude_params:
-                    excluded_keys.update(parent_manager.exclude_params)
-
-                filtered_parent_values = {k: v for k, v in parent_user_values.items() if k not in excluded_keys}
-
-                if filtered_parent_values:
-                    # Use lazy version of parent type to enable sibling inheritance
-                    from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-                    parent_type = parent_manager.dataclass_type
-                    lazy_parent_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(parent_type)
-                    if lazy_parent_type:
-                        parent_type = lazy_parent_type
-
-                    # CRITICAL FIX: Add excluded params from parent's object_instance
-                    # This allows instantiating parent_type even when some params are excluded from the form
-                    # ANTI-DUCK-TYPING: parent_manager always has exclude_params
-                    parent_values_with_excluded = filtered_parent_values.copy()
-                    if parent_manager.exclude_params:
-                        for excluded_param in parent_manager.exclude_params:
-                            if excluded_param not in parent_values_with_excluded and hasattr(parent_manager.object_instance, excluded_param):
-                                parent_values_with_excluded[excluded_param] = getattr(parent_manager.object_instance, excluded_param)
-
-                    # Create parent overlay with only user-modified values (excluding current nested config)
-                    # For global config editing (root form only), use mask_with_none=True to preserve None overrides
-                    parent_overlay_instance = parent_type(**parent_values_with_excluded)
-                    if is_root_global_config:
-                        stack.enter_context(config_context(parent_overlay_instance, mask_with_none=True))
-                    else:
-                        stack.enter_context(config_context(parent_overlay_instance))
-
-        # Convert overlay dict to object instance for config_context()
-        # config_context() expects an object with attributes, not a dict
-        # CRITICAL FIX: If overlay is a dict but empty (no widgets yet), use object_instance directly
-        if isinstance(overlay, dict):
-            if not overlay and self.object_instance is not None:
-                # Empty dict means widgets don't exist yet - use original instance for context
-                import dataclasses
-                if dataclasses.is_dataclass(self.object_instance):
-                    overlay_instance = self.object_instance
-                else:
-                    # For non-dataclass objects, use as-is
-                    overlay_instance = self.object_instance
-            elif self.dataclass_type:
-                # Normal case: convert dict to dataclass instance
-                # CRITICAL FIX: For excluded params (e.g., 'func' for FunctionStep), use values from object_instance
-                # This allows us to instantiate the dataclass type while excluding certain params from the overlay
-                overlay_with_excluded = overlay.copy()
-                for excluded_param in self.exclude_params:
-                    if excluded_param not in overlay_with_excluded and hasattr(self.object_instance, excluded_param):
-                        # Use the value from the original object instance for excluded params
-                        overlay_with_excluded[excluded_param] = getattr(self.object_instance, excluded_param)
-
-                # For functions and non-dataclass objects: use SimpleNamespace to hold parameters
-                # For dataclasses: instantiate normally
-                try:
-                    overlay_instance = self.dataclass_type(**overlay_with_excluded)
-                except TypeError:
-                    # Function or other non-instantiable type: use SimpleNamespace
-                    from types import SimpleNamespace
-                    # For SimpleNamespace, we don't need excluded params
-                    filtered_overlay = {k: v for k, v in overlay.items() if k not in self.exclude_params}
-                    overlay_instance = SimpleNamespace(**filtered_overlay)
-            else:
-                # Dict but no dataclass_type - use SimpleNamespace
-                from types import SimpleNamespace
-                overlay_instance = SimpleNamespace(**overlay)
-        else:
-            # Already an instance - use as-is
-            overlay_instance = overlay
-
-        # Always apply overlay with current form values (the object being edited)
-        # config_context() will filter None values and merge onto parent context
-        stack.enter_context(config_context(overlay_instance))
-
-        return stack
+    # DELETED: 177 lines of nested if/else context building logic
+    # Replaced with builder pattern in context_layer_builders.py
+    # See: GlobalStaticDefaultsBuilder, GlobalLiveValuesBuilder, ParentContextBuilder,
+    #      ParentOverlayBuilder, CurrentOverlayBuilder
 
     def _apply_initial_enabled_styling(self) -> None:
         """Apply initial enabled field styling based on resolved value from widget.
