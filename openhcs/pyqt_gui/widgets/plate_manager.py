@@ -71,6 +71,10 @@ class PlateManagerWidget(QWidget):
     compilation_error = pyqtSignal(str, str)  # plate_name, error_message
     initialization_error = pyqtSignal(str, str)  # plate_name, error_message
     execution_error = pyqtSignal(str)  # error_message
+
+    # Internal signals for thread-safe completion handling
+    _execution_complete_signal = pyqtSignal(dict, list)  # result, ready_items
+    _execution_error_signal = pyqtSignal(str)  # error_msg
     
     def __init__(self, file_manager: FileManager, service_adapter,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
@@ -117,7 +121,11 @@ class PlateManagerWidget(QWidget):
         self.setup_ui()
         self.setup_connections()
         self.update_button_states()
-        
+
+        # Connect internal signals for thread-safe completion handling
+        self._execution_complete_signal.connect(self._on_execution_complete)
+        self._execution_error_signal.connect(self._on_execution_error)
+
         logger.debug("Plate manager widget initialized")
 
     def cleanup(self):
@@ -1061,34 +1069,20 @@ class PlateManagerWidget(QWidget):
                 # Wait for completion (blocking in this thread, but not UI thread)
                 result = self.zmq_client.wait_for_completion(execution_id)
 
-                # Emit completion signal (thread-safe)
-                from PyQt6.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    self,
-                    "_on_execution_complete",
-                    Qt.ConnectionType.QueuedConnection,
-                    result,
-                    ready_items
-                )
+                # Emit completion signal (thread-safe via Qt signal)
+                self._execution_complete_signal.emit(result, ready_items)
 
             except Exception as e:
                 logger.error(f"Error polling for completion: {e}", exc_info=True)
-                # Emit error signal
-                from PyQt6.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    self,
-                    "_on_execution_error",
-                    Qt.ConnectionType.QueuedConnection,
-                    str(e)
-                )
+                # Emit error signal (thread-safe via Qt signal)
+                self._execution_error_signal.emit(str(e))
 
         # Start polling thread
         thread = threading.Thread(target=poll_completion, daemon=True)
         thread.start()
 
-    @pyqtSlot(object, object)
     def _on_execution_complete(self, result, ready_items):
-        """Handle execution completion (called from main thread via QMetaObject.invokeMethod)."""
+        """Handle execution completion (called from main thread via signal)."""
         try:
             status = result.get('status')
             logger.info(f"Execution completed with status: {status}")
@@ -1121,9 +1115,8 @@ class PlateManagerWidget(QWidget):
         except Exception as e:
             logger.error(f"Error handling execution completion: {e}", exc_info=True)
 
-    @pyqtSlot(str)
     def _on_execution_error(self, error_msg):
-        """Handle execution error (called from main thread via QMetaObject.invokeMethod)."""
+        """Handle execution error (called from main thread via signal)."""
         self.execution_error.emit(f"Execution error: {error_msg}")
         self.execution_state = "idle"
         self.current_execution_id = None
@@ -1164,40 +1157,66 @@ class PlateManagerWidget(QWidget):
         self.status_message.emit(message)
 
     async def action_stop_execution(self):
-        """Handle Stop Execution - cancel ZMQ execution or terminate subprocess."""
-        logger.info("🛑 Stop button pressed.")
-        self.status_message.emit("Terminating execution...")
+        """Handle Stop Execution - cancel ZMQ execution or terminate subprocess.
 
-        # Immediately set state to "stopping" and disable the button
-        self.execution_state = "stopping"
-        self.update_button_states()
+        First click: Graceful shutdown, button changes to "Force Kill"
+        Second click: Force shutdown
+        """
+        # Check if this is a force kill (button text is "Force Kill")
+        is_force_kill = self.buttons["run_plate"].text() == "Force Kill"
+
+        if is_force_kill:
+            logger.info("🛑 Force Kill button pressed.")
+            self.status_message.emit("Force killing execution...")
+        else:
+            logger.info("🛑 Stop button pressed.")
+            self.status_message.emit("Terminating execution...")
 
         # Check if using ZMQ execution
         if self.zmq_client:
             try:
-                logger.info("🛑 Requesting graceful cancellation via ZMQ...")
-
                 import asyncio
                 loop = asyncio.get_event_loop()
 
-                # Use the same code path as the ZMQ browser Quit button - it works perfectly!
-                # Send 'shutdown' message which kills workers but keeps server alive
-                logger.info(f"🛑 Killing workers using same code path as Quit button (port {self.zmq_client.port})")
+                if is_force_kill:
+                    # Force kill - use graceful=False
+                    logger.info(f"🛑 Force killing workers (port {self.zmq_client.port})")
 
-                def _kill_workers():
-                    from openhcs.runtime.zmq_base import ZMQClient
-                    return ZMQClient.kill_server_on_port(self.zmq_client.port, graceful=True)
+                    def _force_kill_workers():
+                        from openhcs.runtime.zmq_base import ZMQClient
+                        return ZMQClient.kill_server_on_port(self.zmq_client.port, graceful=False)
 
-                success = await loop.run_in_executor(None, _kill_workers)
+                    success = await loop.run_in_executor(None, _force_kill_workers)
 
-                if success:
-                    logger.info("🛑 Workers killed successfully, server still alive")
-                    self.status_message.emit("Execution cancelled - workers killed")
+                    if success:
+                        logger.info("🛑 Workers force killed successfully")
+                        self.status_message.emit("Execution force killed")
+                    else:
+                        logger.warning("🛑 Failed to force kill workers")
+                        self.status_message.emit("Failed to force kill execution")
                 else:
-                    logger.warning("🛑 Failed to kill workers")
-                    self.status_message.emit("Failed to cancel execution")
+                    # Graceful shutdown - use graceful=True, then change button to "Force Kill"
+                    logger.info(f"🛑 Gracefully killing workers (port {self.zmq_client.port})")
 
-                # Disconnect client
+                    def _kill_workers():
+                        from openhcs.runtime.zmq_base import ZMQClient
+                        return ZMQClient.kill_server_on_port(self.zmq_client.port, graceful=True)
+
+                    success = await loop.run_in_executor(None, _kill_workers)
+
+                    if success:
+                        logger.info("🛑 Workers killed successfully, server still alive")
+                        self.status_message.emit("Execution cancelled - workers killed")
+                    else:
+                        logger.warning("🛑 Failed to kill workers")
+                        self.status_message.emit("Failed to cancel execution")
+
+                    # Change button to "Force Kill" and keep it enabled
+                    self.execution_state = "force_kill_ready"
+                    self.update_button_states()
+                    return  # Don't reset state yet - allow force kill
+
+                # Disconnect client (only on force kill or after graceful success)
                 def _disconnect():
                     self.zmq_client.disconnect()
 
@@ -1219,6 +1238,9 @@ class PlateManagerWidget(QWidget):
                 logger.error(f"🛑 Error cancelling ZMQ execution: {e}")
                 # Use signal for thread-safe error reporting from async context
                 self.execution_error.emit(f"Failed to cancel execution: {e}")
+                # Reset state on error
+                self.execution_state = "idle"
+                self.update_button_states()
 
         elif self.current_process and self.current_process.poll() is None:  # Still running subprocess
             try:
@@ -1674,6 +1696,10 @@ class PlateManagerWidget(QWidget):
             # Stopping state - keep button as "Stop" but disable it
             self.buttons["run_plate"].setEnabled(False)
             self.buttons["run_plate"].setText("Stop")
+        elif self.execution_state == "force_kill_ready":
+            # Force kill ready state - button is "Force Kill" and enabled
+            self.buttons["run_plate"].setEnabled(True)
+            self.buttons["run_plate"].setText("Force Kill")
         elif is_running:
             # Running state - button is "Stop" and enabled
             self.buttons["run_plate"].setEnabled(True)
