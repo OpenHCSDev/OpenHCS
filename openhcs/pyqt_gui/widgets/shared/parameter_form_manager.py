@@ -278,6 +278,7 @@ class ParameterFormManager(QWidget):
             self._block_cross_window_updates = False
 
             # SHARED RESET STATE: Track reset fields across all nested managers within this form
+            # ANTI-DUCK-TYPING: Parent is always ParameterFormManager or has shared_reset_fields
             if hasattr(parent, 'shared_reset_fields'):
                 # Nested manager: use parent's shared reset state
                 self.shared_reset_fields = parent.shared_reset_fields
@@ -567,7 +568,8 @@ class ParameterFormManager(QWidget):
         from openhcs.utils.performance_monitor import timer
 
         # OPTIMIZATION: Skip expensive operations for nested configs
-        is_nested = hasattr(self, '_parent_manager')
+        # ANTI-DUCK-TYPING: _parent_manager always exists (set in __init__)
+        is_nested = self._parent_manager is not None
 
         with timer("    Layout setup", threshold_ms=1.0):
             layout = QVBoxLayout(self)
@@ -656,8 +658,8 @@ class ParameterFormManager(QWidget):
                         root_manager = self._parent_manager
                         while root_manager._parent_manager is not None:
                             root_manager = root_manager._parent_manager
-                        if hasattr(root_manager, '_on_nested_manager_complete'):
-                            root_manager._on_nested_manager_complete(self)
+                        # ANTI-DUCK-TYPING: root_manager always has this method
+                        root_manager._on_nested_manager_complete(self)
                     else:
                         # Root manager - check if all nested managers are done
                         if len(self._pending_nested_managers) == 0:
@@ -1037,9 +1039,9 @@ class ParameterFormManager(QWidget):
                 # CRITICAL: Trigger the nested config's enabled handler to apply enabled styling
                 # This ensures that when toggling from None to Instance, the enabled styling is applied
                 # based on the instance's enabled field value
-                if hasattr(nested_manager, '_apply_initial_enabled_styling'):
-                    from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(0, nested_manager._apply_initial_enabled_styling)
+                # ANTI-DUCK-TYPING: nested_manager always has this method
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, nested_manager._apply_initial_enabled_styling)
             else:
                 # Config is None - set to None and block inputs
                 self.update_parameter(param_info.name, None)
@@ -1154,7 +1156,8 @@ class ParameterFormManager(QWidget):
                 root_manager = root_manager._parent_manager
 
             # Register with root if it's tracking and this will use async (centralized logic)
-            if self.should_use_async(param_count) and hasattr(root_manager, '_pending_nested_managers'):
+            # ANTI-DUCK-TYPING: root_manager always has _pending_nested_managers
+            if self.should_use_async(param_count):
                 # Use a unique key that includes the full path to avoid duplicates
                 unique_key = f"{self.field_id}.{param_name}"
                 root_manager._pending_nested_managers[unique_key] = nested_manager
@@ -1233,9 +1236,8 @@ class ParameterFormManager(QWidget):
         elif isinstance(widget, QTextEdit):
             widget.clear()
         else:
-            # For custom widgets, try to call clear() if available
-            if hasattr(widget, 'clear'):
-                widget.clear()
+            # ANTI-DUCK-TYPING: All widgets should have clear() - fail loud if not
+            widget.clear()
 
     def _update_combo_box(self, widget: QComboBox, value: Any) -> None:
         """Update combo box with value matching."""
@@ -1243,8 +1245,12 @@ class ParameterFormManager(QWidget):
                              next((i for i in range(widget.count()) if widget.itemData(i) == value), -1))
 
     def _update_checkbox_group(self, widget: QWidget, value: Any) -> None:
-        """Update checkbox group using functional operations."""
-        if hasattr(widget, '_checkboxes') and isinstance(value, list):
+        """
+        Update checkbox group using functional operations.
+
+        ANTI-DUCK-TYPING: Widget must have _checkboxes attribute - fail loud if not.
+        """
+        if isinstance(value, list):
             # Functional: reset all, then set selected
             [cb.setChecked(False) for cb in widget._checkboxes.values()]
             [widget._checkboxes[v].setChecked(True) for v in value if v in widget._checkboxes]
@@ -1382,8 +1388,9 @@ class ParameterFormManager(QWidget):
         """Internal reset implementation."""
 
         # Function parameters reset to static defaults from param_defaults
+        # ANTI-DUCK-TYPING: param_defaults always exists (set in __init__)
         if self._is_function_parameter(param_name):
-            reset_value = self.param_defaults.get(param_name) if hasattr(self, 'param_defaults') else None
+            reset_value = self.param_defaults.get(param_name)
             self.parameters[param_name] = reset_value
 
             if param_name in self.widgets:
@@ -1416,8 +1423,9 @@ class ParameterFormManager(QWidget):
                         checkbox.blockSignals(False)
 
                 # Reset nested manager contents too
+                # ANTI-DUCK-TYPING: nested_manager always has reset_all_parameters
                 nested_manager = self.nested_managers.get(param_name)
-                if nested_manager and hasattr(nested_manager, 'reset_all_parameters'):
+                if nested_manager:
                     nested_manager.reset_all_parameters()
 
                 # Enable/disable the nested group visually without relying on signals
@@ -1436,8 +1444,9 @@ class ParameterFormManager(QWidget):
             # If this is a direct dataclass field (non-optional), do NOT replace the instance.
             # Instead, keep the container value and recursively reset the nested manager.
             if param_type and _dc.is_dataclass(param_type):
+                # ANTI-DUCK-TYPING: nested_manager always has reset_all_parameters
                 nested_manager = self.nested_managers.get(param_name)
-                if nested_manager and hasattr(nested_manager, 'reset_all_parameters'):
+                if nested_manager:
                     nested_manager.reset_all_parameters()
                 # Do not modify self.parameters[param_name] (keep current dataclass instance)
                 # Refresh placeholder on the group container if it has a widget
@@ -1555,7 +1564,9 @@ class ParameterFormManager(QWidget):
 
         For nested dataclasses, only include them if they have user-modified fields inside.
         """
-        if not hasattr(self.config, '_resolve_field_value'):
+        # ANTI-DUCK-TYPING: Use isinstance check instead of hasattr
+        from openhcs.config_framework.lazy_dataclass import LazyDataclass
+        if not isinstance(self.config, LazyDataclass):
             # For non-lazy dataclasses, return all current values
             return self.get_current_values()
 
@@ -1739,11 +1750,10 @@ class ParameterFormManager(QWidget):
         # This allows live placeholder updates when sibling fields change
         # ONLY enable this AFTER initial form load to avoid polluting placeholders with initial widget values
         # SKIP if skip_parent_overlay=True (used during reset to prevent re-introducing old values)
-        parent_manager = getattr(self, '_parent_manager', None)
+        # ANTI-DUCK-TYPING: _parent_manager always exists, parent_manager always has these attributes
+        parent_manager = self._parent_manager
         if (not skip_parent_overlay and
             parent_manager and
-            hasattr(parent_manager, 'get_user_modified_values') and
-            hasattr(parent_manager, 'dataclass_type') and
             parent_manager._initial_load_complete):  # Check PARENT's initial load flag
 
             # Get only user-modified values from parent (not all values)
@@ -1756,8 +1766,9 @@ class ParameterFormManager(QWidget):
                 # Example: When resetting well_filter in StepMaterializationConfig, don't include
                 # step_materialization_config from parent's user-modified values
                 # CRITICAL FIX: Also exclude params from parent's exclude_params list (e.g., 'func' for FunctionStep)
+                # ANTI-DUCK-TYPING: parent_manager always has exclude_params
                 excluded_keys = {self.field_id}
-                if hasattr(parent_manager, 'exclude_params') and parent_manager.exclude_params:
+                if parent_manager.exclude_params:
                     excluded_keys.update(parent_manager.exclude_params)
 
                 filtered_parent_values = {k: v for k, v in parent_user_values.items() if k not in excluded_keys}
@@ -1772,8 +1783,9 @@ class ParameterFormManager(QWidget):
 
                     # CRITICAL FIX: Add excluded params from parent's object_instance
                     # This allows instantiating parent_type even when some params are excluded from the form
+                    # ANTI-DUCK-TYPING: parent_manager always has exclude_params
                     parent_values_with_excluded = filtered_parent_values.copy()
-                    if hasattr(parent_manager, 'exclude_params') and parent_manager.exclude_params:
+                    if parent_manager.exclude_params:
                         for excluded_param in parent_manager.exclude_params:
                             if excluded_param not in parent_values_with_excluded and hasattr(parent_manager.object_instance, excluded_param):
                                 parent_values_with_excluded[excluded_param] = getattr(parent_manager.object_instance, excluded_param)
@@ -1871,8 +1883,9 @@ class ParameterFormManager(QWidget):
             logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, no enabled widget found")
             return
 
-        # Get resolved value from widget
-        if hasattr(enabled_widget, 'isChecked'):
+        # ANTI-DUCK-TYPING: enabled widget is always QCheckBox, no hasattr needed
+        from PyQt6.QtWidgets import QCheckBox
+        if isinstance(enabled_widget, QCheckBox):
             resolved_value = enabled_widget.isChecked()
             logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, resolved_value={resolved_value} (from checkbox)")
         else:
@@ -1899,7 +1912,9 @@ class ParameterFormManager(QWidget):
         while current is not None:
             if 'enabled' in current.parameters:
                 enabled_widget = current.widgets.get('enabled')
-                if enabled_widget and hasattr(enabled_widget, 'isChecked'):
+                # ANTI-DUCK-TYPING: enabled widget is always QCheckBox
+                from PyQt6.QtWidgets import QCheckBox
+                if enabled_widget and isinstance(enabled_widget, QCheckBox):
                     if not enabled_widget.isChecked():
                         return True
             current = current._parent_manager
@@ -1938,7 +1953,9 @@ class ParameterFormManager(QWidget):
         if 'enabled' in self.parameters:
             # Get the enabled widget to read the CURRENT resolved value
             enabled_widget = self.widgets.get('enabled')
-            if enabled_widget and hasattr(enabled_widget, 'isChecked'):
+            # ANTI-DUCK-TYPING: enabled widget is always QCheckBox
+            from PyQt6.QtWidgets import QCheckBox
+            if enabled_widget and isinstance(enabled_widget, QCheckBox):
                 # Use the checkbox's current state (which reflects resolved placeholder)
                 resolved_value = enabled_widget.isChecked()
             else:
@@ -1977,7 +1994,9 @@ class ParameterFormManager(QWidget):
         if value is None:
             # Lazy field - get the resolved placeholder value from the widget
             enabled_widget = self.widgets.get('enabled')
-            if enabled_widget and hasattr(enabled_widget, 'isChecked'):
+            # ANTI-DUCK-TYPING: enabled widget is always QCheckBox
+            from PyQt6.QtWidgets import QCheckBox
+            if enabled_widget and isinstance(enabled_widget, QCheckBox):
                 resolved_value = enabled_widget.isChecked()
             else:
                 # Fallback: assume True if we can't resolve
@@ -2267,10 +2286,13 @@ class ParameterFormManager(QWidget):
             nested_manager._apply_all_post_placeholder_callbacks()
 
     def _on_nested_manager_complete(self, nested_manager) -> None:
-        """Called by nested managers when they complete async widget creation."""
-        if hasattr(self, '_pending_nested_managers'):
-            # Find and remove this manager from pending dict
-            key_to_remove = None
+        """
+        Called by nested managers when they complete async widget creation.
+
+        ANTI-DUCK-TYPING: _pending_nested_managers always exists (set in __init__).
+        """
+        # Find and remove this manager from pending dict
+        key_to_remove = None
             for key, manager in self._pending_nested_managers.items():
                 if manager is nested_manager:
                     key_to_remove = key
@@ -2301,17 +2323,20 @@ class ParameterFormManager(QWidget):
                     self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
 
     def _process_nested_values_if_checkbox_enabled(self, name: str, manager: Any, current_values: Dict[str, Any]) -> None:
-        """Process nested values if checkbox is enabled - convert dict back to dataclass."""
-        if not hasattr(manager, 'get_current_values'):
-            return
+        """
+        Process nested values if checkbox is enabled - convert dict back to dataclass.
+
+        ANTI-DUCK-TYPING: manager is always ParameterFormManager, always has get_current_values.
+        """
 
         # Check if this is an Optional dataclass with a checkbox
         param_type = self.parameter_types.get(name)
 
         if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
             # For Optional dataclasses, check if checkbox is enabled
+            # ANTI-DUCK-TYPING: All QWidgets have findChild
             checkbox_widget = self.widgets.get(name)
-            if checkbox_widget and hasattr(checkbox_widget, 'findChild'):
+            if checkbox_widget:
                 from PyQt6.QtWidgets import QCheckBox
                 checkbox = checkbox_widget.findChild(QCheckBox)
                 if checkbox and not checkbox.isChecked():
@@ -2328,7 +2353,9 @@ class ParameterFormManager(QWidget):
         nested_values = manager.get_current_values()
         if nested_values:
             # Convert dictionary back to dataclass instance
-            if param_type and hasattr(param_type, '__dataclass_fields__'):
+            # ANTI-DUCK-TYPING: Use is_dataclass() instead of hasattr
+            from dataclasses import is_dataclass
+            if param_type and is_dataclass(param_type):
                 # Direct dataclass type
                 current_values[name] = param_type(**nested_values)
             elif param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
