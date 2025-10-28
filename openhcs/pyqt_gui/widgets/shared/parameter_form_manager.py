@@ -14,25 +14,13 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 # Performance monitoring
 from openhcs.utils.performance_monitor import timer, get_monitor
 
-# SIMPLIFIED: Removed thread-local imports - dual-axis resolver handles context automatically
-# Mathematical simplification: Shared dispatch tables to eliminate duplication
-WIDGET_UPDATE_DISPATCH = [
-    (QComboBox, 'update_combo_box'),
-    ('get_selected_values', 'update_checkbox_group'),
-    ('set_value', lambda w, v: w.set_value(v)),  # Handles NoneAwareCheckBox, NoneAwareIntEdit, etc.
-    ('setValue', lambda w, v: w.setValue(v if v is not None else w.minimum())),  # CRITICAL FIX: Set to minimum for None values to enable placeholder
-    ('setText', lambda w, v: v is not None and w.setText(str(v)) or (v is None and w.clear())),  # CRITICAL FIX: Handle None values by clearing
-    ('set_path', lambda w, v: w.set_path(v)),  # EnhancedPathWidget support
-]
+# ANTI-DUCK-TYPING: Import ABC-based widget system
+# Replaces WIDGET_UPDATE_DISPATCH and WIDGET_GET_DISPATCH tables
+from openhcs.ui.shared.widget_operations import WidgetOperations
+from openhcs.ui.shared.widget_factory import WidgetFactory
 
-WIDGET_GET_DISPATCH = [
-    (QComboBox, lambda w: w.itemData(w.currentIndex()) if w.currentIndex() >= 0 else None),
-    ('get_selected_values', lambda w: w.get_selected_values()),
-    ('get_value', lambda w: w.get_value()),  # Handles NoneAwareCheckBox, NoneAwareIntEdit, etc.
-    ('value', lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
-    ('get_path', lambda w: w.get_path()),  # EnhancedPathWidget support
-    ('text', lambda w: w.text())
-]
+# DELETED: WIDGET_UPDATE_DISPATCH - replaced with WidgetOperations.set_value()
+# DELETED: WIDGET_GET_DISPATCH - replaced with WidgetOperations.get_value()
 
 logger = logging.getLogger(__name__)
 
@@ -48,18 +36,16 @@ from .clickable_help_components import GroupBoxWithHelp, LabelWithHelp
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from .layout_constants import CURRENT_LAYOUT
 
-# SINGLE SOURCE OF TRUTH: All input widget types that can receive styling (dimming, etc.)
-# This includes all widgets created by the widget creation registry
+# ANTI-DUCK-TYPING: Removed ALL_INPUT_WIDGET_TYPES tuple
+# Widget discovery now uses ABC-based WidgetOperations.get_all_value_widgets()
+# which automatically finds all widgets implementing ValueGettable ABC
+
+# Keep Qt imports for backward compatibility with existing code
 from PyQt6.QtWidgets import QLineEdit, QComboBox, QPushButton, QCheckBox, QLabel, QSpinBox, QDoubleSpinBox
 from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
 from openhcs.pyqt_gui.widgets.enhanced_path_widget import EnhancedPathWidget
 
-# Tuple of all input widget types for findChildren() calls
-ALL_INPUT_WIDGET_TYPES = (
-    QLineEdit, QComboBox, QPushButton, QCheckBox, QLabel,
-    QSpinBox, QDoubleSpinBox, NoScrollSpinBox, NoScrollDoubleSpinBox,
-    NoScrollComboBox, EnhancedPathWidget
-)
+# DELETED: ALL_INPUT_WIDGET_TYPES - replaced with WidgetOperations.get_all_value_widgets()
 
 # Import OpenHCS core components
 # Old field path detection removed - using simple field name matching
@@ -309,6 +295,10 @@ class ParameterFormManager(QWidget):
 
             # Get widget creator from registry
             self._widget_creator = create_pyqt6_registry()
+
+            # ANTI-DUCK-TYPING: Initialize ABC-based widget operations
+            self._widget_ops = WidgetOperations()
+            self._widget_factory = WidgetFactory()
 
             # Context system handles updates automatically
             self._context_event_coordinator = None
@@ -1058,7 +1048,8 @@ class ParameterFormManager(QWidget):
                 title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_disabled)};")
                 help_btn.setEnabled(True)
                 from PyQt6.QtWidgets import QGraphicsOpacityEffect
-                for widget in nested_form.findChildren(ALL_INPUT_WIDGET_TYPES):
+                # ANTI-DUCK-TYPING: Use ABC-based widget discovery
+                for widget in self._widget_ops.get_all_value_widgets(nested_form):
                     effect = QGraphicsOpacityEffect()
                     effect.setOpacity(0.4)
                     widget.setGraphicsEffect(effect)
@@ -1218,14 +1209,14 @@ class ParameterFormManager(QWidget):
             self._apply_context_behavior(widget, value, param_name, exclude_field)
 
     def _dispatch_widget_update(self, widget: QWidget, value: Any) -> None:
-        """Algebraic simplification: Single dispatch logic for all widget updates."""
-        for matcher, updater in WIDGET_UPDATE_DISPATCH:
-            if isinstance(widget, matcher) if isinstance(matcher, type) else hasattr(widget, matcher):
-                if isinstance(updater, str):
-                    getattr(self, f'_{updater}')(widget, value)
-                else:
-                    updater(widget, value)
-                return
+        """
+        SIMPLIFIED: ABC-based widget update (no duck typing).
+
+        BEFORE: Duck typing dispatch table with hasattr checks
+        AFTER: Direct ABC-based call - fails loud if widget doesn't implement ValueSettable
+        """
+        # Use ABC-based widget operations
+        self._widget_ops.set_value(widget, value)
 
     def _clear_widget_to_default_state(self, widget: QWidget) -> None:
         """Clear widget to its default/empty state for reset operations."""
@@ -1286,16 +1277,19 @@ class ParameterFormManager(QWidget):
 
 
     def get_widget_value(self, widget: QWidget) -> Any:
-        """Mathematical simplification: Unified widget value extraction using shared dispatch."""
+        """
+        SIMPLIFIED: ABC-based widget value extraction (no duck typing).
+
+        BEFORE: Duck typing dispatch table with hasattr checks
+        AFTER: Direct ABC-based call - fails loud if widget doesn't implement ValueGettable
+        """
         # CRITICAL: Check if widget is in placeholder state first
         # If it's showing a placeholder, the actual parameter value is None
         if widget.property("is_placeholder_state"):
             return None
 
-        for matcher, extractor in WIDGET_GET_DISPATCH:
-            if isinstance(widget, matcher) if isinstance(matcher, type) else hasattr(widget, matcher):
-                return extractor(widget)
-        return None
+        # Use ABC-based widget operations
+        return self._widget_ops.get_value(widget)
 
     # Framework-specific methods for backward compatibility
 
@@ -2000,7 +1994,8 @@ class ParameterFormManager(QWidget):
         def get_direct_widgets(parent_widget):
             """Get widgets that belong to this form, excluding nested ParameterFormManager widgets."""
             direct_widgets = []
-            all_widgets = parent_widget.findChildren(ALL_INPUT_WIDGET_TYPES)
+            # ANTI-DUCK-TYPING: Use ABC-based widget discovery
+            all_widgets = self._widget_ops.get_all_value_widgets(parent_widget)
             logger.info(f"[GET_DIRECT_WIDGETS] field_id={self.field_id}, total widgets found: {len(all_widgets)}, nested_managers: {list(self.nested_managers.keys())}")
 
             for widget in all_widgets:
@@ -2055,19 +2050,22 @@ class ParameterFormManager(QWidget):
                     # Enabled=True AND no ancestor is disabled: Remove dimming from GroupBox
                     logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, removing dimming from GroupBox")
                     # Clear effects from all widgets in the GroupBox
-                    for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
+                    # ANTI-DUCK-TYPING: Use ABC-based widget discovery
+                    for widget in self._widget_ops.get_all_value_widgets(group_box):
                         widget.setGraphicsEffect(None)
                 elif ancestor_is_disabled:
                     # Ancestor is disabled - keep dimming regardless of child's enabled value
                     logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, keeping dimming (ancestor disabled)")
-                    for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
+                    # ANTI-DUCK-TYPING: Use ABC-based widget discovery
+                    for widget in self._widget_ops.get_all_value_widgets(group_box):
                         effect = QGraphicsOpacityEffect()
                         effect.setOpacity(0.4)
                         widget.setGraphicsEffect(effect)
                 else:
                     # Enabled=False: Apply dimming to GroupBox widgets
                     logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying dimming to GroupBox")
-                    for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
+                    # ANTI-DUCK-TYPING: Use ABC-based widget discovery
+                    for widget in self._widget_ops.get_all_value_widgets(group_box):
                         effect = QGraphicsOpacityEffect()
                         effect.setOpacity(0.4)
                         widget.setGraphicsEffect(effect)
@@ -2112,7 +2110,8 @@ class ParameterFormManager(QWidget):
                         if not group_box:
                             logger.info(f"[ENABLED HANDLER] ⚠️ Still no group_box found, skipping")
                             continue
-                    widgets_to_dim = group_box.findChildren(ALL_INPUT_WIDGET_TYPES)
+                    # ANTI-DUCK-TYPING: Use ABC-based widget discovery
+                    widgets_to_dim = self._widget_ops.get_all_value_widgets(group_box)
                     logger.info(f"[ENABLED HANDLER] Applying dimming to nested config {param_name}, found {len(widgets_to_dim)} widgets")
                     for widget in widgets_to_dim:
                         effect = QGraphicsOpacityEffect()
