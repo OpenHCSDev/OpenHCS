@@ -340,8 +340,10 @@ class ZMQServerManagerWidget(QWidget):
         """
         import zmq
         import pickle
+        from openhcs.constants.constants import CONTROL_PORT_OFFSET
+        from openhcs.runtime.zmq_base import get_zmq_transport_url, get_default_transport_mode
 
-        control_port = port + 1000
+        control_port = port + CONTROL_PORT_OFFSET
         control_context = None
         control_socket = None
 
@@ -350,7 +352,11 @@ class ZMQServerManagerWidget(QWidget):
             control_socket = control_context.socket(zmq.REQ)
             control_socket.setsockopt(zmq.LINGER, 0)
             control_socket.setsockopt(zmq.RCVTIMEO, 300)  # 300ms timeout for fast scanning
-            control_socket.connect(f"tcp://localhost:{control_port}")
+
+            # Use transport mode-aware URL (IPC or TCP)
+            transport_mode = get_default_transport_mode()
+            control_url = get_zmq_transport_url(control_port, transport_mode, 'localhost')
+            control_socket.connect(control_url)
 
             # Send ping
             ping_message = {'type': 'ping'}
@@ -691,9 +697,10 @@ class ZMQServerManagerWidget(QWidget):
                     logger.info(f"🔥 FORCE KILL: Killing processes on port {port} (nuclear option - no ZMQ, direct process kill)")
                     # Force kill: Skip ZMQ entirely, go straight to process killing
                     # This is the nuclear option - it ALWAYS works
+                    from openhcs.constants.constants import CONTROL_PORT_OFFSET
                     killed = ZMQServer.kill_processes_on_port(port)
-                    # Also try port+1000 (data port for execution servers)
-                    killed += ZMQServer.kill_processes_on_port(port + 1000)
+                    # Also try control port (port + CONTROL_PORT_OFFSET)
+                    killed += ZMQServer.kill_processes_on_port(port + CONTROL_PORT_OFFSET)
 
                     if killed > 0:
                         logger.info(f"✅ Force killed {killed} process(es) on port {port}")
