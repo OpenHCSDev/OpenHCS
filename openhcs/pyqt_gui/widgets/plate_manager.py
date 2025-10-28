@@ -1100,6 +1100,9 @@ class PlateManagerWidget(QWidget):
             self.current_execution_id = None
 
             # Update orchestrator states
+            # Note: orchestrator_state_changed signal triggers on_orchestrator_state_changed()
+            # which calls update_plate_list(), so we don't need to call update_button_states() here
+            # (calling it here causes recursive repaint and crashes)
             for plate in ready_items:
                 plate_path = plate['path']
                 if plate_path in self.orchestrators:
@@ -1109,8 +1112,6 @@ class PlateManagerWidget(QWidget):
                     else:
                         self.orchestrators[plate_path]._state = OrchestratorState.READY
                         self.orchestrator_state_changed.emit(plate_path, OrchestratorState.READY.value)
-
-            self.update_button_states()
 
         except Exception as e:
             logger.error(f"Error handling execution completion: {e}", exc_info=True)
