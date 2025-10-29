@@ -558,37 +558,21 @@ class OpenHCSMetadataGenerator:
         """
         Extract component metadata by parsing actual filenames.
 
-        This method parses each file in the output directory to determine which components
-        (channels, wells, sites, z_indexes, timepoints) actually exist in the output.
-
-        CRITICAL: file_paths are guaranteed to be image files (filtered by list_image_files).
-        Parser.parse_filename() is guaranteed to work on valid image filenames.
-        No defensive exception handling - architectural contract is respected.
+        Filenames are architecturally guaranteed to be properly formed by the pipeline.
+        Parser.parse_filename() is guaranteed to succeed. No defensive checks.
 
         Args:
-            file_paths: List of image file paths (guaranteed by list_image_files filtering)
-            parser: FilenameParser instance for parsing filenames
+            file_paths: List of image file paths (guaranteed properly formed)
+            parser: FilenameParser instance
 
         Returns:
             Dict mapping AllComponents to component metadata dicts (key -> display_name)
-            Example: {AllComponents.CHANNEL: {"1": None, "2": None}, ...}
         """
-        # Initialize result dict with empty dicts for each component
         result = {component: {} for component in AllComponents}
 
-        if not file_paths:
-            self.logger.debug("No files to extract metadata from")
-            return result
-
-        # Parse each filename to extract component values
-        # CRITICAL: All files are guaranteed to be image files by list_image_files filtering
         for file_path in file_paths:
             filename = Path(file_path).name
             parsed = parser.parse_filename(filename)
-
-            # If parser returns None, skip this file (parser decides what's valid)
-            if parsed is None:
-                continue
 
             # Extract each component from the parsed filename
             for component in AllComponents:
@@ -600,11 +584,7 @@ class OpenHCSMetadataGenerator:
                         result[component][component_value] = None
 
         # Convert empty dicts to None (no metadata for that component)
-        final_result = {}
-        for component, metadata_dict in result.items():
-            final_result[component] = metadata_dict if metadata_dict else None
-
-        return final_result
+        return {component: metadata_dict if metadata_dict else None for component, metadata_dict in result.items()}
 
 
 
