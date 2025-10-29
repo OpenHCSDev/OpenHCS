@@ -486,11 +486,17 @@ class ParameterFormManager(QWidget):
 
         return content_widget
 
-    def _create_widget_for_param(self, param_info):
+    def _create_widget_for_param(self, param_info: Any) -> Any:
         """
         Create widget for a single parameter based on its type.
 
         Uses parametric dispatch for all widget types (REGULAR, NESTED, OPTIONAL_NESTED).
+
+        Args:
+            param_info: Parameter information (OptionalDataclassInfo, DirectDataclassInfo, or GenericInfo)
+
+        Returns:
+            QWidget: The created widget
         """
         from openhcs.pyqt_gui.widgets.shared.widget_creation_config import (
             create_widget_parametric,

@@ -7,7 +7,7 @@ Mirrors openhcs/core/memory/framework_config.py pattern.
 Architecture:
 - Widget handlers: Custom logic for complex operations
 - Unified config: Single _WIDGET_CREATION_CONFIG dict with all metadata
-- Parametric dispatch: Handlers can be callables or eval expressions
+- Parametric dispatch: Handlers are typed callables (no eval strings)
 
 All three widget types (REGULAR, NESTED, OPTIONAL_NESTED) are now parametrized.
 OPTIONAL_NESTED reuses the same nested form creation logic as NESTED, with additional
@@ -17,6 +17,11 @@ handlers for checkbox title widget and None/instance toggle logic.
 from enum import Enum
 from typing import Any, Callable, Optional, Type, Tuple
 import logging
+
+from .widget_creation_types import (
+    ParameterFormManagerProtocol, ParameterInfoProtocol, DisplayInfo, FieldIds,
+    WidgetCreationConfig
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,159 +195,128 @@ def _connect_optional_checkbox_logic(manager, param_info, checkbox, nested_form,
     manager._on_build_complete_callbacks.append(apply_initial_styling)
 
 
-def _setup_regular_layout(manager, param_info, display_info, field_ids, current_value, unwrapped_type, layout, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme):
+def _create_regular_container(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+                             display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
+                             unwrapped_type: Optional[Type], layout=None, CURRENT_LAYOUT=None,
+                             QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> Any:
+    """Create container for REGULAR widget type."""
+    from PyQt6.QtWidgets import QWidget as QtWidget
+    return QtWidget()
+
+
+def _create_nested_container(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+                            display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
+                            unwrapped_type: Optional[Type], layout=None, CURRENT_LAYOUT=None,
+                            QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> Any:
+    """Create container for NESTED widget type."""
+    from openhcs.pyqt_gui.widgets.shared.clickable_help_components import GroupBoxWithHelp as GBH
+    from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme as PCS
+
+    color_scheme = manager.config.color_scheme or PCS()
+    return GBH(title=display_info['field_label'], help_target=unwrapped_type, color_scheme=color_scheme)
+
+
+def _create_optional_nested_container(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+                                     display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
+                                     unwrapped_type: Optional[Type], layout=None, CURRENT_LAYOUT=None,
+                                     QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> Any:
+    """Create container for OPTIONAL_NESTED widget type."""
+    from PyQt6.QtWidgets import QGroupBox
+    return QGroupBox()
+
+
+def _setup_regular_layout(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+                         display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
+                         unwrapped_type: Optional[Type], layout=None, CURRENT_LAYOUT=None,
+                         QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> None:
     """Setup layout for REGULAR widget type."""
     layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
     layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
 
 
-def _setup_optional_nested_layout(manager, param_info, display_info, field_ids, current_value, unwrapped_type, container, QVBoxLayout):
+def _setup_optional_nested_layout(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+                                 display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
+                                 unwrapped_type: Optional[Type], container=None, QVBoxLayout=None,
+                                 QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> None:
     """Setup layout for OPTIONAL_NESTED widget type."""
-    container.setLayout(QVBoxLayout())
+    from PyQt6.QtWidgets import QVBoxLayout as QVL
+    container.setLayout(QVL())
     container.layout().setSpacing(0)
     container.layout().setContentsMargins(0, 0, 0, 0)
 
 
 # ============================================================================
-# UNIFIED WIDGET CREATION CONFIGURATION (like _FRAMEWORK_CONFIG)
+# UNIFIED WIDGET CREATION CONFIGURATION (typed, no eval strings)
 # ============================================================================
 
-_WIDGET_CREATION_CONFIG = {
-    WidgetCreationType.REGULAR: {
-        # Metadata
-        'layout_type': 'QHBoxLayout',
-        'is_nested': False,
+_WIDGET_CREATION_CONFIG: dict[WidgetCreationType, WidgetCreationConfig] = {
+    WidgetCreationType.REGULAR: WidgetCreationConfig(
+        layout_type='QHBoxLayout',
+        is_nested=False,
+        create_container=_create_regular_container,
+        setup_layout=_setup_regular_layout,
+        create_main_widget=lambda manager, param_info, display_info, field_ids, current_value, unwrapped_type, *args, **kwargs:
+            manager.create_widget(param_info.name, param_info.type, current_value, field_ids['widget_id']),
+        needs_label=True,
+        needs_reset_button=True,
+        needs_unwrap_type=False,
+    ),
 
-        # Widget creation operations (eval expressions or callables)
-        'create_container': 'QWidget()',
-        'setup_layout': _setup_regular_layout,
-        'create_main_widget': 'manager.create_widget(param_info.name, param_info.type, current_value, field_ids["widget_id"])',
+    WidgetCreationType.NESTED: WidgetCreationConfig(
+        layout_type='GroupBoxWithHelp',
+        is_nested=True,
+        create_container=_create_nested_container,
+        setup_layout=None,
+        create_main_widget=_create_nested_form,
+        needs_label=False,
+        needs_reset_button=True,
+        needs_unwrap_type=True,
+        is_optional=False,
+    ),
 
-        # Feature flags
-        'needs_label': True,
-        'needs_reset_button': True,
-        'needs_unwrap_type': False,
-    },
-
-    WidgetCreationType.NESTED: {
-        # Metadata
-        'layout_type': 'GroupBoxWithHelp',
-        'is_nested': True,
-
-        # Widget creation operations
-        'create_container': 'GroupBoxWithHelp(title=display_info["field_label"], help_target=unwrapped_type, color_scheme=manager.config.color_scheme or PyQt6ColorScheme())',
-        'setup_layout': None,  # GroupBox handles its own layout
-        'create_main_widget': _create_nested_form,  # Callable handler
-
-        # Feature flags
-        'needs_label': False,
-        'needs_reset_button': True,  # "Reset All" button in GroupBox title
-        'needs_unwrap_type': True,
-        'is_optional': False,
-    },
-
-    WidgetCreationType.OPTIONAL_NESTED: {
-        # Metadata
-        'layout_type': 'QGroupBox',  # Plain GroupBox with custom title widget
-        'is_nested': True,
-        'is_optional': True,
-
-        # Widget creation operations
-        'create_container': 'QGroupBox()',
-        'setup_layout': _setup_optional_nested_layout,
-        'create_title_widget': _create_optional_title_widget,  # Callable handler
-        'create_main_widget': _create_nested_form,  # REUSE from NESTED!
-        'connect_checkbox_logic': _connect_optional_checkbox_logic,  # Callable handler
-
-        # Feature flags
-        'needs_label': False,
-        'needs_reset_button': True,  # Reset button in custom title widget
-        'needs_unwrap_type': True,
-        'needs_checkbox': True,
-    },
+    WidgetCreationType.OPTIONAL_NESTED: WidgetCreationConfig(
+        layout_type='QGroupBox',
+        is_nested=True,
+        create_container=_create_optional_nested_container,
+        setup_layout=_setup_optional_nested_layout,
+        create_main_widget=_create_nested_form,
+        needs_label=False,
+        needs_reset_button=True,
+        needs_unwrap_type=True,
+        is_optional=True,
+        needs_checkbox=True,
+        create_title_widget=_create_optional_title_widget,
+        connect_checkbox_logic=_connect_optional_checkbox_logic,
+    ),
 }
 
 
 # ============================================================================
-# AUTO-GENERATE WIDGET OPERATIONS FROM CONFIG
+# WIDGET OPERATIONS - Direct access to typed config (no eval)
 # ============================================================================
 
-def _make_widget_operation(expr_str: str, creation_type: WidgetCreationType):
-    """
-    Create operation from expression string (like _make_lambda_with_name).
-
-    Converts eval expressions to lambdas with proper context.
-    """
-    if expr_str is None:
-        return None
-    # Build a lambda-like callable with the expected parameter list. Some
-    # expressions in the config use multiple statements separated by
-    # semicolons (e.g. "a(); b()"), which is invalid inside a Python
-    # lambda. First try to eval a single-expression lambda; if that
-    # raises SyntaxError, convert the expression into a proper def and
-    # exec it to obtain a real function supporting multiple statements.
-
-    import re
-
-    params = (
-        'manager, param_info, display_info, field_ids, '
-        'current_value, unwrapped_type, layout, CURRENT_LAYOUT, '
-        'QWidget, GroupBoxWithHelp, PyQt6ColorScheme'
-    )
-
-    lambda_expr = f'lambda {params}: {expr_str}'
-
-    try:
-        operation = eval(lambda_expr)
-    except SyntaxError:
-        # Convert 'lambda params: body' into a def with the same params
-        m = re.match(r"lambda\s*(.*?)\s*:\s*(.*)", lambda_expr, re.S)
-        if not m:
-            raise
-        params_str, body = m.groups()
-
-        # Build function source; split body on semicolons so multi-statement
-        # expressions become proper statements.
-        func_name = f'{creation_type.value}_operation'
-        func_lines = [f'def {func_name}({params_str}):']
-        for stmt in body.split(';'):
-            stmt = stmt.strip()
-            if not stmt:
-                continue
-            func_lines.append('    ' + stmt)
-
-        func_src = '\n'.join(func_lines)
-
-        # Exec in a temporary namespace and retrieve the created function.
-        ns: dict = {}
-        exec(func_src, globals(), ns)
-        operation = ns[func_name]
-
-    # Give the created callable a helpful name/qualname for debugging
-    operation.__name__ = f'{creation_type.value}_operation'
-    operation.__qualname__ = f'WidgetCreation.{creation_type.value}_operation'
-    return operation
-
-
-_WIDGET_OPERATIONS = {
-    creation_type: {
-        op_name: (
-            _make_widget_operation(expr, creation_type)
-            if isinstance(expr, str)
-            else expr  # Already a callable
-        )
-        for op_name, expr in config.items()
-        if op_name in ['create_container', 'setup_layout', 'create_main_widget', 'create_title_widget', 'connect_checkbox_logic']
+def _get_widget_operations(creation_type: WidgetCreationType) -> dict[str, Callable]:
+    """Get typed widget operations for a creation type."""
+    config = _WIDGET_CREATION_CONFIG[creation_type]
+    ops = {
+        'create_container': config.create_container,
+        'create_main_widget': config.create_main_widget,
     }
-    for creation_type, config in _WIDGET_CREATION_CONFIG.items()
-}
+    if config.setup_layout:
+        ops['setup_layout'] = config.setup_layout
+    if config.create_title_widget:
+        ops['create_title_widget'] = config.create_title_widget
+    if config.connect_checkbox_logic:
+        ops['connect_checkbox_logic'] = config.connect_checkbox_logic
+    return ops
 
 
 # ============================================================================
 # UNIFIED WIDGET CREATION FUNCTION
 # ============================================================================
 
-def create_widget_parametric(manager, param_info, creation_type: WidgetCreationType):
+def create_widget_parametric(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+                           creation_type: WidgetCreationType) -> Any:
     """
     UNIFIED: Create widget using parametric dispatch.
 
@@ -368,7 +342,7 @@ def create_widget_parametric(manager, param_info, creation_type: WidgetCreationT
 
     # Get config and operations for this type
     config = _WIDGET_CREATION_CONFIG[creation_type]
-    ops = _WIDGET_OPERATIONS[creation_type]
+    ops = _get_widget_operations(creation_type)
 
     # Prepare context
     display_info = manager.service.get_parameter_display_info(
@@ -503,18 +477,15 @@ def create_widget_parametric(manager, param_info, creation_type: WidgetCreationT
 # VALIDATION
 # ============================================================================
 
-def _validate_widget_operations():
+def _validate_widget_operations() -> None:
     """Validate that all widget creation types have required operations."""
-    required_ops = ['create_container', 'create_main_widget']
+    for creation_type, config in _WIDGET_CREATION_CONFIG.items():
+        if config.create_container is None:
+            raise RuntimeError(f"{creation_type.value}: create_container is required")
+        if config.create_main_widget is None:
+            raise RuntimeError(f"{creation_type.value}: create_main_widget is required")
 
-    for creation_type, ops in _WIDGET_OPERATIONS.items():
-        for op_name in required_ops:
-            if op_name not in ops or ops[op_name] is None:
-                raise RuntimeError(
-                    f"{creation_type.value} widget creation missing operation: {op_name}"
-                )
-
-    logger.debug(f"✅ Validated {len(_WIDGET_OPERATIONS)} widget creation types")
+    logger.debug(f"✅ Validated {len(_WIDGET_CREATION_CONFIG)} widget creation types")
 
 
 # Run validation at module load time
