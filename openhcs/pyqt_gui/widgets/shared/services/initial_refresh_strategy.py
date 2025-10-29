@@ -90,9 +90,11 @@ class InitialRefreshStrategy(EnumDispatchService[RefreshMode]):
         This ensures new windows immediately show live values from other open windows.
         """
         from openhcs.utils.performance_monitor import timer
+        from .placeholder_refresh_service import PlaceholderRefreshService
 
         with timer("  Initial live context refresh", threshold_ms=10.0):
-            manager._refresh_with_live_context()
+            service = PlaceholderRefreshService()
+            service.refresh_with_live_context(manager)
     
     @classmethod
     def execute(cls, manager: Any) -> None:
