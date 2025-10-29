@@ -229,6 +229,14 @@ class EnhancedPathWidget(QWidget):
         text = self.path_input.text().strip()
         return None if text == "" else text
 
+    def get_value(self):
+        """Implement ValueGettable ABC - alias for get_path()."""
+        return self.get_path()
+
+    def set_value(self, value: Any):
+        """Implement ValueSettable ABC - alias for set_path()."""
+        self.set_path(value)
+
     def _open_dialog(self):
         """Open appropriate Qt dialog based on behavior."""
         try:
@@ -267,3 +275,9 @@ class EnhancedPathWidget(QWidget):
 
         except Exception as e:
             logger.error(f"Failed to open dialog: {e}")
+
+
+# Register EnhancedPathWidget as implementing ValueGettable and ValueSettable
+from openhcs.ui.shared.widget_protocols import ValueGettable, ValueSettable
+ValueGettable.register(EnhancedPathWidget)
+ValueSettable.register(EnhancedPathWidget)

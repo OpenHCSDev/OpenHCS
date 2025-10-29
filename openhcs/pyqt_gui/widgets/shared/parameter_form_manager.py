@@ -90,6 +90,12 @@ class NoneAwareLineEdit(QLineEdit):
         self.setText("" if value is None else str(value))
 
 
+# Register NoneAwareLineEdit as implementing ValueGettable and ValueSettable
+from openhcs.ui.shared.widget_protocols import ValueGettable, ValueSettable
+ValueGettable.register(NoneAwareLineEdit)
+ValueSettable.register(NoneAwareLineEdit)
+
+
 # DELETED: _create_optimized_reset_button() - moved to widget_creation_config.py
 # See widget_creation_config.py: _create_optimized_reset_button()
 
@@ -139,6 +145,11 @@ class NoneAwareIntEdit(QLineEdit):
             self.setText("")
         else:
             self.setText(str(value))
+
+
+# Register NoneAwareIntEdit as implementing ValueGettable and ValueSettable
+ValueGettable.register(NoneAwareIntEdit)
+ValueSettable.register(NoneAwareIntEdit)
 
 
 class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_CombinedMeta):

@@ -166,3 +166,7 @@ class NoneAwareCheckBox(QCheckBox):
         painter.end()
 
 
+# Register NoneAwareCheckBox as implementing ValueGettable and ValueSettable
+from openhcs.ui.shared.widget_protocols import ValueGettable, ValueSettable
+ValueGettable.register(NoneAwareCheckBox)
+ValueSettable.register(NoneAwareCheckBox)
