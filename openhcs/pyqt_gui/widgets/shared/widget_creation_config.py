@@ -19,7 +19,7 @@ from typing import Any, Callable, Optional, Type, Tuple
 import logging
 
 from .widget_creation_types import (
-    ParameterFormManagerProtocol, ParameterInfoProtocol, DisplayInfo, FieldIds,
+    ParameterFormManager, ParameterInfo, DisplayInfo, FieldIds,
     WidgetCreationConfig
 )
 
@@ -195,7 +195,7 @@ def _connect_optional_checkbox_logic(manager, param_info, checkbox, nested_form,
     manager._on_build_complete_callbacks.append(apply_initial_styling)
 
 
-def _create_regular_container(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+def _create_regular_container(manager: ParameterFormManager, param_info: ParameterInfo,
                              display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
                              unwrapped_type: Optional[Type], layout=None, CURRENT_LAYOUT=None,
                              QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> Any:
@@ -204,7 +204,7 @@ def _create_regular_container(manager: ParameterFormManagerProtocol, param_info:
     return QtWidget()
 
 
-def _create_nested_container(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+def _create_nested_container(manager: ParameterFormManager, param_info: ParameterInfo,
                             display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
                             unwrapped_type: Optional[Type], layout=None, CURRENT_LAYOUT=None,
                             QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> Any:
@@ -216,7 +216,7 @@ def _create_nested_container(manager: ParameterFormManagerProtocol, param_info: 
     return GBH(title=display_info['field_label'], help_target=unwrapped_type, color_scheme=color_scheme)
 
 
-def _create_optional_nested_container(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+def _create_optional_nested_container(manager: ParameterFormManager, param_info: ParameterInfo,
                                      display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
                                      unwrapped_type: Optional[Type], layout=None, CURRENT_LAYOUT=None,
                                      QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> Any:
@@ -225,7 +225,7 @@ def _create_optional_nested_container(manager: ParameterFormManagerProtocol, par
     return QGroupBox()
 
 
-def _setup_regular_layout(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+def _setup_regular_layout(manager: ParameterFormManager, param_info: ParameterInfo,
                          display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
                          unwrapped_type: Optional[Type], layout=None, CURRENT_LAYOUT=None,
                          QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> None:
@@ -234,7 +234,7 @@ def _setup_regular_layout(manager: ParameterFormManagerProtocol, param_info: Par
     layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
 
 
-def _setup_optional_nested_layout(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+def _setup_optional_nested_layout(manager: ParameterFormManager, param_info: ParameterInfo,
                                  display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
                                  unwrapped_type: Optional[Type], container=None, QVBoxLayout=None,
                                  QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> None:
@@ -315,7 +315,7 @@ def _get_widget_operations(creation_type: WidgetCreationType) -> dict[str, Calla
 # UNIFIED WIDGET CREATION FUNCTION
 # ============================================================================
 
-def create_widget_parametric(manager: ParameterFormManagerProtocol, param_info: ParameterInfoProtocol,
+def create_widget_parametric(manager: ParameterFormManager, param_info: ParameterInfo,
                            creation_type: WidgetCreationType) -> Any:
     """
     UNIFIED: Create widget using parametric dispatch.
@@ -350,7 +350,7 @@ def create_widget_parametric(manager: ParameterFormManagerProtocol, param_info: 
     )
     field_ids = manager.service.generate_field_ids_direct(manager.config.field_id, param_info.name)
     current_value = manager.parameters.get(param_info.name)
-    unwrapped_type = _unwrap_optional_type(param_info.type) if config['needs_unwrap_type'] else None
+    unwrapped_type = _unwrap_optional_type(param_info.type) if config.needs_unwrap_type else None
 
     # Execute operations
     container = ops['create_container'](
@@ -359,7 +359,7 @@ def create_widget_parametric(manager: ParameterFormManagerProtocol, param_info: 
     )
 
     # Setup layout
-    layout_type = config['layout_type']
+    layout_type = config.layout_type
     if layout_type == 'QHBoxLayout':
         layout = QHBoxLayout(container)
     elif layout_type == 'QVBoxLayout':
@@ -388,7 +388,7 @@ def create_widget_parametric(manager: ParameterFormManagerProtocol, param_info: 
         layout.addWidget(title_components['title_widget'])
 
     # Add label if needed (REGULAR only)
-    if config['needs_label']:
+    if config.needs_label:
         label = LabelWithHelp(
             text=display_info['field_label'],
             param_name=param_info.name,
@@ -406,8 +406,8 @@ def create_widget_parametric(manager: ParameterFormManagerProtocol, param_info: 
 
     # For nested widgets, add to container
     # For regular widgets, add to layout
-    if config['is_nested']:
-        if config.get('is_optional'):
+    if config.is_nested:
+        if config.is_optional:
             # OPTIONAL_NESTED: set enabled state based on current_value
             main_widget.setEnabled(current_value is not None)
         layout.addWidget(main_widget)
@@ -415,14 +415,14 @@ def create_widget_parametric(manager: ParameterFormManagerProtocol, param_info: 
         layout.addWidget(main_widget, 1)
 
     # Add reset button if needed
-    if config['needs_reset_button'] and not manager.read_only:
-        if config.get('is_optional'):
+    if config.needs_reset_button and not manager.read_only:
+        if config.is_optional:
             # OPTIONAL_NESTED: reset button already in title widget, just connect it
             if title_components and title_components['reset_all_button']:
                 nested_manager = manager.nested_managers.get(param_info.name)
                 if nested_manager:
                     title_components['reset_all_button'].clicked.connect(lambda: nested_manager.reset_all_parameters())
-        elif config['is_nested']:
+        elif config.is_nested:
             # NESTED: "Reset All" button in GroupBox title
             from PyQt6.QtWidgets import QPushButton
             reset_all_button = QPushButton("Reset All")
@@ -458,7 +458,7 @@ def create_widget_parametric(manager: ParameterFormManagerProtocol, param_info: 
             )
 
     # Store widget and connect signals
-    if config['is_nested']:
+    if config.is_nested:
         # For nested, store the GroupBox/container
         manager.widgets[param_info.name] = container
         logger.info(f"[CREATE_NESTED_DATACLASS] param_info.name={param_info.name}, stored container in manager.widgets")
