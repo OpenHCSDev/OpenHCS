@@ -27,7 +27,7 @@ class SignalConnectionService:
     def connect_all_signals(manager: Any) -> None:
         """
         Wire all signals for the manager.
-        
+
         Args:
             manager: ParameterFormManager instance
         """
@@ -35,11 +35,11 @@ class SignalConnectionService:
         # CRITICAL: Don't refresh during reset operations - reset handles placeholders itself
         # CRITICAL: Always use live context from other open windows for placeholder resolution
         # CRITICAL: Don't refresh when 'enabled' field changes - it's styling-only and doesn't affect placeholders
-        manager.parameter_changed.connect(
-            lambda param_name, value: manager._refresh_with_live_context()
-            if not getattr(manager, '_in_reset', False) and param_name != 'enabled'
-            else None
-        )
+        def on_parameter_changed(param_name, value):
+            if not getattr(manager, '_in_reset', False) and param_name != 'enabled':
+                manager._placeholder_refresh_service.refresh_with_live_context(manager)
+
+        manager.parameter_changed.connect(on_parameter_changed)
         
         # 2. UNIVERSAL ENABLED FIELD BEHAVIOR: Watch for 'enabled' parameter changes and apply styling
         # This works for any form (function parameters, dataclass fields, etc.) that has an 'enabled' parameter
@@ -52,7 +52,7 @@ class SignalConnectionService:
             # Register callback to run AFTER placeholders are refreshed (not before)
             # because enabled styling needs the resolved placeholder value from the widget
             manager._on_placeholder_refresh_complete_callbacks.append(
-                lambda: manager._enabled_styling_service.apply_initial_enabled_styling(manager)
+                lambda: manager._enabled_field_styling_service.apply_initial_enabled_styling(manager)
             )
         
         # 3. Connect cleanup signal
@@ -96,4 +96,8 @@ class SignalConnectionService:
         
         # Add this instance to the registry
         manager._active_form_managers.append(manager)
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"🔍 REGISTER: {manager.field_id} (id={id(manager)}) registered. Total managers: {len(manager._active_form_managers)}")
 

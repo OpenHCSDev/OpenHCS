@@ -15,18 +15,14 @@ logger = logging.getLogger(__name__)
 class EnabledFieldStylingService:
     """
     Service for applying visual styling based on enabled field state.
-    
+
     Stateless service that encapsulates all enabled field styling operations.
     """
-    
-    def __init__(self, widget_ops):
-        """
-        Initialize enabled field styling service.
-        
-        Args:
-            widget_ops: WidgetOperations instance for ABC-based widget operations
-        """
-        self.widget_ops = widget_ops
+
+    def __init__(self):
+        """Initialize enabled field styling service (stateless - imports dependencies)."""
+        from openhcs.ui.shared.widget_operations import WidgetOperations
+        self.widget_ops = WidgetOperations
     
     def apply_initial_enabled_styling(self, manager) -> None:
         """

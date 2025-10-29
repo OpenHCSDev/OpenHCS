@@ -341,8 +341,14 @@ class LazyDataclassFactory:
                     # Field has metadata but no default - use MISSING to indicate required field
                     field_def = (field.name, final_field_type, dataclasses.field(default=MISSING, metadata=field.metadata))
             else:
-                # No metadata, no special handling needed
-                field_def = (field.name, final_field_type, None)
+                # No metadata, but preserve original field's default value
+                if field.default is not MISSING:
+                    field_def = (field.name, final_field_type, dataclasses.field(default=field.default))
+                elif field.default_factory is not MISSING:
+                    field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory))
+                else:
+                    # No default - field is required
+                    field_def = (field.name, final_field_type)
 
             lazy_field_definitions.append(field_def)
 

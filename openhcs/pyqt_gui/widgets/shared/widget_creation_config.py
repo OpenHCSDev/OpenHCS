@@ -227,16 +227,22 @@ def _create_optional_nested_container(manager: ParameterFormManager, param_info:
 
 def _setup_regular_layout(manager: ParameterFormManager, param_info: ParameterInfo,
                          display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
-                         unwrapped_type: Optional[Type], layout=None, CURRENT_LAYOUT=None,
+                         unwrapped_type: Optional[Type], container=None, CURRENT_LAYOUT=None,
                          QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> None:
-    """Setup layout for REGULAR widget type."""
-    layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
-    layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
+    """Setup layout for REGULAR widget type.
+
+    For REGULAR widgets, container is a QWidget with a layout already set.
+    We need to configure the layout, not the container.
+    """
+    layout = container.layout()
+    if layout:
+        layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
+        layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
 
 
 def _setup_optional_nested_layout(manager: ParameterFormManager, param_info: ParameterInfo,
                                  display_info: DisplayInfo, field_ids: FieldIds, current_value: Any,
-                                 unwrapped_type: Optional[Type], container=None, QVBoxLayout=None,
+                                 unwrapped_type: Optional[Type], container=None, CURRENT_LAYOUT=None,
                                  QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> None:
     """Setup layout for OPTIONAL_NESTED widget type."""
     from PyQt6.QtWidgets import QVBoxLayout as QVL
@@ -358,22 +364,23 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
         None, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme
     )
 
-    # Setup layout
+    # Setup layout - polymorphic dispatch
+    # Each setup_layout function handles its own container type
     layout_type = config.layout_type
     if layout_type == 'QHBoxLayout':
         layout = QHBoxLayout(container)
     elif layout_type == 'QVBoxLayout':
         layout = QVBoxLayout(container)
     elif layout_type == 'QGroupBox':
-        # OPTIONAL_NESTED: setup_layout creates the layout
         layout = None  # Will be set by setup_layout
     else:  # GroupBoxWithHelp
         layout = container.layout()
 
     if ops.get('setup_layout'):
+        # Polymorphic dispatch: each setup_layout function handles its container type
         ops['setup_layout'](
             manager, param_info, display_info, field_ids, current_value, unwrapped_type,
-            layout, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme
+            container, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme
         )
         # For OPTIONAL_NESTED, get the layout after setup
         if layout_type == 'QGroupBox':

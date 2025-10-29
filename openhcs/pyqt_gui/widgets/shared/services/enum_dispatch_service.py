@@ -133,11 +133,20 @@ class EnumDispatchService(ABC, Generic[StrategyEnum]):
                 f"{self.__class__.__name__}: No handler registered for strategy {strategy}. "
                 f"Available strategies: {list(self._handlers.keys())}"
             )
-        
         # Dispatch to handler
         handler = self._handlers[strategy]
         logger.debug(f"{self.__class__.__name__}: Dispatching to {strategy.value} handler")
-        return handler(*args, **kwargs)
+
+        # Handler call convention: the first positional argument is the
+        # primary context (e.g., manager/context object). Additional
+        # positional arguments passed to dispatch are used only for
+        # determining the strategy (for example a pre-computed 'mode') and
+        # should NOT be forwarded to the handler. Forward only the
+        # primary context and keyword arguments to the handler to avoid
+        # accidental "takes X positional arguments but Y were given"
+        # errors when handlers are bound instance methods.
+        handler_args = args[:1] if args else ()
+        return handler(*handler_args, **kwargs)
     
     def get_registered_strategies(self) -> list[StrategyEnum]:
         """

@@ -96,13 +96,20 @@ class StepParameterEditorWidget(QWidget):
         # The step is the overlay (what's being edited), not the parent context
         # Context hierarchy: GlobalPipelineConfig (thread-local) -> PipelineConfig (context_obj) -> Step (overlay)
         # CRITICAL FIX: Exclude 'func' parameter - it's handled by the Function Pattern tab
-        self.form_manager = ParameterFormManager(
-            object_instance=self.step,           # Step instance being edited (overlay)
-            field_id="step",                     # Use "step" as field identifier
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
+
+        config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget
             context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
             exclude_params=['func'],             # Exclude func - it has its own dedicated tab
-            scope_id=self.scope_id               # Pass scope_id to limit cross-window updates to same orchestrator
+            scope_id=self.scope_id,              # Pass scope_id to limit cross-window updates to same orchestrator
+            color_scheme=self.color_scheme       # Pass color scheme for consistent theming
+        )
+
+        self.form_manager = ParameterFormManager(
+            object_instance=self.step,           # Step instance being edited (overlay)
+            field_id="step",                     # Use "step" as field identifier
+            config=config                        # Pass configuration object
         )
         
         self.setup_ui()

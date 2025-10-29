@@ -75,13 +75,9 @@ class InitialRefreshStrategy(EnumDispatchService[RefreshMode]):
         from openhcs.utils.performance_monitor import timer
 
         with timer("  Root global config sibling inheritance refresh", threshold_ms=10.0):
-            # Refresh with None context (sibling inheritance only)
-            manager._placeholder_refresh_service.refresh_all_placeholders(manager, None)
-
-            # Refresh nested managers
-            manager._apply_to_nested_managers(
-                lambda name, mgr: mgr._placeholder_refresh_service.refresh_all_placeholders(mgr, None)
-            )
+            # CRITICAL: Use refresh_with_live_context to collect current form + sibling values
+            # This ensures sibling inheritance works correctly during initial load
+            manager._placeholder_refresh_service.refresh_with_live_context(manager)
     
     def _refresh_other_window(self, manager: Any, mode: RefreshMode = None) -> None:
         """

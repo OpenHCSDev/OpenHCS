@@ -133,8 +133,9 @@ class FormBuildOrchestrator:
                     content_layout.addWidget(widget)
             
             # Initial placeholder refresh for fast visual feedback
+            # CRITICAL: Use refresh_with_live_context to collect current form + sibling values
             with timer(f"        Initial placeholder refresh ({len(sync_params)} widgets)", threshold_ms=5.0):
-                manager._placeholder_refresh_service.refresh_all_placeholders(manager, None)
+                manager._placeholder_refresh_service.refresh_with_live_context(manager)
         
         # Define completion callback
         def on_async_complete():
@@ -189,10 +190,9 @@ class FormBuildOrchestrator:
             self._apply_callbacks(manager._on_build_complete_callbacks)
         
         # STEP 2: Refresh placeholders (resolve inherited values)
+        # CRITICAL: Use refresh_with_live_context to collect current form + sibling values
         with timer("  Complete placeholder refresh", threshold_ms=10.0):
-            manager._placeholder_refresh_service.refresh_all_placeholders(manager, None)
-        with timer("  Nested placeholder refresh", threshold_ms=5.0):
-            manager._apply_to_nested_managers(lambda name, mgr: mgr._placeholder_refresh_service.refresh_all_placeholders(mgr, None))
+            manager._placeholder_refresh_service.refresh_with_live_context(manager)
 
         # STEP 3: Apply post-placeholder callbacks (enabled styling that needs resolved values)
         with timer("  Apply post-placeholder callbacks", threshold_ms=5.0):
@@ -202,7 +202,7 @@ class FormBuildOrchestrator:
 
         # STEP 4: Refresh enabled styling (after placeholders are resolved)
         with timer("  Enabled styling refresh", threshold_ms=5.0):
-            manager._apply_to_nested_managers(lambda name, mgr: mgr._enabled_styling_service.refresh_enabled_styling(mgr))
+            manager._apply_to_nested_managers(lambda name, mgr: mgr._enabled_field_styling_service.refresh_enabled_styling(mgr))
     
     @staticmethod
     def _apply_callbacks(callback_list: List[Callable]) -> None:

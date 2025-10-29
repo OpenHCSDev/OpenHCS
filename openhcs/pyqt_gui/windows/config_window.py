@@ -466,32 +466,10 @@ class ConfigWindow(BaseFormDialog):
         if field_name in self.form_manager.nested_managers:
             nested_manager = self.form_manager.nested_managers[field_name]
 
-            # Strategy: Find the first parameter widget in this nested manager (like the test does)
-            # This is more reliable than trying to find the GroupBox
-            first_widget = None
-
-            if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
-                # Get the first widget from the nested manager's widgets dict
-                first_param_name = next(iter(nested_manager.widgets.keys()))
-                first_widget = nested_manager.widgets[first_param_name]
-                logger.info(f"Found first widget: {first_param_name}")
-
-            if first_widget:
-                # Scroll to the first widget (this will show the section header too)
-                self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
-                logger.info(f"✅ Scrolled to {field_name} via first widget")
-            else:
-                # Fallback: try to find the GroupBox
-                from PyQt6.QtWidgets import QGroupBox
-                current = nested_manager.parentWidget()
-                while current:
-                    if isinstance(current, QGroupBox):
-                        self.scroll_area.ensureWidgetVisible(current, 50, 50)
-                        logger.info(f"✅ Scrolled to {field_name} via GroupBox")
-                        return
-                    current = current.parentWidget()
-
-                logger.warning(f"⚠️ Could not find widget or GroupBox for {field_name}")
+            # The nested_manager itself is a QWidget (ParameterFormManager inherits from QWidget)
+            # Scroll directly to it - this will show the entire section
+            self.scroll_area.ensureWidgetVisible(nested_manager, 100, 100)
+            logger.info(f"✅ Scrolled to {field_name} via nested manager widget")
         else:
             logger.warning(f"❌ Field '{field_name}' not in nested_managers")
 

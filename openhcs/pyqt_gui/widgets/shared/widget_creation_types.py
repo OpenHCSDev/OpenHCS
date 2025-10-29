@@ -72,15 +72,6 @@ class ParameterFormManager(ABC, metaclass=_CombinedMeta):
     # These are like React useEffect hooks
 
     @abstractmethod
-    def _apply_initial_enabled_styling(self) -> None:
-        """
-        Lifecycle hook: Run after widgets created to apply enabled styling.
-
-        Equivalent to: useEffect(() => { applyEnabledStyling() }, [widgets])
-        """
-        pass
-
-    @abstractmethod
     def _emit_parameter_change(self, param_name: str, value: Any) -> None:
         """
         Reactive update: Emit signal when parameter changes.

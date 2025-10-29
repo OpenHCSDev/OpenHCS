@@ -332,12 +332,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # Debounce timer for cross-window placeholder refresh
             self._cross_window_refresh_timer = None
 
-            # STEP 8: Detect user-set fields for lazy dataclasses
-            with timer("  Detect user-set fields", threshold_ms=1.0):
-                if is_dataclass(object_instance):
-                    for field_name, raw_value in self.parameters.items():
-                        if raw_value is not None:
-                            self._user_set_fields.add(field_name)
+            # STEP 8: _user_set_fields starts empty and is populated only when user edits widgets
+            # (via _emit_parameter_change). Do NOT populate during initialization, as that would
+            # include inherited values that weren't explicitly set by the user.
 
             # STEP 9: Mark initial load as complete
             is_nested = self._parent_manager is not None
@@ -351,14 +348,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             with timer("  Initial refresh", threshold_ms=10.0):
                 from .services.initial_refresh_strategy import InitialRefreshStrategy
                 InitialRefreshStrategy.execute(self)
-
-    # ==================== LIFECYCLE HOOKS ====================
-
-    def _apply_initial_enabled_styling(self) -> None:
-        """Lifecycle hook: Apply initial enabled styling after widgets created."""
-        from .services.enabled_field_styling_service import EnabledFieldStylingService
-        service = EnabledFieldStylingService(self._widget_ops)
-        service.apply_initial_enabled_styling(self)
 
     # ==================== WIDGET CREATION METHODS ====================
 
@@ -664,6 +653,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
     def _emit_parameter_change(self, param_name: str, value: Any) -> None:
         """Handle parameter change from widget and update parameter data model."""
+        logger.info(f"🔔 EMIT_PARAM_CHANGE: {self.field_id}.{param_name} = {value}")
 
         # Convert value using unified conversion method
         converted_value = self._convert_widget_value(value, param_name)
@@ -676,7 +666,18 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         self._user_set_fields.add(param_name)
 
         # Emit signal only once - this triggers sibling placeholder updates
+        logger.info(f"🔔 EMIT_PARAM_CHANGE: {self.field_id} emitting parameter_changed signal for {param_name}={converted_value}")
         self.parameter_changed.emit(param_name, converted_value)
+
+    def _on_enabled_field_changed_universal(self, param_name: str, value: Any) -> None:
+        """
+        Universal handler for 'enabled' parameter changes.
+
+        When any form's 'enabled' field changes, apply visual styling.
+        This works for any form (function parameters, dataclass fields, etc.) that has an 'enabled' parameter.
+        """
+        if param_name == 'enabled':
+            self._enabled_field_styling_service.on_enabled_field_changed(self, param_name, value)
 
 
 
@@ -694,16 +695,15 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             with FlagContextManager.reset_context(self, block_cross_window=True):
                 param_names = list(self.parameters.keys())
                 for param_name in param_names:
-                    # Call _reset_parameter_impl directly to avoid nested context managers
-                    self._reset_parameter_impl(param_name)
+                    # Call reset_parameter directly to avoid nested context managers
+                    self.reset_parameter(param_name)
 
             # OPTIMIZATION: Single placeholder refresh at the end instead of per-parameter
             # This is much faster than refreshing after each reset
-            # Use refresh_all_placeholders directly to avoid cross-window context collection
-            # (reset to defaults doesn't need live context from other windows)
+            # CRITICAL: Use refresh_with_live_context to collect current form + sibling values
+            # Even when resetting to defaults, we need live context for sibling inheritance
             # REFACTORING: Inline delegate calls
-            self._placeholder_refresh_service.refresh_all_placeholders(self, None)
-            self._apply_to_nested_managers(lambda name, manager: manager._placeholder_refresh_service.refresh_all_placeholders(manager, None))
+            self._placeholder_refresh_service.refresh_with_live_context(self)
 
 
 
@@ -722,9 +722,15 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             self._user_set_fields.add(param_name)
 
             # Update corresponding widget if it exists
+            # ANTI-DUCK-TYPING: Skip widget update for nested containers (they don't implement ValueSettable)
+            # Nested managers handle their own value updates
             if param_name in self.widgets:
-                # REFACTORING: Inline delegate call
-                self._widget_update_service.update_widget_value(self.widgets[param_name], converted_value, param_name, False, self)
+                widget = self.widgets[param_name]
+                # Only update if widget implements ValueSettable (not containers like QGroupBox)
+                from openhcs.ui.shared.widget_protocols import ValueSettable
+                if isinstance(widget, ValueSettable):
+                    # REFACTORING: Inline delegate call
+                    self._widget_update_service.update_widget_value(widget, converted_value, param_name, False, self)
 
             # Emit signal for PyQt6 compatibility
             # This will trigger both local placeholder refresh AND cross-window updates (via _emit_cross_window_change)
@@ -739,6 +745,12 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         with FlagContextManager.reset_context(self, block_cross_window=False):
             reset_service = ParameterResetService()
             reset_service.reset_parameter(self, param_name)
+
+        # CRITICAL: Refresh all placeholders with live context after reset
+        # This ensures sibling inheritance works correctly (e.g., path_planning_config inheriting from well_filter_config)
+        # We refresh ALL placeholders instead of just the reset field to ensure consistency
+        # Use use_user_modified_only=True so reset fields don't override sibling values
+        self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=True)
 
     def _get_reset_value(self, param_name: str) -> Any:
         """Get reset value based on editing context.
@@ -802,54 +814,58 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
     def get_user_modified_values(self) -> Dict[str, Any]:
         """
-        Get only values that were explicitly set by the user (non-None raw values).
+        Get only values that were explicitly set by the user.
 
         For lazy dataclasses, this preserves lazy resolution for unmodified fields
-        by only returning fields where the raw value is not None.
+        by only returning fields that are in self._user_set_fields (tracked when user edits widgets).
 
         For nested dataclasses, only include them if they have user-modified fields inside.
+
+        CRITICAL: This method uses self._user_set_fields to distinguish between:
+        1. Values that were explicitly set by the user (in _user_set_fields)
+        2. Values that were inherited from parent or set during initialization (not in _user_set_fields)
         """
         # ANTI-DUCK-TYPING: Use isinstance check against LazyDataclass base class
-        if not is_lazy_dataclass(self.config):
+        if not is_lazy_dataclass(self.object_instance):
             # For non-lazy dataclasses, return all current values
             return self.get_current_values()
 
         user_modified = {}
         current_values = self.get_current_values()
 
-        # Only include fields where the raw value is not None
-        for field_name, value in current_values.items():
+        # Only include fields that were explicitly set by the user
+        for field_name in self._user_set_fields:
+            value = current_values.get(field_name)
             if value is not None:
                 # CRITICAL: For nested dataclasses, we need to extract only user-modified fields
-                # by checking the raw values (using object.__getattribute__ to avoid resolution)
+                # by recursively calling get_user_modified_values() on the nested manager
                 if is_dataclass(value) and not isinstance(value, type):
-                    # Extract raw field values from nested dataclass
-                    nested_user_modified = {}
-                    for field in dataclass_fields(value):
-                        raw_value = object.__getattribute__(value, field.name)
-                        if raw_value is not None:
-                            nested_user_modified[field.name] = raw_value
+                    # Check if there's a nested manager for this field
+                    nested_manager = self.nested_managers.get(field_name)
+                    if nested_manager and hasattr(nested_manager, 'get_user_modified_values'):
+                        # Recursively get user-modified values from nested manager
+                        nested_user_modified = nested_manager.get_user_modified_values()
+                        if nested_user_modified:
+                            # CRITICAL: Pass as dict, not as reconstructed instance
+                            # This allows the context merging to handle it properly
+                            # We'll need to reconstruct it when applying to context
+                            user_modified[field_name] = (type(value), nested_user_modified)
+                    else:
+                        # No nested manager, extract raw field values from nested dataclass
+                        nested_user_modified = {}
+                        for field in dataclass_fields(value):
+                            raw_value = object.__getattribute__(value, field.name)
+                            if raw_value is not None:
+                                nested_user_modified[field.name] = raw_value
 
-                    # Only include if nested dataclass has user-modified fields
-                    if nested_user_modified:
-                        # CRITICAL: Pass as dict, not as reconstructed instance
-                        # This allows the context merging to handle it properly
-                        # We'll need to reconstruct it when applying to context
-                        user_modified[field_name] = (type(value), nested_user_modified)
+                        # Only include if nested dataclass has user-modified fields
+                        if nested_user_modified:
+                            user_modified[field_name] = (type(value), nested_user_modified)
                 else:
-                    # Non-dataclass field, include if not None
+                    # Non-dataclass field, include if user set it
                     user_modified[field_name] = value
 
         return user_modified
-
-
-
-    # DELETED: _build_context_stack - pointless wrapper around build_context_stack()
-    # All callers now call build_context_stack() directly from context_layer_builders.py
-
-
-
-
 
     def _should_skip_updates(self) -> bool:
         """
@@ -859,12 +875,20 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         Returns True if in reset mode or blocking cross-window updates.
         """
         # Check self flags
-        if getattr(self, '_in_reset', False) or getattr(self, '_block_cross_window_updates', False):
+        if getattr(self, '_in_reset', False):
+            logger.info(f"🚫 SKIP_CHECK: {self.field_id} has _in_reset=True")
+            return True
+        if getattr(self, '_block_cross_window_updates', False):
+            logger.info(f"🚫 SKIP_CHECK: {self.field_id} has _block_cross_window_updates=True")
             return True
 
         # Check nested manager flags
-        for nested_manager in self.nested_managers.values():
-            if getattr(nested_manager, '_in_reset', False) or getattr(nested_manager, '_block_cross_window_updates', False):
+        for nested_name, nested_manager in self.nested_managers.items():
+            if getattr(nested_manager, '_in_reset', False):
+                logger.info(f"🚫 SKIP_CHECK: {self.field_id} nested manager {nested_name} has _in_reset=True")
+                return True
+            if getattr(nested_manager, '_block_cross_window_updates', False):
+                logger.info(f"🚫 SKIP_CHECK: {self.field_id} nested manager {nested_name} has _block_cross_window_updates=True")
                 return True
 
         return False
@@ -874,43 +898,39 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         Handle parameter changes from nested forms.
 
         When a nested form's field changes:
-        1. Refresh parent form's placeholders
-        2. Emit parent's parameter_changed signal
+        1. Refresh parent form's placeholders with live context (current form + sibling values)
+        2. Refresh all sibling nested managers' placeholders
+        3. Emit parent's parameter_changed signal
         """
+        logger.info(f"🔍 NESTED_CHANGE: {self.field_id} received nested parameter change: {param_name}={value}")
+
         # REFACTORING: Use consolidated flag checking
         if self._should_skip_updates():
+            logger.info(f"🔍 NESTED_CHANGE: {self.field_id} skipping updates (flag check)")
             return
 
-        # Collect live context from other windows (only for root managers)
-        # REFACTORING: Inline delegate call
-        if self._parent_manager is None:
-            live_context = self._placeholder_refresh_service.collect_live_context_from_other_windows(self)
-        else:
-            live_context = None
-
-        # Refresh parent form's placeholders with live context
-        # REFACTORING: Inline delegate call
-        self._placeholder_refresh_service.refresh_all_placeholders(self, live_context)
-
-        # Refresh all nested managers' placeholders (including siblings) with live context
-        # PHASE 2A: Use helper instead of lambda
-        self._call_on_nested_managers('_refresh_all_placeholders', live_context=live_context)
+        # CRITICAL: Use refresh_with_live_context to collect current form values AND sibling values
+        # This enables sibling inheritance (e.g., path_planning_config inheriting from well_filter_config)
+        # refresh_with_live_context will:
+        # 1. Collect live context from other windows (for root managers)
+        # 2. Add current form's values to live context
+        # 3. Add sibling nested manager values to live context
+        # 4. Refresh this form's placeholders
+        # 5. Refresh all nested managers' placeholders
+        self._placeholder_refresh_service.refresh_with_live_context(self)
 
         # CRITICAL: Also refresh enabled styling for all nested managers
         # This ensures that when one config's enabled field changes, siblings that inherit from it update their styling
         # Example: fiji_streaming_config.enabled inherits from napari_streaming_config.enabled
-        # PHASE 2A: Use helper instead of lambda
-        self._call_on_nested_managers('_refresh_enabled_styling')
+        self._apply_to_nested_managers(
+            lambda name, manager: manager._enabled_field_styling_service.refresh_enabled_styling(manager)
+        )
 
         # CRITICAL: Propagate parameter change signal up the hierarchy
         # This ensures cross-window updates work for nested config changes
         # The root manager will emit context_value_changed via _emit_cross_window_change
         # IMPORTANT: We DO propagate 'enabled' field changes for cross-window styling updates
         self.parameter_changed.emit(param_name, value)
-
-
-
-
 
     def _apply_to_nested_managers(self, operation_func: callable) -> None:
         """Apply operation to all nested managers."""
@@ -1060,6 +1080,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         Hierarchical rules:
         - GlobalPipelineConfig changes affect: PipelineConfig, Steps
         - PipelineConfig changes affect: Steps in that pipeline
+        - Nested config changes (WellFilterConfig, etc.) affect: configs that inherit from them
         - Step changes affect: nothing (leaf node)
 
         Args:
@@ -1070,6 +1091,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             True if this form should refresh placeholders due to the change
         """
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+        from dataclasses import fields, is_dataclass
+        import typing
 
         # If other window is editing GlobalPipelineConfig, everyone is affected
         if isinstance(editing_object, GlobalPipelineConfig):
@@ -1079,6 +1102,25 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         if isinstance(editing_object, PipelineConfig):
             # We're affected if our context_obj is the same PipelineConfig instance
             return self.context_obj is editing_object
+
+        # Check if editing_object is a parent type in our inheritance hierarchy
+        # This handles nested configs like WellFilterConfig that are inherited by other configs
+        if is_dataclass(editing_object):
+            editing_type = type(editing_object)
+
+            # Check if our dataclass type has a field of the editing type
+            if is_dataclass(self.dataclass_type):
+                for field in fields(self.dataclass_type):
+                    # Check if this field's type matches the editing type
+                    if field.type == editing_type:
+                        return True
+
+                    # Also check Optional[editing_type]
+                    origin = typing.get_origin(field.type)
+                    if origin is typing.Union:
+                        args = typing.get_args(field.type)
+                        if editing_type in args:
+                            return True
 
         # Step changes don't affect other windows (leaf node)
         return False
@@ -1092,11 +1134,11 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # Schedule new refresh after 200ms delay (debounce)
         # REFACTORING: Inlined _do_cross_window_refresh (single-use method)
         def do_refresh():
+            # CRITICAL: Use refresh_with_live_context to collect current form + sibling values
+            # This ensures cross-window updates see the latest values from all forms
             # REFACTORING: Inline delegate calls
-            live_context = self._placeholder_refresh_service.collect_live_context_from_other_windows(self)
-            self._placeholder_refresh_service.refresh_all_placeholders(self, live_context)
-            self._apply_to_nested_managers(lambda name, manager: manager._placeholder_refresh_service.refresh_all_placeholders(manager, live_context))
-            self._apply_to_nested_managers(lambda name, manager: manager._enabled_styling_service.refresh_enabled_styling(manager))
+            self._placeholder_refresh_service.refresh_with_live_context(self)
+            self._apply_to_nested_managers(lambda name, manager: manager._enabled_field_styling_service.refresh_enabled_styling(manager))
             self.context_refreshed.emit(self.object_instance, self.context_obj)
 
         self._cross_window_refresh_timer = QTimer()

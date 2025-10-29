@@ -125,7 +125,13 @@ class ParameterResetService(ParameterServiceABC):
 
         # Refresh placeholder on container widget
         if param_name in manager.widgets:
-            manager._apply_context_behavior(manager.widgets[param_name], None, param_name)
+            manager._widget_update_service.update_widget_value(
+                manager.widgets[param_name],
+                manager.parameters.get(param_name),
+                param_name,
+                skip_context_behavior=False,
+                manager=manager
+            )
 
         # Emit signal with unchanged container value
         manager.parameter_changed.emit(param_name, manager.parameters.get(param_name))
@@ -148,13 +154,11 @@ class ParameterResetService(ParameterServiceABC):
         # Update widget
         if param_name in manager.widgets:
             widget = manager.widgets[param_name]
-            manager.update_widget_value(widget, reset_value, param_name)
-
-            # Apply placeholder for None values (lazy behavior)
-            if reset_value is None and not manager._in_reset:
-                self._apply_placeholder_for_none(manager, param_name, widget)
+            manager._widget_update_service.update_widget_value(widget, reset_value, param_name, skip_context_behavior=True, manager=manager)
 
         # Emit signal
+        # NOTE: Placeholder refresh is handled by the caller (reset_parameter or reset_all_parameters)
+        # This ensures sibling inheritance works correctly via refresh_with_live_context()
         manager.parameter_changed.emit(param_name, reset_value)
     
     # ========== HELPER METHODS ==========
@@ -182,29 +186,16 @@ class ParameterResetService(ParameterServiceABC):
     def _update_reset_tracking(manager, param_name: str, reset_value: Any) -> None:
         """Update reset field tracking for lazy behavior."""
         field_path = f"{manager.field_id}.{param_name}"
-        
+
         if reset_value is None:
             # Track as reset field
             manager.reset_fields.add(param_name)
             manager.shared_reset_fields.add(field_path)
+            # CRITICAL: Remove from user-set fields when resetting to None
+            # This ensures get_user_modified_values() won't include this field
+            # This allows sibling inheritance to work correctly after reset
+            manager._user_set_fields.discard(param_name)
         else:
             # Remove from reset tracking
             manager.reset_fields.discard(param_name)
             manager.shared_reset_fields.discard(field_path)
-    
-    @staticmethod
-    def _apply_placeholder_for_none(manager, param_name: str, widget) -> None:
-        """Apply placeholder text for None values (lazy behavior)."""
-        # Build overlay from current form state
-        overlay = manager.get_current_values()
-        
-        # Collect live context from other windows
-        live_context = manager._collect_live_context_from_other_windows() if manager._parent_manager is None else None
-        
-        # Build context stack and apply placeholder
-        from openhcs.pyqt_gui.widgets.shared.context_layer_builders import build_context_stack
-        with build_context_stack(manager, overlay, live_context=live_context):
-            placeholder_text = manager.service.get_placeholder_text(param_name, manager.dataclass_type)
-            if placeholder_text:
-                from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)

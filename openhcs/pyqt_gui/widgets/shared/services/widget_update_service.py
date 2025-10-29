@@ -145,16 +145,23 @@ class WidgetUpdateService:
     
     def get_widget_value(self, widget: QWidget) -> Any:
         """
-        Get widget value using ABC-based dispatch.
-        
-        ANTI-DUCK-TYPING: Uses ABC-based dispatch - fails loud if widget doesn't implement ValueGettable.
-        
-        Returns None if widget is in placeholder state.
+        Get widget value using ABC-based polymorphism.
+
+        Returns None if:
+        - Widget is in placeholder state
+        - Widget doesn't implement ValueGettable (container widgets like GroupBoxWithHelp)
+
+        This allows get_current_values() to iterate over all widgets without special casing.
         """
         # Check placeholder state first
         if widget.property("is_placeholder_state"):
             return None
-        
-        # ABC-based value extraction
-        return self.widget_ops.get_value(widget)
+
+        # Polymorphic: if widget implements ValueGettable, get its value; otherwise None
+        from openhcs.ui.shared.widget_protocols import ValueGettable
+        if isinstance(widget, ValueGettable):
+            return widget.get_value()
+
+        # Container widgets (GroupBoxWithHelp, etc) don't have values - return None
+        return None
 

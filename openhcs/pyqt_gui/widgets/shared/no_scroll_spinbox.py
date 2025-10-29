@@ -4,30 +4,40 @@ No-scroll spinbox widgets for PyQt6.
 Prevents accidental value changes from mouse wheel events.
 """
 
-from PyQt6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QStyleOptionComboBox, QStyle
+from PyQt6.QtWidgets import QCheckBox, QStyleOptionComboBox, QStyle
 from PyQt6.QtGui import QWheelEvent, QFont, QColor, QPainter
 from PyQt6.QtCore import Qt
 
+# Import adapters that already implement ValueGettable/ValueSettable
+from openhcs.ui.shared.widget_adapters import SpinBoxAdapter, DoubleSpinBoxAdapter, ComboBoxAdapter
 
-class NoScrollSpinBox(QSpinBox):
-    """SpinBox that ignores wheel events to prevent accidental value changes."""
-    
+
+class NoScrollSpinBox(SpinBoxAdapter):
+    """SpinBox that ignores wheel events to prevent accidental value changes.
+
+    Inherits from SpinBoxAdapter which already implements ValueGettable/ValueSettable ABCs.
+    """
+
     def wheelEvent(self, event: QWheelEvent):
         """Ignore wheel events to prevent accidental value changes."""
         event.ignore()
 
 
-class NoScrollDoubleSpinBox(QDoubleSpinBox):
-    """DoubleSpinBox that ignores wheel events to prevent accidental value changes."""
-    
+class NoScrollDoubleSpinBox(DoubleSpinBoxAdapter):
+    """DoubleSpinBox that ignores wheel events to prevent accidental value changes.
+
+    Inherits from DoubleSpinBoxAdapter which already implements ValueGettable/ValueSettable ABCs.
+    """
+
     def wheelEvent(self, event: QWheelEvent):
         """Ignore wheel events to prevent accidental value changes."""
         event.ignore()
 
 
-class NoScrollComboBox(QComboBox):
+class NoScrollComboBox(ComboBoxAdapter):
     """ComboBox that ignores wheel events to prevent accidental value changes.
 
+    Inherits from ComboBoxAdapter which already implements ValueGettable/ValueSettable ABCs.
     Supports placeholder text when currentIndex == -1 (for None values).
     """
 
@@ -50,6 +60,40 @@ class NoScrollComboBox(QComboBox):
         super().setCurrentIndex(index)
         self._placeholder_active = (index == -1)
         self.update()
+
+    def get_value(self):
+        """Implement ValueGettable ABC."""
+        if self.currentIndex() < 0:
+            return None
+        return self.itemData(self.currentIndex())
+
+    def set_value(self, value):
+        """Implement ValueSettable ABC."""
+        # Find index of item with matching data
+        for i in range(self.count()):
+            if self.itemData(i) == value:
+                self.setCurrentIndex(i)
+                return
+        # Value not found - clear selection
+        self.setCurrentIndex(-1)
+
+    def get_value(self):
+        """Get current value (item data at current index)."""
+        if self.currentIndex() < 0:
+            return None
+        return self.itemData(self.currentIndex())
+
+    def set_value(self, value):
+        """Set current value by finding matching item data."""
+        if value is None:
+            self.setCurrentIndex(-1)
+        else:
+            for i in range(self.count()):
+                if self.itemData(i) == value:
+                    self.setCurrentIndex(i)
+                    return
+            # Value not found - clear selection
+            self.setCurrentIndex(-1)
 
     def paintEvent(self, event):
         """Override to draw placeholder text when currentIndex == -1."""
@@ -170,3 +214,6 @@ class NoneAwareCheckBox(QCheckBox):
 from openhcs.ui.shared.widget_protocols import ValueGettable, ValueSettable
 ValueGettable.register(NoneAwareCheckBox)
 ValueSettable.register(NoneAwareCheckBox)
+
+# NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox inherit from adapters
+# which are already registered, so no additional registration needed
