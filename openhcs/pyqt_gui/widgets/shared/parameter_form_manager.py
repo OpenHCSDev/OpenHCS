@@ -901,20 +901,6 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
 
 
-    def _refresh_all_placeholders(self) -> None:
-        """Refresh all placeholders in this form."""
-        self._placeholder_refresh_service.refresh_all_placeholders(self, None)
-
-    def _refresh_enabled_styling(self) -> None:
-        """Refresh enabled styling for all widgets."""
-        self._enabled_styling_service.refresh_enabled_styling(self)
-
-    def _apply_all_post_placeholder_callbacks(self) -> None:
-        """Apply all post-placeholder callbacks."""
-        for callback in self._on_placeholder_refresh_complete_callbacks:
-            callback()
-        self._on_placeholder_refresh_complete_callbacks.clear()
-
     def _apply_to_nested_managers(self, operation_func: callable) -> None:
         """Apply operation to all nested managers."""
         for param_name, nested_manager in self.nested_managers.items():

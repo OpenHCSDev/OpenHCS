@@ -748,8 +748,8 @@ class ConfigWindow(BaseFormDialog):
                         self.form_manager.update_parameter(field.name, new_value)
 
         # Refresh placeholders to reflect the new values
-        self.form_manager._refresh_all_placeholders()
-        self.form_manager._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+        self.form_manager._placeholder_refresh_service.refresh_all_placeholders(self.form_manager, None)
+        self.form_manager._apply_to_nested_managers(lambda name, manager: manager._placeholder_refresh_service.refresh_all_placeholders(manager, None))
 
     def _update_nested_dataclass(self, field_name: str, new_value):
         """Recursively update a nested dataclass field and all its children."""

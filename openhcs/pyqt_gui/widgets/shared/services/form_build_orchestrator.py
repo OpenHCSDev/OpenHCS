@@ -134,7 +134,7 @@ class FormBuildOrchestrator:
             
             # Initial placeholder refresh for fast visual feedback
             with timer(f"        Initial placeholder refresh ({len(sync_params)} widgets)", threshold_ms=5.0):
-                manager._refresh_all_placeholders()
+                manager._placeholder_refresh_service.refresh_all_placeholders(manager, None)
         
         # Define completion callback
         def on_async_complete():
@@ -190,18 +190,19 @@ class FormBuildOrchestrator:
         
         # STEP 2: Refresh placeholders (resolve inherited values)
         with timer("  Complete placeholder refresh", threshold_ms=10.0):
-            manager._refresh_all_placeholders()
+            manager._placeholder_refresh_service.refresh_all_placeholders(manager, None)
         with timer("  Nested placeholder refresh", threshold_ms=5.0):
-            manager._apply_to_nested_managers(lambda name, mgr: mgr._refresh_all_placeholders())
-        
+            manager._apply_to_nested_managers(lambda name, mgr: mgr._placeholder_refresh_service.refresh_all_placeholders(mgr, None))
+
         # STEP 3: Apply post-placeholder callbacks (enabled styling that needs resolved values)
         with timer("  Apply post-placeholder callbacks", threshold_ms=5.0):
             self._apply_callbacks(manager._on_placeholder_refresh_complete_callbacks)
-            manager._apply_to_nested_managers(lambda name, mgr: mgr._apply_all_post_placeholder_callbacks())
-        
+            for nested_manager in manager.nested_managers.values():
+                self._apply_callbacks(nested_manager._on_placeholder_refresh_complete_callbacks)
+
         # STEP 4: Refresh enabled styling (after placeholders are resolved)
         with timer("  Enabled styling refresh", threshold_ms=5.0):
-            manager._apply_to_nested_managers(lambda name, mgr: mgr._refresh_enabled_styling())
+            manager._apply_to_nested_managers(lambda name, mgr: mgr._enabled_styling_service.refresh_enabled_styling(mgr))
     
     @staticmethod
     def _apply_callbacks(callback_list: List[Callable]) -> None:
