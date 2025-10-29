@@ -444,7 +444,7 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
             manager.reset_buttons[param_info.name] = reset_button
 
     # Connect checkbox logic if needed (OPTIONAL_NESTED only)
-    if config.get('needs_checkbox') and title_components:
+    if config.needs_checkbox and title_components:
         nested_manager = manager.nested_managers.get(param_info.name)
         if nested_manager:
             ops['connect_checkbox_logic'](
