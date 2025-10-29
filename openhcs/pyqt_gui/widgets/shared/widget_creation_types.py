@@ -11,7 +11,7 @@ This is the Python equivalent of React's component interface:
 - Component tree traversal (_apply_to_nested_managers)
 """
 
-from abc import ABC, abstractmethod, ABCMeta
+from abc import ABC, abstractmethod
 from typing import TypedDict, Callable, Optional, Any, Dict, Type
 from dataclasses import dataclass
 
@@ -32,13 +32,7 @@ class FieldIds(TypedDict, total=False):
     optional_checkbox_id: str
 
 
-class ParameterFormManagerMeta(ABCMeta):
-    """Metaclass for ParameterFormManager - combines ABC with dataclass support."""
-    pass
-
-
-@dataclass
-class ParameterFormManager(ABC, metaclass=ParameterFormManagerMeta):
+class ParameterFormManager(ABC):
     """
     React-quality reactive form manager interface.
 
