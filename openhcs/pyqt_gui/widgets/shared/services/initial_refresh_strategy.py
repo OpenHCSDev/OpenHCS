@@ -65,32 +65,32 @@ class InitialRefreshStrategy(EnumDispatchService[RefreshMode]):
         else:
             return RefreshMode.OTHER_WINDOW
     
-    def _refresh_root_global_config(self, manager: Any) -> None:
+    def _refresh_root_global_config(self, manager: Any, mode: RefreshMode = None) -> None:
         """
         Refresh root GlobalPipelineConfig with sibling inheritance only.
-        
+
         No live context from other windows - just resolve placeholders
         using sibling field values within the same config.
         """
         from openhcs.utils.performance_monitor import timer
-        
+
         with timer("  Root global config sibling inheritance refresh", threshold_ms=10.0):
             # Refresh with None context (sibling inheritance only)
             manager._placeholder_refresh_service.refresh_all_placeholders(manager, None)
-            
+
             # Refresh nested managers
             manager._apply_to_nested_managers(
                 lambda name, mgr: mgr._placeholder_refresh_service.refresh_all_placeholders(mgr, None)
             )
     
-    def _refresh_other_window(self, manager: Any) -> None:
+    def _refresh_other_window(self, manager: Any, mode: RefreshMode = None) -> None:
         """
         Refresh PipelineConfig/Step with live context from other windows.
-        
+
         This ensures new windows immediately show live values from other open windows.
         """
         from openhcs.utils.performance_monitor import timer
-        
+
         with timer("  Initial live context refresh", threshold_ms=10.0):
             manager._refresh_with_live_context()
     
