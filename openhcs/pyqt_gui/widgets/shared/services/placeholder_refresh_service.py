@@ -22,14 +22,11 @@ class PlaceholderRefreshService:
     Stateless service that encapsulates all placeholder refresh operations.
     """
 
-    def __init__(self, widget_ops):
-        """
-        Initialize placeholder refresh service.
+    def __init__(self):
+        """Initialize placeholder refresh service (stateless - no dependencies)."""
+        from openhcs.ui.shared.widget_operations import WidgetOperations
 
-        Args:
-            widget_ops: WidgetOperations for placeholder operations
-        """
-        self.widget_ops = widget_ops
+        self.widget_ops = WidgetOperations
     
     def refresh_with_live_context(self, manager, live_context: Optional[dict] = None) -> None:
         """

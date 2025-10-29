@@ -1009,9 +1009,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 # CRITICAL: Trigger refresh in all remaining windows
                 # They were using this window's live values, now they need to revert to saved values
                 from .services.placeholder_refresh_service import PlaceholderRefreshService
+                service = PlaceholderRefreshService()
                 for manager in self._active_form_managers:
                     # Refresh immediately (not deferred) since we're in a controlled close event
-                    service = PlaceholderRefreshService(manager._widget_ops)
                     service.refresh_with_live_context(manager)
         except (ValueError, AttributeError):
             pass  # Already removed or list doesn't exist

@@ -93,7 +93,7 @@ class InitialRefreshStrategy(EnumDispatchService[RefreshMode]):
         from .placeholder_refresh_service import PlaceholderRefreshService
 
         with timer("  Initial live context refresh", threshold_ms=10.0):
-            service = PlaceholderRefreshService(manager._widget_ops)
+            service = PlaceholderRefreshService()
             service.refresh_with_live_context(manager)
     
     @classmethod

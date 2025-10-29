@@ -203,12 +203,12 @@ def _auto_generate_builders():
                 services[fld.name] = fld.default
                 continue
 
-            # Resolve dependencies only if class has custom __init__
-            has_custom_init = fld.type.__init__ is not object.__init__
-            sig = inspect.signature(fld.type.__init__) if has_custom_init else None
-            params = [p for p in sig.parameters.values() if p.name != 'self'] if sig else []
-            deps = {p.name: p.annotation() for p in params}
-            services[fld.name] = fld.type(**deps)
+            # Try to instantiate with no args (stateless services)
+            try:
+                services[fld.name] = fld.type()
+            except TypeError:
+                # If that fails, skip it
+                services[fld.name] = None
 
         return ManagerServices(**services)
 

@@ -15,20 +15,17 @@ logger = logging.getLogger(__name__)
 class WidgetUpdateService:
     """
     Service for updating widget values with signal blocking and placeholder handling.
-    
+
     Stateless service that encapsulates all low-level widget update operations.
     """
-    
-    def __init__(self, widget_ops, widget_enhancer):
-        """
-        Initialize widget update service.
-        
-        Args:
-            widget_ops: WidgetOperations instance for ABC-based widget operations
-            widget_enhancer: PyQt6WidgetEnhancer for placeholder operations
-        """
-        self.widget_ops = widget_ops
-        self.widget_enhancer = widget_enhancer
+
+    def __init__(self):
+        """Initialize widget update service (stateless - no dependencies)."""
+        from openhcs.ui.shared.widget_operations import WidgetOperations
+        from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
+
+        self.widget_ops = WidgetOperations
+        self.widget_enhancer = PyQt6WidgetEnhancer
     
     def update_widget_value(
         self,
