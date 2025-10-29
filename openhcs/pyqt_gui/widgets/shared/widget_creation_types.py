@@ -1,12 +1,15 @@
 """
 Type-safe definitions for widget creation configuration.
 
-Replaces untyped dicts with TypedDict and Protocol classes to enable
-static type checking and catch errors at development time.
+Uses ABCs to enforce explicit contracts and enable static type checking.
 """
 
-from typing import TypedDict, Protocol, Callable, Optional, Any, Dict, Type
+from abc import ABC, abstractmethod
+from typing import TypedDict, Callable, Optional, Any, Dict, Type
 from dataclasses import dataclass
+
+# Import ParameterInfo ABC from shared UI module
+from openhcs.ui.shared.parameter_info_types import ParameterInfoBase as ParameterInfo
 
 
 class DisplayInfo(TypedDict, total=False):
@@ -22,16 +25,10 @@ class FieldIds(TypedDict, total=False):
     optional_checkbox_id: str
 
 
-class ParameterInfoProtocol(Protocol):
-    """Protocol for parameter information objects."""
-    name: str
-    type: Type
-    current_value: Any
-    description: Optional[str]
+class ParameterFormManager(ABC):
+    """ABC for ParameterFormManager - enforces explicit interface."""
 
-
-class ParameterFormManagerProtocol(Protocol):
-    """Protocol for ParameterFormManager to enable type checking."""
+    # Properties that implementations must provide
     read_only: bool
     parameters: Dict[str, Any]
     nested_managers: Dict[str, Any]
@@ -42,58 +39,66 @@ class ParameterFormManagerProtocol(Protocol):
     service: Any
     _widget_ops: Any
     _on_build_complete_callbacks: list
-    
-    def create_widget(self, param_name: str, param_type: Type, current_value: Any, 
+
+    @abstractmethod
+    def create_widget(self, param_name: str, param_type: Type, current_value: Any,
                      widget_id: str, parameter_info: Optional[Any] = None) -> Any:
         """Create a widget for a parameter."""
-        ...
-    
+        pass
+
+    @abstractmethod
     def update_parameter(self, param_name: str, value: Any) -> None:
         """Update a parameter value."""
-        ...
-    
+        pass
+
+    @abstractmethod
     def reset_parameter(self, param_name: str) -> None:
         """Reset a parameter to default."""
-        ...
-    
-    def _create_nested_form_inline(self, param_name: str, unwrapped_type: Type, 
+        pass
+
+    @abstractmethod
+    def _create_nested_form_inline(self, param_name: str, unwrapped_type: Type,
                                    current_value: Any) -> Any:
         """Create a nested form manager inline."""
-        ...
-    
+        pass
+
+    @abstractmethod
     def _make_widget_readonly(self, widget: Any) -> None:
         """Make a widget read-only."""
-        ...
-    
+        pass
+
+    @abstractmethod
     def _emit_parameter_change(self, param_name: str, value: Any) -> None:
         """Emit parameter change signal."""
-        ...
-    
+        pass
+
+    @abstractmethod
     def _apply_initial_enabled_styling(self) -> None:
         """Apply initial enabled styling."""
-        ...
-    
+        pass
+
+    @abstractmethod
     def _apply_to_nested_managers(self, callback: Callable[[str, Any], None]) -> None:
         """Apply callback to all nested managers."""
-        ...
+        pass
 
 
 # Type aliases for handler signatures
 WidgetOperationHandler = Callable[
-    ['ParameterFormManagerProtocol', 'ParameterInfoProtocol', DisplayInfo, FieldIds, 
-     Any, Optional[Type], Optional[Any], Optional[Any], Optional[Type], 
-     Optional[Type], Optional[Type]], 
+    ['ParameterFormManager', 'ParameterInfo', DisplayInfo, FieldIds,
+     Any, Optional[Type], Optional[Any], Optional[Any], Optional[Type],
+     Optional[Type], Optional[Type]],
     Any
 ]
 
 OptionalTitleHandler = Callable[
-    ['ParameterFormManagerProtocol', 'ParameterInfoProtocol', DisplayInfo, FieldIds, 
-     Any, Optional[Type]], 
+    ['ParameterFormManager', 'ParameterInfo', DisplayInfo, FieldIds,
+     Any, Optional[Type]],
     Dict[str, Any]
 ]
 
 CheckboxLogicHandler = Callable[
-    ['ParameterFormManagerProtocol', 'ParameterInfoProtocol', Any, Any, Any, Any, Any, Type], 
+    ['ParameterFormManager', 'ParameterInfo', Any, Any, Any, Any, Any, Type],
     None
 ]
 

@@ -41,12 +41,22 @@ Architecture:
 
 from typing import Type, Any, Optional, List, Union, get_origin, get_args
 from dataclasses import dataclass, is_dataclass
+from abc import ABC, ABCMeta
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class ParameterInfoMeta(type):
+@dataclass
+class ParameterInfoBase(ABC):
+    """ABC for parameter information objects - enforces explicit interface."""
+    name: str
+    type: Type
+    current_value: Any
+    description: Optional[str] = None
+
+
+class ParameterInfoMeta(ABCMeta):
     """
     Metaclass for auto-registration of ParameterInfo types.
     
@@ -75,32 +85,28 @@ class ParameterInfoMeta(type):
 
 
 @dataclass
-class OptionalDataclassInfo(metaclass=ParameterInfoMeta):
+class OptionalDataclassInfo(ParameterInfoBase, metaclass=ParameterInfoMeta):
     """
     Parameter info for Optional[Dataclass] types.
-    
+
     These parameters:
     - Have a checkbox to enable/disable
     - Have a nested form that appears when enabled
     - Can be None when checkbox is unchecked
     - Support lazy inheritance from parent configs
-    
+
     Examples:
         def process(config: Optional[ProcessingConfig]): ...
         def analyze(settings: Optional[AnalysisSettings]): ...
     """
-    name: str
-    type: Type
-    current_value: Any
     default_value: Any = None
-    description: Optional[str] = None
     is_required: bool = True
-    
+
     @staticmethod
     def matches(param_type: Type) -> bool:
         """
         Predicate: Does this type annotation match Optional[Dataclass]?
-        
+
         Returns True if:
         - Type is Union[T, None] (i.e., Optional[T])
         - T is a dataclass
@@ -109,39 +115,35 @@ class OptionalDataclassInfo(metaclass=ParameterInfoMeta):
         is_optional = get_origin(param_type) is Union and type(None) in get_args(param_type)
         if not is_optional:
             return False
-        
+
         # Get inner type and check if dataclass
         inner_type = next(arg for arg in get_args(param_type) if arg is not type(None))
         return is_dataclass(inner_type)
 
 
 @dataclass
-class DirectDataclassInfo(metaclass=ParameterInfoMeta):
+class DirectDataclassInfo(ParameterInfoBase, metaclass=ParameterInfoMeta):
     """
     Parameter info for direct Dataclass types (non-optional).
-    
+
     These parameters:
     - Always exist (never None)
     - Have a nested form that's always visible
     - Preserve object identity during reset
     - Don't have a checkbox
-    
+
     Examples:
         def process(config: ProcessingConfig): ...
         def analyze(settings: AnalysisSettings): ...
     """
-    name: str
-    type: Type
-    current_value: Any
     default_value: Any = None
-    description: Optional[str] = None
     is_required: bool = True
-    
+
     @staticmethod
     def matches(param_type: Type) -> bool:
         """
         Predicate: Does this type annotation match a direct Dataclass?
-        
+
         Returns True if:
         - Type is a dataclass
         - Type is NOT Optional
@@ -150,33 +152,29 @@ class DirectDataclassInfo(metaclass=ParameterInfoMeta):
 
 
 @dataclass
-class GenericInfo(metaclass=ParameterInfoMeta):
+class GenericInfo(ParameterInfoBase, metaclass=ParameterInfoMeta):
     """
     Parameter info for generic types (int, str, Path, etc.).
-    
+
     These parameters:
     - Use simple widgets (QLineEdit, QSpinBox, etc.)
     - Don't have nested forms
     - Support lazy inheritance via placeholders
     - Are the most common parameter type
-    
+
     Examples:
         def process(threshold: int): ...
         def analyze(input_path: Path): ...
         def filter(sigma: float): ...
     """
-    name: str
-    type: Type
-    current_value: Any
     default_value: Any = None
-    description: Optional[str] = None
     is_required: bool = True
-    
+
     @staticmethod
     def matches(param_type: Type) -> bool:
         """
         Predicate: Fallback - matches everything.
-        
+
         This should be registered LAST in the registry so it acts
         as a catch-all for any types not matched by other predicates.
         """

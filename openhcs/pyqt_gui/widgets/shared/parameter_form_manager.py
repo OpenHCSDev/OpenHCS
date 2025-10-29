@@ -15,6 +15,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
+# Import ABC for type-safe widget creation
+from openhcs.pyqt_gui.widgets.shared.widget_creation_types import ParameterFormManager as ParameterFormManagerABC
+
 # Performance monitoring
 from openhcs.utils.performance_monitor import timer, get_monitor
 
@@ -138,7 +141,7 @@ class NoneAwareIntEdit(QLineEdit):
             self.setText(str(value))
 
 
-class ParameterFormManager(QWidget):
+class ParameterFormManager(QWidget, ParameterFormManagerABC):
     """
     PyQt6 parameter form manager with simplified implementation using generic object introspection.
 
@@ -154,6 +157,7 @@ class ParameterFormManager(QWidget):
     - Automatic parameter extraction from object instances
     - Unified interface for all object types
     - Dramatically simplified constructor (4 parameters vs 12+)
+    - Type-safe ABC inheritance for static type checking
     """
 
     parameter_changed = pyqtSignal(str, object)  # param_name, value
