@@ -381,7 +381,7 @@ def create_widget_parametric(manager: ParameterFormManager, param_info: Paramete
 
     # Add title widget if needed (OPTIONAL_NESTED only)
     title_components = None
-    if config.get('is_optional'):
+    if config.is_optional:
         title_components = ops['create_title_widget'](
             manager, param_info, display_info, field_ids, current_value, unwrapped_type
         )
