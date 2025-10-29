@@ -103,13 +103,21 @@ class ParameterFormManager(ParameterFormManagerBase):
             form.styles.height = CONSTANTS.AUTO_SIZE
             
             # Iterate through analyzed parameter structure
+            # Type-safe dispatch using discriminated unions
+            from openhcs.ui.shared.parameter_info_types import OptionalDataclassInfo, DirectDataclassInfo, GenericInfo
+
             for param_info in self.form_structure.parameters:
-                if param_info.is_optional and param_info.is_nested:
+                if isinstance(param_info, OptionalDataclassInfo):
                     yield from self._create_optional_dataclass_widget(param_info)
-                elif param_info.is_optional:
-                    yield from self._create_optional_regular_widget(param_info)
-                elif param_info.is_nested:
+                elif isinstance(param_info, DirectDataclassInfo):
                     yield from self._create_nested_dataclass_widget(param_info)
+                elif isinstance(param_info, GenericInfo):
+                    # Check if it's Optional[regular] by checking the type
+                    from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+                    if ParameterTypeUtils.is_optional(param_info.type):
+                        yield from self._create_optional_regular_widget(param_info)
+                    else:
+                        yield from self._create_regular_parameter_widget(param_info)
                 else:
                     yield from self._create_regular_parameter_widget(param_info)
     

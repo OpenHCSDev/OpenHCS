@@ -35,6 +35,41 @@ def get_base_type_for_lazy(lazy_type: Type) -> Optional[Type]:
     """Get the base type for a lazy dataclass type."""
     return _lazy_type_registry.get(lazy_type)
 
+
+def is_lazy_dataclass(obj_or_type) -> bool:
+    """
+    Check if an object or type is a lazy dataclass.
+
+    ANTI-DUCK-TYPING: Uses isinstance() check against LazyDataclass base class
+    instead of hasattr() attribute sniffing.
+
+    Works with both instances and types, and naturally handles Optional types
+    without unwrapping.
+
+    Args:
+        obj_or_type: Either a dataclass instance or a dataclass type
+
+    Returns:
+        True if the object/type is a lazy dataclass
+
+    Examples:
+        >>> is_lazy_dataclass(PipelineConfig)  # True (type check)
+        >>> is_lazy_dataclass(GlobalPipelineConfig)  # False
+        >>> is_lazy_dataclass(pipeline_config_instance)  # True (instance check)
+        >>> is_lazy_dataclass(LazyPathPlanningConfig)  # True
+        >>> is_lazy_dataclass(PathPlanningConfig)  # False
+
+        # Works with Optional without unwrapping!
+        >>> config: Optional[PipelineConfig] = PipelineConfig()
+        >>> is_lazy_dataclass(config)  # True - checks the instance, not the type annotation
+    """
+    if isinstance(obj_or_type, type):
+        # Type check: is it a subclass of LazyDataclass?
+        return issubclass(obj_or_type, LazyDataclass)
+    else:
+        # Instance check: is it an instance of LazyDataclass?
+        return isinstance(obj_or_type, LazyDataclass)
+
 # Optional imports (handled gracefully)
 try:
     from PyQt6.QtWidgets import QApplication
@@ -44,6 +79,25 @@ except ImportError:
     HAS_PYQT = False
 
 logger = logging.getLogger(__name__)
+
+
+class LazyDataclass:
+    """
+    Base class for all lazy dataclasses created by LazyDataclassFactory.
+
+    This enables isinstance() checks without duck typing or unwrapping:
+        isinstance(config, LazyDataclass)  # Works!
+        isinstance(optional_config, LazyDataclass)  # Works even for Optional!
+
+    All lazy dataclasses inherit from this, regardless of naming convention:
+    - PipelineConfig (lazy version of GlobalPipelineConfig)
+    - LazyPathPlanningConfig
+    - LazyWellFilterConfig
+    - etc.
+
+    ANTI-DUCK-TYPING: Use isinstance(obj, LazyDataclass) instead of hasattr() checks.
+    """
+    pass
 
 
 # Constants for lazy configuration system - simplified from class to module-level
@@ -343,27 +397,24 @@ class LazyDataclassFactory:
             not has_inherit_as_none_marker
         )
 
+        # Determine inheritance: always include LazyDataclass, optionally include base_class
         if has_unsafe_metaclass:
             # Base class has unsafe custom metaclass - don't inherit, just copy interface
             print(f"🔧 LAZY FACTORY: {base_class.__name__} has custom metaclass {base_metaclass.__name__}, avoiding inheritance")
-            lazy_class = make_dataclass(
-                lazy_class_name,
-                LazyDataclassFactory._introspect_dataclass_fields(
-                    base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
-                ),
-                bases=(),  # No inheritance to avoid metaclass conflicts
-                frozen=True
-            )
+            bases = (LazyDataclass,)  # Only inherit from LazyDataclass
         else:
             # Safe to inherit from regular dataclass
-            lazy_class = make_dataclass(
-                lazy_class_name,
-                LazyDataclassFactory._introspect_dataclass_fields(
-                    base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
-                ),
-                bases=(base_class,),
-                frozen=True
-            )
+            bases = (base_class, LazyDataclass)  # Inherit from both
+
+        # Single make_dataclass call - no duplication
+        lazy_class = make_dataclass(
+            lazy_class_name,
+            LazyDataclassFactory._introspect_dataclass_fields(
+                base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
+            ),
+            bases=bases,
+            frozen=True
+        )
 
         # Add constructor parameter tracking to detect user-set fields
         original_init = lazy_class.__init__

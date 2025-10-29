@@ -4,6 +4,8 @@ Shared service layer for parameter form managers.
 This module provides a framework-agnostic service layer that eliminates the
 architectural dependency between PyQt and Textual implementations by providing
 shared business logic and data management.
+
+Uses React-style discriminated unions for type-safe parameter handling.
 """
 
 import dataclasses
@@ -15,41 +17,37 @@ from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 from openhcs.ui.shared.parameter_form_constants import CONSTANTS
 from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
 from openhcs.ui.shared.ui_utils import debug_param, format_param_name
+from openhcs.ui.shared.parameter_info_types import (
+    ParameterInfo,
+    create_parameter_info
+)
 
 
 @dataclass
-class ParameterInfo:
+class ParameterAnalysisInput:
     """
-    Information about a parameter for form generation.
-    
-    Attributes:
-        name: Parameter name
-        type: Parameter type
-        current_value: Current parameter value
-        default_value: Default parameter value
-        description: Parameter description
-        is_required: Whether the parameter is required
-        is_nested: Whether the parameter is a nested dataclass
-        is_optional: Whether the parameter is Optional[T]
+    Type-safe input for parameter analysis.
+
+    Field names match UnifiedParameterInfo for automatic extraction.
+    This enforces unification across all functions that analyze parameters.
     """
-    name: str
-    type: Type
-    current_value: Any
-    default_value: Any = None
-    description: Optional[str] = None
-    is_required: bool = True
-    is_nested: bool = False
-    is_optional: bool = False
+    default_value: Dict[str, Any]
+    param_type: Dict[str, Type]
+    field_id: str
+    description: Optional[Dict[str, str]] = None
+    parent_dataclass_type: Optional[Type] = None
 
 
 @dataclass
 class FormStructure:
     """
     Structure information for a parameter form.
-    
+
+    Uses discriminated union ParameterInfo types for type-safe dispatch.
+
     Attributes:
         field_id: Unique identifier for the form
-        parameters: List of parameter information
+        parameters: List of parameter information (discriminated union types)
         nested_forms: Dictionary of nested form structures
         has_optional_dataclasses: Whether form has optional dataclass parameters
     """
@@ -57,6 +55,24 @@ class FormStructure:
     parameters: List[ParameterInfo]
     nested_forms: Dict[str, 'FormStructure']
     has_optional_dataclasses: bool = False
+
+    def get_parameter_info(self, param_name: str) -> ParameterInfo:
+        """
+        Get ParameterInfo for a parameter by name.
+
+        Args:
+            param_name: Name of the parameter
+
+        Returns:
+            ParameterInfo instance (discriminated union type)
+
+        Raises:
+            KeyError: If parameter not found
+        """
+        for param_info in self.parameters:
+            if param_info.name == param_name:
+                return param_info
+        raise KeyError(f"Parameter '{param_name}' not found in form structure")
 
 
 class ParameterFormService:
@@ -74,9 +90,7 @@ class ParameterFormService:
         """
         self._type_utils = ParameterTypeUtils()
     
-    def analyze_parameters(self, parameters: Dict[str, Any], parameter_types: Dict[str, Type],
-                          field_id: str, parameter_info: Optional[Dict] = None,
-                          parent_dataclass_type: Optional[Type] = None) -> FormStructure:
+    def analyze_parameters(self, input: ParameterAnalysisInput) -> FormStructure:
         """
         Analyze parameters and create form structure.
 
@@ -84,58 +98,56 @@ class ParameterFormService:
         form structure that can be used by any UI framework.
 
         Args:
-            parameters: Dictionary of parameter names to current values
-            parameter_types: Dictionary of parameter names to types
-            field_id: Unique identifier for the form
-            parameter_info: Optional parameter information dictionary
-            parent_dataclass_type: Optional parent dataclass type for context
+            input: Type-safe parameter analysis input (field names match UnifiedParameterInfo)
 
         Returns:
             Complete form structure information
         """
-        debug_param("analyze_parameters", f"field_id={field_id}, parameter_count={len(parameters)}")
-        
+        debug_param("analyze_parameters", f"field_id={input.field_id}, parameter_count={len(input.default_value)}")
+
         param_infos = []
         nested_forms = {}
         has_optional_dataclasses = False
-        
-        for param_name, param_type in parameter_types.items():
-            current_value = parameters.get(param_name)
+
+        for param_name, parameter_type in input.param_type.items():
+            current_value = input.default_value.get(param_name)
 
             # Check if this parameter should be hidden from UI
-            if self._should_hide_from_ui(parent_dataclass_type, param_name, param_type):
+            if self._should_hide_from_ui(input.parent_dataclass_type, param_name, parameter_type):
                 debug_param("analyze_parameters", f"Hiding parameter {param_name} from UI (ui_hidden=True)")
                 continue
 
             # Create parameter info
             param_info = self._create_parameter_info(
-                param_name, param_type, current_value, parameter_info
+                param_name, parameter_type, current_value, input.description
             )
             param_infos.append(param_info)
-            
-            # Check for nested dataclasses
-            if param_info.is_nested:
+
+            # Check for nested dataclasses using isinstance (type-safe!)
+            from openhcs.ui.shared.parameter_info_types import OptionalDataclassInfo, DirectDataclassInfo
+
+            if isinstance(param_info, (OptionalDataclassInfo, DirectDataclassInfo)):
                 # Get actual field path from FieldPathDetector (no artificial "nested_" prefix)
                 # Unwrap Optional types to get the actual dataclass type for field path detection
-                unwrapped_param_type = self._type_utils.get_optional_inner_type(param_type) if self._type_utils.is_optional_dataclass(param_type) else param_type
+                unwrapped_param_type = self._type_utils.get_optional_inner_type(parameter_type) if self._type_utils.is_optional_dataclass(parameter_type) else parameter_type
 
                 # For function parameters (no parent dataclass), use parameter name directly
-                if parent_dataclass_type is None:
+                if input.parent_dataclass_type is None:
                     nested_field_id = param_name
                 else:
-                    nested_field_id = self.get_field_path_with_fail_loud(parent_dataclass_type, unwrapped_param_type)
+                    nested_field_id = self.get_field_path_with_fail_loud(input.parent_dataclass_type, unwrapped_param_type)
 
                 nested_structure = self._analyze_nested_dataclass(
-                    param_name, param_type, current_value, nested_field_id, parent_dataclass_type
+                    param_name, parameter_type, current_value, nested_field_id, input.parent_dataclass_type
                 )
                 nested_forms[param_name] = nested_structure
-            
-            # Check for optional dataclasses
-            if param_info.is_optional and param_info.is_nested:
+
+            # Check for optional dataclasses using isinstance (type-safe!)
+            if isinstance(param_info, OptionalDataclassInfo):
                 has_optional_dataclasses = True
-        
+
         return FormStructure(
-            field_id=field_id,
+            field_id=input.field_id,
             parameters=param_infos,
             nested_forms=nested_forms,
             has_optional_dataclasses=has_optional_dataclasses
@@ -411,15 +423,12 @@ class ParameterFormService:
 
     def _create_parameter_info(self, param_name: str, param_type: Type, current_value: Any,
                              parameter_info: Optional[Dict] = None) -> ParameterInfo:
-        """Create parameter information object."""
-        # Check if it's any optional type
-        is_optional = self._type_utils.is_optional(param_type)
-        if is_optional:
-            inner_type = self._type_utils.get_optional_inner_type(param_type)
-            is_nested = dataclasses.is_dataclass(inner_type)
-        else:
-            is_nested = dataclasses.is_dataclass(param_type)
-        
+        """
+        Create parameter information object using discriminated union factory.
+
+        Uses type introspection to automatically select the correct ParameterInfo
+        subclass (OptionalDataclassInfo, DirectDataclassInfo, or GenericInfo).
+        """
         # Get description from parameter info
         description = None
         if parameter_info and param_name in parameter_info:
@@ -431,14 +440,14 @@ class ParameterFormService:
             else:
                 # Object with description attribute
                 description = getattr(info_obj, 'description', None)
-        
-        return ParameterInfo(
+
+        # Use factory to create correct ParameterInfo subclass
+        # Factory uses type introspection to determine which type to create
+        return create_parameter_info(
             name=param_name,
-            type=param_type,
+            param_type=param_type,
             current_value=current_value,
-            description=description,
-            is_nested=is_nested,
-            is_optional=is_optional
+            description=description
         )
     
     # Class-level cache for nested dataclass parameter info (descriptions only)
@@ -472,13 +481,16 @@ class ParameterFormService:
             nested_param_info = UnifiedParameterAnalyzer.analyze(dataclass_type)
             self._nested_param_info_cache[cache_key] = nested_param_info
 
-        return self.analyze_parameters(
-            nested_params,
-            nested_types,
-            nested_field_id,
-            parameter_info=nested_param_info,
-            parent_dataclass_type=dataclass_type,
+        # Create type-safe input for recursive analysis
+        nested_input = ParameterAnalysisInput(
+            default_value=nested_params,
+            param_type=nested_types,
+            field_id=nested_field_id,
+            description={name: info.description for name, info in nested_param_info.items()} if nested_param_info else None,
+            parent_dataclass_type=dataclass_type
         )
+
+        return self.analyze_parameters(nested_input)
 
     def get_placeholder_text(self, param_name: str, dataclass_type: Type,
                            placeholder_prefix: str = "Pipeline default") -> Optional[str]:

@@ -16,17 +16,25 @@ Mirrors MemoryTypeConverter pattern - adapters normalize inconsistent APIs.
 
 from typing import Any, Callable, Optional
 from enum import Enum
+from abc import ABCMeta
 
 try:
     from PyQt6.QtWidgets import (
         QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QWidget
     )
-    from PyQt6.QtCore import Qt
+    from PyQt6.QtCore import Qt, QObject
     PYQT6_AVAILABLE = True
+    # PyQt-specific metaclass that combines ABCMeta with Qt's metaclass
+    # Order matters: ABCMeta first (it's the "primary" metaclass for ABC functionality)
+    _QtMetaclass = type(QObject)
+    class PyQtWidgetMeta(_QtMetaclass, ABCMeta):
+        """Metaclass for PyQt widgets that need ABC support."""
+        pass
 except ImportError:
     PYQT6_AVAILABLE = False
     # Create dummy base classes for type hints
     QLineEdit = QSpinBox = QDoubleSpinBox = QComboBox = QCheckBox = QWidget = object
+    PyQtWidgetMeta = ABCMeta
 
 from .widget_protocols import (
     ValueGettable, ValueSettable, PlaceholderCapable,
@@ -36,9 +44,9 @@ from .widget_registry import WidgetMeta
 
 
 if PYQT6_AVAILABLE:
-    
+
     class LineEditAdapter(QLineEdit, ValueGettable, ValueSettable, PlaceholderCapable,
-                          ChangeSignalEmitter, metaclass=WidgetMeta):
+                          ChangeSignalEmitter, metaclass=PyQtWidgetMeta):
         """
         Adapter for QLineEdit implementing OpenHCS ABCs.
         
@@ -78,7 +86,7 @@ if PYQT6_AVAILABLE:
     
     
     class SpinBoxAdapter(QSpinBox, ValueGettable, ValueSettable, PlaceholderCapable,
-                         RangeConfigurable, ChangeSignalEmitter, metaclass=WidgetMeta):
+                         RangeConfigurable, ChangeSignalEmitter, metaclass=PyQtWidgetMeta):
         """
         Adapter for QSpinBox implementing OpenHCS ABCs.
         
@@ -130,7 +138,7 @@ if PYQT6_AVAILABLE:
     
     class DoubleSpinBoxAdapter(QDoubleSpinBox, ValueGettable, ValueSettable,
                                PlaceholderCapable, RangeConfigurable,
-                               ChangeSignalEmitter, metaclass=WidgetMeta):
+                               ChangeSignalEmitter, metaclass=PyQtWidgetMeta):
         """
         Adapter for QDoubleSpinBox implementing OpenHCS ABCs.
         
@@ -179,7 +187,7 @@ if PYQT6_AVAILABLE:
     
     
     class ComboBoxAdapter(QComboBox, ValueGettable, ValueSettable, PlaceholderCapable,
-                         ChangeSignalEmitter, metaclass=WidgetMeta):
+                         ChangeSignalEmitter, metaclass=PyQtWidgetMeta):
         """
         Adapter for QComboBox implementing OpenHCS ABCs.
         
@@ -237,7 +245,7 @@ if PYQT6_AVAILABLE:
     
     
     class CheckBoxAdapter(QCheckBox, ValueGettable, ValueSettable,
-                         ChangeSignalEmitter, metaclass=WidgetMeta):
+                         ChangeSignalEmitter, metaclass=PyQtWidgetMeta):
         """
         Adapter for QCheckBox implementing OpenHCS ABCs.
         

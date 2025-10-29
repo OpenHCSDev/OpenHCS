@@ -18,7 +18,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
     QListWidgetItem, QLabel,
-    QSplitter, QApplication
+    QSplitter
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QFont
@@ -71,10 +71,6 @@ class PlateManagerWidget(QWidget):
     compilation_error = pyqtSignal(str, str)  # plate_name, error_message
     initialization_error = pyqtSignal(str, str)  # plate_name, error_message
     execution_error = pyqtSignal(str)  # error_message
-
-    # Internal signals for thread-safe completion handling
-    _execution_complete_signal = pyqtSignal(dict, list)  # result, ready_items
-    _execution_error_signal = pyqtSignal(str)  # error_msg
     
     def __init__(self, file_manager: FileManager, service_adapter,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
@@ -121,11 +117,7 @@ class PlateManagerWidget(QWidget):
         self.setup_ui()
         self.setup_connections()
         self.update_button_states()
-
-        # Connect internal signals for thread-safe completion handling
-        self._execution_complete_signal.connect(self._on_execution_complete)
-        self._execution_error_signal.connect(self._on_execution_error)
-
+        
         logger.debug("Plate manager widget initialized")
 
     def cleanup(self):
@@ -986,50 +978,49 @@ class PlateManagerWidget(QWidget):
 
                 logger.info(f"Executing plate: {plate_path}")
 
-                # Submit pipeline via ZMQ (non-blocking - returns immediately)
+                # Execute via ZMQ (in executor to avoid blocking UI)
                 # Send original definition pipeline - server will compile it
-                def _submit():
-                    return self.zmq_client.submit_pipeline(
+                def _execute():
+                    return self.zmq_client.execute_pipeline(
                         plate_id=str(plate_path),
                         pipeline_steps=definition_pipeline,
                         global_config=global_config_to_send,
                         pipeline_config=pipeline_config
                     )
 
-                response = await loop.run_in_executor(None, _submit)
+                response = await loop.run_in_executor(None, _execute)
 
                 # Track execution ID for cancellation
                 if response.get('execution_id'):
                     self.current_execution_id = response['execution_id']
 
-                logger.info(f"Plate {plate_path} submission response: {response.get('status')}")
+                logger.info(f"Plate {plate_path} execution response: {response.get('status')}")
 
-                # Handle submission response (not completion - that comes via progress callback)
+                # Handle different response statuses
                 status = response.get('status')
-                if status == 'accepted':
-                    # Execution submitted successfully - it's now running in background
-                    logger.info(f"Plate {plate_path} execution submitted successfully, ID={response.get('execution_id')}")
-                    self.status_message.emit(f"Executing {plate_path}... (check progress below)")
-
-                    # Start polling for completion in background (non-blocking)
-                    execution_id = response.get('execution_id')
-                    if execution_id:
-                        self._start_completion_poller(execution_id, plate_paths_to_run, ready_items)
-                else:
-                    # Submission failed - handle error
+                if status == 'cancelled':
+                    # Cancellation is expected, not an error - just log it
+                    logger.info(f"Plate {plate_path} execution was cancelled")
+                    self.status_message.emit(f"Execution cancelled for {plate_path}")
+                elif status != 'complete':
+                    # Actual error - use signal for thread-safe error reporting
                     error_msg = response.get('message', 'Unknown error')
-                    logger.error(f"Plate {plate_path} submission failed: {error_msg}")
-                    self.execution_error.emit(f"Submission failed for {plate_path}: {error_msg}")
+                    logger.error(f"Plate {plate_path} execution failed: {error_msg}")
+                    self.execution_error.emit(f"Execution failed for {plate_path}: {error_msg}")
 
-                    # Reset state on submission failure
-                    self.execution_state = "idle"
-                    self.current_execution_id = None
-                    for plate in ready_items:
-                        plate_path = plate['path']
-                        if plate_path in self.orchestrators:
-                            self.orchestrators[plate_path]._state = OrchestratorState.READY
-                            self.orchestrator_state_changed.emit(plate_path, OrchestratorState.READY.value)
-                    self.update_button_states()
+            # Execution complete
+            self.execution_state = "idle"
+            self.current_execution_id = None
+            self.status_message.emit(f"Completed {len(ready_items)} plate(s)")
+
+            # Update orchestrator states
+            for plate in ready_items:
+                plate_path = plate['path']
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
+
+            self.update_button_states()
 
         except Exception as e:
             logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
@@ -1037,7 +1028,8 @@ class PlateManagerWidget(QWidget):
             self.execution_error.emit(f"Failed to execute: {e}")
             self.execution_state = "idle"
 
-            # Disconnect client on error
+        finally:
+            # Always disconnect client after execution to avoid state conflicts
             if self.zmq_client is not None:
                 try:
                     def _disconnect():
@@ -1050,87 +1042,6 @@ class PlateManagerWidget(QWidget):
 
             self.current_execution_id = None
             self.update_button_states()
-
-    def _start_completion_poller(self, execution_id, plate_paths, ready_items):
-        """
-        Start background thread to poll for execution completion (non-blocking).
-
-        Args:
-            execution_id: Execution ID to poll
-            plate_paths: List of plate paths being executed
-            ready_items: List of plate items being executed
-        """
-        import threading
-
-        def poll_completion():
-            """Poll for completion in background thread."""
-            try:
-                # Wait for completion (blocking in this thread, but not UI thread)
-                result = self.zmq_client.wait_for_completion(execution_id)
-
-                # Emit completion signal (thread-safe via Qt signal)
-                self._execution_complete_signal.emit(result, ready_items)
-
-            except Exception as e:
-                logger.error(f"Error polling for completion: {e}", exc_info=True)
-                # Emit error signal (thread-safe via Qt signal)
-                self._execution_error_signal.emit(str(e))
-
-        # Start polling thread
-        thread = threading.Thread(target=poll_completion, daemon=True)
-        thread.start()
-
-    def _on_execution_complete(self, result, ready_items):
-        """Handle execution completion (called from main thread via signal)."""
-        try:
-            status = result.get('status')
-            logger.info(f"Execution completed with status: {status}")
-
-            if status == 'complete':
-                self.status_message.emit(f"Completed {len(ready_items)} plate(s)")
-            elif status == 'cancelled':
-                self.status_message.emit(f"Execution cancelled")
-            else:
-                error_msg = result.get('message', 'Unknown error')
-                self.execution_error.emit(f"Execution failed: {error_msg}")
-
-            # Disconnect ZMQ client on completion
-            if self.zmq_client is not None:
-                try:
-                    logger.info("Disconnecting ZMQ client after execution completion")
-                    self.zmq_client.disconnect()
-                except Exception as disconnect_error:
-                    logger.warning(f"Failed to disconnect ZMQ client: {disconnect_error}")
-                finally:
-                    self.zmq_client = None
-
-            # Update state
-            self.execution_state = "idle"
-            self.current_execution_id = None
-
-            # Update orchestrator states
-            # Note: orchestrator_state_changed signal triggers on_orchestrator_state_changed()
-            # which calls update_plate_list(), so we don't need to call update_button_states() here
-            # (calling it here causes recursive repaint and crashes)
-            for plate in ready_items:
-                plate_path = plate['path']
-                if plate_path in self.orchestrators:
-                    if status == 'complete':
-                        self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
-                        self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
-                    else:
-                        self.orchestrators[plate_path]._state = OrchestratorState.READY
-                        self.orchestrator_state_changed.emit(plate_path, OrchestratorState.READY.value)
-
-        except Exception as e:
-            logger.error(f"Error handling execution completion: {e}", exc_info=True)
-
-    def _on_execution_error(self, error_msg):
-        """Handle execution error (called from main thread via signal)."""
-        self.execution_error.emit(f"Execution error: {error_msg}")
-        self.execution_state = "idle"
-        self.current_execution_id = None
-        self.update_button_states()
 
     def _on_zmq_progress(self, message):
         """
@@ -1167,63 +1078,61 @@ class PlateManagerWidget(QWidget):
         self.status_message.emit(message)
 
     async def action_stop_execution(self):
-        """Handle Stop Execution - cancel ZMQ execution or terminate subprocess.
+        """Handle Stop Execution - cancel ZMQ execution or terminate subprocess."""
+        logger.info("🛑 Stop button pressed.")
+        self.status_message.emit("Terminating execution...")
 
-        First click: Graceful shutdown, button changes to "Force Kill"
-        Second click: Force shutdown
-
-        Uses EXACT same code path as ZMQ browser quit button.
-        """
-        logger.info("🛑🛑🛑 action_stop_execution CALLED")
-        logger.info(f"🛑 execution_state: {self.execution_state}")
-        logger.info(f"🛑 zmq_client: {self.zmq_client}")
-        logger.info(f"🛑 Button text: {self.buttons['run_plate'].text()}")
-
-        # Check if this is a force kill (button text is "Force Kill")
-        is_force_kill = self.buttons["run_plate"].text() == "Force Kill"
+        # Immediately set state to "stopping" and disable the button
+        self.execution_state = "stopping"
+        self.update_button_states()
 
         # Check if using ZMQ execution
         if self.zmq_client:
-            port = self.zmq_client.port
+            try:
+                logger.info("🛑 Requesting graceful cancellation via ZMQ...")
 
-            # Change button to "Force Kill" IMMEDIATELY (before any async operations)
-            if not is_force_kill:
-                logger.info(f"🛑 Stop button pressed - changing to Force Kill")
-                self.execution_state = "force_kill_ready"
+                import asyncio
+                loop = asyncio.get_event_loop()
+
+                # Use the same code path as the ZMQ browser Quit button - it works perfectly!
+                # Send 'shutdown' message which kills workers but keeps server alive
+                logger.info(f"🛑 Killing workers using same code path as Quit button (port {self.zmq_client.port})")
+
+                def _kill_workers():
+                    from openhcs.runtime.zmq_base import ZMQClient
+                    return ZMQClient.kill_server_on_port(self.zmq_client.port, graceful=True)
+
+                success = await loop.run_in_executor(None, _kill_workers)
+
+                if success:
+                    logger.info("🛑 Workers killed successfully, server still alive")
+                    self.status_message.emit("Execution cancelled - workers killed")
+                else:
+                    logger.warning("🛑 Failed to kill workers")
+                    self.status_message.emit("Failed to cancel execution")
+
+                # Disconnect client
+                def _disconnect():
+                    self.zmq_client.disconnect()
+
+                await loop.run_in_executor(None, _disconnect)
+
+                self.zmq_client = None
+                self.current_execution_id = None
+                self.execution_state = "idle"
+
+                # Update orchestrator states
+                for orchestrator in self.orchestrators.values():
+                    if orchestrator.state == OrchestratorState.EXECUTING:
+                        orchestrator._state = OrchestratorState.COMPILED
+
+                self.status_message.emit("Execution cancelled by user")
                 self.update_button_states()
-                # Force immediate UI update
-                QApplication.processEvents()
 
-            # Use EXACT same code path as ZMQ browser quit button
-            import threading
-
-            def kill_server():
-                from openhcs.runtime.zmq_base import ZMQClient
-                try:
-                    graceful = not is_force_kill
-                    logger.info(f"🛑 {'Gracefully' if graceful else 'Force'} killing server on port {port}...")
-                    success = ZMQClient.kill_server_on_port(port, graceful=graceful)
-
-                    if success:
-                        logger.info(f"✅ Successfully {'quit' if graceful else 'force killed'} server on port {port}")
-                        # Emit signal to update UI on main thread
-                        self._execution_complete_signal.emit(
-                            {'status': 'cancelled'},
-                            []  # No ready_items needed for cancellation
-                        )
-                    else:
-                        logger.warning(f"❌ Failed to {'quit' if graceful else 'force kill'} server on port {port}")
-                        self._execution_error_signal.emit(f"Failed to stop execution on port {port}")
-
-                except Exception as e:
-                    logger.error(f"❌ Error stopping server on port {port}: {e}")
-                    self._execution_error_signal.emit(f"Error stopping execution: {e}")
-
-            # Run in background thread (same as ZMQ browser)
-            thread = threading.Thread(target=kill_server, daemon=True)
-            thread.start()
-
-            return
+            except Exception as e:
+                logger.error(f"🛑 Error cancelling ZMQ execution: {e}")
+                # Use signal for thread-safe error reporting from async context
+                self.execution_error.emit(f"Failed to cancel execution: {e}")
 
         elif self.current_process and self.current_process.poll() is None:  # Still running subprocess
             try:
@@ -1281,6 +1190,8 @@ class PlateManagerWidget(QWidget):
                 self.status_message.emit("Execution terminated by user")
                 self.update_button_states()
                 self.subprocess_log_stopped.emit()
+        else:
+            self.service_adapter.show_info_dialog("No execution is currently running.")
     
     def action_code_plate(self):
         """Generate Python code for selected plates and their pipelines (Tier 3)."""
@@ -1409,11 +1320,6 @@ class PlateManagerWidget(QWidget):
         """Handle edited orchestrator code and update UI state (same logic as Textual TUI)."""
         logger.debug("Orchestrator code edited, processing changes...")
         try:
-            # Ensure pipeline editor window is open before processing orchestrator code
-            main_window = self._find_main_window()
-            if main_window and hasattr(main_window, 'show_pipeline_editor'):
-                main_window.show_pipeline_editor()
-
             # CRITICAL FIX: Execute code with lazy dataclass constructor patching to preserve None vs concrete distinction
             namespace = {}
             with self._patch_lazy_constructors():
@@ -1503,6 +1409,7 @@ class PlateManagerWidget(QWidget):
 
                 # Trigger UI refresh
                 self.pipeline_data_changed.emit()
+                self.service_adapter.show_info_dialog("Orchestrator configuration updated successfully")
 
             else:
                 raise ValueError("No valid assignments found in edited code")
@@ -1681,10 +1588,6 @@ class PlateManagerWidget(QWidget):
             # Stopping state - keep button as "Stop" but disable it
             self.buttons["run_plate"].setEnabled(False)
             self.buttons["run_plate"].setText("Stop")
-        elif self.execution_state == "force_kill_ready":
-            # Force kill ready state - button is "Force Kill" and enabled
-            self.buttons["run_plate"].setEnabled(True)
-            self.buttons["run_plate"].setText("Force Kill")
         elif is_running:
             # Running state - button is "Stop" and enabled
             self.buttons["run_plate"].setEnabled(True)
@@ -1701,8 +1604,8 @@ class PlateManagerWidget(QWidget):
         Returns:
             True if any plate is running, False otherwise
         """
-        # Consider "running", "stopping", and "force_kill_ready" states as "busy"
-        return self.execution_state in ("running", "stopping", "force_kill_ready")
+        # Consider both "running" and "stopping" states as "busy"
+        return self.execution_state in ("running", "stopping")
     
     def update_status(self, message: str):
         """
@@ -1819,15 +1722,6 @@ class PlateManagerWidget(QWidget):
         """
         self.pipeline_editor = pipeline_editor
         logger.debug("Pipeline editor reference set in plate manager")
-
-    def _find_main_window(self):
-        """Find the main window by traversing parent hierarchy."""
-        widget = self
-        while widget:
-            if hasattr(widget, 'floating_windows'):
-                return widget
-            widget = widget.parent()
-        return None
 
     async def _start_monitoring(self):
         """Start monitoring subprocess execution."""

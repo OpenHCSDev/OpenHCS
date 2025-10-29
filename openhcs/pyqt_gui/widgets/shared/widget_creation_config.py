@@ -1,7 +1,7 @@
 """
 Widget creation configuration - parametric pattern.
 
-Single source of truth for widget creation behavior (REGULAR and NESTED only).
+Single source of truth for widget creation behavior (REGULAR, NESTED, and OPTIONAL_NESTED).
 Mirrors openhcs/core/memory/framework_config.py pattern.
 
 Architecture:
@@ -9,9 +9,9 @@ Architecture:
 - Unified config: Single _WIDGET_CREATION_CONFIG dict with all metadata
 - Parametric dispatch: Handlers can be callables or eval expressions
 
-NOTE: OPTIONAL_NESTED widgets are too complex for parametrization (180+ lines with
-      custom checkbox logic, title widgets, styling callbacks). They remain as a
-      dedicated method. This config handles the simpler REGULAR and NESTED types.
+All three widget types (REGULAR, NESTED, OPTIONAL_NESTED) are now parametrized.
+OPTIONAL_NESTED reuses the same nested form creation logic as NESTED, with additional
+handlers for checkbox title widget and None/instance toggle logic.
 """
 
 from enum import Enum
@@ -25,10 +25,11 @@ class WidgetCreationType(Enum):
     """
     Enum for widget creation strategies - mirrors MemoryType pattern.
 
-    PyQt6 uses 2 parametric types (REGULAR, NESTED) + 1 custom handler (OPTIONAL_NESTED).
+    PyQt6 uses 3 parametric types: REGULAR, NESTED, and OPTIONAL_NESTED.
     """
     REGULAR = "regular"
     NESTED = "nested"
+    OPTIONAL_NESTED = "optional_nested"
 
 
 # ============================================================================
@@ -61,12 +62,15 @@ def _create_optimized_reset_button(field_id: str, param_name: str, reset_callbac
     return button
 
 
-def _create_nested_form(manager, param_info, display_info, field_ids, current_value, unwrapped_type) -> Any:
+def _create_nested_form(manager, param_info, display_info, field_ids, current_value, unwrapped_type, layout=None, CURRENT_LAYOUT=None, QWidget=None, GroupBoxWithHelp=None, PyQt6ColorScheme=None) -> Any:
     """
     Handler for creating nested form.
 
     NOTE: This creates the nested manager AND stores it in manager.nested_managers.
     The caller should NOT try to store it again.
+
+    Extra parameters (layout, CURRENT_LAYOUT, etc.) are accepted but not used - they're
+    part of the unified handler signature for consistency.
     """
     nested_manager = manager._create_nested_form_inline(
         param_info.name, unwrapped_type, current_value
@@ -74,6 +78,129 @@ def _create_nested_form(manager, param_info, display_info, field_ids, current_va
     # Store nested manager BEFORE building form (needed for reset button connection)
     manager.nested_managers[param_info.name] = nested_manager
     return nested_manager.build_form()
+
+
+def _create_optional_title_widget(manager, param_info, display_info, field_ids, current_value, unwrapped_type):
+    """
+    Handler for creating optional dataclass title widget with checkbox.
+
+    Creates: checkbox + title label + reset button + help button (all inline).
+    Returns: (title_widget, checkbox) tuple for later connection.
+    """
+    from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QFont
+    from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+    from openhcs.pyqt_gui.widgets.shared.clickable_help_components import HelpButton
+
+    title_widget = QWidget()
+    title_layout = QHBoxLayout(title_widget)
+    title_layout.setSpacing(5)
+    title_layout.setContentsMargins(10, 5, 10, 5)
+
+    # Checkbox (compact, no text)
+    checkbox = NoneAwareCheckBox()
+    checkbox.setObjectName(field_ids['optional_checkbox_id'])
+    # Title checkbox ONLY controls None vs Instance, NOT the enabled field
+    checkbox.setChecked(current_value is not None)
+    checkbox.setMaximumWidth(20)
+    title_layout.addWidget(checkbox)
+
+    # Title label (clickable to toggle checkbox)
+    title_label = QLabel(display_info['checkbox_label'])
+    title_font = QFont()
+    title_font.setBold(True)
+    title_label.setFont(title_font)
+    title_label.mousePressEvent = lambda e: checkbox.toggle()
+    title_label.setCursor(Qt.CursorShape.PointingHandCursor)
+    title_layout.addWidget(title_label)
+
+    title_layout.addStretch()
+
+    # Reset All button (will be connected later)
+    reset_all_button = None
+    if not manager.read_only:
+        reset_all_button = QPushButton("Reset")
+        reset_all_button.setMaximumWidth(60)
+        reset_all_button.setFixedHeight(20)
+        reset_all_button.setToolTip(f"Reset all parameters in {display_info['checkbox_label']} to defaults")
+        title_layout.addWidget(reset_all_button)
+
+    # Help button
+    help_btn = HelpButton(help_target=unwrapped_type, text="?", color_scheme=manager.color_scheme)
+    help_btn.setMaximumWidth(25)
+    help_btn.setMaximumHeight(20)
+    title_layout.addWidget(help_btn)
+
+    return {
+        'title_widget': title_widget,
+        'checkbox': checkbox,
+        'title_label': title_label,
+        'help_btn': help_btn,
+        'reset_all_button': reset_all_button,
+    }
+
+
+def _connect_optional_checkbox_logic(manager, param_info, checkbox, nested_form, nested_manager, title_label, help_btn, unwrapped_type):
+    """
+    Handler for connecting optional dataclass checkbox toggle logic.
+
+    Checkbox controls None vs instance state (independent of enabled field).
+    """
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QGraphicsOpacityEffect
+
+    def on_checkbox_changed(checked):
+        # Title checkbox controls whether config exists (None vs instance)
+        nested_form.setEnabled(checked)
+
+        if checked:
+            # Config exists - create instance preserving the enabled field value
+            current_param_value = manager.parameters.get(param_info.name)
+            if current_param_value is None:
+                # Create new instance with default enabled value
+                new_instance = unwrapped_type()
+                manager.update_parameter(param_info.name, new_instance)
+
+            # Remove dimming for None state (title only)
+            title_label.setStyleSheet("")
+            help_btn.setEnabled(True)
+
+            # Trigger the nested config's enabled handler to apply enabled styling
+            QTimer.singleShot(0, nested_manager._apply_initial_enabled_styling)
+        else:
+            # Config is None - set to None and block inputs
+            manager.update_parameter(param_info.name, None)
+
+            # Apply dimming for None state
+            title_label.setStyleSheet(f"color: {manager.color_scheme.to_hex(manager.color_scheme.text_disabled)};")
+            help_btn.setEnabled(True)
+            # ANTI-DUCK-TYPING: Use ABC-based widget discovery
+            for widget in manager._widget_ops.get_all_value_widgets(nested_form):
+                effect = QGraphicsOpacityEffect()
+                effect.setOpacity(0.4)
+                widget.setGraphicsEffect(effect)
+
+    checkbox.toggled.connect(on_checkbox_changed)
+
+    # Register callback for initial styling (deferred until after all widgets are created)
+    def apply_initial_styling():
+        on_checkbox_changed(checkbox.isChecked())
+
+    manager._on_build_complete_callbacks.append(apply_initial_styling)
+
+
+def _setup_regular_layout(manager, param_info, display_info, field_ids, current_value, unwrapped_type, layout, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme):
+    """Setup layout for REGULAR widget type."""
+    layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing)
+    layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)
+
+
+def _setup_optional_nested_layout(manager, param_info, display_info, field_ids, current_value, unwrapped_type, container, QVBoxLayout):
+    """Setup layout for OPTIONAL_NESTED widget type."""
+    container.setLayout(QVBoxLayout())
+    container.layout().setSpacing(0)
+    container.layout().setContentsMargins(0, 0, 0, 0)
 
 
 # ============================================================================
@@ -88,7 +215,7 @@ _WIDGET_CREATION_CONFIG = {
 
         # Widget creation operations (eval expressions or callables)
         'create_container': 'QWidget()',
-        'setup_layout': 'layout.setSpacing(CURRENT_LAYOUT.parameter_row_spacing); layout.setContentsMargins(*CURRENT_LAYOUT.parameter_row_margins)',
+        'setup_layout': _setup_regular_layout,
         'create_main_widget': 'manager.create_widget(param_info.name, param_info.type, current_value, field_ids["widget_id"])',
 
         # Feature flags
@@ -111,6 +238,27 @@ _WIDGET_CREATION_CONFIG = {
         'needs_label': False,
         'needs_reset_button': True,  # "Reset All" button in GroupBox title
         'needs_unwrap_type': True,
+        'is_optional': False,
+    },
+
+    WidgetCreationType.OPTIONAL_NESTED: {
+        # Metadata
+        'layout_type': 'QGroupBox',  # Plain GroupBox with custom title widget
+        'is_nested': True,
+        'is_optional': True,
+
+        # Widget creation operations
+        'create_container': 'QGroupBox()',
+        'setup_layout': _setup_optional_nested_layout,
+        'create_title_widget': _create_optional_title_widget,  # Callable handler
+        'create_main_widget': _create_nested_form,  # REUSE from NESTED!
+        'connect_checkbox_logic': _connect_optional_checkbox_logic,  # Callable handler
+
+        # Feature flags
+        'needs_label': False,
+        'needs_reset_button': True,  # Reset button in custom title widget
+        'needs_unwrap_type': True,
+        'needs_checkbox': True,
     },
 }
 
@@ -127,11 +275,50 @@ def _make_widget_operation(expr_str: str, creation_type: WidgetCreationType):
     """
     if expr_str is None:
         return None
+    # Build a lambda-like callable with the expected parameter list. Some
+    # expressions in the config use multiple statements separated by
+    # semicolons (e.g. "a(); b()"), which is invalid inside a Python
+    # lambda. First try to eval a single-expression lambda; if that
+    # raises SyntaxError, convert the expression into a proper def and
+    # exec it to obtain a real function supporting multiple statements.
 
-    # Create lambda with proper context
-    # Context: manager, param_info, display_info, field_ids, current_value, unwrapped_type, layout, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme
-    lambda_expr = f'lambda manager, param_info, display_info, field_ids, current_value, unwrapped_type, layout, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme: {expr_str}'
-    operation = eval(lambda_expr)
+    import re
+
+    params = (
+        'manager, param_info, display_info, field_ids, '
+        'current_value, unwrapped_type, layout, CURRENT_LAYOUT, '
+        'QWidget, GroupBoxWithHelp, PyQt6ColorScheme'
+    )
+
+    lambda_expr = f'lambda {params}: {expr_str}'
+
+    try:
+        operation = eval(lambda_expr)
+    except SyntaxError:
+        # Convert 'lambda params: body' into a def with the same params
+        m = re.match(r"lambda\s*(.*?)\s*:\s*(.*)", lambda_expr, re.S)
+        if not m:
+            raise
+        params_str, body = m.groups()
+
+        # Build function source; split body on semicolons so multi-statement
+        # expressions become proper statements.
+        func_name = f'{creation_type.value}_operation'
+        func_lines = [f'def {func_name}({params_str}):']
+        for stmt in body.split(';'):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            func_lines.append('    ' + stmt)
+
+        func_src = '\n'.join(func_lines)
+
+        # Exec in a temporary namespace and retrieve the created function.
+        ns: dict = {}
+        exec(func_src, globals(), ns)
+        operation = ns[func_name]
+
+    # Give the created callable a helpful name/qualname for debugging
     operation.__name__ = f'{creation_type.value}_operation'
     operation.__qualname__ = f'WidgetCreation.{creation_type.value}_operation'
     return operation
@@ -145,7 +332,7 @@ _WIDGET_OPERATIONS = {
             else expr  # Already a callable
         )
         for op_name, expr in config.items()
-        if op_name in ['create_container', 'setup_layout', 'create_main_widget']
+        if op_name in ['create_container', 'setup_layout', 'create_main_widget', 'create_title_widget', 'connect_checkbox_logic']
     }
     for creation_type, config in _WIDGET_CREATION_CONFIG.items()
 }
@@ -159,13 +346,13 @@ def create_widget_parametric(manager, param_info, creation_type: WidgetCreationT
     """
     UNIFIED: Create widget using parametric dispatch.
 
-    Replaces _create_regular_parameter_widget and _create_nested_dataclass_widget.
-    Does NOT handle OPTIONAL_NESTED (too complex - remains as dedicated method).
+    Replaces _create_regular_parameter_widget, _create_nested_dataclass_widget,
+    and _create_optional_dataclass_widget.
 
     Args:
         manager: ParameterFormManager instance
         param_info: Parameter information object
-        creation_type: Widget creation type (REGULAR or NESTED)
+        creation_type: Widget creation type (REGULAR, NESTED, or OPTIONAL_NESTED)
 
     Returns:
         QWidget: Created widget container
@@ -203,16 +390,30 @@ def create_widget_parametric(manager, param_info, creation_type: WidgetCreationT
         layout = QHBoxLayout(container)
     elif layout_type == 'QVBoxLayout':
         layout = QVBoxLayout(container)
+    elif layout_type == 'QGroupBox':
+        # OPTIONAL_NESTED: setup_layout creates the layout
+        layout = None  # Will be set by setup_layout
     else:  # GroupBoxWithHelp
         layout = container.layout()
 
-    if ops['setup_layout']:
+    if ops.get('setup_layout'):
         ops['setup_layout'](
             manager, param_info, display_info, field_ids, current_value, unwrapped_type,
             layout, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme
         )
+        # For OPTIONAL_NESTED, get the layout after setup
+        if layout_type == 'QGroupBox':
+            layout = container.layout()
 
-    # Add label if needed
+    # Add title widget if needed (OPTIONAL_NESTED only)
+    title_components = None
+    if config.get('is_optional'):
+        title_components = ops['create_title_widget'](
+            manager, param_info, display_info, field_ids, current_value, unwrapped_type
+        )
+        layout.addWidget(title_components['title_widget'])
+
+    # Add label if needed (REGULAR only)
     if config['needs_label']:
         label = LabelWithHelp(
             text=display_info['field_label'],
@@ -229,17 +430,26 @@ def create_widget_parametric(manager, param_info, creation_type: WidgetCreationT
         layout, CURRENT_LAYOUT, QWidget, GroupBoxWithHelp, PyQt6ColorScheme
     )
 
-    # For nested widgets, add to GroupBox
+    # For nested widgets, add to container
     # For regular widgets, add to layout
     if config['is_nested']:
-        container.addWidget(main_widget)
+        if config.get('is_optional'):
+            # OPTIONAL_NESTED: set enabled state based on current_value
+            main_widget.setEnabled(current_value is not None)
+        layout.addWidget(main_widget)
     else:
         layout.addWidget(main_widget, 1)
 
     # Add reset button if needed
     if config['needs_reset_button'] and not manager.read_only:
-        if config['is_nested']:
-            # Nested: "Reset All" button in GroupBox title
+        if config.get('is_optional'):
+            # OPTIONAL_NESTED: reset button already in title widget, just connect it
+            if title_components and title_components['reset_all_button']:
+                nested_manager = manager.nested_managers.get(param_info.name)
+                if nested_manager:
+                    title_components['reset_all_button'].clicked.connect(lambda: nested_manager.reset_all_parameters())
+        elif config['is_nested']:
+            # NESTED: "Reset All" button in GroupBox title
             from PyQt6.QtWidgets import QPushButton
             reset_all_button = QPushButton("Reset All")
             reset_all_button.setMaximumWidth(80)
@@ -250,7 +460,7 @@ def create_widget_parametric(manager, param_info, creation_type: WidgetCreationT
                 reset_all_button.clicked.connect(lambda: nested_manager.reset_all_parameters())
             container.addTitleWidget(reset_all_button)
         else:
-            # Regular: reset button in layout
+            # REGULAR: reset button in layout
             reset_button = _create_optimized_reset_button(
                 manager.config.field_id,
                 param_info.name,
@@ -259,11 +469,25 @@ def create_widget_parametric(manager, param_info, creation_type: WidgetCreationT
             layout.addWidget(reset_button)
             manager.reset_buttons[param_info.name] = reset_button
 
+    # Connect checkbox logic if needed (OPTIONAL_NESTED only)
+    if config.get('needs_checkbox') and title_components:
+        nested_manager = manager.nested_managers.get(param_info.name)
+        if nested_manager:
+            ops['connect_checkbox_logic'](
+                manager, param_info,
+                title_components['checkbox'],
+                main_widget,
+                nested_manager,
+                title_components['title_label'],
+                title_components['help_btn'],
+                unwrapped_type
+            )
+
     # Store widget and connect signals
     if config['is_nested']:
-        # For nested, store the GroupBox
+        # For nested, store the GroupBox/container
         manager.widgets[param_info.name] = container
-        logger.info(f"[CREATE_NESTED_DATACLASS] param_info.name={param_info.name}, stored GroupBoxWithHelp in manager.widgets")
+        logger.info(f"[CREATE_NESTED_DATACLASS] param_info.name={param_info.name}, stored container in manager.widgets")
     else:
         # For regular, store the main widget
         manager.widgets[param_info.name] = main_widget
