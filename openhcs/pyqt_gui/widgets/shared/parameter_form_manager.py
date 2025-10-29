@@ -9,6 +9,7 @@ import dataclasses
 from dataclasses import dataclass, is_dataclass, fields as dataclass_fields
 import logging
 from typing import Any, Dict, Type, Optional, Tuple, List
+from abc import ABCMeta
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton,
     QLineEdit, QCheckBox, QComboBox, QGroupBox, QSpinBox, QDoubleSpinBox
@@ -17,6 +18,34 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
 # Import ABC for type-safe widget creation
 from openhcs.pyqt_gui.widgets.shared.widget_creation_types import ParameterFormManager as ParameterFormManagerABC
+
+
+def _create_combined_metaclass(base_class: type, abc_meta: type = ABCMeta) -> type:
+    """Dynamically create a combined metaclass for a base class and ABC.
+
+    Resolves metaclass conflicts by creating a new metaclass that inherits
+    from both the base class's metaclass and ABCMeta.
+
+    Args:
+        base_class: The base class (e.g., QWidget)
+        abc_meta: The ABC metaclass (default: ABCMeta)
+
+    Returns:
+        A new metaclass combining both
+    """
+    base_metaclass = type(base_class)
+    if base_metaclass is abc_meta:
+        return base_metaclass
+
+    # Create combined metaclass dynamically
+    class CombinedMeta(base_metaclass, abc_meta):
+        pass
+
+    return CombinedMeta
+
+
+# Create combined metaclass for ParameterFormManager
+_ParameterFormManagerMeta = _create_combined_metaclass(QWidget, ABCMeta)
 
 # Performance monitoring
 from openhcs.utils.performance_monitor import timer, get_monitor
@@ -141,7 +170,7 @@ class NoneAwareIntEdit(QLineEdit):
             self.setText(str(value))
 
 
-class ParameterFormManager(QWidget, ParameterFormManagerABC):
+class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_ParameterFormManagerMeta):
     """
     PyQt6 parameter form manager with simplified implementation using generic object introspection.
 
