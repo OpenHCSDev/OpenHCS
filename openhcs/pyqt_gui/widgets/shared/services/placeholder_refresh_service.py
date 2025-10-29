@@ -18,18 +18,18 @@ logger = logging.getLogger(__name__)
 class PlaceholderRefreshService:
     """
     Service for refreshing placeholders with live context from other windows.
-    
+
     Stateless service that encapsulates all placeholder refresh operations.
     """
-    
-    def __init__(self, widget_enhancer):
+
+    def __init__(self, widget_ops):
         """
         Initialize placeholder refresh service.
-        
+
         Args:
-            widget_enhancer: PyQt6WidgetEnhancer for placeholder operations
+            widget_ops: WidgetOperations for placeholder operations
         """
-        self.widget_enhancer = widget_enhancer
+        self.widget_ops = widget_ops
     
     def refresh_with_live_context(self, manager, live_context: Optional[dict] = None) -> None:
         """
@@ -83,7 +83,7 @@ class PlaceholderRefreshService:
                         with monitor.measure():
                             placeholder_text = manager.service.get_placeholder_text(param_name, manager.dataclass_type)
                             if placeholder_text:
-                                self.widget_enhancer.apply_placeholder_text(widget, placeholder_text)
+                                self.widget_ops.try_set_placeholder(widget, placeholder_text)
     
     def collect_live_context_from_other_windows(self, manager) -> dict:
         """
