@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 
 # Import ABC for type-safe widget creation
-from openhcs.pyqt_gui.widgets.shared.widget_creation_types import ParameterFormManager as ParameterFormManagerABC
+from openhcs.pyqt_gui.widgets.shared.widget_creation_types import ParameterFormManager as ParameterFormManagerABC, _CombinedMeta
 
 # Performance monitoring
 from openhcs.utils.performance_monitor import timer, get_monitor
@@ -141,11 +141,11 @@ class NoneAwareIntEdit(QLineEdit):
             self.setText(str(value))
 
 
-class ParameterFormManager(QWidget, ParameterFormManagerABC):
+class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_CombinedMeta):
     """
     React-quality reactive form manager for PyQt6.
 
-    Inherits from both QWidget and ParameterFormManagerABC.
+    Inherits from both QWidget and ParameterFormManagerABC with combined metaclass.
     All abstract methods MUST be implemented by this class.
 
     This implementation leverages the new context management system and supports any object type:

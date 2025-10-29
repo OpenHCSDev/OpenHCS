@@ -11,7 +11,7 @@ This is the Python equivalent of React's component interface:
 - Component tree traversal (_apply_to_nested_managers)
 """
 
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, ABCMeta
 from typing import TypedDict, Callable, Optional, Any, Dict, Type
 from dataclasses import dataclass
 
@@ -32,7 +32,16 @@ class FieldIds(TypedDict, total=False):
     optional_checkbox_id: str
 
 
-class ParameterFormManager(ABC):
+# Create a combined metaclass that works with both PyQt and ABC
+# This must be done BEFORE defining the ABC class
+from PyQt6.QtWidgets import QWidget
+
+class _CombinedMeta(ABCMeta, type(QWidget)):
+    """Combined metaclass for ABC + PyQt6 QWidget."""
+    pass
+
+
+class ParameterFormManager(ABC, metaclass=_CombinedMeta):
     """
     React-quality reactive form manager interface.
 
