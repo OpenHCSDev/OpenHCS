@@ -20,32 +20,29 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from openhcs.pyqt_gui.widgets.shared.widget_creation_types import ParameterFormManager as ParameterFormManagerABC
 
 
-def _create_combined_metaclass(base_class: type, abc_meta: type = ABCMeta) -> type:
-    """Dynamically create a combined metaclass for a base class and ABC.
+def _create_combined_metaclass(qt_metaclass: type, abc_metaclass: type = ABCMeta) -> type:
+    """
+    Dynamically create a combined metaclass for PyQt + ABC.
 
     Resolves metaclass conflicts by creating a new metaclass that inherits
-    from both the base class's metaclass and ABCMeta.
+    from both PyQt's metaclass and ABCMeta.
 
     Args:
-        base_class: The base class (e.g., QWidget)
-        abc_meta: The ABC metaclass (default: ABCMeta)
+        qt_metaclass: PyQt6's metaclass (from QWidget)
+        abc_metaclass: ABC metaclass (default: ABCMeta)
 
     Returns:
         A new metaclass combining both
     """
-    base_metaclass = type(base_class)
-    if base_metaclass is abc_meta:
-        return base_metaclass
-
-    # Create combined metaclass dynamically
-    class CombinedMeta(base_metaclass, abc_meta):
+    class CombinedMeta(qt_metaclass, abc_metaclass):
+        """Combined metaclass for PyQt + ABC."""
         pass
 
     return CombinedMeta
 
 
 # Create combined metaclass for ParameterFormManager
-_ParameterFormManagerMeta = _create_combined_metaclass(QWidget, ABCMeta)
+_ParameterFormManagerMeta = _create_combined_metaclass(type(QWidget), ABCMeta)
 
 # Performance monitoring
 from openhcs.utils.performance_monitor import timer, get_monitor
@@ -172,7 +169,10 @@ class NoneAwareIntEdit(QLineEdit):
 
 class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_ParameterFormManagerMeta):
     """
-    PyQt6 parameter form manager with simplified implementation using generic object introspection.
+    React-quality reactive form manager for PyQt6.
+
+    Inherits from both QWidget and ParameterFormManagerABC with proper metaclass resolution.
+    All abstract methods MUST be implemented by this class.
 
     This implementation leverages the new context management system and supports any object type:
     - Dataclasses (via dataclasses.fields())
@@ -186,7 +186,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Paramete
     - Automatic parameter extraction from object instances
     - Unified interface for all object types
     - Dramatically simplified constructor (4 parameters vs 12+)
-    - Type-safe ABC inheritance for static type checking
+    - React-style lifecycle hooks and reactive updates
+    - Proper ABC inheritance with metaclass conflict resolution
     """
 
     parameter_changed = pyqtSignal(str, object)  # param_name, value
@@ -365,6 +366,18 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Paramete
             with timer("  Initial refresh", threshold_ms=10.0):
                 from .services.initial_refresh_strategy import InitialRefreshStrategy
                 InitialRefreshStrategy.execute(self)
+
+    # ==================== LIFECYCLE HOOKS ====================
+
+    def _apply_initial_enabled_styling(self) -> None:
+        """
+        Lifecycle hook: Apply initial enabled styling after widgets created.
+
+        Delegates to EnabledFieldStylingService which handles the actual styling logic.
+        """
+        from .services.enabled_field_styling_service import EnabledFieldStylingService
+        service = EnabledFieldStylingService()
+        service.apply_initial_enabled_styling(self)
 
     # ==================== WIDGET CREATION METHODS ====================
 

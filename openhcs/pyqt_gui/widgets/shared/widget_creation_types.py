@@ -1,10 +1,17 @@
 """
-Type-safe definitions for widget creation configuration.
+React-quality UI framework for Python - Type-safe widget creation.
 
-Uses ABCs to enforce explicit contracts and enable static type checking.
+Uses ABC + dataclass with proper metaclass resolution.
+All components MUST inherit from ParameterFormManager and implement the interface.
+
+This is the Python equivalent of React's component interface:
+- State management (parameters, nested_managers, widgets)
+- Lifecycle hooks (_apply_initial_enabled_styling, _emit_parameter_change)
+- Reactive updates (update_parameter, reset_parameter)
+- Component tree traversal (_apply_to_nested_managers)
 """
 
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, ABCMeta
 from typing import TypedDict, Callable, Optional, Any, Dict, Type
 from dataclasses import dataclass
 
@@ -25,10 +32,28 @@ class FieldIds(TypedDict, total=False):
     optional_checkbox_id: str
 
 
-class ParameterFormManager(ABC):
-    """ABC for ParameterFormManager - enforces explicit interface."""
+class ParameterFormManagerMeta(ABCMeta):
+    """Metaclass for ParameterFormManager - combines ABC with dataclass support."""
+    pass
 
-    # Properties that implementations must provide
+
+@dataclass
+class ParameterFormManager(ABC, metaclass=ParameterFormManagerMeta):
+    """
+    React-quality reactive form manager interface.
+
+    All components MUST inherit from this ABC and implement all abstract methods.
+    Uses dataclass for clean state declaration.
+
+    Semantics (React equivalents):
+    - State: parameters, nested_managers, widgets (like React state)
+    - Lifecycle: _apply_initial_enabled_styling (like useEffect)
+    - Reactive updates: _emit_parameter_change (like setState + event emitter)
+    - Component tree: _apply_to_nested_managers (like recursive component traversal)
+    """
+
+    # ==================== STATE ====================
+    # These are like React component state
     read_only: bool
     parameters: Dict[str, Any]
     nested_managers: Dict[str, Any]
@@ -40,46 +65,90 @@ class ParameterFormManager(ABC):
     _widget_ops: Any
     _on_build_complete_callbacks: list
 
+    # ==================== LIFECYCLE HOOKS ====================
+    # These are like React useEffect hooks
+
     @abstractmethod
-    def create_widget(self, param_name: str, param_type: Type, current_value: Any,
-                     widget_id: str, parameter_info: Optional[Any] = None) -> Any:
-        """Create a widget for a parameter."""
+    def _apply_initial_enabled_styling(self) -> None:
+        """
+        Lifecycle hook: Run after widgets created to apply enabled styling.
+
+        Equivalent to: useEffect(() => { applyEnabledStyling() }, [widgets])
+        """
         pass
 
     @abstractmethod
+    def _emit_parameter_change(self, param_name: str, value: Any) -> None:
+        """
+        Reactive update: Emit signal when parameter changes.
+
+        Equivalent to: setState(name, value) + emit event
+        """
+        pass
+
+    # ==================== STATE MUTATIONS ====================
+    # These are like React state setters
+
+    @abstractmethod
     def update_parameter(self, param_name: str, value: Any) -> None:
-        """Update a parameter value."""
+        """
+        Update parameter in data model.
+
+        Equivalent to: setState(name, value)
+        """
         pass
 
     @abstractmethod
     def reset_parameter(self, param_name: str) -> None:
-        """Reset a parameter to default."""
+        """
+        Reset parameter to default value.
+
+        Equivalent to: setState(name, defaultValue)
+        """
+        pass
+
+    # ==================== WIDGET CREATION ====================
+    # These are like React component rendering
+
+    @abstractmethod
+    def create_widget(self, param_name: str, param_type: Type, current_value: Any,
+                     widget_id: str, parameter_info: Optional[Any] = None) -> Any:
+        """
+        Create a widget for a parameter.
+
+        Equivalent to: render(<ParameterWidget ... />)
+        """
         pass
 
     @abstractmethod
     def _create_nested_form_inline(self, param_name: str, unwrapped_type: Type,
                                    current_value: Any) -> Any:
-        """Create a nested form manager inline."""
+        """
+        Create nested form manager inline.
+
+        Equivalent to: render(<NestedForm ... />)
+        """
         pass
 
     @abstractmethod
     def _make_widget_readonly(self, widget: Any) -> None:
-        """Make a widget read-only."""
+        """
+        Make a widget read-only.
+
+        Equivalent to: <input disabled={true} />
+        """
         pass
 
-    @abstractmethod
-    def _emit_parameter_change(self, param_name: str, value: Any) -> None:
-        """Emit parameter change signal."""
-        pass
-
-    @abstractmethod
-    def _apply_initial_enabled_styling(self) -> None:
-        """Apply initial enabled styling."""
-        pass
+    # ==================== COMPONENT TREE TRAVERSAL ====================
+    # These are like React's recursive component tree operations
 
     @abstractmethod
     def _apply_to_nested_managers(self, callback: Callable[[str, Any], None]) -> None:
-        """Apply callback to all nested managers."""
+        """
+        Apply operation to all nested managers recursively.
+
+        Equivalent to: traverseComponentTree(callback)
+        """
         pass
 
 
