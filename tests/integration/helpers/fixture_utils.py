@@ -124,6 +124,9 @@ EXECUTION_MODE_CONFIGS = ["threading", "multiprocessing"]
 ZMQ_EXECUTION_MODE_CONFIGS = ["direct", "zmq", "zmq-tcp"]
 
 # Sequential processing configurations for parametrized testing
+component1 = "TIMEPOINT"
+component2 = "TIMEPOINT,CHANNEL"
+component_invalid = "CHANNEL"
 SEQUENTIAL_CONFIGS = {
     "none": {
         "name": "none",
@@ -134,27 +137,27 @@ SEQUENTIAL_CONFIGS = {
     "valid_1_component": {
         "name": "valid_1_component",
         "description": "Sequential with 1 component (TIMEPOINT)",
-        "sequential_components": ["TIMEPOINT"],
+        "sequential_components": [component1],
         "should_fail": False
     },
     "valid_2_components": {
         "name": "valid_2_components",
-        "description": "Sequential with 1 component (TIMEPOINT) - same as valid_1_component for now",
-        "sequential_components": ["TIMEPOINT"],
+        "description": "Sequential with 2 components (TIMEPOINT, CHANNEL)",
+        "sequential_components": ["TIMEPOINT", "CHANNEL"],
         "should_fail": False,
-        "note": "Using 2 components would require components not used by any step's variable_components, which is hard to achieve in this test pipeline"
+        "note": "CHANNEL will be filtered out for create_composite step (which uses CHANNEL in variable_components), but applied to other steps"
     },
     "invalid_overlap": {
         "name": "invalid_overlap",
-        "description": "Invalid: CHANNEL in both variable and sequential",
+        "description": "CHANNEL conflicts with create_composite's variable_components - will be filtered out",
         "sequential_components": ["CHANNEL"],
-        "should_fail": True,
-        "expected_error": "cannot be in both sequential_components and variable_components"
+        "should_fail": False,
+        "note": "CHANNEL will be filtered out for create_composite step, but applied to other steps"
     },
     "invalid_duplicates": {
         "name": "invalid_duplicates",
         "description": "Invalid: Duplicate TIMEPOINT in sequential",
-        "sequential_components": ["TIMEPOINT", "TIMEPOINT"],
+        "sequential_components": [component1, component1],
         "should_fail": True,
         "expected_error": "sequential_components contains duplicates"
     }
