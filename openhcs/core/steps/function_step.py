@@ -961,9 +961,13 @@ class FunctionStep(AbstractStep):
                 seq_comps = [sc.value for sc in seq_config.sequential_components]
                 var_comps = [vc.value for vc in variable_components] if variable_components else []
 
+                # Create pattern engine for subdividing patterns
+                from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
+                pattern_engine = PatternDiscoveryEngine(context.microscope_handler.parser, filemanager)
+
                 for comp_val, current_pattern_list in grouped_patterns.items():
                     # Subdivide patterns by sequential components
-                    patterns_by_combo = context.microscope_handler.pattern_engine.subdivide_patterns_by_components(
+                    patterns_by_combo = pattern_engine.subdivide_patterns_by_components(
                         current_pattern_list, seq_comps
                     )
 
@@ -992,7 +996,18 @@ class FunctionStep(AbstractStep):
                             )
 
                         # Clear memory after this combination
-                        filemanager.clear_files(str(step_output_dir), Backend.MEMORY.value)
+                        # Clear preloaded input files from memory to free up space
+                        if read_backend != Backend.MEMORY.value:
+                            try:
+                                memory_files = filemanager.list_files(str(step_input_dir), backend=Backend.MEMORY.value, recursive=True)
+                                for file_path in memory_files:
+                                    try:
+                                        filemanager.delete(file_path, Backend.MEMORY.value)
+                                    except Exception as e:
+                                        logger.warning(f"Failed to delete memory file {file_path}: {e}")
+                                logger.debug(f"🔄 SEQUENTIAL: Cleared {len(memory_files)} preloaded files from memory")
+                            except Exception as e:
+                                logger.warning(f"Failed to clear memory files from {step_input_dir}: {e}")
             else:
                 # Normal processing (existing code)
                 for comp_val, current_pattern_list in grouped_patterns.items():
