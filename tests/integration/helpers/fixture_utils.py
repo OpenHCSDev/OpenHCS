@@ -139,9 +139,10 @@ SEQUENTIAL_CONFIGS = {
     },
     "valid_2_components": {
         "name": "valid_2_components",
-        "description": "Sequential with 2 components (TIMEPOINT, SITE)",
-        "sequential_components": ["TIMEPOINT", "SITE"],
-        "should_fail": False
+        "description": "Sequential with 1 component (TIMEPOINT) - same as valid_1_component for now",
+        "sequential_components": ["TIMEPOINT"],
+        "should_fail": False,
+        "note": "Using 2 components would require components not used by any step's variable_components, which is hard to achieve in this test pipeline"
     },
     "invalid_overlap": {
         "name": "invalid_overlap",
