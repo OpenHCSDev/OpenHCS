@@ -283,7 +283,8 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             # STEP 4: Initialize tracking attributes (consolidated)
             self.widgets, self.reset_buttons, self.nested_managers = {}, {}, {}
             self.reset_fields, self._user_set_fields = set(), set()
-            self._initial_load_complete, self._block_cross_window_updates = False, False
+            # ANTI-DUCK-TYPING: Initialize ALL flags so FlagContextManager doesn't need getattr defaults
+            self._initial_load_complete, self._block_cross_window_updates, self._in_reset = False, False, False
             self.shared_reset_fields = (
                 config.parent.shared_reset_fields
                 if hasattr(config.parent, 'shared_reset_fields')
@@ -885,20 +886,21 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         REFACTORING: Consolidates duplicate flag checking logic.
         Returns True if in reset mode or blocking cross-window updates.
         """
+        # ANTI-DUCK-TYPING: Use direct attribute access (all flags initialized in __init__)
         # Check self flags
-        if getattr(self, '_in_reset', False):
+        if self._in_reset:
             logger.info(f"🚫 SKIP_CHECK: {self.field_id} has _in_reset=True")
             return True
-        if getattr(self, '_block_cross_window_updates', False):
+        if self._block_cross_window_updates:
             logger.info(f"🚫 SKIP_CHECK: {self.field_id} has _block_cross_window_updates=True")
             return True
 
-        # Check nested manager flags
+        # Check nested manager flags (nested managers are also ParameterFormManager instances)
         for nested_name, nested_manager in self.nested_managers.items():
-            if getattr(nested_manager, '_in_reset', False):
+            if nested_manager._in_reset:
                 logger.info(f"🚫 SKIP_CHECK: {self.field_id} nested manager {nested_name} has _in_reset=True")
                 return True
-            if getattr(nested_manager, '_block_cross_window_updates', False):
+            if nested_manager._block_cross_window_updates:
                 logger.info(f"🚫 SKIP_CHECK: {self.field_id} nested manager {nested_name} has _block_cross_window_updates=True")
                 return True
 

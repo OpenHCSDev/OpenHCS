@@ -106,10 +106,12 @@ class FlagContextManager:
                 f"Add new flags to ManagerFlag enum."
             )
         
-        # Save previous values (default to False if not set)
+        # Save previous values
+        # ANTI-DUCK-TYPING: Use direct attribute access (fail-loud if flag doesn't exist)
+        # All flags must be initialized in ParameterFormManager.__init__
         prev_values: Dict[str, bool] = {}
         for flag_name in flags:
-            prev_values[flag_name] = getattr(obj, flag_name, False)
+            prev_values[flag_name] = getattr(obj, flag_name)  # No default - fail if missing
             logger.debug(f"Saving flag {flag_name}={prev_values[flag_name]} on {type(obj).__name__}")
         
         # Set new values
@@ -173,7 +175,8 @@ class FlagContextManager:
             # _initial_load_complete is now True
         """
         # Set flag to False during load
-        prev_value = getattr(obj, ManagerFlag.INITIAL_LOAD_COMPLETE.value, False)
+        # ANTI-DUCK-TYPING: Use direct attribute access (fail-loud if flag doesn't exist)
+        prev_value = getattr(obj, ManagerFlag.INITIAL_LOAD_COMPLETE.value)  # No default - fail if missing
         setattr(obj, ManagerFlag.INITIAL_LOAD_COMPLETE.value, False)
         
         try:
@@ -186,39 +189,41 @@ class FlagContextManager:
     def is_flag_set(obj: Any, flag: ManagerFlag) -> bool:
         """
         Check if a flag is currently set to True.
-        
+
         Args:
             obj: Object to check flag on
             flag: ManagerFlag enum value
-        
+
         Returns:
             True if flag is set, False otherwise
-        
+
         Example:
             if FlagContextManager.is_flag_set(self, ManagerFlag.IN_RESET):
                 return  # Skip expensive operation during reset
         """
-        return getattr(obj, flag.value, False)
+        # ANTI-DUCK-TYPING: Use direct attribute access (fail-loud if flag doesn't exist)
+        return getattr(obj, flag.value)  # No default - fail if missing
     
     @staticmethod
     def get_flag_state(obj: Any) -> Dict[str, bool]:
         """
         Get current state of all registered flags.
-        
+
         Useful for debugging and logging.
-        
+
         Args:
             obj: Object to get flag state from
-        
+
         Returns:
             Dict mapping flag names to their current values
-        
+
         Example:
             state = FlagContextManager.get_flag_state(self)
             logger.debug(f"Flag state: {state}")
         """
+        # ANTI-DUCK-TYPING: Use direct attribute access (fail-loud if flag doesn't exist)
         return {
-            flag.value: getattr(obj, flag.value, False)
+            flag.value: getattr(obj, flag.value)  # No default - fail if missing
             for flag in ManagerFlag
         }
 
