@@ -697,7 +697,7 @@ class ZMQClient(ABC):
         return servers
 
     @staticmethod
-    def kill_server_on_port(port, graceful=True, timeout=5.0):
+    def kill_server_on_port(port, graceful=True, timeout=5.0, transport_mode=None, host='localhost'):
         """
         Kill server on specified port.
 
@@ -706,89 +706,101 @@ class ZMQClient(ABC):
             graceful: If True, kills workers only (server stays alive).
                      If False, kills workers AND server (port becomes free).
             timeout: Timeout in seconds for server response
+            transport_mode: TransportMode (IPC or TCP). If None, uses platform default.
+            host: Host for TCP mode (ignored for IPC)
 
         Returns:
             bool: True if operation succeeded
         """
         import zmq
+        transport_mode = transport_mode or get_default_transport_mode()
         msg_type = 'shutdown' if graceful else 'force_shutdown'
         shutdown_sent = False
         shutdown_acknowledged = False
 
         def is_port_free(port):
-            """Check if port is free (not in use)."""
-            sock_test = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock_test.settimeout(0.1)
-            try:
-                sock_test.bind(('localhost', port))
-                sock_test.close()
-                return True
-            except OSError:
-                return False
-            finally:
+            """Check if port is free (not in use) - only for TCP mode."""
+            if transport_mode == TransportMode.IPC:
+                # IPC mode - check if socket file exists
+                socket_path = _get_ipc_socket_path(port)
+                return not (socket_path and socket_path.exists())
+            else:
+                # TCP mode - check if port is bound
+                sock_test = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock_test.settimeout(0.1)
                 try:
+                    sock_test.bind(('localhost', port))
                     sock_test.close()
-                except:
-                    pass
+                    return True
+                except OSError:
+                    return False
+                finally:
+                    try:
+                        sock_test.close()
+                    except:
+                        pass
 
         try:
+            control_port = port + CONTROL_PORT_OFFSET
+            control_url = get_zmq_transport_url(control_port, transport_mode, host)
+
             ctx = zmq.Context()
             sock = ctx.socket(zmq.REQ)
             sock.setsockopt(zmq.LINGER, 0)
-            sock.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
-            sock.connect(f"tcp://localhost:{port + 1000}")
-            sock.send(pickle.dumps({'type': msg_type}))
-            shutdown_sent = True
-            ack = pickle.loads(sock.recv())
-            if ack.get('type') == 'shutdown_ack':
-                shutdown_acknowledged = True
+            sock.connect(control_url)
 
-                if graceful:
-                    # Graceful shutdown: workers killed, server stays alive
-                    # Port should still be in use
+            if graceful:
+                # Graceful shutdown: wait for ack (server stays alive)
+                sock.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
+                sock.send(pickle.dumps({'type': msg_type}))
+                shutdown_sent = True
+                ack = pickle.loads(sock.recv())
+                if ack.get('type') == 'shutdown_ack':
                     logger.info(f"✅ Server on port {port} acknowledged graceful shutdown (workers killed, server alive)")
                     return True
-                else:
-                    # Force shutdown: workers AND server killed
-                    # Port should become free
-                    logger.info(f"✅ Server on port {port} acknowledged force shutdown")
-                    # Wait for server to actually close
-                    time.sleep(1.5)
-                    # Verify port is actually closed
-                    if is_port_free(port):
-                        logger.info(f"✅ Port {port} is now free")
-                        return True
-                    # Port still in use, but server acknowledged - give it more time
-                    time.sleep(1.0)
-                    # Check again
-                    if is_port_free(port):
-                        logger.info(f"✅ Port {port} is now free (after extra wait)")
-                        return True
-                    # Server acknowledged but port still in use - consider it success anyway
-                    # (might be in TIME_WAIT state, or server is still cleaning up)
-                    logger.info(f"✅ Server on port {port} acknowledged shutdown but port still in use (may be TIME_WAIT) - considering success")
+            else:
+                # Force shutdown: send message and immediately kill - don't wait for ack
+                # Server is dying, it can't reliably send ack anyway
+                sock.setsockopt(zmq.SNDTIMEO, 1000)  # 1s timeout for send
+                try:
+                    sock.send(pickle.dumps({'type': msg_type}))
+                    logger.info(f"🔥 Sent force shutdown message to port {port}")
+                except Exception as send_error:
+                    logger.warning(f"⚠️ Failed to send force shutdown message: {send_error}")
+
+                # Don't wait for ack - immediately kill the server
+                if transport_mode == TransportMode.IPC:
+                    # IPC mode - remove socket files
+                    _remove_ipc_socket(port)
+                    _remove_ipc_socket(control_port)
+                    logger.info(f"✅ Removed IPC socket files for ports {port} and {control_port}")
                     return True
+                else:
+                    # TCP mode - kill processes on ports
+                    killed = sum(ZMQServer.kill_processes_on_port(p) for p in [port, control_port])
+                    logger.info(f"✅ Force killed {killed} processes on ports {port} and {control_port}")
+                    return killed > 0
+
         except Exception as e:
-            # If we sent the shutdown message but got a timeout on response,
-            # the server might still be shutting down - verify port status
-            if shutdown_sent:
-                if graceful:
-                    # Graceful shutdown timeout - server might have killed workers but didn't respond
-                    # This is OK, consider it success
-                    logger.info(f"⚠️ Graceful shutdown message sent to port {port}, but no response received: {e}")
-                    logger.info(f"✅ Considering graceful shutdown successful (workers likely killed)")
+            # Connection failed - server might not exist or wrong transport mode
+            logger.warning(f"❌ Failed to connect to server on port {port} ({transport_mode.value} mode): {e}")
+
+            if not graceful:
+                # Force shutdown failed via ZMQ, try killing processes directly
+                if transport_mode == TransportMode.IPC:
+                    # IPC mode - remove socket files
+                    _remove_ipc_socket(port)
+                    _remove_ipc_socket(control_port)
+                    logger.info(f"Removed IPC socket files for ports {port} and {control_port}")
                     return True
                 else:
-                    # Force shutdown timeout - check if port is free
-                    logger.info(f"⚠️ Force shutdown message sent to port {port}, but no response received: {e}")
-                    time.sleep(2.0)  # Give server time to shut down
-                    # Check if port is now free
-                    if is_port_free(port):
-                        # Port is free, shutdown was successful despite timeout
-                        logger.info(f"✅ Port {port} is now free (shutdown succeeded despite timeout)")
-                        return True
-                    # Port still in use - shutdown may have failed
-                    logger.warning(f"❌ Port {port} still in use after force shutdown timeout")
+                    # TCP mode - kill processes on ports
+                    killed = sum(ZMQServer.kill_processes_on_port(p) for p in [port, control_port])
+                    logger.info(f"Force killed {killed} processes on ports {port} and {control_port}")
+                    return killed > 0
+
+            logger.warning(f"❌ Failed to shutdown server on port {port} gracefully")
+            return False
         finally:
             try:
                 sock.close()
@@ -796,18 +808,7 @@ class ZMQClient(ABC):
             except:
                 pass
 
-        # If shutdown was acknowledged, consider it a success even if we couldn't verify port closure
-        # (the server confirmed it's shutting down, which is good enough)
-        if shutdown_acknowledged:
-            logger.info(f"✅ Shutdown acknowledged for port {port}, considering it successful")
-            return True
-
-        if not graceful:
-            # Force shutdown failed via ZMQ, try killing processes directly
-            killed = sum(ZMQServer.kill_processes_on_port(p) for p in [port, port + 1000])
-            logger.info(f"Force killed {killed} processes on ports {port} and {port + 1000}")
-            return killed > 0
-
+        # Graceful shutdown failed - no ack received
         logger.warning(f"❌ Failed to shutdown server on port {port} gracefully")
         return False
 

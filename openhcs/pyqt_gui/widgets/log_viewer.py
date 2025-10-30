@@ -922,13 +922,20 @@ class LogViewerWindow(QMainWindow):
 
         def ping_server(port: int) -> dict:
             """Ping a server and return pong response, or None if no response."""
-            control_port = port + 1000
+            from openhcs.constants.constants import CONTROL_PORT_OFFSET
+            from openhcs.runtime.zmq_base import get_zmq_transport_url, get_default_transport_mode
+
+            control_port = port + CONTROL_PORT_OFFSET
             try:
                 context = zmq.Context()
                 socket = context.socket(zmq.REQ)
                 socket.setsockopt(zmq.LINGER, 0)
                 socket.setsockopt(zmq.RCVTIMEO, 1000)  # 1 second timeout (servers may be busy)
-                socket.connect(f"tcp://localhost:{control_port}")
+
+                # Use transport mode-aware URL (IPC or TCP)
+                transport_mode = get_default_transport_mode()
+                control_url = get_zmq_transport_url(control_port, transport_mode, 'localhost')
+                socket.connect(control_url)
 
                 # Send ping
                 socket.send(pickle.dumps({'type': 'ping'}))

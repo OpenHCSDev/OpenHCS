@@ -105,7 +105,7 @@ class GlobalPipelineConfig:
     num_workers: int = 1
     """Number of worker processes/threads for parallelizable tasks."""
 
-    materialization_results_path: Path = Path("results")
+    materialization_results_path: Path = field(default=Path("results"), metadata={'ui_hidden': True})
     """
     Path for materialized analysis results (CSV, JSON files from special outputs).
 
@@ -120,11 +120,11 @@ class GlobalPipelineConfig:
     by the sub_dir field in each step's step_materialization_config.
     """
 
-    microscope: Microscope = Microscope.AUTO
+    microscope: Microscope = field(default=Microscope.AUTO, metadata={'ui_hidden': True})
     """Default microscope type for auto-detection."""
 
     #use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true')
-    use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true')
+    use_threading: bool = field(default_factory=lambda: os.getenv('OPENHCS_USE_THREADING', 'false').lower() == 'true', metadata={'ui_hidden': True})
     """Use ThreadPoolExecutor instead of ProcessPoolExecutor for debugging. Reads from OPENHCS_USE_THREADING environment variable."""
 
     # Future extension point:
@@ -439,6 +439,9 @@ class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     sub_dir: str = "checkpoints"
     """Subdirectory for materialized outputs (different from global 'images')."""
 
+    enabled: bool = True
+    """Whether this materialization config is enabled. When False, config exists but materialization is disabled."""
+
 
 @global_pipeline_config
 @dataclass(frozen=True)
@@ -455,6 +458,9 @@ class StreamingDefaults:
 
     transport_mode: TransportMode = TransportMode.IPC
     """ZMQ transport mode: IPC (local only, no firewall) or TCP (remote support, firewall prompts)."""
+
+    enabled: bool = True
+    """Whether this streaming config is enabled. When False, config exists but streaming is disabled."""
 
 @global_pipeline_config(ui_hidden=True)
 @dataclass(frozen=True)

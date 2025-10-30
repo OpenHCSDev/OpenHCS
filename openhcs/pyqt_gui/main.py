@@ -690,24 +690,25 @@ class OpenHCSMainWindow(QMainWindow):
         """
         from pathlib import Path
 
+        # Ensure plate manager exists (create if needed)
+        self.show_plate_manager()
+
         # Get the plate manager widget
-        if "plate_manager" in self.floating_windows:
-            plate_dialog = self.floating_windows["plate_manager"]
-            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
-            plate_manager = plate_dialog.findChild(PlateManagerWidget)
+        plate_dialog = self.floating_windows["plate_manager"]
+        from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+        plate_manager = plate_dialog.findChild(PlateManagerWidget)
 
-            if plate_manager:
-                # Add the generated plate - this triggers plate_selected signal
-                # which automatically updates pipeline editor via existing connections
-                plate_manager.add_plate_callback([Path(output_dir)])
+        if not plate_manager:
+            raise RuntimeError("Plate manager widget not found after creation")
 
-                # Load the test pipeline
-                self._load_pipeline_file(pipeline_path)
+        # Add the generated plate - this triggers plate_selected signal
+        # which automatically updates pipeline editor via existing connections
+        plate_manager.add_plate_callback([Path(output_dir)])
 
-                # Show the plate manager window if it's hidden
-                self.show_plate_manager()
+        # Load the test pipeline (this will create pipeline editor if needed)
+        self._load_pipeline_file(pipeline_path)
 
-                logger.info(f"Added synthetic plate and loaded test pipeline: {output_dir}")
+        logger.info(f"Added synthetic plate and loaded test pipeline: {output_dir}")
 
     def _load_pipeline_file(self, pipeline_path: str):
         """
@@ -717,26 +718,23 @@ class OpenHCSMainWindow(QMainWindow):
             pipeline_path: Path to the pipeline file to load
         """
         try:
-            # Get the pipeline editor widget
-            if "pipeline_editor" not in self.floating_windows:
-                logger.debug("Pipeline editor not available - skipping pipeline load")
-                return
+            # Ensure pipeline editor exists (create if needed)
+            self.show_pipeline_editor()
 
+            # Get the pipeline editor widget
             pipeline_dialog = self.floating_windows["pipeline_editor"]
             from openhcs.pyqt_gui.widgets.pipeline_editor import PipelineEditorWidget
             pipeline_editor = pipeline_dialog.findChild(PipelineEditorWidget)
 
             if not pipeline_editor:
-                logger.debug("Pipeline editor widget not found - skipping pipeline load")
-                return
+                raise RuntimeError("Pipeline editor widget not found after creation")
 
             # Load the pipeline file
             from pathlib import Path
             pipeline_file = Path(pipeline_path)
 
             if not pipeline_file.exists():
-                logger.warning(f"Pipeline file not found: {pipeline_path}")
-                return
+                raise FileNotFoundError(f"Pipeline file not found: {pipeline_path}")
 
             # For .py files, read code and use existing _handle_edited_pipeline_code
             if pipeline_file.suffix == '.py':
@@ -753,6 +751,7 @@ class OpenHCSMainWindow(QMainWindow):
 
         except Exception as e:
             logger.error(f"Failed to load pipeline: {e}", exc_info=True)
+            raise
 
 
 

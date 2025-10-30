@@ -304,17 +304,25 @@ class FijiStreamVisualizer:
                     logger.error("🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready")
 
     def _is_port_in_use(self, port: int) -> bool:
-        """Check if a port is in use."""
-        import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.1)
-        try:
-            sock.bind(('localhost', port))
-            sock.close()
-            return False
-        except OSError:
-            sock.close()
-            return True
+        """Check if a port/socket is in use (handles both IPC and TCP modes)."""
+        from openhcs.runtime.zmq_base import _get_ipc_socket_path
+
+        if self.transport_mode == TransportMode.IPC:
+            # IPC mode - check if socket file exists
+            socket_path = _get_ipc_socket_path(port)
+            return socket_path.exists() if socket_path else False
+        else:
+            # TCP mode - check if port is bound
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.1)
+            try:
+                sock.bind(('localhost', port))
+                sock.close()
+                return False
+            except OSError:
+                sock.close()
+                return True
 
     def _try_connect_to_existing_viewer(self) -> bool:
         """Try to connect to an existing Fiji viewer and verify it's responsive."""

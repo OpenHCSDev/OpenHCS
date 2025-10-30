@@ -388,17 +388,12 @@ class OpenHCSExecutionServer:
             # Execute using standard compile→execute phases
             logger.info(f"[{execution_id}] Executing pipeline...")
 
-            # Determine wells to process
-            if config_params and config_params.get('well_filter'):
-                wells = config_params['well_filter']
-            elif hasattr(global_config, 'step_well_filter_config') and global_config.step_well_filter_config and global_config.step_well_filter_config.well_filter:
-                wells = global_config.step_well_filter_config.well_filter
-            else:
-                wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-
+            # CRITICAL: Compiler now resolves well_filter_config from pipeline_config automatically
+            # No need to extract it manually here - just pass None to compile_pipelines
+            # The compiler will check orchestrator.pipeline_config.well_filter_config and use it
             compilation = orchestrator.compile_pipelines(
                 pipeline_definition=pipeline_steps,
-                well_filter=wells,
+                well_filter=None,
             )
             compiled_contexts = compilation['compiled_contexts']
 
@@ -440,8 +435,8 @@ class OpenHCSExecutionServer:
             if hasattr(step, 'napari_streaming_config') and step.napari_streaming_config:
                 new_config = replace(
                     step.napari_streaming_config,
-                    napari_host=client_host,
-                    napari_port=client_port
+                    host=client_host,
+                    port=client_port
                 )
                 step = replace(step, napari_streaming_config=new_config)
             updated_steps.append(step)

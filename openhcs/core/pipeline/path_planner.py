@@ -114,7 +114,7 @@ class PathPlanner:
         # Handle optional materialization and input conversion
         # Read step_materialization_config directly from step object (not step plans, which aren't populated yet)
         materialized_output_dir = None
-        if step.step_materialization_config:
+        if step.step_materialization_config and step.step_materialization_config.enabled:
             # Check if this step has well filters and if current well should be materialized
             step_axis_filters = getattr(self.ctx, 'step_axis_filters', {}).get(sid, {})
             materialization_filter = step_axis_filters.get('step_materialization_config')
@@ -382,7 +382,7 @@ class PathPlanner:
         # Collect all materialization steps with their paths and positions
         mat_steps = [
             (step, self.plans.get(i, {}).get('pipeline_position', 0), self._build_output_path(step.step_materialization_config))
-            for i, step in enumerate(pipeline) if step.step_materialization_config
+            for i, step in enumerate(pipeline) if step.step_materialization_config and step.step_materialization_config.enabled
         ]
 
         # Group by path for conflict detection
@@ -397,7 +397,6 @@ class PathPlanner:
         # Resolve materialization vs materialization conflicts
         for path_key, step_list in path_groups.items():
             if len(step_list) > 1:
-                print(f"⚠️  Materialization path collision detected for {len(step_list)} steps at: {path_key}")
                 for step, pos, path in step_list:
                     self._resolve_and_update_paths(step, pos, path, f"pos {pos}")
 
@@ -409,7 +408,6 @@ class PathPlanner:
 
         # Generate unique sub_dir name instead of calculating from paths
         original_sub_dir = materialization_config.sub_dir
-        print(f"🔍 PATH_COLLISION DEBUG: step '{step.name}' original_sub_dir = '{original_sub_dir}' (type: {type(materialization_config).__name__})")
         new_sub_dir = f"{original_sub_dir}_step{position}"
 
         # Update step materialization config with new sub_dir
@@ -424,8 +422,6 @@ class PathPlanner:
             if 'materialized_output_dir' in step_plan:
                 step_plan['materialized_output_dir'] = str(resolved_path)
                 step_plan['materialized_sub_dir'] = new_sub_dir  # Update stored sub_dir
-
-        print(f"    - step '{step.name}' ({conflict_type}) → {resolved_path}")
 
 
 

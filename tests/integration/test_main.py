@@ -493,8 +493,8 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
         logger.info(f"Well {well_id}: {len(ctx.required_visualizers)} visualizers")
         for i, vis_info in enumerate(ctx.required_visualizers):
             config = vis_info['config']
-            if hasattr(config, 'napari_port'):
-                logger.info(f"  Visualizer {i}: Napari port {config.napari_port}")
+            if hasattr(config, 'port'):
+                logger.info(f"  Visualizer {i}: Napari port {config.port}")
             else:
                 logger.info(f"  Visualizer {i}: {type(config).__name__}")
     logger.info("=" * 80)

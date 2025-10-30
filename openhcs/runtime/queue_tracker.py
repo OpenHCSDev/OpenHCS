@@ -64,14 +64,18 @@ class QueueTracker:
                 self._total_processed += 1
                 logger.debug(f"[{self.viewer_type}:{self.viewer_port}] Marked processed {image_id} (took {elapsed:.2f}s, pending: {len(self._pending)})")
 
-                # Auto-clear when all images are processed
+                # Log when all images are processed (but don't auto-clear)
+                # The UI needs to read the final progress before the tracker is cleared
                 if len(self._pending) == 0 and self._total_sent > 0:
-                    logger.info(f"[{self.viewer_type}:{self.viewer_port}] All {self._total_sent} images processed - auto-clearing tracker")
-                    self._processed.clear()
-                    self._total_sent = 0
-                    self._total_processed = 0
+                    logger.info(f"[{self.viewer_type}:{self.viewer_port}] All {self._total_sent} images processed")
             else:
-                logger.warning(f"[{self.viewer_type}:{self.viewer_port}] Received ack for unknown image {image_id}")
+                # Image was not registered (likely sent from worker process with separate registry)
+                # Still count it as processed so UI can track progress
+                if image_id not in self._processed:
+                    self._processed.add(image_id)
+                    self._total_processed += 1
+                    self._total_sent += 1  # Retroactively count as sent
+                    logger.debug(f"[{self.viewer_type}:{self.viewer_port}] Received ack for unregistered image {image_id}, counted retroactively (processed: {self._total_processed}/{self._total_sent})")
     
     def get_progress(self) -> Tuple[int, int]:
         """Get current progress.
@@ -127,6 +131,18 @@ class QueueTracker:
             self._total_sent = 0
             self._total_processed = 0
             logger.debug(f"[{self.viewer_type}:{self.viewer_port}] Cleared queue tracker")
+
+    def reset_for_new_batch(self):
+        """Reset tracker for a new batch of images (e.g., new pipeline execution).
+
+        Clears pending and processed sets but preserves the tracker for reuse.
+        """
+        with self._lock:
+            self._pending.clear()
+            self._processed.clear()
+            self._total_sent = 0
+            self._total_processed = 0
+            logger.debug(f"[{self.viewer_type}:{self.viewer_port}] Reset queue tracker for new batch")
     
     def __repr__(self):
         with self._lock:

@@ -86,60 +86,33 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
 
     def log_thread_count(step_name):
         thread_count = psutil.Process(os.getpid()).num_threads()
-        logger.info(f"🔥 SUBPROCESS: THREAD COUNT at {step_name}: {thread_count}")
-        print(f"🔥 SUBPROCESS STDOUT: THREAD COUNT at {step_name}: {thread_count}")
         return thread_count
 
     # NUCLEAR ERROR DETECTION: Wrap EVERYTHING in try/except
     def force_error_detection(func_name, func, *args, **kwargs):
         """Wrapper that forces any error to be visible and logged."""
         try:
-            logger.info(f"🔥 SUBPROCESS: CALLING {func_name} with args={len(args)}, kwargs={len(kwargs)}")
-            print(f"🔥 SUBPROCESS STDOUT: CALLING {func_name}")
-
-            # DEATH DETECTION: Mark entry into function (log file only)
-            logger.info(f"🔥 SUBPROCESS: ENTERING: {func_name}")
-
             result = func(*args, **kwargs)
-
-            # DEATH DETECTION: Mark successful completion (log file only)
-            logger.info(f"🔥 SUBPROCESS: COMPLETED: {func_name}")
-
-            logger.info(f"🔥 SUBPROCESS: {func_name} COMPLETED successfully")
-            print(f"🔥 SUBPROCESS STDOUT: {func_name} COMPLETED")
             return result
         except Exception as e:
-            error_msg = f"🔥 NUCLEAR ERROR in {func_name}: {e}"
+            error_msg = f"Error in {func_name}: {e}"
             logger.error(error_msg, exc_info=True)
-            print(f"🔥 SUBPROCESS STDOUT NUCLEAR ERROR: {error_msg}")
-            print(f"🔥 SUBPROCESS STDOUT NUCLEAR TRACEBACK: {traceback.format_exc()}")
-            # Error logged to log file (single source of truth)
-            raise RuntimeError(f"FORCED ERROR DETECTION: {func_name} failed: {e}") from e
+            raise RuntimeError(f"Failed: {func_name} failed: {e}") from e
         except BaseException as e:
-            error_msg = f"🔥 NUCLEAR CRITICAL ERROR in {func_name}: {e}"
+            error_msg = f"Critical error in {func_name}: {e}"
             logger.error(error_msg, exc_info=True)
-            print(f"🔥 SUBPROCESS STDOUT NUCLEAR CRITICAL: {error_msg}")
-            print(f"🔥 SUBPROCESS STDOUT NUCLEAR CRITICAL TRACEBACK: {traceback.format_exc()}")
-            # Error logged to log file (single source of truth)
-            raise RuntimeError(f"FORCED CRITICAL ERROR DETECTION: {func_name} failed: {e}") from e
+            raise RuntimeError(f"Critical error: {func_name} failed: {e}") from e
 
     # DEATH DETECTION: Progress markers to find where process dies
     def death_marker(location, details=""):
         """Mark progress to detect where process dies (log file only)."""
-        marker_msg = f"🔥 DEATH_MARKER: {location} - {details}"
-        logger.info(marker_msg)
-        print(marker_msg)
+        pass
 
     try:
         death_marker("FUNCTION_START", f"plate_path={plate_path}")
         log_thread_count("function start")
 
-        death_marker("BEFORE_STARTING_LOG")
-        logger.info(f"SUBPROCESS: Starting plate {plate_path}")
-
-        death_marker("BEFORE_STATUS_WRITE")
-        logger.info(f"🔥 SUBPROCESS: STARTING plate {plate_path}")
-        death_marker("AFTER_STATUS_WRITE")
+        logger.info(f"Starting plate {plate_path}")
 
         log_thread_count("after status write")
         
@@ -160,14 +133,11 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
 
         # Global config is already a proper object from pickle - no reconstruction needed!
         log_thread_count("using pickled global config")
-        logger.info(f"🔥 SUBPROCESS: Using pickled global config: {type(global_config)}")
-        logger.info(f"🔥 SUBPROCESS: Zarr compressor: {global_config.zarr_config.compressor.value}")
         log_thread_count("after global config validation")
 
-        logger.info("SUBPROCESS: Global config validated - GPU registry and CUDA streams will be initialized by workers")
+        logger.info("Global config validated - GPU registry and CUDA streams will be initialized by workers")
 
         # Step 2: Create orchestrator and initialize (like test_main.py)
-        logger.info("🔥 SUBPROCESS: Creating orchestrator...")
 
         log_thread_count("before orchestrator import")
 
@@ -212,46 +182,25 @@ def run_single_plate(plate_path: str, pipeline_definition: List, compiled_contex
         # NUCLEAR WRAP: Orchestrator initialization
         force_error_detection("orchestrator_initialize", orchestrator.initialize)
         log_thread_count("after orchestrator initialization")
-        logger.info("🔥 SUBPROCESS: Orchestrator initialized!")
-        
+
         # Step 3: Use wells from pre-compiled contexts (not rediscovery)
         # The UI already compiled contexts for the specific wells in this plate
         wells = list(compiled_contexts.keys())
-        logger.info(f"🔥 SUBPROCESS: Using pre-compiled wells for plate {plate_path}: {wells}")
-        logger.info(f"🔥 SUBPROCESS: Found {len(wells)} wells from compiled contexts")
 
         # AGGRESSIVE VALIDATION: Check wells from compiled contexts
         if not wells:
-            error_msg = f"🔥 CRITICAL: No wells found in compiled contexts for plate {plate_path}!"
+            error_msg = f"No wells found in compiled contexts for plate {plate_path}!"
             logger.error(error_msg)
-            print(f"🔥 SUBPROCESS STDOUT CRITICAL: {error_msg}")
             raise RuntimeError(error_msg)
         if not isinstance(wells, list):
-            error_msg = f"🔥 CRITICAL: Wells is not a list: {type(wells)} = {wells}"
+            error_msg = f"Wells is not a list: {type(wells)} = {wells}"
             logger.error(error_msg)
-            print(f"🔥 SUBPROCESS STDOUT CRITICAL: {error_msg}")
             raise RuntimeError(error_msg)
 
-        logger.info(f"🔥 SUBPROCESS: Pipeline has {len(pipeline_definition)} steps")
-        logger.info("🔥 SUBPROCESS: Using pre-compiled contexts from UI")
-        logger.info(f"🔥 SUBPROCESS: EXECUTING plate {plate_path}")
-        
         # Step 5: Execution phase with multiprocessing (like test_main.py but with processes)
-        logger.info("🔥 SUBPROCESS: Starting execution phase with multiprocessing...")
-
         # Use effective config passed from UI (includes pipeline config) instead of global config
         config_to_use = effective_config if effective_config is not None else global_config
         max_workers = config_to_use.num_workers
-        logger.info(f"🔥 SUBPROCESS: Using {max_workers} workers from {'effective' if effective_config else 'global'} config for {len(wells)} wells")
-
-        # This is where hangs often occur - add extra monitoring
-        logger.info("🔥 SUBPROCESS: About to call execute_compiled_plate...")
-
-        # Skip GPU memory monitoring in subprocess runner - workers will handle GPU monitoring
-        logger.info("🔥 SUBPROCESS: GPU memory monitoring deferred to workers")
-
-        # Let's debug what's actually happening - use normal threading
-        logger.info("🔥 SUBPROCESS: Starting execution with detailed monitoring...")
 
         # Create a custom progress callback to see exactly where it hangs
         def progress_callback(well_id, step_name, status):

@@ -117,18 +117,8 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
         else:
             global_value = getattr(global_config, field.name)
             merged_config_values[field.name] = global_value
-            if field.name == 'step_well_filter_config':
-                print(f"🔍 MERGE DEBUG: Using global_config value: {global_value}")
 
     result = GlobalPipelineConfig(**merged_config_values)
-
-    # DEBUG: Check what the result looks like
-    if hasattr(result, 'step_well_filter_config'):
-        step_config = getattr(result, 'step_well_filter_config')
-        if hasattr(step_config, 'well_filter'):
-            well_filter_value = getattr(step_config, 'well_filter')
-            print(f"🔍 MERGE DEBUG: Final result has step_well_filter_config.well_filter = {well_filter_value}")
-
     return result
 
 
@@ -149,16 +139,15 @@ def _execute_single_axis_static(
         visualizer: Optional Napari visualizer (not used in multiprocessing)
     """
     axis_id = frozen_context.axis_id
-    logger.info(f"🔥 SINGLE_AXIS: Starting execution for axis {axis_id}")
 
     # NUCLEAR VALIDATION
     if not frozen_context.is_frozen():
-        error_msg = f"🔥 SINGLE_AXIS ERROR: Context for axis {axis_id} is not frozen before execution"
+        error_msg = f"Context for axis {axis_id} is not frozen before execution"
         logger.error(error_msg)
         raise RuntimeError(error_msg)
 
     if not pipeline_definition:
-        error_msg = f"🔥 SINGLE_AXIS ERROR: Empty pipeline_definition for axis {axis_id}"
+        error_msg = f"Empty pipeline_definition for axis {axis_id}"
         logger.error(error_msg)
         raise RuntimeError(error_msg)
 
@@ -166,17 +155,14 @@ def _execute_single_axis_static(
     for step_index, step in enumerate(pipeline_definition):
         step_name = frozen_context.step_plans[step_index]["step_name"]
 
-        logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
-
         # Verify step has process method (should always be true for AbstractStep subclasses)
         if not hasattr(step, 'process'):
-            error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} missing process method for axis {axis_id}"
+            error_msg = f"Step {step_index+1} missing process method for axis {axis_id}"
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
         # Call process method on step instance
         step.process(frozen_context, step_index)
-        logger.info(f"🔥 SINGLE_AXIS: Step {step_index+1}/{len(pipeline_definition)} - {step_name} completed for axis {axis_id}")
 
         # Handle visualization if requested
         if visualizer:
@@ -243,11 +229,6 @@ def _configure_worker_logging(log_file_base: str):
 
     # Get worker logger
     worker_logger = logging.getLogger("openhcs.worker")
-    worker_logger.info(f"🔥 WORKER: Process {worker_pid} (ID: {worker_id}) logging configured")
-    worker_logger.info(f"🔥 WORKER: All logs writing to: {worker_log_file}")
-
-    # Log import hook installation status
-    worker_logger.info("🔥 WORKER: Import hook installed for auto-discovered functions")
 
 
 def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
@@ -277,12 +258,9 @@ def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
         # Set up basic logging for worker messages
         logging.basicConfig(level=logging.INFO)
         worker_logger = logging.getLogger("openhcs.worker")
-        worker_logger.info("🔥 WORKER: No log file base provided, using basic logging")
 
     # Initialize function registry for this worker process
     try:
-        worker_logger.info("🔥 WORKER: Initializing function registry for worker process")
-
         # Import and initialize function registry (will auto-discover all libraries)
         import openhcs.processing.func_registry as func_registry_module
 
@@ -291,17 +269,12 @@ def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
             if not func_registry_module._registry_initialized:
                 func_registry_module._auto_initialize_registry()
 
-        worker_logger.info("🔥 WORKER: Function registry initialized successfully")
-
     except Exception as e:
-        worker_logger.error(f"🔥 WORKER: Failed to initialize function registry: {e}")
         # Don't raise - let worker continue, registry will auto-init on first function call
-        worker_logger.warning("🔥 WORKER: Function registry will auto-initialize on first function call")
+        pass
 
     # Initialize GPU registry for this worker process
     try:
-        worker_logger.info("🔥 WORKER: Initializing GPU registry for worker process")
-
         # Reconstruct global config from dict
         from openhcs.core.config import GlobalPipelineConfig
         global_config = GlobalPipelineConfig(**global_config_dict)
@@ -310,12 +283,9 @@ def _configure_worker_with_gpu(log_file_base: str, global_config_dict: dict):
         from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
         setup_global_gpu_registry(global_config)
 
-        worker_logger.info("🔥 WORKER: GPU registry initialized successfully")
-
     except Exception as e:
-        worker_logger.error(f"🔥 WORKER: Failed to initialize GPU registry: {e}")
         # Don't raise - let worker continue without GPU if needed
-        worker_logger.warning("🔥 WORKER: Continuing without GPU registry - GPU functions may fail")
+        pass
 
 
 # Global variable to store log file base for worker processes
@@ -519,19 +489,15 @@ class PipelineOrchestrator(ContextProvider):
         if key in self._visualizers:
             vis = self._visualizers[key]
             if vis.is_running:
-                logger.info(f"🔬 ORCHESTRATOR: Reusing existing visualizer for {key}")
                 return vis
             else:
-                logger.info(f"🔬 ORCHESTRATOR: Existing visualizer for {key} is not running, creating new one")
                 del self._visualizers[key]
 
         # Create new visualizer using polymorphic create_visualizer method
-        logger.info(f"🔬 ORCHESTRATOR: Creating new visualizer for {key} (persistent={config.persistent})")
         vis = config.create_visualizer(self.filemanager, vis_config)
 
         # Start viewer asynchronously for streaming configs
         if isinstance(config, StreamingConfig):
-            logger.info(f"🔬 ORCHESTRATOR: Starting {key[0]} visualizer asynchronously on port {config.port}")
             vis.start_viewer(async_mode=True)
 
             # Ping server to set ready state (background thread to avoid blocking)
@@ -541,12 +507,10 @@ class PipelineOrchestrator(ContextProvider):
                 time.sleep(1.0)  # Give server time to start
                 if hasattr(vis, '_wait_for_server_ready'):
                     vis._wait_for_server_ready(timeout=10.0)
-                    logger.info(f"🔬 ORCHESTRATOR: {key[0]} visualizer on port {config.port} is ready")
 
             thread = threading.Thread(target=ping_server, daemon=True)
             thread.start()
         else:
-            logger.info(f"🔬 ORCHESTRATOR: Starting visualizer: {vis}")
             vis.start_viewer()
 
         # Store in cache

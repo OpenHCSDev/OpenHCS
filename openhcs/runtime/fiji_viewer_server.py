@@ -83,6 +83,10 @@ class FijiViewerServer(ZMQServer):
         self._max_debounce_wait = self.MAX_DEBOUNCE_WAIT_MS / 1000.0  # Convert ms to seconds
         self._first_message_time = None  # Track when first message in batch arrived
 
+        # Lock for hyperstack operations to prevent concurrent batch processing from
+        # overwriting each other's hyperstacks (race condition in fast sequential mode)
+        self._hyperstack_lock = threading.Lock()
+
     def _setup_ack_socket(self):
         """Setup PUSH socket for sending acknowledgments."""
         import zmq
@@ -542,6 +546,22 @@ class FijiViewerServer(ZMQServer):
             channel_components: Components mapped to Channel dimension
             slice_components: Components mapped to Slice dimension
             frame_components: Components mapped to Frame dimension
+        """
+        # Lock to prevent concurrent batches from overwriting each other's hyperstacks
+        # (race condition in fast sequential mode where multiple debounce timers fire)
+        with self._hyperstack_lock:
+            self._process_window_group_locked(window_key, items, display_config_dict,
+                                              channel_components, slice_components, frame_components)
+
+    def _process_window_group_locked(self, window_key: str, items: List[Dict[str, Any]],
+                                     display_config_dict: Dict[str, Any],
+                                     channel_components: List[str],
+                                     slice_components: List[str],
+                                     frame_components: List[str]):
+        """
+        Process window group with hyperstack lock held.
+
+        This is the actual implementation, called by _process_window_group with lock held.
         """
         # STEP 1: SHARED - Collect dimension values from ALL items (all types)
         # For images: collect from current batch and MERGE with stored values to expand dimensions
@@ -1039,10 +1059,13 @@ class FijiViewerServer(ZMQServer):
         if window_key in self.hyperstacks:
             self.hyperstacks[window_key].close()
 
-        # Show and store
-        imp.show()
+        # Store BEFORE showing to prevent race condition where next batch arrives
+        # before hyperstack is registered, causing duplicate window creation
         self.hyperstacks[window_key] = imp
         self.hyperstack_metadata[window_key] = all_images
+
+        # Show after storing (imp.show() may be async on Swing thread)
+        imp.show()
 
         logger.info(f"🔬 FIJI SERVER: Displayed hyperstack '{window_key}' with {stack.getSize()} slices")
 

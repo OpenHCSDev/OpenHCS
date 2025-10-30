@@ -1193,7 +1193,7 @@ class ImageBrowserWidget(QWidget):
             viewer, filenames, plate_path, read_backend, napari_config
         )
 
-        logger.info(f"Loading and streaming batch of {len(filenames)} images to Napari viewer on port {napari_config.napari_port}...")
+        logger.info(f"Loading and streaming batch of {len(filenames)} images to Napari viewer on port {napari_config.port}...")
 
     def _load_and_stream_batch_to_fiji(self, filenames: list):
         """Load multiple images and stream as batch to Fiji (builds hyperstack)."""
@@ -1233,7 +1233,7 @@ class ImageBrowserWidget(QWidget):
             viewer, filenames, plate_path, read_backend, fiji_config
         )
 
-        logger.info(f"Loading and streaming batch of {len(filenames)} images to Fiji viewer on port {fiji_config.fiji_port}...")
+        logger.info(f"Loading and streaming batch of {len(filenames)} images to Fiji viewer on port {fiji_config.port}...")
 
     def _load_and_stream_batch_to_napari_async(self, viewer, filenames: list, plate_path: Path,
                                                  read_backend: str, config):
@@ -1252,8 +1252,8 @@ class ImageBrowserWidget(QWidget):
 
                 if not is_already_running:
                     # Viewer is launching - register it immediately so UI shows it
-                    register_launching_viewer(viewer.napari_port, 'napari', len(filenames))
-                    logger.info(f"Registered launching Napari viewer on port {viewer.napari_port} with {len(filenames)} queued images")
+                    register_launching_viewer(viewer.port, 'napari', len(filenames))
+                    logger.info(f"Registered launching Napari viewer on port {viewer.port} with {len(filenames)} queued images")
 
                 # Show loading status
                 self._update_status_threadsafe(f"Loading {len(filenames)} images from disk...")
@@ -1275,18 +1275,18 @@ class ImageBrowserWidget(QWidget):
 
                 if not is_already_running:
                     # Viewer is launching - wait for it to be ready before streaming
-                    logger.info(f"Waiting for Napari viewer on port {viewer.napari_port} to be ready...")
+                    logger.info(f"Waiting for Napari viewer on port {viewer.port} to be ready...")
 
                     # Wait for viewer to be ready before streaming
                     if not viewer.wait_for_ready(timeout=15.0):
-                        unregister_launching_viewer(viewer.napari_port)
-                        raise RuntimeError(f"Napari viewer on port {viewer.napari_port} failed to become ready")
+                        unregister_launching_viewer(viewer.port)
+                        raise RuntimeError(f"Napari viewer on port {viewer.port} failed to become ready")
 
-                    logger.info(f"Napari viewer on port {viewer.napari_port} is ready")
+                    logger.info(f"Napari viewer on port {viewer.port} is ready")
                     # Unregister from launching registry (now ready)
-                    unregister_launching_viewer(viewer.napari_port)
+                    unregister_launching_viewer(viewer.port)
                 else:
-                    logger.info(f"Napari viewer on port {viewer.napari_port} is already running")
+                    logger.info(f"Napari viewer on port {viewer.port} is already running")
 
                 # Use the napari streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
@@ -1297,7 +1297,7 @@ class ImageBrowserWidget(QWidget):
 
                 # Prepare metadata for streaming
                 metadata = {
-                    'napari_port': viewer.napari_port,
+                    'port': viewer.port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
                     'source': source
@@ -1310,7 +1310,7 @@ class ImageBrowserWidget(QWidget):
                     BackendEnum.NAPARI_STREAM.value,
                     **metadata
                 )
-                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Napari on port {viewer.napari_port}")
+                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Napari on port {viewer.port}")
             except Exception as e:
                 logger.error(f"Failed to load/stream batch to Napari: {e}")
                 # Show error in UI thread
@@ -1343,19 +1343,19 @@ class ImageBrowserWidget(QWidget):
 
                 if not is_already_running:
                     # Viewer is launching - register it and show in UI
-                    register_launching_viewer(viewer.napari_port, 'napari', len(file_paths))
-                    logger.info(f"Waiting for Napari viewer on port {viewer.napari_port} to be ready...")
+                    register_launching_viewer(viewer.port, 'napari', len(file_paths))
+                    logger.info(f"Waiting for Napari viewer on port {viewer.port} to be ready...")
 
                     # Wait for viewer to be ready before streaming
                     if not viewer.wait_for_ready(timeout=15.0):
-                        unregister_launching_viewer(viewer.napari_port)
-                        raise RuntimeError(f"Napari viewer on port {viewer.napari_port} failed to become ready")
+                        unregister_launching_viewer(viewer.port)
+                        raise RuntimeError(f"Napari viewer on port {viewer.port} failed to become ready")
 
-                    logger.info(f"Napari viewer on port {viewer.napari_port} is ready")
+                    logger.info(f"Napari viewer on port {viewer.port} is ready")
                     # Unregister from launching registry (now ready)
-                    unregister_launching_viewer(viewer.napari_port)
+                    unregister_launching_viewer(viewer.port)
                 else:
-                    logger.info(f"Napari viewer on port {viewer.napari_port} is already running")
+                    logger.info(f"Napari viewer on port {viewer.port} is already running")
 
                 # Use the napari streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
@@ -1366,7 +1366,7 @@ class ImageBrowserWidget(QWidget):
 
                 # Prepare metadata for streaming
                 metadata = {
-                    'napari_port': viewer.napari_port,
+                    'port': viewer.port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
                     'source': source
@@ -1379,7 +1379,7 @@ class ImageBrowserWidget(QWidget):
                     BackendEnum.NAPARI_STREAM.value,
                     **metadata
                 )
-                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Napari on port {viewer.napari_port}")
+                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Napari on port {viewer.port}")
             except Exception as e:
                 logger.error(f"Failed to stream batch to Napari: {e}")
                 # Show error in UI thread
@@ -1417,8 +1417,8 @@ class ImageBrowserWidget(QWidget):
 
                 if not is_already_running:
                     # Viewer is launching - register it immediately so UI shows it
-                    register_launching_viewer(viewer.fiji_port, 'fiji', len(filenames))
-                    logger.info(f"Registered launching Fiji viewer on port {viewer.fiji_port} with {len(filenames)} queued images")
+                    register_launching_viewer(viewer.port, 'fiji', len(filenames))
+                    logger.info(f"Registered launching Fiji viewer on port {viewer.port} with {len(filenames)} queued images")
 
                 # Show loading status
                 self._update_status_threadsafe(f"Loading {len(filenames)} images from disk...")
@@ -1440,18 +1440,18 @@ class ImageBrowserWidget(QWidget):
 
                 if not is_already_running:
                     # Viewer is launching - wait for it to be ready before streaming
-                    logger.info(f"Waiting for Fiji viewer on port {viewer.fiji_port} to be ready...")
+                    logger.info(f"Waiting for Fiji viewer on port {viewer.port} to be ready...")
 
                     # Wait for viewer to be ready before streaming
                     if not viewer.wait_for_ready(timeout=15.0):
-                        unregister_launching_viewer(viewer.fiji_port)
-                        raise RuntimeError(f"Fiji viewer on port {viewer.fiji_port} failed to become ready")
+                        unregister_launching_viewer(viewer.port)
+                        raise RuntimeError(f"Fiji viewer on port {viewer.port} failed to become ready")
 
-                    logger.info(f"Fiji viewer on port {viewer.fiji_port} is ready")
+                    logger.info(f"Fiji viewer on port {viewer.port} is ready")
                     # Unregister from launching registry (now ready)
-                    unregister_launching_viewer(viewer.fiji_port)
+                    unregister_launching_viewer(viewer.port)
                 else:
-                    logger.info(f"Fiji viewer on port {viewer.fiji_port} is already running")
+                    logger.info(f"Fiji viewer on port {viewer.port} is already running")
 
                 # Use the Fiji streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
@@ -1462,7 +1462,7 @@ class ImageBrowserWidget(QWidget):
 
                 # Prepare metadata for streaming
                 metadata = {
-                    'fiji_port': viewer.fiji_port,
+                    'port': viewer.port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
                     'source': source
@@ -1476,7 +1476,7 @@ class ImageBrowserWidget(QWidget):
                     BackendEnum.FIJI_STREAM.value,
                     **metadata
                 )
-                logger.info(f"✅ IMAGE BROWSER: Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.fiji_port}")
+                logger.info(f"✅ IMAGE BROWSER: Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.port}")
             except Exception as e:
                 logger.error(f"Failed to load/stream batch to Fiji: {e}")
                 # Show error in UI thread
@@ -1509,19 +1509,19 @@ class ImageBrowserWidget(QWidget):
 
                 if not is_already_running:
                     # Viewer is launching - register it and show in UI
-                    register_launching_viewer(viewer.fiji_port, 'fiji', len(file_paths))
-                    logger.info(f"Waiting for Fiji viewer on port {viewer.fiji_port} to be ready...")
+                    register_launching_viewer(viewer.port, 'fiji', len(file_paths))
+                    logger.info(f"Waiting for Fiji viewer on port {viewer.port} to be ready...")
 
                     # Wait for viewer to be ready before streaming
                     if not viewer.wait_for_ready(timeout=15.0):
-                        unregister_launching_viewer(viewer.fiji_port)
-                        raise RuntimeError(f"Fiji viewer on port {viewer.fiji_port} failed to become ready")
+                        unregister_launching_viewer(viewer.port)
+                        raise RuntimeError(f"Fiji viewer on port {viewer.port} failed to become ready")
 
-                    logger.info(f"Fiji viewer on port {viewer.fiji_port} is ready")
+                    logger.info(f"Fiji viewer on port {viewer.port} is ready")
                     # Unregister from launching registry (now ready)
-                    unregister_launching_viewer(viewer.fiji_port)
+                    unregister_launching_viewer(viewer.port)
                 else:
-                    logger.info(f"Fiji viewer on port {viewer.fiji_port} is already running")
+                    logger.info(f"Fiji viewer on port {viewer.port} is already running")
 
                 # Use the Fiji streaming backend to send the batch
                 from openhcs.constants.constants import Backend as BackendEnum
@@ -1532,7 +1532,7 @@ class ImageBrowserWidget(QWidget):
 
                 # Prepare metadata for streaming
                 metadata = {
-                    'fiji_port': viewer.fiji_port,
+                    'port': viewer.port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
                     'source': source
@@ -1545,7 +1545,7 @@ class ImageBrowserWidget(QWidget):
                     BackendEnum.FIJI_STREAM.value,
                     **metadata
                 )
-                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.fiji_port}")
+                logger.info(f"Successfully streamed batch of {len(file_paths)} images to Fiji on port {viewer.port}")
             except Exception as e:
                 logger.error(f"Failed to stream batch to Fiji: {e}")
                 # Show error in UI thread
@@ -1639,14 +1639,14 @@ class ImageBrowserWidget(QWidget):
                 rois,
                 roi_json_path,
                 BackendEnum.FIJI_STREAM.value,
-                fiji_host='localhost',
-                fiji_port=fiji_config.fiji_port,
+                host='localhost',
+                port=fiji_config.port,
                 display_config=fiji_config,
                 microscope_handler=self.orchestrator.microscope_handler,
                 source=source
             )
 
-            logger.info(f"Streamed {len(rois)} ROIs to Fiji on port {fiji_config.fiji_port}")
+            logger.info(f"Streamed {len(rois)} ROIs to Fiji on port {fiji_config.port}")
 
         except Exception as e:
             logger.error(f"Failed to stream ROIs to Fiji: {e}")

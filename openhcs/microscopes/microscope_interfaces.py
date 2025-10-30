@@ -106,7 +106,7 @@ class MetadataHandler(ABC):
 
     FALLBACK_VALUES = {
         'pixel_size': DEFAULT_PIXEL_SIZE,  # Default pixel size in micrometers
-        'grid_dimensions': None,  # No grid dimensions by default
+        'grid_dimensions': (1, 1),  # Default grid dimensions (1x1) when not available
     }
 
     def __init__(self):

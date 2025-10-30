@@ -95,7 +95,7 @@ def materialize_cell_counts(data: List[Union[CellCountResult, MultiChannelResult
         path: Output path for results
         filemanager: FileManager instance for I/O operations
         backends: Single backend string or list of backends to save to
-        backend_kwargs: Dict mapping backend names to their kwargs (e.g., {'fiji_stream': {'fiji_port': 5560}})
+        backend_kwargs: Dict mapping backend names to their kwargs (e.g., {'fiji_stream': {'port': 5560}})
 
     Returns:
         Path to the saved results file (first backend in list)
@@ -137,7 +137,7 @@ def materialize_segmentation_masks(data: List[np.ndarray], path: str, filemanage
         path: Output path for ROI data
         filemanager: FileManager instance for I/O operations
         backends: Single backend string or list of backends to save to
-        backend_kwargs: Dict mapping backend names to their kwargs (e.g., {'fiji_stream': {'fiji_port': 5560}})
+        backend_kwargs: Dict mapping backend names to their kwargs (e.g., {'fiji_stream': {'port': 5560}})
 
     Returns:
         Path to the saved ROI file (first backend in list)
