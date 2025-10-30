@@ -535,6 +535,10 @@ class OpenHCSMetadataGenerator:
         # This ensures metadata reflects what was actually written, not the original input
         component_metadata = self._extract_component_metadata_from_files(actual_files, handler.parser)
 
+        # Merge extracted component keys with display names from original metadata cache
+        # This preserves display names (e.g., "tl-20") while using actual output components
+        merged_metadata = self._merge_component_metadata(component_metadata, context.metadata_cache)
+
         # CRITICAL: Use AllComponents enum for cache lookups (cache is keyed by AllComponents)
         # GroupBy and AllComponents have same values but different hashes, so dict.get() fails with GroupBy
         return OpenHCSMetadata(
@@ -543,11 +547,11 @@ class OpenHCSMetadataGenerator:
             grid_dimensions=grid_dimensions,
             pixel_size=pixel_size,
             image_files=relative_files,
-            channels=component_metadata.get(AllComponents.CHANNEL),
-            wells=component_metadata.get(AllComponents.WELL),
-            sites=component_metadata.get(AllComponents.SITE),
-            z_indexes=component_metadata.get(AllComponents.Z_INDEX),
-            timepoints=component_metadata.get(AllComponents.TIMEPOINT),
+            channels=merged_metadata.get(AllComponents.CHANNEL),
+            wells=merged_metadata.get(AllComponents.WELL),
+            sites=merged_metadata.get(AllComponents.SITE),
+            z_indexes=merged_metadata.get(AllComponents.Z_INDEX),
+            timepoints=merged_metadata.get(AllComponents.TIMEPOINT),
             available_backends={write_backend: True},
             workspace_mapping=None,  # Preserve existing - filtered out by create_metadata()
             main=is_main if is_main else None,
@@ -579,12 +583,46 @@ class OpenHCSMetadataGenerator:
                 component_name = component.value
                 if component_name in parsed:
                     component_value = str(parsed[component_name])
-                    # Store with None as display name (will be preserved from existing metadata if available)
+                    # Store with None as display name (will be merged with original metadata display names)
                     if component_value not in result[component]:
                         result[component][component_value] = None
 
         # Convert empty dicts to None (no metadata for that component)
         return {component: metadata_dict if metadata_dict else None for component, metadata_dict in result.items()}
+
+    def _merge_component_metadata(self, extracted: Dict[AllComponents, Optional[Dict[str, Optional[str]]]], cache: Dict[AllComponents, Optional[Dict[str, Optional[str]]]]) -> Dict[AllComponents, Optional[Dict[str, Optional[str]]]]:
+        """
+        Merge extracted component keys with display names from original metadata cache.
+
+        For each component:
+        - Use extracted keys (what actually exists in output)
+        - Preserve display names from cache (e.g., "tl-20" for channel "1")
+        - If no display name in cache, use None
+
+        Args:
+            extracted: Component metadata extracted from output filenames
+            cache: Original metadata cache with display names
+
+        Returns:
+            Merged metadata with actual components and preserved display names
+        """
+        result = {}
+        for component in AllComponents:
+            extracted_dict = extracted.get(component)
+            cache_dict = cache.get(component)
+
+            if extracted_dict is None:
+                result[component] = None
+            else:
+                # For each extracted key, get display name from cache if available
+                merged = {}
+                for key in extracted_dict.keys():
+                    display_name = cache_dict.get(key) if cache_dict else None
+                    merged[key] = display_name
+
+                result[component] = merged if merged else None
+
+        return result
 
 
 
