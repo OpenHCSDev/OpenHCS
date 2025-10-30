@@ -34,7 +34,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from openhcs.core.xdg_paths import get_cache_file_path
 from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
-from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
+from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig, LazyDiscoveryDict
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +115,8 @@ class FunctionMetadata:
 
 
 
-# Registry for all library registry classes
-LIBRARY_REGISTRIES: Dict[str, Type['LibraryRegistryBase']] = {}
+# Registry for all library registry classes with lazy auto-discovery
+LIBRARY_REGISTRIES = LazyDiscoveryDict()
 
 
 # Configuration for library registry auto-registration
@@ -125,7 +125,9 @@ _LIBRARY_REGISTRY_CONFIG = RegistryConfig(
     key_attribute='_registry_name',
     skip_if_no_key=True,  # Skip abstract base classes
     log_registration=True,
-    registry_name='library registry'
+    registry_name='library registry',
+    discovery_package='openhcs.processing.backends.lib_registry',
+    discovery_recursive=False
 )
 
 

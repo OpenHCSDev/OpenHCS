@@ -618,9 +618,8 @@ def create_microscope_handler(microscope_type: str = 'auto',
         microscope_type = _auto_detect_microscope_type(plate_folder, filemanager, allowed_types=allowed_auto_types)
         logger.info("Auto-detected microscope type: %s", microscope_type)
 
-    # Ensure all handlers are discovered before lookup
-    from openhcs.microscopes.handler_registry_service import discover_all_handlers, get_all_handler_types
-    discover_all_handlers()
+    # Handlers auto-discovered on first access to MICROSCOPE_HANDLERS
+    from openhcs.microscopes.handler_registry_service import get_all_handler_types
 
     # Get the appropriate handler class from the registry
     # No dynamic imports or fallbacks (Clause 77: Rot Intolerance)
@@ -718,10 +717,8 @@ def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
         MetadataNotFoundError: If metadata files are missing
         Any other exception from metadata handlers (fail-loud)
     """
-    # Ensure all handlers are discovered before auto-detection
-    from openhcs.microscopes.handler_registry_service import discover_all_handlers
+    # Handlers auto-discovered on first access to MICROSCOPE_HANDLERS
     from openhcs.io.exceptions import MetadataNotFoundError
-    discover_all_handlers()
 
     # Build detection order: openhcsdata first, then filtered/ordered list
     detection_order = ['openhcsdata']  # Always first, always included (correct registration name)

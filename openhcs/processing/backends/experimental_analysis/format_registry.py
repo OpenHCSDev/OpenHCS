@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple, Type
 import pandas as pd
 from pathlib import Path
 
-from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
+from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig, LazyDiscoveryDict
 
 
 @dataclass(frozen=True)
@@ -24,8 +24,8 @@ class MicroscopeFormatConfig:
     plate_detection_method: str
 
 
-# Registry for all microscope format registry classes
-MICROSCOPE_FORMAT_REGISTRIES: Dict[str, Type['MicroscopeFormatRegistryBase']] = {}
+# Registry for all microscope format registry classes with lazy auto-discovery
+MICROSCOPE_FORMAT_REGISTRIES = LazyDiscoveryDict()
 
 
 # Configuration for format registry auto-registration
@@ -34,7 +34,9 @@ _FORMAT_REGISTRY_CONFIG = RegistryConfig(
     key_attribute='FORMAT_NAME',
     skip_if_no_key=True,  # Skip abstract base class
     log_registration=True,
-    registry_name='microscope format registry'
+    registry_name='microscope format registry',
+    discovery_package='openhcs.processing.backends.experimental_analysis',
+    discovery_recursive=False
 )
 
 

@@ -37,38 +37,11 @@ class FormatRegistryService:
         if cls._registry_cache is not None:
             return cls._registry_cache
 
-        # Trigger discovery by importing all registry modules
-        cls._ensure_registries_discovered()
-
-        # Use auto-registered format registries
+        # Registries auto-discovered on first access to MICROSCOPE_FORMAT_REGISTRIES
         cls._registry_cache = MICROSCOPE_FORMAT_REGISTRIES.copy()
         return cls._registry_cache
 
-    @classmethod
-    def _ensure_registries_discovered(cls) -> None:
-        """
-        Ensure all registry modules are imported to trigger metaclass registration.
 
-        Uses generic discovery to import all MicroscopeFormatRegistryBase subclasses,
-        which triggers their metaclass registration into MICROSCOPE_FORMAT_REGISTRIES.
-
-        The metaclass handles everything - modules without MicroscopeFormatRegistryBase subclasses
-        or without FORMAT_NAME simply don't register. No excludes needed.
-        """
-        from openhcs.core.registry_discovery import discover_registry_classes
-        from openhcs.processing.backends.experimental_analysis.format_registry import MicroscopeFormatRegistryBase
-        import openhcs.processing.backends.experimental_analysis
-
-        # Use generic discovery to import all registry modules
-        # The metaclass decides what registers based on skip_if_no_key
-        _ = discover_registry_classes(
-            package_path=openhcs.processing.backends.experimental_analysis.__path__,
-            package_prefix="openhcs.processing.backends.experimental_analysis.",
-            base_class=MicroscopeFormatRegistryBase
-            # No exclude_modules - let the metaclass handle it!
-        )
-
-        logger.debug(f"Discovered {len(MICROSCOPE_FORMAT_REGISTRIES)} format registries: {list(MICROSCOPE_FORMAT_REGISTRIES.keys())}")
     
     @classmethod
     def get_all_format_registries(cls) -> Dict[str, Type[MicroscopeFormatRegistryBase]]:

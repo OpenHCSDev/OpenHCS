@@ -32,10 +32,7 @@ class RegistryService:
         logger.debug("🎯 REGISTRY SERVICE: Discovering functions from all registries...")
         all_functions = {}
 
-        # Trigger discovery by importing all registry modules
-        cls._ensure_registries_discovered()
-
-        # Use auto-registered registry classes from LIBRARY_REGISTRIES
+        # Registries auto-discovered on first access to LIBRARY_REGISTRIES
         registry_classes = list(LIBRARY_REGISTRIES.values())
         logger.debug(f"🎯 REGISTRY SERVICE: Found {len(registry_classes)} registered library registries")
 
@@ -68,31 +65,7 @@ class RegistryService:
         cls._metadata_cache = all_functions
         return all_functions
     
-    @classmethod
-    def _ensure_registries_discovered(cls) -> None:
-        """
-        Ensure all registry modules are imported to trigger metaclass registration.
 
-        Uses generic discovery to import all LibraryRegistryBase subclasses,
-        which triggers their metaclass registration into LIBRARY_REGISTRIES.
-
-        The metaclass handles everything - modules without LibraryRegistryBase subclasses
-        or without _library_name simply don't register. No excludes needed.
-        """
-        from openhcs.core.registry_discovery import discover_registry_classes
-        from openhcs.processing.backends.lib_registry.unified_registry import LibraryRegistryBase
-        import openhcs.processing.backends.lib_registry
-
-        # Use generic discovery to import all registry modules
-        # The metaclass decides what registers based on skip_if_no_key
-        _ = discover_registry_classes(
-            package_path=openhcs.processing.backends.lib_registry.__path__,
-            package_prefix="openhcs.processing.backends.lib_registry.",
-            base_class=LibraryRegistryBase
-            # No exclude_modules - let the metaclass handle it!
-        )
-
-        logger.debug(f"Discovered {len(LIBRARY_REGISTRIES)} library registries: {list(LIBRARY_REGISTRIES.keys())}")
     
     @classmethod
     def clear_metadata_cache(cls) -> None:
