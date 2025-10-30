@@ -971,8 +971,11 @@ class FunctionStep(AbstractStep):
                         current_pattern_list, seq_comps
                     )
 
+                    logger.info(f"🔄 SEQUENTIAL: Processing component '{comp_val}' with {len(patterns_by_combo)} sequential combinations")
+
                     # Iterate over each combination
-                    for combo_patterns in patterns_by_combo.values():
+                    for combo_key, combo_patterns in patterns_by_combo.items():
+                        logger.info(f"🔄 SEQUENTIAL: Processing combination {combo_key} with {len(combo_patterns)} patterns")
                         # Bulk preload for this combination only
                         if read_backend != Backend.MEMORY.value:
                             _bulk_preload_step_images(
@@ -1005,7 +1008,7 @@ class FunctionStep(AbstractStep):
                                         filemanager.delete(file_path, Backend.MEMORY.value)
                                     except Exception as e:
                                         logger.warning(f"Failed to delete memory file {file_path}: {e}")
-                                logger.debug(f"🔄 SEQUENTIAL: Cleared {len(memory_files)} preloaded files from memory")
+                                logger.info(f"🔄 SEQUENTIAL: Cleared {len(memory_files)} preloaded files from memory")
                             except Exception as e:
                                 logger.warning(f"Failed to clear memory files from {step_input_dir}: {e}")
             else:
