@@ -207,12 +207,16 @@ class PathPlanner:
 
         # Type-specific logic
         if dir_type == 'input':
-            if i == 0 or getattr(step, 'input_source', None) == InputSource.PIPELINE_START:
+            # Access input_source from processing_config (new API)
+            input_source = getattr(step.processing_config, 'input_source', None) if hasattr(step, 'processing_config') else None
+            if i == 0 or input_source == InputSource.PIPELINE_START:
                 return self.initial_input
             prev_step_index = i - 1  # Use previous step index instead of step_id
             return Path(self.plans[prev_step_index]['output_dir'])
         else:  # output
-            if i == 0 or getattr(step, 'input_source', None) == InputSource.PIPELINE_START:
+            # Access input_source from processing_config (new API)
+            input_source = getattr(step.processing_config, 'input_source', None) if hasattr(step, 'processing_config') else None
+            if i == 0 or input_source == InputSource.PIPELINE_START:
                 return self._build_output_path()
             return fallback  # Work in place
 
@@ -361,7 +365,9 @@ class PathPlanner:
         # Existing connectivity validation
         for i in range(1, len(pipeline)):
             curr, prev = pipeline[i], pipeline[i-1]
-            if getattr(curr, 'input_source', None) == InputSource.PIPELINE_START:
+            # Access input_source from processing_config (new API)
+            input_source = getattr(curr.processing_config, 'input_source', None) if hasattr(curr, 'processing_config') else None
+            if input_source == InputSource.PIPELINE_START:
                 continue
             curr_in = self.plans[i]['input_dir']  # Use step index i
             prev_out = self.plans[i-1]['output_dir']  # Use step index i-1

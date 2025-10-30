@@ -414,8 +414,8 @@ class PipelineEditorWidget(QWidget):
             group_name = getattr(group_by, 'name', str(group_by))
             preview_parts.append(f"group_by={group_name}")
 
-        # Input source preview
-        input_source = getattr(step, 'input_source', None)
+        # Input source preview (access from processing_config)
+        input_source = getattr(step.processing_config, 'input_source', None) if hasattr(step, 'processing_config') else None
         if input_source:
             source_name = getattr(input_source, 'name', str(input_source))
             if source_name != 'PREVIOUS_STEP':  # Only show if not default
@@ -485,8 +485,8 @@ class PipelineEditorWidget(QWidget):
         else:
             tooltip_lines.append("Group By: None")
 
-        # Input source
-        input_source = getattr(step, 'input_source', None)
+        # Input source (access from processing_config)
+        input_source = getattr(step.processing_config, 'input_source', None) if hasattr(step, 'processing_config') else None
         if input_source:
             source_name = getattr(input_source, 'name', str(input_source))
             tooltip_lines.append(f"Input Source: {source_name}")

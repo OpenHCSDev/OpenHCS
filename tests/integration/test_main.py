@@ -21,7 +21,7 @@ from openhcs.core.config import (
     PathPlanningConfig, StepWellFilterConfig, VFSConfig, ZarrConfig,
     NapariVariableSizeHandling
 )
-from openhcs.core.config import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyFijiStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig
+from openhcs.core.config import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyFijiStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig, LazyProcessingConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.pipeline import Pipeline
@@ -206,27 +206,27 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False)
             ),
             Step(
                 func=create_composite,
-                variable_components=[VariableComponents.CHANNEL],
+                processing_config=LazyProcessingConfig(variable_components=[VariableComponents.CHANNEL]),
                 napari_streaming_config=LazyNapariStreamingConfig(port=5557) if enable_napari else None,
                 fiji_streaming_config=LazyFijiStreamingConfig(port=5556) if enable_fiji else None
             ),
             Step(
                 name="Z-Stack Flattening",
                 func=(create_projection, {'method': 'max_projection'}),
-                variable_components=[VariableComponents.Z_INDEX],
+                processing_config=LazyProcessingConfig(variable_components=[VariableComponents.Z_INDEX]),
                 step_materialization_config=LazyStepMaterializationConfig()
             ),
             Step(name="Position Computation", func=position_func),
             Step(
                 name="Secondary Enhancement",
                 func=[(stack_percentile_normalize, {'low_percentile': 0.5, 'high_percentile': 99.5})],
-                input_source=InputSource.PIPELINE_START,
+                processing_config=LazyProcessingConfig(input_source=InputSource.PIPELINE_START),
             ),
             Step(name="CPU Assembly", func=assemble_stack_cpu),
             Step(
                 name="Z-Stack Flattening",
                 func=(create_projection, {'method': 'max_projection'}),
-                variable_components=[VariableComponents.Z_INDEX],
+                processing_config=LazyProcessingConfig(variable_components=[VariableComponents.Z_INDEX]),
             ),
             Step(name="Cell Counting",
                 func=({'1':
