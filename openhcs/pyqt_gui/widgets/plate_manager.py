@@ -660,7 +660,8 @@ class PlateManagerWidget(QWidget):
                 on_save_callback,       # on_save_callback
                 self.color_scheme,      # color_scheme
                 self,                   # parent
-                scope_id=scope_id       # Scope to this orchestrator
+                scope_id,               # scope_id
+                orchestrator            # orchestrator (for live updates)
             )
 
             # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system
@@ -687,7 +688,7 @@ class PlateManagerWidget(QWidget):
             """Apply global configuration to all orchestrators and save to cache."""
             self.service_adapter.set_global_config(new_config)  # Update app-level config
 
-            # Update thread-local storage for MaterializationPathConfig defaults
+            # Update thread-local storage (single source of truth for persistent global config)
             from openhcs.core.config import GlobalPipelineConfig
             from openhcs.config_framework.global_config import set_global_config_for_editing
             set_global_config_for_editing(GlobalPipelineConfig, new_config)
@@ -701,6 +702,10 @@ class PlateManagerWidget(QWidget):
             # SIMPLIFIED: Dual-axis resolver handles context discovery automatically
             if self.selected_plate_path and self.selected_plate_path in self.orchestrators:
                 logger.debug(f"Global config applied to selected orchestrator: {self.selected_plate_path}")
+
+            # REACTIVITY: Emit signal so other windows can refresh automatically
+            self.global_config_changed.emit()
+            logger.debug("Emitted global_config_changed signal for reactive placeholder updates")
 
             self.service_adapter.show_info_dialog("Global configuration applied to all orchestrators")
 

@@ -110,7 +110,7 @@ def get_expected_default(config: str, field: str) -> str:
     return get_actual_config_default(config, field)
 
 TimingConfig = TimingConfig(
-    ACTION_DELAY=0.1,  # Default delay for most actions
+    ACTION_DELAY=0.3,  # Must be > 200ms debounce timer for cross-window placeholder refresh
     WINDOW_DELAY=.1,  # Default delay for window operations
     SAVE_DELAY=.1,  # Default delay for save operations
     VISUAL_OBSERVATION_DELAY=0.2,  # Delay for visual observation
@@ -175,21 +175,38 @@ def setup_application_workflow(context: WorkflowContext) -> WorkflowContext:
     )
 
 def find_widget(context: WorkflowContext, field_name: str, config_section: str = None):
-    """Find widget using existing infrastructure."""
+    """Find widget using existing infrastructure, including nested managers."""
     from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
     form_managers = context.config_window.findChildren(ParameterFormManager)
 
-    return (WidgetFinder.find_field_widget_in_config_section(form_managers, field_name, config_section)
-            if config_section else WidgetFinder.find_field_widget(form_managers, field_name))
+    if config_section:
+        # First try to find the widget directly in the config section
+        widget = WidgetFinder.find_field_widget_in_config_section(form_managers, field_name, config_section)
+        if widget:
+            return widget
+
+        # If not found, try to find the nested manager for this config section
+        # and look for the widget inside it
+        # ANTI-DUCK-TYPING: ParameterFormManager always has nested_managers and widgets attributes
+        for form_manager in form_managers:
+            if config_section in form_manager.nested_managers:
+                nested_manager = form_manager.nested_managers[config_section]
+                if field_name in nested_manager.widgets:
+                    print(f"🔍 DEBUG: Found '{field_name}' in nested manager '{config_section}'")
+                    return nested_manager.widgets[field_name]
+
+        return None
+    else:
+        return WidgetFinder.find_field_widget(form_managers, field_name)
 
 def find_reset_button(context: WorkflowContext, field_name: str, config_section: str = None):
-    """Find reset button using existing infrastructure."""
+    """Find reset button using existing infrastructure, including nested managers."""
     from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
     form_managers = context.config_window.findChildren(ParameterFormManager)
 
     # Find the form manager that has this field in the specified config section
     if config_section:
-        # Use the same logic as find_field_widget_in_config_section but return the form manager
+        # First try to find the reset button in a form manager that matches the config section
         expected_dataclass_patterns = [
             config_section,  # exact match
             f"Lazy{config_section}",  # LazyStepWellFilterConfig
@@ -210,6 +227,15 @@ def find_reset_button(context: WorkflowContext, field_name: str, config_section:
                         print(f"🔍 FORM MANAGER DEBUG: Found target form manager: {dataclass_name}")
                         break
         else:
+            # If not found, try to find the nested manager for this config section
+            # ANTI-DUCK-TYPING: ParameterFormManager always has nested_managers and reset_buttons attributes
+            for form_manager in form_managers:
+                if config_section in form_manager.nested_managers:
+                    nested_manager = form_manager.nested_managers[config_section]
+                    if field_name in nested_manager.reset_buttons:
+                        print(f"🔍 DEBUG: Found reset button for '{field_name}' in nested manager '{config_section}'")
+                        return nested_manager.reset_buttons[field_name]
+
             target_form_manager = None
     else:
         target_form_manager = WidgetFinder.find_form_manager_for_field(form_managers, field_name)

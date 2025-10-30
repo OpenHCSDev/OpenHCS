@@ -188,6 +188,12 @@ class OpenHCSMainWindow(QMainWindow):
 
             self.floating_windows["plate_manager"] = window
 
+            # REACTIVITY: Connect global config changed signal so windows auto-refresh
+            # When PlateManager saves global config, it emits this signal
+            # Main window propagates it to all other windows via on_config_changed
+            plate_widget.global_config_changed.connect(lambda: self.on_config_changed(self.service_adapter.get_global_config()))
+            logger.debug("Connected PlateManager global_config_changed signal for reactive updates")
+
             # Connect progress signals to status bar
             if hasattr(self, 'status_bar') and self.status_bar:
                 # Create progress bar in status bar if it doesn't exist

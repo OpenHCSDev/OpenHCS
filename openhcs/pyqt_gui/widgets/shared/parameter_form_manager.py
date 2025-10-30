@@ -598,9 +598,12 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         )
 
         # Inherit lazy/global editing context from parent so resets behave correctly in nested forms
+        # CRITICAL FIX: Nested forms must inherit is_global_config_editing from parent
+        # This ensures GLOBAL_STATIC_DEFAULTS layer is applied to nested forms when editing GlobalPipelineConfig
+        # Without this, reset fields show stale loaded values instead of static defaults
         try:
             nested_manager.config.is_lazy_dataclass = self.config.is_lazy_dataclass
-            nested_manager.config.is_global_config_editing = not self.config.is_lazy_dataclass
+            nested_manager.config.is_global_config_editing = self.config.is_global_config_editing
         except Exception:
             pass
 
@@ -700,10 +703,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
 
             # OPTIMIZATION: Single placeholder refresh at the end instead of per-parameter
             # This is much faster than refreshing after each reset
-            # CRITICAL: Use refresh_with_live_context to collect current form + sibling values
+            # CRITICAL: Use refresh_with_live_context to query _active_form_managers for sibling values
             # Even when resetting to defaults, we need live context for sibling inheritance
             # REFACTORING: Inline delegate calls
-            self._placeholder_refresh_service.refresh_with_live_context(self)
+            self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=False)
 
 
 
@@ -749,8 +752,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # CRITICAL: Refresh all placeholders with live context after reset
         # This ensures sibling inheritance works correctly (e.g., path_planning_config inheriting from well_filter_config)
         # We refresh ALL placeholders instead of just the reset field to ensure consistency
-        # Use use_user_modified_only=True so reset fields don't override sibling values
-        self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=True)
+        # BUGFIX: Use use_user_modified_only=False so reset fields ARE included in sibling context
+        # When you reset a field to None, you WANT it to be visible to siblings for inheritance
+        self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=False)
 
     def _get_reset_value(self, param_name: str) -> Any:
         """Get reset value based on editing context.
@@ -833,6 +837,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         user_modified = {}
         current_values = self.get_current_values()
 
+        # DEBUG: Log what fields are tracked as user-set
+        logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - _user_set_fields = {self._user_set_fields}")
+        logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - current_values = {current_values}")
+
         # Only include fields that were explicitly set by the user
         for field_name in self._user_set_fields:
             value = current_values.get(field_name)
@@ -864,6 +872,9 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 else:
                     # Non-dataclass field, include if user set it
                     user_modified[field_name] = value
+
+        # DEBUG: Log what's being returned
+        logger.debug(f"🔍 GET_USER_MODIFIED: {self.field_id} - returning user_modified = {user_modified}")
 
         return user_modified
 
@@ -909,15 +920,12 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
             logger.info(f"🔍 NESTED_CHANGE: {self.field_id} skipping updates (flag check)")
             return
 
-        # CRITICAL: Use refresh_with_live_context to collect current form values AND sibling values
+        # CRITICAL: Use refresh_with_live_context to query _active_form_managers for sibling values
         # This enables sibling inheritance (e.g., path_planning_config inheriting from well_filter_config)
         # refresh_with_live_context will:
-        # 1. Collect live context from other windows (for root managers)
-        # 2. Add current form's values to live context
-        # 3. Add sibling nested manager values to live context
-        # 4. Refresh this form's placeholders
-        # 5. Refresh all nested managers' placeholders
-        self._placeholder_refresh_service.refresh_with_live_context(self)
+        # 1. Refresh this form's placeholders (builders query _active_form_managers internally)
+        # 2. Refresh all nested managers' placeholders
+        self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=False)
 
         # CRITICAL: Also refresh enabled styling for all nested managers
         # This ensures that when one config's enabled field changes, siblings that inherit from it update their styling
@@ -1043,7 +1051,7 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
                 service = PlaceholderRefreshService()
                 for manager in self._active_form_managers:
                     # Refresh immediately (not deferred) since we're in a controlled close event
-                    service.refresh_with_live_context(manager)
+                    service.refresh_with_live_context(manager, use_user_modified_only=False)
         except (ValueError, AttributeError):
             pass  # Already removed or list doesn't exist
 
@@ -1134,10 +1142,10 @@ class ParameterFormManager(QWidget, ParameterFormManagerABC, metaclass=_Combined
         # Schedule new refresh after 200ms delay (debounce)
         # REFACTORING: Inlined _do_cross_window_refresh (single-use method)
         def do_refresh():
-            # CRITICAL: Use refresh_with_live_context to collect current form + sibling values
+            # CRITICAL: Use refresh_with_live_context to query _active_form_managers for sibling values
             # This ensures cross-window updates see the latest values from all forms
             # REFACTORING: Inline delegate calls
-            self._placeholder_refresh_service.refresh_with_live_context(self)
+            self._placeholder_refresh_service.refresh_with_live_context(self, use_user_modified_only=False)
             self._apply_to_nested_managers(lambda name, manager: manager._enabled_field_styling_service.refresh_enabled_styling(manager))
             self.context_refreshed.emit(self.object_instance, self.context_obj)
 

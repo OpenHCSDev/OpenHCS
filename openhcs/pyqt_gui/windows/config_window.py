@@ -52,7 +52,8 @@ class ConfigWindow(BaseFormDialog):
     def __init__(self, config_class: Type, current_config: Any,
                  on_save_callback: Optional[Callable] = None,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None,
-                 scope_id: Optional[str] = None):
+                 scope_id: Optional[str] = None,
+                 orchestrator=None):
         """
         Initialize the configuration window.
 
@@ -63,6 +64,7 @@ class ConfigWindow(BaseFormDialog):
             color_scheme: Color scheme for styling (optional, uses default if None)
             parent: Parent widget
             scope_id: Optional scope identifier (e.g., plate_path) to limit cross-window updates to same orchestrator
+            orchestrator: Optional orchestrator reference for live updates (PipelineConfig only)
         """
         super().__init__(parent)
 
@@ -71,9 +73,16 @@ class ConfigWindow(BaseFormDialog):
         self.current_config = current_config
         self.on_save_callback = on_save_callback
         self.scope_id = scope_id  # Store scope_id for passing to form_manager
+        self.orchestrator = orchestrator  # Store orchestrator for live updates
 
         # Flag to prevent refresh during save operation
         self._saving = False
+
+        # LIVE UPDATES ARCHITECTURE: Store original config for Cancel restoration
+        # When user clicks Cancel, we restore this original state
+        import copy
+        self._original_config = copy.deepcopy(current_config)
+        logger.debug(f"🔍 LIVE_UPDATES: Stored original config for Cancel restoration")
 
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
@@ -113,6 +122,12 @@ class ConfigWindow(BaseFormDialog):
 
         # Setup UI
         self.setup_ui()
+
+        # LIVE UPDATES ARCHITECTURE: Connect to parameter_changed signal
+        # Every change updates the live context (as if saving on each keystroke)
+        # This makes changes visible to other windows immediately
+        self.form_manager.parameter_changed.connect(self._on_parameter_changed_live_update)
+        logger.debug(f"🔍 LIVE_UPDATES: Connected parameter_changed signal for live context updates")
 
         logger.debug(f"Config window initialized for {config_class.__name__}")
 
@@ -765,8 +780,97 @@ class ConfigWindow(BaseFormDialog):
                     else:
                         nested_manager.update_parameter(field.name, nested_field_value)
 
+    def _on_parameter_changed_live_update(self, param_name: str, value: Any):
+        """
+        LIVE UPDATES ARCHITECTURE: Update context on every parameter change.
+
+        This makes changes visible to other windows immediately (WYSIWYG).
+        Every keystroke updates the live context as if saving.
+        Cancel button will restore the original state.
+        """
+        logger.debug(f"🔍 LIVE_UPDATES: Parameter changed: {param_name} = {value}")
+
+        # Get current values from form
+        if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
+            current_values = self.form_manager.get_user_modified_values()
+        else:
+            current_values = self.form_manager.get_current_values()
+
+        # Create config instance with current values
+        try:
+            new_config = self.config_class(**current_values)
+        except Exception as e:
+            logger.debug(f"🔍 LIVE_UPDATES: Failed to create config instance: {e}")
+            return
+
+        # Update context based on config type
+        if self.config_class == GlobalPipelineConfig:
+            # For GlobalPipelineConfig: Update thread-local storage
+            from openhcs.config_framework.global_config import set_global_config_for_editing
+            set_global_config_for_editing(GlobalPipelineConfig, new_config)
+            logger.debug(f"🔍 LIVE_UPDATES: Updated thread-local GlobalPipelineConfig")
+
+            # ANTI-DUCK-TYPING: Use explicit isinstance check instead of hasattr
+            # Parent is PlateManagerWidget when editing PipelineConfig
+            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+            parent = self.parent()
+            if isinstance(parent, PlateManagerWidget):
+                parent.global_config_changed.emit()
+                logger.debug(f"🔍 LIVE_UPDATES: Emitted global_config_changed signal")
+        else:
+            # For PipelineConfig: Update orchestrator context
+            if self.orchestrator:
+                self.orchestrator.apply_pipeline_config(new_config)
+                logger.debug(f"🔍 LIVE_UPDATES: Updated orchestrator PipelineConfig for {self.orchestrator.plate_path}")
+
+                # ANTI-DUCK-TYPING: Use explicit isinstance check instead of hasattr
+                from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+                parent = self.parent()
+                if isinstance(parent, PlateManagerWidget):
+                    effective_config = self.orchestrator.get_effective_config()
+                    parent.orchestrator_config_changed.emit(str(self.orchestrator.plate_path), effective_config)
+                    logger.debug(f"🔍 LIVE_UPDATES: Emitted orchestrator_config_changed signal")
+            else:
+                logger.debug(f"🔍 LIVE_UPDATES: PipelineConfig live update - no orchestrator reference")
+
     def reject(self):
-        """Handle dialog rejection (Cancel button)."""
+        """
+        Handle dialog rejection (Cancel button).
+
+        LIVE UPDATES ARCHITECTURE: Restore original config state.
+        This undoes all live updates that were applied during editing.
+        """
+        logger.debug(f"🔍 LIVE_UPDATES: Cancel clicked - restoring original config")
+
+        # Restore original config based on config type
+        if self.config_class == GlobalPipelineConfig:
+            # For GlobalPipelineConfig: Restore thread-local storage
+            from openhcs.config_framework.global_config import set_global_config_for_editing
+            set_global_config_for_editing(GlobalPipelineConfig, self._original_config)
+            logger.debug(f"🔍 LIVE_UPDATES: Restored original GlobalPipelineConfig to thread-local")
+
+            # ANTI-DUCK-TYPING: Use explicit isinstance check instead of hasattr
+            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+            parent = self.parent()
+            if isinstance(parent, PlateManagerWidget):
+                parent.global_config_changed.emit()
+                logger.debug(f"🔍 LIVE_UPDATES: Emitted global_config_changed signal with original config")
+        else:
+            # For PipelineConfig: Restore orchestrator context
+            if self.orchestrator:
+                self.orchestrator.apply_pipeline_config(self._original_config)
+                logger.debug(f"🔍 LIVE_UPDATES: Restored original PipelineConfig to orchestrator {self.orchestrator.plate_path}")
+
+                # ANTI-DUCK-TYPING: Use explicit isinstance check instead of hasattr
+                from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
+                parent = self.parent()
+                if isinstance(parent, PlateManagerWidget):
+                    effective_config = self.orchestrator.get_effective_config()
+                    parent.orchestrator_config_changed.emit(str(self.orchestrator.plate_path), effective_config)
+                    logger.debug(f"🔍 LIVE_UPDATES: Emitted orchestrator_config_changed signal with original config")
+            else:
+                logger.debug(f"🔍 LIVE_UPDATES: PipelineConfig cancel - no orchestrator reference")
+
         self.config_cancelled.emit()
         super().reject()  # BaseFormDialog handles unregistration
 

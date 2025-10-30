@@ -25,6 +25,130 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# HELPER FUNCTIONS - Query _active_form_managers directly
+# ============================================================================
+
+def _find_manager_for_type(manager: 'ParameterFormManager', target_type: type) -> Optional['ParameterFormManager']:
+    """
+    Find active manager for a given type by querying _active_form_managers registry.
+
+    This replaces the live_context dict lookup pattern. Instead of:
+        live_values = live_context.get(target_type)
+
+    We now do:
+        target_manager = _find_manager_for_type(manager, target_type)
+        live_values = target_manager.get_values() if target_manager else None
+
+    Args:
+        manager: Current ParameterFormManager instance (for scope filtering)
+        target_type: Type to find (e.g., PipelineConfig, GlobalPipelineConfig)
+
+    Returns:
+        ParameterFormManager instance for target_type, or None if not found
+    """
+    from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+    from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+    for other_manager in manager._active_form_managers:
+        # Skip self
+        if other_manager is manager:
+            continue
+
+        # Scope filtering: only collect from same scope OR global scope (None)
+        if other_manager.scope_id is not None and manager.scope_id is not None:
+            if other_manager.scope_id != manager.scope_id:
+                continue
+
+        # Type matching: exact, base, or lazy
+        obj_type = type(other_manager.object_instance)
+
+        # Exact match
+        if obj_type == target_type:
+            logger.debug(f"Found manager for {target_type.__name__} (exact match): {other_manager.field_id}")
+            return other_manager
+
+        # Base type match
+        base_type = get_base_type_for_lazy(obj_type)
+        if base_type == target_type:
+            logger.debug(f"Found manager for {target_type.__name__} (base match): {other_manager.field_id}")
+            return other_manager
+
+        # Lazy type match
+        lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
+        if lazy_type == target_type:
+            logger.debug(f"Found manager for {target_type.__name__} (lazy match): {other_manager.field_id}")
+            return other_manager
+
+    logger.debug(f"No manager found for {target_type.__name__}")
+    return None
+
+
+def _get_manager_values(manager: 'ParameterFormManager', use_user_modified_only: bool) -> dict:
+    """
+    Get values from manager based on mode.
+
+    Args:
+        manager: ParameterFormManager instance
+        use_user_modified_only: If True, get only user-modified values (for reset behavior)
+                                 If False, get all current values (for normal refresh)
+
+    Returns:
+        Dict of field names to values
+    """
+    return manager.get_user_modified_values() if use_user_modified_only else manager.get_current_values()
+
+
+def _reconstruct_nested_dataclasses(live_values: dict, base_instance=None) -> dict:
+    """
+    Reconstruct nested dataclasses from tuple format (type, dict) to instances.
+
+    get_user_modified_values() returns nested dataclasses as (type, dict) tuples
+    to preserve only user-modified fields. This function reconstructs them as instances
+    by merging the user-modified fields into the base instance's nested dataclasses.
+
+    Moved from PlaceholderRefreshService to be a shared helper.
+
+    Args:
+        live_values: Dict with values, may contain (type, dict) tuples for nested dataclasses
+        base_instance: Base dataclass instance to merge into (for nested dataclass fields)
+
+    Returns:
+        Dict with nested dataclasses reconstructed as instances
+    """
+    from dataclasses import is_dataclass
+
+    reconstructed = {}
+    for field_name, value in live_values.items():
+        if isinstance(value, tuple) and len(value) == 2:
+            # Nested dataclass in tuple format: (type, dict)
+            dataclass_type, field_dict = value
+
+            # If we have a base instance, merge into its nested dataclass
+            # ANTI-DUCK-TYPING: Use dataclass introspection instead of hasattr
+            if base_instance and is_dataclass(base_instance):
+                import dataclasses
+                field_names = {f.name for f in dataclasses.fields(base_instance)}
+                if field_name in field_names:
+                    base_nested = getattr(base_instance, field_name)
+                    if base_nested is not None and is_dataclass(base_nested):
+                        # Merge user-modified fields into base nested dataclass
+                        reconstructed[field_name] = dataclasses.replace(base_nested, **field_dict)
+                    else:
+                        # No base nested dataclass, create fresh instance
+                        reconstructed[field_name] = dataclass_type(**field_dict)
+                else:
+                    # Field not in base instance, create fresh instance
+                    reconstructed[field_name] = dataclass_type(**field_dict)
+            else:
+                # No base instance, create fresh instance
+                reconstructed[field_name] = dataclass_type(**field_dict)
+        else:
+            # Regular value, pass through
+            reconstructed[field_name] = value
+    return reconstructed
+
+
+# ============================================================================
 # CONTEXT LAYER TYPE ENUM - Defines execution order
 # ============================================================================
 
@@ -172,30 +296,31 @@ class GlobalStaticDefaultsBuilder(ContextLayerBuilder):
 class GlobalLiveValuesBuilder(ContextLayerBuilder):
     """
     Builder for GLOBAL_LIVE_VALUES layer.
-    
+
     Applies live GlobalPipelineConfig values from other open windows.
     Merges live values into thread-local GlobalPipelineConfig.
+    Queries _active_form_managers directly instead of using live_context dict.
     """
     _layer_type = ContextLayerType.GLOBAL_LIVE_VALUES
-    
-    def can_build(self, manager: 'ParameterFormManager', live_context=None, **kwargs) -> bool:
+
+    def can_build(self, manager: 'ParameterFormManager', **kwargs) -> bool:
         # Don't apply if we're editing root GlobalPipelineConfig (static defaults already applied)
         is_root_global_config = (manager.config.is_global_config_editing and
                                  manager.global_config_type is not None and
                                  manager.context_obj is None)
-        
-        return (not is_root_global_config and
-                live_context is not None and
-                manager.global_config_type is not None)
-    
-    def build(self, manager: 'ParameterFormManager', live_context=None, **kwargs) -> Optional[ContextLayer]:
-        from openhcs.pyqt_gui.widgets.shared.services.placeholder_refresh_service import PlaceholderRefreshService
 
-        service = PlaceholderRefreshService()
-        global_live_values = service.find_live_values_for_type(
-            manager.global_config_type, live_context
-        )
-        if global_live_values is None:
+        return not is_root_global_config and manager.global_config_type is not None
+
+    def build(self, manager: 'ParameterFormManager', use_user_modified_only=False, **kwargs) -> Optional[ContextLayer]:
+        # Query _active_form_managers directly for GlobalPipelineConfig manager
+        global_manager = _find_manager_for_type(manager, manager.global_config_type)
+        if global_manager is None:
+            logger.debug(f"No GlobalPipelineConfig manager found in _active_form_managers")
+            return None
+
+        # Get values from the manager
+        global_live_values = _get_manager_values(global_manager, use_user_modified_only)
+        if not global_live_values:
             return None
 
         try:
@@ -203,12 +328,13 @@ class GlobalLiveValuesBuilder(ContextLayerBuilder):
             thread_local_global = get_base_global_config()
             if thread_local_global is not None:
                 # Reconstruct nested dataclasses from tuple format
-                global_live_values = service.reconstruct_nested_dataclasses(
+                global_live_values = _reconstruct_nested_dataclasses(
                     global_live_values, thread_local_global
                 )
                 global_live_instance = dataclasses.replace(
                     thread_local_global, **global_live_values
                 )
+                logger.debug(f"Built GLOBAL_LIVE_VALUES layer with {len(global_live_values)} fields")
                 return ContextLayer(
                     layer_type=self._layer_type,
                     instance=global_live_instance
@@ -222,43 +348,49 @@ class GlobalLiveValuesBuilder(ContextLayerBuilder):
 class ParentContextBuilder(ContextLayerBuilder):
     """
     Builder for PARENT_CONTEXT layer(s).
-    
+
     Applies parent context(s) with live values merged in.
     Returns list of layers (one per parent context).
+    Queries _active_form_managers directly instead of using live_context dict.
     """
     _layer_type = ContextLayerType.PARENT_CONTEXT
-    
+
     def can_build(self, manager: 'ParameterFormManager', **kwargs) -> bool:
         return manager.context_obj is not None
-    
-    def build(self, manager: 'ParameterFormManager', live_context=None, **kwargs) -> List[ContextLayer]:
+
+    def build(self, manager: 'ParameterFormManager', use_user_modified_only=False, **kwargs) -> List[ContextLayer]:
         """Returns list of layers (one per parent context)."""
         contexts = manager.context_obj if isinstance(manager.context_obj, list) else [manager.context_obj]
         layers = []
-        
+
         for ctx in contexts:
-            layer = self._build_single_context(manager, ctx, live_context)
+            layer = self._build_single_context(manager, ctx, use_user_modified_only)
             if layer:
                 layers.append(layer)
-        
+
         return layers
-    
-    def _build_single_context(self, manager: 'ParameterFormManager', ctx: Any, live_context: dict) -> Optional[ContextLayer]:
+
+    def _build_single_context(self, manager: 'ParameterFormManager', ctx: Any, use_user_modified_only: bool) -> Optional[ContextLayer]:
         """Build layer for a single parent context."""
-        from openhcs.pyqt_gui.widgets.shared.services.placeholder_refresh_service import PlaceholderRefreshService
-
-        service = PlaceholderRefreshService()
         ctx_type = type(ctx)
-        live_values = service.find_live_values_for_type(ctx_type, live_context)
 
-        if live_values is not None:
+        # Query _active_form_managers directly for parent context manager
+        parent_manager = _find_manager_for_type(manager, ctx_type)
+
+        if parent_manager is not None:
             try:
-                live_values = service.reconstruct_nested_dataclasses(live_values, ctx)
-                live_instance = dataclasses.replace(ctx, **live_values)
-                return ContextLayer(layer_type=self._layer_type, instance=live_instance)
+                # Get live values from the parent manager
+                live_values = _get_manager_values(parent_manager, use_user_modified_only)
+                if live_values:
+                    live_values = _reconstruct_nested_dataclasses(live_values, ctx)
+                    live_instance = dataclasses.replace(ctx, **live_values)
+                    logger.debug(f"Built PARENT_CONTEXT layer for {ctx_type.__name__} with {len(live_values)} live fields")
+                    return ContextLayer(layer_type=self._layer_type, instance=live_instance)
             except Exception as e:
-                logger.warning(f"Failed to apply live parent context: {e}")
+                logger.warning(f"Failed to apply live parent context for {ctx_type.__name__}: {e}")
 
+        # No live manager or failed to merge, use static context
+        logger.debug(f"Built PARENT_CONTEXT layer for {ctx_type.__name__} (static, no live values)")
         return ContextLayer(layer_type=self._layer_type, instance=ctx)
 
 
@@ -267,52 +399,48 @@ class SiblingContextsBuilder(ContextLayerBuilder):
     Builder for SIBLING_CONTEXTS layer(s).
 
     Applies sibling nested manager values for sibling inheritance.
-    Converts sibling dicts from live_context to instances and applies them to the context stack.
+    Queries parent's nested_managers directly instead of using live_context dict.
     Only applies for nested managers (not root managers).
     """
     _layer_type = ContextLayerType.SIBLING_CONTEXTS
 
-    def can_build(self, manager: 'ParameterFormManager', live_context=None, **kwargs) -> bool:
-        # Only apply for nested managers with live_context
-        result = manager._parent_manager is not None and live_context is not None
-        logger.info(f"🔍 SIBLING_CAN_BUILD: {manager.field_id} - parent={manager._parent_manager is not None}, live_context={live_context is not None}, result={result}")
+    def can_build(self, manager: 'ParameterFormManager', **kwargs) -> bool:
+        # Only apply for nested managers
+        result = manager._parent_manager is not None
+        logger.info(f"🔍 SIBLING_CAN_BUILD: {manager.field_id} - parent={manager._parent_manager is not None}, result={result}")
         return result
 
-    def build(self, manager: 'ParameterFormManager', live_context=None, **kwargs) -> List[ContextLayer]:
+    def build(self, manager: 'ParameterFormManager', use_user_modified_only=False, **kwargs) -> List[ContextLayer]:
         """Returns list of layers (one per sibling context)."""
         layers = []
-        logger.info(f"🔍 SIBLING_BUILD: Building for {manager.field_id}, live_context has {len(live_context)} types")
 
-        # Iterate through all types in live_context
-        for ctx_type, ctx_values in live_context.items():
-            logger.info(f"🔍 SIBLING_BUILD: Checking {ctx_type.__name__}")
+        # Query parent's nested_managers directly (no live_context dict needed!)
+        if manager._parent_manager is None:
+            return layers
 
-            # Skip if this is the current manager's type (don't apply self as sibling)
-            if ctx_type == type(manager.object_instance):
-                logger.info(f"🔍 SIBLING_BUILD: Skipping {ctx_type.__name__} (current manager's type)")
+        logger.info(f"🔍 SIBLING_BUILD: Building for {manager.field_id}, parent has {len(manager._parent_manager.nested_managers)} nested managers")
+
+        # Iterate through sibling managers
+        for sibling_name, sibling_manager in manager._parent_manager.nested_managers.items():
+            # Skip self
+            if sibling_manager is manager:
+                logger.info(f"🔍 SIBLING_BUILD: Skipping {sibling_name} (self)")
                 continue
 
-            # Skip if this is the parent's type (handled by ParentContextBuilder)
-            if manager._parent_manager and ctx_type == type(manager._parent_manager.object_instance):
-                logger.info(f"🔍 SIBLING_BUILD: Skipping {ctx_type.__name__} (parent's type)")
+            # Get values from sibling manager
+            sibling_values = _get_manager_values(sibling_manager, use_user_modified_only)
+            if not sibling_values:
+                logger.info(f"🔍 SIBLING_BUILD: Skipping {sibling_name} (no values)")
                 continue
 
-            # Skip if this is GlobalPipelineConfig (handled by GlobalLiveValuesBuilder)
-            if manager.global_config_type and ctx_type == manager.global_config_type:
-                logger.info(f"🔍 SIBLING_BUILD: Skipping {ctx_type.__name__} (GlobalPipelineConfig)")
-                continue
-
-            # Convert dict to instance
+            # Create instance from sibling values
             try:
-                if isinstance(ctx_values, dict):
-                    # Create instance from dict
-                    sibling_instance = ctx_type(**ctx_values)
-                    layers.append(ContextLayer(layer_type=self._layer_type, instance=sibling_instance))
-                    logger.info(f"🔍 SIBLING_CONTEXT: Added {ctx_type.__name__} to context stack for {manager.field_id}")
-                else:
-                    logger.info(f"🔍 SIBLING_BUILD: Skipping {ctx_type.__name__} (not a dict, is {type(ctx_values).__name__})")
+                sibling_type = type(sibling_manager.object_instance)
+                sibling_instance = sibling_type(**sibling_values)
+                layers.append(ContextLayer(layer_type=self._layer_type, instance=sibling_instance))
+                logger.info(f"🔍 SIBLING_CONTEXT: Added {sibling_type.__name__} ({sibling_name}) to context stack for {manager.field_id}")
             except Exception as e:
-                logger.warning(f"Failed to create sibling context for {ctx_type.__name__}: {e}")
+                logger.warning(f"Failed to create sibling context for {sibling_name}: {e}")
 
         logger.info(f"🔍 SIBLING_BUILD: Created {len(layers)} sibling layers for {manager.field_id}")
         return layers
@@ -362,9 +490,13 @@ class ParentOverlayBuilder(ContextLayerBuilder):
         parent_values_with_excluded = filtered_parent_values.copy()
         parent_exclude_params = getattr(parent_manager.config, 'exclude_params', None)
         if parent_exclude_params:
-            for excluded_param in parent_exclude_params:
-                if excluded_param not in parent_values_with_excluded and hasattr(parent_manager.object_instance, excluded_param):
-                    parent_values_with_excluded[excluded_param] = getattr(parent_manager.object_instance, excluded_param)
+            # ANTI-DUCK-TYPING: Use dataclass introspection instead of hasattr
+            from dataclasses import is_dataclass, fields
+            if is_dataclass(parent_manager.object_instance):
+                field_names = {f.name for f in fields(parent_manager.object_instance)}
+                for excluded_param in parent_exclude_params:
+                    if excluded_param not in parent_values_with_excluded and excluded_param in field_names:
+                        parent_values_with_excluded[excluded_param] = getattr(parent_manager.object_instance, excluded_param)
         
         # Create parent overlay instance
         parent_overlay_instance = parent_type(**parent_values_with_excluded)
@@ -430,9 +562,13 @@ class CurrentOverlayBuilder(ContextLayerBuilder):
         # Add excluded params from object_instance
         overlay_with_excluded = overlay.copy()
         exclude_params = getattr(manager.config, 'exclude_params', None) or []
-        for excluded_param in exclude_params:
-            if excluded_param not in overlay_with_excluded and hasattr(manager.object_instance, excluded_param):
-                overlay_with_excluded[excluded_param] = getattr(manager.object_instance, excluded_param)
+        # ANTI-DUCK-TYPING: Use dataclass introspection instead of hasattr
+        from dataclasses import is_dataclass, fields
+        if is_dataclass(manager.object_instance):
+            field_names = {f.name for f in fields(manager.object_instance)}
+            for excluded_param in exclude_params:
+                if excluded_param not in overlay_with_excluded and excluded_param in field_names:
+                    overlay_with_excluded[excluded_param] = getattr(manager.object_instance, excluded_param)
 
         # Try to instantiate dataclass
         try:
@@ -448,17 +584,19 @@ class CurrentOverlayBuilder(ContextLayerBuilder):
 # UNIFIED CONTEXT BUILDING FUNCTION
 # ============================================================================
 
-def build_context_stack(manager: 'ParameterFormManager', overlay, skip_parent_overlay: bool = False, live_context: dict = None) -> ExitStack:
+def build_context_stack(manager: 'ParameterFormManager', overlay, skip_parent_overlay: bool = False, use_user_modified_only: bool = False) -> ExitStack:
     """
     UNIFIED: Build context stack using builder pattern.
 
     Replaces 200+ line _build_context_stack method with composable builders.
+    Builders query _active_form_managers directly instead of using live_context dict.
 
     Args:
         manager: ParameterFormManager instance
         overlay: Current form values (dict or dataclass instance)
         skip_parent_overlay: If True, skip parent's user-modified values
-        live_context: Optional dict mapping object instances to live values
+        use_user_modified_only: If True, builders query only user-modified values from managers (for reset behavior)
+                                 If False, builders query all current values (for normal refresh behavior)
 
     Returns:
         ExitStack with nested contexts in correct order
@@ -471,10 +609,10 @@ def build_context_stack(manager: 'ParameterFormManager', overlay, skip_parent_ov
         if not builder:
             continue
 
-        if not builder.can_build(manager, live_context=live_context, skip_parent_overlay=skip_parent_overlay, overlay=overlay):
+        if not builder.can_build(manager, skip_parent_overlay=skip_parent_overlay, overlay=overlay):
             continue
 
-        layers = builder.build(manager, live_context=live_context, skip_parent_overlay=skip_parent_overlay, overlay=overlay)
+        layers = builder.build(manager, use_user_modified_only=use_user_modified_only, skip_parent_overlay=skip_parent_overlay, overlay=overlay)
 
         # Handle single layer or list of layers
         if isinstance(layers, list):
