@@ -303,9 +303,6 @@ class ProcessingConfig:
     input_source: InputSource = InputSource.PREVIOUS_STEP
     """Input source strategy: PREVIOUS_STEP (normal chaining) or PIPELINE_START (access original input)."""
 
-    sequential_enabled: bool = False
-    """Whether to enable sequential processing to reduce memory usage."""
-
     sequential_components: List[SequentialComponents] = field(default_factory=list)
     """Components to process sequentially (e.g., [SequentialComponents.TIMEPOINT, SequentialComponents.CHANNEL])."""
 

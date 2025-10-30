@@ -123,6 +123,42 @@ EXECUTION_MODE_CONFIGS = ["threading", "multiprocessing"]
 # - zmq-tcp: ZMQ with TCP transport (opt-in, triggers firewall prompts)
 ZMQ_EXECUTION_MODE_CONFIGS = ["direct", "zmq", "zmq-tcp"]
 
+# Sequential processing configurations for parametrized testing
+SEQUENTIAL_CONFIGS = {
+    "none": {
+        "name": "none",
+        "description": "No sequential processing",
+        "sequential_components": [],
+        "should_fail": False
+    },
+    "valid_1_component": {
+        "name": "valid_1_component",
+        "description": "Sequential with 1 component (TIMEPOINT)",
+        "sequential_components": ["TIMEPOINT"],
+        "should_fail": False
+    },
+    "valid_2_components": {
+        "name": "valid_2_components",
+        "description": "Sequential with 2 components (TIMEPOINT, SITE)",
+        "sequential_components": ["TIMEPOINT", "SITE"],
+        "should_fail": False
+    },
+    "invalid_overlap": {
+        "name": "invalid_overlap",
+        "description": "Invalid: CHANNEL in both variable and sequential",
+        "sequential_components": ["CHANNEL"],
+        "should_fail": True,
+        "expected_error": "cannot be in both sequential_components and variable_components"
+    },
+    "invalid_duplicates": {
+        "name": "invalid_duplicates",
+        "description": "Invalid: Duplicate TIMEPOINT in sequential",
+        "sequential_components": ["TIMEPOINT", "TIMEPOINT"],
+        "should_fail": True,
+        "expected_error": "sequential_components contains duplicates"
+    }
+}
+
 @pytest.fixture(scope="module")
 def microscope_config(request):
     """Provide microscope configuration - parametrized by pytest_generate_tests."""
@@ -192,6 +228,12 @@ def zmq_execution_mode(request):
         os.environ['OPENHCS_USE_ZMQ_EXECUTION'] = original_value
     else:
         os.environ.pop('OPENHCS_USE_ZMQ_EXECUTION', None)
+
+@pytest.fixture(scope="module")
+def sequential_config(request):
+    """Provide sequential processing configuration - parametrized by pytest_generate_tests."""
+    # The actual parameter value is passed by pytest via pytest_generate_tests hook
+    return request.param
 
 @pytest.fixture(scope="module")
 def base_test_dir(microscope_config):

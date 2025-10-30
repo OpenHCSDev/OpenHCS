@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Union
 
-from openhcs.constants.constants import VariableComponents
+from openhcs.constants.constants import VariableComponents, SequentialComponents
 from openhcs.constants.input_source import InputSource
 from openhcs.core.config import (
     GlobalPipelineConfig, MaterializationBackend,
@@ -180,8 +180,17 @@ def test_function_dir(base_test_dir, microscope_config, request):
     test_dir.mkdir(parents=True, exist_ok=True)
     yield test_dir
 
-def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False) -> Pipeline:
-    """Create test pipeline with materialization configuration."""
+def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False, sequential_config: dict = None) -> Pipeline:
+    """Create test pipeline with materialization configuration.
+
+    Args:
+        enable_napari: Enable Napari streaming
+        enable_fiji: Enable Fiji streaming
+        sequential_config: Sequential processing configuration dict with keys:
+            - sequential_components: List of component names to process sequentially
+            - should_fail: Whether this config should fail validation
+            - expected_error: Expected error message substring (if should_fail=True)
+    """
     cpu_only_mode = os.getenv('OPENHCS_CPU_ONLY', 'false').lower() == 'true'
     if cpu_only_mode:
         position_func = ashlar_compute_tile_positions_cpu
@@ -193,6 +202,12 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False)
             # Fallback cleanly to CPU if GPU path is unavailable
             os.environ['OPENHCS_CPU_ONLY'] = 'true'
             position_func = ashlar_compute_tile_positions_cpu
+
+    # Convert sequential component names to SequentialComponents enum
+    sequential_components = []
+    if sequential_config and sequential_config.get("sequential_components"):
+        for comp_name in sequential_config["sequential_components"]:
+            sequential_components.append(SequentialComponents[comp_name])
 
     return Pipeline(
         steps=[
@@ -206,7 +221,10 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False)
             ),
             Step(
                 func=create_composite,
-                processing_config=LazyProcessingConfig(variable_components=[VariableComponents.CHANNEL]),
+                processing_config=LazyProcessingConfig(
+                    variable_components=[VariableComponents.CHANNEL],
+                    sequential_components=sequential_components
+                ) if sequential_components else LazyProcessingConfig(variable_components=[VariableComponents.CHANNEL]),
                 napari_streaming_config=LazyNapariStreamingConfig(port=5557) if enable_napari else None,
                 fiji_streaming_config=LazyFijiStreamingConfig(port=5556) if enable_fiji else None
             ),
@@ -601,8 +619,8 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
         return _execute_pipeline_phases(orchestrator, pipeline)
 
 
-def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict, enable_napari: bool, enable_fiji: bool):
-    """Unified test for all combinations of microscope types, backends, data types, and execution modes."""
+def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_config: Dict, execution_mode: str, zmq_execution_mode: str, microscope_config: Dict, enable_napari: bool, enable_fiji: bool, sequential_config: Dict):
+    """Unified test for all combinations of microscope types, backends, data types, execution modes, and sequential processing."""
     # Handle both Path and int (OMERO plate_id)
     if isinstance(plate_dir, int):
         test_config = TestConfig(plate_dir, backend_config, execution_mode, microscope_config)
@@ -619,10 +637,28 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
         omero_manager.close()
         print("✅ OMERO server is ready")
 
-    print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, microscope: {microscope_config['format']}, mode: {execution_mode}, zmq: {zmq_execution_mode}")
+    print(f"{CONSTANTS.START_INDICATOR} with plate: {plate_dir}, backend: {backend_config}, microscope: {microscope_config['format']}, mode: {execution_mode}, zmq: {zmq_execution_mode}, sequential: {sequential_config['name']}")
 
-    pipeline = create_test_pipeline(enable_napari=enable_napari, enable_fiji=enable_fiji)
+    # Create pipeline with sequential configuration
+    pipeline = create_test_pipeline(enable_napari=enable_napari, enable_fiji=enable_fiji, sequential_config=sequential_config)
 
+    # If this configuration should fail validation, expect ValueError during compilation
+    if sequential_config.get("should_fail", False):
+        with pytest.raises(ValueError) as exc_info:
+            # Export pipeline to Python file (skip for OMERO - no filesystem)
+            if not test_config.is_omero:
+                _export_pipeline_to_file(pipeline, test_config.plate_dir)
+
+            # Execute using the specified mode (direct or zmq) - should fail during compilation
+            _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode)
+
+        # Verify the error message contains the expected substring
+        expected_error = sequential_config.get("expected_error", "")
+        assert expected_error in str(exc_info.value), f"Expected error message to contain '{expected_error}', but got: {exc_info.value}"
+        print(f"✅ Validation correctly rejected invalid configuration: {exc_info.value}")
+        return  # Test passed - invalid config was rejected as expected
+
+    # Valid configuration - should succeed
     # Export pipeline to Python file (skip for OMERO - no filesystem)
     if not test_config.is_omero:
         _export_pipeline_to_file(pipeline, test_config.plate_dir)

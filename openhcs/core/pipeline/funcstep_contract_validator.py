@@ -212,16 +212,12 @@ class FuncStepContractValidator:
                 variable_components=step.processing_config.variable_components,
                 group_by=None,
                 input_source=step.processing_config.input_source,
-                sequential_enabled=step.processing_config.sequential_enabled,
                 sequential_components=step.processing_config.sequential_components
             )
 
         # Validate sequential processing configuration
         proc_config = step.processing_config
-        if proc_config and proc_config.sequential_enabled:
-            if not proc_config.sequential_components:
-                raise ValueError(f"Step '{step_name}': sequential_components cannot be empty when sequential processing is enabled")
-
+        if proc_config and proc_config.sequential_components:
             seq_comp_values = {sc.value for sc in proc_config.sequential_components}
             var_comp_values = {vc.value for vc in proc_config.variable_components}
 

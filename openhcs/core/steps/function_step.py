@@ -956,7 +956,7 @@ class FunctionStep(AbstractStep):
 
             # Check if sequential processing is enabled
             seq_config = step_plan.get("sequential_processing")
-            if seq_config and seq_config.sequential_enabled:
+            if seq_config and seq_config.sequential_components:
                 # Sequential processing: subdivide and iterate over combinations
                 seq_comps = [sc.value for sc in seq_config.sequential_components]
                 var_comps = [vc.value for vc in variable_components] if variable_components else []
