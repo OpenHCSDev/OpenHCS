@@ -857,6 +857,18 @@ class FunctionStep(AbstractStep):
                 **filter_kwargs               # Dynamic filter parameter
             )
 
+            # Debug: Log discovered patterns
+            logger.info(f"🔍 PATTERN DISCOVERY: Step {step_index} ({step_name}) discovered patterns for well {axis_id}")
+            logger.info(f"🔍 PATTERN DISCOVERY: step_input_dir={step_input_dir}, read_backend={read_backend}")
+            if axis_id in patterns_by_well:
+                if isinstance(patterns_by_well[axis_id], dict):
+                    for comp_val, pattern_list in patterns_by_well[axis_id].items():
+                        logger.info(f"🔍 PATTERN DISCOVERY: Component '{comp_val}' has {len(pattern_list)} patterns: {pattern_list}")
+                else:
+                    logger.info(f"🔍 PATTERN DISCOVERY: Found {len(patterns_by_well[axis_id])} ungrouped patterns: {patterns_by_well[axis_id]}")
+            else:
+                logger.warning(f"🔍 PATTERN DISCOVERY: No patterns found for well {axis_id}!")
+
 
             # Only access gpu_id if the step requires GPU (has GPU memory types)
             from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES
@@ -999,18 +1011,27 @@ class FunctionStep(AbstractStep):
                             )
 
                         # Clear memory after this combination
-                        # Clear preloaded input files from memory to free up space
+                        # Only clear files that were loaded for this specific combination
                         if read_backend != Backend.MEMORY.value:
                             try:
-                                memory_files = filemanager.list_files(str(step_input_dir), backend=Backend.MEMORY.value, recursive=True)
-                                for file_path in memory_files:
+                                # Get the specific files that were loaded for this combination
+                                combo_files = [f for p in combo_patterns
+                                             for f in microscope_handler.path_list_from_pattern(
+                                                 str(step_input_dir), p, filemanager, read_backend, var_comps)]
+                                combo_file_set = set(combo_files)
+
+                                # Delete only the files from this combination
+                                deleted_count = 0
+                                for file_path in combo_file_set:
                                     try:
-                                        filemanager.delete(file_path, Backend.MEMORY.value)
+                                        if filemanager.exists(file_path, Backend.MEMORY.value):
+                                            filemanager.delete(file_path, Backend.MEMORY.value)
+                                            deleted_count += 1
                                     except Exception as e:
                                         logger.warning(f"Failed to delete memory file {file_path}: {e}")
-                                logger.info(f"🔄 SEQUENTIAL: Cleared {len(memory_files)} preloaded files from memory")
+                                logger.info(f"🔄 SEQUENTIAL: Cleared {deleted_count} preloaded files from memory for combination {combo_key}")
                             except Exception as e:
-                                logger.warning(f"Failed to clear memory files from {step_input_dir}: {e}")
+                                logger.warning(f"Failed to clear memory files for combination {combo_key}: {e}")
             else:
                 # Normal processing (existing code)
                 for comp_val, current_pattern_list in grouped_patterns.items():
