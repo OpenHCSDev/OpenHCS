@@ -38,6 +38,8 @@ class FijiViewerServer(ZMQServer):
     Displays images via PyImageJ.
     """
 
+    _server_type = 'fiji'  # Registration key for AutoRegisterMeta
+
     # Debouncing configuration
     DEBOUNCE_DELAY_MS = 500  # Collect items for 500ms before processing
     MAX_DEBOUNCE_WAIT_MS = 2000  # Maximum wait time before forcing batch processing

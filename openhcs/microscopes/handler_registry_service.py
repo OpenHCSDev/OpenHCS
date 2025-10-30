@@ -22,6 +22,9 @@ def discover_all_handlers() -> None:
 
     Uses generic discovery to find and import all MicroscopeHandler subclasses,
     which triggers their metaclass registration into MICROSCOPE_HANDLERS.
+
+    The metaclass handles everything - modules without MicroscopeHandler subclasses
+    or without _microscope_type simply don't register. No excludes needed.
     """
     global _discovery_completed
     if _discovery_completed:
@@ -29,13 +32,13 @@ def discover_all_handlers() -> None:
 
     import openhcs.microscopes
 
-    # Use generic discovery to find all handlers
-    # This imports the modules, triggering metaclass registration
+    # Use generic discovery to import all modules
+    # The metaclass decides what registers based on skip_if_no_key
     _ = discover_registry_classes_recursive(
         package_path=openhcs.microscopes.__path__,
         package_prefix="openhcs.microscopes.",
-        base_class=MicroscopeHandler,
-        exclude_modules={'handler_registry_service', 'microscope_base', 'microscope_interfaces'}
+        base_class=MicroscopeHandler
+        # No exclude_modules - let the metaclass handle it!
     )
 
     _discovery_completed = True

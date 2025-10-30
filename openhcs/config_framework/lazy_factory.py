@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 
 # OpenHCS imports
 from openhcs.config_framework.placeholder import LazyDefaultPlaceholderService
+from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
 # Note: dual_axis_resolver_recursive and lazy_placeholder imports kept inline to avoid circular imports
 
 
@@ -462,19 +463,24 @@ def ensure_global_config_context(global_config_type: Type, global_config_instanc
 CONTEXT_PROVIDERS = {}
 
 
-class ContextProviderMeta(ABCMeta):
+# Configuration for context provider registration
+_CONTEXT_PROVIDER_REGISTRY_CONFIG = RegistryConfig(
+    registry_dict=CONTEXT_PROVIDERS,
+    key_attribute='_context_type',
+    key_extractor=None,  # Requires explicit _context_type
+    skip_if_no_key=True,  # Skip if no _context_type set
+    secondary_registries=None,
+    log_registration=True,
+    registry_name='context provider'
+)
+
+
+class ContextProviderMeta(AutoRegisterMeta):
     """Metaclass for automatic registration of context provider classes."""
 
-    def __new__(cls, name, bases, attrs):
-        new_class = super().__new__(cls, name, bases, attrs)
-
-        # Only register concrete classes that have a context_type attribute
-        context_type = getattr(new_class, '_context_type', None)
-        if context_type and not getattr(new_class, '__abstractmethods__', None):
-            CONTEXT_PROVIDERS[context_type] = new_class
-            logger.debug(f"Auto-registered context provider: {context_type} -> {name}")
-
-        return new_class
+    def __new__(mcs, name, bases, attrs):
+        return super().__new__(mcs, name, bases, attrs,
+                              registry_config=_CONTEXT_PROVIDER_REGISTRY_CONFIG)
 
 
 class ContextProvider(metaclass=ContextProviderMeta):

@@ -476,6 +476,8 @@ class NapariViewerServer(ZMQServer):
     Uses SUB socket to receive images from pipeline clients.
     """
 
+    _server_type = 'napari'  # Registration key for AutoRegisterMeta
+
     def __init__(self, port: int, viewer_title: str, replace_layers: bool = False, log_file_path: str = None, transport_mode: TransportMode = TransportMode.IPC):
         """
         Initialize Napari viewer server.

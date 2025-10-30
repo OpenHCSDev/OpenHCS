@@ -7,9 +7,9 @@ discovered and registered when their classes are defined.
 """
 
 import logging
-from abc import ABCMeta
 from typing import Dict, Type
 from openhcs.io.base import DataSink, StorageBackend
+from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -20,36 +20,29 @@ STORAGE_BACKENDS: Dict[str, Type[DataSink]] = {}
 _backend_instances: Dict[str, DataSink] = {}
 
 
-class StorageBackendMeta(ABCMeta):
+# Configuration for storage backend registration
+_BACKEND_REGISTRY_CONFIG = RegistryConfig(
+    registry_dict=STORAGE_BACKENDS,
+    key_attribute='_backend_type',
+    key_extractor=None,  # Requires explicit _backend_type
+    skip_if_no_key=True,  # Skip if no _backend_type set
+    secondary_registries=None,
+    log_registration=True,
+    registry_name='storage backend'
+)
+
+
+class StorageBackendMeta(AutoRegisterMeta):
     """
     Metaclass for automatic registration of storage backends.
-    
+
     Automatically registers backend classes when they are defined,
     eliminating the need for hardcoded registration in factory functions.
     """
 
-    def __new__(cls, name, bases, attrs):
-        new_class = super().__new__(cls, name, bases, attrs)
-
-        # Only register concrete implementations (not abstract base classes)
-        if not getattr(new_class, '__abstractmethods__', None):
-            # Extract backend type from class attributes or class name
-            backend_type = getattr(new_class, '_backend_type', None)
-            
-            if backend_type is None:
-                # Skip registration if no explicit backend type
-                logger.debug(f"Skipping registration for {name} - no explicit _backend_type attribute")
-                return new_class
-
-            # Auto-register in STORAGE_BACKENDS
-            STORAGE_BACKENDS[backend_type] = new_class
-
-            # Store the backend type as a class attribute
-            new_class._backend_type = backend_type
-
-            logger.debug(f"Auto-registered {name} as '{backend_type}' backend")
-
-        return new_class
+    def __new__(mcs, name, bases, attrs):
+        return super().__new__(mcs, name, bases, attrs,
+                              registry_config=_BACKEND_REGISTRY_CONFIG)
 
 
 def get_backend_instance(backend_type: str) -> DataSink:

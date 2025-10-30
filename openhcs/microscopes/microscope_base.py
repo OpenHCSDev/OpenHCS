@@ -7,12 +7,21 @@ including filename parsing and metadata handling.
 
 import logging
 import os
-from abc import ABC, ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, Type
 
 # Import constants
 from openhcs.constants.constants import Backend
+# Import generic metaclass infrastructure
+from openhcs.core.auto_register_meta import (
+    AutoRegisterMeta,
+    RegistryConfig,
+    SecondaryRegistry,
+    extract_key_from_handler_suffix,
+    PRIMARY_KEY,
+    LazyDiscoveryDict
+)
 # PatternDiscoveryEngine imported locally to avoid circular imports
 from openhcs.io.filemanager import FileManager
 # Import interfaces from the base interfaces module
@@ -21,43 +30,39 @@ from openhcs.microscopes.microscope_interfaces import (FilenameParser,
 
 logger = logging.getLogger(__name__)
 
-# Dictionary to store registered microscope handlers
-MICROSCOPE_HANDLERS = {}
+# Dictionary to store registered microscope handlers (with lazy auto-discovery)
+MICROSCOPE_HANDLERS = LazyDiscoveryDict()
 
 # Dictionary to store registered metadata handlers for auto-detection
 METADATA_HANDLERS = {}
 
 
-class MicroscopeHandlerMeta(ABCMeta):
+# Configuration for microscope handler registration
+_MICROSCOPE_REGISTRY_CONFIG = RegistryConfig(
+    registry_dict=MICROSCOPE_HANDLERS,
+    key_attribute='_microscope_type',
+    key_extractor=extract_key_from_handler_suffix,
+    skip_if_no_key=False,
+    secondary_registries=[
+        SecondaryRegistry(
+            registry_dict=METADATA_HANDLERS,
+            key_source=PRIMARY_KEY,
+            attr_name='_metadata_handler_class'
+        )
+    ],
+    log_registration=True,
+    registry_name='microscope handler',
+    discovery_package='openhcs.microscopes',  # Auto-discover from this package
+    discovery_recursive=True  # Use recursive discovery
+)
+
+
+class MicroscopeHandlerMeta(AutoRegisterMeta):
     """Metaclass for automatic registration of microscope handlers."""
 
-    def __new__(cls, name, bases, attrs):
-        new_class = super().__new__(cls, name, bases, attrs)
-
-        # Only register concrete handler classes (not the abstract base class)
-        if bases and not getattr(new_class, '__abstractmethods__', None):
-            # Use explicit microscope type if provided, otherwise extract from class name
-            microscope_type = getattr(new_class, '_microscope_type', None)
-            if not microscope_type:
-                if name.endswith('Handler'):
-                    microscope_type = name[:-7].lower()  # ImageXpressHandler -> imagexpress
-                else:
-                    microscope_type = name.lower()
-
-            # Auto-register in MICROSCOPE_HANDLERS
-            MICROSCOPE_HANDLERS[microscope_type] = new_class
-
-            # Store the microscope type as the standard class attribute
-            new_class._microscope_type = microscope_type
-
-            # Auto-register metadata handler if the class has one
-            metadata_handler_class = getattr(new_class, '_metadata_handler_class', None)
-            if metadata_handler_class:
-                METADATA_HANDLERS[microscope_type] = metadata_handler_class
-
-            logger.debug(f"Auto-registered {name} as '{microscope_type}'")
-
-        return new_class
+    def __new__(mcs, name, bases, attrs):
+        return super().__new__(mcs, name, bases, attrs,
+                              registry_config=_MICROSCOPE_REGISTRY_CONFIG)
 
 
 def register_metadata_handler(handler_class, metadata_handler_class):

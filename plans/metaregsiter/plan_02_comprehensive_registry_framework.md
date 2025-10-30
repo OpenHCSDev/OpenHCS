@@ -392,6 +392,23 @@ Create a unified registry framework that covers ALL plugin and extension systems
 
 ### Implementation Draft
 
-(Code will be written here after smell loop approval)
+#### Phase 1: AutoRegisterMeta Infrastructure ✅ COMPLETE
+
+**File:** `openhcs/core/auto_register_meta.py` (300 lines)
+
+Created generic metaclass infrastructure with:
+- `RegistryConfig` dataclass for configuration
+- `AutoRegisterMeta` metaclass with generic registration logic
+- Helper functions: `extract_key_from_handler_suffix`, `extract_key_from_backend_suffix`
+- Comprehensive docstrings and pattern selection guide
+
+**Key Design Decisions:**
+1. Configuration-driven approach (explicit over magic)
+2. Supports all 3 existing patterns without breaking changes
+3. Secondary registry support for metadata handlers
+4. Skip-if-no-key behavior for optional registration
+5. Debug logging for all registration events
+
+**Next:** Migrate the 3 existing metaclasses to use this infrastructure
 
 

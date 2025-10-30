@@ -9,13 +9,14 @@ import threading
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Type
 import pickle
 from openhcs.runtime.zmq_messages import ControlMessageType, ResponseType, MessageFields, PongResponse, SocketType, ImageAck
 from openhcs.constants.constants import (
     CONTROL_PORT_OFFSET, IPC_SOCKET_DIR_NAME, IPC_SOCKET_PREFIX, IPC_SOCKET_EXTENSION
 )
 from openhcs.core.config import TransportMode
+from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,61 @@ logger = logging.getLogger(__name__)
 # All viewers send acks to this port via PUSH sockets
 # Client listens on this port via PULL socket
 SHARED_ACK_PORT = 7555
+
+# ============================================================================
+# ZMQ Server Registry
+# ============================================================================
+
+# Global registry for ZMQ server classes
+ZMQ_SERVERS: Dict[str, Type['ZMQServer']] = {}
+
+# Registry configuration for ZMQServer metaclass
+_ZMQ_SERVER_REGISTRY_CONFIG = RegistryConfig(
+    registry_dict=ZMQ_SERVERS,
+    key_attribute='_server_type',
+    skip_if_no_key=True,  # Skip abstract base class
+    log_registration=True,
+    registry_name='ZMQ server'
+)
+
+
+class ZMQServerMeta(AutoRegisterMeta):
+    """Metaclass for automatic registration of ZMQ server classes."""
+    def __new__(mcs, name, bases, attrs):
+        return super().__new__(mcs, name, bases, attrs,
+                              registry_config=_ZMQ_SERVER_REGISTRY_CONFIG)
+
+
+def discover_all_zmq_servers() -> None:
+    """
+    Discover all ZMQ server implementations by importing runtime modules.
+
+    This triggers metaclass registration for all ZMQServer subclasses,
+    including third-party plugins installed via pip.
+
+    Third-party packages can provide custom servers by:
+    1. Subclassing ZMQServer
+    2. Setting _server_type attribute
+    3. User imports the package: `import my_custom_server_package`
+
+    No entry_points or setup.py boilerplate needed!
+
+    The metaclass handles everything - modules without ZMQServer subclasses
+    or without _server_type simply don't register. No excludes needed.
+    """
+    from openhcs.core.registry_discovery import discover_registry_classes
+    import openhcs.runtime
+
+    # Discover all ZMQServer subclasses in openhcs.runtime
+    # This imports ALL modules - metaclass decides what registers
+    _ = discover_registry_classes(
+        package_path=openhcs.runtime.__path__,
+        package_prefix="openhcs.runtime.",
+        base_class='ZMQServer'  # Will be resolved after class is defined
+        # No exclude_modules - let the metaclass handle it!
+    )
+
+    logger.debug(f"Discovered {len(ZMQ_SERVERS)} ZMQ servers: {list(ZMQ_SERVERS.keys())}")
 
 
 def get_default_transport_mode() -> TransportMode:
@@ -237,8 +293,10 @@ def stop_global_ack_listener():
         _ack_listener_running = False
 
 
-class ZMQServer(ABC):
+class ZMQServer(ABC, metaclass=ZMQServerMeta):
     """ABC for ZMQ servers - dual-channel pattern with ping/pong handshake."""
+
+    _server_type: Optional[str] = None  # Override in subclasses for registration
 
     def __init__(self, port, host='*', log_file_path=None, data_socket_type=None, transport_mode=None):
         import zmq

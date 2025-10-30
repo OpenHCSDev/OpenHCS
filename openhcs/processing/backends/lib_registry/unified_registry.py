@@ -29,11 +29,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 
 from openhcs.core.xdg_paths import get_cache_file_path
 from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
+from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -114,13 +115,40 @@ class FunctionMetadata:
 
 
 
-class LibraryRegistryBase(ABC):
+# Registry for all library registry classes
+LIBRARY_REGISTRIES: Dict[str, Type['LibraryRegistryBase']] = {}
+
+
+# Configuration for library registry auto-registration
+_LIBRARY_REGISTRY_CONFIG = RegistryConfig(
+    registry_dict=LIBRARY_REGISTRIES,
+    key_attribute='_registry_name',
+    skip_if_no_key=True,  # Skip abstract base classes
+    log_registration=True,
+    registry_name='library registry'
+)
+
+
+class LibraryRegistryMeta(AutoRegisterMeta):
+    """Metaclass for automatic registration of library registry classes."""
+
+    def __new__(mcs, name, bases, attrs):
+        return super().__new__(mcs, name, bases, attrs,
+                              registry_config=_LIBRARY_REGISTRY_CONFIG)
+
+
+class LibraryRegistryBase(ABC, metaclass=LibraryRegistryMeta):
     """
     Minimal ABC for all library registries.
 
     Provides only essential contracts that all registries must implement,
     regardless of whether they use runtime testing or explicit contracts.
+
+    Subclasses are automatically registered in LIBRARY_REGISTRIES by setting
+    the _registry_name class attribute.
     """
+
+    _registry_name: Optional[str] = None  # Override in subclasses (e.g., 'pyclesperanto', 'cupy')
 
     # Common exclusions across all libraries
     COMMON_EXCLUSIONS = {

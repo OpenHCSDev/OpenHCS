@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 class ZMQExecutionServer(ZMQServer):
     """ZMQ execution server for OpenHCS pipelines."""
 
+    _server_type = 'execution'  # Registration key for AutoRegisterMeta
+
     def __init__(self, port=DEFAULT_EXECUTION_SERVER_PORT, host='*', log_file_path=None, transport_mode=TransportMode.IPC):
         super().__init__(port, host, log_file_path, transport_mode=transport_mode)
         self.active_executions = {}
