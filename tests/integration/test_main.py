@@ -190,6 +190,9 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False,
             - sequential_components: List of component names to process sequentially
             - should_fail: Whether this config should fail validation
             - expected_error: Expected error message substring (if should_fail=True)
+
+    Note: sequential_config is NOT used in this function - it should be set in PipelineConfig instead.
+    This parameter is kept for backward compatibility but is ignored.
     """
     cpu_only_mode = os.getenv('OPENHCS_CPU_ONLY', 'false').lower() == 'true'
     if cpu_only_mode:
@@ -202,12 +205,6 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False,
             # Fallback cleanly to CPU if GPU path is unavailable
             os.environ['OPENHCS_CPU_ONLY'] = 'true'
             position_func = ashlar_compute_tile_positions_cpu
-
-    # Convert sequential component names to SequentialComponents enum
-    sequential_components = []
-    if sequential_config and sequential_config.get("sequential_components"):
-        for comp_name in sequential_config["sequential_components"]:
-            sequential_components.append(SequentialComponents[comp_name])
 
     return Pipeline(
         steps=[
@@ -222,9 +219,8 @@ def create_test_pipeline(enable_napari: bool = False, enable_fiji: bool = False,
             Step(
                 func=create_composite,
                 processing_config=LazyProcessingConfig(
-                    variable_components=[VariableComponents.CHANNEL],
-                    sequential_components=sequential_components
-                ) if sequential_components else LazyProcessingConfig(variable_components=[VariableComponents.CHANNEL]),
+                    variable_components=[VariableComponents.CHANNEL]
+                ),
                 napari_streaming_config=LazyNapariStreamingConfig(port=5557) if enable_napari else None,
                 fiji_streaming_config=LazyFijiStreamingConfig(port=5556) if enable_fiji else None
             ),
@@ -377,7 +373,7 @@ def _create_pipeline_config(test_config: TestConfig) -> GlobalPipelineConfig:
     )
 
 
-def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
+def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) -> PipelineOrchestrator:
     """Initialize and configure the pipeline orchestrator."""
     from openhcs.io.base import reset_memory_backend
     reset_memory_backend()
@@ -404,6 +400,12 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
         omero_backend = OMEROLocalBackend(omero_conn=omero_manager.conn)
         storage_registry['omero_local'] = omero_backend
 
+    # Convert sequential component names to SequentialComponents enum
+    sequential_components = []
+    if sequential_config and sequential_config.get("sequential_components"):
+        for comp_name in sequential_config["sequential_components"]:
+            sequential_components.append(SequentialComponents[comp_name])
+
     # Create PipelineConfig with lazy configs for proper hierarchical inheritance
     # CRITICAL: Explicitly set vfs_config=None to inherit from global config
     # Without this, PipelineConfig auto-creates a VFSConfig with default values (materialization_backend=DISK)
@@ -413,6 +415,9 @@ def _initialize_orchestrator(test_config: TestConfig) -> PipelineOrchestrator:
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
         step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+        processing_config=LazyProcessingConfig(
+            sequential_components=sequential_components
+        ) if sequential_components else None,
         vfs_config=None,  # Inherit from global config
     )
 
@@ -580,7 +585,7 @@ def _execute_pipeline_zmq(test_config: TestConfig, pipeline: Pipeline, global_co
         logger.info("🔌 Disconnected from ZMQ execution server")
 
 
-def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq_mode: str) -> Dict:
+def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq_mode: str, sequential_config=None) -> Dict:
     """
     Execute pipeline using either direct orchestrator or ZMQ client based on mode.
 
@@ -601,6 +606,12 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
         # Create global config for ZMQ execution
         global_config = _create_pipeline_config(test_config)
 
+        # Convert sequential component names to SequentialComponents enum
+        sequential_components = []
+        if sequential_config and sequential_config.get("sequential_components"):
+            for comp_name in sequential_config["sequential_components"]:
+                sequential_components.append(SequentialComponents[comp_name])
+
         # Create pipeline config with lazy configs
         # NOTE: No need to set vfs_config explicitly - the compiler will automatically
         # validate and correct the backend based on microscope compatibility
@@ -610,12 +621,15 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
                 output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
             ),
             step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
+            processing_config=LazyProcessingConfig(
+                sequential_components=sequential_components
+            ) if sequential_components else None,
         )
 
         return _execute_pipeline_zmq(test_config, pipeline, global_config, pipeline_config)
     else:
         logger.info("🔧 Using direct orchestrator mode")
-        orchestrator = _initialize_orchestrator(test_config)
+        orchestrator = _initialize_orchestrator(test_config, sequential_config)
         return _execute_pipeline_phases(orchestrator, pipeline)
 
 
@@ -650,7 +664,7 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
                 _export_pipeline_to_file(pipeline, test_config.plate_dir)
 
             # Execute using the specified mode (direct or zmq) - should fail during compilation
-            _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode)
+            _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode, sequential_config)
 
         # Verify the error message contains the expected substring
         expected_error = sequential_config.get("expected_error", "")
@@ -664,7 +678,7 @@ def test_main(plate_dir: Union[Path, str, int], backend_config: str, data_type_c
         _export_pipeline_to_file(pipeline, test_config.plate_dir)
 
     # Execute using the specified mode (direct or zmq)
-    results = _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode)
+    results = _execute_pipeline_with_mode(test_config, pipeline, zmq_execution_mode, sequential_config)
 
     # Validate materialization (skip for OMERO - different validation needed)
     if not test_config.is_omero:
