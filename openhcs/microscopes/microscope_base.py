@@ -52,7 +52,7 @@ _MICROSCOPE_REGISTRY_CONFIG = RegistryConfig(
     ],
     log_registration=True,
     registry_name='microscope handler',
-    discovery_package='openhcs.microscopes',  # Auto-discover from this package
+    # discovery_package auto-inferred from module: 'openhcs.microscopes'
     discovery_recursive=True  # Use recursive discovery
 )
 

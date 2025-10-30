@@ -196,7 +196,7 @@ class RegistryConfig:
     secondary_registries: Optional[list[SecondaryRegistry]] = None
     log_registration: bool = True
     registry_name: str = "plugin"
-    discovery_package: Optional[str] = None  # e.g., 'openhcs.microscopes'
+    discovery_package: Optional[str] = None  # Auto-inferred from base class module if None
     discovery_recursive: bool = False
     discovery_function: Optional[Callable] = None  # Custom discovery function
 
@@ -259,7 +259,18 @@ class AutoRegisterMeta(ABCMeta):
 
         # Set up lazy discovery if registry dict supports it (only once for base class)
         if isinstance(registry_config.registry_dict, LazyDiscoveryDict) and not registry_config.registry_dict._config:
-            registry_config.registry_dict._set_config(new_class, registry_config)
+            # Auto-infer discovery_package from base class module if not specified
+            config = registry_config
+            if config.discovery_package is None:
+                # Extract package from base class module (e.g., 'openhcs.microscopes.microscope_base' → 'openhcs.microscopes')
+                module_parts = new_class.__module__.rsplit('.', 1)
+                inferred_package = module_parts[0] if len(module_parts) > 1 else new_class.__module__
+                # Create new config with inferred package
+                from dataclasses import replace
+                config = replace(config, discovery_package=inferred_package)
+                logger.debug(f"Auto-inferred discovery_package='{inferred_package}' from {new_class.__module__}")
+
+            registry_config.registry_dict._set_config(new_class, config)
 
         # Only register concrete classes (not abstract base classes)
         if not bases or getattr(new_class, '__abstractmethods__', None):

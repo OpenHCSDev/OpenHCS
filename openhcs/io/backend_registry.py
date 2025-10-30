@@ -48,7 +48,7 @@ _BACKEND_REGISTRY_CONFIG = RegistryConfig(
     secondary_registries=None,
     log_registration=True,
     registry_name='storage backend',
-    discovery_package='openhcs.io',
+    # discovery_package auto-inferred from module: 'openhcs.io'
     discovery_recursive=False,
     discovery_function=_discover_storage_backends
 )

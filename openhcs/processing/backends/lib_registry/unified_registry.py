@@ -126,7 +126,7 @@ _LIBRARY_REGISTRY_CONFIG = RegistryConfig(
     skip_if_no_key=True,  # Skip abstract base classes
     log_registration=True,
     registry_name='library registry',
-    discovery_package='openhcs.processing.backends.lib_registry',
+    # discovery_package auto-inferred from module: 'openhcs.processing.backends.lib_registry'
     discovery_recursive=False
 )
 

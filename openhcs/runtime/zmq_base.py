@@ -39,7 +39,7 @@ _ZMQ_SERVER_REGISTRY_CONFIG = RegistryConfig(
     skip_if_no_key=True,  # Skip abstract base class
     log_registration=True,
     registry_name='ZMQ server',
-    discovery_package='openhcs.runtime',
+    # discovery_package auto-inferred from module: 'openhcs.runtime'
     discovery_recursive=False
 )
 
