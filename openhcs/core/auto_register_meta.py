@@ -309,6 +309,8 @@ class AutoRegisterMeta(ABCMeta):
 
         # Set up lazy discovery if registry dict supports it (only once for base class)
         if isinstance(registry_config.registry_dict, LazyDiscoveryDict) and not registry_config.registry_dict._config:
+            from dataclasses import replace
+
             # Auto-infer discovery_package from base class module if not specified
             config = registry_config
             if config.discovery_package is None:
@@ -316,9 +318,43 @@ class AutoRegisterMeta(ABCMeta):
                 module_parts = new_class.__module__.rsplit('.', 1)
                 inferred_package = module_parts[0] if len(module_parts) > 1 else new_class.__module__
                 # Create new config with inferred package
-                from dataclasses import replace
                 config = replace(config, discovery_package=inferred_package)
                 logger.debug(f"Auto-inferred discovery_package='{inferred_package}' from {new_class.__module__}")
+
+            # Auto-wrap secondary registries with SecondaryRegistryDict
+            if config.secondary_registries:
+                import sys
+                wrapped_secondaries = []
+                module = sys.modules.get(new_class.__module__)
+
+                for sec_reg in config.secondary_registries:
+                    # Check if secondary registry needs wrapping
+                    if isinstance(sec_reg.registry_dict, dict) and not isinstance(sec_reg.registry_dict, SecondaryRegistryDict):
+                        # Create a new SecondaryRegistryDict wrapping the primary registry
+                        wrapped_dict = SecondaryRegistryDict(registry_config.registry_dict)
+                        # Copy any existing entries from the old dict
+                        wrapped_dict.update(sec_reg.registry_dict)
+
+                        # Find and update the module global variable
+                        if module:
+                            for var_name, var_value in vars(module).items():
+                                if var_value is sec_reg.registry_dict:
+                                    setattr(module, var_name, wrapped_dict)
+                                    logger.debug(f"Auto-wrapped secondary registry '{var_name}' in {new_class.__module__}")
+                                    break
+
+                        # Create new SecondaryRegistry with wrapped dict
+                        wrapped_sec_reg = SecondaryRegistry(
+                            registry_dict=wrapped_dict,
+                            key_source=sec_reg.key_source,
+                            attr_name=sec_reg.attr_name
+                        )
+                        wrapped_secondaries.append(wrapped_sec_reg)
+                    else:
+                        wrapped_secondaries.append(sec_reg)
+
+                # Rebuild config with wrapped secondary registries
+                config = replace(config, secondary_registries=wrapped_secondaries)
 
             registry_config.registry_dict._set_config(new_class, config)
 

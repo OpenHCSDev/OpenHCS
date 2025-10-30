@@ -20,8 +20,7 @@ from openhcs.core.auto_register_meta import (
     SecondaryRegistry,
     extract_key_from_handler_suffix,
     PRIMARY_KEY,
-    LazyDiscoveryDict,
-    SecondaryRegistryDict
+    LazyDiscoveryDict
 )
 # PatternDiscoveryEngine imported locally to avoid circular imports
 from openhcs.io.filemanager import FileManager
@@ -35,8 +34,8 @@ logger = logging.getLogger(__name__)
 MICROSCOPE_HANDLERS = LazyDiscoveryDict()
 
 # Dictionary to store registered metadata handlers for auto-detection
-# This is a secondary registry that auto-triggers discovery of MICROSCOPE_HANDLERS
-METADATA_HANDLERS = SecondaryRegistryDict(MICROSCOPE_HANDLERS)
+# This will be auto-wrapped with SecondaryRegistryDict by the metaclass
+METADATA_HANDLERS = {}
 
 
 # Configuration for microscope handler registration
