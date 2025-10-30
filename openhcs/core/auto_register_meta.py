@@ -58,6 +58,56 @@ KeyExtractor = Callable[[str, Type], str]
 PRIMARY_KEY = 'primary'
 
 
+class SecondaryRegistryDict(dict):
+    """
+    Dict for secondary registries that auto-triggers primary registry discovery.
+
+    When accessed, this dict triggers discovery of the primary registry,
+    which populates both the primary and secondary registries.
+    """
+
+    def __init__(self, primary_registry: 'LazyDiscoveryDict'):
+        super().__init__()
+        self._primary_registry = primary_registry
+
+    def _ensure_discovered(self):
+        """Trigger discovery of primary registry (which populates this secondary registry)."""
+        if hasattr(self._primary_registry, '_discover'):
+            self._primary_registry._discover()
+
+    def __getitem__(self, key):
+        self._ensure_discovered()
+        return super().__getitem__(key)
+
+    def __contains__(self, key):
+        self._ensure_discovered()
+        return super().__contains__(key)
+
+    def __iter__(self):
+        self._ensure_discovered()
+        return super().__iter__()
+
+    def __len__(self):
+        self._ensure_discovered()
+        return super().__len__()
+
+    def keys(self):
+        self._ensure_discovered()
+        return super().keys()
+
+    def values(self):
+        self._ensure_discovered()
+        return super().values()
+
+    def items(self):
+        self._ensure_discovered()
+        return super().items()
+
+    def get(self, key, default=None):
+        self._ensure_discovered()
+        return super().get(key, default)
+
+
 class LazyDiscoveryDict(dict):
     """Dict that auto-discovers plugins on first access."""
 
