@@ -175,13 +175,19 @@ def _bulk_preload_step_images(
     patterns_by_well: Dict[str, Any],
     filemanager: 'FileManager',
     microscope_handler: 'MicroscopeHandler',
-    zarr_config: Optional[Dict[str, Any]] = None
+    zarr_config: Optional[Dict[str, Any]] = None,
+    patterns_to_preload: Optional[List[str]] = None,
+    variable_components: Optional[List[str]] = None
 ) -> None:
     """
-    Pre-load all images for this step from source backend into memory backend.
+    Pre-load images for this step from source backend into memory backend.
 
     This reduces I/O overhead by doing a single bulk read operation
     instead of loading images per pattern group.
+
+    Args:
+        patterns_to_preload: Optional list of specific patterns to preload (for sequential mode).
+        variable_components: Required when patterns_to_preload is provided, for pattern expansion.
 
     Note: External conditional logic ensures this is only called for non-memory backends.
     """
@@ -190,13 +196,17 @@ def _bulk_preload_step_images(
 
     logger.debug(f"🔄 BULK PRELOAD: Loading images from {read_backend} to memory for well {axis_id}")
 
-    # Get all files for this well from patterns
-    all_files = []
-    # Create specialized path getter for this well
-    get_paths_for_axis = create_image_path_getter(axis_id, filemanager, microscope_handler)
-
-    # Get all image paths for this well
-    full_file_paths = get_paths_for_axis(step_input_dir, read_backend)
+    # Get file paths based on mode
+    if patterns_to_preload is not None:
+        # Sequential mode: expand patterns to files
+        all_files = [f for p in patterns_to_preload
+                     for f in microscope_handler.path_list_from_pattern(
+                         str(step_input_dir), p, filemanager, read_backend, variable_components)]
+        full_file_paths = list(set(all_files))
+    else:
+        # Normal mode: get all files for well
+        get_paths_for_axis = create_image_path_getter(axis_id, filemanager, microscope_handler)
+        full_file_paths = get_paths_for_axis(step_input_dir, read_backend)
 
     if not full_file_paths:
         raise RuntimeError(f"🔄 BULK PRELOAD: No files found for well {axis_id} in {step_input_dir} with backend {read_backend}")
@@ -944,20 +954,61 @@ class FunctionStep(AbstractStep):
             if isinstance(func_from_plan, dict):
                 logger.info(f"🔍 DICT_PATTERN: func_from_plan keys: {list(func_from_plan.keys())}")
 
-            for comp_val, current_pattern_list in grouped_patterns.items():
-                logger.info(f"🔍 DICT_PATTERN: Processing component '{comp_val}' with {len(current_pattern_list)} patterns")
-                exec_func_or_chain = comp_to_funcs[comp_val]
-                base_kwargs = comp_to_base_args[comp_val]
-                logger.info(f"🔍 DICT_PATTERN: Component '{comp_val}' exec_func_or_chain: {exec_func_or_chain}")
-                for pattern_item in current_pattern_list:
-                    _process_single_pattern_group(
-                        context, pattern_item, exec_func_or_chain, base_kwargs,
-                        step_input_dir, step_output_dir, axis_id, comp_val,
-                        read_backend, write_backend, input_mem_type, output_mem_type,
-                        device_id, same_dir,
-                        special_inputs, special_outputs, # Pass the maps from step_plan
-                        step_plan["zarr_config"],
-                        variable_components, step_index  # Pass step_index for funcplan lookup
+            # Check if sequential processing is enabled
+            seq_config = step_plan.get("sequential_processing")
+            if seq_config and seq_config.sequential_enabled:
+                # Sequential processing: subdivide and iterate over combinations
+                seq_comps = [sc.value for sc in seq_config.sequential_components]
+                var_comps = [vc.value for vc in variable_components] if variable_components else []
+
+                for comp_val, current_pattern_list in grouped_patterns.items():
+                    # Subdivide patterns by sequential components
+                    patterns_by_combo = context.microscope_handler.pattern_engine.subdivide_patterns_by_components(
+                        current_pattern_list, seq_comps
+                    )
+
+                    # Iterate over each combination
+                    for combo_patterns in patterns_by_combo.values():
+                        # Bulk preload for this combination only
+                        if read_backend != Backend.MEMORY.value:
+                            _bulk_preload_step_images(
+                                step_input_dir, step_output_dir, axis_id, read_backend,
+                                patterns_by_well, filemanager, context.microscope_handler, step_plan["zarr_config"],
+                                patterns_to_preload=combo_patterns, variable_components=var_comps
+                            )
+
+                        # Process patterns in this combination
+                        exec_func_or_chain = comp_to_funcs[comp_val]
+                        base_kwargs = comp_to_base_args[comp_val]
+                        for pattern_item in combo_patterns:
+                            _process_single_pattern_group(
+                                context, pattern_item, exec_func_or_chain, base_kwargs,
+                                step_input_dir, step_output_dir, axis_id, comp_val,
+                                read_backend, write_backend, input_mem_type, output_mem_type,
+                                device_id, same_dir,
+                                special_inputs, special_outputs,
+                                step_plan["zarr_config"],
+                                variable_components, step_index
+                            )
+
+                        # Clear memory after this combination
+                        filemanager.clear_files(str(step_output_dir), Backend.MEMORY.value)
+            else:
+                # Normal processing (existing code)
+                for comp_val, current_pattern_list in grouped_patterns.items():
+                    logger.info(f"🔍 DICT_PATTERN: Processing component '{comp_val}' with {len(current_pattern_list)} patterns")
+                    exec_func_or_chain = comp_to_funcs[comp_val]
+                    base_kwargs = comp_to_base_args[comp_val]
+                    logger.info(f"🔍 DICT_PATTERN: Component '{comp_val}' exec_func_or_chain: {exec_func_or_chain}")
+                    for pattern_item in current_pattern_list:
+                        _process_single_pattern_group(
+                            context, pattern_item, exec_func_or_chain, base_kwargs,
+                            step_input_dir, step_output_dir, axis_id, comp_val,
+                            read_backend, write_backend, input_mem_type, output_mem_type,
+                            device_id, same_dir,
+                            special_inputs, special_outputs, # Pass the maps from step_plan
+                            step_plan["zarr_config"],
+                            variable_components, step_index  # Pass step_index for funcplan lookup
                     )
             logger.info(f"🔥 STEP: Completed processing for '{step_name}' well {axis_id}.")
 

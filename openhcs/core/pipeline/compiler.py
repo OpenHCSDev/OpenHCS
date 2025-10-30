@@ -353,8 +353,14 @@ class PipelineCompiler:
             current_plan.setdefault("chainbreaker", False) # PathPlanner now sets this.
 
             # Add step-specific attributes (non-I/O, non-path related)
-            current_plan["variable_components"] = step.variable_components
-            current_plan["group_by"] = step.group_by
+            # Access via processing_config (already resolved by resolve_lazy_configurations_for_serialization)
+            current_plan["variable_components"] = step.processing_config.variable_components
+            current_plan["group_by"] = step.processing_config.group_by
+            current_plan["input_source"] = step.processing_config.input_source
+
+            # Add full processing config for sequential processing
+            current_plan["sequential_processing"] = step.processing_config
+
             # Lazy configs were already resolved at the beginning of compilation
             resolved_step = step
 
@@ -467,9 +473,9 @@ class PipelineCompiler:
                 # 🎯 SEMANTIC COHERENCE FIX: Prevent group_by/variable_components conflict
                 # When variable_components contains the same value as group_by,
                 # set group_by to None to avoid EZStitcher heritage rule violation
-                if (step.variable_components and step.group_by and
-                    step.group_by in step.variable_components):
-                    logger.debug(f"Step {step.name}: Detected group_by='{step.group_by}' in variable_components={step.variable_components}. "
+                if (step.processing_config.variable_components and step.processing_config.group_by and
+                    step.processing_config.group_by in step.processing_config.variable_components):
+                    logger.debug(f"Step {step.name}: Detected group_by='{step.processing_config.group_by}' in variable_components={step.processing_config.variable_components}. "
                                 f"Setting group_by=None to maintain semantic coherence.")
                     current_plan["group_by"] = None
 

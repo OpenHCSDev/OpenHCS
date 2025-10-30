@@ -422,8 +422,8 @@ class PipelineEditorWidget(ButtonListWidget):
             "name": step.name,
             "type": "function",
             "func": step.func,
-            "variable_components": step.variable_components,
-            "group_by": step.group_by
+            "variable_components": step.processing_config.variable_components,
+            "group_by": step.processing_config.group_by
         }
 
     def _find_step_index_by_selection(self) -> Optional[int]:

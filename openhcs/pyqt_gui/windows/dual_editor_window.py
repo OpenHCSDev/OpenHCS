@@ -259,8 +259,8 @@ class DualEditorWindow(BaseFormDialog):
             self.func_editor.main_window = main_window
 
         # Initialize step configuration settings in function editor (mirrors Textual TUI)
-        self.func_editor.current_group_by = self.editing_step.group_by
-        self.func_editor.current_variable_components = self.editing_step.variable_components or []
+        self.func_editor.current_group_by = self.editing_step.processing_config.group_by
+        self.func_editor.current_variable_components = self.editing_step.processing_config.variable_components or []
 
         # Refresh component button to show correct text and state (mirrors Textual TUI reactive updates)
         self.func_editor._refresh_component_button()
@@ -404,8 +404,8 @@ class DualEditorWindow(BaseFormDialog):
         setattr(self.editing_step, param_name, value)
 
         if param_name in ('group_by', 'variable_components'):
-            self.func_editor.current_group_by = self.editing_step.group_by
-            self.func_editor.current_variable_components = self.editing_step.variable_components or []
+            self.func_editor.current_group_by = self.editing_step.processing_config.group_by
+            self.func_editor.current_variable_components = self.editing_step.processing_config.variable_components or []
             self.func_editor._refresh_component_button()
 
         self.detect_changes()

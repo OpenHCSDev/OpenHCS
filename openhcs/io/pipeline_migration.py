@@ -39,14 +39,14 @@ def detect_legacy_pipeline(steps: List[Any]) -> bool:
     try:
         for step in steps:
             # Check if step has group_by attribute with string value
-            if hasattr(step, 'group_by') and step.group_by is not None:
-                if isinstance(step.group_by, str):
-                    logger.debug(f"Legacy string group_by detected: {step.group_by}")
+            if hasattr(step, 'group_by') and step.processing_config.group_by is not None:
+                if isinstance(step.processing_config.group_by, str):
+                    logger.debug(f"Legacy string group_by detected: {step.processing_config.group_by}")
                     return True
             
             # Check variable_components for string values
-            if hasattr(step, 'variable_components') and step.variable_components:
-                for component in step.variable_components:
+            if hasattr(step, 'variable_components') and step.processing_config.variable_components:
+                for component in step.processing_config.variable_components:
                     if isinstance(component, str):
                         logger.debug(f"Legacy string variable_component detected: {component}")
                         return True
@@ -147,12 +147,12 @@ def migrate_pipeline_steps(steps: List[Any]) -> List[Any]:
         migrated_step = step
         
         # Migrate group_by if present
-        if hasattr(step, 'group_by') and step.group_by is not None:
-            migrated_step.group_by = migrate_legacy_group_by(step.group_by)
+        if hasattr(step, 'group_by') and step.processing_config.group_by is not None:
+            migrated_step.processing_config.group_by = migrate_legacy_group_by(step.processing_config.group_by)
         
         # Migrate variable_components if present
-        if hasattr(step, 'variable_components') and step.variable_components:
-            migrated_step.variable_components = migrate_legacy_variable_components(step.variable_components)
+        if hasattr(step, 'variable_components') and step.processing_config.variable_components:
+            migrated_step.processing_config.variable_components = migrate_legacy_variable_components(step.processing_config.variable_components)
         
         migrated_steps.append(migrated_step)
     

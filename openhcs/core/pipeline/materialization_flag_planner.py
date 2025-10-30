@@ -59,7 +59,7 @@ class MaterializationFlagPlanner:
                 if READ_BACKEND not in step_plan:
                     # Check if this step reads from PIPELINE_START (original input)
                     from openhcs.core.steps.abstract import InputSource
-                    if step.input_source == InputSource.PIPELINE_START:
+                    if step.processing_config.input_source == InputSource.PIPELINE_START:
                         # Use the same backend as the first step
                         step_plan[READ_BACKEND] = step_plans[0][READ_BACKEND]
                     else:

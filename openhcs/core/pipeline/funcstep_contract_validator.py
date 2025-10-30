@@ -199,26 +199,52 @@ class FuncStepContractValidator:
         validator = GenericValidator(config)
 
         # Check for constraint violation: group_by ∈ variable_components
-        if step.group_by and step.group_by.value in [vc.value for vc in step.variable_components]:
+        if step.processing_config.group_by and step.processing_config.group_by.value in [vc.value for vc in step.processing_config.variable_components]:
             # Auto-resolve constraint violation by nullifying group_by
             logger.warning(
                 f"Step '{step_name}': Auto-resolved group_by conflict. "
-                f"Set group_by to None due to conflict with variable_components {[vc.value for vc in step.variable_components]}. "
-                f"Original group_by was {step.group_by.value}."
+                f"Set group_by to None due to conflict with variable_components {[vc.value for vc in step.processing_config.variable_components]}. "
+                f"Original group_by was {step.processing_config.group_by.value}."
             )
-            step.group_by = None
+            # Create new config with group_by set to None
+            from openhcs.core.config import ProcessingConfig
+            step.processing_config = ProcessingConfig(
+                variable_components=step.processing_config.variable_components,
+                group_by=None,
+                input_source=step.processing_config.input_source,
+                sequential_enabled=step.processing_config.sequential_enabled,
+                sequential_components=step.processing_config.sequential_components
+            )
+
+        # Validate sequential processing configuration
+        proc_config = step.processing_config
+        if proc_config and proc_config.sequential_enabled:
+            if not proc_config.sequential_components:
+                raise ValueError(f"Step '{step_name}': sequential_components cannot be empty when sequential processing is enabled")
+
+            seq_comp_values = {sc.value for sc in proc_config.sequential_components}
+            var_comp_values = {vc.value for vc in proc_config.variable_components}
+
+            if seq_comp_values & var_comp_values:
+                raise ValueError(
+                    f"Step '{step_name}': Components {seq_comp_values & var_comp_values} cannot be in both "
+                    f"sequential_components and variable_components"
+                )
+
+            if len(seq_comp_values) != len(proc_config.sequential_components):
+                raise ValueError(f"Step '{step_name}': sequential_components contains duplicates")
 
         # Validate step configuration after auto-resolution
         validation_result = validator.validate_step(
-            step.variable_components, step.group_by, func_pattern, step_name
+            step.processing_config.variable_components, step.processing_config.group_by, func_pattern, step_name
         )
         if not validation_result.is_valid:
             raise ValueError(validation_result.error_message)
 
         # Validate dict pattern keys if orchestrator is available
-        if orchestrator is not None and isinstance(func_pattern, dict) and step.group_by is not None:
+        if orchestrator is not None and isinstance(func_pattern, dict) and step.processing_config.group_by is not None:
             dict_validation_result = validator.validate_dict_pattern_keys(
-                func_pattern, step.group_by, step_name, orchestrator
+                func_pattern, step.processing_config.group_by, step_name, orchestrator
             )
             if not dict_validation_result.is_valid:
                 raise ValueError(dict_validation_result.error_message)
