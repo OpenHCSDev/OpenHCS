@@ -15,6 +15,7 @@ Fundamental systems that define OpenHCS architecture.
    :maxdepth: 1
 
    plugin_registry_system
+   plugin_registry_advanced
    function_pattern_system
    function_registry_system
    pipeline_compilation_system

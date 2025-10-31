@@ -49,6 +49,29 @@ from typing import Dict, Type, Optional, Callable, Any
 
 logger = logging.getLogger(__name__)
 
+# Lazy import to avoid circular dependency
+_registry_cache_manager = None
+
+def _get_cache_manager():
+    """Lazy import of RegistryCacheManager to avoid circular imports."""
+    global _registry_cache_manager
+    if _registry_cache_manager is None:
+        from openhcs.core.registry_cache import (
+            RegistryCacheManager,
+            CacheConfig,
+            serialize_plugin_class,
+            deserialize_plugin_class,
+            get_package_file_mtimes
+        )
+        _registry_cache_manager = {
+            'RegistryCacheManager': RegistryCacheManager,
+            'CacheConfig': CacheConfig,
+            'serialize_plugin_class': serialize_plugin_class,
+            'deserialize_plugin_class': deserialize_plugin_class,
+            'get_package_file_mtimes': get_package_file_mtimes
+        }
+    return _registry_cache_manager
+
 
 # Type aliases for clarity
 RegistryDict = Dict[str, Type]
@@ -109,36 +132,111 @@ class SecondaryRegistryDict(dict):
 
 
 class LazyDiscoveryDict(dict):
-    """Dict that auto-discovers plugins on first access."""
+    """
+    Dict that auto-discovers plugins on first access with optional caching.
 
-    def __init__(self):
+    Supports caching discovered plugins to speed up subsequent application starts.
+    Cache is validated against package version and file modification times.
+    """
+
+    def __init__(self, enable_cache: bool = True):
+        """
+        Initialize lazy discovery dict.
+
+        Args:
+            enable_cache: If True, use caching to speed up discovery
+        """
         super().__init__()
         self._base_class = None
         self._config = None
         self._discovered = False
+        self._enable_cache = enable_cache
+        self._cache_manager = None
 
     def _set_config(self, base_class: Type, config: 'RegistryConfig') -> None:
         self._base_class = base_class
         self._config = config
 
+        # Initialize cache manager if caching is enabled
+        if self._enable_cache and config.discovery_package:
+            try:
+                cache_utils = _get_cache_manager()
+
+                # Get version getter (use openhcs version)
+                def get_version():
+                    try:
+                        import openhcs
+                        return openhcs.__version__
+                    except:
+                        return "unknown"
+
+                self._cache_manager = cache_utils['RegistryCacheManager'](
+                    cache_name=f"{config.registry_name.replace(' ', '_')}_registry",
+                    version_getter=get_version,
+                    serializer=cache_utils['serialize_plugin_class'],
+                    deserializer=cache_utils['deserialize_plugin_class'],
+                    config=cache_utils['CacheConfig'](
+                        max_age_days=7,
+                        check_mtimes=True  # Validate file modifications
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Failed to initialize cache manager: {e}")
+                self._cache_manager = None
+
     def _discover(self) -> None:
-        """Run discovery once."""
+        """Run discovery once, using cache if available."""
         if self._discovered or not self._config or not self._config.discovery_package:
             return
         self._discovered = True
 
+        # Try to load from cache first
+        if self._cache_manager:
+            try:
+                cached_plugins = self._cache_manager.load_cache()
+                if cached_plugins is not None:
+                    # Reconstruct registry from cache
+                    self.update(cached_plugins)
+                    logger.info(
+                        f"✅ Loaded {len(self)} {self._config.registry_name}s from cache"
+                    )
+                    return
+            except Exception as e:
+                logger.debug(f"Cache load failed for {self._config.registry_name}: {e}")
+
+        # Cache miss or disabled - perform full discovery
         try:
             pkg = importlib.import_module(self._config.discovery_package)
 
             if self._config.discovery_function:
-                self._config.discovery_function(pkg.__path__, f"{self._config.discovery_package}.", self._base_class)
+                self._config.discovery_function(
+                    pkg.__path__,
+                    f"{self._config.discovery_package}.",
+                    self._base_class
+                )
             else:
                 root = self._config.discovery_package.split('.')[0]
                 mod = importlib.import_module(f"{root}.core.registry_discovery")
-                func = mod.discover_registry_classes_recursive if self._config.discovery_recursive else mod.discover_registry_classes
+                func = (
+                    mod.discover_registry_classes_recursive
+                    if self._config.discovery_recursive
+                    else mod.discover_registry_classes
+                )
                 func(pkg.__path__, f"{self._config.discovery_package}.", self._base_class)
 
             logger.debug(f"Discovered {len(self)} {self._config.registry_name}s")
+
+            # Save to cache if enabled
+            if self._cache_manager:
+                try:
+                    cache_utils = _get_cache_manager()
+                    file_mtimes = cache_utils['get_package_file_mtimes'](
+                        self._config.discovery_package
+                    )
+                    self._cache_manager.save_cache(dict(self), file_mtimes)
+                except Exception as e:
+                    logger.debug(f"Failed to save cache for {self._config.registry_name}: {e}")
+
         except Exception as e:
             logger.warning(f"Discovery failed: {e}")
 
