@@ -28,15 +28,11 @@ class MicroscopeFormatConfig:
 MICROSCOPE_FORMAT_REGISTRIES = LazyDiscoveryDict()
 
 
-# Configuration for format registry auto-registration
 _FORMAT_REGISTRY_CONFIG = RegistryConfig(
     registry_dict=MICROSCOPE_FORMAT_REGISTRIES,
     key_attribute='FORMAT_NAME',
-    skip_if_no_key=True,  # Skip abstract base class
-    log_registration=True,
-    registry_name='microscope format registry',
-    # discovery_package auto-inferred from module: 'openhcs.processing.backends.experimental_analysis'
-    discovery_recursive=False
+    skip_if_no_key=True,
+    registry_name='microscope format registry'
 )
 
 

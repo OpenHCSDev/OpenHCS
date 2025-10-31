@@ -7,7 +7,6 @@ discovered and registered when their classes are defined.
 """
 
 import logging
-import os
 from typing import Dict, Type
 from openhcs.io.base import DataSink, StorageBackend
 from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig, LazyDiscoveryDict
@@ -21,36 +20,11 @@ STORAGE_BACKENDS = LazyDiscoveryDict()
 _backend_instances: Dict[str, DataSink] = {}
 
 
-def _discover_storage_backends(package_path, package_prefix, base_class):
-    """Custom discovery function that respects subprocess mode."""
-    from openhcs.core.registry_discovery import discover_registry_classes
-
-    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-        # Subprocess mode - only import essential backends
-        import openhcs.io.disk  # noqa: F401
-        import openhcs.io.memory  # noqa: F401
-    else:
-        # Normal mode - discover all backends
-        discover_registry_classes(
-            package_path=package_path,
-            package_prefix=package_prefix,
-            base_class=base_class,
-            exclude_modules={'base', 'backend_registry', 'exceptions', 'atomic', 'filemanager', 'metadata_writer'}
-        )
-
-
-# Configuration for storage backend registration
 _BACKEND_REGISTRY_CONFIG = RegistryConfig(
     registry_dict=STORAGE_BACKENDS,
     key_attribute='_backend_type',
-    key_extractor=None,  # Requires explicit _backend_type
-    skip_if_no_key=True,  # Skip if no _backend_type set
-    secondary_registries=None,
-    log_registration=True,
-    registry_name='storage backend',
-    # discovery_package auto-inferred from module: 'openhcs.io'
-    discovery_recursive=False,
-    discovery_function=_discover_storage_backends
+    skip_if_no_key=True,
+    registry_name='storage backend'
 )
 
 

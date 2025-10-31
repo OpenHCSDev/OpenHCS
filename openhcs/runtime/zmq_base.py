@@ -32,15 +32,11 @@ SHARED_ACK_PORT = 7555
 # Global registry for ZMQ server classes with lazy auto-discovery
 ZMQ_SERVERS = LazyDiscoveryDict()
 
-# Registry configuration for ZMQServer metaclass
 _ZMQ_SERVER_REGISTRY_CONFIG = RegistryConfig(
     registry_dict=ZMQ_SERVERS,
     key_attribute='_server_type',
-    skip_if_no_key=True,  # Skip abstract base class
-    log_registration=True,
-    registry_name='ZMQ server',
-    # discovery_package auto-inferred from module: 'openhcs.runtime'
-    discovery_recursive=False
+    skip_if_no_key=True,
+    registry_name='ZMQ server'
 )
 
 

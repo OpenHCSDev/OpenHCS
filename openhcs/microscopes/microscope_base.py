@@ -38,12 +38,10 @@ MICROSCOPE_HANDLERS = LazyDiscoveryDict()
 METADATA_HANDLERS = {}
 
 
-# Configuration for microscope handler registration
 _MICROSCOPE_REGISTRY_CONFIG = RegistryConfig(
     registry_dict=MICROSCOPE_HANDLERS,
     key_attribute='_microscope_type',
     key_extractor=extract_key_from_handler_suffix,
-    skip_if_no_key=False,
     secondary_registries=[
         SecondaryRegistry(
             registry_dict=METADATA_HANDLERS,
@@ -51,10 +49,7 @@ _MICROSCOPE_REGISTRY_CONFIG = RegistryConfig(
             attr_name='_metadata_handler_class'
         )
     ],
-    log_registration=True,
-    registry_name='microscope handler',
-    # discovery_package auto-inferred from module: 'openhcs.microscopes'
-    discovery_recursive=True  # Use recursive discovery
+    registry_name='microscope handler'
 )
 
 

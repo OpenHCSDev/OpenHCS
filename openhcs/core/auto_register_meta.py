@@ -419,6 +419,35 @@ class AutoRegisterMeta(ABCMeta):
                 config = replace(config, discovery_package=inferred_package)
                 logger.debug(f"Auto-inferred discovery_package='{inferred_package}' from {new_class.__module__}")
 
+            # Auto-infer discovery_recursive based on package structure
+            # Check if package has subdirectories with __init__.py (indicating nested structure)
+            if config.discovery_package:
+                try:
+                    pkg = importlib.import_module(config.discovery_package)
+                    if hasattr(pkg, '__path__'):
+                        import os
+                        has_subpackages = False
+                        for path in pkg.__path__:
+                            if os.path.isdir(path):
+                                # Check if any subdirectories contain __init__.py
+                                for entry in os.listdir(path):
+                                    subdir = os.path.join(path, entry)
+                                    if os.path.isdir(subdir) and os.path.exists(os.path.join(subdir, '__init__.py')):
+                                        has_subpackages = True
+                                        break
+                            if has_subpackages:
+                                break
+
+                        # Only override if discovery_recursive is still at default (False)
+                        # This allows explicit overrides to take precedence
+                        if has_subpackages and not config.discovery_recursive:
+                            config = replace(config, discovery_recursive=True)
+                            logger.debug(f"Auto-inferred discovery_recursive=True for '{config.discovery_package}' (has subpackages)")
+                        elif not has_subpackages and config.discovery_recursive:
+                            logger.debug(f"Keeping explicit discovery_recursive=True for '{config.discovery_package}' (no subpackages detected)")
+                except Exception as e:
+                    logger.debug(f"Failed to auto-infer discovery_recursive: {e}")
+
             # Auto-wrap secondary registries with SecondaryRegistryDict
             if config.secondary_registries:
                 import sys
