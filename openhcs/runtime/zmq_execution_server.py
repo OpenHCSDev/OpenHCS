@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 class ZMQExecutionServer(ZMQServer):
     """ZMQ execution server for OpenHCS pipelines."""
 
-    def __init__(self, port=DEFAULT_EXECUTION_SERVER_PORT, host='*', log_file_path=None, transport_mode=TransportMode.IPC):
+    def __init__(self, port=DEFAULT_EXECUTION_SERVER_PORT, host='*', log_file_path=None, transport_mode=None):
+        # Use platform-aware default if not specified (TCP on Windows, IPC on Unix/Mac)
         super().__init__(port, host, log_file_path, transport_mode=transport_mode)
         self.active_executions = {}
         self.start_time = None
