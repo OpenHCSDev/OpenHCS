@@ -9,12 +9,12 @@ from fnmatch import fnmatch
 from openhcs.io.disk import DiskStorageBackend
 from openhcs.io.metadata_writer import get_metadata_path
 from openhcs.io.exceptions import StorageResolutionError
-from openhcs.io.base import StorageBackend
+from openhcs.io.base import ReadOnlyBackend
 
 logger = logging.getLogger(__name__)
 
 
-class VirtualWorkspaceBackend(StorageBackend):
+class VirtualWorkspaceBackend(ReadOnlyBackend):
     """
     Read-only path translation layer for virtual workspace.
 
@@ -347,51 +347,4 @@ class VirtualWorkspaceBackend(StorageBackend):
         else:
             # Root is always a directory if mapping exists
             return len(self._mapping_cache) > 0
-
-    @property
-    def requires_filesystem_validation(self) -> bool:
-        """Virtual backends don't require filesystem validation."""
-        return False
-
-    # Write operations - not supported (read-only backend)
-    def save(self, data: Any, output_path: Union[str, Path], **kwargs) -> None:
-        """Not supported - virtual workspace is read-only."""
-        raise NotImplementedError("VirtualWorkspaceBackend is read-only")
-
-    def save_batch(self, data_list: List[Any], output_paths: List[Union[str, Path]], **kwargs) -> None:
-        """Not supported - virtual workspace is read-only."""
-        raise NotImplementedError("VirtualWorkspaceBackend is read-only")
-
-    def delete(self, file_path: Union[str, Path]) -> None:
-        """Not supported - virtual workspace is read-only."""
-        raise NotImplementedError("VirtualWorkspaceBackend is read-only")
-
-    def delete_all(self, file_path: Union[str, Path]) -> None:
-        """Not supported - virtual workspace is read-only."""
-        raise NotImplementedError("VirtualWorkspaceBackend is read-only")
-
-    def ensure_directory(self, directory: Union[str, Path]) -> Path:
-        """Not supported - virtual workspace is read-only."""
-        raise NotImplementedError("VirtualWorkspaceBackend is read-only")
-
-    def create_symlink(self, source: Union[str, Path], link_name: Union[str, Path]):
-        """Not supported - virtual workspace is read-only."""
-        raise NotImplementedError("VirtualWorkspaceBackend is read-only")
-
-    def is_symlink(self, source: Union[str, Path]) -> bool:
-        """Virtual workspace doesn't use symlinks."""
-        return False
-
-    def move(self, src: Union[str, Path], dst: Union[str, Path]) -> None:
-        """Not supported - virtual workspace is read-only."""
-        raise NotImplementedError("VirtualWorkspaceBackend is read-only")
-
-    def copy(self, src: Union[str, Path], dst: Union[str, Path]) -> None:
-        """Not supported - virtual workspace is read-only."""
-        raise NotImplementedError("VirtualWorkspaceBackend is read-only")
-
-    def stat(self, path: Union[str, Path]) -> Dict[str, Any]:
-        """Get file metadata by resolving to real path."""
-        real_path = self._resolve_path(path)
-        return self.disk_backend.stat(real_path)
 

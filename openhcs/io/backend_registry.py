@@ -8,15 +8,16 @@ discovered and registered when their classes are defined.
 
 import logging
 from typing import Dict
-from openhcs.io.base import DataSink, StorageBackend
+from openhcs.io.base import BackendBase, DataSink
 from openhcs.core.auto_register_meta import AutoRegisterMeta
 
 logger = logging.getLogger(__name__)
 
 _backend_instances: Dict[str, DataSink] = {}
 
-# Registry auto-created by AutoRegisterMeta on StorageBackend base class
-STORAGE_BACKENDS = StorageBackend.__registry__
+# Registry auto-created by AutoRegisterMeta on BackendBase
+# Includes both StorageBackend (read-write) and ReadOnlyBackend (read-only) subclasses
+STORAGE_BACKENDS = BackendBase.__registry__
 
 
 def get_backend_instance(backend_type: str) -> DataSink:

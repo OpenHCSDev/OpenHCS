@@ -8,7 +8,7 @@ import os
 
 # Essential imports (always available)
 from .atomic import file_lock, atomic_write_json, atomic_update_json, FileLockError, FileLockTimeoutError
-from .base import DataSink, StorageBackend, storage_registry, reset_memory_backend, ensure_storage_registry, get_backend
+from .base import BackendBase, DataSink, DataSource, ReadOnlyBackend, StorageBackend, storage_registry, reset_memory_backend, ensure_storage_registry, get_backend
 from .backend_registry import (
     get_backend_instance,
     cleanup_backend_connections, cleanup_all_backends, STORAGE_BACKENDS
@@ -26,7 +26,10 @@ from .streaming import StreamingBackend
 # and streaming backends (→ napari/fiji)
 
 __all__ = [
+    'BackendBase',
     'DataSink',
+    'DataSource',
+    'ReadOnlyBackend',
     'StorageBackend',
     'StreamingBackend',
     'storage_registry',

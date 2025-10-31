@@ -556,29 +556,31 @@ class AutoRegisterMeta(ABCMeta):
 
         # If no metaclass registry, check if base class wants auto-creation or inheritance
         if registry_dict is None:
-            # Check if class has __registry_key__ attribute (base class defining registry)
-            key_attribute = attrs.get('__registry_key__')
-            if key_attribute is not None:
-                # Auto-create registry dict and store on the class
-                registry_dict = LazyDiscoveryDict()
-                new_class.__registry__ = registry_dict
-
-                # Get other optional attributes from class
-                key_extractor = attrs.get('__key_extractor__')
-                skip_if_no_key = attrs.get('__skip_if_no_key__', True)
-                secondary_registries = attrs.get('__secondary_registries__')
-                registry_name = attrs.get('__registry_name__')
+            # First check if any parent class has __registry__ (inherit from parent)
+            # This takes priority over creating a new registry
+            for base in new_class.__mro__[1:]:  # Skip self
+                if hasattr(base, '__registry__'):
+                    registry_dict = base.__registry__
+                    key_attribute = getattr(base, '__registry_key__', None)
+                    key_extractor = getattr(base, '__key_extractor__', None)
+                    skip_if_no_key = getattr(base, '__skip_if_no_key__', True)
+                    secondary_registries = getattr(base, '__secondary_registries__', None)
+                    registry_name = getattr(base, '__registry_name__', None)
+                    break
             else:
-                # Check if any parent class has __registry__ (subclass inheriting registry)
-                for base in new_class.__mro__[1:]:  # Skip self
-                    if hasattr(base, '__registry__'):
-                        registry_dict = base.__registry__
-                        key_attribute = getattr(base, '__registry_key__', None)
-                        key_extractor = getattr(base, '__key_extractor__', None)
-                        skip_if_no_key = getattr(base, '__skip_if_no_key__', True)
-                        secondary_registries = getattr(base, '__secondary_registries__', None)
-                        registry_name = getattr(base, '__registry_name__', None)
-                        break
+                # No parent registry found - check if class explicitly defines __registry_key__
+                # (only create new registry if __registry_key__ is in the class body, not inherited)
+                key_attribute = attrs.get('__registry_key__')
+                if key_attribute is not None:
+                    # Auto-create registry dict and store on the class
+                    registry_dict = LazyDiscoveryDict()
+                    new_class.__registry__ = registry_dict
+
+                    # Get other optional attributes from class
+                    key_extractor = attrs.get('__key_extractor__')
+                    skip_if_no_key = attrs.get('__skip_if_no_key__', True)
+                    secondary_registries = attrs.get('__secondary_registries__')
+                    registry_name = attrs.get('__registry_name__')
                 else:
                     return None  # No registry configuration found
         else:
