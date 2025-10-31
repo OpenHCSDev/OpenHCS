@@ -7,38 +7,20 @@ discovered and registered when their classes are defined.
 """
 
 import logging
-from typing import Dict, Type
-from openhcs.io.base import DataSink, StorageBackend
-from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig, LazyDiscoveryDict
+from typing import Dict
+from openhcs.io.base import DataSink
+from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
 
 logger = logging.getLogger(__name__)
 
-# Global registry of storage backends - populated by metaclass with lazy auto-discovery
 STORAGE_BACKENDS = LazyDiscoveryDict()
-
-# Global registry of backend instances - created lazily
 _backend_instances: Dict[str, DataSink] = {}
 
 
-_BACKEND_REGISTRY_CONFIG = RegistryConfig(
-    registry_dict=STORAGE_BACKENDS,
-    key_attribute='_backend_type',
-    skip_if_no_key=True,
-    registry_name='storage backend'
-)
-
-
 class StorageBackendMeta(AutoRegisterMeta):
-    """
-    Metaclass for automatic registration of storage backends.
-
-    Automatically registers backend classes when they are defined,
-    eliminating the need for hardcoded registration in factory functions.
-    """
-
-    def __new__(mcs, name, bases, attrs):
-        return super().__new__(mcs, name, bases, attrs,
-                              registry_config=_BACKEND_REGISTRY_CONFIG)
+    """Metaclass for automatic registration of storage backends."""
+    __registry_dict__ = STORAGE_BACKENDS
+    __registry_key__ = '_backend_type'
 
 
 def get_backend_instance(backend_type: str) -> DataSink:

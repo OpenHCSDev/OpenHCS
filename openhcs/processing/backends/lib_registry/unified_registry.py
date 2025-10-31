@@ -34,7 +34,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from openhcs.core.xdg_paths import get_cache_file_path
 from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
-from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig, LazyDiscoveryDict
+from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
 
 logger = logging.getLogger(__name__)
 
@@ -119,20 +119,10 @@ class FunctionMetadata:
 LIBRARY_REGISTRIES = LazyDiscoveryDict()
 
 
-_LIBRARY_REGISTRY_CONFIG = RegistryConfig(
-    registry_dict=LIBRARY_REGISTRIES,
-    key_attribute='_registry_name',
-    skip_if_no_key=True,
-    registry_name='library registry'
-)
-
-
 class LibraryRegistryMeta(AutoRegisterMeta):
     """Metaclass for automatic registration of library registry classes."""
-
-    def __new__(mcs, name, bases, attrs):
-        return super().__new__(mcs, name, bases, attrs,
-                              registry_config=_LIBRARY_REGISTRY_CONFIG)
+    __registry_dict__ = LIBRARY_REGISTRIES
+    __registry_key__ = '_registry_name'
 
 
 class LibraryRegistryBase(ABC, metaclass=LibraryRegistryMeta):

@@ -16,7 +16,7 @@ from openhcs.constants.constants import (
     CONTROL_PORT_OFFSET, IPC_SOCKET_DIR_NAME, IPC_SOCKET_PREFIX, IPC_SOCKET_EXTENSION
 )
 from openhcs.core.config import TransportMode
-from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig, LazyDiscoveryDict
+from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +32,10 @@ SHARED_ACK_PORT = 7555
 # Global registry for ZMQ server classes with lazy auto-discovery
 ZMQ_SERVERS = LazyDiscoveryDict()
 
-_ZMQ_SERVER_REGISTRY_CONFIG = RegistryConfig(
-    registry_dict=ZMQ_SERVERS,
-    key_attribute='_server_type',
-    skip_if_no_key=True,
-    registry_name='ZMQ server'
-)
-
-
 class ZMQServerMeta(AutoRegisterMeta):
     """Metaclass for automatic registration of ZMQ server classes."""
-    def __new__(mcs, name, bases, attrs):
-        return super().__new__(mcs, name, bases, attrs,
-                              registry_config=_ZMQ_SERVER_REGISTRY_CONFIG)
+    __registry_dict__ = ZMQ_SERVERS
+    __registry_key__ = '_server_type'
 
 
 

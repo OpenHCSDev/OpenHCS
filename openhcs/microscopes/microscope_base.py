@@ -16,7 +16,6 @@ from openhcs.constants.constants import Backend
 # Import generic metaclass infrastructure
 from openhcs.core.auto_register_meta import (
     AutoRegisterMeta,
-    RegistryConfig,
     SecondaryRegistry,
     extract_key_from_handler_suffix,
     PRIMARY_KEY,
@@ -38,27 +37,19 @@ MICROSCOPE_HANDLERS = LazyDiscoveryDict()
 METADATA_HANDLERS = {}
 
 
-_MICROSCOPE_REGISTRY_CONFIG = RegistryConfig(
-    registry_dict=MICROSCOPE_HANDLERS,
-    key_attribute='_microscope_type',
-    key_extractor=extract_key_from_handler_suffix,
-    secondary_registries=[
+class MicroscopeHandlerMeta(AutoRegisterMeta):
+    """Metaclass for automatic registration of microscope handlers."""
+    __registry_dict__ = MICROSCOPE_HANDLERS
+    __registry_key__ = '_microscope_type'
+    __key_extractor__ = extract_key_from_handler_suffix
+    __skip_if_no_key__ = False
+    __secondary_registries__ = [
         SecondaryRegistry(
             registry_dict=METADATA_HANDLERS,
             key_source=PRIMARY_KEY,
             attr_name='_metadata_handler_class'
         )
-    ],
-    registry_name='microscope handler'
-)
-
-
-class MicroscopeHandlerMeta(AutoRegisterMeta):
-    """Metaclass for automatic registration of microscope handlers."""
-
-    def __new__(mcs, name, bases, attrs):
-        return super().__new__(mcs, name, bases, attrs,
-                              registry_config=_MICROSCOPE_REGISTRY_CONFIG)
+    ]
 
 
 def register_metadata_handler(handler_class, metadata_handler_class):

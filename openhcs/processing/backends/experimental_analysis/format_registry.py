@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple, Type
 import pandas as pd
 from pathlib import Path
 
-from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig, LazyDiscoveryDict
+from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
 
 
 @dataclass(frozen=True)
@@ -28,20 +28,10 @@ class MicroscopeFormatConfig:
 MICROSCOPE_FORMAT_REGISTRIES = LazyDiscoveryDict()
 
 
-_FORMAT_REGISTRY_CONFIG = RegistryConfig(
-    registry_dict=MICROSCOPE_FORMAT_REGISTRIES,
-    key_attribute='FORMAT_NAME',
-    skip_if_no_key=True,
-    registry_name='microscope format registry'
-)
-
-
 class MicroscopeFormatRegistryMeta(AutoRegisterMeta):
     """Metaclass for automatic registration of microscope format registry classes."""
-
-    def __new__(mcs, name, bases, attrs):
-        return super().__new__(mcs, name, bases, attrs,
-                              registry_config=_FORMAT_REGISTRY_CONFIG)
+    __registry_dict__ = MICROSCOPE_FORMAT_REGISTRIES
+    __registry_key__ = 'FORMAT_NAME'
 
 
 class MicroscopeFormatRegistryBase(ABC, metaclass=MicroscopeFormatRegistryMeta):

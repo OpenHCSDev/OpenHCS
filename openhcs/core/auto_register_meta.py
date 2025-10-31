@@ -393,7 +393,7 @@ class AutoRegisterMeta(ABCMeta):
             bases: Base classes
             attrs: Class attributes dictionary
             registry_config: Configuration for registration behavior.
-                           If None, no registration is performed (for base metaclass itself).
+                           If None, auto-configures from class attributes or skips registration.
 
         Returns:
             The newly created class
@@ -401,9 +401,11 @@ class AutoRegisterMeta(ABCMeta):
         # Create the class using ABCMeta
         new_class = super().__new__(mcs, name, bases, attrs)
 
-        # Skip registration if no config provided (base metaclass itself)
+        # Auto-configure registry if not provided but class has __registry__ attributes
         if registry_config is None:
-            return new_class
+            registry_config = mcs._auto_configure_registry(new_class, attrs)
+            if registry_config is None:
+                return new_class  # No config and no auto-config possible
 
         # Set up lazy discovery if registry dict supports it (only once for base class)
         if isinstance(registry_config.registry_dict, LazyDiscoveryDict) and not registry_config.registry_dict._config:
@@ -535,6 +537,57 @@ class AutoRegisterMeta(ABCMeta):
                 f"Class {name} must have {config.key_attribute} attribute "
                 f"or provide a key_extractor in registry config"
             )
+
+    @classmethod
+    def _auto_configure_registry(mcs, new_class: Type, attrs: dict) -> Optional[RegistryConfig]:
+        """
+        Auto-configure registry from metaclass attributes.
+
+        Looks for __registry_dict__, __registry_key__, etc. on the METACLASS.
+        If found, creates a RegistryConfig automatically.
+
+        Returns:
+            RegistryConfig if auto-configuration successful, None otherwise
+        """
+        # Check if the metaclass has __registry_dict__ attribute
+        registry_dict = getattr(mcs, '__registry_dict__', None)
+
+        if registry_dict is None:
+            return None  # No registry dict found, skip auto-config
+
+        # Get key attribute (default: _registry_key)
+        key_attribute = getattr(mcs, '__registry_key__', '_registry_key')
+
+        # Get registry name (default: derived from class name)
+        registry_name = getattr(mcs, '__registry_name__', None)
+        if registry_name is None:
+            # Derive from class name: "StorageBackend" → "storage backend"
+            # Remove common suffixes like "Base", "Meta", "Handler"
+            clean_name = new_class.__name__
+            for suffix in ['Base', 'Meta', 'Handler', 'Registry']:
+                if clean_name.endswith(suffix):
+                    clean_name = clean_name[:-len(suffix)]
+                    break
+            # Convert CamelCase to space-separated lowercase
+            import re
+            registry_name = re.sub(r'([A-Z])', r' \1', clean_name).strip().lower()
+
+        # Get other optional attributes
+        key_extractor = getattr(mcs, '__key_extractor__', None)
+        skip_if_no_key = getattr(mcs, '__skip_if_no_key__', True)
+        secondary_registries = getattr(mcs, '__secondary_registries__', None)
+
+        logger.debug(f"Auto-configured registry for {new_class.__name__}: "
+                    f"key_attribute={key_attribute}, registry_name={registry_name}")
+
+        return RegistryConfig(
+            registry_dict=registry_dict,
+            key_attribute=key_attribute,
+            key_extractor=key_extractor,
+            skip_if_no_key=skip_if_no_key,
+            secondary_registries=secondary_registries,
+            registry_name=registry_name
+        )
 
     @staticmethod
     def _register_class(cls: Type, key: str, config: RegistryConfig) -> None:
