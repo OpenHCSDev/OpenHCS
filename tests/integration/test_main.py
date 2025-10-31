@@ -21,7 +21,7 @@ from openhcs.core.config import (
     PathPlanningConfig, StepWellFilterConfig, VFSConfig, ZarrConfig,
     NapariVariableSizeHandling
 )
-from openhcs.core.config import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyFijiStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig, LazyProcessingConfig
+from openhcs.core.config import LazyStepMaterializationConfig, LazyNapariStreamingConfig, LazyFijiStreamingConfig, LazyStepWellFilterConfig, LazyPathPlanningConfig, LazyProcessingConfig, LazySequentialProcessingConfig
 from openhcs.core.orchestrator.gpu_scheduler import setup_global_gpu_registry
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.pipeline import Pipeline
@@ -415,7 +415,7 @@ def _initialize_orchestrator(test_config: TestConfig, sequential_config=None) ->
             output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
         ),
         step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
-        processing_config=LazyProcessingConfig(
+        sequential_processing_config=LazySequentialProcessingConfig(
             sequential_components=sequential_components
         ) if sequential_components else None,
         vfs_config=None,  # Inherit from global config
@@ -615,13 +615,13 @@ def _execute_pipeline_with_mode(test_config: TestConfig, pipeline: Pipeline, zmq
         # Create pipeline config with lazy configs
         # NOTE: No need to set vfs_config explicitly - the compiler will automatically
         # validate and correct the backend based on microscope compatibility
-        from openhcs.core.config import LazyPathPlanningConfig, LazyStepWellFilterConfig
+        from openhcs.core.config import LazyPathPlanningConfig, LazyStepWellFilterConfig, LazySequentialProcessingConfig
         pipeline_config = PipelineConfig(
             path_planning_config=LazyPathPlanningConfig(
                 output_dir_suffix=CONSTANTS.OUTPUT_SUFFIX
             ),
             step_well_filter_config=LazyStepWellFilterConfig(well_filter=CONSTANTS.PIPELINE_STEP_WELL_FILTER_TEST),
-            processing_config=LazyProcessingConfig(
+            sequential_processing_config=LazySequentialProcessingConfig(
                 sequential_components=sequential_components
             ) if sequential_components else None,
         )

@@ -581,6 +581,89 @@ class PipelineCompiler:
 
 
     @staticmethod
+    def analyze_pipeline_sequential_mode(
+        context: ProcessingContext,
+        global_config: 'GlobalPipelineConfig',
+        orchestrator: 'PipelineOrchestrator'
+    ) -> None:
+        """
+        Configure pipeline-wide sequential processing mode from pipeline-level config.
+        Precomputes sequential combinations at compile time.
+
+        Args:
+            context: ProcessingContext to configure
+            global_config: GlobalPipelineConfig containing SequentialProcessingConfig
+            orchestrator: PipelineOrchestrator with microscope handler for pattern discovery
+        """
+        if context.is_frozen():
+            raise AttributeError("Cannot analyze pipeline sequential mode in a frozen ProcessingContext.")
+
+        # Get pipeline-level sequential processing config
+        seq_config = global_config.sequential_processing_config
+
+        if seq_config and seq_config.sequential_components:
+            # Enable pipeline-wide sequential mode
+            context.pipeline_sequential_mode = True
+            seq_comps = tuple(sc.value for sc in seq_config.sequential_components)
+
+            # Precompute combinations at compile time
+            from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
+            pattern_engine = PatternDiscoveryEngine(
+                context.microscope_handler.parser,
+                context.filemanager
+            )
+
+            # Get backend from VFS config
+            vfs_config = global_config.vfs_config
+            backend = vfs_config.materialization_backend.value if vfs_config else 'disk'
+
+            # Discover patterns for this axis (no variable_components - we want all patterns)
+            from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSIONS
+            from openhcs.constants import GroupBy
+            patterns_by_well = context.microscope_handler.auto_detect_patterns(
+                context.input_dir,
+                context.filemanager,
+                backend=backend,
+                extensions=DEFAULT_IMAGE_EXTENSIONS,
+                group_by=None,  # No grouping - return flat list of patterns
+                variable_components=[],
+                well_filter=[context.axis_id]
+            )
+
+            if context.axis_id in patterns_by_well:
+                well_patterns = patterns_by_well[context.axis_id]
+
+                # Handle both dict (grouped) and list (ungrouped) patterns
+                if isinstance(well_patterns, dict):
+                    # Flatten dict patterns into a single list
+                    all_patterns = []
+                    for pattern_list in well_patterns.values():
+                        all_patterns.extend(pattern_list)
+                    well_patterns = all_patterns
+
+                # Subdivide by sequential components to discover combinations
+                patterns_by_combo = pattern_engine.subdivide_patterns_by_components(
+                    well_patterns, list(seq_comps)
+                )
+                context.pipeline_sequential_combinations = list(patterns_by_combo.keys())
+                logger.info(
+                    f"Pipeline sequential mode: ENABLED (components: {seq_comps}, "
+                    f"combinations: {len(context.pipeline_sequential_combinations)})"
+                )
+            else:
+                # No patterns found for this axis - disable sequential mode
+                context.pipeline_sequential_mode = False
+                context.pipeline_sequential_combinations = None
+                logger.warning(
+                    f"Pipeline sequential mode: DISABLED (no patterns found for axis {context.axis_id})"
+                )
+        else:
+            # No sequential processing configured
+            context.pipeline_sequential_mode = False
+            context.pipeline_sequential_combinations = None
+            logger.debug("Pipeline sequential mode: DISABLED (no sequential components configured)")
+
+    @staticmethod
     def validate_memory_contracts_for_context(
         context: ProcessingContext,
         steps_definition: List[AbstractStep],
@@ -960,6 +1043,7 @@ class PipelineCompiler:
                     PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                     PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, orchestrator)
                     PipelineCompiler.plan_materialization_flags_for_context(context, pipeline_definition, orchestrator)
+                    PipelineCompiler.analyze_pipeline_sequential_mode(context, context.global_config, orchestrator)
                     PipelineCompiler.validate_memory_contracts_for_context(context, pipeline_definition, orchestrator)
                     PipelineCompiler.assign_gpu_resources_for_context(context)
 

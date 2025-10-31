@@ -27,6 +27,9 @@ class ProcessingContext:
         axis_id: Identifier of the multiprocessing axis value being processed.
         filemanager: Instance of FileManager for VFS operations.
         global_config: GlobalPipelineConfig holding system-wide configurations.
+        pipeline_sequential_mode: Flag indicating pipeline-wide vs step-wide sequential processing.
+        pipeline_sequential_combinations: Pre-computed sequential combinations for pipeline-wide mode.
+        current_sequential_combination: Active combination during pipeline-wide sequential execution.
         _is_frozen: Internal flag indicating if the context is immutable.
     """
 
@@ -58,6 +61,11 @@ class ProcessingContext:
         self.global_config = global_config # Store the global config
         self.filemanager = None # Expected to be set by Orchestrator via kwargs or direct assignment
 
+        # Pipeline-wide sequential processing fields
+        self.pipeline_sequential_mode = False
+        object.__setattr__(self, 'pipeline_sequential_combinations', None)  # Mutable field, excluded from freeze
+        object.__setattr__(self, 'current_sequential_combination', None)  # Mutable field, excluded from freeze
+
         # Add any additional attributes from kwargs
         # Note: 'filemanager' is often passed via kwargs by PipelineOrchestrator.create_context
         for key, value in kwargs.items():
@@ -66,8 +74,11 @@ class ProcessingContext:
     def __setattr__(self, name: str, value: Any) -> None:
         """
         Set an attribute, preventing modification if the context is frozen.
+
+        Exceptions: pipeline_sequential_combinations and current_sequential_combination
+        are mutable even when frozen, allowing runtime discovery and iteration.
         """
-        if getattr(self, '_is_frozen', False) and name != '_is_frozen':
+        if getattr(self, '_is_frozen', False) and name not in ('_is_frozen', 'pipeline_sequential_combinations', 'current_sequential_combination'):
             raise AttributeError(f"Cannot modify attribute '{name}' of a frozen ProcessingContext.")
         super().__setattr__(name, value)
 

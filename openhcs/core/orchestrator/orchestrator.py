@@ -730,7 +730,7 @@ class PipelineOrchestrator(ContextProvider):
                     'total_steps': len(pipeline_definition)
                 })
             except Exception as e:
-                logger.warning(f"Progress callback failed for axis {axis_id} start: {e}")
+                logger.warning(f"Progress_callback failed for axis {axis_id} start: {e}")
 
         # NUCLEAR VALIDATION
         if not frozen_context.is_frozen():
@@ -743,13 +743,23 @@ class PipelineOrchestrator(ContextProvider):
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
-        # Step IDs are consistent since pipeline_definition comes from UI (no remapping needed)
+        # Type-driven dispatch: pipeline-wide vs step-wide sequential
+        return (self._execute_pipeline_sequential(pipeline_definition, frozen_context, visualizer)
+                if frozen_context.pipeline_sequential_mode
+                else self._execute_step_sequential(pipeline_definition, frozen_context, visualizer))
 
-        logger.info(f"🔥 SINGLE_AXIS: Processing {len(pipeline_definition)} steps for axis {axis_id}")
+    def _execute_step_sequential(
+        self,
+        pipeline_definition: List[AbstractStep],
+        frozen_context: ProcessingContext,
+        visualizer: Optional[NapariVisualizerType]
+    ) -> Dict[str, Any]:
+        """Execute pipeline with step-wide sequential processing (current behavior)."""
+        axis_id = frozen_context.axis_id
+        logger.info(f"🔥 SINGLE_AXIS: Processing {len(pipeline_definition)} steps for axis {axis_id} (step-wide sequential)")
 
         for step_index, step in enumerate(pipeline_definition):
             step_name = frozen_context.step_plans[step_index]["step_name"]
-
             logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
             # Send progress: step started
@@ -762,7 +772,7 @@ class PipelineOrchestrator(ContextProvider):
                 except Exception as e:
                     logger.warning(f"Progress callback failed for axis {axis_id} step {step_name} start: {e}")
 
-            # Verify step has process method (should always be true for AbstractStep subclasses)
+            # Verify step has process method
             if not hasattr(step, 'process'):
                 error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} missing process method for axis {axis_id}"
                 logger.error(error_msg)
@@ -782,14 +792,6 @@ class PipelineOrchestrator(ContextProvider):
                 except Exception as e:
                     logger.warning(f"Progress callback failed for axis {axis_id} step {step_name} completion: {e}")
 
-    #        except Exception as step_error:
-    #            import traceback
-    #            full_traceback = traceback.format_exc()
-    #            error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} ({step_id}) failed for axis {axis_id}: {step_error}"
-    #            logger.error(error_msg, exc_info=True)
-    #            logger.error(f"🔥 SINGLE_AXIS TRACEBACK for axis {axis_id}, step {step_index+1} ({step_id}):\n{full_traceback}")
-    #            raise RuntimeError(error_msg) from step_error
-
             if visualizer:
                 step_plan = frozen_context.step_plans[step_index]
                 if step_plan['visualize']:
@@ -805,7 +807,7 @@ class PipelineOrchestrator(ContextProvider):
                         )
                     else:
                         logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
-        
+
         logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
 
         # Send progress: axis completed
@@ -816,6 +818,47 @@ class PipelineOrchestrator(ContextProvider):
                 })
             except Exception as e:
                 logger.warning(f"Progress callback failed for axis {axis_id} completion: {e}")
+
+        return {"status": "success", "axis_id": axis_id}
+
+    def _execute_pipeline_sequential(
+        self,
+        pipeline_definition: List[AbstractStep],
+        frozen_context: ProcessingContext,
+        visualizer: Optional[NapariVisualizerType]
+    ) -> Dict[str, Any]:
+        """Execute pipeline with pipeline-wide sequential processing.
+
+        Combinations are precomputed at compile time and stored in context.pipeline_sequential_combinations.
+        Loop: combinations → steps (process one combo through all steps before moving to next).
+        """
+        axis_id = frozen_context.axis_id
+
+        # Combinations were precomputed at compile time
+        combinations = frozen_context.pipeline_sequential_combinations or []
+
+        if not combinations:
+            logger.warning(f"Pipeline sequential mode enabled but no combinations found for axis {axis_id}")
+            # Fallback to normal execution
+            for step_index, step in enumerate(pipeline_definition):
+                step.process(frozen_context, step_index)
+        else:
+            logger.info(f"🔄 PIPELINE_SEQUENTIAL: {len(combinations)} combinations for axis {axis_id}")
+
+            # Loop: combinations → steps
+            for combo in combinations:
+                frozen_context.current_sequential_combination = combo
+                logger.debug(f"🔄 Processing combination: {combo}")
+                for step_index, step in enumerate(pipeline_definition):
+                    step.process(frozen_context, step_index)
+
+        frozen_context.current_sequential_combination = None
+
+        if self.progress_callback:
+            try:
+                self.progress_callback(axis_id, 'pipeline', 'completed', {'total_steps': len(pipeline_definition)})
+            except Exception as e:
+                logger.warning(f"Progress callback failed: {e}")
 
         return {"status": "success", "axis_id": axis_id}
 

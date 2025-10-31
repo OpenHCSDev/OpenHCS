@@ -211,56 +211,10 @@ class FuncStepContractValidator:
             step.processing_config = ProcessingConfig(
                 variable_components=step.processing_config.variable_components,
                 group_by=None,
-                input_source=step.processing_config.input_source,
-                sequential_components=step.processing_config.sequential_components
+                input_source=step.processing_config.input_source
             )
 
-        # Validate and filter sequential processing configuration
-        proc_config = step.processing_config
-        if proc_config and proc_config.sequential_components:
-            seq_comp_values = {sc.value for sc in proc_config.sequential_components}
-            var_comp_values = {vc.value for vc in proc_config.variable_components}
-
-            # Filter out conflicting components instead of raising an error
-            conflicts = seq_comp_values & var_comp_values
-            if conflicts:
-                # Remove conflicting components from sequential_components
-                filtered_seq_comps = [sc for sc in proc_config.sequential_components
-                                     if sc.value not in conflicts]
-
-                if filtered_seq_comps:
-                    logger.warning(
-                        f"Step '{step_name}': Filtered out components {conflicts} from sequential_components "
-                        f"because they conflict with variable_components. "
-                        f"Remaining sequential_components: {[sc.value for sc in filtered_seq_comps]}"
-                    )
-                    # Update the processing config with filtered components
-                    from openhcs.core.config import ProcessingConfig
-                    step.processing_config = ProcessingConfig(
-                        variable_components=proc_config.variable_components,
-                        group_by=proc_config.group_by,
-                        input_source=proc_config.input_source,
-                        sequential_components=filtered_seq_comps
-                    )
-                else:
-                    logger.warning(
-                        f"Step '{step_name}': All sequential_components {seq_comp_values} conflict with "
-                        f"variable_components. Sequential processing disabled for this step."
-                    )
-                    # Disable sequential processing for this step
-                    from openhcs.core.config import ProcessingConfig
-                    step.processing_config = ProcessingConfig(
-                        variable_components=proc_config.variable_components,
-                        group_by=proc_config.group_by,
-                        input_source=proc_config.input_source,
-                        sequential_components=None
-                    )
-
-            # Check for duplicates in the (potentially filtered) sequential_components
-            if step.processing_config.sequential_components:
-                seq_comp_values_after = {sc.value for sc in step.processing_config.sequential_components}
-                if len(seq_comp_values_after) != len(step.processing_config.sequential_components):
-                    raise ValueError(f"Step '{step_name}': sequential_components contains duplicates")
+        # Sequential processing validation removed - it's now pipeline-level, not per-step
 
         # Validate step configuration after auto-resolution
         validation_result = validator.validate_step(

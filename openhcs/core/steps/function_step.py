@@ -202,7 +202,8 @@ def _bulk_preload_step_images(
         all_files = [f for p in patterns_to_preload
                      for f in microscope_handler.path_list_from_pattern(
                          str(step_input_dir), p, filemanager, read_backend, variable_components)]
-        full_file_paths = list(set(all_files))
+        # Ensure full paths (prepend directory if needed)
+        full_file_paths = [str(step_input_dir / f) if not Path(f).is_absolute() else f for f in set(all_files)]
     else:
         # Normal mode: get all files for well
         get_paths_for_axis = create_image_path_getter(axis_id, filemanager, microscope_handler)
@@ -228,7 +229,7 @@ def _bulk_preload_step_images(
             logger.debug(f"🔄 BULK PRELOAD: Deleted existing file {file_path} before bulk preload")
 
     filemanager.save_batch(raw_images, full_file_paths, Backend.MEMORY.value)
-    logger.debug(f"🔄 BULK PRELOAD: Saving {file_path} to memory")
+    logger.info(f"🔄 BULK PRELOAD: Saved {len(full_file_paths)} files to memory for well {axis_id}")
 
     # Clean up source references - keep only memory backend references
     del raw_images
@@ -895,10 +896,9 @@ class FunctionStep(AbstractStep):
             logger.info(f"Step {step_index} ({step_name}) I/O: read='{read_backend}', write='{write_backend}'.")
             logger.info(f"Step {step_index} ({step_name}) Paths: input_dir='{step_input_dir}', output_dir='{step_output_dir}', same_dir={same_dir}")
 
-            # 🔄 MATERIALIZATION READ: Bulk preload if not reading from memory
-            if read_backend != Backend.MEMORY.value:
-                _bulk_preload_step_images(step_input_dir, step_output_dir, axis_id, read_backend,
-                                        patterns_by_well,filemanager, microscope_handler, step_plan["zarr_config"])
+            # Import psutil for memory logging
+            import psutil
+            import os
 
             # 🔄 INPUT CONVERSION: Convert loaded input data to zarr if configured
             if "input_conversion_dir" in step_plan:
@@ -966,89 +966,109 @@ class FunctionStep(AbstractStep):
             if isinstance(func_from_plan, dict):
                 logger.info(f"🔍 DICT_PATTERN: func_from_plan keys: {list(func_from_plan.keys())}")
 
-            # Check if sequential processing is enabled
-            seq_config = step_plan.get("sequential_processing")
-            if seq_config and seq_config.sequential_components:
-                # Sequential processing: subdivide and iterate over combinations
+            # Pipeline-wide sequential: filter patterns to current combination
+            if context.current_sequential_combination:
+                return self._process_single_combination(
+                    context, step_index, grouped_patterns, comp_to_funcs, comp_to_base_args,
+                    variable_components, context.current_sequential_combination
+                )
+
+            # Unified processing loop: handles both sequential and non-sequential cases
+            # Sequential processing is pipeline-level, not per-step
+            seq_config = context.global_config.sequential_processing_config
+            is_sequential = seq_config and seq_config.sequential_components
+
+            if is_sequential:
                 seq_comps = [sc.value for sc in seq_config.sequential_components]
                 var_comps = [vc.value for vc in variable_components] if variable_components else []
-
-                # Create pattern engine for subdividing patterns
                 from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
                 pattern_engine = PatternDiscoveryEngine(context.microscope_handler.parser, filemanager)
 
-                for comp_val, current_pattern_list in grouped_patterns.items():
+            process = psutil.Process(os.getpid())
+
+            # Process each component value
+            for comp_val, current_pattern_list in grouped_patterns.items():
+                exec_func_or_chain = comp_to_funcs[comp_val]
+                base_kwargs = comp_to_base_args[comp_val]
+
+                # Determine combinations to process
+                if is_sequential:
                     # Subdivide patterns by sequential components
                     patterns_by_combo = pattern_engine.subdivide_patterns_by_components(
                         current_pattern_list, seq_comps
                     )
-
                     logger.info(f"🔄 SEQUENTIAL: Processing component '{comp_val}' with {len(patterns_by_combo)} sequential combinations")
+                else:
+                    # Non-sequential: treat all patterns as a single "combination"
+                    patterns_by_combo = {('all',): current_pattern_list}
+                    logger.info(f"🔍 DICT_PATTERN: Processing component '{comp_val}' with {len(current_pattern_list)} patterns")
 
-                    # Iterate over each combination
-                    for combo_key, combo_patterns in patterns_by_combo.items():
+                # Process each combination
+                for combo_key, combo_patterns in patterns_by_combo.items():
+                    if is_sequential:
                         logger.info(f"🔄 SEQUENTIAL: Processing combination {combo_key} with {len(combo_patterns)} patterns")
-                        # Bulk preload for this combination only
-                        if read_backend != Backend.MEMORY.value:
+
+                    # Preload files for this combination
+                    if read_backend != Backend.MEMORY.value:
+                        mem_before_mb = process.memory_info().rss / 1024 / 1024
+                        combo_label = f"{combo_key}" if is_sequential else "all patterns"
+                        logger.info(f"📊 MEMORY: Before preload for {combo_label}: {mem_before_mb:.1f} MB RSS")
+
+                        if is_sequential:
+                            # Sequential: preload only this combination's patterns
                             _bulk_preload_step_images(
                                 step_input_dir, step_output_dir, axis_id, read_backend,
                                 patterns_by_well, filemanager, context.microscope_handler, step_plan["zarr_config"],
                                 patterns_to_preload=combo_patterns, variable_components=var_comps
                             )
-
-                        # Process patterns in this combination
-                        exec_func_or_chain = comp_to_funcs[comp_val]
-                        base_kwargs = comp_to_base_args[comp_val]
-                        for pattern_item in combo_patterns:
-                            _process_single_pattern_group(
-                                context, pattern_item, exec_func_or_chain, base_kwargs,
-                                step_input_dir, step_output_dir, axis_id, comp_val,
-                                read_backend, write_backend, input_mem_type, output_mem_type,
-                                device_id, same_dir,
-                                special_inputs, special_outputs,
-                                step_plan["zarr_config"],
-                                variable_components, step_index
+                        else:
+                            # Non-sequential: preload all patterns
+                            _bulk_preload_step_images(
+                                step_input_dir, step_output_dir, axis_id, read_backend,
+                                patterns_by_well, filemanager, microscope_handler, step_plan["zarr_config"]
                             )
 
-                        # Clear memory after this combination
-                        # Only clear files that were loaded for this specific combination
-                        if read_backend != Backend.MEMORY.value:
-                            try:
-                                # Get the specific files that were loaded for this combination
-                                combo_files = [f for p in combo_patterns
-                                             for f in microscope_handler.path_list_from_pattern(
-                                                 str(step_input_dir), p, filemanager, read_backend, var_comps)]
-                                combo_file_set = set(combo_files)
+                        mem_after_mb = process.memory_info().rss / 1024 / 1024
+                        logger.info(f"📊 MEMORY: After preload for {combo_label}: {mem_after_mb:.1f} MB RSS (+{mem_after_mb - mem_before_mb:.1f} MB)")
 
-                                # Delete only the files from this combination
-                                deleted_count = 0
-                                for file_path in combo_file_set:
-                                    try:
-                                        if filemanager.exists(file_path, Backend.MEMORY.value):
-                                            filemanager.delete(file_path, Backend.MEMORY.value)
-                                            deleted_count += 1
-                                    except Exception as e:
-                                        logger.warning(f"Failed to delete memory file {file_path}: {e}")
-                                logger.info(f"🔄 SEQUENTIAL: Cleared {deleted_count} preloaded files from memory for combination {combo_key}")
-                            except Exception as e:
-                                logger.warning(f"Failed to clear memory files for combination {combo_key}: {e}")
-            else:
-                # Normal processing (existing code)
-                for comp_val, current_pattern_list in grouped_patterns.items():
-                    logger.info(f"🔍 DICT_PATTERN: Processing component '{comp_val}' with {len(current_pattern_list)} patterns")
-                    exec_func_or_chain = comp_to_funcs[comp_val]
-                    base_kwargs = comp_to_base_args[comp_val]
-                    logger.info(f"🔍 DICT_PATTERN: Component '{comp_val}' exec_func_or_chain: {exec_func_or_chain}")
-                    for pattern_item in current_pattern_list:
+                    # Process patterns in this combination
+                    for pattern_item in combo_patterns:
                         _process_single_pattern_group(
                             context, pattern_item, exec_func_or_chain, base_kwargs,
                             step_input_dir, step_output_dir, axis_id, comp_val,
                             read_backend, write_backend, input_mem_type, output_mem_type,
                             device_id, same_dir,
-                            special_inputs, special_outputs, # Pass the maps from step_plan
+                            special_inputs, special_outputs,
                             step_plan["zarr_config"],
-                            variable_components, step_index  # Pass step_index for funcplan lookup
-                    )
+                            variable_components, step_index
+                        )
+
+                    # Clear memory after this combination (only for sequential processing)
+                    if is_sequential and read_backend != Backend.MEMORY.value:
+                        try:
+                            # Get the specific files that were loaded for this combination
+                            combo_files = [f for p in combo_patterns
+                                         for f in microscope_handler.path_list_from_pattern(
+                                             str(step_input_dir), p, filemanager, read_backend, var_comps)]
+                            # Convert to full paths (same as in preload)
+                            combo_file_set = set(str(step_input_dir / f) if not Path(f).is_absolute() else f for f in combo_files)
+
+                            # Delete only the files from this combination
+                            deleted_count = 0
+                            for file_path in combo_file_set:
+                                try:
+                                    if filemanager.exists(file_path, Backend.MEMORY.value):
+                                        filemanager.delete(file_path, Backend.MEMORY.value)
+                                        deleted_count += 1
+                                except Exception as e:
+                                    logger.warning(f"Failed to delete memory file {file_path}: {e}")
+
+                            # Log memory usage after clearing
+                            mem_after_clear_mb = process.memory_info().rss / 1024 / 1024
+                            logger.info(f"🔄 SEQUENTIAL: Cleared {deleted_count} preloaded files from memory for combination {combo_key}")
+                            logger.info(f"📊 MEMORY: After clearing {combo_key}: {mem_after_clear_mb:.1f} MB RSS")
+                        except Exception as e:
+                            logger.warning(f"Failed to clear memory files for combination {combo_key}: {e}")
             logger.info(f"🔥 STEP: Completed processing for '{step_name}' well {axis_id}.")
 
             # 📄 MATERIALIZATION WRITE: Only if not writing to memory
@@ -1480,3 +1500,50 @@ def _update_metadata_for_zarr_conversion(
         writer = AtomicMetadataWriter()
         writer.merge_subdirectory_metadata(metadata_path, {original_subdir: {"available_backends": {"zarr": True}}})
         logger.info(f"Updated metadata: {original_subdir} now has zarr backend")
+
+    def _process_single_combination(
+        self, context, step_index, grouped_patterns, comp_to_funcs, comp_to_base_args,
+        variable_components, target_combo
+    ):
+        """Process only patterns matching target_combo in pipeline-wide sequential mode."""
+        from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
+        pattern_engine = PatternDiscoveryEngine(context.microscope_handler.parser, context.filemanager)
+
+        step_plan = context.step_plans[step_index]
+        # Sequential processing is pipeline-level, not per-step
+        seq_config = context.global_config.sequential_processing_config
+        if not seq_config or not seq_config.sequential_components:
+            raise RuntimeError("_process_single_combination called but sequential processing is not configured")
+        seq_comps = [sc.value for sc in seq_config.sequential_components]
+
+        # Process each component value, filtering to target_combo
+        for comp_val, current_pattern_list in grouped_patterns.items():
+            patterns_by_combo = pattern_engine.subdivide_patterns_by_components(current_pattern_list, seq_comps)
+
+            if target_combo in patterns_by_combo:
+                combo_patterns = patterns_by_combo[target_combo]
+                exec_func_or_chain = comp_to_funcs[comp_val]
+                base_kwargs = comp_to_base_args[comp_val]
+
+                # Extract step plan fields
+                step_input_dir = step_plan['input_dir']
+                step_output_dir = step_plan['output_dir']
+                axis_id = context.axis_id
+                read_backend = step_plan['read_backend']
+                write_backend = step_plan['write_backend']
+                input_mem_type = step_plan.get('input_memory_type_hint')
+                output_mem_type = step_plan.get('output_memory_type_hint')
+                device_id = step_plan.get('device_id')
+                same_dir = step_plan.get('same_dir', False)
+                special_inputs = step_plan.get('special_inputs', {})
+                special_outputs = step_plan.get('special_outputs', {})
+
+                # Process patterns
+                for pattern_item in combo_patterns:
+                    _process_single_pattern_group(
+                        context, pattern_item, exec_func_or_chain, base_kwargs,
+                        step_input_dir, step_output_dir, axis_id, comp_val,
+                        read_backend, write_backend, input_mem_type, output_mem_type,
+                        device_id, same_dir, special_inputs, special_outputs,
+                        step_plan["zarr_config"], variable_components, step_index
+                    )
