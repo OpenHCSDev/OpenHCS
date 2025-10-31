@@ -33,8 +33,14 @@ class ZMQExecutionServer(ZMQServer):
         # Execution queue for sequential processing
         self.execution_queue = queue.Queue()
         self.queue_worker_thread = None
+        # Don't start queue worker here - it will be started in start() after _running is set to True
+
+    def start(self):
+        """Override start to also start the queue worker thread after server is running."""
+        super().start()
+        # Now that _running is True, start the queue worker
         self._start_queue_worker()
-    
+
     def _create_pong_response(self):
         running = [(eid, r) for eid, r in self.active_executions.items()
                    if r.get(MessageFields.STATUS) == ExecutionStatus.RUNNING.value]
