@@ -11,7 +11,7 @@ import logging
 import sys
 import platform
 
-__version__ = "0.3.9"
+__version__ = "0.3.10"
 
 # Force UTF-8 encoding for stdout/stderr on Windows
 # This ensures emoji and Unicode characters work in console output
