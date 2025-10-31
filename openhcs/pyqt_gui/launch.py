@@ -36,18 +36,46 @@ def is_wsl() -> bool:
 
 
 def setup_qt_platform():
-    """Setup Qt platform for different environments, especially WSL2."""
+    """Setup Qt platform for different environments (macOS, Linux, WSL2, Windows)."""
+    import platform
+    from pathlib import Path
+
     # Check if QT_QPA_PLATFORM is already set
     if 'QT_QPA_PLATFORM' in os.environ:
         logging.debug(f"QT_QPA_PLATFORM already set to: {os.environ['QT_QPA_PLATFORM']}")
         return
 
-    # For WSL2, we need to explicitly set the platform to xcb
-    if is_wsl():
+    # Set appropriate Qt platform based on OS
+    if platform.system() == 'Darwin':  # macOS
+        os.environ['QT_QPA_PLATFORM'] = 'cocoa'
+        logging.info("macOS detected - setting QT_QPA_PLATFORM=cocoa")
+
+        # Set plugin path to help Qt find the cocoa plugin
+        # Try to find PyQt6 installation directory
+        if 'QT_QPA_PLATFORM_PLUGIN_PATH' not in os.environ:
+            try:
+                import PyQt6
+                pyqt6_path = Path(PyQt6.__file__).parent
+                plugin_path = pyqt6_path / 'Qt6' / 'plugins' / 'platforms'
+                if plugin_path.exists():
+                    os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = str(plugin_path.parent)
+                    logging.info(f"Set QT_QPA_PLATFORM_PLUGIN_PATH to: {plugin_path.parent}")
+                else:
+                    logging.warning(f"PyQt6 plugins directory not found at: {plugin_path}")
+            except Exception as e:
+                logging.warning(f"Could not set QT_QPA_PLATFORM_PLUGIN_PATH: {e}")
+
+    elif platform.system() == 'Linux':
         os.environ['QT_QPA_PLATFORM'] = 'xcb'
-        logging.info("WSL2 detected - setting QT_QPA_PLATFORM=xcb")
+        if is_wsl():
+            logging.info("WSL2 detected - setting QT_QPA_PLATFORM=xcb")
+        else:
+            logging.info("Linux detected - setting QT_QPA_PLATFORM=xcb")
+        # Disable shared memory for X11 (helps with display issues)
+        os.environ['QT_X11_NO_MITSHM'] = '1'
+    # Windows doesn't need QT_QPA_PLATFORM set
     else:
-        logging.debug("Not running in WSL2 - using default Qt platform")
+        logging.debug(f"Platform {platform.system()} - using default Qt platform")
 
 
 def setup_logging(log_level: str = "INFO", log_file: Optional[Path] = None):
