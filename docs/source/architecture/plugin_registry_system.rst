@@ -56,21 +56,18 @@ Traditional plugin systems require extensive boilerplate:
 
 .. code-block:: python
 
-   # Base class with metaclass configuration
+   # Base class with registry configuration as class attributes
    class MicroscopeHandler(metaclass=AutoRegisterMeta):
-       _registry_config = RegistryConfig(
-           registry_dict=LazyDiscoveryDict(),
-           key_attribute='FORMAT_NAME',
-           skip_if_no_key=True,
-           log_registration=True,
-           registry_name='microscope handler registry'
-           # discovery_package auto-inferred from module!
-       )
-   
+       __registry_key__ = 'FORMAT_NAME'
+       # That's it! Registry auto-created, discovery auto-configured!
+
+   # Access the auto-created registry
+   MICROSCOPE_HANDLERS = MicroscopeHandler.__registry__
+
    # Plugin auto-registers on definition
    class ImageXpressHandler(MicroscopeHandler):
        FORMAT_NAME = 'imagexpress'  # That's it!
-   
+
    # Discovery happens automatically on first access
    handler = MICROSCOPE_HANDLERS['imagexpress']  # Auto-discovers all handlers
 
@@ -100,51 +97,82 @@ registers concrete classes in configured registries:
 **Registration Flow**:
 
 1. Class definition triggers ``AutoRegisterMeta.__new__()``
-2. Metaclass checks if class is abstract (has abstract methods)
-3. If concrete, extracts registration key from ``key_attribute``
-4. Registers class in primary registry
-5. Registers in secondary registries if configured
-6. Sets up lazy discovery on first registry access
+2. Metaclass auto-configures registry from class attributes (or inherits from parent)
+3. Metaclass checks if class is abstract (has abstract methods)
+4. If concrete, extracts registration key from ``key_attribute``
+5. Registers class in primary registry
+6. Registers in secondary registries if configured
+7. Sets up lazy discovery on first registry access
 
-RegistryConfig Dataclass
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Auto-Configuration from Class Attributes
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configuration for plugin registration behavior:
+The metaclass automatically configures registries from class attributes - **no manual
+RegistryConfig needed**:
+
+.. code-block:: python
+
+   # ZERO BOILERPLATE - Just set class attributes!
+   class BackendBase(metaclass=AutoRegisterMeta):
+       __registry_key__ = '_backend_type'  # Required: attribute name for registration key
+       __key_extractor__ = None            # Optional: function to derive key from class name
+       __skip_if_no_key__ = True           # Optional: skip registration if key is None
+       __secondary_registries__ = None     # Optional: list of SecondaryRegistry objects
+       __registry_name__ = None            # Optional: human-readable registry name
+
+   # Registry auto-created and stored on the class!
+   STORAGE_BACKENDS = BackendBase.__registry__  # LazyDiscoveryDict auto-created
+
+   # Child classes inherit the registry - no duplication!
+   class StorageBackend(BackendBase, DataSource, DataSink):
+       pass  # Inherits BackendBase.__registry__ automatically
+
+   class ReadOnlyBackend(BackendBase, DataSource):
+       pass  # Also inherits BackendBase.__registry__
+
+**Auto-Configuration Logic**:
+
+1. **Check parent classes first**: If any parent has ``__registry__``, inherit it
+2. **Create new registry**: If class defines ``__registry_key__`` in its body, create new registry
+3. **Skip registration**: If no registry found and no ``__registry_key__``, skip
+
+**Auto-Inference**:
+
+- ``discovery_package``: Auto-inferred from base class module (e.g., ``openhcs.io.base`` → ``openhcs.io``)
+- ``discovery_recursive``: Auto-detected by checking if package has subpackages with ``__init__.py``
+- ``registry_name``: Auto-derived from class name (e.g., ``StorageBackend`` → ``"storage backend"``)
+
+RegistryConfig Dataclass (Legacy/Advanced)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For advanced use cases, you can still use explicit ``RegistryConfig``:
 
 .. code-block:: python
 
    @dataclass(frozen=True)
    class RegistryConfig:
        """Configuration for automatic plugin registration."""
-       
+
        # Primary registry
        registry_dict: RegistryDict
        key_attribute: str
        key_extractor: Optional[Callable] = None
        skip_if_no_key: bool = False
-       
+
        # Secondary registries (e.g., metadata handlers)
        secondary_registries: Optional[list[SecondaryRegistry]] = None
-       
+
        # Discovery configuration
        discovery_package: Optional[str] = None  # Auto-inferred if None!
        discovery_recursive: bool = True
        discovery_function: Optional[Callable] = None
-       
+
        # Logging
        log_registration: bool = False
        registry_name: str = 'registry'
 
-**Key Parameters**:
-
-- ``registry_dict``: Dictionary to register plugins into (usually ``LazyDiscoveryDict``)
-- ``key_attribute``: Class attribute containing registration key (e.g., ``'FORMAT_NAME'``)
-- ``key_extractor``: Optional function to derive key from class name
-- ``skip_if_no_key``: If ``True``, skip registration when key is ``None`` (for abstract bases)
-- ``secondary_registries``: List of secondary registries to populate
-- ``discovery_package``: Package to search for plugins (auto-inferred from base class module!)
-- ``discovery_recursive``: Whether to search subpackages recursively
-- ``log_registration``: Whether to log each registration
+**Note**: The auto-configuration approach is preferred for new code. Explicit ``RegistryConfig``
+is only needed for complex scenarios with custom discovery functions or multiple secondary registries.
 
 LazyDiscoveryDict
 ~~~~~~~~~~~~~~~~~
@@ -209,6 +237,48 @@ Dictionary subclass for secondary registries that auto-triggers primary discover
 **Auto-Wrapping**: The metaclass automatically wraps plain dict secondary registries
 with ``SecondaryRegistryDict`` - no manual wrapping needed!
 
+Registry Inheritance Pattern
+----------------------------
+
+Multiple classes can share the same registry via inheritance:
+
+.. code-block:: python
+
+   # Base class creates the registry
+   class BackendBase(metaclass=AutoRegisterMeta):
+       __registry_key__ = '_backend_type'
+       # Registry auto-created: BackendBase.__registry__
+
+   # Child classes inherit the registry
+   class StorageBackend(BackendBase, DataSource, DataSink):
+       pass  # Inherits BackendBase.__registry__
+
+   class ReadOnlyBackend(BackendBase, DataSource):
+       pass  # Also inherits BackendBase.__registry__
+
+   # All three classes share the SAME registry dict
+   assert StorageBackend.__registry__ is BackendBase.__registry__
+   assert ReadOnlyBackend.__registry__ is BackendBase.__registry__
+
+   # Concrete implementations register in the shared registry
+   class DiskStorageBackend(StorageBackend):
+       _backend_type = 'disk'  # Registers in BackendBase.__registry__
+
+   class VirtualWorkspaceBackend(ReadOnlyBackend):
+       _backend_type = 'virtual_workspace'  # Also registers in BackendBase.__registry__
+
+**Inheritance Logic**:
+
+1. **Check parent classes first**: Metaclass checks ``__mro__`` for existing ``__registry__``
+2. **Inherit if found**: Use parent's registry instead of creating new one
+3. **Create only if needed**: Only create new registry if ``__registry_key__`` is defined in class body
+
+**Benefits**:
+
+- ✅ Single source of truth for all related plugins
+- ✅ Clean interface hierarchy without registry duplication
+- ✅ Subclasses can specialize behavior while sharing registration
+
 Auto-Inference Features
 ------------------------
 
@@ -219,15 +289,12 @@ The metaclass automatically infers the discovery package from the base class mod
 
 .. code-block:: python
 
-   # Base class in openhcs/microscopes/microscope_base.py
-   class MicroscopeHandler(metaclass=AutoRegisterMeta):
-       _registry_config = RegistryConfig(
-           registry_dict=LazyDiscoveryDict(),
-           key_attribute='FORMAT_NAME',
-           # discovery_package NOT specified - will be auto-inferred!
-       )
-   
-   # Metaclass auto-infers: 'openhcs.microscopes'
+   # Base class in openhcs/io/base.py
+   class BackendBase(metaclass=AutoRegisterMeta):
+       __registry_key__ = '_backend_type'
+       # discovery_package auto-inferred: 'openhcs.io'
+
+   # Metaclass auto-infers: 'openhcs.io'
    # (Extracts package by removing last component from module path)
 
 **Inference Logic**:
@@ -235,9 +302,23 @@ The metaclass automatically infers the discovery package from the base class mod
 .. code-block:: python
 
    # Extract package from base class module
-   # 'openhcs.microscopes.microscope_base' → 'openhcs.microscopes'
+   # 'openhcs.io.base' → 'openhcs.io'
    module_parts = base_class.__module__.rsplit('.', 1)
    inferred_package = module_parts[0] if len(module_parts) > 1 else base_class.__module__
+
+Discovery Recursive Auto-Detection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The metaclass automatically detects if discovery should be recursive:
+
+.. code-block:: python
+
+   # Checks if discovery package has subdirectories with __init__.py
+   # If yes: discovery_recursive = True
+   # If no: discovery_recursive = False
+
+   # Example: openhcs.io has subdirectories → recursive=True
+   # Example: openhcs.constants has no subdirectories → recursive=False
 
 Secondary Registry Auto-Wrapping
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -344,35 +425,54 @@ Example 1: Microscope Handler Registry
 - ``omero`` → ``OMEROHandler``
 - ``openhcsdata`` → ``OpenHCSMicroscopeHandler``
 
-Example 2: Storage Backend Registry
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Example 2: Storage Backend Registry (ZERO Boilerplate)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Registry Setup** (``openhcs/io/backend_registry.py``):
+**Registry Setup** (``openhcs/io/base.py``):
 
 .. code-block:: python
 
-   STORAGE_BACKENDS = LazyDiscoveryDict()
-   
-   class StorageBackend(ABC, metaclass=AutoRegisterMeta):
-       """Base class for storage backends."""
-       
-       _registry_config = RegistryConfig(
-           registry_dict=STORAGE_BACKENDS,
-           key_attribute='BACKEND_NAME',
-           skip_if_no_key=True,
-           log_registration=True,
-           registry_name='storage backend registry'
-           # discovery_package auto-inferred: 'openhcs.io'
-       )
+   # ZERO BOILERPLATE - Just class attributes!
+   class BackendBase(metaclass=AutoRegisterMeta):
+       """Base class for all storage backends."""
+       __registry_key__ = '_backend_type'
+       # Registry auto-created, discovery auto-configured!
+
+   # Access the auto-created registry
+   STORAGE_BACKENDS = BackendBase.__registry__
+
+   # Interface hierarchy with shared registry
+   class StorageBackend(BackendBase, DataSource, DataSink):
+       """Read-write storage backends."""
+       # Inherits BackendBase.__registry__ - no duplication!
+
+   class ReadOnlyBackend(BackendBase, DataSource):
+       """Read-only storage backends."""
+       # Also inherits BackendBase.__registry__ - same registry!
+
+**Plugin Implementation** (``openhcs/io/disk.py``):
+
+.. code-block:: python
+
+   from openhcs.io.base import StorageBackend
+
+   class DiskStorageBackend(StorageBackend):
+       """Disk-based storage backend."""
+       _backend_type = 'disk'  # Auto-registers with this key!
 
 **Registered Backends**:
 
-- ``disk`` → ``DiskBackend``
-- ``zarr`` → ``ZarrBackend``
-- ``omero`` → ``OMEROBackend``
-- ``memory`` → ``MemoryBackend``
-- ``hdf5`` → ``HDF5Backend``
-- ``n5`` → ``N5Backend``
+- ``disk`` → ``DiskStorageBackend`` (read-write)
+- ``zarr`` → ``ZarrStorageBackend`` (read-write)
+- ``memory`` → ``MemoryStorageBackend`` (read-write)
+- ``virtual_workspace`` → ``VirtualWorkspaceBackend`` (read-only)
+
+**Key Benefits**:
+
+- ✅ No custom metaclasses needed
+- ✅ No manual ``RegistryConfig`` creation
+- ✅ Registry shared via inheritance (``StorageBackend`` and ``ReadOnlyBackend`` share ``BackendBase.__registry__``)
+- ✅ Clean interface hierarchy (no interface abuse)
 
 Example 3: Library Registry System
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
