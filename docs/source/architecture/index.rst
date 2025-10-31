@@ -14,6 +14,7 @@ Fundamental systems that define OpenHCS architecture.
 .. toctree::
    :maxdepth: 1
 
+   plugin_registry_system
    function_pattern_system
    function_registry_system
    pipeline_compilation_system
