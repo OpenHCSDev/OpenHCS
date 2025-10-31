@@ -28,17 +28,8 @@ SHARED_ACK_PORT = 7555
 # ============================================================================
 # ZMQ Server Registry
 # ============================================================================
-
-# Global registry for ZMQ server classes with lazy auto-discovery
-ZMQ_SERVERS = LazyDiscoveryDict()
-
-class ZMQServerMeta(AutoRegisterMeta):
-    """Metaclass for automatic registration of ZMQ server classes."""
-    __registry_dict__ = ZMQ_SERVERS
-    __registry_key__ = '_server_type'
-
-
-
+# Registry will be auto-created by AutoRegisterMeta on ZMQServer base class
+# Access via: ZMQServer.__registry__ (created after class definition below)
 
 
 def get_default_transport_mode() -> TransportMode:
@@ -253,8 +244,14 @@ def stop_global_ack_listener():
         _ack_listener_running = False
 
 
-class ZMQServer(ABC, metaclass=ZMQServerMeta):
-    """ABC for ZMQ servers - dual-channel pattern with ping/pong handshake."""
+class ZMQServer(ABC, metaclass=AutoRegisterMeta):
+    """
+    ABC for ZMQ servers - dual-channel pattern with ping/pong handshake.
+
+    Registry auto-created and stored as ZMQServer.__registry__.
+    Subclasses auto-register by setting _server_type class attribute.
+    """
+    __registry_key__ = '_server_type'
 
     _server_type: Optional[str] = None  # Override in subclasses for registration
 
@@ -837,4 +834,11 @@ class ZMQClient(ABC):
     @abstractmethod
     def send_data(self, data):
         pass
+
+
+# ============================================================================
+# Registry Export
+# ============================================================================
+# Auto-created registry from ZMQServer base class
+ZMQ_SERVERS = ZMQServer.__registry__
 

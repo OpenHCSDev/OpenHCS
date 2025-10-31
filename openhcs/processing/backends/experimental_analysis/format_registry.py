@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple, Type
 import pandas as pd
 from pathlib import Path
 
-from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
+from openhcs.core.auto_register_meta import AutoRegisterMeta
 
 
 @dataclass(frozen=True)
@@ -24,17 +24,7 @@ class MicroscopeFormatConfig:
     plate_detection_method: str
 
 
-# Registry for all microscope format registry classes with lazy auto-discovery
-MICROSCOPE_FORMAT_REGISTRIES = LazyDiscoveryDict()
-
-
-class MicroscopeFormatRegistryMeta(AutoRegisterMeta):
-    """Metaclass for automatic registration of microscope format registry classes."""
-    __registry_dict__ = MICROSCOPE_FORMAT_REGISTRIES
-    __registry_key__ = 'FORMAT_NAME'
-
-
-class MicroscopeFormatRegistryBase(ABC, metaclass=MicroscopeFormatRegistryMeta):
+class MicroscopeFormatRegistryBase(ABC, metaclass=AutoRegisterMeta):
     """
     Abstract base class for microscope format registries.
 
@@ -42,9 +32,10 @@ class MicroscopeFormatRegistryBase(ABC, metaclass=MicroscopeFormatRegistryMeta):
     for processing different microscope data formats while eliminating
     code duplication and hardcoded format-specific logic.
 
-    Subclasses are automatically registered in MICROSCOPE_FORMAT_REGISTRIES
-    by setting the FORMAT_NAME class attribute.
+    Registry auto-created and stored as MicroscopeFormatRegistryBase.__registry__.
+    Subclasses auto-register by setting FORMAT_NAME class attribute.
     """
+    __registry_key__ = 'FORMAT_NAME'
 
     # Abstract class attributes - each implementation must define these
     FORMAT_NAME: str
@@ -229,3 +220,10 @@ class FormatDetectionError(Exception):
 class DataProcessingError(Exception):
     """Raised when data processing fails."""
     pass
+
+
+# ============================================================================
+# Registry Export
+# ============================================================================
+# Auto-created registry from MicroscopeFormatRegistryBase
+MICROSCOPE_FORMAT_REGISTRIES = MicroscopeFormatRegistryBase.__registry__

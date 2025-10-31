@@ -18,8 +18,7 @@ from openhcs.core.auto_register_meta import (
     AutoRegisterMeta,
     SecondaryRegistry,
     extract_key_from_handler_suffix,
-    PRIMARY_KEY,
-    LazyDiscoveryDict
+    PRIMARY_KEY
 )
 # PatternDiscoveryEngine imported locally to avoid circular imports
 from openhcs.io.filemanager import FileManager
@@ -29,27 +28,9 @@ from openhcs.microscopes.microscope_interfaces import (FilenameParser,
 
 logger = logging.getLogger(__name__)
 
-# Dictionary to store registered microscope handlers (with lazy auto-discovery)
-MICROSCOPE_HANDLERS = LazyDiscoveryDict()
-
 # Dictionary to store registered metadata handlers for auto-detection
 # This will be auto-wrapped with SecondaryRegistryDict by the metaclass
 METADATA_HANDLERS = {}
-
-
-class MicroscopeHandlerMeta(AutoRegisterMeta):
-    """Metaclass for automatic registration of microscope handlers."""
-    __registry_dict__ = MICROSCOPE_HANDLERS
-    __registry_key__ = '_microscope_type'
-    __key_extractor__ = extract_key_from_handler_suffix
-    __skip_if_no_key__ = False
-    __secondary_registries__ = [
-        SecondaryRegistry(
-            registry_dict=METADATA_HANDLERS,
-            key_source=PRIMARY_KEY,
-            attr_name='_metadata_handler_class'
-        )
-    ]
 
 
 def register_metadata_handler(handler_class, metadata_handler_class):
@@ -68,8 +49,24 @@ def register_metadata_handler(handler_class, metadata_handler_class):
 
 
 
-class MicroscopeHandler(ABC, metaclass=MicroscopeHandlerMeta):
-    """Composed class for handling microscope-specific functionality."""
+class MicroscopeHandler(ABC, metaclass=AutoRegisterMeta):
+    """
+    Composed class for handling microscope-specific functionality.
+
+    Registry auto-created and stored as MicroscopeHandler.__registry__.
+    Subclasses auto-register by setting _microscope_type class attribute.
+    Secondary registry METADATA_HANDLERS populated via _metadata_handler_class.
+    """
+    __registry_key__ = '_microscope_type'
+    __key_extractor__ = extract_key_from_handler_suffix
+    __skip_if_no_key__ = False
+    __secondary_registries__ = [
+        SecondaryRegistry(
+            registry_dict=METADATA_HANDLERS,
+            key_source=PRIMARY_KEY,
+            attr_name='_metadata_handler_class'
+        )
+    ]
 
     DEFAULT_MICROSCOPE = 'auto'
     _handlers_cache = None
@@ -742,3 +739,10 @@ def _auto_detect_microscope_type(plate_folder: Path, filemanager: FileManager,
            f"Ensure metadata files are present for supported formats.")
     logger.error(msg)
     raise ValueError(msg)
+
+
+# ============================================================================
+# Registry Export
+# ============================================================================
+# Auto-created registry from MicroscopeHandler base class
+MICROSCOPE_HANDLERS = MicroscopeHandler.__registry__

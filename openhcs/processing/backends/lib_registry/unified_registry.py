@@ -115,26 +115,17 @@ class FunctionMetadata:
 
 
 
-# Registry for all library registry classes with lazy auto-discovery
-LIBRARY_REGISTRIES = LazyDiscoveryDict()
-
-
-class LibraryRegistryMeta(AutoRegisterMeta):
-    """Metaclass for automatic registration of library registry classes."""
-    __registry_dict__ = LIBRARY_REGISTRIES
-    __registry_key__ = '_registry_name'
-
-
-class LibraryRegistryBase(ABC, metaclass=LibraryRegistryMeta):
+class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
     """
     Minimal ABC for all library registries.
 
     Provides only essential contracts that all registries must implement,
     regardless of whether they use runtime testing or explicit contracts.
 
-    Subclasses are automatically registered in LIBRARY_REGISTRIES by setting
-    the _registry_name class attribute.
+    Registry auto-created and stored as LibraryRegistryBase.__registry__.
+    Subclasses auto-register by setting _registry_name class attribute.
     """
+    __registry_key__ = '_registry_name'
 
     _registry_name: Optional[str] = None  # Override in subclasses (e.g., 'pyclesperanto', 'cupy')
 
@@ -880,3 +871,10 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
     def _generate_tags(self, func_name: str) -> List[str]:
         """Generate tags using library name."""
         return [self.library_name]
+
+
+# ============================================================================
+# Registry Export
+# ============================================================================
+# Auto-created registry from LibraryRegistryBase
+LIBRARY_REGISTRIES = LibraryRegistryBase.__registry__
