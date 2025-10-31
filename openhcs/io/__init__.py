@@ -10,7 +10,7 @@ import os
 from .atomic import file_lock, atomic_write_json, atomic_update_json, FileLockError, FileLockTimeoutError
 from .base import DataSink, StorageBackend, storage_registry, reset_memory_backend, ensure_storage_registry, get_backend
 from .backend_registry import (
-    StorageBackendMeta, get_backend_instance,
+    get_backend_instance,
     cleanup_backend_connections, cleanup_all_backends, STORAGE_BACKENDS
 )
 from .disk import DiskStorageBackend
@@ -33,7 +33,6 @@ __all__ = [
     'reset_memory_backend',
     'ensure_storage_registry',
     'get_backend',
-    'StorageBackendMeta',
     'get_backend_instance',
     'cleanup_all_backends',
     'STORAGE_BACKENDS',

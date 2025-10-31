@@ -541,28 +541,57 @@ class AutoRegisterMeta(ABCMeta):
     @classmethod
     def _auto_configure_registry(mcs, new_class: Type, attrs: dict) -> Optional[RegistryConfig]:
         """
-        Auto-configure registry from metaclass attributes.
+        Auto-configure registry from metaclass OR base class attributes.
 
-        Looks for __registry_dict__, __registry_key__, etc. on the METACLASS.
-        If found, creates a RegistryConfig automatically.
+        Priority:
+        1. Metaclass attributes (__registry_dict__, __registry_key__ on metaclass)
+        2. Base class attributes (__registry_key__ on class, auto-create __registry__)
+        3. Parent class __registry__ (inherit from parent)
 
         Returns:
             RegistryConfig if auto-configuration successful, None otherwise
         """
-        # Check if the metaclass has __registry_dict__ attribute
+        # Check if the metaclass has __registry_dict__ attribute (old style)
         registry_dict = getattr(mcs, '__registry_dict__', None)
 
+        # If no metaclass registry, check if base class wants auto-creation or inheritance
         if registry_dict is None:
-            return None  # No registry dict found, skip auto-config
+            # Check if class has __registry_key__ attribute (base class defining registry)
+            key_attribute = attrs.get('__registry_key__')
+            if key_attribute is not None:
+                # Auto-create registry dict and store on the class
+                registry_dict = LazyDiscoveryDict()
+                new_class.__registry__ = registry_dict
 
-        # Get key attribute (default: _registry_key)
-        key_attribute = getattr(mcs, '__registry_key__', '_registry_key')
+                # Get other optional attributes from class
+                key_extractor = attrs.get('__key_extractor__')
+                skip_if_no_key = attrs.get('__skip_if_no_key__', True)
+                secondary_registries = attrs.get('__secondary_registries__')
+                registry_name = attrs.get('__registry_name__')
+            else:
+                # Check if any parent class has __registry__ (subclass inheriting registry)
+                for base in new_class.__mro__[1:]:  # Skip self
+                    if hasattr(base, '__registry__'):
+                        registry_dict = base.__registry__
+                        key_attribute = getattr(base, '__registry_key__', None)
+                        key_extractor = getattr(base, '__key_extractor__', None)
+                        skip_if_no_key = getattr(base, '__skip_if_no_key__', True)
+                        secondary_registries = getattr(base, '__secondary_registries__', None)
+                        registry_name = getattr(base, '__registry_name__', None)
+                        break
+                else:
+                    return None  # No registry configuration found
+        else:
+            # Old style: get from metaclass
+            key_attribute = getattr(mcs, '__registry_key__', '_registry_key')
+            key_extractor = getattr(mcs, '__key_extractor__', None)
+            skip_if_no_key = getattr(mcs, '__skip_if_no_key__', True)
+            secondary_registries = getattr(mcs, '__secondary_registries__', None)
+            registry_name = getattr(mcs, '__registry_name__', None)
 
-        # Get registry name (default: derived from class name)
-        registry_name = getattr(mcs, '__registry_name__', None)
+        # Auto-derive registry name if not provided
         if registry_name is None:
             # Derive from class name: "StorageBackend" → "storage backend"
-            # Remove common suffixes like "Base", "Meta", "Handler"
             clean_name = new_class.__name__
             for suffix in ['Base', 'Meta', 'Handler', 'Registry']:
                 if clean_name.endswith(suffix):
@@ -571,11 +600,6 @@ class AutoRegisterMeta(ABCMeta):
             # Convert CamelCase to space-separated lowercase
             import re
             registry_name = re.sub(r'([A-Z])', r' \1', clean_name).strip().lower()
-
-        # Get other optional attributes
-        key_extractor = getattr(mcs, '__key_extractor__', None)
-        skip_if_no_key = getattr(mcs, '__skip_if_no_key__', True)
-        secondary_registries = getattr(mcs, '__secondary_registries__', None)
 
         logger.debug(f"Auto-configured registry for {new_class.__name__}: "
                     f"key_attribute={key_attribute}, registry_name={registry_name}")

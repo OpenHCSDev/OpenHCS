@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 from openhcs.constants.constants import Backend
 from openhcs.io.exceptions import StorageResolutionError
+from openhcs.core.auto_register_meta import AutoRegisterMeta
 
 logger = logging.getLogger(__name__)
 
@@ -151,15 +152,16 @@ class VirtualBackend(DataSink):
         return False
 
 
-class StorageBackend(DataSink):
+class StorageBackend(DataSink, metaclass=AutoRegisterMeta):
     """
     Abstract base class for persistent storage operations.
 
     Extends DataSink with retrieval capabilities and file system operations
     for backends that provide persistent storage with file-like semantics.
 
-    Concrete implementations should use StorageBackendMeta for automatic registration.
+    Concrete implementations are automatically registered via AutoRegisterMeta.
     """
+    __registry_key__ = '_backend_type'
 
     # Inherits save() and save_batch() from DataSink
 
