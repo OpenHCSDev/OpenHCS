@@ -81,6 +81,7 @@ class ResponseType(Enum):
 
 
 class ExecutionStatus(Enum):
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETE = "complete"
     COMPLETED = "completed"

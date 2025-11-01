@@ -99,12 +99,9 @@ def get_zmq_transport_url(port: int, transport_mode: TransportMode, host: str = 
         ZMQ transport URL string
 
     Raises:
-        ValueError: If transport_mode is invalid (fail-loud)
+        ValueError: If transport_mode is invalid or IPC is requested on Windows (fail-loud)
 
     Examples:
-        >>> get_zmq_transport_url(5555, TransportMode.IPC)  # Windows
-        'ipc://openhcs-zmq-5555'
-
         >>> get_zmq_transport_url(5555, TransportMode.IPC)  # Unix/Mac
         'ipc:///home/user/.openhcs/ipc/openhcs-zmq-5555.sock'
 
@@ -113,8 +110,13 @@ def get_zmq_transport_url(port: int, transport_mode: TransportMode, host: str = 
     """
     if transport_mode == TransportMode.IPC:
         if platform.system() == 'Windows':
-            # Windows named pipes: ipc://openhcs-zmq-{port}
-            return f"ipc://{IPC_SOCKET_PREFIX}-{port}"
+            # Windows doesn't support IPC (Unix domain sockets) - fail-loud
+            raise ValueError(
+                "IPC transport mode is not supported on Windows. "
+                "Windows does not support Unix domain sockets. "
+                "Use TransportMode.TCP instead, or use get_default_transport_mode() "
+                "to automatically select the correct mode for the platform."
+            )
         else:
             # Unix domain sockets: use helper to get path and ensure directory exists
             socket_path = _get_ipc_socket_path(port)

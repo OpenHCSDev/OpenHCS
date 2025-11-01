@@ -16,6 +16,7 @@ import sys
 import time
 from openhcs.runtime.zmq_execution_server import ZMQExecutionServer
 from openhcs.core.config import TransportMode
+from openhcs.runtime.zmq_base import get_default_transport_mode
 
 # Set up logging
 logging.basicConfig(
@@ -29,12 +30,17 @@ def main():
     """Main entry point for server launcher."""
     from openhcs.constants.constants import DEFAULT_EXECUTION_SERVER_PORT, CONTROL_PORT_OFFSET
 
+    # Get platform-aware default transport mode
+    default_mode = get_default_transport_mode()
+    default_mode_str = 'tcp' if default_mode == TransportMode.TCP else 'ipc'
+
     parser = argparse.ArgumentParser(description='ZMQ Execution Server Launcher')
     parser.add_argument('--port', type=int, default=DEFAULT_EXECUTION_SERVER_PORT, help=f'Data port (control port will be port + {CONTROL_PORT_OFFSET})')
     parser.add_argument('--host', type=str, default='*', help='Host to bind to (default: * for all interfaces)')
     parser.add_argument('--persistent', action='store_true', help='Run as persistent server (detached)')
     parser.add_argument('--log-file-path', type=str, default=None, help='Path to server log file (for client discovery)')
-    parser.add_argument('--transport-mode', type=str, default='ipc', choices=['ipc', 'tcp'], help='Transport mode (ipc or tcp)')
+    parser.add_argument('--transport-mode', type=str, default=default_mode_str, choices=['ipc', 'tcp'],
+                       help=f'Transport mode (default: {default_mode_str} for this platform)')
 
     args = parser.parse_args()
 
