@@ -19,6 +19,10 @@ from openhcs.constants.constants import Backend
 # Import decorator for automatic decorator creation
 from openhcs.config_framework import auto_create_decorator
 
+# Import platform-aware transport mode default
+# This must be imported here to avoid circular imports
+import platform
+
 logger = logging.getLogger(__name__)
 
 
@@ -412,6 +416,11 @@ class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     """Whether this materialization config is enabled. When False, config exists but materialization is disabled."""
 
 
+# Define platform-aware default transport mode at module level
+# TCP on Windows (no Unix domain socket support), IPC on Unix/Mac
+_DEFAULT_TRANSPORT_MODE = TransportMode.TCP if platform.system() == 'Windows' else TransportMode.IPC
+
+
 @global_pipeline_config
 @dataclass(frozen=True)
 class StreamingDefaults:
@@ -425,8 +434,8 @@ class StreamingDefaults:
     port: int = None  # Subclasses must override with their specific default
     """Port for streaming communication. Each streamer type has its own default."""
 
-    transport_mode: TransportMode = TransportMode.IPC
-    """ZMQ transport mode: IPC (local only, no firewall) or TCP (remote support, firewall prompts)."""
+    transport_mode: TransportMode = _DEFAULT_TRANSPORT_MODE
+    """ZMQ transport mode: Platform-aware default (TCP on Windows, IPC on Unix/Mac)."""
 
     enabled: bool = True
     """Whether this streaming config is enabled. When False, config exists but streaming is disabled."""

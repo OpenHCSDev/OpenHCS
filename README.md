@@ -333,6 +333,11 @@ pip install -e ".[all,dev]"
 
 # Run tests
 pytest tests/
+
+# Run OMERO integration tests (requires Docker)
+# See OMERO_TESTING_GUIDE.md for setup instructions
+cd openhcs/omero && docker-compose up -d && ./wait_for_omero.sh && cd ../..
+pytest tests/integration/test_main.py --it-microscopes=OMERO --it-backends=disk -v
 ```
 
 ### Contribution Areas
