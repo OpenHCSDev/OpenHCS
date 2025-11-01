@@ -6,9 +6,8 @@ Follows OpenHCS generic solution principle - automatically adapts to new registr
 """
 
 import logging
-from typing import Dict, List, Optional
-from openhcs.core.registry_discovery import discover_registry_classes
-from .unified_registry import LibraryRegistryBase, FunctionMetadata
+from typing import Dict, List, Optional, Type
+from .unified_registry import LibraryRegistryBase, FunctionMetadata, LIBRARY_REGISTRIES
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +32,9 @@ class RegistryService:
         logger.debug("🎯 REGISTRY SERVICE: Discovering functions from all registries...")
         all_functions = {}
 
-        # Discover all registry classes automatically
-        registry_classes = cls._discover_registries()
+        # Registries auto-discovered on first access to LIBRARY_REGISTRIES
+        registry_classes = list(LIBRARY_REGISTRIES.values())
+        logger.debug(f"🎯 REGISTRY SERVICE: Found {len(registry_classes)} registered library registries")
 
         # Load functions from each registry
         for registry_class in registry_classes:
@@ -65,17 +65,7 @@ class RegistryService:
         cls._metadata_cache = all_functions
         return all_functions
     
-    @classmethod
-    def _discover_registries(cls) -> List[type]:
-        """Automatically discover all registry implementations using generic discovery."""
-        import openhcs.processing.backends.lib_registry as registry_package
 
-        return discover_registry_classes(
-            package_path=registry_package.__path__,
-            package_prefix=registry_package.__name__ + ".",
-            base_class=LibraryRegistryBase,
-            exclude_modules={'unified_registry'}
-        )
     
     @classmethod
     def clear_metadata_cache(cls) -> None:

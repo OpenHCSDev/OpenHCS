@@ -23,16 +23,13 @@ from openhcs.core.config import TransportMode
 import numpy as np
 
 from openhcs.io.streaming import StreamingBackend
-from openhcs.io.backend_registry import StorageBackendMeta
 from openhcs.constants.constants import Backend
 
 logger = logging.getLogger(__name__)
 
 
-class NapariStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
-    """Napari streaming backend with automatic metaclass registration."""
-
-    # Backend type from enum for registration
+class NapariStreamingBackend(StreamingBackend):
+    """Napari streaming backend with automatic registration."""
     _backend_type = Backend.NAPARI_STREAM.value
 
     # Configure ABC attributes

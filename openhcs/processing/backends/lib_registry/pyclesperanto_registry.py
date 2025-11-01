@@ -20,6 +20,9 @@ cle = optional_import("pyclesperanto")
 class PyclesperantoRegistry(RuntimeTestingRegistryBase):
     """Clean pyclesperanto registry with internal library-specific logic."""
 
+    # Registry name for auto-registration
+    _registry_name = 'pyclesperanto'
+
     # Library-specific exclusions extending common ones
     EXCLUSIONS = LibraryRegistryBase.COMMON_EXCLUSIONS | {
         'push_zyx', 'pull_zyx', 'create_zyx', 'set_wait_for_kernel_finish',

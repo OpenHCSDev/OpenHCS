@@ -6,15 +6,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 from fnmatch import fnmatch
 
-from openhcs.io.backend_registry import StorageBackendMeta
 from openhcs.io.disk import DiskStorageBackend
 from openhcs.io.metadata_writer import get_metadata_path
 from openhcs.io.exceptions import StorageResolutionError
+from openhcs.io.base import ReadOnlyBackend
 
 logger = logging.getLogger(__name__)
 
 
-class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
+class VirtualWorkspaceBackend(ReadOnlyBackend):
     """
     Read-only path translation layer for virtual workspace.
 
@@ -347,9 +347,4 @@ class VirtualWorkspaceBackend(metaclass=StorageBackendMeta):
         else:
             # Root is always a directory if mapping exists
             return len(self._mapping_cache) > 0
-
-    @property
-    def requires_filesystem_validation(self) -> bool:
-        """Virtual backends don't require filesystem validation."""
-        return False
 

@@ -14,10 +14,8 @@ from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import numpy as np
 
-from openhcs.constants.constants import FileFormat
+from openhcs.constants.constants import FileFormat, Backend
 from openhcs.io.base import StorageBackend
-from openhcs.io.backend_registry import StorageBackendMeta
-from openhcs.constants.constants import Backend
 
 logger = logging.getLogger(__name__)
 
@@ -61,10 +59,8 @@ class FileFormatRegistry:
         return ext.lower() in self._writers and ext.lower() in self._readers
 
 
-class DiskStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
-    """Disk storage backend with automatic metaclass registration."""
-
-    # Backend type from enum for registration
+class DiskStorageBackend(StorageBackend):
+    """Disk storage backend with automatic registration."""
     _backend_type = Backend.DISK.value
     def __init__(self):
         self.format_registry = FileFormatRegistry()
