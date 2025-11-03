@@ -40,14 +40,13 @@ def test_napari_windows_path_escaping():
                             2
                         ]  # [sys.executable, "-c", python_code]
 
-                        # Verify the path is properly escaped
-                        # repr() will create a string like 'C:\\Users\\labuser\\Documents\\openhcs'
-                        # which is safe to use in Python code
+                        # Verify the path is properly escaped using repr()
+                        # repr() produces a string like 'C:\\Users\\labuser\\Documents\\openhcs'
+                        # with properly escaped backslashes
+                        expected_repr = repr(windows_path)
                         assert (
-                            "C:\\\\Users" in python_code
-                            or "'C:\\\\Users" in python_code
-                            or '"C:\\\\Users' in python_code
-                        ), f"Windows path not properly escaped in generated code:\n{python_code}"
+                            expected_repr in python_code
+                        ), f"Windows path not properly escaped. Expected {expected_repr} in generated code:\n{python_code}"
 
                         # Verify the code is syntactically valid Python
                         try:
@@ -89,12 +88,13 @@ def test_fiji_windows_path_escaping():
                             2
                         ]  # [sys.executable, "-c", python_code]
 
-                        # Verify the path is properly escaped
+                        # Verify the path is properly escaped using repr()
+                        # repr() produces a string like 'C:\\Users\\labuser\\Documents\\openhcs'
+                        # with properly escaped backslashes
+                        expected_repr = repr(windows_path)
                         assert (
-                            "C:\\\\Users" in python_code
-                            or "'C:\\\\Users" in python_code
-                            or '"C:\\\\Users' in python_code
-                        ), f"Windows path not properly escaped in generated code:\n{python_code}"
+                            expected_repr in python_code
+                        ), f"Windows path not properly escaped. Expected {expected_repr} in generated code:\n{python_code}"
 
                         # Verify the code is syntactically valid Python
                         try:
