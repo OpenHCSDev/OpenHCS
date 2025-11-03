@@ -42,7 +42,12 @@ def _cleanup_global_fiji_viewer() -> None:
             _global_fiji_process = None
 
 
-def _spawn_detached_fiji_process(port: int, viewer_title: str, display_config, transport_mode: TransportMode = TransportMode.IPC) -> subprocess.Popen:
+def _spawn_detached_fiji_process(
+    port: int,
+    viewer_title: str,
+    display_config,
+    transport_mode: TransportMode = TransportMode.IPC,
+) -> subprocess.Popen:
     """
     Spawn a completely detached Fiji viewer process that survives parent termination.
 
@@ -59,7 +64,7 @@ def _spawn_detached_fiji_process(port: int, viewer_title: str, display_config, t
     import os
 
     current_dir = os.getcwd()
-    python_code = f'''
+    python_code = f"""
 import sys
 import os
 
@@ -85,7 +90,7 @@ except Exception as e:
     import traceback
     logger.error(traceback.format_exc())
     sys.exit(1)
-'''
+"""
 
     try:
         # Create log file for detached process
@@ -94,49 +99,50 @@ except Exception as e:
         log_file = os.path.join(log_dir, f"fiji_detached_port_{port}.log")
 
         # Replace placeholder with actual log file path
-        python_code = python_code.replace(repr(current_dir + "/.fiji_log_path_placeholder"), repr(log_file))
+        python_code = python_code.replace(
+            repr(current_dir + "/.fiji_log_path_placeholder"), repr(log_file)
+        )
 
         # Use subprocess.Popen with detachment flags
         if sys.platform == "win32":
             env = os.environ.copy()
-            with open(log_file, 'w') as log_f:
+            with open(log_file, "w") as log_f:
                 process = subprocess.Popen(
                     [sys.executable, "-c", python_code],
-                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
+                    | subprocess.DETACHED_PROCESS,
                     env=env,
                     cwd=os.getcwd(),
                     stdout=log_f,
-                    stderr=subprocess.STDOUT
+                    stderr=subprocess.STDOUT,
                 )
         else:
             # Unix: Use start_new_session to detach
             env = os.environ.copy()
 
             # Ensure display environment is preserved
-            if 'QT_QPA_PLATFORM' not in env:
-                env['QT_QPA_PLATFORM'] = 'xcb'
-            env['QT_X11_NO_MITSHM'] = '1'
+            if "QT_QPA_PLATFORM" not in env:
+                env["QT_QPA_PLATFORM"] = "xcb"
+            env["QT_X11_NO_MITSHM"] = "1"
 
-            log_f = open(log_file, 'w')
+            log_f = open(log_file, "w")
             process = subprocess.Popen(
                 [sys.executable, "-c", python_code],
                 env=env,
                 cwd=os.getcwd(),
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
-                start_new_session=True  # CRITICAL: Detach from parent
+                start_new_session=True,  # CRITICAL: Detach from parent
             )
 
-        logger.info(f"🔬 FIJI VISUALIZER: Detached Fiji process started (PID: {process.pid}), logging to {log_file}")
+        logger.info(
+            f"🔬 FIJI VISUALIZER: Detached Fiji process started (PID: {process.pid}), logging to {log_file}"
+        )
         return process
 
     except Exception as e:
         logger.error(f"🔬 FIJI VISUALIZER: Failed to spawn detached Fiji process: {e}")
         raise
-
-
-
-
 
 
 class FijiStreamVisualizer:
@@ -147,14 +153,26 @@ class FijiStreamVisualizer:
     Follows same architecture as NapariStreamVisualizer.
     """
 
-    def __init__(self, filemanager: FileManager, visualizer_config, viewer_title: str = "OpenHCS Fiji Visualization",
-                 persistent: bool = True, port: int = None, display_config=None, transport_mode: TransportMode = TransportMode.IPC):
+    def __init__(
+        self,
+        filemanager: FileManager,
+        visualizer_config,
+        viewer_title: str = "OpenHCS Fiji Visualization",
+        persistent: bool = True,
+        port: int = None,
+        display_config=None,
+        transport_mode: TransportMode = TransportMode.IPC,
+    ):
         self.filemanager = filemanager
         self.viewer_title = viewer_title
         self.persistent = persistent
         self.visualizer_config = visualizer_config
         # Use config class default if not specified
-        self.port = port if port is not None else FijiStreamingConfig.__dataclass_fields__['port'].default
+        self.port = (
+            port
+            if port is not None
+            else FijiStreamingConfig.__dataclass_fields__["port"].default
+        )
         self.display_config = display_config
         self.transport_mode = transport_mode  # ZMQ transport mode (IPC or TCP)
         self.process: Optional[multiprocessing.Process] = None
@@ -177,7 +195,9 @@ class FijiStreamVisualizer:
         if self._connected_to_existing:
             # Quick ping check to verify viewer is still alive
             if not self._quick_ping_check():
-                logger.debug(f"🔬 FIJI VISUALIZER: Connected viewer on port {self.port} is no longer responsive")
+                logger.debug(
+                    f"🔬 FIJI VISUALIZER: Connected viewer on port {self.port} is no longer responsive"
+                )
                 self._is_running = False
                 self._connected_to_existing = False
                 return False
@@ -189,7 +209,7 @@ class FijiStreamVisualizer:
 
         # Check if process is actually alive
         try:
-            if hasattr(self.process, 'is_alive'):
+            if hasattr(self.process, "is_alive"):
                 # multiprocessing.Process
                 alive = self.process.is_alive()
             else:
@@ -197,7 +217,9 @@ class FijiStreamVisualizer:
                 alive = self.process.poll() is None
 
             if not alive:
-                logger.debug(f"🔬 FIJI VISUALIZER: Fiji process on port {self.port} is no longer alive")
+                logger.debug(
+                    f"🔬 FIJI VISUALIZER: Fiji process on port {self.port} is no longer alive"
+                )
                 self._is_running = False
 
             return alive
@@ -218,13 +240,15 @@ class FijiStreamVisualizer:
             sock = ctx.socket(zmq.REQ)
             sock.setsockopt(zmq.LINGER, 0)
             sock.setsockopt(zmq.RCVTIMEO, 200)  # 200ms timeout for quick check
-            control_url = get_zmq_transport_url(self.port + CONTROL_PORT_OFFSET, self.transport_mode, 'localhost')
+            control_url = get_zmq_transport_url(
+                self.port + CONTROL_PORT_OFFSET, self.transport_mode, "localhost"
+            )
             sock.connect(control_url)
-            sock.send(pickle.dumps({'type': 'ping'}))
+            sock.send(pickle.dumps({"type": "ping"}))
             response = pickle.loads(sock.recv())
             sock.close()
             ctx.term()
-            return response.get('type') == 'pong'
+            return response.get("type") == "pong"
         except:
             return False
 
@@ -251,16 +275,23 @@ class FijiStreamVisualizer:
             # Check if there's already a viewer running on the configured port
             if self._is_port_in_use(self.port):
                 # Try to connect to existing viewer first
-                logger.info(f"🔬 FIJI VISUALIZER: Port {self.port} is in use, attempting to connect to existing viewer...")
+                logger.info(
+                    f"🔬 FIJI VISUALIZER: Port {self.port} is in use, attempting to connect to existing viewer..."
+                )
                 if self._try_connect_to_existing_viewer():
-                    logger.info(f"🔬 FIJI VISUALIZER: Successfully connected to existing viewer on port {self.port}")
+                    logger.info(
+                        f"🔬 FIJI VISUALIZER: Successfully connected to existing viewer on port {self.port}"
+                    )
                     self._is_running = True
                     self._connected_to_existing = True
                     return
                 else:
                     # Existing viewer is unresponsive - kill it and start fresh
-                    logger.info(f"🔬 FIJI VISUALIZER: Existing viewer on port {self.port} is unresponsive, killing and restarting...")
+                    logger.info(
+                        f"🔬 FIJI VISUALIZER: Existing viewer on port {self.port} is unresponsive, killing and restarting..."
+                    )
                     from openhcs.runtime.zmq_base import ZMQServer
+
                     ZMQServer.kill_processes_on_port(self.port)
                     ZMQServer.kill_processes_on_port(self.port + 1000)
                     time.sleep(0.5)
@@ -269,13 +300,19 @@ class FijiStreamVisualizer:
                 logger.warning("Fiji viewer is already running.")
                 return
 
-            logger.info(f"🔬 FIJI VISUALIZER: Starting Fiji viewer server on port {self.port} (persistent={self.persistent})")
+            logger.info(
+                f"🔬 FIJI VISUALIZER: Starting Fiji viewer server on port {self.port} (persistent={self.persistent})"
+            )
 
             # ALL viewers (persistent and non-persistent) should be detached subprocess
             # so they don't block parent process exit. The difference is only whether
             # we terminate them during cleanup.
-            logger.info(f"🔬 FIJI VISUALIZER: Creating {'persistent' if self.persistent else 'non-persistent'} Fiji viewer (detached)")
-            self.process = _spawn_detached_fiji_process(self.port, self.viewer_title, self.display_config, self.transport_mode)
+            logger.info(
+                f"🔬 FIJI VISUALIZER: Creating {'persistent' if self.persistent else 'non-persistent'} Fiji viewer (detached)"
+            )
+            self.process = _spawn_detached_fiji_process(
+                self.port, self.viewer_title, self.display_config, self.transport_mode
+            )
 
             # Only track non-persistent viewers in global variable for test cleanup
             if not self.persistent:
@@ -289,9 +326,13 @@ class FijiStreamVisualizer:
                 def wait_and_set_ready():
                     if self._wait_for_server_ready(timeout=10.0):
                         self._is_running = True
-                        logger.info(f"🔬 FIJI VISUALIZER: Fiji viewer server ready (PID: {self.process.pid if hasattr(self.process, 'pid') else 'unknown'})")
+                        logger.info(
+                            f"🔬 FIJI VISUALIZER: Fiji viewer server ready (PID: {self.process.pid if hasattr(self.process, 'pid') else 'unknown'})"
+                        )
                     else:
-                        logger.error("🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready")
+                        logger.error(
+                            "🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready"
+                        )
 
                 thread = threading.Thread(target=wait_and_set_ready, daemon=True)
                 thread.start()
@@ -299,9 +340,13 @@ class FijiStreamVisualizer:
                 # For sync mode, wait immediately
                 if self._wait_for_server_ready(timeout=10.0):
                     self._is_running = True
-                    logger.info(f"🔬 FIJI VISUALIZER: Fiji viewer server ready (PID: {self.process.pid if hasattr(self.process, 'pid') else 'unknown'})")
+                    logger.info(
+                        f"🔬 FIJI VISUALIZER: Fiji viewer server ready (PID: {self.process.pid if hasattr(self.process, 'pid') else 'unknown'})"
+                    )
                 else:
-                    logger.error("🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready")
+                    logger.error(
+                        "🔬 FIJI VISUALIZER: Fiji viewer server failed to become ready"
+                    )
 
     def _is_port_in_use(self, port: int) -> bool:
         """Check if a port/socket is in use (handles both IPC and TCP modes)."""
@@ -314,10 +359,11 @@ class FijiStreamVisualizer:
         else:
             # TCP mode - check if port is bound
             import socket
+
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(0.1)
             try:
-                sock.bind(('localhost', port))
+                sock.bind(("localhost", port))
                 sock.close()
                 return False
             except OSError:
@@ -336,17 +382,19 @@ class FijiStreamVisualizer:
             sock = ctx.socket(zmq.REQ)
             sock.setsockopt(zmq.LINGER, 0)
             sock.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
-            control_url = get_zmq_transport_url(self.port + CONTROL_PORT_OFFSET, self.transport_mode, 'localhost')
+            control_url = get_zmq_transport_url(
+                self.port + CONTROL_PORT_OFFSET, self.transport_mode, "localhost"
+            )
             sock.connect(control_url)
 
             # Send ping
-            sock.send(pickle.dumps({'type': 'ping'}))
+            sock.send(pickle.dumps({"type": "ping"}))
             response = pickle.loads(sock.recv())
 
             sock.close()
             ctx.term()
 
-            return response.get('type') == 'pong' and response.get('ready')
+            return response.get("type") == "pong" and response.get("ready")
         except:
             return False
 
@@ -357,7 +405,9 @@ class FijiStreamVisualizer:
         from openhcs.runtime.zmq_base import get_zmq_transport_url
         from openhcs.constants.constants import CONTROL_PORT_OFFSET
 
-        logger.info(f"🔬 FIJI VISUALIZER: Waiting for server on port {self.port} to be ready...")
+        logger.info(
+            f"🔬 FIJI VISUALIZER: Waiting for server on port {self.port} to be ready..."
+        )
 
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -367,17 +417,19 @@ class FijiStreamVisualizer:
                 sock = ctx.socket(zmq.REQ)
                 sock.setsockopt(zmq.LINGER, 0)
                 sock.setsockopt(zmq.RCVTIMEO, 500)  # 500ms timeout
-                control_url = get_zmq_transport_url(self.port + CONTROL_PORT_OFFSET, self.transport_mode, 'localhost')
+                control_url = get_zmq_transport_url(
+                    self.port + CONTROL_PORT_OFFSET, self.transport_mode, "localhost"
+                )
                 sock.connect(control_url)
 
                 # Send ping
-                sock.send(pickle.dumps({'type': 'ping'}))
+                sock.send(pickle.dumps({"type": "ping"}))
                 response = pickle.loads(sock.recv())
 
                 sock.close()
                 ctx.term()
 
-                if response.get('type') == 'pong':
+                if response.get("type") == "pong":
                     logger.info(f"🔬 FIJI VISUALIZER: Server ready on port {self.port}")
                     return True
             except Exception as e:
@@ -385,7 +437,9 @@ class FijiStreamVisualizer:
 
             time.sleep(0.2)
 
-        logger.warning(f"🔬 FIJI VISUALIZER: Timeout waiting for server on port {self.port}")
+        logger.warning(
+            f"🔬 FIJI VISUALIZER: Timeout waiting for server on port {self.port}"
+        )
         return False
 
     def send_control_message(self, message_type: str, timeout: float = 2.0) -> bool:
@@ -400,7 +454,9 @@ class FijiStreamVisualizer:
             True if message was sent and acknowledged, False otherwise
         """
         if not self.is_running or self.port is None:
-            logger.warning(f"🔬 FIJI VISUALIZER: Cannot send {message_type} - viewer not running")
+            logger.warning(
+                f"🔬 FIJI VISUALIZER: Cannot send {message_type} - viewer not running"
+            )
             return False
 
         import zmq
@@ -417,26 +473,34 @@ class FijiStreamVisualizer:
             control_socket = control_context.socket(zmq.REQ)
             control_socket.setsockopt(zmq.LINGER, 0)
             control_socket.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
-            control_url = get_zmq_transport_url(control_port, self.transport_mode, 'localhost')
+            control_url = get_zmq_transport_url(
+                control_port, self.transport_mode, "localhost"
+            )
             control_socket.connect(control_url)
 
             # Send control message
-            message = {'type': message_type}
+            message = {"type": message_type}
             control_socket.send(pickle.dumps(message))
 
             # Wait for acknowledgment
             response = control_socket.recv()
             response_data = pickle.loads(response)
 
-            if response_data.get('status') == 'success':
-                logger.info(f"🔬 FIJI VISUALIZER: {message_type} acknowledged by viewer")
+            if response_data.get("status") == "success":
+                logger.info(
+                    f"🔬 FIJI VISUALIZER: {message_type} acknowledged by viewer"
+                )
                 return True
             else:
-                logger.warning(f"🔬 FIJI VISUALIZER: {message_type} failed: {response_data}")
+                logger.warning(
+                    f"🔬 FIJI VISUALIZER: {message_type} failed: {response_data}"
+                )
                 return False
 
         except zmq.Again:
-            logger.warning(f"🔬 FIJI VISUALIZER: Timeout waiting for {message_type} acknowledgment")
+            logger.warning(
+                f"🔬 FIJI VISUALIZER: Timeout waiting for {message_type} acknowledgment"
+            )
             return False
         except Exception as e:
             logger.warning(f"🔬 FIJI VISUALIZER: Failed to send {message_type}: {e}")
@@ -460,7 +524,7 @@ class FijiStreamVisualizer:
         Returns:
             True if state was cleared successfully, False otherwise
         """
-        return self.send_control_message('clear_state')
+        return self.send_control_message("clear_state")
 
     def stop_viewer(self) -> None:
         """Stop Fiji viewer server (only if not persistent)."""
@@ -472,13 +536,15 @@ class FijiStreamVisualizer:
 
                 if self.process:
                     # Handle both subprocess and multiprocessing process types
-                    if hasattr(self.process, 'is_alive'):
+                    if hasattr(self.process, "is_alive"):
                         # multiprocessing.Process
                         if self.process.is_alive():
                             self.process.terminate()
                             self.process.join(timeout=5)
                             if self.process.is_alive():
-                                logger.warning("🔬 FIJI VISUALIZER: Force killing Fiji viewer")
+                                logger.warning(
+                                    "🔬 FIJI VISUALIZER: Force killing Fiji viewer"
+                                )
                                 self.process.kill()
                                 self.process.join(timeout=2)
                     else:
@@ -488,7 +554,9 @@ class FijiStreamVisualizer:
                             try:
                                 self.process.wait(timeout=5)
                             except subprocess.TimeoutExpired:
-                                logger.warning("🔬 FIJI VISUALIZER: Force killing Fiji viewer")
+                                logger.warning(
+                                    "🔬 FIJI VISUALIZER: Force killing Fiji viewer"
+                                )
                                 self.process.kill()
 
                 # Clear global reference
