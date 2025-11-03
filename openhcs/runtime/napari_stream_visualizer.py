@@ -1052,13 +1052,13 @@ if hasattr(os, "setsid"):
         pass
 
 # Add current working directory to Python path
-sys.path.insert(0, "{current_dir}")
+sys.path.insert(0, {repr(current_dir)})
 
 try:
     from openhcs.runtime.napari_stream_visualizer import _napari_viewer_process
     from openhcs.core.config import TransportMode
     transport_mode = TransportMode.{transport_mode.name}
-    _napari_viewer_process({port}, "{viewer_title}", {replace_layers}, "{current_dir}/.napari_log_path_placeholder", transport_mode)
+    _napari_viewer_process({port}, {repr(viewer_title)}, {replace_layers}, {repr(current_dir + "/.napari_log_path_placeholder")}, transport_mode)
 except Exception as e:
     import logging
     logger = logging.getLogger("openhcs.runtime.napari_detached")
@@ -1075,7 +1075,7 @@ except Exception as e:
         log_file = os.path.join(log_dir, f"napari_detached_port_{port}.log")
 
         # Replace placeholder with actual log file path in python code
-        python_code = python_code.replace(f"{current_dir}/.napari_log_path_placeholder", log_file)
+        python_code = python_code.replace(repr(current_dir + "/.napari_log_path_placeholder"), repr(log_file))
 
         # Use subprocess.Popen with detachment flags
         if sys.platform == "win32":

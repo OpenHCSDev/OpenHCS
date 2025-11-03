@@ -71,13 +71,13 @@ if hasattr(os, "setsid"):
         pass
 
 # Add current working directory to Python path
-sys.path.insert(0, "{current_dir}")
+sys.path.insert(0, {repr(current_dir)})
 
 try:
     from openhcs.runtime.fiji_viewer_server import _fiji_viewer_server_process
     from openhcs.core.config import TransportMode
     transport_mode = TransportMode.{transport_mode.name}
-    _fiji_viewer_server_process({port}, "{viewer_title}", None, "{current_dir}/.fiji_log_path_placeholder", transport_mode)
+    _fiji_viewer_server_process({port}, {repr(viewer_title)}, None, {repr(current_dir + "/.fiji_log_path_placeholder")}, transport_mode)
 except Exception as e:
     import logging
     logger = logging.getLogger("openhcs.runtime.fiji_detached")
@@ -94,7 +94,7 @@ except Exception as e:
         log_file = os.path.join(log_dir, f"fiji_detached_port_{port}.log")
 
         # Replace placeholder with actual log file path
-        python_code = python_code.replace(f"{current_dir}/.fiji_log_path_placeholder", log_file)
+        python_code = python_code.replace(repr(current_dir + "/.fiji_log_path_placeholder"), repr(log_file))
 
         # Use subprocess.Popen with detachment flags
         if sys.platform == "win32":
