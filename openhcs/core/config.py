@@ -293,7 +293,7 @@ class ProcessingConfig:
     input_source: InputSource = InputSource.PREVIOUS_STEP
     """Input source strategy: PREVIOUS_STEP (normal chaining) or PIPELINE_START (access original input)."""
 
-
+@global_pipeline_config
 @dataclass(frozen=True)
 class SequentialProcessingConfig:
     """Pipeline-level configuration for sequential processing mode.

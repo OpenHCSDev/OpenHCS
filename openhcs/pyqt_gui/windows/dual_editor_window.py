@@ -445,6 +445,9 @@ class DualEditorWindow(BaseFormDialog):
         SINGLE SOURCE OF TRUTH: Always sync function editor on any parameter change.
         This ensures the function editor stays in sync regardless of which parameter
         changed or how the step structure evolves in the future.
+
+        Handles both top-level parameters (e.g., 'name', 'processing_config') and
+        nested parameters from nested forms (e.g., 'group_by' from processing_config form).
         """
         logger.info(f"🔔 on_form_parameter_changed: param_name={param_name}, value type={type(value).__name__}")
 
@@ -452,6 +455,23 @@ class DualEditorWindow(BaseFormDialog):
         if param_name == "__reset_all_complete__":
             logger.info("🔄 Received reset_all_complete signal, syncing function editor")
             # Sync function editor after reset_all completes
+            self._sync_function_editor_from_step()
+            self.detect_changes()
+            return
+
+        # CRITICAL: Check if this is a nested parameter (from a nested form manager)
+        # Nested parameters are fields within nested dataclasses (e.g., processing_config.group_by)
+        # They don't exist as direct attributes on FunctionStep
+        # Known nested parameters from processing_config: group_by, variable_components, input_source
+        NESTED_PARAMS = {'group_by', 'variable_components', 'input_source'}
+
+        if param_name in NESTED_PARAMS:
+            logger.info(f"🔍 {param_name} is a nested parameter from processing_config")
+            # This is a nested parameter change - the nested form manager already updated
+            # the processing_config dataclass, so we just need to sync the function editor
+            # The step_editor.form_manager has a nested manager for processing_config that
+            # already updated self.editing_step.processing_config.{param_name}
+            logger.info(f"🔄 Calling _sync_function_editor_from_step after nested {param_name} change")
             self._sync_function_editor_from_step()
             self.detect_changes()
             return
