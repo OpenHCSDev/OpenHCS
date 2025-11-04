@@ -192,10 +192,10 @@ def _execute_axis_with_sequential_combinations(
         visualizer: Optional Napari visualizer (not used in multiprocessing)
 
     Returns:
-        Combined execution results for all combinations
+        Single result dict with status for the entire axis (all combinations)
     """
     if not axis_contexts:
-        return {}
+        return {"status": "success", "axis_id": "unknown"}
 
     # Extract axis_id from first context
     first_context_key, first_context = axis_contexts[0]
@@ -203,14 +203,16 @@ def _execute_axis_with_sequential_combinations(
 
     logger.info(f"🔄 WORKER: Processing {len(axis_contexts)} combination(s) for axis {axis_id}")
 
-    combined_results = {}
-
     for combo_idx, (context_key, frozen_context) in enumerate(axis_contexts):
         logger.info(f"🔄 WORKER: Processing combination {combo_idx + 1}/{len(axis_contexts)}: {context_key}")
 
         # Execute this combination
         result = _execute_single_axis_static(pipeline_definition, frozen_context, visualizer)
-        combined_results[context_key] = result
+
+        # Check if this combination failed
+        if result.get('status') != 'success':
+            logger.error(f"🔄 WORKER: Combination {context_key} failed for axis {axis_id}")
+            return {"status": "error", "axis_id": axis_id, "failed_combination": context_key}
 
         # Clear VFS between combinations (except after the last one)
         if combo_idx < len(axis_contexts) - 1:
@@ -223,7 +225,7 @@ def _execute_axis_with_sequential_combinations(
                 cleanup_all_gpu_frameworks()
 
     logger.info(f"🔄 WORKER: Completed all {len(axis_contexts)} combination(s) for axis {axis_id}")
-    return combined_results
+    return {"status": "success", "axis_id": axis_id}
 
 
 def _execute_single_axis_static(
