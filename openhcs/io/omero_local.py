@@ -123,12 +123,15 @@ class PlateStructure:
     max_t: int
 
 
-class OMEROLocalBackend(VirtualBackend):
+class OMEROLocalBackend(VirtualBackend, PicklableBackend):
     """
     Virtual backend for OMERO server-side execution.
 
     Generates filenames on-demand from OMERO plate structure.
     No real filesystem operations - all paths are virtual.
+
+    Implements PicklableBackend to support multiprocessing by preserving
+    connection parameters across process boundaries.
     """
 
     _backend_type = 'omero_local'
