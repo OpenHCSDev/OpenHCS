@@ -333,7 +333,13 @@ class MagicGuiWidgetFactory:
         return widget
 
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
-        """Create multi-selection checkbox group for List[Enum] parameters."""
+        """Create multi-selection checkbox group for List[Enum] parameters.
+
+        Uses NoneAwareCheckBox pattern consistently with bool parameters:
+        - Initialize all checkboxes with set_value(None) for placeholder state
+        - Use set_value() instead of setChecked() to properly track placeholder state
+        - Use get_value() in get_selected_values() to distinguish placeholder vs concrete
+        """
         from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
 
         enum_type = get_enum_from_list(param_type)
@@ -350,16 +356,48 @@ class MagicGuiWidgetFactory:
             widget._checkboxes[enum_value] = checkbox
             layout.addWidget(checkbox)
 
-        # Set current values (check boxes for items in the list)
-        if current_value and isinstance(current_value, list):
-            for enum_value in current_value:
-                if enum_value in widget._checkboxes:
-                    widget._checkboxes[enum_value].setChecked(True)
+        # Set current values using set_value() to properly handle None/placeholder state
+        if current_value is None:
+            # None means inherit from parent - initialize all checkboxes in placeholder state
+            for checkbox in widget._checkboxes.values():
+                checkbox.set_value(None)
+        elif isinstance(current_value, list):
+            # Explicit list - set concrete values
+            for enum_value, checkbox in widget._checkboxes.items():
+                # Set to True if in list, False if not (both are concrete values)
+                checkbox.set_value(enum_value in current_value)
+        else:
+            # Fallback: treat as None (placeholder state)
+            for checkbox in widget._checkboxes.values():
+                checkbox.set_value(None)
 
-        # Add method to get selected values
+        # Add method to get selected values using get_value() pattern
         def get_selected_values():
-            return [enum_val for enum_val, checkbox in widget._checkboxes.items()
-                   if checkbox.isChecked()]
+            """Get selected enum values, returning None if all checkboxes are in placeholder state.
+
+            Treats List[Enum] like a list of independent bools:
+            - If ALL checkboxes are in placeholder state → return None (inherit from parent)
+            - If ANY checkbox has been clicked → ALL become concrete, return list of checked items
+
+            Note: The signal handler ensures that clicking ANY checkbox converts ALL to concrete,
+            so we should never have a mixed state (some placeholder, some concrete).
+            """
+            # Check if any checkbox has a concrete value (not placeholder)
+            has_concrete_value = any(
+                checkbox.get_value() is not None
+                for checkbox in widget._checkboxes.values()
+            )
+
+            if not has_concrete_value:
+                # All checkboxes are in placeholder state - return None to inherit from parent
+                return None
+
+            # All checkboxes are concrete (signal handler converted them)
+            # Return list of enum values where checkbox is checked
+            return [
+                enum_val for enum_val, checkbox in widget._checkboxes.items()
+                if checkbox.get_value() == True
+            ]
         widget.get_selected_values = get_selected_values
 
         return widget
@@ -842,7 +880,12 @@ class PyQt6WidgetEnhancer:
 
     @staticmethod
     def _connect_checkbox_group_signals(widget: Any, param_name: str, callback: Any) -> None:
-        """Connect signals for checkbox group widgets."""
+        """Connect signals for checkbox group widgets.
+
+        Treats List[Enum] like a list of independent bools:
+        - When user clicks ANY checkbox, ALL checkboxes convert from placeholder to concrete
+        - This ensures the entire list becomes concrete once the user starts editing
+        """
         import logging
         logger = logging.getLogger(__name__)
 
@@ -852,9 +895,24 @@ class PyQt6WidgetEnhancer:
                 def make_handler(cb):
                     """Create handler with proper closure to avoid lambda capture issues."""
                     def handler(state):
-                        selected = widget.get_selected_values()
-                        logger.info(f"🔘 Checkbox {cb.text()} changed to {state}, selected values: {[v.name for v in selected]}")
+                        # CRITICAL: When user clicks ANY checkbox, convert ALL checkboxes to concrete
+                        # This implements "list of bools" behavior - editing one makes the whole list concrete
+                        for other_checkbox in widget._checkboxes.values():
+                            if hasattr(other_checkbox, '_is_placeholder') and other_checkbox._is_placeholder:
+                                # Convert placeholder to concrete by setting current displayed state
+                                other_checkbox._is_placeholder = False
+                                # Keep the current checked state (which shows the inherited value)
+                                # No need to call setChecked - it's already showing the right state
+
+                        # Clear placeholder state from the group widget itself
                         PyQt6WidgetEnhancer._clear_placeholder_state(widget)
+
+                        # Get selected values (now all concrete)
+                        selected = widget.get_selected_values()
+                        # Handle None (placeholder state) in logging
+                        selected_str = "None (inherit from parent)" if selected is None else [v.name for v in selected]
+                        logger.info(f"🔘 Checkbox {cb.text()} changed to {state}, selected values: {selected_str}")
+
                         callback(param_name, selected)
                     return handler
 

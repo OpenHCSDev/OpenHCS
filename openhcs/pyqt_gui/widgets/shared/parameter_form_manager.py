@@ -322,7 +322,8 @@ class ParameterFormManager(QWidget):
             # CRITICAL: Don't refresh during reset operations - reset handles placeholders itself
             # CRITICAL: Always use live context from other open windows for placeholder resolution
             # CRITICAL: Don't refresh when 'enabled' field changes - it's styling-only and doesn't affect placeholders
-            self.parameter_changed.connect(lambda param_name, value: self._refresh_with_live_context() if not getattr(self, '_in_reset', False) and param_name != 'enabled' else None)
+            # CRITICAL: Pass the changed param_name so we can skip refreshing it (user just edited it, it's not inherited)
+            self.parameter_changed.connect(lambda param_name, value: self._refresh_with_live_context(exclude_param=param_name) if not getattr(self, '_in_reset', False) and param_name != 'enabled' else None)
 
             # UNIVERSAL ENABLED FIELD BEHAVIOR: Watch for 'enabled' parameter changes and apply styling
             # This works for any form (function parameters, dataclass fields, etc.) that has an 'enabled' parameter
@@ -1252,14 +1253,36 @@ class ParameterFormManager(QWidget):
                              next((i for i in range(widget.count()) if widget.itemData(i) == value), -1))
 
     def _update_checkbox_group(self, widget: QWidget, value: Any) -> None:
-        """Update checkbox group using functional operations."""
+        """Update checkbox group using set_value() pattern for proper placeholder handling.
+
+        CRITICAL: Block signals on ALL checkboxes to prevent race conditions.
+        Without signal blocking, set_value() triggers stateChanged signals which
+        fire the user click handler, creating an infinite loop.
+        """
         import traceback
         logger.info(f"🔄 _update_checkbox_group called with value={[v.name if hasattr(v, 'name') else v for v in value] if value else value}")
         logger.info(f"   Call stack: {''.join(traceback.format_stack()[-4:-1])}")
-        if hasattr(widget, '_checkboxes') and isinstance(value, list):
-            # Functional: reset all, then set selected
-            [cb.setChecked(False) for cb in widget._checkboxes.values()]
-            [widget._checkboxes[v].setChecked(True) for v in value if v in widget._checkboxes]
+
+        if not hasattr(widget, '_checkboxes'):
+            return
+
+        # CRITICAL: Block signals on ALL checkboxes before updating
+        for checkbox in widget._checkboxes.values():
+            checkbox.blockSignals(True)
+
+        try:
+            if value is None:
+                # None means inherit from parent - set all checkboxes to placeholder state
+                for checkbox in widget._checkboxes.values():
+                    checkbox.set_value(None)
+            elif isinstance(value, list):
+                # Explicit list - set concrete values using set_value()
+                for enum_val, checkbox in widget._checkboxes.items():
+                    checkbox.set_value(enum_val in value)
+        finally:
+            # CRITICAL: Always unblock signals, even if there's an exception
+            for checkbox in widget._checkboxes.values():
+                checkbox.blockSignals(False)
 
     def _execute_with_signal_blocking(self, widget: QWidget, operation: callable) -> None:
         """Execute operation with signal blocking - stateless utility."""
@@ -2188,7 +2211,7 @@ class ParameterFormManager(QWidget):
         # IMPORTANT: We DO propagate 'enabled' field changes for cross-window styling updates
         self.parameter_changed.emit(param_name, value)
 
-    def _refresh_with_live_context(self, live_context: dict = None) -> None:
+    def _refresh_with_live_context(self, live_context: dict = None, exclude_param: str = None) -> None:
         """Refresh placeholders using live context from other open windows.
 
         This is the standard refresh method that should be used for all placeholder updates.
@@ -2196,10 +2219,11 @@ class ParameterFormManager(QWidget):
 
         Args:
             live_context: Optional pre-collected live context. If None, will collect it.
+            exclude_param: Optional parameter name to exclude from refresh (e.g., the param that just changed)
         """
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"🔍 REFRESH: {self.field_id} (id={id(self)}) refreshing with live context")
+        logger.info(f"🔍 REFRESH: {self.field_id} (id={id(self)}) refreshing with live context (exclude_param={exclude_param})")
 
         # Only root managers should collect live context (nested managers inherit from parent)
         # If live_context is already provided (e.g., from parent), use it to avoid redundant collection
@@ -2207,17 +2231,18 @@ class ParameterFormManager(QWidget):
             live_context = self._collect_live_context_from_other_windows()
 
         # Refresh this form's placeholders
-        self._refresh_all_placeholders(live_context=live_context)
+        self._refresh_all_placeholders(live_context=live_context, exclude_param=exclude_param)
 
         # CRITICAL: Also refresh all nested managers' placeholders
         # Pass the same live_context to avoid redundant get_current_values() calls
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
+        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context, exclude_param=exclude_param))
 
-    def _refresh_all_placeholders(self, live_context: dict = None) -> None:
+    def _refresh_all_placeholders(self, live_context: dict = None, exclude_param: str = None) -> None:
         """Refresh placeholder text for all widgets in this form.
 
         Args:
             live_context: Optional dict mapping object instances to their live values from other open windows
+            exclude_param: Optional parameter name to exclude from refresh (e.g., the param that just changed)
         """
         with timer(f"_refresh_all_placeholders ({self.field_id})", threshold_ms=5.0):
             # Allow placeholder refresh for nested forms even if they're not detected as lazy dataclasses
@@ -2235,6 +2260,10 @@ class ParameterFormManager(QWidget):
             with self._build_context_stack(overlay, live_context=live_context):
                 monitor = get_monitor("Placeholder resolution per field")
                 for param_name, widget in self.widgets.items():
+                    # CRITICAL: Skip the parameter that just changed (user edited it, it's not inherited)
+                    if exclude_param and param_name == exclude_param:
+                        logger.info(f"🔍 SKIP REFRESH: {param_name} (user just edited it)")
+                        continue
                     # CRITICAL: Check current value from self.parameters (has correct None values)
                     current_value = self.parameters.get(param_name)
 
@@ -2243,34 +2272,10 @@ class ParameterFormManager(QWidget):
                     # even though self.parameters still has None
                     widget_in_placeholder_state = widget.property("is_placeholder_state")
 
-                    # CRITICAL: For List[Enum] checkbox groups, also check if current value matches inherited value
-                    # This allows showing placeholder styling even when value is not None but matches the default
+                    # CRITICAL: Only apply placeholder styling if current_value is None
+                    # Do NOT apply placeholder styling if value matches parent - that would make
+                    # concrete values appear as placeholders, breaking save/load!
                     should_apply_placeholder = current_value is None or widget_in_placeholder_state
-
-                    if not should_apply_placeholder and hasattr(widget, '_checkboxes'):
-                        logger.info(f"🔍 Checking if checkbox group {param_name} matches inherited value: current={current_value}")
-                        # Check if current value matches the inherited value
-                        placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
-                        logger.info(f"📋 Placeholder text for {param_name}: {placeholder_text}")
-                        if placeholder_text:
-                            # Extract inherited value from placeholder text
-                            from openhcs.pyqt_gui.widgets.shared.widget_strategies import _extract_default_value
-                            try:
-                                default_value_str = _extract_default_value(placeholder_text)
-                                if default_value_str.startswith('[') and default_value_str.endswith(']'):
-                                    list_content = default_value_str[1:-1].strip()
-                                    inherited_values = [v.strip() for v in list_content.split(',')] if list_content else []
-                                    # Convert current_value to list of uppercase enum names for comparison
-                                    current_values_str = [v.name for v in current_value] if current_value else []
-                                    logger.info(f"  Comparing: current={current_values_str} vs inherited={inherited_values}")
-                                    # Check if they match
-                                    if set(current_values_str) == set(inherited_values):
-                                        logger.info(f"  ✅ Match! Will apply placeholder styling")
-                                        should_apply_placeholder = True
-                                    else:
-                                        logger.info(f"  ❌ No match")
-                            except Exception as e:
-                                logger.error(f"  ❌ Failed to compare: {e}", exc_info=True)
 
                     if should_apply_placeholder:
                         with monitor.measure():
