@@ -13,8 +13,9 @@ from pathlib import Path
 from typing import Optional, Union, Any, List
 from enum import Enum
 from abc import ABC, abstractmethod
-from openhcs.constants import Microscope, VirtualComponents
-from openhcs.constants.constants import Backend
+from openhcs.constants import Microscope, SequentialComponents, VirtualComponents, VariableComponents, GroupBy
+from openhcs.constants.constants import Backend, get_default_variable_components, get_default_group_by
+from openhcs.constants.input_source import InputSource
 
 # Import decorator for automatic decorator creation
 from openhcs.config_framework import auto_create_decorator
@@ -281,6 +282,37 @@ class VFSConfig:
     materialization_backend: MaterializationBackend = MaterializationBackend.DISK
     """Backend for explicitly materialized outputs (e.g., final results, user-requested saves)."""
 
+
+@global_pipeline_config
+@dataclass(frozen=True)
+class ProcessingConfig:
+    """Configuration for step processing behavior including variable components, grouping, and input source."""
+
+    variable_components: List[VariableComponents] = field(default_factory=get_default_variable_components)
+    """List of variable components for pattern expansion."""
+
+    group_by: Optional[GroupBy] = field(default_factory=get_default_group_by)
+    """Component to group patterns by for conditional function routing."""
+
+    input_source: InputSource = InputSource.PREVIOUS_STEP
+    """Input source strategy: PREVIOUS_STEP (normal chaining) or PIPELINE_START (access original input)."""
+
+@global_pipeline_config
+@dataclass(frozen=True)
+class SequentialProcessingConfig:
+    """Pipeline-level configuration for sequential processing mode.
+
+    Sequential processing changes the orchestrator's execution flow to process
+    one combination at a time through all steps, reducing memory usage.
+    This is a pipeline-level setting, not per-step.
+    """
+
+    sequential_components: List[SequentialComponents] = field(default_factory=list)
+    """Components to process sequentially (e.g., [SequentialComponents.TIMEPOINT, SequentialComponents.CHANNEL]).
+
+    When set, the orchestrator will process one combination of these components through
+    all pipeline steps before moving to the next combination, clearing memory between combinations.
+    """
 
 @global_pipeline_config
 @dataclass(frozen=True)

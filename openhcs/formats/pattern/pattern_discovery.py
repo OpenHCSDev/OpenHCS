@@ -201,6 +201,35 @@ class PatternDiscoveryEngine:
 
         return grouped_patterns
 
+    def subdivide_patterns_by_components(
+        self,
+        patterns: List[str],
+        components: List[str]
+    ) -> Dict[tuple, List[str]]:
+        """
+        Subdivide patterns by multiple component values.
+
+        Args:
+            patterns: List of pattern strings
+            components: List of component names to subdivide by
+
+        Returns:
+            Dictionary mapping component value tuples to pattern lists
+            Example: {('001', '1'): [...], ('001', '2'): [...]}
+        """
+        if not components:
+            return {(): patterns}
+
+        subdivided = defaultdict(list)
+        for pattern in patterns:
+            pattern_template = str(pattern).replace(self.PLACEHOLDER_PATTERN, '001')
+            metadata = self.parser.parse_filename(pattern_template)
+            if not metadata:
+                raise ValueError(f"Failed to parse pattern: {pattern}")
+            key = tuple(str(metadata[comp]) for comp in components if comp in metadata and metadata[comp] is not None)
+            subdivided[key].append(pattern)
+        return dict(subdivided)
+
     def auto_detect_patterns(
         self,
         folder_path: Union[str, Path],
@@ -220,7 +249,7 @@ class PatternDiscoveryEngine:
         axis_filter = kwargs.get(f"{axis_name}_filter")
 
         files_by_axis = self._find_and_filter_images(
-            folder_path, axis_filter, extensions, True, backend
+            folder_path, axis_filter, extensions, recursive, backend
         )
 
         if not files_by_axis:

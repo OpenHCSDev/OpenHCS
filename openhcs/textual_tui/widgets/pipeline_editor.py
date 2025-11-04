@@ -422,8 +422,8 @@ class PipelineEditorWidget(ButtonListWidget):
             "name": step.name,
             "type": "function",
             "func": step.func,
-            "variable_components": step.variable_components,
-            "group_by": step.group_by
+            "variable_components": step.processing_config.variable_components,
+            "group_by": step.processing_config.group_by
         }
 
     def _find_step_index_by_selection(self) -> Optional[int]:
@@ -493,19 +493,12 @@ class PipelineEditorWidget(ButtonListWidget):
             return
 
         try:
-            from pathlib import Path
+            # Use module import to find basic_pipeline.py
+            import openhcs.tests.basic_pipeline as basic_pipeline_module
+            import inspect
 
-            # Find basic_pipeline.py relative to openhcs package
-            import openhcs
-            openhcs_root = Path(openhcs.__file__).parent
-            pipeline_file = openhcs_root / "tests" / "basic_pipeline.py"
-
-            if not pipeline_file.exists():
-                self.app.current_status = f"Pipeline file not found: {pipeline_file}"
-                return
-
-            # Read the file content
-            python_code = pipeline_file.read_text()
+            # Get the source code from the module
+            python_code = inspect.getsource(basic_pipeline_module)
 
             # Execute the code to get pipeline_steps (same as code editor logic)
             namespace = {}
@@ -522,7 +515,9 @@ class PipelineEditorWidget(ButtonListWidget):
                 raise ValueError("No 'pipeline_steps = [...]' assignment found in basic_pipeline.py")
 
         except Exception as e:
+            import traceback
             logger.error(f"Failed to auto-load basic_pipeline.py: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             self.app.current_status = f"Failed to auto-load pipeline: {str(e)}"
 
     async def action_load_pipeline(self) -> None:

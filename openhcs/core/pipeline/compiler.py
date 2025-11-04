@@ -4,6 +4,28 @@ Pipeline module for OpenHCS.
 This module provides the core pipeline compilation components for OpenHCS.
 The PipelineCompiler is responsible for preparing step_plans within a ProcessingContext.
 
+CONFIGURATION ACCESS PATTERN:
+============================
+The compiler must ALWAYS access configuration through the merged config, never the raw pipeline_config:
+
+✅ CORRECT:
+    effective_config = orchestrator.get_effective_config()
+    vfs_config = effective_config.vfs_config
+    well_filter = effective_config.well_filter_config.well_filter
+
+❌ INCORRECT:
+    vfs_config = orchestrator.pipeline_config.vfs_config  # Returns None if not explicitly set!
+
+WHY:
+- orchestrator.pipeline_config is the raw PipelineConfig with None values
+- orchestrator.get_effective_config() returns merged config (pipeline + global)
+- Using raw config breaks global config inheritance for ALL fields
+- Using merged config works automatically for ANY config field (no hardcoding needed)
+
+EXCEPTION:
+- config_context(orchestrator.pipeline_config) is CORRECT - sets up lazy resolution context
+- Writing to orchestrator.pipeline_config is CORRECT - updates the raw config
+
 Doctrinal Clauses:
 - Clause 12 — Absolute Clean Execution
 - Clause 17 — VFS Exclusivity (FileManager is the only component that uses VirtualPath)
@@ -207,7 +229,7 @@ class PipelineCompiler:
         metadata_writer: bool = False,
         plate_path: Optional[Path] = None
         # base_input_dir and axis_id parameters removed, will use from context
-    ) -> None:
+    ) -> List[AbstractStep]:
         """
         Initializes step_plans by calling PipelinePathPlanner.prepare_pipeline_paths,
         which handles primary paths, special I/O path planning and linking, and chainbreaker status.
@@ -219,6 +241,9 @@ class PipelineCompiler:
             orchestrator: Orchestrator instance for well filter resolution
             metadata_writer: If True, this well is responsible for creating OpenHCS metadata files
             plate_path: Path to plate root for zarr conversion detection
+
+        Returns:
+            List of resolved AbstractStep objects with lazy configs resolved
         """
         # NOTE: This method is called within config_context() wrapper in compile_pipelines()
         if context.is_frozen():
@@ -250,8 +275,8 @@ class PipelineCompiler:
         # Check if first step needs zarr conversion
         if steps_definition and plate_path:
             first_step = steps_definition[0]
-            # Access config directly from orchestrator.pipeline_config (lazy resolution via config_context)
-            vfs_config = orchestrator.pipeline_config.vfs_config
+            # Access config from merged config (pipeline + global) for proper inheritance
+            vfs_config = orchestrator.get_effective_config().vfs_config
 
             # Only convert if default materialization backend is ZARR
             wants_zarr_conversion = (
@@ -286,11 +311,12 @@ class PipelineCompiler:
                     logger.debug(f"Input conversion to zarr enabled for first step: {first_step.name}")
 
         # The axis_id and base_input_dir are available from the context object.
-        # Path planning now gets config directly from orchestrator.pipeline_config parameter
+        # CRITICAL: Pass merged config (not raw pipeline_config) for proper global config inheritance
+        # This ensures path_planning_config and vfs_config inherit from global config
         PipelinePathPlanner.prepare_pipeline_paths(
             context,
             steps_definition,
-            orchestrator.pipeline_config
+            context.global_config  # Use merged config from context instead of raw pipeline_config
         )
 
         # === FUNCTION OBJECT REFRESH ===
@@ -303,7 +329,17 @@ class PipelineCompiler:
         # Resolve each step's lazy configs with proper nested context
         # This ensures step-level configs inherit from pipeline-level configs
         # Architecture: GlobalPipelineConfig -> PipelineConfig -> Step (same as UI)
-        logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs with nested step contexts...")
+        logger.info("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs with nested step contexts...")
+
+        # DEBUG: Check what the base global config looks like
+        from openhcs.config_framework.context_manager import get_base_global_config
+        base_global = get_base_global_config()
+        if base_global and hasattr(base_global, 'processing_config'):
+            logger.info(f"🔍 BASE GLOBAL CONFIG: processing_config = {base_global.processing_config}")
+            if base_global.processing_config:
+                logger.info(f"🔍 BASE GLOBAL CONFIG: processing_config.variable_components = {base_global.processing_config.variable_components}")
+        else:
+            logger.info(f"🔍 BASE GLOBAL CONFIG: No processing_config or base_global is None")
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
         from openhcs.config_framework.context_manager import config_context
 
@@ -313,7 +349,22 @@ class PipelineCompiler:
         resolved_steps = []
         for step in steps_definition:
             with config_context(step):  # Step-level context on top of pipeline context
+                # DEBUG: Check what the context looks like before resolution
+                from openhcs.config_framework.context_manager import get_current_temp_global
+                current_ctx = get_current_temp_global()
+                if current_ctx and hasattr(current_ctx, 'processing_config'):
+                    logger.info(f"🔍 CONTEXT CHECK: processing_config.variable_components = {current_ctx.processing_config.variable_components if current_ctx.processing_config else 'None'}")
+                else:
+                    logger.info(f"🔍 CONTEXT CHECK: No context or no processing_config in context")
+
                 resolved_step = resolve_lazy_configurations_for_serialization(step)
+
+                # DEBUG: Check what the resolved step looks like
+                if hasattr(resolved_step, 'processing_config'):
+                    logger.info(f"🔍 RESOLVED CHECK: {resolved_step.name}.processing_config.variable_components = {resolved_step.processing_config.variable_components if resolved_step.processing_config else 'None'}")
+                else:
+                    logger.info(f"🔍 RESOLVED CHECK: {resolved_step.name} has no processing_config")
+
                 resolved_steps.append(resolved_step)
         steps_definition = resolved_steps
 
@@ -353,8 +404,33 @@ class PipelineCompiler:
             current_plan.setdefault("chainbreaker", False) # PathPlanner now sets this.
 
             # Add step-specific attributes (non-I/O, non-path related)
-            current_plan["variable_components"] = step.variable_components
-            current_plan["group_by"] = step.group_by
+            # Access via processing_config (already resolved by resolve_lazy_configurations_for_serialization)
+            # Explicit, fail-fast access to processing_config (avoid silent duck-typing guards)
+            try:
+                proc_cfg = step.processing_config
+            except AttributeError as e:
+                logger.error(f"Step '{getattr(step, 'name', '<unknown>')}' missing processing_config during compilation.")
+                raise
+
+            # Normalise variable_components here in the compiler: replace None/empty with default
+            # Use dataclasses.replace to avoid mutating frozen dataclasses.
+            from dataclasses import replace
+            from openhcs.core.config import VariableComponents
+
+            if proc_cfg.variable_components is None or not proc_cfg.variable_components:
+                if proc_cfg.variable_components is None:
+                    logger.warning(f"Step '{step.name}' has None variable_components; compiler applying default")
+                else:
+                    logger.warning(f"Step '{step.name}' has empty variable_components; compiler applying default")
+                proc_cfg = replace(proc_cfg, variable_components=[VariableComponents.SITE])
+
+            current_plan["variable_components"] = proc_cfg.variable_components
+            current_plan["group_by"] = proc_cfg.group_by
+            current_plan["input_source"] = proc_cfg.input_source
+
+            # Add full processing config for sequential processing
+            current_plan["sequential_processing"] = proc_cfg
+
             # Lazy configs were already resolved at the beginning of compilation
             resolved_step = step
 
@@ -467,9 +543,9 @@ class PipelineCompiler:
                 # 🎯 SEMANTIC COHERENCE FIX: Prevent group_by/variable_components conflict
                 # When variable_components contains the same value as group_by,
                 # set group_by to None to avoid EZStitcher heritage rule violation
-                if (step.variable_components and step.group_by and
-                    step.group_by in step.variable_components):
-                    logger.debug(f"Step {step.name}: Detected group_by='{step.group_by}' in variable_components={step.variable_components}. "
+                if (step.processing_config.variable_components and step.processing_config.group_by and
+                    step.processing_config.group_by in step.processing_config.variable_components):
+                    logger.debug(f"Step {step.name}: Detected group_by='{step.processing_config.group_by}' in variable_components={step.processing_config.variable_components}. "
                                 f"Setting group_by=None to maintain semantic coherence.")
                     current_plan["group_by"] = None
 
@@ -482,6 +558,9 @@ class PipelineCompiler:
                     current_plan['input_memory_type_hint'] = step.input_memory_type_hint
                 if hasattr(step, 'output_memory_type_hint'): # From FunctionStep.__init__
                     current_plan['output_memory_type_hint'] = step.output_memory_type_hint
+
+        # Return resolved steps for use by subsequent compiler methods
+        return steps_definition
 
     # The resolve_special_input_paths_for_context static method is DELETED (lines 181-238 of original)
     # as this functionality is now handled by PipelinePathPlanner.prepare_pipeline_paths.
@@ -511,8 +590,8 @@ class PipelineCompiler:
 
         all_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
 
-        # Access config directly from orchestrator.pipeline_config (lazy resolution via config_context)
-        vfs_config = orchestrator.pipeline_config.vfs_config
+        # Access config from merged config (pipeline + global) for proper inheritance
+        vfs_config = orchestrator.get_effective_config().vfs_config
 
         for step_index, step in enumerate(steps_definition):
             step_plan = context.step_plans[step_index]
@@ -549,11 +628,12 @@ class PipelineCompiler:
 
         # MaterializationFlagPlanner.prepare_pipeline_flags now takes context and pipeline_definition
         # and modifies context.step_plans in-place.
+        # CRITICAL: Pass merged config (not raw pipeline_config) for proper global config inheritance
         MaterializationFlagPlanner.prepare_pipeline_flags(
             context,
             steps_definition,
             orchestrator.plate_path,
-            orchestrator.pipeline_config
+            context.global_config  # Use merged config from context instead of raw pipeline_config
         )
 
         # Post-check (optional, but good for ensuring contracts are met by the planner)
@@ -573,6 +653,118 @@ class PipelineCompiler:
                     f"Missing required keys: {missing_keys} (Clause 273)."
                 )
 
+
+    @staticmethod
+    def validate_sequential_components_compatibility(
+        steps_definition: List[AbstractStep],
+        sequential_components: List
+    ) -> None:
+        """
+        Validate that no step's variable_components overlap with pipeline's sequential_components.
+
+        Args:
+            steps_definition: List of AbstractStep objects
+            sequential_components: List of SequentialComponents from pipeline config
+
+        Raises:
+            ValueError: If any step has variable_components that overlap with sequential_components
+        """
+        if not sequential_components:
+            return
+
+        seq_comp_values = {sc.value for sc in sequential_components}
+
+        for step in steps_definition:
+            # Only check FunctionSteps with processing_config
+            if hasattr(step, 'processing_config') and step.processing_config:
+                var_comps = step.processing_config.variable_components
+                if var_comps:
+                    var_comp_values = {vc.value for vc in var_comps}
+                    overlap = seq_comp_values & var_comp_values
+
+                    if overlap:
+                        raise ValueError(
+                            f"Step '{step.name}' has variable_components {sorted(overlap)} that conflict with "
+                            f"pipeline's sequential_components {sorted(seq_comp_values)}. "
+                            f"A component cannot be both sequential (pipeline-level) and variable (step-level). "
+                            f"Either remove {sorted(overlap)} from the step's variable_components or from the "
+                            f"pipeline's sequential_components."
+                        )
+
+    @staticmethod
+    def analyze_pipeline_sequential_mode(
+        context: ProcessingContext,
+        global_config: 'GlobalPipelineConfig',
+        orchestrator: 'PipelineOrchestrator'
+    ) -> None:
+        """
+        Configure pipeline-wide sequential processing mode from pipeline-level config.
+        Precomputes sequential combinations at compile time.
+
+        Args:
+            context: ProcessingContext to configure
+            global_config: GlobalPipelineConfig containing SequentialProcessingConfig
+            orchestrator: PipelineOrchestrator with microscope handler for pattern discovery
+        """
+        if context.is_frozen():
+            raise AttributeError("Cannot analyze pipeline sequential mode in a frozen ProcessingContext.")
+
+        # Get pipeline-level sequential processing config
+        seq_config = global_config.sequential_processing_config
+
+        if seq_config and seq_config.sequential_components:
+            # Enable pipeline-wide sequential mode
+            context.pipeline_sequential_mode = True
+            seq_comps = tuple(sc.value for sc in seq_config.sequential_components)
+
+            # Precompute combinations from orchestrator's component keys cache
+            # This cache is populated from filename parsing during init, so it's always available
+            from openhcs.constants import AllComponents
+            import itertools
+
+            # Extract component values from orchestrator's cache for each sequential component
+            # Filter out components with only 1 value (no point in sequential processing)
+            component_values_lists = []
+            filtered_seq_comps = []
+
+            for seq_comp in seq_comps:
+                # Convert component name to AllComponents enum
+                component_enum = AllComponents(seq_comp)
+
+                # Get component values from orchestrator's cache (populated from filename parsing)
+                component_values = orchestrator.get_component_keys(component_enum)
+
+                if not component_values:
+                    logger.warning(f"No {seq_comp} values found in orchestrator cache")
+                    component_values_lists.append([])
+                elif len(component_values) == 1:
+                    logger.info(f"Sequential component '{seq_comp}' has only 1 value - ignoring for sequential processing")
+                else:
+                    # Only include components with multiple values
+                    component_values_lists.append(component_values)
+                    filtered_seq_comps.append(seq_comp)
+                    logger.debug(f"Sequential component '{seq_comp}': {len(component_values)} values from cache")
+
+            # Generate all combinations using Cartesian product
+            if component_values_lists and all(component_values_lists):
+                combinations = list(itertools.product(*component_values_lists))
+                context.pipeline_sequential_combinations = combinations
+                logger.info(
+                    f"Pipeline sequential mode: ENABLED (components: {tuple(filtered_seq_comps)}, "
+                    f"combinations: {len(combinations)})"
+                )
+            else:
+                # No components with multiple values - disable sequential mode
+                context.pipeline_sequential_mode = False
+                context.pipeline_sequential_combinations = None
+                logger.info(
+                    f"Pipeline sequential mode: DISABLED (all sequential components have ≤1 value)"
+                )
+        else:
+            # No sequential processing configured
+            context.pipeline_sequential_mode = False
+            context.pipeline_sequential_combinations = None
+            logger.debug("Pipeline sequential mode: DISABLED (no sequential components configured)")
 
     @staticmethod
     def validate_memory_contracts_for_context(
@@ -727,7 +919,8 @@ class PipelineCompiler:
 
         if required_backend:
             # Microscope has single compatible backend - auto-correct if needed
-            vfs_config = orchestrator.pipeline_config.vfs_config or VFSConfig()
+            # Access from merged config for proper inheritance
+            vfs_config = orchestrator.get_effective_config().vfs_config or VFSConfig()
 
             if vfs_config.materialization_backend != required_backend:
                 logger.warning(
@@ -735,6 +928,7 @@ class PipelineCompiler:
                     f"Auto-correcting from {vfs_config.materialization_backend.value}."
                 )
                 new_vfs_config = replace(vfs_config, materialization_backend=required_backend)
+                # Update the raw pipeline_config (this is a write operation, not a read)
                 orchestrator.pipeline_config = replace(
                     orchestrator.pipeline_config,
                     vfs_config=new_vfs_config
@@ -861,11 +1055,13 @@ class PipelineCompiler:
             # Get multiprocessing axis values dynamically from configuration
             from openhcs.constants import MULTIPROCESSING_AXIS
 
-            # CRITICAL: Resolve well_filter_config from pipeline_config if present
+            # CRITICAL: Resolve well_filter_config from merged config (pipeline + global)
             # This allows global-level well filtering to work (e.g., well_filter_config.well_filter = 1)
+            # Must use get_effective_config() to get merged config, not raw pipeline_config
             resolved_axis_filter = axis_filter
-            if orchestrator.pipeline_config and hasattr(orchestrator.pipeline_config, 'well_filter_config'):
-                well_filter_config = orchestrator.pipeline_config.well_filter_config
+            effective_config = orchestrator.get_effective_config()
+            if effective_config and hasattr(effective_config, 'well_filter_config'):
+                well_filter_config = effective_config.well_filter_config
                 if well_filter_config and hasattr(well_filter_config, 'well_filter') and well_filter_config.well_filter is not None:
                     from openhcs.core.utils import WellFilterProcessor
                     available_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
@@ -939,37 +1135,90 @@ class PipelineCompiler:
 
             for axis_id in axis_values_to_process:
                 logger.debug(f"Compiling for axis value: {axis_id}")
-                context = orchestrator.create_context(axis_id)
-
-                # Copy global axis filters to this context
-                context.step_axis_filters = global_step_axis_filters
 
                 # Determine if this axis value is responsible for metadata creation
                 is_responsible = (axis_id == responsible_axis_value)
                 logger.debug(f"Axis {axis_id} metadata responsibility: {is_responsible}")
 
+                # Create a temporary context to check if sequential mode is enabled
+                temp_context = orchestrator.create_context(axis_id)
+                temp_context.step_axis_filters = global_step_axis_filters
+
                 # CRITICAL: Wrap all compilation steps in config_context() for lazy resolution
                 from openhcs.config_framework.context_manager import config_context
                 with config_context(orchestrator.pipeline_config):
-                    PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
-                    PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, orchestrator)
-                    PipelineCompiler.plan_materialization_flags_for_context(context, pipeline_definition, orchestrator)
-                    PipelineCompiler.validate_memory_contracts_for_context(context, pipeline_definition, orchestrator)
-                    PipelineCompiler.assign_gpu_resources_for_context(context)
+                    # Validate sequential components compatibility BEFORE analyzing sequential mode
+                    seq_config = temp_context.global_config.sequential_processing_config
+                    if seq_config and seq_config.sequential_components:
+                        PipelineCompiler.validate_sequential_components_compatibility(
+                            pipeline_definition, seq_config.sequential_components
+                        )
 
-                    if enable_visualizer_override:
-                        PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
+                    # Analyze sequential mode to get combinations (doesn't freeze context)
+                    PipelineCompiler.analyze_pipeline_sequential_mode(temp_context, temp_context.global_config, orchestrator)
 
-                    # Resolve all lazy dataclasses before freezing to ensure multiprocessing compatibility
-                    PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
+                # Check if sequential mode is enabled
+                if temp_context.pipeline_sequential_mode and temp_context.pipeline_sequential_combinations:
+                    # Compile separate context for each sequential combination
+                    combinations = temp_context.pipeline_sequential_combinations
+                    logger.info(f"🔄 COMPILER: Compiling {len(combinations)} sequential contexts for axis {axis_id}")
 
+                    for combo_idx, combo in enumerate(combinations):
+                        context = orchestrator.create_context(axis_id)
+                        context.step_axis_filters = global_step_axis_filters
 
+                        # Set the current combination BEFORE freezing
+                        context.pipeline_sequential_mode = True
+                        context.pipeline_sequential_combinations = combinations
+                        context.current_sequential_combination = combo
+                        logger.info(f"🔄 COMPILER: Set context.current_sequential_combination = {combo} for axis {axis_id}")
 
+                        with config_context(orchestrator.pipeline_config):
+                            resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
+                            PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
+                            PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
+                            PipelineCompiler.validate_memory_contracts_for_context(context, resolved_steps, orchestrator)
+                            PipelineCompiler.assign_gpu_resources_for_context(context)
 
+                            if enable_visualizer_override:
+                                PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
 
-                context.freeze()
-                compiled_contexts[axis_id] = context
-                logger.debug(f"Compilation finished for axis value: {axis_id}")
+                            PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
+
+                        context.freeze()
+                        # Use composite key: (axis_id, combo_idx)
+                        context_key = f"{axis_id}__combo_{combo_idx}"
+                        compiled_contexts[context_key] = context
+                        logger.debug(f"Compiled sequential context {combo_idx + 1}/{len(combinations)} for axis {axis_id}")
+                else:
+                    # No sequential mode - compile single context as before
+                    context = orchestrator.create_context(axis_id)
+                    context.step_axis_filters = global_step_axis_filters
+
+                    with config_context(orchestrator.pipeline_config):
+                        resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
+                        PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
+                        PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
+
+                        # Validate sequential components compatibility BEFORE analyzing sequential mode
+                        seq_config = context.global_config.sequential_processing_config
+                        if seq_config and seq_config.sequential_components:
+                            PipelineCompiler.validate_sequential_components_compatibility(
+                                pipeline_definition, seq_config.sequential_components
+                            )
+
+                        PipelineCompiler.analyze_pipeline_sequential_mode(context, context.global_config, orchestrator)
+                        PipelineCompiler.validate_memory_contracts_for_context(context, resolved_steps, orchestrator)
+                        PipelineCompiler.assign_gpu_resources_for_context(context)
+
+                        if enable_visualizer_override:
+                            PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
+
+                        PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
+
+                    context.freeze()
+                    compiled_contexts[axis_id] = context
+                    logger.debug(f"Compilation finished for axis value: {axis_id}")
 
             # Log path planning summary once per plate
             if compiled_contexts:

@@ -29,15 +29,21 @@ class StreamingBackend(DataSink):
     Subclasses must define abstract class attributes:
     - VIEWER_TYPE: str (e.g., 'napari', 'fiji')
     - SHM_PREFIX: str (e.g., 'napari_', 'fiji_')
+    - _backend_type: str (e.g., 'napari_stream', 'fiji_stream')
 
     All streaming backends use generic 'host' and 'port' kwargs for polymorphism.
 
-    Concrete implementations should use StorageBackendMeta for automatic registration.
+    Inherits from DataSink (which inherits from BackendBase for automatic registration).
     """
 
     # Abstract class attributes that subclasses must define
     VIEWER_TYPE: str = None
     SHM_PREFIX: str = None
+
+    @property
+    def requires_filesystem_validation(self) -> bool:
+        """Streaming backends don't require filesystem validation."""
+        return False
 
     def __init__(self):
         """Initialize ZeroMQ and shared memory infrastructure."""

@@ -181,6 +181,10 @@ def create_well_dict(raw_df, wells=None,scope=None):
     # This code only runs when the script is executed directly, not when imported as a module
     rows=[string.ascii_uppercase[i] for i in range(8)]
     cols=[i+1 for i in range(12)]
+if __name__ == "__main__":
+    # This code only runs when the script is executed directly, not when imported as a module
+    rows=[string.ascii_uppercase[i] for i in range(8)]
+    cols=[i+1 for i in range(12)]
     conditions = []
     for row in rows:
         for col in cols:

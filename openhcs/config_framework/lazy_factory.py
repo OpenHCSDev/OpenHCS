@@ -283,7 +283,13 @@ class LazyDataclassFactory:
                 if field.default is not MISSING:
                     field_def = (field.name, final_field_type, dataclasses.field(default=field.default, metadata=field.metadata))
                 elif field.default_factory is not MISSING:
-                    field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory, metadata=field.metadata))
+                    # CRITICAL: For lazy configs (PipelineConfig), dataclass fields with default_factory
+                    # should become None instead of creating instances
+                    # This enables proper inheritance from GlobalPipelineConfig
+                    if is_dataclass(field.type):
+                        field_def = (field.name, final_field_type, dataclasses.field(default=None, metadata=field.metadata))
+                    else:
+                        field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory, metadata=field.metadata))
                 else:
                     # Field has metadata but no default - use MISSING to indicate required field
                     field_def = (field.name, final_field_type, dataclasses.field(default=MISSING, metadata=field.metadata))
@@ -1038,8 +1044,9 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
             field_type = Union[field_type, type(None)]
             default_value = None
         else:
-            # Both inherit_as_none and regular cases use same default factory
-            # Add ui_hidden metadata to the field so UI layer can check it
+            # CRITICAL: GlobalPipelineConfig needs default_factory to create instances with defaults
+            # PipelineConfig (created by make_lazy_simple) automatically gets default=None
+            # So we use default_factory here for GlobalPipelineConfig fields
             default_value = field(default_factory=field_type, metadata={'ui_hidden': is_ui_hidden})
 
         return (config['field_name'], field_type, default_value)

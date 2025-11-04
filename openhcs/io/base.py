@@ -19,7 +19,87 @@ from openhcs.core.auto_register_meta import AutoRegisterMeta
 logger = logging.getLogger(__name__)
 
 
-class DataSink(ABC):
+class PicklableBackend(ABC):
+    """
+    Abstract base class for storage backends that support pickling with connection parameters.
+
+    Backends that maintain network connections or other unpicklable resources must
+    explicitly inherit from this ABC and implement the required methods to be safely
+    pickled and unpickled in multiprocessing workers.
+
+    This is particularly important for backends that maintain:
+    - Network connections (e.g., OMERO, remote databases, S3)
+    - File handles that can't cross process boundaries
+    - Authentication sessions
+
+    The pattern is:
+    1. Main process: Backend stores connection params via get_connection_params()
+    2. Pickling: ProcessingContext preserves these params
+    3. Worker process: Backend recreates connection using set_connection_params()
+
+    This uses nominal typing (ABC) not structural typing (Protocol), so
+    explicit inheritance is required for isinstance() checks to work.
+    """
+
+    @abstractmethod
+    def get_connection_params(self) -> Optional[Dict[str, Any]]:
+        """
+        Return connection parameters for worker process reconnection.
+
+        Returns:
+            Dictionary of connection parameters (host, port, username, etc.)
+            or None if no connection parameters are available.
+
+        Note:
+            Passwords should NOT be included in connection params.
+            They should be retrieved from environment variables in the worker.
+        """
+        pass
+
+    @abstractmethod
+    def set_connection_params(self, params: Optional[Dict[str, Any]]) -> None:
+        """
+        Set connection parameters (used during unpickling).
+
+        Args:
+            params: Dictionary of connection parameters or None
+        """
+        pass
+
+
+class BackendBase(metaclass=AutoRegisterMeta):
+    """
+    Base class for all storage backends (read-only and read-write).
+
+    Defines the registry and common interface for backend discovery.
+    Concrete backends should inherit from StorageBackend, ReadOnlyBackend, or DataSink.
+    """
+    __registry_key__ = '_backend_type'
+
+    # Enable automatic discovery of backends in openhcs.io package
+    from openhcs.core.auto_register_meta import RegistryConfig, LazyDiscoveryDict
+    __registry_config__ = RegistryConfig(
+        registry_dict=LazyDiscoveryDict(),
+        key_attribute='_backend_type',
+        skip_if_no_key=True,
+        registry_name='backend',
+        discovery_package='openhcs.io',
+        discovery_recursive=False,  # All backends are in openhcs.io/*.py (flat structure)
+    )
+
+    @property
+    @abstractmethod
+    def requires_filesystem_validation(self) -> bool:
+        """
+        Whether this backend requires filesystem validation.
+
+        Returns:
+            True for local filesystem backends, False for virtual/remote/streaming
+        """
+        pass
+
+
+class DataSink(BackendBase):
     """
     Abstract base class for data destinations.
 
@@ -30,6 +110,8 @@ class DataSink(ABC):
     - Fail-loud: No defensive programming, explicit error handling
     - Minimal: Only essential operations both storage and streaming need
     - Generic: Enables any type of data destination backend
+
+    Inherits from BackendBase for automatic registration.
     """
 
     @abstractmethod
@@ -66,7 +148,7 @@ class DataSink(ABC):
         pass
 
 
-class DataSource(ABC):
+class DataSource(BackendBase):
     """
     Abstract base class for read-only data sources.
 
@@ -234,30 +316,14 @@ class VirtualBackend(DataSink):
         return False
 
 
-class BackendBase(metaclass=AutoRegisterMeta):
-    """
-    Base class for all storage backends (read-only and read-write).
-
-    Defines the registry and common interface for backend discovery.
-    Concrete backends should inherit from StorageBackend or ReadOnlyBackend.
-    """
-    __registry_key__ = '_backend_type'
-
-    @property
-    @abstractmethod
-    def requires_filesystem_validation(self) -> bool:
-        """Whether this backend requires filesystem validation."""
-        pass
-
-
-class ReadOnlyBackend(BackendBase, DataSource):
+class ReadOnlyBackend(DataSource):
     """
     Abstract base class for read-only storage backends with auto-registration.
 
     Use this for backends that only need to read data (virtual workspaces,
     read-only mounts, archive viewers, etc.).
 
-    Inherits from BackendBase (for registration) and DataSource (for read interface).
+    Inherits from DataSource (which inherits from BackendBase for registration).
     No write operations - clean separation of concerns.
 
     Concrete implementations are automatically registered via AutoRegisterMeta.
@@ -279,7 +345,7 @@ class ReadOnlyBackend(BackendBase, DataSource):
     # - exists(), is_file(), is_dir()
 
 
-class StorageBackend(BackendBase, DataSource, DataSink):
+class StorageBackend(DataSource, DataSink):
     """
     Abstract base class for read-write storage backends.
 
@@ -465,5 +531,16 @@ def reset_memory_backend() -> None:
 
     # Clear files from existing memory backend while preserving directories
     memory_backend = storage_registry[Backend.MEMORY.value]
+
+    # DEBUG: Log what's in memory before clearing
+    existing_keys = list(memory_backend._memory_store.keys())
+    logger.info(f"🔍 VFS_CLEAR: Memory backend has {len(existing_keys)} entries BEFORE clear")
+    logger.info(f"🔍 VFS_CLEAR: First 10 keys: {existing_keys[:10]}")
+
     memory_backend.clear_files_only()
+
+    # DEBUG: Log what's in memory after clearing
+    remaining_keys = list(memory_backend._memory_store.keys())
+    logger.info(f"🔍 VFS_CLEAR: Memory backend has {len(remaining_keys)} entries AFTER clear (directories only)")
+    logger.info(f"🔍 VFS_CLEAR: First 10 remaining keys: {remaining_keys[:10]}")
     logger.info("Memory backend reset - files cleared, directories preserved")

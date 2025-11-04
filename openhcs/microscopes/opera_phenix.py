@@ -428,7 +428,8 @@ class OperaPhenixFilenameParser(FilenameParser):
         else:
             raise ValueError(f"Invalid well format: {well}. Expected format: 'R01C03'")
 
-        # Default Z-index and timepoint to 1 if not provided
+        # Default all components to 1 if not provided - ensures consistent filename structure
+        site = 1 if site is None else site
         z_index = 1 if z_index is None else z_index
         channel = 1 if channel is None else channel
         timepoint = 1 if timepoint is None else timepoint

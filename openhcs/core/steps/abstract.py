@@ -31,6 +31,7 @@ from openhcs.constants.input_source import InputSource
 # Import LazyStepMaterializationConfig for type hints
 from openhcs.core.config import LazyStepMaterializationConfig
 from openhcs.core.config import LazyStepWellFilterConfig
+from openhcs.core.config import LazyProcessingConfig
 
 # Import ContextProvider for automatic step context registration
 from openhcs.config_framework.lazy_factory import ContextProvider
@@ -121,9 +122,7 @@ class AbstractStep(abc.ABC, ContextProvider):
         name: str = None,
         description: str = None,
         enabled: bool = True,
-        variable_components: List[VariableComponents] = get_default_variable_components(),
-        group_by: Optional[GroupBy] = get_default_group_by(),
-        input_source: InputSource = InputSource.PREVIOUS_STEP,
+        processing_config: 'LazyProcessingConfig' = LazyProcessingConfig(),
         step_well_filter_config: 'LazyStepWellFilterConfig' = LazyStepWellFilterConfig(),
         step_materialization_config: Optional['LazyStepMaterializationConfig'] = None,
         napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
@@ -140,11 +139,8 @@ class AbstractStep(abc.ABC, ContextProvider):
             description: Optional description of what this step does.
             enabled: Whether this step is enabled. Disabled steps are filtered out
                     during pipeline compilation. Defaults to True.
-            variable_components: List of variable components for this step.
-            group_by: Optional grouping hint for step execution.
-            input_source: Input source strategy for this step. Defaults to PREVIOUS_STEP
-                         for normal pipeline chaining. Use PIPELINE_START to access
-                         original input data (replaces @chain_breaker decorator).
+            processing_config: LazyProcessingConfig for variable_components, group_by, input_source, and sequential processing.
+            step_well_filter_config: LazyStepWellFilterConfig for well filtering.
             step_materialization_config: Optional LazyStepMaterializationConfig for per-step materialized output.
                                    When provided, enables saving materialized copy of step output
                                    to custom location in addition to normal memory backend processing.
@@ -157,13 +153,11 @@ class AbstractStep(abc.ABC, ContextProvider):
         self.name = name or self.__class__.__name__
         self.description = description
         self.enabled = enabled
-        self.variable_components = variable_components
-        self.group_by = group_by
-        self.input_source = input_source
+        self.processing_config = processing_config
+        self.step_well_filter_config = step_well_filter_config
         self.step_materialization_config = step_materialization_config
         self.napari_streaming_config = napari_streaming_config
         self.fiji_streaming_config = fiji_streaming_config
-        self.step_well_filter_config = step_well_filter_config
 
         # Internal compiler hints - set by path planner during compilation
         self.__input_dir__ = None
