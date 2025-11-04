@@ -2128,6 +2128,9 @@ class ParameterFormManager(QWidget):
         2. Refresh all sibling nested forms' placeholders
         3. Refresh enabled styling (in case siblings inherit enabled values)
         4. Propagate the change signal up to root for cross-window updates
+
+        CRITICAL: We pass exclude_field to avoid re-applying placeholder to the field that just changed.
+        This prevents glitchy behavior where clicking a checkbox triggers a refresh that fights with the click.
         """
         # OPTIMIZATION: Skip expensive placeholder refreshes during batch reset
         # The reset operation will do a single refresh at the end
@@ -2157,10 +2160,16 @@ class ParameterFormManager(QWidget):
                 live_context = None
 
             # Refresh parent form's placeholders with live context
-            self._refresh_all_placeholders(live_context=live_context)
+            # CRITICAL: Exclude the field that just changed to avoid fighting with user interaction
+            self._refresh_all_placeholders(live_context=live_context, exclude_field=param_name)
 
             # Refresh all nested managers' placeholders (including siblings) with live context
-            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
+            # CRITICAL: Exclude the nested manager that emitted the change
+            self._apply_to_nested_managers(
+                lambda name, manager: manager._refresh_all_placeholders(live_context=live_context)
+                if name != self._find_nested_manager_name_for_param(param_name)
+                else None
+            )
 
             # CRITICAL: Also refresh enabled styling for all nested managers
             # This ensures that when one config's enabled field changes, siblings that inherit from it update their styling
@@ -2198,11 +2207,22 @@ class ParameterFormManager(QWidget):
         # Pass the same live_context to avoid redundant get_current_values() calls
         self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
 
-    def _refresh_all_placeholders(self, live_context: dict = None) -> None:
+    def _find_nested_manager_name_for_param(self, param_name: str) -> Optional[str]:
+        """Find which nested manager contains the given parameter.
+
+        Returns the nested manager's name (e.g., 'processing_config') if found, None otherwise.
+        """
+        for nested_name, nested_manager in self.nested_managers.items():
+            if param_name in nested_manager.parameters:
+                return nested_name
+        return None
+
+    def _refresh_all_placeholders(self, live_context: dict = None, exclude_field: str = None) -> None:
         """Refresh placeholder text for all widgets in this form.
 
         Args:
             live_context: Optional dict mapping object instances to their live values from other open windows
+            exclude_field: Optional field name to exclude from refresh (e.g., the field that just changed)
         """
         with timer(f"_refresh_all_placeholders ({self.field_id})", threshold_ms=5.0):
             # Allow placeholder refresh for nested forms even if they're not detected as lazy dataclasses
@@ -2220,6 +2240,11 @@ class ParameterFormManager(QWidget):
             with self._build_context_stack(overlay, live_context=live_context):
                 monitor = get_monitor("Placeholder resolution per field")
                 for param_name, widget in self.widgets.items():
+                    # Skip the field that just changed to avoid fighting with user interaction
+                    if exclude_field and param_name == exclude_field:
+                        logger.info(f"⏭️ Skipping placeholder refresh for {param_name} (just changed)")
+                        continue
+
                     # CRITICAL: Check current value from self.parameters (has correct None values)
                     current_value = self.parameters.get(param_name)
 
