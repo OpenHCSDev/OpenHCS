@@ -170,7 +170,7 @@ class ProcessingContext:
             Dictionary of state to pickle
         """
         from openhcs.constants.constants import Backend
-        from openhcs.io.backend_protocols import PicklableBackend
+        from openhcs.io.omero_local import PicklableBackend
 
         state = self.__dict__.copy()
 
