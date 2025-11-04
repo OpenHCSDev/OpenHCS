@@ -2131,42 +2131,44 @@ class ParameterFormManager(QWidget):
         """
         # OPTIMIZATION: Skip expensive placeholder refreshes during batch reset
         # The reset operation will do a single refresh at the end
-        if getattr(self, '_in_reset', False):
-            return
-
-        # OPTIMIZATION: Skip cross-window context collection during batch operations
-        if getattr(self, '_block_cross_window_updates', False):
-            return
+        # BUT: Still propagate the signal so dual editor window can sync function editor
+        in_reset = getattr(self, '_in_reset', False)
+        block_cross_window = getattr(self, '_block_cross_window_updates', False)
 
         # CRITICAL OPTIMIZATION: Also check if ANY nested manager is in reset mode
         # When a nested dataclass's "Reset All" button is clicked, the nested manager
         # sets _in_reset=True, but the parent doesn't know about it. We need to skip
         # expensive updates while the child is resetting.
+        nested_in_reset = False
         for nested_manager in self.nested_managers.values():
             if getattr(nested_manager, '_in_reset', False):
-                return
+                nested_in_reset = True
+                break
             if getattr(nested_manager, '_block_cross_window_updates', False):
-                return
+                nested_in_reset = True
+                break
 
-        # Collect live context from other windows (only for root managers)
-        if self._parent_manager is None:
-            live_context = self._collect_live_context_from_other_windows()
-        else:
-            live_context = None
+        # Skip expensive operations during reset, but still propagate signal
+        if not (in_reset or block_cross_window or nested_in_reset):
+            # Collect live context from other windows (only for root managers)
+            if self._parent_manager is None:
+                live_context = self._collect_live_context_from_other_windows()
+            else:
+                live_context = None
 
-        # Refresh parent form's placeholders with live context
-        self._refresh_all_placeholders(live_context=live_context)
+            # Refresh parent form's placeholders with live context
+            self._refresh_all_placeholders(live_context=live_context)
 
-        # Refresh all nested managers' placeholders (including siblings) with live context
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
+            # Refresh all nested managers' placeholders (including siblings) with live context
+            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
 
-        # CRITICAL: Also refresh enabled styling for all nested managers
-        # This ensures that when one config's enabled field changes, siblings that inherit from it update their styling
-        # Example: fiji_streaming_config.enabled inherits from napari_streaming_config.enabled
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+            # CRITICAL: Also refresh enabled styling for all nested managers
+            # This ensures that when one config's enabled field changes, siblings that inherit from it update their styling
+            # Example: fiji_streaming_config.enabled inherits from napari_streaming_config.enabled
+            self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
 
-        # CRITICAL: Propagate parameter change signal up the hierarchy
-        # This ensures cross-window updates work for nested config changes
+        # CRITICAL: ALWAYS propagate parameter change signal up the hierarchy, even during reset
+        # This ensures the dual editor window can sync the function editor when reset changes group_by
         # The root manager will emit context_value_changed via _emit_cross_window_change
         # IMPORTANT: We DO propagate 'enabled' field changes for cross-window styling updates
         self.parameter_changed.emit(param_name, value)

@@ -331,16 +331,29 @@ class DualEditorWindow(BaseFormDialog):
         # CRITICAL: Read from form manager's current values (live context), not from self.editing_step
         # The form manager updates its self.parameters dict as the user types, but doesn't update
         # the dataclass instance until save. So we need to read from the form's current state.
+        #
+        # CRITICAL: Also apply lazy resolution to handle None values (inherit from pipeline config)
+        from openhcs.config_framework.context_manager import config_context
+
         try:
             # Get current values from step editor form (includes nested dataclasses)
             current_values = self.step_editor.form_manager.get_current_values()
             processing_config = current_values.get('processing_config')
 
             if processing_config:
-                # Read from the live processing_config dataclass (reconstructed from nested manager)
-                effective_group_by = processing_config.group_by
-                variable_components = processing_config.variable_components or []
-                logger.info(f"🔍 Live form values: group_by={effective_group_by}, variable_components={variable_components}")
+                # CRITICAL: Apply config_context to enable lazy resolution for None values
+                # When group_by is None, it should inherit from pipeline config
+                with config_context(self.orchestrator.pipeline_config):
+                    # Create a temporary step with current form values for lazy resolution context
+                    from dataclasses import replace
+                    temp_step = replace(self.editing_step, **current_values)
+
+                    with config_context(temp_step):
+                        # Read from the live processing_config with lazy resolution
+                        # If group_by is None, this will resolve to pipeline config's value
+                        effective_group_by = temp_step.processing_config.group_by
+                        variable_components = temp_step.processing_config.variable_components or []
+                        logger.info(f"🔍 Live form values (lazy-resolved): group_by={effective_group_by}, variable_components={variable_components}")
             else:
                 # Fallback: processing_config not in current values (shouldn't happen)
                 logger.warning("⚠️  processing_config not found in current form values, using defaults")
