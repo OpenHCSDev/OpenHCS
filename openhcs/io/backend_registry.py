@@ -64,14 +64,18 @@ def create_storage_registry() -> Dict[str, DataSink]:
     Returns:
         Dictionary mapping backend types to instances
     """
-    # Backends auto-discovered on first access to STORAGE_BACKENDS
+    # Trigger discovery of all backends in openhcs.io package
+    # This imports all backend modules (disk, memory, zarr, napari_stream, fiji_stream, etc.)
+    # and registers them via metaclass
+    STORAGE_BACKENDS._discover()
+    logger.debug("Triggered backend discovery via LazyDiscoveryDict")
 
     # Backends that require context-specific initialization (e.g., plate_root)
     # These are registered lazily when needed, not at startup
     SKIP_BACKENDS = {'virtual_workspace'}
 
     registry = {}
-    for backend_type in STORAGE_BACKENDS.keys():  # Auto-discovers here
+    for backend_type in STORAGE_BACKENDS.keys():
         # Skip backends that need context-specific initialization
         if backend_type in SKIP_BACKENDS:
             logger.debug(f"Skipping backend '{backend_type}' - requires context-specific initialization")

@@ -19,7 +19,39 @@ from openhcs.core.auto_register_meta import AutoRegisterMeta
 logger = logging.getLogger(__name__)
 
 
-class DataSink(ABC):
+class BackendBase(metaclass=AutoRegisterMeta):
+    """
+    Base class for all storage backends (read-only and read-write).
+
+    Defines the registry and common interface for backend discovery.
+    Concrete backends should inherit from StorageBackend, ReadOnlyBackend, or DataSink.
+    """
+    __registry_key__ = '_backend_type'
+
+    # Enable automatic discovery of backends in openhcs.io package
+    from openhcs.core.auto_register_meta import RegistryConfig, LazyDiscoveryDict
+    __registry_config__ = RegistryConfig(
+        registry_dict=LazyDiscoveryDict(),
+        key_attribute='_backend_type',
+        skip_if_no_key=True,
+        registry_name='backend',
+        discovery_package='openhcs.io',
+        discovery_recursive=False,  # All backends are in openhcs.io/*.py (flat structure)
+    )
+
+    @property
+    @abstractmethod
+    def requires_filesystem_validation(self) -> bool:
+        """
+        Whether this backend requires filesystem validation.
+
+        Returns:
+            True for local filesystem backends, False for virtual/remote/streaming
+        """
+        pass
+
+
+class DataSink(BackendBase):
     """
     Abstract base class for data destinations.
 
@@ -30,6 +62,8 @@ class DataSink(ABC):
     - Fail-loud: No defensive programming, explicit error handling
     - Minimal: Only essential operations both storage and streaming need
     - Generic: Enables any type of data destination backend
+
+    Inherits from BackendBase for automatic registration.
     """
 
     @abstractmethod
@@ -66,7 +100,7 @@ class DataSink(ABC):
         pass
 
 
-class DataSource(ABC):
+class DataSource(BackendBase):
     """
     Abstract base class for read-only data sources.
 
@@ -234,30 +268,14 @@ class VirtualBackend(DataSink):
         return False
 
 
-class BackendBase(metaclass=AutoRegisterMeta):
-    """
-    Base class for all storage backends (read-only and read-write).
-
-    Defines the registry and common interface for backend discovery.
-    Concrete backends should inherit from StorageBackend or ReadOnlyBackend.
-    """
-    __registry_key__ = '_backend_type'
-
-    @property
-    @abstractmethod
-    def requires_filesystem_validation(self) -> bool:
-        """Whether this backend requires filesystem validation."""
-        pass
-
-
-class ReadOnlyBackend(BackendBase, DataSource):
+class ReadOnlyBackend(DataSource):
     """
     Abstract base class for read-only storage backends with auto-registration.
 
     Use this for backends that only need to read data (virtual workspaces,
     read-only mounts, archive viewers, etc.).
 
-    Inherits from BackendBase (for registration) and DataSource (for read interface).
+    Inherits from DataSource (which inherits from BackendBase for registration).
     No write operations - clean separation of concerns.
 
     Concrete implementations are automatically registered via AutoRegisterMeta.
@@ -279,7 +297,7 @@ class ReadOnlyBackend(BackendBase, DataSource):
     # - exists(), is_file(), is_dir()
 
 
-class StorageBackend(BackendBase, DataSource, DataSink):
+class StorageBackend(DataSource, DataSink):
     """
     Abstract base class for read-write storage backends.
 
