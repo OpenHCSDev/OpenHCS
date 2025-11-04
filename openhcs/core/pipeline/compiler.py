@@ -253,8 +253,8 @@ class PipelineCompiler:
         # Check if first step needs zarr conversion
         if steps_definition and plate_path:
             first_step = steps_definition[0]
-            # Access config directly from orchestrator.pipeline_config (lazy resolution via config_context)
-            vfs_config = orchestrator.pipeline_config.vfs_config
+            # Access config from merged config (pipeline + global) for proper inheritance
+            vfs_config = orchestrator.get_effective_config().vfs_config
 
             # Only convert if default materialization backend is ZARR
             wants_zarr_conversion = (
@@ -567,8 +567,8 @@ class PipelineCompiler:
 
         all_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
 
-        # Access config directly from orchestrator.pipeline_config (lazy resolution via config_context)
-        vfs_config = orchestrator.pipeline_config.vfs_config
+        # Access config from merged config (pipeline + global) for proper inheritance
+        vfs_config = orchestrator.get_effective_config().vfs_config
 
         for step_index, step in enumerate(steps_definition):
             step_plan = context.step_plans[step_index]
@@ -888,7 +888,8 @@ class PipelineCompiler:
 
         if required_backend:
             # Microscope has single compatible backend - auto-correct if needed
-            vfs_config = orchestrator.pipeline_config.vfs_config or VFSConfig()
+            # Access from merged config for proper inheritance
+            vfs_config = orchestrator.get_effective_config().vfs_config or VFSConfig()
 
             if vfs_config.materialization_backend != required_backend:
                 logger.warning(
@@ -896,6 +897,7 @@ class PipelineCompiler:
                     f"Auto-correcting from {vfs_config.materialization_backend.value}."
                 )
                 new_vfs_config = replace(vfs_config, materialization_backend=required_backend)
+                # Update the raw pipeline_config (this is a write operation, not a read)
                 orchestrator.pipeline_config = replace(
                     orchestrator.pipeline_config,
                     vfs_config=new_vfs_config
