@@ -537,6 +537,48 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
         widget.setToolTip(placeholder_text)
 
 
+def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> None:
+    """Apply placeholder to checkbox group (QGroupBox with _checkboxes dict).
+
+    Reuses _apply_checkbox_placeholder() for each checkbox in the group.
+    Parses the list of inherited enum values and applies placeholder state to each checkbox.
+
+    Example placeholder_text: "Pipeline default: [SITE, CHANNEL]"
+    """
+    if not hasattr(widget, '_checkboxes'):
+        return
+
+    try:
+        # Extract the list of enum values from placeholder text
+        # Format: "Pipeline default: [SITE, CHANNEL]" or "Pipeline default: []"
+        default_value_str = _extract_default_value(placeholder_text)
+
+        # Parse the list - remove brackets and split by comma
+        if default_value_str.startswith('[') and default_value_str.endswith(']'):
+            list_content = default_value_str[1:-1].strip()
+            inherited_values = [v.strip() for v in list_content.split(',')] if list_content else []
+        else:
+            inherited_values = []
+
+        # Apply placeholder to each checkbox in the group
+        for enum_value, checkbox in widget._checkboxes.items():
+            # Check if this enum value is in the inherited list
+            is_checked = enum_value.value in inherited_values
+
+            # Create individual placeholder text for this checkbox
+            individual_placeholder = f"Pipeline default: {is_checked}"
+
+            # Reuse existing checkbox placeholder logic
+            _apply_checkbox_placeholder(checkbox, individual_placeholder)
+
+        # Mark the group widget itself as being in placeholder state
+        widget.setProperty("is_placeholder_state", True)
+        widget.setToolTip(f"{placeholder_text} (click any checkbox to set your own value)")
+
+    except Exception as e:
+        widget.setToolTip(placeholder_text)
+
+
 def _apply_path_widget_placeholder(widget: Any, placeholder_text: str) -> None:
     """Apply placeholder to Path widget by targeting the inner QLineEdit."""
     try:
@@ -697,6 +739,10 @@ class PyQt6WidgetEnhancer:
     @staticmethod
     def apply_placeholder_text(widget: Any, placeholder_text: str) -> None:
         """Apply placeholder using declarative widget-strategy mapping."""
+        # Check for checkbox group (QGroupBox with _checkboxes attribute)
+        if hasattr(widget, '_checkboxes'):
+            return _apply_checkbox_group_placeholder(widget, placeholder_text)
+
         # Direct widget type mapping for enhanced placeholders
         widget_strategy = WIDGET_PLACEHOLDER_STRATEGIES.get(type(widget))
         if widget_strategy:
@@ -789,12 +835,37 @@ class PyQt6WidgetEnhancer:
             # Connect to each checkbox's stateChanged signal
             for checkbox in widget._checkboxes.values():
                 checkbox.stateChanged.connect(
-                    lambda: callback(param_name, widget.get_selected_values())
+                    lambda: (
+                        PyQt6WidgetEnhancer._clear_placeholder_state(widget),
+                        callback(param_name, widget.get_selected_values())
+                    )[-1]
                 )
 
     @staticmethod
     def _clear_placeholder_state(widget: Any) -> None:
         """Clear placeholder state using functional approach."""
+        # Handle checkbox groups by clearing each checkbox's placeholder state
+        if hasattr(widget, '_checkboxes'):
+            for checkbox in widget._checkboxes.values():
+                if checkbox.property("is_placeholder_state"):
+                    checkbox.setStyleSheet("")
+                    checkbox.setProperty("is_placeholder_state", False)
+                    if hasattr(checkbox, '_is_placeholder'):
+                        checkbox._is_placeholder = False
+                    # Clean checkbox tooltip
+                    current_tooltip = checkbox.toolTip()
+                    cleaned_tooltip = next(
+                        (current_tooltip.replace(f" ({hint})", "")
+                         for hint in PlaceholderConfig.INTERACTION_HINTS.values()
+                         if f" ({hint})" in current_tooltip),
+                        current_tooltip
+                    )
+                    checkbox.setToolTip(cleaned_tooltip)
+            # Clear group widget's placeholder state
+            widget.setProperty("is_placeholder_state", False)
+            widget.setToolTip("")
+            return
+
         if not widget.property("is_placeholder_state"):
             return
 
