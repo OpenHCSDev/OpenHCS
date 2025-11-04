@@ -2163,7 +2163,19 @@ class ParameterFormManager(QWidget):
             self._refresh_all_placeholders(live_context=live_context)
 
             # Refresh all nested managers' placeholders (including siblings) with live context
-            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
+            # CRITICAL: Find which nested manager emitted this change and skip refreshing it
+            # This prevents the placeholder system from fighting with user interaction
+            emitting_manager_name = None
+            for nested_name, nested_manager in self.nested_managers.items():
+                if param_name in nested_manager.parameters:
+                    emitting_manager_name = nested_name
+                    break
+
+            self._apply_to_nested_managers(
+                lambda name, manager: manager._refresh_all_placeholders(live_context=live_context)
+                if name != emitting_manager_name
+                else logger.info(f"⏭️ Skipping refresh of {name} (it just emitted {param_name} change)")
+            )
 
             # CRITICAL: Also refresh enabled styling for all nested managers
             # This ensures that when one config's enabled field changes, siblings that inherit from it update their styling
