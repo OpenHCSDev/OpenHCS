@@ -309,7 +309,11 @@ class DualEditorWindow(BaseFormDialog):
 
     def _sync_function_editor_from_step(self):
         """
-        SINGLE SOURCE OF TRUTH: Sync function editor state from current step.
+        SINGLE SOURCE OF TRUTH: Sync function editor state from step editor's CURRENT form values.
+
+        CRITICAL: This reads from the form manager's current values (live context), NOT from self.editing_step.
+        The form manager's values are the live working copy that updates as the user types.
+        self.editing_step only gets updated when the user saves.
 
         This method extracts all step configuration that affects the function editor
         and updates it. Call this whenever ANY step parameter changes to ensure
@@ -324,30 +328,26 @@ class DualEditorWindow(BaseFormDialog):
             logger.info("⏭️  Function editor doesn't exist yet, skipping sync")
             return
 
-        # CRITICAL: Use config_context to enable lazy resolution
-        # Without this context, lazy dataclass fields resolve to None
-        from openhcs.config_framework.context_manager import config_context
-
-        # First, log the raw values on the step's processing_config
+        # CRITICAL: Read from form manager's current values (live context), not from self.editing_step
+        # The form manager updates its self.parameters dict as the user types, but doesn't update
+        # the dataclass instance until save. So we need to read from the form's current state.
         try:
-            raw_group_by = object.__getattribute__(self.editing_step.processing_config, 'group_by')
-            raw_variable_components = object.__getattribute__(self.editing_step.processing_config, 'variable_components')
-            logger.info(f"📊 Raw values on step.processing_config: group_by={raw_group_by}, variable_components={raw_variable_components}")
-        except Exception as e:
-            logger.error(f"Failed to read raw values: {e}")
+            # Get current values from step editor form (includes nested dataclasses)
+            current_values = self.step_editor.form_manager.get_current_values()
+            processing_config = current_values.get('processing_config')
 
-        try:
-            with config_context(self.orchestrator.pipeline_config):
-                with config_context(self.editing_step):
-                    # Extract group_by from processing_config (lazy resolution happens here)
-                    effective_group_by = self.editing_step.processing_config.group_by
-                    logger.info(f"🔍 Lazy-resolved group_by: {effective_group_by}")
-
-                    # Extract variable_components from processing_config
-                    variable_components = self.editing_step.processing_config.variable_components or []
-                    logger.info(f"🔍 Lazy-resolved variable_components: {variable_components}")
+            if processing_config:
+                # Read from the live processing_config dataclass (reconstructed from nested manager)
+                effective_group_by = processing_config.group_by
+                variable_components = processing_config.variable_components or []
+                logger.info(f"🔍 Live form values: group_by={effective_group_by}, variable_components={variable_components}")
+            else:
+                # Fallback: processing_config not in current values (shouldn't happen)
+                logger.warning("⚠️  processing_config not found in current form values, using defaults")
+                effective_group_by = None
+                variable_components = []
         except Exception as e:
-            logger.error(f"❌ Failed to resolve lazy values in config_context: {e}", exc_info=True)
+            logger.error(f"❌ Failed to read live form values: {e}", exc_info=True)
             effective_group_by = None
             variable_components = []
 
