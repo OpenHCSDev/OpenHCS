@@ -2228,7 +2228,30 @@ class ParameterFormManager(QWidget):
                     # even though self.parameters still has None
                     widget_in_placeholder_state = widget.property("is_placeholder_state")
 
-                    if current_value is None or widget_in_placeholder_state:
+                    # CRITICAL: For List[Enum] checkbox groups, also check if current value matches inherited value
+                    # This allows showing placeholder styling even when value is not None but matches the default
+                    should_apply_placeholder = current_value is None or widget_in_placeholder_state
+
+                    if not should_apply_placeholder and hasattr(widget, '_checkboxes'):
+                        # Check if current value matches the inherited value
+                        placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
+                        if placeholder_text:
+                            # Extract inherited value from placeholder text
+                            from openhcs.pyqt_gui.widgets.shared.widget_strategies import _extract_default_value
+                            try:
+                                default_value_str = _extract_default_value(placeholder_text)
+                                if default_value_str.startswith('[') and default_value_str.endswith(']'):
+                                    list_content = default_value_str[1:-1].strip()
+                                    inherited_values = [v.strip() for v in list_content.split(',')] if list_content else []
+                                    # Convert current_value to list of strings for comparison
+                                    current_values_str = [v.value for v in current_value] if current_value else []
+                                    # Check if they match
+                                    if set(current_values_str) == set(inherited_values):
+                                        should_apply_placeholder = True
+                            except Exception:
+                                pass
+
+                    if should_apply_placeholder:
                         with monitor.measure():
                             placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                             if placeholder_text:

@@ -548,10 +548,16 @@ def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> Non
     if not hasattr(widget, '_checkboxes'):
         return
 
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
+        logger.info(f"🔍 Applying checkbox group placeholder: {placeholder_text}")
+
         # Extract the list of enum values from placeholder text
         # Format: "Pipeline default: [SITE, CHANNEL]" or "Pipeline default: []"
         default_value_str = _extract_default_value(placeholder_text)
+        logger.info(f"📋 Extracted default value: {default_value_str}")
 
         # Parse the list - remove brackets and split by comma
         if default_value_str.startswith('[') and default_value_str.endswith(']'):
@@ -560,10 +566,14 @@ def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> Non
         else:
             inherited_values = []
 
+        logger.info(f"✅ Parsed inherited values: {inherited_values}")
+
         # Apply placeholder to each checkbox in the group
         for enum_value, checkbox in widget._checkboxes.items():
             # Check if this enum value is in the inherited list
             is_checked = enum_value.value in inherited_values
+
+            logger.info(f"  📌 {enum_value.value}: is_checked={is_checked} (in {inherited_values})")
 
             # Create individual placeholder text for this checkbox
             individual_placeholder = f"Pipeline default: {is_checked}"
@@ -576,6 +586,7 @@ def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> Non
         widget.setToolTip(f"{placeholder_text} (click any checkbox to set your own value)")
 
     except Exception as e:
+        logger.error(f"❌ Failed to apply checkbox group placeholder: {e}", exc_info=True)
         widget.setToolTip(placeholder_text)
 
 
