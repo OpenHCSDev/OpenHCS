@@ -75,6 +75,42 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _merge_nested_dataclass(pipeline_value, global_value):
+    """
+    Recursively merge nested dataclass configs.
+
+    For each field in the dataclass:
+    - If pipeline value is not None, use it
+    - Otherwise, use global value
+
+    This ensures that None values in nested configs resolve to global config values.
+    """
+    from dataclasses import is_dataclass, fields as dataclass_fields
+
+    if not is_dataclass(pipeline_value) or not is_dataclass(global_value):
+        # Not dataclasses, return pipeline value as-is
+        return pipeline_value
+
+    # Both are dataclasses - merge field by field
+    merged_values = {}
+    for field in dataclass_fields(type(pipeline_value)):
+        pipeline_field_value = getattr(pipeline_value, field.name)
+        global_field_value = getattr(global_value, field.name)
+
+        if pipeline_field_value is not None:
+            # Pipeline has a value - check if it's a nested dataclass that needs merging
+            if is_dataclass(pipeline_field_value) and is_dataclass(global_field_value):
+                merged_values[field.name] = _merge_nested_dataclass(pipeline_field_value, global_field_value)
+            else:
+                merged_values[field.name] = pipeline_field_value
+        else:
+            # Pipeline value is None - use global value
+            merged_values[field.name] = global_field_value
+
+    # Create new instance with merged values
+    return type(pipeline_value)(**merged_values)
+
+
 def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: GlobalPipelineConfig) -> GlobalPipelineConfig:
     """
     Pure function for creating merged config that preserves None values for sibling inheritance.
@@ -110,8 +146,15 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
                 if field.name == 'step_well_filter_config':
                     logger.debug(f"Converted lazy config to base: {converted_value}")
             else:
-                # Regular value - use as-is
-                merged_config_values[field.name] = pipeline_value
+                # CRITICAL FIX: For base dataclass configs, merge nested fields
+                # This ensures None values in nested configs resolve to global values
+                global_value = getattr(global_config, field.name)
+                from dataclasses import is_dataclass
+                if is_dataclass(pipeline_value) and is_dataclass(global_value):
+                    merged_config_values[field.name] = _merge_nested_dataclass(pipeline_value, global_value)
+                else:
+                    # Regular value - use as-is
+                    merged_config_values[field.name] = pipeline_value
                 if field.name == 'step_well_filter_config':
                     logger.debug(f"Using pipeline value as-is: {pipeline_value}")
         else:
