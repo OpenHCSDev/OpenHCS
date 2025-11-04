@@ -122,6 +122,57 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
     return result
 
 
+def _execute_axis_with_sequential_combinations(
+    pipeline_definition: List[AbstractStep],
+    axis_contexts: List[tuple],  # List of (context_key, frozen_context) tuples
+    visualizer: Optional['NapariVisualizerType']
+) -> Dict[str, Any]:
+    """
+    Execute all sequential combinations for a single axis in order.
+
+    This function runs in a worker process and handles VFS clearing between combinations.
+    Multiple axes can run in parallel, but combinations within an axis are sequential.
+
+    Args:
+        pipeline_definition: List of pipeline steps to execute
+        axis_contexts: List of (context_key, frozen_context) tuples for this axis
+        visualizer: Optional Napari visualizer (not used in multiprocessing)
+
+    Returns:
+        Combined execution results for all combinations
+    """
+    if not axis_contexts:
+        return {}
+
+    # Extract axis_id from first context
+    first_context_key, first_context = axis_contexts[0]
+    axis_id = first_context.axis_id
+
+    logger.info(f"🔄 WORKER: Processing {len(axis_contexts)} combination(s) for axis {axis_id}")
+
+    combined_results = {}
+
+    for combo_idx, (context_key, frozen_context) in enumerate(axis_contexts):
+        logger.info(f"🔄 WORKER: Processing combination {combo_idx + 1}/{len(axis_contexts)}: {context_key}")
+
+        # Execute this combination
+        result = _execute_single_axis_static(pipeline_definition, frozen_context, visualizer)
+        combined_results[context_key] = result
+
+        # Clear VFS between combinations (except after the last one)
+        if combo_idx < len(axis_contexts) - 1:
+            from openhcs.io.base import reset_memory_backend
+            from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+
+            logger.info(f"🔄 WORKER: Clearing VFS after combination {combo_idx + 1}/{len(axis_contexts)}")
+            reset_memory_backend()
+            if cleanup_all_gpu_frameworks:
+                cleanup_all_gpu_frameworks()
+
+    logger.info(f"🔄 WORKER: Completed all {len(axis_contexts)} combination(s) for axis {axis_id}")
+    return combined_results
+
+
 def _execute_single_axis_static(
     pipeline_definition: List[AbstractStep],
     frozen_context: 'ProcessingContext',
@@ -392,12 +443,13 @@ class PipelineOrchestrator(ContextProvider):
             self.registry = storage_registry
             logger.info("PipelineOrchestrator using provided StorageRegistry instance.")
         else:
-            # Create a copy of the global registry to avoid modifying shared state
+            # Use the global registry directly (don't copy) so that reset_memory_backend() works correctly
+            # The global registry is a singleton, and VFS clearing needs to clear the same instance
             from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
-            # Ensure registry is initialized before copying
+            # Ensure registry is initialized
             ensure_storage_registry()
-            self.registry = global_storage_registry.copy()
-            logger.info("PipelineOrchestrator created its own StorageRegistry instance (copy of global).")
+            self.registry = global_storage_registry
+            logger.info("PipelineOrchestrator using global StorageRegistry instance.")
 
         # Override zarr backend with orchestrator's config
         shared_context = get_current_global_config(GlobalPipelineConfig)
@@ -743,10 +795,13 @@ class PipelineOrchestrator(ContextProvider):
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
-        # Type-driven dispatch: pipeline-wide vs step-wide sequential
-        return (self._execute_pipeline_sequential(pipeline_definition, frozen_context, visualizer)
-                if frozen_context.pipeline_sequential_mode
-                else self._execute_step_sequential(pipeline_definition, frozen_context, visualizer))
+        # Debug: Log sequential mode status
+        logger.info(f"🔍 DISPATCH: axis={axis_id}, pipeline_sequential_mode={frozen_context.pipeline_sequential_mode}, "
+                   f"combinations={frozen_context.pipeline_sequential_combinations}")
+
+        # All execution goes through step-sequential now
+        # Sequential combinations are handled by compiling separate contexts
+        return self._execute_step_sequential(pipeline_definition, frozen_context, visualizer)
 
     def _execute_step_sequential(
         self,
@@ -831,6 +886,7 @@ class PipelineOrchestrator(ContextProvider):
 
         Combinations are precomputed at compile time and stored in context.pipeline_sequential_combinations.
         Loop: combinations → steps (process one combo through all steps before moving to next).
+        VFS is cleared between combinations to prevent memory accumulation.
         """
         axis_id = frozen_context.axis_id
 
@@ -846,11 +902,29 @@ class PipelineOrchestrator(ContextProvider):
             logger.info(f"🔄 PIPELINE_SEQUENTIAL: {len(combinations)} combinations for axis {axis_id}")
 
             # Loop: combinations → steps
-            for combo in combinations:
+            for combo_idx, combo in enumerate(combinations):
                 frozen_context.current_sequential_combination = combo
-                logger.debug(f"🔄 Processing combination: {combo}")
+                logger.info(f"🔄 ORCHESTRATOR: Set current_sequential_combination = {combo}")
+                logger.info(f"🔄 ORCHESTRATOR: Verify frozen_context.current_sequential_combination = {frozen_context.current_sequential_combination}")
+                logger.info(f"🔄 Processing combination {combo_idx + 1}/{len(combinations)}: {combo}")
+
+                # Process all steps for this combination
                 for step_index, step in enumerate(pipeline_definition):
                     step.process(frozen_context, step_index)
+
+                # Clear VFS after each combination (except the last one, to preserve final outputs)
+                # The last combination's outputs need to remain in VFS for any post-processing
+                if combo_idx < len(combinations) - 1:
+                    try:
+                        from openhcs.io.base import reset_memory_backend
+                        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+
+                        logger.info(f"🔄 SEQUENTIAL: Clearing VFS after combination {combo}")
+                        reset_memory_backend()
+                        cleanup_all_gpu_frameworks()
+                        logger.info(f"🔄 SEQUENTIAL: VFS cleared, ready for next combination")
+                    except Exception as e:
+                        logger.warning(f"Failed to clear VFS after combination {combo}: {e}")
 
         frozen_context.current_sequential_combination = None
 
@@ -1051,20 +1125,39 @@ class PipelineOrchestrator(ContextProvider):
                 if not config:
                     raise RuntimeError("Component configuration is required for orchestrator execution")
                 axis_name = config.multiprocessing_axis.value
-                for axis_id, context in contexts_snapshot.items():
-                    try:
-                        logger.info(f"🔥 DEATH_MARKER: SUBMITTING_TASK_FOR_{axis_name.upper()}_{axis_id}")
-                        logger.info(f"🔥 ORCHESTRATOR: Submitting task for {axis_name} {axis_id}")
-                        # Resolve all arguments before passing to ProcessPoolExecutor
-                        resolved_context = resolve_lazy_configurations_for_serialization(context)
 
-                        # Use static function to avoid pickling the orchestrator instance
-                        # Note: Use original pipeline_definition to preserve collision-resolved configs
-                        # Don't pass visualizer to worker processes - they communicate via ZeroMQ
+                # Group contexts by axis to detect sequential combinations
+                from collections import defaultdict
+                contexts_by_axis = defaultdict(list)
+                for context_key, context in contexts_snapshot.items():
+                    # Extract axis_id from context_key (either "axis_id" or "axis_id__combo_N")
+                    if "__combo_" in context_key:
+                        axis_id = context_key.split("__combo_")[0]
+                        contexts_by_axis[axis_id].append((context_key, context))
+                    else:
+                        contexts_by_axis[context_key].append((context_key, context))
+
+                logger.info(f"🔄 ORCHESTRATOR: Processing {len(contexts_by_axis)} {axis_name}s with {len(contexts_snapshot)} total contexts")
+
+                # Submit one task per axis (each task handles its own sequential combinations)
+                for axis_id, axis_contexts in contexts_by_axis.items():
+                    logger.info(f"🔄 ORCHESTRATOR: Axis {axis_id} has {len(axis_contexts)} context(s)")
+
+                    try:
+                        # Resolve all contexts for this axis
+                        resolved_axis_contexts = [
+                            (context_key, resolve_lazy_configurations_for_serialization(context))
+                            for context_key, context in axis_contexts
+                        ]
+
+                        logger.info(f"🔥 DEATH_MARKER: SUBMITTING_TASK_FOR_{axis_name.upper()}_{axis_id}")
+                        logger.info(f"🔥 ORCHESTRATOR: Submitting task for {axis_name} {axis_id} with {len(resolved_axis_contexts)} combination(s)")
+
+                        # Submit task that will handle all combinations for this axis sequentially
                         future = executor.submit(
-                            _execute_single_axis_static,
+                            _execute_axis_with_sequential_combinations,
                             pipeline_definition,
-                            resolved_context,
+                            resolved_axis_contexts,
                             None  # visualizer
                         )
                         future_to_axis_id[future] = axis_id

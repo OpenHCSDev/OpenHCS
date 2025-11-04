@@ -469,6 +469,25 @@ def _execute_function_core(
                # prefixed_vfs_path = str(vfs_path_obj.parent / prefixed_filename)
 
                 logger.info(f"🔍 SPECIAL_SAVE: Saving '{output_key}' to '{vfs_path}' (memory backend)")
+
+                # DEBUG: List what's currently in VFS before saving
+                from openhcs.io.base import storage_registry as global_storage_registry
+                global_memory_backend = global_storage_registry[Backend.MEMORY.value]
+                global_existing_keys = list(global_memory_backend._memory_store.keys())
+                logger.info(f"🔍 VFS_DEBUG: GLOBAL memory backend has {len(global_existing_keys)} entries before save")
+                logger.info(f"🔍 VFS_DEBUG: GLOBAL memory backend ID: {id(global_memory_backend)}")
+                logger.info(f"🔍 VFS_DEBUG: GLOBAL first 10 keys: {global_existing_keys[:10]}")
+
+                # Check filemanager's memory backend
+                filemanager_memory_backend = context.filemanager._get_backend(Backend.MEMORY.value)
+                filemanager_existing_keys = list(filemanager_memory_backend._memory_store.keys())
+                logger.info(f"🔍 VFS_DEBUG: FILEMANAGER memory backend has {len(filemanager_existing_keys)} entries before save")
+                logger.info(f"🔍 VFS_DEBUG: FILEMANAGER memory backend ID: {id(filemanager_memory_backend)}")
+                logger.info(f"🔍 VFS_DEBUG: FILEMANAGER first 10 keys: {filemanager_existing_keys[:10]}")
+
+                if vfs_path in filemanager_existing_keys:
+                    logger.warning(f"🔍 VFS_DEBUG: WARNING - '{vfs_path}' ALREADY EXISTS in FILEMANAGER memory backend!")
+
                 # Ensure directory exists for memory backend
                 parent_dir = str(Path(vfs_path).parent)
                 context.filemanager.ensure_directory(parent_dir, Backend.MEMORY.value)
@@ -966,109 +985,94 @@ class FunctionStep(AbstractStep):
             if isinstance(func_from_plan, dict):
                 logger.info(f"🔍 DICT_PATTERN: func_from_plan keys: {list(func_from_plan.keys())}")
 
-            # Pipeline-wide sequential: filter patterns to current combination
+            # DEBUG: Log VFS state at the start of step processing
+            from openhcs.io.base import storage_registry
+            memory_backend = storage_registry[Backend.MEMORY.value]
+            existing_keys = list(memory_backend._memory_store.keys())
+            logger.info(f"🔍 VFS_START: Memory backend has {len(existing_keys)} entries at START of step '{step_name}' for well {axis_id}")
+            # Filter to show only files in results directory
+            results_keys = [k for k in existing_keys if 'results/' in k]
+            logger.info(f"🔍 VFS_START: Results directory has {len(results_keys)} entries: {results_keys}")
+
+            # 🔄 SEQUENTIAL PROCESSING: Filter patterns BEFORE preload
+            logger.info(f"🔄 SEQUENTIAL CHECK: context.current_sequential_combination = {context.current_sequential_combination}")
+            logger.info(f"🔄 SEQUENTIAL CHECK: context.pipeline_sequential_mode = {context.pipeline_sequential_mode}")
+
             if context.current_sequential_combination:
-                return self._process_single_combination(
-                    context, step_index, grouped_patterns, comp_to_funcs, comp_to_base_args,
-                    variable_components, context.current_sequential_combination
-                )
-
-            # Unified processing loop: handles both sequential and non-sequential cases
-            # Sequential processing is pipeline-level, not per-step
-            seq_config = context.global_config.sequential_processing_config
-            is_sequential = seq_config and seq_config.sequential_components
-
-            if is_sequential:
+                # Filter grouped_patterns to only include the current combination
+                seq_config = context.global_config.sequential_processing_config
                 seq_comps = [sc.value for sc in seq_config.sequential_components]
-                var_comps = [vc.value for vc in variable_components] if variable_components else []
-                from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
-                pattern_engine = PatternDiscoveryEngine(context.microscope_handler.parser, filemanager)
+                target_combo = context.current_sequential_combination
 
+                logger.info(f"🔄 SEQUENTIAL: Filtering patterns for combination {target_combo} (components: {seq_comps})")
+
+                # Filter grouped_patterns dict to only include matching comp_val
+                filtered_grouped_patterns = {}
+                for comp_val, pattern_list in grouped_patterns.items():
+                    # For single sequential component (most common case)
+                    if len(target_combo) == 1 and len(seq_comps) == 1:
+                        if comp_val == target_combo[0]:
+                            filtered_grouped_patterns[comp_val] = pattern_list
+                            logger.info(f"🔄 SEQUENTIAL: Keeping component '{comp_val}' ({len(pattern_list)} patterns)")
+                        else:
+                            logger.debug(f"🔄 SEQUENTIAL: Filtering out component '{comp_val}'")
+                    # TODO: Handle multi-component combinations if needed
+
+                # Replace grouped_patterns with filtered version
+                grouped_patterns = filtered_grouped_patterns
+                logger.info(f"🔄 SEQUENTIAL: After filtering, processing {len(grouped_patterns)} component(s)")
+
+            # Non-sequential processing: process all patterns for all component values
             process = psutil.Process(os.getpid())
+
+            # Preload files ONCE for all filtered patterns (before processing loop)
+            if read_backend != Backend.MEMORY.value:
+                mem_before_mb = process.memory_info().rss / 1024 / 1024
+                logger.info(f"📊 MEMORY: Before preload: {mem_before_mb:.1f} MB RSS")
+
+                # If sequential mode, only preload filtered patterns
+                if context.current_sequential_combination:
+                    # Collect all patterns from filtered grouped_patterns
+                    patterns_to_preload = []
+                    for comp_val, pattern_list in grouped_patterns.items():
+                        patterns_to_preload.extend(pattern_list)
+
+                    logger.info(f"� SEQUENTIAL: Preloading {len(patterns_to_preload)} filtered patterns")
+                    _bulk_preload_step_images(
+                        step_input_dir, step_output_dir, axis_id, read_backend,
+                        patterns_by_well, filemanager, microscope_handler, step_plan["zarr_config"],
+                        patterns_to_preload=patterns_to_preload,
+                        variable_components=[vc.value for vc in variable_components] if variable_components else []
+                    )
+                else:
+                    # Non-sequential: preload all patterns
+                    _bulk_preload_step_images(
+                        step_input_dir, step_output_dir, axis_id, read_backend,
+                        patterns_by_well, filemanager, microscope_handler, step_plan["zarr_config"]
+                    )
+
+                mem_after_mb = process.memory_info().rss / 1024 / 1024
+                logger.info(f"📊 MEMORY: After preload: {mem_after_mb:.1f} MB RSS (+{mem_after_mb - mem_before_mb:.1f} MB)")
 
             # Process each component value
             for comp_val, current_pattern_list in grouped_patterns.items():
                 exec_func_or_chain = comp_to_funcs[comp_val]
                 base_kwargs = comp_to_base_args[comp_val]
 
-                # Determine combinations to process
-                if is_sequential:
-                    # Subdivide patterns by sequential components
-                    patterns_by_combo = pattern_engine.subdivide_patterns_by_components(
-                        current_pattern_list, seq_comps
+                logger.info(f"🔍 DICT_PATTERN: Processing component '{comp_val}' with {len(current_pattern_list)} patterns")
+
+                # Process all patterns for this component value
+                for pattern_item in current_pattern_list:
+                    _process_single_pattern_group(
+                        context, pattern_item, exec_func_or_chain, base_kwargs,
+                        step_input_dir, step_output_dir, axis_id, comp_val,
+                        read_backend, write_backend, input_mem_type, output_mem_type,
+                        device_id, same_dir,
+                        special_inputs, special_outputs,
+                        step_plan["zarr_config"],
+                        variable_components, step_index
                     )
-                    logger.info(f"🔄 SEQUENTIAL: Processing component '{comp_val}' with {len(patterns_by_combo)} sequential combinations")
-                else:
-                    # Non-sequential: treat all patterns as a single "combination"
-                    patterns_by_combo = {('all',): current_pattern_list}
-                    logger.info(f"🔍 DICT_PATTERN: Processing component '{comp_val}' with {len(current_pattern_list)} patterns")
 
-                # Process each combination
-                for combo_key, combo_patterns in patterns_by_combo.items():
-                    if is_sequential:
-                        logger.info(f"🔄 SEQUENTIAL: Processing combination {combo_key} with {len(combo_patterns)} patterns")
-
-                    # Preload files for this combination
-                    if read_backend != Backend.MEMORY.value:
-                        mem_before_mb = process.memory_info().rss / 1024 / 1024
-                        combo_label = f"{combo_key}" if is_sequential else "all patterns"
-                        logger.info(f"📊 MEMORY: Before preload for {combo_label}: {mem_before_mb:.1f} MB RSS")
-
-                        if is_sequential:
-                            # Sequential: preload only this combination's patterns
-                            _bulk_preload_step_images(
-                                step_input_dir, step_output_dir, axis_id, read_backend,
-                                patterns_by_well, filemanager, context.microscope_handler, step_plan["zarr_config"],
-                                patterns_to_preload=combo_patterns, variable_components=var_comps
-                            )
-                        else:
-                            # Non-sequential: preload all patterns
-                            _bulk_preload_step_images(
-                                step_input_dir, step_output_dir, axis_id, read_backend,
-                                patterns_by_well, filemanager, microscope_handler, step_plan["zarr_config"]
-                            )
-
-                        mem_after_mb = process.memory_info().rss / 1024 / 1024
-                        logger.info(f"📊 MEMORY: After preload for {combo_label}: {mem_after_mb:.1f} MB RSS (+{mem_after_mb - mem_before_mb:.1f} MB)")
-
-                    # Process patterns in this combination
-                    for pattern_item in combo_patterns:
-                        _process_single_pattern_group(
-                            context, pattern_item, exec_func_or_chain, base_kwargs,
-                            step_input_dir, step_output_dir, axis_id, comp_val,
-                            read_backend, write_backend, input_mem_type, output_mem_type,
-                            device_id, same_dir,
-                            special_inputs, special_outputs,
-                            step_plan["zarr_config"],
-                            variable_components, step_index
-                        )
-
-                    # Clear memory after this combination (only for sequential processing)
-                    if is_sequential and read_backend != Backend.MEMORY.value:
-                        try:
-                            # Get the specific files that were loaded for this combination
-                            combo_files = [f for p in combo_patterns
-                                         for f in microscope_handler.path_list_from_pattern(
-                                             str(step_input_dir), p, filemanager, read_backend, var_comps)]
-                            # Convert to full paths (same as in preload)
-                            combo_file_set = set(str(step_input_dir / f) if not Path(f).is_absolute() else f for f in combo_files)
-
-                            # Delete only the files from this combination
-                            deleted_count = 0
-                            for file_path in combo_file_set:
-                                try:
-                                    if filemanager.exists(file_path, Backend.MEMORY.value):
-                                        filemanager.delete(file_path, Backend.MEMORY.value)
-                                        deleted_count += 1
-                                except Exception as e:
-                                    logger.warning(f"Failed to delete memory file {file_path}: {e}")
-
-                            # Log memory usage after clearing
-                            mem_after_clear_mb = process.memory_info().rss / 1024 / 1024
-                            logger.info(f"🔄 SEQUENTIAL: Cleared {deleted_count} preloaded files from memory for combination {combo_key}")
-                            logger.info(f"📊 MEMORY: After clearing {combo_key}: {mem_after_clear_mb:.1f} MB RSS")
-                        except Exception as e:
-                            logger.warning(f"Failed to clear memory files for combination {combo_key}: {e}")
             logger.info(f"🔥 STEP: Completed processing for '{step_name}' well {axis_id}.")
 
             # 📄 MATERIALIZATION WRITE: Only if not writing to memory
@@ -1500,50 +1504,3 @@ def _update_metadata_for_zarr_conversion(
         writer = AtomicMetadataWriter()
         writer.merge_subdirectory_metadata(metadata_path, {original_subdir: {"available_backends": {"zarr": True}}})
         logger.info(f"Updated metadata: {original_subdir} now has zarr backend")
-
-    def _process_single_combination(
-        self, context, step_index, grouped_patterns, comp_to_funcs, comp_to_base_args,
-        variable_components, target_combo
-    ):
-        """Process only patterns matching target_combo in pipeline-wide sequential mode."""
-        from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
-        pattern_engine = PatternDiscoveryEngine(context.microscope_handler.parser, context.filemanager)
-
-        step_plan = context.step_plans[step_index]
-        # Sequential processing is pipeline-level, not per-step
-        seq_config = context.global_config.sequential_processing_config
-        if not seq_config or not seq_config.sequential_components:
-            raise RuntimeError("_process_single_combination called but sequential processing is not configured")
-        seq_comps = [sc.value for sc in seq_config.sequential_components]
-
-        # Process each component value, filtering to target_combo
-        for comp_val, current_pattern_list in grouped_patterns.items():
-            patterns_by_combo = pattern_engine.subdivide_patterns_by_components(current_pattern_list, seq_comps)
-
-            if target_combo in patterns_by_combo:
-                combo_patterns = patterns_by_combo[target_combo]
-                exec_func_or_chain = comp_to_funcs[comp_val]
-                base_kwargs = comp_to_base_args[comp_val]
-
-                # Extract step plan fields
-                step_input_dir = step_plan['input_dir']
-                step_output_dir = step_plan['output_dir']
-                axis_id = context.axis_id
-                read_backend = step_plan['read_backend']
-                write_backend = step_plan['write_backend']
-                input_mem_type = step_plan.get('input_memory_type_hint')
-                output_mem_type = step_plan.get('output_memory_type_hint')
-                device_id = step_plan.get('device_id')
-                same_dir = step_plan.get('same_dir', False)
-                special_inputs = step_plan.get('special_inputs', {})
-                special_outputs = step_plan.get('special_outputs', {})
-
-                # Process patterns
-                for pattern_item in combo_patterns:
-                    _process_single_pattern_group(
-                        context, pattern_item, exec_func_or_chain, base_kwargs,
-                        step_input_dir, step_output_dir, axis_id, comp_val,
-                        read_backend, write_backend, input_mem_type, output_mem_type,
-                        device_id, same_dir, special_inputs, special_outputs,
-                        step_plan["zarr_config"], variable_components, step_index
-                    )

@@ -63,8 +63,8 @@ class ProcessingContext:
 
         # Pipeline-wide sequential processing fields
         self.pipeline_sequential_mode = False
-        object.__setattr__(self, 'pipeline_sequential_combinations', None)  # Mutable field, excluded from freeze
-        object.__setattr__(self, 'current_sequential_combination', None)  # Mutable field, excluded from freeze
+        self.pipeline_sequential_combinations = None  # Precomputed at compile time from metadata
+        self.current_sequential_combination = None  # Set by compiler for each combination iteration
 
         # Add any additional attributes from kwargs
         # Note: 'filemanager' is often passed via kwargs by PipelineOrchestrator.create_context
@@ -75,10 +75,9 @@ class ProcessingContext:
         """
         Set an attribute, preventing modification if the context is frozen.
 
-        Exceptions: pipeline_sequential_combinations and current_sequential_combination
-        are mutable even when frozen, allowing runtime discovery and iteration.
+        All fields are immutable once frozen - no exceptions.
         """
-        if getattr(self, '_is_frozen', False) and name not in ('_is_frozen', 'pipeline_sequential_combinations', 'current_sequential_combination'):
+        if getattr(self, '_is_frozen', False) and name != '_is_frozen':
             raise AttributeError(f"Cannot modify attribute '{name}' of a frozen ProcessingContext.")
         super().__setattr__(name, value)
 
@@ -154,3 +153,97 @@ class ProcessingContext:
         if not hasattr(self, 'global_config') or self.global_config is None:
             raise RuntimeError("GlobalPipelineConfig not set on ProcessingContext.")
         return self.global_config.num_workers
+
+    def __getstate__(self) -> Dict[str, Any]:
+        """
+        Prepare context for pickling (e.g., for multiprocessing).
+
+        Excludes the filemanager from pickling to avoid copying the storage registry
+        across process boundaries. The filemanager will be recreated in the worker
+        process using the worker's local global registry.
+
+        Preserves zarr_config and plate_path so backends can be recreated with the same
+        settings in the worker process.
+
+        Returns:
+            Dictionary of state to pickle
+        """
+        state = self.__dict__.copy()
+
+        # Preserve zarr config from global_config for filemanager recreation
+        if hasattr(self, 'global_config') and self.global_config is not None:
+            state['_zarr_config'] = self.global_config.zarr_config
+        else:
+            state['_zarr_config'] = None
+
+        # Preserve plate_path for virtual_workspace backend recreation
+        if hasattr(self, 'plate_path'):
+            state['_plate_path'] = self.plate_path
+        else:
+            state['_plate_path'] = None
+
+        # Check if virtual_workspace backend is registered in the filemanager
+        if hasattr(self, 'filemanager') and self.filemanager is not None:
+            from openhcs.constants.constants import Backend
+            state['_has_virtual_workspace'] = Backend.VIRTUAL_WORKSPACE.value in self.filemanager.registry
+        else:
+            state['_has_virtual_workspace'] = False
+
+        # Remove filemanager - will be recreated in worker process
+        state.pop('filemanager', None)
+
+        return state
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        """
+        Restore context after unpickling (e.g., in worker process).
+
+        Recreates the filemanager using the worker's local global registry,
+        ensuring that all processes share the same memory backend instance
+        within their own process space.
+
+        Also recreates the virtual_workspace backend if it was registered in the
+        main process.
+
+        Args:
+            state: Dictionary of state from __getstate__
+        """
+        # Extract preserved state
+        zarr_config = state.pop('_zarr_config', None)
+        plate_path = state.pop('_plate_path', None)
+        has_virtual_workspace = state.pop('_has_virtual_workspace', False)
+
+        # Restore all other attributes
+        self.__dict__.update(state)
+
+        # Recreate filemanager in worker process using worker's local global registry
+        from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
+        from openhcs.io.filemanager import FileManager
+        from openhcs.io.zarr import ZarrStorageBackend
+        from openhcs.constants.constants import Backend
+
+        # Ensure worker's registry is initialized
+        ensure_storage_registry()
+
+        # Override zarr backend with preserved config (same as orchestrator does)
+        if zarr_config is not None:
+            zarr_backend_with_config = ZarrStorageBackend(zarr_config)
+            global_storage_registry[Backend.ZARR.value] = zarr_backend_with_config
+
+        # Recreate virtual_workspace backend if it was registered in main process
+        if has_virtual_workspace and plate_path is not None:
+            from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
+            from pathlib import Path
+            try:
+                virtual_backend = VirtualWorkspaceBackend(plate_root=Path(plate_path))
+                global_storage_registry[Backend.VIRTUAL_WORKSPACE.value] = virtual_backend
+            except Exception as e:
+                # Log but don't fail - the backend might not be needed in this worker
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to recreate virtual_workspace backend in worker: {e}")
+
+        # Create filemanager using worker's local global registry
+        # This ensures the worker uses its own memory backend instance
+        # Use __dict__ directly to bypass frozen check
+        self.__dict__['filemanager'] = FileManager(global_storage_registry)

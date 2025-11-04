@@ -249,7 +249,7 @@ class PatternDiscoveryEngine:
         axis_filter = kwargs.get(f"{axis_name}_filter")
 
         files_by_axis = self._find_and_filter_images(
-            folder_path, axis_filter, extensions, True, backend
+            folder_path, axis_filter, extensions, recursive, backend
         )
 
         if not files_by_axis:

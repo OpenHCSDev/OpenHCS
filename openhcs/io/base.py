@@ -598,5 +598,16 @@ def reset_memory_backend() -> None:
 
     # Clear files from existing memory backend while preserving directories
     memory_backend = storage_registry[Backend.MEMORY.value]
+
+    # DEBUG: Log what's in memory before clearing
+    existing_keys = list(memory_backend._memory_store.keys())
+    logger.info(f"🔍 VFS_CLEAR: Memory backend has {len(existing_keys)} entries BEFORE clear")
+    logger.info(f"🔍 VFS_CLEAR: First 10 keys: {existing_keys[:10]}")
+
     memory_backend.clear_files_only()
+
+    # DEBUG: Log what's in memory after clearing
+    remaining_keys = list(memory_backend._memory_store.keys())
+    logger.info(f"🔍 VFS_CLEAR: Memory backend has {len(remaining_keys)} entries AFTER clear (directories only)")
+    logger.info(f"🔍 VFS_CLEAR: First 10 remaining keys: {remaining_keys[:10]}")
     logger.info("Memory backend reset - files cleared, directories preserved")

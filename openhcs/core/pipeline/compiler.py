@@ -207,7 +207,7 @@ class PipelineCompiler:
         metadata_writer: bool = False,
         plate_path: Optional[Path] = None
         # base_input_dir and axis_id parameters removed, will use from context
-    ) -> None:
+    ) -> List[AbstractStep]:
         """
         Initializes step_plans by calling PipelinePathPlanner.prepare_pipeline_paths,
         which handles primary paths, special I/O path planning and linking, and chainbreaker status.
@@ -219,6 +219,9 @@ class PipelineCompiler:
             orchestrator: Orchestrator instance for well filter resolution
             metadata_writer: If True, this well is responsible for creating OpenHCS metadata files
             plate_path: Path to plate root for zarr conversion detection
+
+        Returns:
+            List of resolved AbstractStep objects with lazy configs resolved
         """
         # NOTE: This method is called within config_context() wrapper in compile_pipelines()
         if context.is_frozen():
@@ -303,7 +306,17 @@ class PipelineCompiler:
         # Resolve each step's lazy configs with proper nested context
         # This ensures step-level configs inherit from pipeline-level configs
         # Architecture: GlobalPipelineConfig -> PipelineConfig -> Step (same as UI)
-        logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs with nested step contexts...")
+        logger.info("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs with nested step contexts...")
+
+        # DEBUG: Check what the base global config looks like
+        from openhcs.config_framework.context_manager import get_base_global_config
+        base_global = get_base_global_config()
+        if base_global and hasattr(base_global, 'processing_config'):
+            logger.info(f"🔍 BASE GLOBAL CONFIG: processing_config = {base_global.processing_config}")
+            if base_global.processing_config:
+                logger.info(f"🔍 BASE GLOBAL CONFIG: processing_config.variable_components = {base_global.processing_config.variable_components}")
+        else:
+            logger.info(f"🔍 BASE GLOBAL CONFIG: No processing_config or base_global is None")
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
         from openhcs.config_framework.context_manager import config_context
 
@@ -313,7 +326,22 @@ class PipelineCompiler:
         resolved_steps = []
         for step in steps_definition:
             with config_context(step):  # Step-level context on top of pipeline context
+                # DEBUG: Check what the context looks like before resolution
+                from openhcs.config_framework.context_manager import get_current_temp_global
+                current_ctx = get_current_temp_global()
+                if current_ctx and hasattr(current_ctx, 'processing_config'):
+                    logger.info(f"🔍 CONTEXT CHECK: processing_config.variable_components = {current_ctx.processing_config.variable_components if current_ctx.processing_config else 'None'}")
+                else:
+                    logger.info(f"🔍 CONTEXT CHECK: No context or no processing_config in context")
+
                 resolved_step = resolve_lazy_configurations_for_serialization(step)
+
+                # DEBUG: Check what the resolved step looks like
+                if hasattr(resolved_step, 'processing_config'):
+                    logger.info(f"🔍 RESOLVED CHECK: {resolved_step.name}.processing_config.variable_components = {resolved_step.processing_config.variable_components if resolved_step.processing_config else 'None'}")
+                else:
+                    logger.info(f"🔍 RESOLVED CHECK: {resolved_step.name} has no processing_config")
+
                 resolved_steps.append(resolved_step)
         steps_definition = resolved_steps
 
@@ -508,6 +536,9 @@ class PipelineCompiler:
                 if hasattr(step, 'output_memory_type_hint'): # From FunctionStep.__init__
                     current_plan['output_memory_type_hint'] = step.output_memory_type_hint
 
+        # Return resolved steps for use by subsequent compiler methods
+        return steps_definition
+
     # The resolve_special_input_paths_for_context static method is DELETED (lines 181-238 of original)
     # as this functionality is now handled by PipelinePathPlanner.prepare_pipeline_paths.
 
@@ -625,56 +656,41 @@ class PipelineCompiler:
             context.pipeline_sequential_mode = True
             seq_comps = tuple(sc.value for sc in seq_config.sequential_components)
 
-            # Precompute combinations at compile time
-            from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
-            pattern_engine = PatternDiscoveryEngine(
-                context.microscope_handler.parser,
-                context.filemanager
-            )
+            # Precompute combinations from orchestrator's component keys cache
+            # This cache is populated from filename parsing during init, so it's always available
+            from openhcs.constants import AllComponents
+            import itertools
 
-            # Get backend from VFS config
-            vfs_config = global_config.vfs_config
-            backend = vfs_config.materialization_backend.value if vfs_config else 'disk'
+            # Extract component values from orchestrator's cache for each sequential component
+            component_values_lists = []
+            for seq_comp in seq_comps:
+                # Convert component name to AllComponents enum
+                component_enum = AllComponents(seq_comp)
 
-            # Discover patterns for this axis (no variable_components - we want all patterns)
-            from openhcs.constants.constants import DEFAULT_IMAGE_EXTENSIONS
-            from openhcs.constants import GroupBy
-            patterns_by_well = context.microscope_handler.auto_detect_patterns(
-                context.input_dir,
-                context.filemanager,
-                backend=backend,
-                extensions=DEFAULT_IMAGE_EXTENSIONS,
-                group_by=None,  # No grouping - return flat list of patterns
-                variable_components=[],
-                well_filter=[context.axis_id]
-            )
+                # Get component values from orchestrator's cache (populated from filename parsing)
+                component_values = orchestrator.get_component_keys(component_enum)
 
-            if context.axis_id in patterns_by_well:
-                well_patterns = patterns_by_well[context.axis_id]
+                if component_values:
+                    component_values_lists.append(component_values)
+                    logger.debug(f"Sequential component '{seq_comp}': {len(component_values)} values from cache")
+                else:
+                    logger.warning(f"No {seq_comp} values found in orchestrator cache")
+                    component_values_lists.append([])
 
-                # Handle both dict (grouped) and list (ungrouped) patterns
-                if isinstance(well_patterns, dict):
-                    # Flatten dict patterns into a single list
-                    all_patterns = []
-                    for pattern_list in well_patterns.values():
-                        all_patterns.extend(pattern_list)
-                    well_patterns = all_patterns
-
-                # Subdivide by sequential components to discover combinations
-                patterns_by_combo = pattern_engine.subdivide_patterns_by_components(
-                    well_patterns, list(seq_comps)
-                )
-                context.pipeline_sequential_combinations = list(patterns_by_combo.keys())
+            # Generate all combinations using Cartesian product
+            if all(component_values_lists):
+                combinations = list(itertools.product(*component_values_lists))
+                context.pipeline_sequential_combinations = combinations
                 logger.info(
                     f"Pipeline sequential mode: ENABLED (components: {seq_comps}, "
-                    f"combinations: {len(context.pipeline_sequential_combinations)})"
+                    f"combinations: {len(combinations)})"
                 )
             else:
-                # No patterns found for this axis - disable sequential mode
+                # Missing component values - disable sequential mode
                 context.pipeline_sequential_mode = False
                 context.pipeline_sequential_combinations = None
                 logger.warning(
-                    f"Pipeline sequential mode: DISABLED (no patterns found for axis {context.axis_id})"
+                    f"Pipeline sequential mode: DISABLED (missing component values in cache)"
                 )
         else:
             # No sequential processing configured
@@ -1047,38 +1063,75 @@ class PipelineCompiler:
 
             for axis_id in axis_values_to_process:
                 logger.debug(f"Compiling for axis value: {axis_id}")
-                context = orchestrator.create_context(axis_id)
-
-                # Copy global axis filters to this context
-                context.step_axis_filters = global_step_axis_filters
 
                 # Determine if this axis value is responsible for metadata creation
                 is_responsible = (axis_id == responsible_axis_value)
                 logger.debug(f"Axis {axis_id} metadata responsibility: {is_responsible}")
 
+                # Create a temporary context to check if sequential mode is enabled
+                temp_context = orchestrator.create_context(axis_id)
+                temp_context.step_axis_filters = global_step_axis_filters
+
                 # CRITICAL: Wrap all compilation steps in config_context() for lazy resolution
                 from openhcs.config_framework.context_manager import config_context
                 with config_context(orchestrator.pipeline_config):
-                    PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
-                    PipelineCompiler.declare_zarr_stores_for_context(context, pipeline_definition, orchestrator)
-                    PipelineCompiler.plan_materialization_flags_for_context(context, pipeline_definition, orchestrator)
-                    PipelineCompiler.analyze_pipeline_sequential_mode(context, context.global_config, orchestrator)
-                    PipelineCompiler.validate_memory_contracts_for_context(context, pipeline_definition, orchestrator)
-                    PipelineCompiler.assign_gpu_resources_for_context(context)
+                    # Analyze sequential mode to get combinations (doesn't freeze context)
+                    PipelineCompiler.analyze_pipeline_sequential_mode(temp_context, temp_context.global_config, orchestrator)
 
-                    if enable_visualizer_override:
-                        PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
+                # Check if sequential mode is enabled
+                if temp_context.pipeline_sequential_mode and temp_context.pipeline_sequential_combinations:
+                    # Compile separate context for each sequential combination
+                    combinations = temp_context.pipeline_sequential_combinations
+                    logger.info(f"🔄 COMPILER: Compiling {len(combinations)} sequential contexts for axis {axis_id}")
 
-                    # Resolve all lazy dataclasses before freezing to ensure multiprocessing compatibility
-                    PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
+                    for combo_idx, combo in enumerate(combinations):
+                        context = orchestrator.create_context(axis_id)
+                        context.step_axis_filters = global_step_axis_filters
 
+                        # Set the current combination BEFORE freezing
+                        context.pipeline_sequential_mode = True
+                        context.pipeline_sequential_combinations = combinations
+                        context.current_sequential_combination = combo
+                        logger.info(f"🔄 COMPILER: Set context.current_sequential_combination = {combo} for axis {axis_id}")
 
+                        with config_context(orchestrator.pipeline_config):
+                            resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
+                            PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
+                            PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
+                            PipelineCompiler.validate_memory_contracts_for_context(context, resolved_steps, orchestrator)
+                            PipelineCompiler.assign_gpu_resources_for_context(context)
 
+                            if enable_visualizer_override:
+                                PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
 
+                            PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
 
-                context.freeze()
-                compiled_contexts[axis_id] = context
-                logger.debug(f"Compilation finished for axis value: {axis_id}")
+                        context.freeze()
+                        # Use composite key: (axis_id, combo_idx)
+                        context_key = f"{axis_id}__combo_{combo_idx}"
+                        compiled_contexts[context_key] = context
+                        logger.debug(f"Compiled sequential context {combo_idx + 1}/{len(combinations)} for axis {axis_id}")
+                else:
+                    # No sequential mode - compile single context as before
+                    context = orchestrator.create_context(axis_id)
+                    context.step_axis_filters = global_step_axis_filters
+
+                    with config_context(orchestrator.pipeline_config):
+                        resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
+                        PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
+                        PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
+                        PipelineCompiler.analyze_pipeline_sequential_mode(context, context.global_config, orchestrator)
+                        PipelineCompiler.validate_memory_contracts_for_context(context, resolved_steps, orchestrator)
+                        PipelineCompiler.assign_gpu_resources_for_context(context)
+
+                        if enable_visualizer_override:
+                            PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
+
+                        PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
+
+                    context.freeze()
+                    compiled_contexts[axis_id] = context
+                    logger.debug(f"Compilation finished for axis value: {axis_id}")
 
             # Log path planning summary once per plate
             if compiled_contexts:
