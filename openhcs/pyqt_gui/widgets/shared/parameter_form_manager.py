@@ -2245,8 +2245,8 @@ class ParameterFormManager(QWidget):
                                 if default_value_str.startswith('[') and default_value_str.endswith(']'):
                                     list_content = default_value_str[1:-1].strip()
                                     inherited_values = [v.strip() for v in list_content.split(',')] if list_content else []
-                                    # Convert current_value to list of strings for comparison
-                                    current_values_str = [v.value for v in current_value] if current_value else []
+                                    # Convert current_value to list of uppercase enum names for comparison
+                                    current_values_str = [v.name for v in current_value] if current_value else []
                                     logger.info(f"  Comparing: current={current_values_str} vs inherited={inherited_values}")
                                     # Check if they match
                                     if set(current_values_str) == set(inherited_values):

@@ -571,9 +571,10 @@ def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> Non
         # Apply placeholder to each checkbox in the group
         for enum_value, checkbox in widget._checkboxes.items():
             # Check if this enum value is in the inherited list
-            is_checked = enum_value.value in inherited_values
+            # Compare using uppercase enum name (e.g., 'SITE') not lowercase value (e.g., 'site')
+            is_checked = enum_value.name in inherited_values
 
-            logger.info(f"  📌 {enum_value.value}: is_checked={is_checked} (in {inherited_values})")
+            logger.info(f"  📌 {enum_value.value}: is_checked={is_checked} (comparing {enum_value.name} in {inherited_values})")
 
             # Create individual placeholder text for this checkbox
             individual_placeholder = f"Pipeline default: {is_checked}"
