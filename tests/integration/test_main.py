@@ -490,6 +490,7 @@ def _export_pipeline_to_file(pipeline: Pipeline, plate_dir: Path) -> None:
 def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipeline) -> Dict:
     """Execute compilation and execution phases of the pipeline (direct mode)."""
     from openhcs.constants import MULTIPROCESSING_AXIS
+    from openhcs.core.orchestrator.execution_result import ExecutionResult
     import logging
     logger = logging.getLogger(__name__)
 
@@ -534,7 +535,7 @@ def _execute_pipeline_phases(orchestrator: PipelineOrchestrator, pipeline: Pipel
     # Validate all wells succeeded
     failed_wells = [
         well_id for well_id, result in results.items()
-        if result.get('status') != 'success'
+        if not result.is_success()
     ]
     if failed_wells:
         raise RuntimeError(f"Wells failed execution: {failed_wells}")

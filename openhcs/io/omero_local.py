@@ -24,6 +24,7 @@ except ImportError:
 import numpy as np
 
 from openhcs.io.base import VirtualBackend
+from openhcs.io.backend_protocols import PicklableBackend
 from openhcs.constants.constants import FileFormat
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,29 @@ class OMEROLocalBackend(VirtualBackend):
         """Restore state after unpickling."""
         self.__dict__.update(state)
         # Connection will be retrieved from global registry in worker process
+
+    def get_connection_params(self) -> Optional[Dict[str, Any]]:
+        """
+        Return connection parameters for worker process reconnection.
+
+        Implements PicklableBackend protocol.
+
+        Returns:
+            Dictionary of connection parameters (host, port, username)
+            or None if no connection parameters are available.
+        """
+        return self._conn_params
+
+    def set_connection_params(self, params: Optional[Dict[str, Any]]) -> None:
+        """
+        Set connection parameters (used during unpickling).
+
+        Implements PicklableBackend protocol.
+
+        Args:
+            params: Dictionary of connection parameters or None
+        """
+        self._conn_params = params
 
     def _get_connection(self, **kwargs):
         """

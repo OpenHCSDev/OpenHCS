@@ -111,11 +111,12 @@ class ProcessingContext:
         """
         if not self.axis_id:
             raise RuntimeError("Cannot freeze ProcessingContext: 'axis_id' is not set.")
-        if not hasattr(self, 'filemanager') or self.filemanager is None:
+        if self.filemanager is None:
             raise RuntimeError("Cannot freeze ProcessingContext: 'filemanager' is not set.")
         # step_plans can be empty if the pipeline is empty, but it must exist.
-        if not hasattr(self, 'step_plans'):
-             raise RuntimeError("Cannot freeze ProcessingContext: 'step_plans' attribute does not exist.")
+        # Trust dataclass contract - if step_plans doesn't exist, that's a bug
+        if self.step_plans is None:
+             raise RuntimeError("Cannot freeze ProcessingContext: 'step_plans' is not set.")
 
         self._is_frozen = True # This assignment is allowed by __setattr__
 
@@ -138,19 +139,19 @@ class ProcessingContext:
 
     def get_vfs_config(self) -> VFSConfig:
         """Returns the VFSConfig part of the global configuration."""
-        if not hasattr(self, 'global_config') or self.global_config is None:
+        if self.global_config is None:
             raise RuntimeError("GlobalPipelineConfig not set on ProcessingContext.")
         return self.global_config.vfs_config
 
     def get_path_planning_config(self) -> PathPlanningConfig:
         """Returns the PathPlanningConfig part of the global configuration."""
-        if not hasattr(self, 'global_config') or self.global_config is None:
+        if self.global_config is None:
             raise RuntimeError("GlobalPipelineConfig not set on ProcessingContext.")
         return self.global_config.path_planning_config
 
     def get_num_workers(self) -> int:
         """Returns the number of workers from the global configuration."""
-        if not hasattr(self, 'global_config') or self.global_config is None:
+        if self.global_config is None:
             raise RuntimeError("GlobalPipelineConfig not set on ProcessingContext.")
         return self.global_config.num_workers
 
@@ -168,32 +169,35 @@ class ProcessingContext:
         Returns:
             Dictionary of state to pickle
         """
+        from openhcs.constants.constants import Backend
+        from openhcs.io.backend_protocols import PicklableBackend
+
         state = self.__dict__.copy()
 
         # Preserve zarr config from global_config for filemanager recreation
-        if hasattr(self, 'global_config') and self.global_config is not None:
-            state['_zarr_config'] = self.global_config.zarr_config
-        else:
-            state['_zarr_config'] = None
+        # Trust dataclass contract - if global_config doesn't exist, that's a bug
+        state['_zarr_config'] = self.global_config.zarr_config if self.global_config else None
 
         # Preserve plate_path for virtual_workspace backend recreation
-        if hasattr(self, 'plate_path'):
-            state['_plate_path'] = self.plate_path
-        else:
-            state['_plate_path'] = None
+        # Trust dataclass contract - plate_path is a defined field
+        state['_plate_path'] = self.plate_path
 
-        # Check if virtual_workspace backend is registered in the filemanager
-        if hasattr(self, 'filemanager') and self.filemanager is not None:
-            from openhcs.constants.constants import Backend
+        # Check if backends are registered in the filemanager
+        # filemanager is a required field - if it's None, context is not properly initialized
+        if self.filemanager is not None:
             state['_has_virtual_workspace'] = Backend.VIRTUAL_WORKSPACE.value in self.filemanager.registry
 
             # Check if OMERO backend is registered and preserve its connection params
-            state['_has_omero_backend'] = 'omero_local' in self.filemanager.registry
+            backend_key = Backend.OMERO_LOCAL.value
+            state['_has_omero_backend'] = backend_key in self.filemanager.registry
+
             if state['_has_omero_backend']:
-                omero_backend = self.filemanager.registry.get('omero_local')
-                # Preserve connection parameters for worker process reconnection
-                if hasattr(omero_backend, '_conn_params') and omero_backend._conn_params:
-                    state['_omero_conn_params'] = omero_backend._conn_params
+                # Use explicit dict access - if key exists, backend must be there
+                omero_backend = self.filemanager.registry[backend_key]
+
+                # Use PicklableBackend protocol instead of hasattr() duck typing
+                if isinstance(omero_backend, PicklableBackend):
+                    state['_omero_conn_params'] = omero_backend.get_connection_params()
                 else:
                     state['_omero_conn_params'] = None
             else:
@@ -222,6 +226,17 @@ class ProcessingContext:
         Args:
             state: Dictionary of state from __getstate__
         """
+        import logging
+        import os
+        from pathlib import Path
+
+        from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
+        from openhcs.io.filemanager import FileManager
+        from openhcs.io.zarr import ZarrStorageBackend
+        from openhcs.constants.constants import Backend
+
+        logger = logging.getLogger(__name__)
+
         # Extract preserved state
         zarr_config = state.pop('_zarr_config', None)
         plate_path = state.pop('_plate_path', None)
@@ -231,12 +246,6 @@ class ProcessingContext:
 
         # Restore all other attributes
         self.__dict__.update(state)
-
-        # Recreate filemanager in worker process using worker's local global registry
-        from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
-        from openhcs.io.filemanager import FileManager
-        from openhcs.io.zarr import ZarrStorageBackend
-        from openhcs.constants.constants import Backend
 
         # Ensure worker's registry is initialized
         ensure_storage_registry()
@@ -248,48 +257,56 @@ class ProcessingContext:
 
         # Recreate virtual_workspace backend if it was registered in main process
         if has_virtual_workspace and plate_path is not None:
-            from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
-            from pathlib import Path
             try:
-                virtual_backend = VirtualWorkspaceBackend(plate_root=Path(plate_path))
-                global_storage_registry[Backend.VIRTUAL_WORKSPACE.value] = virtual_backend
-            except Exception as e:
-                # Log but don't fail - the backend might not be needed in this worker
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.warning(f"Failed to recreate virtual_workspace backend in worker: {e}")
+                from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
+            except ImportError:
+                logger.debug("VirtualWorkspaceBackend module not available in worker")
+            else:
+                try:
+                    virtual_backend = VirtualWorkspaceBackend(plate_root=Path(plate_path))
+                    global_storage_registry[Backend.VIRTUAL_WORKSPACE.value] = virtual_backend
+                except (ValueError, TypeError, OSError) as e:
+                    # Expected: Invalid config or missing directory
+                    logger.warning(f"Failed to recreate virtual_workspace backend: {e}")
+                except Exception as e:
+                    # Unexpected: This is a bug
+                    logger.error(f"BUG: Unexpected error recreating virtual_workspace backend: {e}", exc_info=True)
 
         # Recreate OMERO backend if it was registered in main process
         if has_omero_backend and omero_conn_params is not None:
-            from openhcs.io.omero_local import OMEROLocalBackend
-            import logging
-            import os
-            logger = logging.getLogger(__name__)
             try:
-                # Create backend instance without connection
-                omero_backend = OMEROLocalBackend()
-                # Restore connection parameters
-                omero_backend._conn_params = omero_conn_params
-
-                # Try to establish connection using stored params
-                # Password comes from environment variable or defaults to 'openhcs'
-                password = os.getenv('OMERO_PASSWORD', 'openhcs')
+                from openhcs.io.omero_local import OMEROLocalBackend
                 from omero.gateway import BlitzGateway
-                conn = BlitzGateway(
-                    omero_conn_params['username'],
-                    password,
-                    host=omero_conn_params['host'],
-                    port=omero_conn_params['port']
-                )
-                if conn.connect():
-                    omero_backend._initial_conn = conn
-                    global_storage_registry['omero_local'] = omero_backend
-                    logger.info(f"✓ Recreated OMERO backend in worker process (connected to {omero_conn_params['host']}:{omero_conn_params['port']})")
-                else:
-                    logger.warning(f"Failed to connect to OMERO in worker process - backend not registered")
-            except Exception as e:
-                # Log but don't fail - the backend might not be needed in this worker
-                logger.warning(f"Failed to recreate OMERO backend in worker: {e}")
+            except ImportError:
+                logger.debug("OMERO modules not available in worker - skipping OMERO backend recreation")
+            else:
+                try:
+                    # Create backend instance without connection
+                    omero_backend = OMEROLocalBackend()
+                    # Restore connection parameters using protocol method
+                    omero_backend.set_connection_params(omero_conn_params)
+
+                    # Try to establish connection using stored params
+                    # Password comes from environment variable or defaults to 'openhcs'
+                    password = os.getenv('OMERO_PASSWORD', 'openhcs')
+                    conn = BlitzGateway(
+                        omero_conn_params['username'],
+                        password,
+                        host=omero_conn_params['host'],
+                        port=omero_conn_params['port']
+                    )
+                    if conn.connect():
+                        omero_backend._initial_conn = conn
+                        global_storage_registry[Backend.OMERO_LOCAL.value] = omero_backend
+                        logger.info(f"✓ Recreated OMERO backend in worker process (connected to {omero_conn_params['host']}:{omero_conn_params['port']})")
+                    else:
+                        logger.warning(f"Failed to connect to OMERO in worker process - backend not registered")
+                except (KeyError, ValueError, TypeError) as e:
+                    # Expected: Invalid connection params
+                    logger.warning(f"Failed to recreate OMERO backend due to invalid params: {e}")
+                except Exception as e:
+                    # Unexpected: This is a bug
+                    logger.error(f"BUG: Unexpected error recreating OMERO backend: {e}", exc_info=True)
 
         # Create filemanager using worker's local global registry
         # This ensures the worker uses its own memory backend instance
