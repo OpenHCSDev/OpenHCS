@@ -186,8 +186,22 @@ class ProcessingContext:
         if hasattr(self, 'filemanager') and self.filemanager is not None:
             from openhcs.constants.constants import Backend
             state['_has_virtual_workspace'] = Backend.VIRTUAL_WORKSPACE.value in self.filemanager.registry
+
+            # Check if OMERO backend is registered and preserve its connection params
+            state['_has_omero_backend'] = 'omero_local' in self.filemanager.registry
+            if state['_has_omero_backend']:
+                omero_backend = self.filemanager.registry.get('omero_local')
+                # Preserve connection parameters for worker process reconnection
+                if hasattr(omero_backend, '_conn_params') and omero_backend._conn_params:
+                    state['_omero_conn_params'] = omero_backend._conn_params
+                else:
+                    state['_omero_conn_params'] = None
+            else:
+                state['_omero_conn_params'] = None
         else:
             state['_has_virtual_workspace'] = False
+            state['_has_omero_backend'] = False
+            state['_omero_conn_params'] = None
 
         # Remove filemanager - will be recreated in worker process
         state.pop('filemanager', None)
@@ -202,8 +216,8 @@ class ProcessingContext:
         ensuring that all processes share the same memory backend instance
         within their own process space.
 
-        Also recreates the virtual_workspace backend if it was registered in the
-        main process.
+        Also recreates the virtual_workspace and OMERO backends if they were
+        registered in the main process.
 
         Args:
             state: Dictionary of state from __getstate__
@@ -212,6 +226,8 @@ class ProcessingContext:
         zarr_config = state.pop('_zarr_config', None)
         plate_path = state.pop('_plate_path', None)
         has_virtual_workspace = state.pop('_has_virtual_workspace', False)
+        has_omero_backend = state.pop('_has_omero_backend', False)
+        omero_conn_params = state.pop('_omero_conn_params', None)
 
         # Restore all other attributes
         self.__dict__.update(state)
@@ -242,6 +258,38 @@ class ProcessingContext:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.warning(f"Failed to recreate virtual_workspace backend in worker: {e}")
+
+        # Recreate OMERO backend if it was registered in main process
+        if has_omero_backend and omero_conn_params is not None:
+            from openhcs.io.omero_local import OMEROLocalBackend
+            import logging
+            import os
+            logger = logging.getLogger(__name__)
+            try:
+                # Create backend instance without connection
+                omero_backend = OMEROLocalBackend()
+                # Restore connection parameters
+                omero_backend._conn_params = omero_conn_params
+
+                # Try to establish connection using stored params
+                # Password comes from environment variable or defaults to 'openhcs'
+                password = os.getenv('OMERO_PASSWORD', 'openhcs')
+                from omero.gateway import BlitzGateway
+                conn = BlitzGateway(
+                    omero_conn_params['username'],
+                    password,
+                    host=omero_conn_params['host'],
+                    port=omero_conn_params['port']
+                )
+                if conn.connect():
+                    omero_backend._initial_conn = conn
+                    global_storage_registry['omero_local'] = omero_backend
+                    logger.info(f"✓ Recreated OMERO backend in worker process (connected to {omero_conn_params['host']}:{omero_conn_params['port']})")
+                else:
+                    logger.warning(f"Failed to connect to OMERO in worker process - backend not registered")
+            except Exception as e:
+                # Log but don't fail - the backend might not be needed in this worker
+                logger.warning(f"Failed to recreate OMERO backend in worker: {e}")
 
         # Create filemanager using worker's local global registry
         # This ensures the worker uses its own memory backend instance
