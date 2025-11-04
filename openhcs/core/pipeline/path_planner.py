@@ -54,7 +54,8 @@ class PathPlanner:
 
     def __init__(self, context: ProcessingContext, pipeline_config):
         self.ctx = context
-        # Access config directly from pipeline_config (lazy resolution happens via config_context)
+        # CRITICAL: pipeline_config is now the merged config (GlobalPipelineConfig) from context.global_config
+        # This ensures proper inheritance from global config without needing field-specific code
         self.cfg = pipeline_config.path_planning_config
         self.vfs = pipeline_config.vfs_config
         self.plans = context.step_plans
@@ -440,7 +441,15 @@ class PipelinePathPlanner:
     def prepare_pipeline_paths(context: ProcessingContext,
                               pipeline_definition: List[AbstractStep],
                               pipeline_config) -> Dict:
-        """Prepare pipeline paths."""
+        """
+        Prepare pipeline paths.
+
+        Args:
+            context: ProcessingContext with step_plans
+            pipeline_definition: List of pipeline steps
+            pipeline_config: Merged GlobalPipelineConfig (from context.global_config)
+                           NOT the raw PipelineConfig - ensures proper global config inheritance
+        """
         return PathPlanner(context, pipeline_config).plan(pipeline_definition)
 
     @staticmethod

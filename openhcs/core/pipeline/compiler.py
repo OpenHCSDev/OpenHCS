@@ -4,6 +4,28 @@ Pipeline module for OpenHCS.
 This module provides the core pipeline compilation components for OpenHCS.
 The PipelineCompiler is responsible for preparing step_plans within a ProcessingContext.
 
+CONFIGURATION ACCESS PATTERN:
+============================
+The compiler must ALWAYS access configuration through the merged config, never the raw pipeline_config:
+
+✅ CORRECT:
+    effective_config = orchestrator.get_effective_config()
+    vfs_config = effective_config.vfs_config
+    well_filter = effective_config.well_filter_config.well_filter
+
+❌ INCORRECT:
+    vfs_config = orchestrator.pipeline_config.vfs_config  # Returns None if not explicitly set!
+
+WHY:
+- orchestrator.pipeline_config is the raw PipelineConfig with None values
+- orchestrator.get_effective_config() returns merged config (pipeline + global)
+- Using raw config breaks global config inheritance for ALL fields
+- Using merged config works automatically for ANY config field (no hardcoding needed)
+
+EXCEPTION:
+- config_context(orchestrator.pipeline_config) is CORRECT - sets up lazy resolution context
+- Writing to orchestrator.pipeline_config is CORRECT - updates the raw config
+
 Doctrinal Clauses:
 - Clause 12 — Absolute Clean Execution
 - Clause 17 — VFS Exclusivity (FileManager is the only component that uses VirtualPath)
@@ -289,11 +311,12 @@ class PipelineCompiler:
                     logger.debug(f"Input conversion to zarr enabled for first step: {first_step.name}")
 
         # The axis_id and base_input_dir are available from the context object.
-        # Path planning now gets config directly from orchestrator.pipeline_config parameter
+        # CRITICAL: Pass merged config (not raw pipeline_config) for proper global config inheritance
+        # This ensures path_planning_config and vfs_config inherit from global config
         PipelinePathPlanner.prepare_pipeline_paths(
             context,
             steps_definition,
-            orchestrator.pipeline_config
+            context.global_config  # Use merged config from context instead of raw pipeline_config
         )
 
         # === FUNCTION OBJECT REFRESH ===
@@ -605,11 +628,12 @@ class PipelineCompiler:
 
         # MaterializationFlagPlanner.prepare_pipeline_flags now takes context and pipeline_definition
         # and modifies context.step_plans in-place.
+        # CRITICAL: Pass merged config (not raw pipeline_config) for proper global config inheritance
         MaterializationFlagPlanner.prepare_pipeline_flags(
             context,
             steps_definition,
             orchestrator.plate_path,
-            orchestrator.pipeline_config
+            context.global_config  # Use merged config from context instead of raw pipeline_config
         )
 
         # Post-check (optional, but good for ensuring contracts are met by the planner)
