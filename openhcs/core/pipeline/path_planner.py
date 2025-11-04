@@ -56,14 +56,6 @@ class PathPlanner:
         self.ctx = context
         # CRITICAL: pipeline_config is now the merged config (GlobalPipelineConfig) from context.global_config
         # This ensures proper inheritance from global config without needing field-specific code
-
-        # DEBUG: Log what we're receiving
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"🔍 PathPlanner.__init__ DEBUG:")
-        logger.error(f"  pipeline_config type: {type(pipeline_config)}")
-        logger.error(f"  pipeline_config.path_planning_config: {pipeline_config.path_planning_config}")
-
         self.cfg = pipeline_config.path_planning_config
         self.vfs = pipeline_config.vfs_config
         self.plans = context.step_plans

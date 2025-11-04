@@ -136,13 +136,23 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
             logger.debug(f"Processing step_well_filter_config: pipeline_value = {pipeline_value}")
 
         if pipeline_value is not None:
-            # CRITICAL FIX: Convert lazy configs to base configs with resolved values
-            # This ensures that user-set values from lazy configs are preserved in the thread-local context
-            # instead of being replaced with static defaults when GlobalPipelineConfig is instantiated
+            # CRITICAL FIX: For lazy configs, merge with global config BEFORE converting to base
+            # This ensures None values in lazy configs resolve to global values
+            # Then convert to base config to store in thread-local context
             if hasattr(pipeline_value, 'to_base_config'):
-                # This is a lazy config - convert to base config with resolved values
-                converted_value = pipeline_value.to_base_config()
-                merged_config_values[field.name] = converted_value
+                # This is a lazy config - merge with global config first
+                global_value = getattr(global_config, field.name)
+                from dataclasses import is_dataclass
+                if is_dataclass(global_value):
+                    # Merge lazy config with global config to resolve None values
+                    merged_lazy = _merge_nested_dataclass(pipeline_value, global_value)
+                    # Now convert merged result to base config
+                    converted_value = merged_lazy.to_base_config() if hasattr(merged_lazy, 'to_base_config') else merged_lazy
+                    merged_config_values[field.name] = converted_value
+                else:
+                    # No global value to merge with, just convert to base
+                    converted_value = pipeline_value.to_base_config()
+                    merged_config_values[field.name] = converted_value
                 if field.name == 'step_well_filter_config':
                     logger.debug(f"Converted lazy config to base: {converted_value}")
             else:
