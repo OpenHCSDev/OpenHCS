@@ -343,16 +343,22 @@ class DualEditorWindow(BaseFormDialog):
             if processing_config:
                 # CRITICAL: Apply config_context to enable lazy resolution for None values
                 # When group_by is None, it should inherit from pipeline config
-                with config_context(self.orchestrator.pipeline_config):
-                    # Create a temporary step with current form values for lazy resolution context
-                    from dataclasses import replace
-                    temp_step = replace(self.editing_step, **current_values)
+                # We need to create a temporary step-like object with the live processing_config
+                # so that lazy resolution can work properly
 
+                # Create a simple object that mimics the step's structure for lazy resolution
+                class TempStep:
+                    def __init__(self, processing_config):
+                        self.processing_config = processing_config
+
+                temp_step = TempStep(processing_config)
+
+                with config_context(self.orchestrator.pipeline_config):
                     with config_context(temp_step):
                         # Read from the live processing_config with lazy resolution
                         # If group_by is None, this will resolve to pipeline config's value
-                        effective_group_by = temp_step.processing_config.group_by
-                        variable_components = temp_step.processing_config.variable_components or []
+                        effective_group_by = processing_config.group_by
+                        variable_components = processing_config.variable_components or []
                         logger.info(f"🔍 Live form values (lazy-resolved): group_by={effective_group_by}, variable_components={variable_components}")
             else:
                 # Fallback: processing_config not in current values (shouldn't happen)
