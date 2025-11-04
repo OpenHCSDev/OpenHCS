@@ -2233,8 +2233,10 @@ class ParameterFormManager(QWidget):
                     should_apply_placeholder = current_value is None or widget_in_placeholder_state
 
                     if not should_apply_placeholder and hasattr(widget, '_checkboxes'):
+                        logger.info(f"🔍 Checking if checkbox group {param_name} matches inherited value: current={current_value}")
                         # Check if current value matches the inherited value
                         placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
+                        logger.info(f"📋 Placeholder text for {param_name}: {placeholder_text}")
                         if placeholder_text:
                             # Extract inherited value from placeholder text
                             from openhcs.pyqt_gui.widgets.shared.widget_strategies import _extract_default_value
@@ -2245,16 +2247,21 @@ class ParameterFormManager(QWidget):
                                     inherited_values = [v.strip() for v in list_content.split(',')] if list_content else []
                                     # Convert current_value to list of strings for comparison
                                     current_values_str = [v.value for v in current_value] if current_value else []
+                                    logger.info(f"  Comparing: current={current_values_str} vs inherited={inherited_values}")
                                     # Check if they match
                                     if set(current_values_str) == set(inherited_values):
+                                        logger.info(f"  ✅ Match! Will apply placeholder styling")
                                         should_apply_placeholder = True
-                            except Exception:
-                                pass
+                                    else:
+                                        logger.info(f"  ❌ No match")
+                            except Exception as e:
+                                logger.error(f"  ❌ Failed to compare: {e}", exc_info=True)
 
                     if should_apply_placeholder:
                         with monitor.measure():
                             placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                             if placeholder_text:
+                                logger.info(f"🎨 Applying placeholder to {param_name}: {placeholder_text}")
                                 from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
                                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
