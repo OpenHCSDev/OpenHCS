@@ -829,13 +829,18 @@ class PlateManagerWidget(QWidget):
                 for step in execution_pipeline:
                     step.step_id = str(id(step))
                     # Ensure variable_components is never None - use FunctionStep default
-                    if step.processing_config.variable_components is None:
-                        logger.warning(f"Step '{step.name}' has None variable_components, setting FunctionStep default")
-                        step.processing_config.variable_components = [VariableComponents.SITE]
-                    # Also ensure it's not an empty list
-                    elif not step.processing_config.variable_components:
-                        logger.warning(f"Step '{step.name}' has empty variable_components, setting FunctionStep default")
-                        step.processing_config.variable_components = [VariableComponents.SITE]
+                    # ProcessingConfig is a frozen dataclass; do NOT mutate it in-place.
+                    # Create a new ProcessingConfig instance with the desired value instead.
+                    from dataclasses import replace
+                    if step.processing_config.variable_components is None or not step.processing_config.variable_components:
+                        if step.processing_config.variable_components is None:
+                            logger.warning(f"Step '{step.name}' has None variable_components, setting FunctionStep default")
+                        else:
+                            logger.warning(f"Step '{step.name}' has empty variable_components, setting FunctionStep default")
+                        step.processing_config = replace(
+                            step.processing_config,
+                            variable_components=[VariableComponents.SITE]
+                        )
 
                 # Get wells and compile (async - run in executor to avoid blocking UI)
                 # Wrap in Pipeline object like test_main.py does

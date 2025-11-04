@@ -281,8 +281,18 @@ class VFSConfig:
 
 @global_pipeline_config
 @dataclass(frozen=True)
+class SequentialProcessingConfig:
+    """Configuration for sequential component processing to reduce memory usage."""
+    enabled: bool = False
+    """Whether to enable sequential processing."""
+
+    sequential_components: List['SequentialComponents'] = field(default_factory=list)
+    """Components to process sequentially (e.g., [SequentialComponents.TIMEPOINT, SequentialComponents.CHANNEL])."""
+
+@global_pipeline_config
+@dataclass(frozen=True)
 class ProcessingConfig:
-    """Configuration for step processing behavior including variable components, grouping, and input source."""
+    """Configuration for step processing behavior including variable components, grouping, and sequential processing."""
 
     variable_components: List[VariableComponents] = field(default_factory=get_default_variable_components)
     """List of variable components for pattern expansion."""
@@ -293,24 +303,11 @@ class ProcessingConfig:
     input_source: InputSource = InputSource.PREVIOUS_STEP
     """Input source strategy: PREVIOUS_STEP (normal chaining) or PIPELINE_START (access original input)."""
 
-
-@global_pipeline_config
-@dataclass(frozen=True)
-class SequentialProcessingConfig:
-    """Pipeline-level configuration for sequential processing mode.
-
-    Sequential processing changes the orchestrator's execution flow to process
-    one combination at a time through all steps, reducing memory usage.
-    This is a pipeline-level setting, not per-step.
-    """
+    sequential_enabled: bool = False
+    """Whether to enable sequential processing to reduce memory usage."""
 
     sequential_components: List[SequentialComponents] = field(default_factory=list)
-    """Components to process sequentially (e.g., [SequentialComponents.TIMEPOINT, SequentialComponents.CHANNEL]).
-
-    When set, the orchestrator will process one combination of these components through
-    all pipeline steps before moving to the next combination, clearing memory between combinations.
-    """
-
+    """Components to process sequentially (e.g., [SequentialComponents.TIMEPOINT, SequentialComponents.CHANNEL])."""
 
 @global_pipeline_config
 @dataclass(frozen=True)

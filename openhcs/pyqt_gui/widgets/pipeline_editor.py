@@ -629,17 +629,12 @@ class PipelineEditorWidget(QWidget):
             return
 
         try:
-            from pathlib import Path
+            # Use module import to find basic_pipeline.py
+            import openhcs.tests.basic_pipeline as basic_pipeline_module
+            import inspect
 
-            # Hardcoded path to basic_pipeline.py
-            pipeline_file = Path("/home/ts/code/projects/openhcs/openhcs/tests/basic_pipeline.py")
-
-            if not pipeline_file.exists():
-                self.service_adapter.show_error_dialog(f"Pipeline file not found: {pipeline_file}")
-                return
-
-            # Read the file content
-            python_code = pipeline_file.read_text()
+            # Get the source code from the module
+            python_code = inspect.getsource(basic_pipeline_module)
 
             # Execute the code to get pipeline_steps (same as _handle_edited_pipeline_code)
             namespace = {}
@@ -658,7 +653,9 @@ class PipelineEditorWidget(QWidget):
                 raise ValueError("No 'pipeline_steps = [...]' assignment found in basic_pipeline.py")
 
         except Exception as e:
+            import traceback
             logger.error(f"Failed to auto-load basic_pipeline.py: {e}")
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             self.service_adapter.show_error_dialog(f"Failed to auto-load pipeline: {str(e)}")
     
     def action_code_pipeline(self):
@@ -736,39 +733,45 @@ class PipelineEditorWidget(QWidget):
         from contextlib import contextmanager
         from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
         import dataclasses
+        import inspect
 
         @contextmanager
         def patch_context():
             # Store original constructors
             original_constructors = {}
 
-            # Find all lazy dataclass types that need patching
-            from openhcs.core.config import LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig
-            lazy_types = [LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig]
+            # CRITICAL: Automatically discover ALL lazy dataclass types from openhcs.core.config
+            # This prevents hardcoding and ensures all lazy types are patched
+            import openhcs.core.config as config_module
+            lazy_types = []
+            for name, obj in inspect.getmembers(config_module):
+                # Check if it's a class and has lazy resolution
+                if inspect.isclass(obj) and LazyDefaultPlaceholderService.has_lazy_resolution(obj):
+                    lazy_types.append(obj)
+                    logger.debug(f"Discovered lazy type for patching: {name}")
 
-            # Add any other lazy types that might be used
+            # Patch all discovered lazy types
             for lazy_type in lazy_types:
-                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
-                    # Store original constructor
-                    original_constructors[lazy_type] = lazy_type.__init__
+                # Store original constructor
+                original_constructors[lazy_type] = lazy_type.__init__
 
-                    # Create patched constructor that uses raw values
-                    def create_patched_init(original_init, dataclass_type):
-                        def patched_init(self, **kwargs):
-                            # Use raw value approach instead of calling original constructor
-                            # This prevents lazy resolution during code execution
-                            for field in dataclasses.fields(dataclass_type):
-                                value = kwargs.get(field.name, None)
-                                object.__setattr__(self, field.name, value)
+                # Create patched constructor that uses raw values
+                def create_patched_init(original_init, dataclass_type):
+                    def patched_init(self, **kwargs):
+                        # Use raw value approach instead of calling original constructor
+                        # This prevents lazy resolution during code execution
+                        for field in dataclasses.fields(dataclass_type):
+                            value = kwargs.get(field.name, None)
+                            object.__setattr__(self, field.name, value)
 
-                            # Initialize any required lazy dataclass attributes
-                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
-                                object.__setattr__(self, '_is_lazy_dataclass', True)
+                        # Initialize any required lazy dataclass attributes
+                        if hasattr(dataclass_type, '_is_lazy_dataclass'):
+                            object.__setattr__(self, '_is_lazy_dataclass', True)
 
-                        return patched_init
+                    return patched_init
 
-                    # Apply the patch
-                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
+                # Apply the patch
+                lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
 
             try:
                 yield

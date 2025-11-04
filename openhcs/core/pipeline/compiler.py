@@ -354,12 +354,31 @@ class PipelineCompiler:
 
             # Add step-specific attributes (non-I/O, non-path related)
             # Access via processing_config (already resolved by resolve_lazy_configurations_for_serialization)
-            current_plan["variable_components"] = step.processing_config.variable_components
-            current_plan["group_by"] = step.processing_config.group_by
-            current_plan["input_source"] = step.processing_config.input_source
+            # Explicit, fail-fast access to processing_config (avoid silent duck-typing guards)
+            try:
+                proc_cfg = step.processing_config
+            except AttributeError as e:
+                logger.error(f"Step '{getattr(step, 'name', '<unknown>')}' missing processing_config during compilation.")
+                raise
+
+            # Normalise variable_components here in the compiler: replace None/empty with default
+            # Use dataclasses.replace to avoid mutating frozen dataclasses.
+            from dataclasses import replace
+            from openhcs.core.config import VariableComponents
+
+            if proc_cfg.variable_components is None or not proc_cfg.variable_components:
+                if proc_cfg.variable_components is None:
+                    logger.warning(f"Step '{step.name}' has None variable_components; compiler applying default")
+                else:
+                    logger.warning(f"Step '{step.name}' has empty variable_components; compiler applying default")
+                proc_cfg = replace(proc_cfg, variable_components=[VariableComponents.SITE])
+
+            current_plan["variable_components"] = proc_cfg.variable_components
+            current_plan["group_by"] = proc_cfg.group_by
+            current_plan["input_source"] = proc_cfg.input_source
 
             # Add full processing config for sequential processing
-            current_plan["sequential_processing"] = step.processing_config
+            current_plan["sequential_processing"] = proc_cfg
 
             # Lazy configs were already resolved at the beginning of compilation
             resolved_step = step
