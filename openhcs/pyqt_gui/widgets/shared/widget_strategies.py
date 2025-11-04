@@ -843,15 +843,22 @@ class PyQt6WidgetEnhancer:
     @staticmethod
     def _connect_checkbox_group_signals(widget: Any, param_name: str, callback: Any) -> None:
         """Connect signals for checkbox group widgets."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         if hasattr(widget, '_checkboxes'):
             # Connect to each checkbox's stateChanged signal
             for checkbox in widget._checkboxes.values():
-                checkbox.stateChanged.connect(
-                    lambda: (
-                        PyQt6WidgetEnhancer._clear_placeholder_state(widget),
-                        callback(param_name, widget.get_selected_values())
-                    )[-1]
-                )
+                def make_handler(cb):
+                    """Create handler with proper closure to avoid lambda capture issues."""
+                    def handler(state):
+                        selected = widget.get_selected_values()
+                        logger.info(f"🔘 Checkbox {cb.text()} changed to {state}, selected values: {[v.name for v in selected]}")
+                        PyQt6WidgetEnhancer._clear_placeholder_state(widget)
+                        callback(param_name, selected)
+                    return handler
+
+                checkbox.stateChanged.connect(make_handler(checkbox))
 
     @staticmethod
     def _clear_placeholder_state(widget: Any) -> None:
