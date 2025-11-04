@@ -281,16 +281,6 @@ class VFSConfig:
 
 @global_pipeline_config
 @dataclass(frozen=True)
-class SequentialProcessingConfig:
-    """Configuration for sequential component processing to reduce memory usage."""
-    enabled: bool = False
-    """Whether to enable sequential processing."""
-
-    sequential_components: List['SequentialComponents'] = field(default_factory=list)
-    """Components to process sequentially (e.g., [SequentialComponents.TIMEPOINT, SequentialComponents.CHANNEL])."""
-
-@global_pipeline_config
-@dataclass(frozen=True)
 class ProcessingConfig:
     """Configuration for step processing behavior including variable components, grouping, and input source."""
 
