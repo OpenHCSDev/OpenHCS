@@ -170,28 +170,39 @@ if hasattr(omero_backend, '_conn_params') and omero_backend._conn_params:
 
 **Problem**: Checking for private attribute `_conn_params` with `hasattr()` is double duck typing.
 
-**Solution**: Define explicit interface for picklable backends:
+**Solution**: Define explicit ABC for picklable backends:
 
 ```python
 from abc import ABC, abstractmethod
-from typing import Protocol
 
-class PicklableBackend(Protocol):
-    """Protocol for backends that support pickling with connection params."""
-    
+# In openhcs/io/omero_local.py:
+class PicklableBackend(ABC):
+    """ABC for backends that support pickling with connection params."""
+
+    @abstractmethod
     def get_connection_params(self) -> Optional[Dict[str, Any]]:
         """Return connection parameters for worker process reconnection."""
-        ...
+        pass
+
+    @abstractmethod
+    def set_connection_params(self, params: Optional[Dict[str, Any]]) -> None:
+        """Set connection parameters (used during unpickling)."""
+        pass
 
 # In OMEROLocalBackend:
-def get_connection_params(self) -> Optional[Dict[str, Any]]:
-    """Return connection parameters for worker process reconnection."""
-    return self._conn_params
+class OMEROLocalBackend(VirtualBackend, PicklableBackend):
+    def get_connection_params(self) -> Optional[Dict[str, Any]]:
+        return self._conn_params
+
+    def set_connection_params(self, params: Optional[Dict[str, Any]]) -> None:
+        self._conn_params = params
 
 # In ProcessingContext.__getstate__:
 if isinstance(omero_backend, PicklableBackend):
     state['_omero_conn_params'] = omero_backend.get_connection_params()
 ```
+
+**Note**: Using ABC (not Protocol) because OpenHCS requires explicit contracts via inheritance, not structural duck typing.
 
 ---
 
