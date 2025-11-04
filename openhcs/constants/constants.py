@@ -142,8 +142,12 @@ def _create_enums():
                 GroupBy.__qualname__ = 'GroupBy'
                 GroupBy = _add_groupby_methods(GroupBy)
 
+                sc = Enum('SequentialComponents', cached_data['sequential_components'])
+                sc.__module__ = __name__
+                sc.__qualname__ = 'SequentialComponents'
+
                 logger.info(f"🔧 _create_enums() LOADED FROM CACHE in process {os.getpid()}")
-                return all_components, vc, GroupBy
+                return all_components, vc, GroupBy, sc
         except Exception as e:
             logger.debug(f"Cache load failed for component enums: {e}")
 
@@ -171,14 +175,21 @@ def _create_enums():
     GroupBy.__qualname__ = 'GroupBy'
     GroupBy = _add_groupby_methods(GroupBy)
 
+    # SequentialComponents: Same as VariableComponents (for sequential processing)
+    sc_dict = {c.name: c.value for c in remaining}
+    sc = Enum('SequentialComponents', sc_dict)
+    sc.__module__ = __name__
+    sc.__qualname__ = 'SequentialComponents'
+
     # Save to persistent cache
-    # Store all three enums as a single item with key 'enums'
+    # Store all four enums as a single item with key 'enums'
     if cache_manager:
         try:
             enum_data = {
                 'all_components': all_components_dict,
                 'variable_components': vc_dict,
-                'group_by': gb_dict
+                'group_by': gb_dict,
+                'sequential_components': sc_dict
             }
             cache_manager.save_cache({'enums': enum_data})
             logger.debug("💾 Saved component enums to cache")
@@ -186,9 +197,10 @@ def _create_enums():
             logger.debug(f"Failed to save component enum cache: {e}")
 
     logger.info(f"🔧 _create_enums() RETURNING in process {os.getpid()}: "
-               f"AllComponents={id(all_components)}, VariableComponents={id(vc)}, GroupBy={id(GroupBy)}")
+               f"AllComponents={id(all_components)}, VariableComponents={id(vc)}, GroupBy={id(GroupBy)}, "
+               f"SequentialComponents={id(sc)}")
     logger.info(f"🔧 _create_enums() cache_info after return: {_create_enums.cache_info()}")
-    return all_components, vc, GroupBy
+    return all_components, vc, GroupBy, sc
 
 
 @lru_cache(maxsize=1)
@@ -224,7 +236,7 @@ def __getattr__(name):
     CRITICAL: Ensures enums are created exactly once per process and stored in globals()
     so that pickle identity checks pass in multiprocessing contexts.
     """
-    if name in ('AllComponents', 'VariableComponents', 'GroupBy'):
+    if name in ('AllComponents', 'VariableComponents', 'GroupBy', 'SequentialComponents'):
         # Check if already created (handles race conditions)
         if name in globals():
             return globals()[name]
@@ -235,13 +247,15 @@ def __getattr__(name):
         logger = logging.getLogger(__name__)
         logger.info(f"🔧 ENUM CREATION: Creating {name} in process {os.getpid()}")
 
-        all_components, vc, gb = _create_enums()
+        all_components, vc, gb, sc = _create_enums()
         globals()['AllComponents'] = all_components
         globals()['VariableComponents'] = vc
         globals()['GroupBy'] = gb
+        globals()['SequentialComponents'] = sc
 
         logger.info(f"🔧 ENUM CREATION: Created enums in process {os.getpid()}: "
-                   f"AllComponents={id(all_components)}, VariableComponents={id(vc)}, GroupBy={id(gb)}")
+                   f"AllComponents={id(all_components)}, VariableComponents={id(vc)}, GroupBy={id(gb)}, "
+                   f"SequentialComponents={id(sc)}")
         logger.info(f"🔧 ENUM CREATION: VariableComponents.__module__={vc.__module__}, __qualname__={vc.__qualname__}")
 
         return globals()[name]
@@ -294,14 +308,14 @@ DEFAULT_RECURSIVE_PATTERN_SEARCH = False
 @lru_cache(maxsize=1)
 def get_default_variable_components():
     """Get default variable components from ComponentConfiguration."""
-    _, vc, _ = _create_enums()  # Get the enum directly
+    _, vc, _, _ = _create_enums()  # Get the enum directly
     return [getattr(vc, c.name) for c in get_openhcs_config().default_variable]
 
 
 @lru_cache(maxsize=1)
 def get_default_group_by():
     """Get default group_by from ComponentConfiguration."""
-    _, _, gb = _create_enums()  # Get the enum directly
+    _, _, gb, _ = _create_enums()  # Get the enum directly
     config = get_openhcs_config()
     return getattr(gb, config.default_group_by.name) if config.default_group_by else None
 

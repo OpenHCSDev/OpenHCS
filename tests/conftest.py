@@ -80,6 +80,13 @@ def pytest_addoption(parser):
         help="Comma-separated list of processing axis components (default: well). Options: well. Use 'all' for full coverage."
     )
 
+    parser.addoption(
+        "--it-sequential",
+        action="store",
+        default=env_default("IT_SEQUENTIAL", "none"),
+        help="Comma-separated list of sequential processing configurations (default: none). Options: none,valid_1_component,valid_2_components,invalid_overlap,invalid_duplicates. Use 'all' for full coverage."
+    )
+
 
 def pytest_configure(config):
     """Validate configuration options."""
@@ -91,7 +98,8 @@ def pytest_configure(config):
         "dims": ["2d", "3d"],
         "exec_modes": ["threading", "multiprocessing"],
         "zmq_modes": ["direct", "zmq"],
-        "processing_axis": ["well"]
+        "processing_axis": ["well"],
+        "sequential": ["none", "valid_1_component", "valid_2_components", "invalid_overlap", "invalid_duplicates"]
     }
 
     # Validate each option
@@ -101,7 +109,8 @@ def pytest_configure(config):
         ("--it-dims", "dims"),
         ("--it-exec-mode", "exec_modes"),
         ("--it-zmq-mode", "zmq_modes"),
-        ("--it-processing-axis", "processing_axis")
+        ("--it-processing-axis", "processing_axis"),
+        ("--it-sequential", "sequential")
     ]
     
     for option_name, choice_key in options_to_validate:
@@ -123,7 +132,7 @@ def pytest_configure(config):
 # Import constants from fixture_utils for parametrization
 from tests.integration.helpers.fixture_utils import (
     BACKEND_CONFIGS, MICROSCOPE_CONFIGS, DATA_TYPE_CONFIGS,
-    EXECUTION_MODE_CONFIGS, ZMQ_EXECUTION_MODE_CONFIGS
+    EXECUTION_MODE_CONFIGS, ZMQ_EXECUTION_MODE_CONFIGS, SEQUENTIAL_CONFIGS
 )
 
 # Visualizer configurations for parametrized testing
@@ -170,6 +179,11 @@ INTEGRATION_TEST_CONFIG = {
         'option': '--it-visualizers',
         'choices': list(VISUALIZER_CONFIGS.keys()),
         'value_mapper': lambda name: VISUALIZER_CONFIGS[name]  # Map name to config dict
+    },
+    'sequential_config': {
+        'option': '--it-sequential',
+        'choices': list(SEQUENTIAL_CONFIGS.keys()),
+        'value_mapper': lambda name: SEQUENTIAL_CONFIGS[name]  # Map name to config dict
     }
 }
 

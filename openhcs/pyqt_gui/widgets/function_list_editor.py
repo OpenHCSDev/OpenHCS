@@ -576,6 +576,17 @@ class FunctionListEditorWidget(QWidget):
         self._update_pattern_data()
         self._populate_function_list()
 
+    def set_effective_group_by(self, group_by: Optional[GroupBy]) -> None:
+        """Accept authoritative GroupBy from parent (step.processing_config) and refresh UI.
+
+        The parent (window) is responsible for providing the correct GroupBy instance
+        from the step.processing_config. This method trusts the type and simply
+        updates the widget state and refreshes dependent controls.
+        """
+        self.current_group_by = group_by
+        # Update the button text/state immediately
+        self._refresh_component_button()
+
     def _get_component_button_text(self) -> str:
         """Get text for the component selection button (mirrors Textual TUI)."""
         if self.current_group_by is None or self.current_group_by == GroupBy.NONE:

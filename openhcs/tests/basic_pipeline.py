@@ -9,7 +9,7 @@ Generated: 2025-10-21 01:49:14.400609
 # Automatically collected imports
 from openhcs.constants.constants import GroupBy, VariableComponents
 from openhcs.constants.input_source import InputSource
-from openhcs.core.config import LazyFijiStreamingConfig, LazyNapariStreamingConfig, LazyStepMaterializationConfig, LazyStepWellFilterConfig, NapariVariableSizeHandling
+from openhcs.core.config import LazyFijiStreamingConfig, LazyNapariStreamingConfig, LazyStepMaterializationConfig, LazyStepWellFilterConfig, LazyProcessingConfig, NapariVariableSizeHandling
 from openhcs.core.memory.decorators import DtypeConversion
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.processing.backends.analysis.cell_counting_cpu import DetectionMethod, count_cells_single_channel
@@ -36,7 +36,7 @@ pipeline_steps.append(step_1)
 step_2 = FunctionStep(
     func=create_composite,
     name="create_composite",
-    variable_components=[VariableComponents.CHANNEL],
+    processing_config=LazyProcessingConfig(variable_components=[VariableComponents.CHANNEL]),
 )
 pipeline_steps.append(step_2)
 
@@ -44,7 +44,7 @@ pipeline_steps.append(step_2)
 step_3 = FunctionStep(
     func=create_projection,
     name="Z-Stack Flattening",
-    variable_components=[VariableComponents.Z_INDEX],
+    processing_config=LazyProcessingConfig(variable_components=[VariableComponents.Z_INDEX]),
     step_materialization_config=LazyStepMaterializationConfig()
 )
 pipeline_steps.append(step_3)
@@ -63,7 +63,7 @@ step_5 = FunctionStep(
             'high_percentile': 99.5
         }),
     name="Secondary Enhancement",
-    input_source=InputSource.PIPELINE_START
+    processing_config=LazyProcessingConfig(input_source=InputSource.PIPELINE_START),
 )
 pipeline_steps.append(step_5)
 
@@ -78,7 +78,7 @@ pipeline_steps.append(step_6)
 step_7 = FunctionStep(
     func=create_projection,
     name="Z-Stack Flattening",
-    variable_components=[VariableComponents.Z_INDEX],
+    processing_config=LazyProcessingConfig(variable_components=[VariableComponents.Z_INDEX]),
     napari_streaming_config=LazyNapariStreamingConfig(),
     fiji_streaming_config=LazyFijiStreamingConfig()
 )

@@ -333,7 +333,13 @@ class MagicGuiWidgetFactory:
         return widget
 
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
-        """Create multi-selection checkbox group for List[Enum] parameters."""
+        """Create multi-selection checkbox group for List[Enum] parameters.
+
+        Uses NoneAwareCheckBox pattern consistently with bool parameters:
+        - Initialize all checkboxes with set_value(None) for placeholder state
+        - Use set_value() instead of setChecked() to properly track placeholder state
+        - Use get_value() in get_selected_values() to distinguish placeholder vs concrete
+        """
         from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
 
         enum_type = get_enum_from_list(param_type)
@@ -350,16 +356,48 @@ class MagicGuiWidgetFactory:
             widget._checkboxes[enum_value] = checkbox
             layout.addWidget(checkbox)
 
-        # Set current values (check boxes for items in the list)
-        if current_value and isinstance(current_value, list):
-            for enum_value in current_value:
-                if enum_value in widget._checkboxes:
-                    widget._checkboxes[enum_value].setChecked(True)
+        # Set current values using set_value() to properly handle None/placeholder state
+        if current_value is None:
+            # None means inherit from parent - initialize all checkboxes in placeholder state
+            for checkbox in widget._checkboxes.values():
+                checkbox.set_value(None)
+        elif isinstance(current_value, list):
+            # Explicit list - set concrete values
+            for enum_value, checkbox in widget._checkboxes.items():
+                # Set to True if in list, False if not (both are concrete values)
+                checkbox.set_value(enum_value in current_value)
+        else:
+            # Fallback: treat as None (placeholder state)
+            for checkbox in widget._checkboxes.values():
+                checkbox.set_value(None)
 
-        # Add method to get selected values
+        # Add method to get selected values using get_value() pattern
         def get_selected_values():
-            return [enum_val for enum_val, checkbox in widget._checkboxes.items()
-                   if checkbox.isChecked()]
+            """Get selected enum values, returning None if all checkboxes are in placeholder state.
+
+            Treats List[Enum] like a list of independent bools:
+            - If ALL checkboxes are in placeholder state → return None (inherit from parent)
+            - If ANY checkbox has been clicked → ALL become concrete, return list of checked items
+
+            Note: The signal handler ensures that clicking ANY checkbox converts ALL to concrete,
+            so we should never have a mixed state (some placeholder, some concrete).
+            """
+            # Check if any checkbox has a concrete value (not placeholder)
+            has_concrete_value = any(
+                checkbox.get_value() is not None
+                for checkbox in widget._checkboxes.values()
+            )
+
+            if not has_concrete_value:
+                # All checkboxes are in placeholder state - return None to inherit from parent
+                return None
+
+            # All checkboxes are concrete (signal handler converted them)
+            # Return list of enum values where checkbox is checked
+            return [
+                enum_val for enum_val, checkbox in widget._checkboxes.items()
+                if checkbox.get_value() == True
+            ]
         widget.get_selected_values = get_selected_values
 
         return widget
@@ -537,6 +575,60 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
         widget.setToolTip(placeholder_text)
 
 
+def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> None:
+    """Apply placeholder to checkbox group (QGroupBox with _checkboxes dict).
+
+    Reuses _apply_checkbox_placeholder() for each checkbox in the group.
+    Parses the list of inherited enum values and applies placeholder state to each checkbox.
+
+    Example placeholder_text: "Pipeline default: [SITE, CHANNEL]"
+    """
+    if not hasattr(widget, '_checkboxes'):
+        return
+
+    import logging
+    logger = logging.getLogger(__name__)
+
+    try:
+        logger.info(f"🔍 Applying checkbox group placeholder: {placeholder_text}")
+
+        # Extract the list of enum values from placeholder text
+        # Format: "Pipeline default: [SITE, CHANNEL]" or "Pipeline default: []"
+        default_value_str = _extract_default_value(placeholder_text)
+        logger.info(f"📋 Extracted default value: {default_value_str}")
+
+        # Parse the list - remove brackets and split by comma
+        if default_value_str.startswith('[') and default_value_str.endswith(']'):
+            list_content = default_value_str[1:-1].strip()
+            inherited_values = [v.strip() for v in list_content.split(',')] if list_content else []
+        else:
+            inherited_values = []
+
+        logger.info(f"✅ Parsed inherited values: {inherited_values}")
+
+        # Apply placeholder to each checkbox in the group
+        for enum_value, checkbox in widget._checkboxes.items():
+            # Check if this enum value is in the inherited list
+            # Compare using uppercase enum name (e.g., 'SITE') not lowercase value (e.g., 'site')
+            is_checked = enum_value.name in inherited_values
+
+            logger.info(f"  📌 {enum_value.value}: is_checked={is_checked} (comparing {enum_value.name} in {inherited_values})")
+
+            # Create individual placeholder text for this checkbox
+            individual_placeholder = f"Pipeline default: {is_checked}"
+
+            # Reuse existing checkbox placeholder logic
+            _apply_checkbox_placeholder(checkbox, individual_placeholder)
+
+        # Mark the group widget itself as being in placeholder state
+        widget.setProperty("is_placeholder_state", True)
+        widget.setToolTip(f"{placeholder_text} (click any checkbox to set your own value)")
+
+    except Exception as e:
+        logger.error(f"❌ Failed to apply checkbox group placeholder: {e}", exc_info=True)
+        widget.setToolTip(placeholder_text)
+
+
 def _apply_path_widget_placeholder(widget: Any, placeholder_text: str) -> None:
     """Apply placeholder to Path widget by targeting the inner QLineEdit."""
     try:
@@ -697,6 +789,10 @@ class PyQt6WidgetEnhancer:
     @staticmethod
     def apply_placeholder_text(widget: Any, placeholder_text: str) -> None:
         """Apply placeholder using declarative widget-strategy mapping."""
+        # Check for checkbox group (QGroupBox with _checkboxes attribute)
+        if hasattr(widget, '_checkboxes'):
+            return _apply_checkbox_group_placeholder(widget, placeholder_text)
+
         # Direct widget type mapping for enhanced placeholders
         widget_strategy = WIDGET_PLACEHOLDER_STRATEGIES.get(type(widget))
         if widget_strategy:
@@ -784,17 +880,69 @@ class PyQt6WidgetEnhancer:
 
     @staticmethod
     def _connect_checkbox_group_signals(widget: Any, param_name: str, callback: Any) -> None:
-        """Connect signals for checkbox group widgets."""
+        """Connect signals for checkbox group widgets.
+
+        Treats List[Enum] like a list of independent bools:
+        - When user clicks ANY checkbox, ALL checkboxes convert from placeholder to concrete
+        - This ensures the entire list becomes concrete once the user starts editing
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
         if hasattr(widget, '_checkboxes'):
             # Connect to each checkbox's stateChanged signal
             for checkbox in widget._checkboxes.values():
-                checkbox.stateChanged.connect(
-                    lambda: callback(param_name, widget.get_selected_values())
-                )
+                def make_handler(cb):
+                    """Create handler with proper closure to avoid lambda capture issues."""
+                    def handler(state):
+                        # CRITICAL: When user clicks ANY checkbox, convert ALL checkboxes to concrete
+                        # This implements "list of bools" behavior - editing one makes the whole list concrete
+                        for other_checkbox in widget._checkboxes.values():
+                            if hasattr(other_checkbox, '_is_placeholder') and other_checkbox._is_placeholder:
+                                # Convert placeholder to concrete by setting current displayed state
+                                other_checkbox._is_placeholder = False
+                                # Keep the current checked state (which shows the inherited value)
+                                # No need to call setChecked - it's already showing the right state
+
+                        # Clear placeholder state from the group widget itself
+                        PyQt6WidgetEnhancer._clear_placeholder_state(widget)
+
+                        # Get selected values (now all concrete)
+                        selected = widget.get_selected_values()
+                        # Handle None (placeholder state) in logging
+                        selected_str = "None (inherit from parent)" if selected is None else [v.name for v in selected]
+                        logger.info(f"🔘 Checkbox {cb.text()} changed to {state}, selected values: {selected_str}")
+
+                        callback(param_name, selected)
+                    return handler
+
+                checkbox.stateChanged.connect(make_handler(checkbox))
 
     @staticmethod
     def _clear_placeholder_state(widget: Any) -> None:
         """Clear placeholder state using functional approach."""
+        # Handle checkbox groups by clearing each checkbox's placeholder state
+        if hasattr(widget, '_checkboxes'):
+            for checkbox in widget._checkboxes.values():
+                if checkbox.property("is_placeholder_state"):
+                    checkbox.setStyleSheet("")
+                    checkbox.setProperty("is_placeholder_state", False)
+                    if hasattr(checkbox, '_is_placeholder'):
+                        checkbox._is_placeholder = False
+                    # Clean checkbox tooltip
+                    current_tooltip = checkbox.toolTip()
+                    cleaned_tooltip = next(
+                        (current_tooltip.replace(f" ({hint})", "")
+                         for hint in PlaceholderConfig.INTERACTION_HINTS.values()
+                         if f" ({hint})" in current_tooltip),
+                        current_tooltip
+                    )
+                    checkbox.setToolTip(cleaned_tooltip)
+            # Clear group widget's placeholder state
+            widget.setProperty("is_placeholder_state", False)
+            widget.setToolTip("")
+            return
+
         if not widget.property("is_placeholder_state"):
             return
 
