@@ -723,7 +723,10 @@ class PipelineCompiler:
             import itertools
 
             # Extract component values from orchestrator's cache for each sequential component
+            # Filter out components with only 1 value (no point in sequential processing)
             component_values_lists = []
+            filtered_seq_comps = []
+
             for seq_comp in seq_comps:
                 # Convert component name to AllComponents enum
                 component_enum = AllComponents(seq_comp)
@@ -731,27 +734,31 @@ class PipelineCompiler:
                 # Get component values from orchestrator's cache (populated from filename parsing)
                 component_values = orchestrator.get_component_keys(component_enum)
 
-                if component_values:
-                    component_values_lists.append(component_values)
-                    logger.debug(f"Sequential component '{seq_comp}': {len(component_values)} values from cache")
-                else:
+                if not component_values:
                     logger.warning(f"No {seq_comp} values found in orchestrator cache")
                     component_values_lists.append([])
+                elif len(component_values) == 1:
+                    logger.info(f"Sequential component '{seq_comp}' has only 1 value - ignoring for sequential processing")
+                else:
+                    # Only include components with multiple values
+                    component_values_lists.append(component_values)
+                    filtered_seq_comps.append(seq_comp)
+                    logger.debug(f"Sequential component '{seq_comp}': {len(component_values)} values from cache")
 
             # Generate all combinations using Cartesian product
-            if all(component_values_lists):
+            if component_values_lists and all(component_values_lists):
                 combinations = list(itertools.product(*component_values_lists))
                 context.pipeline_sequential_combinations = combinations
                 logger.info(
-                    f"Pipeline sequential mode: ENABLED (components: {seq_comps}, "
+                    f"Pipeline sequential mode: ENABLED (components: {tuple(filtered_seq_comps)}, "
                     f"combinations: {len(combinations)})"
                 )
             else:
-                # Missing component values - disable sequential mode
+                # No components with multiple values - disable sequential mode
                 context.pipeline_sequential_mode = False
                 context.pipeline_sequential_combinations = None
-                logger.warning(
-                    f"Pipeline sequential mode: DISABLED (missing component values in cache)"
+                logger.info(
+                    f"Pipeline sequential mode: DISABLED (all sequential components have ≤1 value)"
                 )
         else:
             # No sequential processing configured
