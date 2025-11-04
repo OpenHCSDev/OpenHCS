@@ -65,7 +65,9 @@ step_5 = FunctionStep(
             'high_percentile': 99.5
         }),
     name="Secondary Enhancement",
-    input_source=InputSource.PIPELINE_START
+    processing_config=LazyProcessingConfig(
+        input_source=InputSource.PIPELINE_START
+    )
 )
 pipeline_steps.append(step_5)
 
@@ -80,7 +82,7 @@ pipeline_steps.append(step_6)
 step_7 = FunctionStep(
     func=create_projection,
     name="Z-Stack Flattening",
-    variable_components=[VariableComponents.Z_INDEX]
+    processing_config=LazyProcessingConfig(variable_components=[VariableComponents.Z_INDEX]),
 )
 pipeline_steps.append(step_7)
 
