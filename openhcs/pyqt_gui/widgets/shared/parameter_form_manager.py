@@ -1403,10 +1403,18 @@ class ParameterFormManager(QWidget):
         if param_name not in self.parameters:
             return
 
-        # Set flag to prevent _refresh_all_placeholders during reset
+        # Set flag to prevent automatic refresh during reset
+        # CRITICAL: Keep _in_reset=True until AFTER manual refresh to prevent
+        # queued parameter_changed signals from triggering automatic refresh
         self._in_reset = True
         try:
-            return self._reset_parameter_impl(param_name)
+            self._reset_parameter_impl(param_name)
+
+            # CRITICAL: Manually refresh placeholders BEFORE clearing _in_reset
+            # This ensures queued parameter_changed signals don't trigger automatic refresh
+            # This matches the behavior of reset_all_parameters() which also refreshes before clearing flag
+            self._refresh_all_placeholders()
+            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
         finally:
             self._in_reset = False
 
@@ -2235,7 +2243,9 @@ class ParameterFormManager(QWidget):
 
         # CRITICAL: Also refresh all nested managers' placeholders
         # Pass the same live_context to avoid redundant get_current_values() calls
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context, exclude_param=exclude_param))
+        # CRITICAL: Do NOT pass exclude_param to nested managers - it only applies to the current form
+        # If parent has "well_filter" and nested form also has "well_filter", they're different fields
+        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
 
     def _refresh_all_placeholders(self, live_context: dict = None, exclude_param: str = None) -> None:
         """Refresh placeholder text for all widgets in this form.
