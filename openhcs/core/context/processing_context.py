@@ -163,14 +163,15 @@ class ProcessingContext:
         across process boundaries. The filemanager will be recreated in the worker
         process using the worker's local global registry.
 
-        Preserves zarr_config and plate_path so backends can be recreated with the same
-        settings in the worker process.
+        Uses self-describing backend pickling: iterates over all backends and preserves
+        connection params for any that implement PicklableBackend, storing their class
+        info for dynamic recreation.
 
         Returns:
             Dictionary of state to pickle
         """
         from openhcs.constants.constants import Backend
-        from openhcs.io.omero_local import PicklableBackend
+        from openhcs.io.base import PicklableBackend
 
         state = self.__dict__.copy()
 
@@ -182,30 +183,27 @@ class ProcessingContext:
         # Trust dataclass contract - plate_path is a defined field
         state['_plate_path'] = self.plate_path
 
-        # Check if backends are registered in the filemanager
-        # filemanager is a required field - if it's None, context is not properly initialized
+        # Self-describing backend pickling: iterate over all backends and preserve
+        # connection params for any that implement PicklableBackend
+        state['_picklable_backends'] = {}
+
         if self.filemanager is not None:
+            # Track virtual_workspace separately for backward compatibility
             state['_has_virtual_workspace'] = Backend.VIRTUAL_WORKSPACE.value in self.filemanager.registry
 
-            # Check if OMERO backend is registered and preserve its connection params
-            backend_key = Backend.OMERO_LOCAL.value
-            state['_has_omero_backend'] = backend_key in self.filemanager.registry
-
-            if state['_has_omero_backend']:
-                # Use explicit dict access - if key exists, backend must be there
-                omero_backend = self.filemanager.registry[backend_key]
-
-                # Use PicklableBackend protocol instead of hasattr() duck typing
-                if isinstance(omero_backend, PicklableBackend):
-                    state['_omero_conn_params'] = omero_backend.get_connection_params()
-                else:
-                    state['_omero_conn_params'] = None
-            else:
-                state['_omero_conn_params'] = None
+            # Iterate over all registered backends and preserve picklable ones
+            for backend_key, backend_instance in self.filemanager.registry.items():
+                if isinstance(backend_instance, PicklableBackend):
+                    params = backend_instance.get_connection_params()
+                    if params is not None:
+                        # Store backend class info for dynamic recreation
+                        state['_picklable_backends'][backend_key] = {
+                            'class_name': type(backend_instance).__name__,
+                            'module_name': type(backend_instance).__module__,
+                            'params': params
+                        }
         else:
             state['_has_virtual_workspace'] = False
-            state['_has_omero_backend'] = False
-            state['_omero_conn_params'] = None
 
         # Remove filemanager - will be recreated in worker process
         state.pop('filemanager', None)
@@ -220,14 +218,15 @@ class ProcessingContext:
         ensuring that all processes share the same memory backend instance
         within their own process space.
 
-        Also recreates the virtual_workspace and OMERO backends if they were
-        registered in the main process.
+        Uses self-describing backend recreation: dynamically recreates all
+        picklable backends based on stored class info and connection params.
 
         Args:
             state: Dictionary of state from __getstate__
         """
         import logging
         import os
+        import importlib
         from pathlib import Path
 
         from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
@@ -241,8 +240,7 @@ class ProcessingContext:
         zarr_config = state.pop('_zarr_config', None)
         plate_path = state.pop('_plate_path', None)
         has_virtual_workspace = state.pop('_has_virtual_workspace', False)
-        has_omero_backend = state.pop('_has_omero_backend', False)
-        omero_conn_params = state.pop('_omero_conn_params', None)
+        picklable_backends = state.pop('_picklable_backends', {})
 
         # Restore all other attributes
         self.__dict__.update(state)
@@ -272,41 +270,51 @@ class ProcessingContext:
                     # Unexpected: This is a bug
                     logger.error(f"BUG: Unexpected error recreating virtual_workspace backend: {e}", exc_info=True)
 
-        # Recreate OMERO backend if it was registered in main process
-        if has_omero_backend and omero_conn_params is not None:
+        # Self-describing backend recreation: dynamically recreate all picklable backends
+        for backend_key, backend_info in picklable_backends.items():
             try:
-                from openhcs.io.omero_local import OMEROLocalBackend
-                from omero.gateway import BlitzGateway
-            except ImportError:
-                logger.debug("OMERO modules not available in worker - skipping OMERO backend recreation")
-            else:
-                try:
-                    # Create backend instance without connection
-                    omero_backend = OMEROLocalBackend()
-                    # Restore connection parameters using protocol method
-                    omero_backend.set_connection_params(omero_conn_params)
+                # Dynamically import the backend class
+                module = importlib.import_module(backend_info['module_name'])
+                backend_class = getattr(module, backend_info['class_name'])
 
-                    # Try to establish connection using stored params
-                    # Password comes from environment variable or defaults to 'openhcs'
-                    password = os.getenv('OMERO_PASSWORD', 'openhcs')
-                    conn = BlitzGateway(
-                        omero_conn_params['username'],
-                        password,
-                        host=omero_conn_params['host'],
-                        port=omero_conn_params['port']
-                    )
-                    if conn.connect():
-                        omero_backend._initial_conn = conn
-                        global_storage_registry[Backend.OMERO_LOCAL.value] = omero_backend
-                        logger.info(f"✓ Recreated OMERO backend in worker process (connected to {omero_conn_params['host']}:{omero_conn_params['port']})")
-                    else:
-                        logger.warning(f"Failed to connect to OMERO in worker process - backend not registered")
-                except (KeyError, ValueError, TypeError) as e:
-                    # Expected: Invalid connection params
-                    logger.warning(f"Failed to recreate OMERO backend due to invalid params: {e}")
-                except Exception as e:
-                    # Unexpected: This is a bug
-                    logger.error(f"BUG: Unexpected error recreating OMERO backend: {e}", exc_info=True)
+                # Create backend instance
+                backend_instance = backend_class()
+
+                # Restore connection parameters
+                backend_instance.set_connection_params(backend_info['params'])
+
+                # Backend-specific connection logic
+                if backend_info['class_name'] == 'OMEROLocalBackend':
+                    # OMERO requires establishing connection
+                    try:
+                        from omero.gateway import BlitzGateway
+                        password = os.getenv('OMERO_PASSWORD', 'openhcs')
+                        params = backend_info['params']
+                        conn = BlitzGateway(
+                            params['username'],
+                            password,
+                            host=params['host'],
+                            port=params['port']
+                        )
+                        if conn.connect():
+                            backend_instance._initial_conn = conn
+                            global_storage_registry[backend_key] = backend_instance
+                            logger.info(f"✓ Recreated {backend_info['class_name']} in worker (connected to {params['host']}:{params['port']})")
+                        else:
+                            logger.warning(f"Failed to connect {backend_info['class_name']} in worker - backend not registered")
+                    except Exception as e:
+                        logger.warning(f"Failed to establish connection for {backend_info['class_name']}: {e}")
+                else:
+                    # Generic picklable backend - just register it
+                    global_storage_registry[backend_key] = backend_instance
+                    logger.info(f"✓ Recreated {backend_info['class_name']} in worker")
+
+            except (ImportError, AttributeError, KeyError, ValueError, TypeError) as e:
+                # Expected: Module not available, class not found, invalid params
+                logger.warning(f"Failed to recreate backend '{backend_key}' ({backend_info.get('class_name', 'unknown')}): {e}")
+            except Exception as e:
+                # Unexpected: This is a bug
+                logger.error(f"BUG: Unexpected error recreating backend '{backend_key}': {e}", exc_info=True)
 
         # Create filemanager using worker's local global registry
         # This ensures the worker uses its own memory backend instance

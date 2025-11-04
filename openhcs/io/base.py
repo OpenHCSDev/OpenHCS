@@ -19,6 +19,54 @@ from openhcs.core.auto_register_meta import AutoRegisterMeta
 logger = logging.getLogger(__name__)
 
 
+class PicklableBackend(ABC):
+    """
+    Abstract base class for storage backends that support pickling with connection parameters.
+
+    Backends that maintain network connections or other unpicklable resources must
+    explicitly inherit from this ABC and implement the required methods to be safely
+    pickled and unpickled in multiprocessing workers.
+
+    This is particularly important for backends that maintain:
+    - Network connections (e.g., OMERO, remote databases, S3)
+    - File handles that can't cross process boundaries
+    - Authentication sessions
+
+    The pattern is:
+    1. Main process: Backend stores connection params via get_connection_params()
+    2. Pickling: ProcessingContext preserves these params
+    3. Worker process: Backend recreates connection using set_connection_params()
+
+    This uses nominal typing (ABC) not structural typing (Protocol), so
+    explicit inheritance is required for isinstance() checks to work.
+    """
+
+    @abstractmethod
+    def get_connection_params(self) -> Optional[Dict[str, Any]]:
+        """
+        Return connection parameters for worker process reconnection.
+
+        Returns:
+            Dictionary of connection parameters (host, port, username, etc.)
+            or None if no connection parameters are available.
+
+        Note:
+            Passwords should NOT be included in connection params.
+            They should be retrieved from environment variables in the worker.
+        """
+        pass
+
+    @abstractmethod
+    def set_connection_params(self, params: Optional[Dict[str, Any]]) -> None:
+        """
+        Set connection parameters (used during unpickling).
+
+        Args:
+            params: Dictionary of connection parameters or None
+        """
+        pass
+
+
 class BackendBase(metaclass=AutoRegisterMeta):
     """
     Base class for all storage backends (read-only and read-write).
