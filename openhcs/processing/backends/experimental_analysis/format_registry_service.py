@@ -8,8 +8,11 @@ following OpenHCS generic solution principles.
 from typing import Dict, List, Optional, Type
 from pathlib import Path
 
-from openhcs.core.registry_discovery import discover_registry_classes_recursive
-from .format_registry import MicroscopeFormatRegistryBase, FormatDetectionError
+from .format_registry import (
+    MicroscopeFormatRegistryBase,
+    FormatDetectionError,
+    MICROSCOPE_FORMAT_REGISTRIES
+)
 
 
 class FormatRegistryService:
@@ -26,7 +29,7 @@ class FormatRegistryService:
     @classmethod
     def _discover_registries(cls) -> Dict[str, Type[MicroscopeFormatRegistryBase]]:
         """
-        Automatically discover all format registry classes using generic discovery.
+        Get all format registry classes from auto-registered dict.
 
         Returns:
             Dictionary mapping format names to registry classes
@@ -34,26 +37,11 @@ class FormatRegistryService:
         if cls._registry_cache is not None:
             return cls._registry_cache
 
-        # Get the package path for experimental_analysis
-        import openhcs.processing.backends.experimental_analysis
+        # Registries auto-discovered on first access to MICROSCOPE_FORMAT_REGISTRIES
+        cls._registry_cache = MICROSCOPE_FORMAT_REGISTRIES.copy()
+        return cls._registry_cache
 
-        # Validation function to check for FORMAT_NAME attribute
-        def has_format_name(registry_class: Type) -> bool:
-            return hasattr(registry_class, 'FORMAT_NAME') and registry_class.FORMAT_NAME
 
-        # Discover all registry classes
-        registry_list = discover_registry_classes_recursive(
-            package_path=openhcs.processing.backends.experimental_analysis.__path__,
-            package_prefix="openhcs.processing.backends.experimental_analysis.",
-            base_class=MicroscopeFormatRegistryBase,
-            validation_func=has_format_name
-        )
-
-        # Convert list to dict keyed by FORMAT_NAME
-        registries = {registry_class.FORMAT_NAME: registry_class for registry_class in registry_list}
-
-        cls._registry_cache = registries
-        return registries
     
     @classmethod
     def get_all_format_registries(cls) -> Dict[str, Type[MicroscopeFormatRegistryBase]]:

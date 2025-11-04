@@ -9,13 +9,14 @@ import threading
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Type
 import pickle
 from openhcs.runtime.zmq_messages import ControlMessageType, ResponseType, MessageFields, PongResponse, SocketType, ImageAck
 from openhcs.constants.constants import (
     CONTROL_PORT_OFFSET, IPC_SOCKET_DIR_NAME, IPC_SOCKET_PREFIX, IPC_SOCKET_EXTENSION
 )
 from openhcs.core.config import TransportMode
+from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,12 @@ logger = logging.getLogger(__name__)
 # All viewers send acks to this port via PUSH sockets
 # Client listens on this port via PULL socket
 SHARED_ACK_PORT = 7555
+
+# ============================================================================
+# ZMQ Server Registry
+# ============================================================================
+# Registry will be auto-created by AutoRegisterMeta on ZMQServer base class
+# Access via: ZMQServer.__registry__ (created after class definition below)
 
 
 def get_default_transport_mode() -> TransportMode:
@@ -92,12 +99,9 @@ def get_zmq_transport_url(port: int, transport_mode: TransportMode, host: str = 
         ZMQ transport URL string
 
     Raises:
-        ValueError: If transport_mode is invalid (fail-loud)
+        ValueError: If transport_mode is invalid or IPC is requested on Windows (fail-loud)
 
     Examples:
-        >>> get_zmq_transport_url(5555, TransportMode.IPC)  # Windows
-        'ipc://openhcs-zmq-5555'
-
         >>> get_zmq_transport_url(5555, TransportMode.IPC)  # Unix/Mac
         'ipc:///home/user/.openhcs/ipc/openhcs-zmq-5555.sock'
 
@@ -106,8 +110,13 @@ def get_zmq_transport_url(port: int, transport_mode: TransportMode, host: str = 
     """
     if transport_mode == TransportMode.IPC:
         if platform.system() == 'Windows':
-            # Windows named pipes: ipc://openhcs-zmq-{port}
-            return f"ipc://{IPC_SOCKET_PREFIX}-{port}"
+            # Windows doesn't support IPC (Unix domain sockets) - fail-loud
+            raise ValueError(
+                "IPC transport mode is not supported on Windows. "
+                "Windows does not support Unix domain sockets. "
+                "Use TransportMode.TCP instead, or use get_default_transport_mode() "
+                "to automatically select the correct mode for the platform."
+            )
         else:
             # Unix domain sockets: use helper to get path and ensure directory exists
             socket_path = _get_ipc_socket_path(port)
@@ -237,8 +246,16 @@ def stop_global_ack_listener():
         _ack_listener_running = False
 
 
-class ZMQServer(ABC):
-    """ABC for ZMQ servers - dual-channel pattern with ping/pong handshake."""
+class ZMQServer(ABC, metaclass=AutoRegisterMeta):
+    """
+    ABC for ZMQ servers - dual-channel pattern with ping/pong handshake.
+
+    Registry auto-created and stored as ZMQServer.__registry__.
+    Subclasses auto-register by setting _server_type class attribute.
+    """
+    __registry_key__ = '_server_type'
+
+    _server_type: Optional[str] = None  # Override in subclasses for registration
 
     def __init__(self, port, host='*', log_file_path=None, data_socket_type=None, transport_mode=None):
         import zmq
@@ -819,4 +836,11 @@ class ZMQClient(ABC):
     @abstractmethod
     def send_data(self, data):
         pass
+
+
+# ============================================================================
+# Registry Export
+# ============================================================================
+# Auto-created registry from ZMQServer base class
+ZMQ_SERVERS = ZMQServer.__registry__
 

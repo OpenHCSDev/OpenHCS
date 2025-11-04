@@ -15,13 +15,14 @@ import importlib
 import inspect
 import logging
 import pkgutil
+from collections.abc import Iterable
 from typing import Callable, List, Optional, Set, Type
 
 logger = logging.getLogger(__name__)
 
 
 def discover_registry_classes(
-    package_path: List[str],
+    package_path: Iterable[str],
     package_prefix: str,
     base_class: Type,
     exclude_modules: Optional[Set[str]] = None,
@@ -37,6 +38,7 @@ def discover_registry_classes(
     
     Args:
         package_path: Package __path__ attribute to scan (e.g., openhcs.io.__path__)
+                     Accepts any iterable of strings (List, Tuple, _NamespacePath, etc.)
         package_prefix: Module prefix for importlib (e.g., "openhcs.io.")
         base_class: Base class to filter for (e.g., StorageBackend)
         exclude_modules: Set of module name substrings to skip (e.g., {'base', 'registry'})
@@ -121,7 +123,7 @@ def discover_registry_classes(
 
 
 def discover_registry_classes_recursive(
-    package_path: List[str],
+    package_path: Iterable[str],
     package_prefix: str,
     base_class: Type,
     exclude_modules: Optional[Set[str]] = None,
@@ -135,6 +137,7 @@ def discover_registry_classes_recursive(
     
     Args:
         package_path: Package __path__ attribute to scan
+                     Accepts any iterable of strings (List, Tuple, _NamespacePath, etc.)
         package_prefix: Module prefix for importlib
         base_class: Base class to filter for
         exclude_modules: Set of module name substrings to skip

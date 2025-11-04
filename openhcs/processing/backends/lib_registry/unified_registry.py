@@ -29,11 +29,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 
 from openhcs.core.xdg_paths import get_cache_file_path
 from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
+from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
 
 logger = logging.getLogger(__name__)
 
@@ -114,13 +115,19 @@ class FunctionMetadata:
 
 
 
-class LibraryRegistryBase(ABC):
+class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
     """
     Minimal ABC for all library registries.
 
     Provides only essential contracts that all registries must implement,
     regardless of whether they use runtime testing or explicit contracts.
+
+    Registry auto-created and stored as LibraryRegistryBase.__registry__.
+    Subclasses auto-register by setting _registry_name class attribute.
     """
+    __registry_key__ = '_registry_name'
+
+    _registry_name: Optional[str] = None  # Override in subclasses (e.g., 'pyclesperanto', 'cupy')
 
     # Common exclusions across all libraries
     COMMON_EXCLUSIONS = {
@@ -864,3 +871,10 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
     def _generate_tags(self, func_name: str) -> List[str]:
         """Generate tags using library name."""
         return [self.library_name]
+
+
+# ============================================================================
+# Registry Export
+# ============================================================================
+# Auto-created registry from LibraryRegistryBase
+LIBRARY_REGISTRIES = LibraryRegistryBase.__registry__

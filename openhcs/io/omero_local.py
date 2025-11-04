@@ -24,7 +24,6 @@ except ImportError:
 import numpy as np
 
 from openhcs.io.base import VirtualBackend
-from openhcs.io.backend_registry import StorageBackendMeta
 from openhcs.constants.constants import FileFormat
 
 logger = logging.getLogger(__name__)
@@ -86,7 +85,7 @@ class PlateStructure:
     max_t: int
 
 
-class OMEROLocalBackend(VirtualBackend, metaclass=StorageBackendMeta):
+class OMEROLocalBackend(VirtualBackend):
     """
     Virtual backend for OMERO server-side execution.
 

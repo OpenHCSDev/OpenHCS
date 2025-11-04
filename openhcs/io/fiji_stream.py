@@ -19,16 +19,14 @@ import os
 import numpy as np
 
 from openhcs.io.streaming import StreamingBackend
-from openhcs.io.backend_registry import StorageBackendMeta
 from openhcs.constants.constants import Backend
 from openhcs.core.config import TransportMode
 
 logger = logging.getLogger(__name__)
 
 
-class FijiStreamingBackend(StreamingBackend, metaclass=StorageBackendMeta):
+class FijiStreamingBackend(StreamingBackend):
     """Fiji streaming backend with ZMQ publisher pattern (matches Napari architecture)."""
-
     _backend_type = Backend.FIJI_STREAM.value
 
     # Configure ABC attributes

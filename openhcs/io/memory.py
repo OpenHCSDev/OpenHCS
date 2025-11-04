@@ -15,16 +15,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
 from openhcs.io.base import StorageBackend
-from openhcs.io.backend_registry import StorageBackendMeta
 from openhcs.constants.constants import Backend
 
 logger = logging.getLogger(__name__)
 
 
-class MemoryStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
-    """Memory storage backend with automatic metaclass registration."""
-
-    # Backend type from enum for registration
+class MemoryStorageBackend(StorageBackend):
+    """Memory storage backend with automatic registration."""
     _backend_type = Backend.MEMORY.value
     def __init__(self, shared_dict: Optional[Dict[str, Any]] = None):
         """

@@ -25,6 +25,9 @@ class OpenHCSRegistry(LibraryRegistryBase):
     while producing the same FunctionMetadata format as external libraries.
     """
 
+    # Registry name for auto-registration
+    _registry_name = 'openhcs'
+
     # Required abstract class attributes
     MODULES_TO_SCAN = []  # Will be set dynamically
     MEMORY_TYPE = None  # OpenHCS functions have their own memory type attributes

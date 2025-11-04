@@ -7,49 +7,17 @@ discovered and registered when their classes are defined.
 """
 
 import logging
-from abc import ABCMeta
-from typing import Dict, Type
-from openhcs.io.base import DataSink, StorageBackend
+from typing import Dict
+from openhcs.io.base import BackendBase, DataSink
+from openhcs.core.auto_register_meta import AutoRegisterMeta
 
 logger = logging.getLogger(__name__)
 
-# Global registry of storage backends - populated by metaclass
-STORAGE_BACKENDS: Dict[str, Type[DataSink]] = {}
-
-# Global registry of backend instances - created lazily
 _backend_instances: Dict[str, DataSink] = {}
 
-
-class StorageBackendMeta(ABCMeta):
-    """
-    Metaclass for automatic registration of storage backends.
-    
-    Automatically registers backend classes when they are defined,
-    eliminating the need for hardcoded registration in factory functions.
-    """
-
-    def __new__(cls, name, bases, attrs):
-        new_class = super().__new__(cls, name, bases, attrs)
-
-        # Only register concrete implementations (not abstract base classes)
-        if not getattr(new_class, '__abstractmethods__', None):
-            # Extract backend type from class attributes or class name
-            backend_type = getattr(new_class, '_backend_type', None)
-            
-            if backend_type is None:
-                # Skip registration if no explicit backend type
-                logger.debug(f"Skipping registration for {name} - no explicit _backend_type attribute")
-                return new_class
-
-            # Auto-register in STORAGE_BACKENDS
-            STORAGE_BACKENDS[backend_type] = new_class
-
-            # Store the backend type as a class attribute
-            new_class._backend_type = backend_type
-
-            logger.debug(f"Auto-registered {name} as '{backend_type}' backend")
-
-        return new_class
+# Registry auto-created by AutoRegisterMeta on BackendBase
+# Includes both StorageBackend (read-write) and ReadOnlyBackend (read-only) subclasses
+STORAGE_BACKENDS = BackendBase.__registry__
 
 
 def get_backend_instance(backend_type: str) -> DataSink:
@@ -96,15 +64,14 @@ def create_storage_registry() -> Dict[str, DataSink]:
     Returns:
         Dictionary mapping backend types to instances
     """
-    # Ensure all backends are discovered
-    discover_all_backends()
+    # Backends auto-discovered on first access to STORAGE_BACKENDS
 
     # Backends that require context-specific initialization (e.g., plate_root)
     # These are registered lazily when needed, not at startup
     SKIP_BACKENDS = {'virtual_workspace'}
 
     registry = {}
-    for backend_type in STORAGE_BACKENDS.keys():
+    for backend_type in STORAGE_BACKENDS.keys():  # Auto-discovers here
         # Skip backends that need context-specific initialization
         if backend_type in SKIP_BACKENDS:
             logger.debug(f"Skipping backend '{backend_type}' - requires context-specific initialization")
@@ -193,40 +160,4 @@ def cleanup_all_backends() -> None:
     logger.info("All backend instances cleaned up")
 
 
-def discover_all_backends() -> None:
-    """
-    Discover all storage backends using generic discovery.
 
-    Uses generic discovery to find and import all StorageBackend subclasses,
-    which triggers their metaclass registration into STORAGE_BACKENDS.
-
-    In subprocess runner mode (OPENHCS_SUBPROCESS_NO_GPU=1), only discovers
-    essential backends (disk, memory) to avoid GPU library imports.
-    """
-    import os
-    from openhcs.core.registry_discovery import discover_registry_classes
-
-    # Check if we're in subprocess runner mode and should skip GPU-heavy backends
-    if os.getenv('OPENHCS_SUBPROCESS_NO_GPU') == '1':
-        # Subprocess runner mode - only discover essential backends
-        # Import essential backend modules directly to trigger registration
-        try:
-            import openhcs.io.disk  # noqa: F401
-            import openhcs.io.memory  # noqa: F401
-            logger.debug(f"Subprocess runner mode - discovered {len(STORAGE_BACKENDS)} essential backends: {list(STORAGE_BACKENDS.keys())}")
-        except ImportError as e:
-            logger.warning(f"Could not import essential backend modules: {e}")
-    else:
-        # Normal mode - discover all backends using generic discovery
-        import openhcs.io
-
-        # Use generic discovery to find all backends
-        # This imports the modules, triggering metaclass registration
-        _ = discover_registry_classes(
-            package_path=openhcs.io.__path__,
-            package_prefix="openhcs.io.",
-            base_class=StorageBackend,
-            exclude_modules={'base', 'backend_registry', 'exceptions', 'atomic', 'filemanager', 'metadata_writer'}
-        )
-
-        logger.debug(f"Discovered {len(STORAGE_BACKENDS)} storage backends: {list(STORAGE_BACKENDS.keys())}")

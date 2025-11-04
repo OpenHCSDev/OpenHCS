@@ -7,9 +7,11 @@ microscope format registries, following OpenHCS registry architecture patterns.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Type
 import pandas as pd
 from pathlib import Path
+
+from openhcs.core.auto_register_meta import AutoRegisterMeta
 
 
 @dataclass(frozen=True)
@@ -22,15 +24,19 @@ class MicroscopeFormatConfig:
     plate_detection_method: str
 
 
-class MicroscopeFormatRegistryBase(ABC):
+class MicroscopeFormatRegistryBase(ABC, metaclass=AutoRegisterMeta):
     """
     Abstract base class for microscope format registries.
-    
+
     Following OpenHCS registry patterns, this provides a unified interface
     for processing different microscope data formats while eliminating
     code duplication and hardcoded format-specific logic.
+
+    Registry auto-created and stored as MicroscopeFormatRegistryBase.__registry__.
+    Subclasses auto-register by setting FORMAT_NAME class attribute.
     """
-    
+    __registry_key__ = 'FORMAT_NAME'
+
     # Abstract class attributes - each implementation must define these
     FORMAT_NAME: str
     SHEET_NAME: Optional[str]  # None means use first sheet
@@ -214,3 +220,10 @@ class FormatDetectionError(Exception):
 class DataProcessingError(Exception):
     """Raised when data processing fails."""
     pass
+
+
+# ============================================================================
+# Registry Export
+# ============================================================================
+# Auto-created registry from MicroscopeFormatRegistryBase
+MICROSCOPE_FORMAT_REGISTRIES = MicroscopeFormatRegistryBase.__registry__

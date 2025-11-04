@@ -24,19 +24,35 @@ logger = logging.getLogger(__name__)
 class ZMQExecutionServer(ZMQServer):
     """ZMQ execution server for OpenHCS pipelines."""
 
-    def __init__(self, port=DEFAULT_EXECUTION_SERVER_PORT, host='*', log_file_path=None, transport_mode=TransportMode.IPC):
+    _server_type = 'execution'  # Registration key for AutoRegisterMeta
+
+    def __init__(self, port=DEFAULT_EXECUTION_SERVER_PORT, host='*', log_file_path=None, transport_mode=None):
+        # Use platform-aware default if not specified (TCP on Windows, IPC on Unix/Mac)
         super().__init__(port, host, log_file_path, transport_mode=transport_mode)
         self.active_executions = {}
         self.start_time = None
         self.progress_queue = queue.Queue()
-    
+
+        # Execution queue for sequential processing
+        self.execution_queue = queue.Queue()
+        self.queue_worker_thread = None
+        # Don't start queue worker here - it will be started in start() after _running is set to True
+
+    def start(self):
+        """Override start to also start the queue worker thread after server is running."""
+        super().start()
+        # Now that _running is True, start the queue worker
+        self._start_queue_worker()
+
     def _create_pong_response(self):
         running = [(eid, r) for eid, r in self.active_executions.items()
                    if r.get(MessageFields.STATUS) == ExecutionStatus.RUNNING.value]
+        queued = [(eid, r) for eid, r in self.active_executions.items()
+                  if r.get(MessageFields.STATUS) == ExecutionStatus.QUEUED.value]
         return PongResponse(
             port=self.port, control_port=self.control_port, ready=self._ready,
             server=self.__class__.__name__, log_file_path=self.log_file_path,
-            active_executions=len(running),
+            active_executions=len(running) + len(queued),
             running_executions=[{
                 MessageFields.EXECUTION_ID: eid, MessageFields.PLATE_ID: r.get(MessageFields.PLATE_ID, 'unknown'),
                 MessageFields.START_TIME: r.get(MessageFields.START_TIME, 0),
@@ -83,20 +99,84 @@ class ZMQExecutionServer(ZMQServer):
         except KeyError as e:
             return None, ExecuteResponse(ResponseType.ERROR, error=f'Missing field: {e}').to_dict()
 
+    def _start_queue_worker(self):
+        """Start the queue worker thread that processes executions sequentially."""
+        if self.queue_worker_thread is None or not self.queue_worker_thread.is_alive():
+            self.queue_worker_thread = threading.Thread(target=self._queue_worker, daemon=True)
+            self.queue_worker_thread.start()
+            logger.info("Started execution queue worker thread")
+
+    def _queue_worker(self):
+        """Worker thread that processes executions from the queue sequentially."""
+        logger.info("Queue worker thread started - will process executions sequentially")
+        try:
+            while self._running:
+                try:
+                    # Block with timeout so we can check _running flag periodically
+                    try:
+                        execution_id, request, record = self.execution_queue.get(timeout=1.0)
+                    except queue.Empty:
+                        continue
+
+                    logger.info(f"[{execution_id}] Dequeued for execution (queue size: {self.execution_queue.qsize()})")
+
+                    # Check if server is still running before starting execution
+                    if not self._running:
+                        logger.info(f"[{execution_id}] Server shutting down, skipping execution")
+                        record[MessageFields.STATUS] = ExecutionStatus.CANCELLED.value
+                        self.execution_queue.task_done()
+                        break
+
+                    # Run the execution (this blocks until complete)
+                    self._run_execution(execution_id, request, record)
+
+                    # Mark task as done
+                    self.execution_queue.task_done()
+                except Exception as e:
+                    logger.error(f"Queue worker error: {e}", exc_info=True)
+        finally:
+            # Clean up any remaining queued executions when worker exits
+            remaining = 0
+            while not self.execution_queue.empty():
+                try:
+                    execution_id, request, record = self.execution_queue.get_nowait()
+                    record[MessageFields.STATUS] = ExecutionStatus.CANCELLED.value
+                    record[MessageFields.END_TIME] = time.time()
+                    logger.info(f"[{execution_id}] Cancelled (was queued when server shut down)")
+                    self.execution_queue.task_done()
+                    remaining += 1
+                except queue.Empty:
+                    break
+
+            if remaining > 0:
+                logger.info(f"Cancelled {remaining} queued executions during shutdown")
+            logger.info("Queue worker thread exiting")
+
     def _handle_execute(self, msg):
         request, error = self._validate_and_parse(msg, ExecuteRequest)
         if error:
             return error
         execution_id = str(uuid.uuid4())
         record = {MessageFields.EXECUTION_ID: execution_id, MessageFields.PLATE_ID: request.plate_id,
-                  MessageFields.CLIENT_ADDRESS: request.client_address, MessageFields.STATUS: ExecutionStatus.RUNNING.value,
-                  MessageFields.START_TIME: time.time(), MessageFields.END_TIME: None, MessageFields.ERROR: None}
+                  MessageFields.CLIENT_ADDRESS: request.client_address, MessageFields.STATUS: ExecutionStatus.QUEUED.value,
+                  MessageFields.START_TIME: None, MessageFields.END_TIME: None, MessageFields.ERROR: None}
         self.active_executions[execution_id] = record
-        threading.Thread(target=self._run_execution, args=(execution_id, request, record), daemon=True).start()
-        return ExecuteResponse(ResponseType.ACCEPTED, execution_id=execution_id, message='Execution started').to_dict()
+
+        # Add to queue instead of spawning a thread immediately
+        self.execution_queue.put((execution_id, request, record))
+        queue_position = self.execution_queue.qsize()
+        logger.info(f"[{execution_id}] Queued for execution (position: {queue_position})")
+
+        return ExecuteResponse(ResponseType.ACCEPTED, execution_id=execution_id,
+                             message=f'Execution queued (position: {queue_position})').to_dict()
 
     def _run_execution(self, execution_id, request, record):
         try:
+            # Update status to RUNNING and set start time when execution actually begins
+            record[MessageFields.STATUS] = ExecutionStatus.RUNNING.value
+            record[MessageFields.START_TIME] = time.time()
+            logger.info(f"[{execution_id}] Starting execution (was queued)")
+
             results = self._execute_pipeline(execution_id, request.plate_id, request.pipeline_code,
                                             request.config_params, request.config_code,
                                             request.pipeline_config_code, request.client_address)
@@ -160,7 +240,7 @@ class ZMQExecutionServer(ZMQServer):
 
     def _cancel_all_executions(self):
         for eid, r in self.active_executions.items():
-            if r[MessageFields.STATUS] == ExecutionStatus.RUNNING.value:
+            if r[MessageFields.STATUS] in (ExecutionStatus.RUNNING.value, ExecutionStatus.QUEUED.value):
                 r[MessageFields.STATUS] = ExecutionStatus.CANCELLED.value
                 r[MessageFields.END_TIME] = time.time()
                 logger.info(f"[{eid}] Cancelled")
