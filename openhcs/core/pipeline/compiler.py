@@ -1022,11 +1022,13 @@ class PipelineCompiler:
             # Get multiprocessing axis values dynamically from configuration
             from openhcs.constants import MULTIPROCESSING_AXIS
 
-            # CRITICAL: Resolve well_filter_config from pipeline_config if present
+            # CRITICAL: Resolve well_filter_config from merged config (pipeline + global)
             # This allows global-level well filtering to work (e.g., well_filter_config.well_filter = 1)
+            # Must use get_effective_config() to get merged config, not raw pipeline_config
             resolved_axis_filter = axis_filter
-            if orchestrator.pipeline_config and hasattr(orchestrator.pipeline_config, 'well_filter_config'):
-                well_filter_config = orchestrator.pipeline_config.well_filter_config
+            effective_config = orchestrator.get_effective_config()
+            if effective_config and hasattr(effective_config, 'well_filter_config'):
+                well_filter_config = effective_config.well_filter_config
                 if well_filter_config and hasattr(well_filter_config, 'well_filter') and well_filter_config.well_filter is not None:
                     from openhcs.core.utils import WellFilterProcessor
                     available_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
