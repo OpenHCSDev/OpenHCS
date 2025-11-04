@@ -631,6 +631,43 @@ class PipelineCompiler:
 
 
     @staticmethod
+    def validate_sequential_components_compatibility(
+        steps_definition: List[AbstractStep],
+        sequential_components: List
+    ) -> None:
+        """
+        Validate that no step's variable_components overlap with pipeline's sequential_components.
+
+        Args:
+            steps_definition: List of AbstractStep objects
+            sequential_components: List of SequentialComponents from pipeline config
+
+        Raises:
+            ValueError: If any step has variable_components that overlap with sequential_components
+        """
+        if not sequential_components:
+            return
+
+        seq_comp_values = {sc.value for sc in sequential_components}
+
+        for step in steps_definition:
+            # Only check FunctionSteps with processing_config
+            if hasattr(step, 'processing_config') and step.processing_config:
+                var_comps = step.processing_config.variable_components
+                if var_comps:
+                    var_comp_values = {vc.value for vc in var_comps}
+                    overlap = seq_comp_values & var_comp_values
+
+                    if overlap:
+                        raise ValueError(
+                            f"Step '{step.name}' has variable_components {sorted(overlap)} that conflict with "
+                            f"pipeline's sequential_components {sorted(seq_comp_values)}. "
+                            f"A component cannot be both sequential (pipeline-level) and variable (step-level). "
+                            f"Either remove {sorted(overlap)} from the step's variable_components or from the "
+                            f"pipeline's sequential_components."
+                        )
+
+    @staticmethod
     def analyze_pipeline_sequential_mode(
         context: ProcessingContext,
         global_config: 'GlobalPipelineConfig',
@@ -1075,6 +1112,13 @@ class PipelineCompiler:
                 # CRITICAL: Wrap all compilation steps in config_context() for lazy resolution
                 from openhcs.config_framework.context_manager import config_context
                 with config_context(orchestrator.pipeline_config):
+                    # Validate sequential components compatibility BEFORE analyzing sequential mode
+                    seq_config = temp_context.global_config.sequential_processing_config
+                    if seq_config and seq_config.sequential_components:
+                        PipelineCompiler.validate_sequential_components_compatibility(
+                            pipeline_definition, seq_config.sequential_components
+                        )
+
                     # Analyze sequential mode to get combinations (doesn't freeze context)
                     PipelineCompiler.analyze_pipeline_sequential_mode(temp_context, temp_context.global_config, orchestrator)
 
@@ -1120,6 +1164,14 @@ class PipelineCompiler:
                         resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
                         PipelineCompiler.declare_zarr_stores_for_context(context, resolved_steps, orchestrator)
                         PipelineCompiler.plan_materialization_flags_for_context(context, resolved_steps, orchestrator)
+
+                        # Validate sequential components compatibility BEFORE analyzing sequential mode
+                        seq_config = context.global_config.sequential_processing_config
+                        if seq_config and seq_config.sequential_components:
+                            PipelineCompiler.validate_sequential_components_compatibility(
+                                pipeline_definition, seq_config.sequential_components
+                            )
+
                         PipelineCompiler.analyze_pipeline_sequential_mode(context, context.global_config, orchestrator)
                         PipelineCompiler.validate_memory_contracts_for_context(context, resolved_steps, orchestrator)
                         PipelineCompiler.assign_gpu_resources_for_context(context)

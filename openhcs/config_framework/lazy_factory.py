@@ -1032,9 +1032,11 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
             field_type = Union[field_type, type(None)]
             default_value = None
         else:
-            # Both inherit_as_none and regular cases use same default factory
-            # Add ui_hidden metadata to the field so UI layer can check it
-            default_value = field(default_factory=field_type, metadata={'ui_hidden': is_ui_hidden})
+            # CRITICAL FIX: Use default=None instead of default_factory=field_type
+            # This ensures PipelineConfig fields default to None for proper inheritance
+            # instead of creating instances with default values (e.g., SequentialProcessingConfig(sequential_components=[]))
+            # which would override global config values
+            default_value = field(default=None, metadata={'ui_hidden': is_ui_hidden})
 
         return (config['field_name'], field_type, default_value)
 
