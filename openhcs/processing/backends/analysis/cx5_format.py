@@ -506,29 +506,31 @@ def remove_inval_chars(name):
         name=name.replace(char,"")
     return name
 
-rows=[string.ascii_uppercase[i] for i in range(8)]
-cols=[i+1 for i in range(12)]
-conditions = []
-for row in rows:
-    for col in cols:
-        conditions.append(str(row)+str(col).zfill(2))
+if __name__ == "__main__":
+    # This code only runs when the script is executed directly, not when imported as a module
+    rows=[string.ascii_uppercase[i] for i in range(8)]
+    cols=[i+1 for i in range(12)]
+    conditions = []
+    for row in rows:
+        for col in cols:
+            conditions.append(str(row)+str(col).zfill(2))
 
-results_path="mx_results.xlsx"
-config_file="./config.xlsx"
-compiled_results_path="./compiled_results_normalized.xlsx"
-heatmap_path="./heatmaps.xlsx"
+    results_path="mx_results.xlsx"
+    config_file="./config.xlsx"
+    compiled_results_path="./compiled_results_normalized.xlsx"
+    heatmap_path="./heatmaps.xlsx"
 
-scope, plate_layout, conditions, ctrl_positions=read_plate_layout(config_file)
-plate_groups=load_plate_groups(config_file)
-experiment_dict_locations=make_experiment_dict_locations(plate_groups,plate_layout,conditions)
-df = read_results(results_path,scope=scope)
-features = get_features(df,scope=scope)
-well_dict=create_well_dict(df,scope=scope)
-plates_dict=create_plates_dict(df,scope=scope)
-plates_dict = fill_plates_dict(df,plates_dict,scope=scope)
-experiment_dict_values=make_experiment_dict_values(plates_dict,experiment_dict_locations,features)
-if ctrl_positions is not None:
-    experiment_dict_values=normalize_experiment(experiment_dict_values,ctrl_positions,features,plates_dict)
-feature_tables = create_all_feature_tables(experiment_dict_values,features)
-write_values_heat_map(plates_dict,features,heatmap_path)
-feature_tables_to_excel(feature_tables,compiled_results_path)
+    scope, plate_layout, conditions, ctrl_positions=read_plate_layout(config_file)
+    plate_groups=load_plate_groups(config_file)
+    experiment_dict_locations=make_experiment_dict_locations(plate_groups,plate_layout,conditions)
+    df = read_results(results_path,scope=scope)
+    features = get_features(df,scope=scope)
+    well_dict=create_well_dict(df,scope=scope)
+    plates_dict=create_plates_dict(df,scope=scope)
+    plates_dict = fill_plates_dict(df,plates_dict,scope=scope)
+    experiment_dict_values=make_experiment_dict_values(plates_dict,experiment_dict_locations,features)
+    if ctrl_positions is not None:
+        experiment_dict_values=normalize_experiment(experiment_dict_values,ctrl_positions,features,plates_dict)
+    feature_tables = create_all_feature_tables(experiment_dict_values,features)
+    write_values_heat_map(plates_dict,features,heatmap_path)
+    feature_tables_to_excel(feature_tables,compiled_results_path)
