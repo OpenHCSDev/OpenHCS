@@ -726,6 +726,11 @@ def create_table_for_feature(feature,experiment_dict_values):
         condition_data[condition].append(values[i])
 
     # Create DataFrame with conditions as columns and N as rows
+    # Handle case where all conditions are empty (no data available)
+    if not condition_data or all(len(vals) == 0 for vals in condition_data.values()):
+        # Return empty DataFrame with condition columns
+        return pd.DataFrame(columns=sorted(condition_data.keys()) if condition_data else [])
+
     max_n = max(len(vals) for vals in condition_data.values())
     data_matrix = []
     for n in range(max_n):
