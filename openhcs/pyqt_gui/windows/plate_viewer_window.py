@@ -338,7 +338,7 @@ class PlateViewerWindow(QDialog):
                 csv_files = list(results_dir.glob("*.csv"))
                 for csv_file in csv_files:
                     parsed = parser.parse_filename(csv_file.name)
-                    if 'well' in parsed:
+                    if parsed and 'well' in parsed:
                         well_ids.add(parsed['well'])
 
             well_ids = sorted(list(well_ids))
