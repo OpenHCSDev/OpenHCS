@@ -457,28 +457,34 @@ class ImageXpressFilenameParser(FilenameParser):
         if not well:
             raise ValueError("Well ID cannot be empty or None.")
 
-        # Default timepoint to 1 if not provided (like z_index)
+        # Default all components to 1 if not provided - ensures consistent filename structure
+        if site is None:
+            site = 1
+        if channel is None:
+            channel = 1
+        if z_index is None:
+            z_index = 1
         if timepoint is None:
             timepoint = 1
 
         parts = [well]
 
-        if site is not None:
-            if isinstance(site, str):
-                parts.append(f"_s{site}")
-            else:
-                parts.append(f"_s{site:0{site_padding}d}")
+        # Always add site
+        if isinstance(site, str):
+            parts.append(f"_s{site}")
+        else:
+            parts.append(f"_s{site:0{site_padding}d}")
 
-        if channel is not None:
-            parts.append(f"_w{channel}")
+        # Always add channel
+        parts.append(f"_w{channel}")
 
-        if z_index is not None:
-            if isinstance(z_index, str):
-                parts.append(f"_z{z_index}")
-            else:
-                parts.append(f"_z{z_index:0{z_padding}d}")
+        # Always add z_index
+        if isinstance(z_index, str):
+            parts.append(f"_z{z_index}")
+        else:
+            parts.append(f"_z{z_index:0{z_padding}d}")
 
-        # Always add timepoint (like z_index)
+        # Always add timepoint
         if isinstance(timepoint, str):
             parts.append(f"_t{timepoint}")
         else:

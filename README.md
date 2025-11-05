@@ -7,7 +7,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/openhcs.svg)](https://pypi.org/project/openhcs/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![GPU Accelerated](https://img.shields.io/badge/GPU-Accelerated-green.svg)](https://github.com/trissim/openhcs)
 [![Documentation Status](https://readthedocs.org/projects/openhcs/badge/?version=latest)](https://openhcs.readthedocs.io/en/latest/?badge=latest)
 
@@ -333,6 +333,11 @@ pip install -e ".[all,dev]"
 
 # Run tests
 pytest tests/
+
+# Run OMERO integration tests (requires Docker)
+# See OMERO_TESTING_GUIDE.md for setup instructions
+cd openhcs/omero && docker-compose up -d && ./wait_for_omero.sh && cd ../..
+pytest tests/integration/test_main.py --it-microscopes=OMERO --it-backends=disk -v
 ```
 
 ### Contribution Areas

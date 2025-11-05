@@ -14,11 +14,92 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 from openhcs.constants.constants import Backend
 from openhcs.io.exceptions import StorageResolutionError
+from openhcs.core.auto_register_meta import AutoRegisterMeta
 
 logger = logging.getLogger(__name__)
 
 
-class DataSink(ABC):
+class PicklableBackend(ABC):
+    """
+    Abstract base class for storage backends that support pickling with connection parameters.
+
+    Backends that maintain network connections or other unpicklable resources must
+    explicitly inherit from this ABC and implement the required methods to be safely
+    pickled and unpickled in multiprocessing workers.
+
+    This is particularly important for backends that maintain:
+    - Network connections (e.g., OMERO, remote databases, S3)
+    - File handles that can't cross process boundaries
+    - Authentication sessions
+
+    The pattern is:
+    1. Main process: Backend stores connection params via get_connection_params()
+    2. Pickling: ProcessingContext preserves these params
+    3. Worker process: Backend recreates connection using set_connection_params()
+
+    This uses nominal typing (ABC) not structural typing (Protocol), so
+    explicit inheritance is required for isinstance() checks to work.
+    """
+
+    @abstractmethod
+    def get_connection_params(self) -> Optional[Dict[str, Any]]:
+        """
+        Return connection parameters for worker process reconnection.
+
+        Returns:
+            Dictionary of connection parameters (host, port, username, etc.)
+            or None if no connection parameters are available.
+
+        Note:
+            Passwords should NOT be included in connection params.
+            They should be retrieved from environment variables in the worker.
+        """
+        pass
+
+    @abstractmethod
+    def set_connection_params(self, params: Optional[Dict[str, Any]]) -> None:
+        """
+        Set connection parameters (used during unpickling).
+
+        Args:
+            params: Dictionary of connection parameters or None
+        """
+        pass
+
+
+class BackendBase(metaclass=AutoRegisterMeta):
+    """
+    Base class for all storage backends (read-only and read-write).
+
+    Defines the registry and common interface for backend discovery.
+    Concrete backends should inherit from StorageBackend, ReadOnlyBackend, or DataSink.
+    """
+    __registry_key__ = '_backend_type'
+
+    # Enable automatic discovery of backends in openhcs.io package
+    from openhcs.core.auto_register_meta import RegistryConfig, LazyDiscoveryDict
+    __registry_config__ = RegistryConfig(
+        registry_dict=LazyDiscoveryDict(),
+        key_attribute='_backend_type',
+        skip_if_no_key=True,
+        registry_name='backend',
+        discovery_package='openhcs.io',
+        discovery_recursive=False,  # All backends are in openhcs.io/*.py (flat structure)
+    )
+
+    @property
+    @abstractmethod
+    def requires_filesystem_validation(self) -> bool:
+        """
+        Whether this backend requires filesystem validation.
+
+        Returns:
+            True for local filesystem backends, False for virtual/remote/streaming
+        """
+        pass
+
+
+class DataSink(BackendBase):
     """
     Abstract base class for data destinations.
 
@@ -29,6 +110,8 @@ class DataSink(ABC):
     - Fail-loud: No defensive programming, explicit error handling
     - Minimal: Only essential operations both storage and streaming need
     - Generic: Enables any type of data destination backend
+
+    Inherits from BackendBase for automatic registration.
     """
 
     @abstractmethod
@@ -62,6 +145,88 @@ class DataSink(ABC):
             TypeError: If any identifier is not a valid type
             ValueError: If any data cannot be sent to destination
         """
+        pass
+
+
+class DataSource(BackendBase):
+    """
+    Abstract base class for read-only data sources.
+
+    Defines the minimal interface for loading data from any source,
+    whether filesystem, virtual workspace, remote storage, or databases.
+
+    This is the read-only counterpart to DataSink.
+    """
+
+    @abstractmethod
+    def load(self, file_path: Union[str, Path], **kwargs) -> Any:
+        """
+        Load data from a file path.
+
+        Args:
+            file_path: Path to the file to load
+            **kwargs: Backend-specific arguments
+
+        Raises:
+            FileNotFoundError: If the file does not exist
+            TypeError: If file_path is not a valid type
+            ValueError: If the data cannot be loaded
+        """
+        pass
+
+    @abstractmethod
+    def load_batch(self, file_paths: List[Union[str, Path]], **kwargs) -> List[Any]:
+        """
+        Load multiple files in a single batch operation.
+
+        Args:
+            file_paths: List of file paths to load
+            **kwargs: Backend-specific arguments
+
+        Raises:
+            FileNotFoundError: If any file does not exist
+            TypeError: If any file_path is not a valid type
+            ValueError: If any data cannot be loaded
+        """
+        pass
+
+    @abstractmethod
+    def list_files(self, directory: Union[str, Path], pattern: Optional[str] = None,
+                  extensions: Optional[Set[str]] = None, recursive: bool = False,
+                  **kwargs) -> List[str]:
+        """
+        List files in a directory.
+
+        Args:
+            directory: Directory to list files from
+            pattern: Optional glob pattern to filter files
+            extensions: Optional set of file extensions to filter (e.g., {'.tif', '.png'})
+            recursive: Whether to search recursively
+            **kwargs: Backend-specific arguments
+
+        Returns:
+            List of file paths (absolute or relative depending on backend)
+        """
+        pass
+
+    @abstractmethod
+    def exists(self, path: Union[str, Path]) -> bool:
+        """Check if a path exists."""
+        pass
+
+    @abstractmethod
+    def is_file(self, path: Union[str, Path]) -> bool:
+        """Check if a path is a file."""
+        pass
+
+    @abstractmethod
+    def is_dir(self, path: Union[str, Path]) -> bool:
+        """Check if a path is a directory."""
+        pass
+
+    @abstractmethod
+    def list_dir(self, path: Union[str, Path]) -> List[str]:
+        """List immediate entries in a directory (names only)."""
         pass
 
 
@@ -151,288 +316,56 @@ class VirtualBackend(DataSink):
         return False
 
 
-class StorageBackend(DataSink):
+class ReadOnlyBackend(DataSource):
     """
-    Abstract base class for persistent storage operations.
+    Abstract base class for read-only storage backends with auto-registration.
 
-    Extends DataSink with retrieval capabilities and file system operations
-    for backends that provide persistent storage with file-like semantics.
+    Use this for backends that only need to read data (virtual workspaces,
+    read-only mounts, archive viewers, etc.).
 
-    Concrete implementations should use StorageBackendMeta for automatic registration.
+    Inherits from DataSource (which inherits from BackendBase for registration).
+    No write operations - clean separation of concerns.
+
+    Concrete implementations are automatically registered via AutoRegisterMeta.
     """
-
-    # Inherits save() and save_batch() from DataSink
-
-    @abstractmethod
-    def load(self, file_path: Union[str, Path], **kwargs) -> Any:
-        """
-        Load data from a file.
-
-        Args:
-            file_path: Path to the file to load
-            **kwargs: Additional arguments for the load operation
-
-        Returns:
-            The loaded data
-
-        Raises:
-            FileNotFoundError: If the file does not exist
-            TypeError: If the file_path is not a valid path type
-            ValueError: If the file cannot be loaded
-        """
-        pass
-
-    @abstractmethod
-    def save(self, data: Any, output_path: Union[str, Path], **kwargs) -> None:
-        """
-        Save data to a file.
-
-        Args:
-            data: The data to save
-            output_path: Path where the data should be saved
-            **kwargs: Additional arguments for the save operation
-
-        Raises:
-            TypeError: If the output_path is not a valid path type
-            ValueError: If the data cannot be saved
-        """
-        pass
-
-    @abstractmethod
-    def load_batch(self, file_paths: List[Union[str, Path]], **kwargs) -> List[Any]:
-        """
-        Load multiple files in a single batch operation.
-
-        Args:
-            file_paths: List of file paths to load
-            **kwargs: Additional arguments for the load operation
-
-        Returns:
-            List of loaded data objects in the same order as file_paths
-
-        Raises:
-            FileNotFoundError: If any file does not exist
-            TypeError: If any file_path is not a valid path type
-            ValueError: If any file cannot be loaded
-        """
-        pass
-
-    @abstractmethod
-    def save_batch(self, data_list: List[Any], output_paths: List[Union[str, Path]], **kwargs) -> None:
-        """
-        Save multiple data objects in a single batch operation.
-
-        Args:
-            data_list: List of data objects to save
-            output_paths: List of destination paths (must match length of data_list)
-            **kwargs: Additional arguments for the save operation
-
-        Raises:
-            ValueError: If data_list and output_paths have different lengths
-            TypeError: If any output_path is not a valid path type
-            ValueError: If any data cannot be saved
-        """
-        pass
-
-    @abstractmethod
-    def list_files(self, directory: Union[str, Path], pattern: Optional[str] = None,
-                  extensions: Optional[Set[str]] = None, recursive: bool = False,
-                  **kwargs) -> List[Path]:
-        """
-        List files in a directory, optionally filtering by pattern and extensions.
-
-        Args:
-            directory: Directory to search.
-            pattern: Optional glob pattern to match filenames.
-            extensions: Optional set of file extensions to filter by (e.g., {'.tif', '.png'}).
-                        Extensions should include the dot and are case-insensitive.
-            recursive: Whether to search recursively.
-            **kwargs: Backend-specific arguments (unused for most backends)
-
-        Returns:
-            List of paths to matching files.
-
-        Raises:
-            TypeError: If the directory is not a valid path type
-            FileNotFoundError: If the directory does not exist
-        """
-        pass
 
     @property
     def requires_filesystem_validation(self) -> bool:
         """
         Whether this backend requires filesystem validation.
 
-        Real filesystem backends return True - they need path validation.
-        Virtual backends return False - they don't have real filesystem paths.
+        Returns:
+            False for virtual/remote backends, True for local filesystem
+        """
+        return False
+
+    # Inherits all abstract methods from DataSource:
+    # - load(), load_batch()
+    # - list_files(), list_dir()
+    # - exists(), is_file(), is_dir()
+
+
+class StorageBackend(DataSource, DataSink):
+    """
+    Abstract base class for read-write storage backends.
+
+    Extends DataSource (read) and DataSink (write) with file system operations
+    for backends that provide persistent storage with file-like semantics.
+
+    Concrete implementations are automatically registered via AutoRegisterMeta.
+    """
+    # Inherits load(), load_batch(), list_files(), etc. from DataSource
+    # Inherits save() and save_batch() from DataSink
+
+    @property
+    def requires_filesystem_validation(self) -> bool:
+        """
+        Whether this backend requires filesystem validation.
 
         Returns:
-            True for real filesystem backends
+            True for real filesystem backends (default for StorageBackend)
         """
         return True
-
-    @abstractmethod
-    def list_dir(self, path: Union[str, Path]) -> List[str]:
-        """
-        List the names of immediate entries in a directory.
-
-        Args:
-            path: Directory path to list.
-
-        Returns:
-            List of entry names (not full paths) in the directory.
-
-        Raises:
-            FileNotFoundError: If the path does not exist.
-            NotADirectoryError: If the path is not a directory.
-            TypeError: If the path is not a valid path type.
-        """
-        pass
-
-    @abstractmethod
-    def delete(self, file_path: Union[str, Path]) -> None:
-        """
-        Delete a file.
-
-        Args:
-            file_path: Path to the file to delete
-
-        Raises:
-            TypeError: If the file_path is not a valid path type
-            FileNotFoundError: If the file does not exist
-            ValueError: If the file cannot be deleted
-        """
-        pass
-
-    @abstractmethod
-    def delete_all(self, file_path: Union[str, Path]) -> None:
-        """
-        Deletes a file or a folder in full.
-
-        Args:
-            file_path: Path to the file to delete
-
-        Raises:
-            TypeError: If the file_path is not a valid path type
-            ValueError: If the file cannot be deleted
-        """
-        pass
-
-
-    @abstractmethod
-    def ensure_directory(self, directory: Union[str, Path]) -> Path:
-        """
-        Ensure a directory exists, creating it if necessary.
-
-        Args:
-            directory: Path to the directory to ensure exists
-
-        Returns:
-            The path to the directory
-
-        Raises:
-            TypeError: If the directory is not a valid path type
-            ValueError: If the directory cannot be created
-        """
-        pass
-
-
-    @abstractmethod
-    def create_symlink(self, source: Union[str, Path], link_name: Union[str, Path]):
-        """
-        Creates a symlink from source to link_name.
-
-        Args:
-            source: Path to the source file
-            link_name: Path where the symlink should be created
-
-        Raises:
-            TypeError: If the path is not a valid path type
-        """
-        pass
-
-    @abstractmethod
-    def is_symlink(self, source: Union[str, Path]) -> bool:
-        """
-        Checks if a path is a symlink.
-
-        Args:
-            source: Path to the source file
-
-        Raises:
-            TypeError: If the path is not a valid path type
-        """
-    
-    @abstractmethod
-    def is_file(self, source: Union[str, Path]) -> bool:
-        """
-        Checks if a path is a file.
-
-        Args:
-            source: Path to the source file
-
-        Raises:
-            TypeError: If the path is not a valid path type
-        """
-    @abstractmethod
-    def is_dir(self, source: Union[str, Path]) -> bool:
-        """
-        Checks if a path is a symlink.
-
-        Args:
-            source: Path to the source file
-
-        Raises:
-            TypeError: If the path is not a valid path type
-        """
-    
-    @abstractmethod
-    def move(self, src: Union[str, Path], dst: Union[str, Path]) -> None:
-        """ 
-        Move a file or directory from src to dst.
-
-        Args:
-            src: Path to the source file
-            dst: Path to the destination file
-
-        Raises:
-            TypeError: If the path is not a valid path type
-            FileNotFoundError: If the source file does not exist
-            FileExistsError: If the destination file already exists
-            ValueError: If the file cannot be moved
-        """
-        pass
-
-    @abstractmethod
-    def copy(self, src: Union[str, Path], dst: Union[str, Path]) -> None:
-        """
-        Copy a file or directory from src to dst.
-
-        Args:
-            src: Path to the source file
-            dst: Path to the destination file
-
-        Raises:
-            TypeError: If the path is not a valid path type
-            FileNotFoundError: If the source file does not exist
-            FileExistsError: If the destination file already exists
-            ValueError: If the file cannot be copied
-        """
-        pass
-
-    @abstractmethod
-    def stat(self, path: Union[str, Path]) -> Dict[str, Any]:
-        """
-        Get metadata for a file or directory.
-
-        Args:
-            src: Path to the source file
-
-        Raises:
-            TypeError: If the path is not a valid path type
-            FileNotFoundError: If the source file does not exist
-        """
-        pass
 
     def exists(self, path: Union[str, Path]) -> bool:
         """
@@ -598,5 +531,16 @@ def reset_memory_backend() -> None:
 
     # Clear files from existing memory backend while preserving directories
     memory_backend = storage_registry[Backend.MEMORY.value]
+
+    # DEBUG: Log what's in memory before clearing
+    existing_keys = list(memory_backend._memory_store.keys())
+    logger.info(f"🔍 VFS_CLEAR: Memory backend has {len(existing_keys)} entries BEFORE clear")
+    logger.info(f"🔍 VFS_CLEAR: First 10 keys: {existing_keys[:10]}")
+
     memory_backend.clear_files_only()
+
+    # DEBUG: Log what's in memory after clearing
+    remaining_keys = list(memory_backend._memory_store.keys())
+    logger.info(f"🔍 VFS_CLEAR: Memory backend has {len(remaining_keys)} entries AFTER clear (directories only)")
+    logger.info(f"🔍 VFS_CLEAR: First 10 remaining keys: {remaining_keys[:10]}")
     logger.info("Memory backend reset - files cleared, directories preserved")

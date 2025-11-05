@@ -137,6 +137,23 @@ semantic_matrix_analyzer/
 tools/
 bin/
 
+# Development artifacts and temporary files
+*_PLAN.md
+*_REVIEW.md
+*_SUMMARY.md
+*_TRACKING.md
+*_ANALYSIS.md
+*_COMPLETE.md
+CHANGES_*.md
+PR_*.md
+duck_typing_*.md
+measure_peak_memory.py
+test_caching_*.py
+*-fail.txt
+*_output.txt
+*_logs.txt
+win_logs.txt
+
 # Chunkhound
 .chunkhound/
 docs/generated_md/

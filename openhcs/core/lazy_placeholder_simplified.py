@@ -133,6 +133,18 @@ class LazyDefaultPlaceholderService:
             value_text = LazyDefaultPlaceholderService.NONE_VALUE_TEXT
         elif hasattr(resolved_value, '__dataclass_fields__'):
             value_text = LazyDefaultPlaceholderService._format_nested_dataclass_summary(resolved_value)
+        elif isinstance(resolved_value, list):
+            # Handle List[Enum] - format each enum value properly
+            if resolved_value and all(hasattr(item, 'value') and hasattr(item, 'name') for item in resolved_value):
+                try:
+                    from openhcs.ui.shared.ui_utils import format_enum_display
+                    formatted_items = [format_enum_display(item) for item in resolved_value]
+                    value_text = f"[{', '.join(formatted_items)}]"
+                except ImportError:
+                    value_text = str(resolved_value)
+            else:
+                # Regular list or empty list
+                value_text = str(resolved_value)
         else:
             # Apply proper formatting for different value types
             if hasattr(resolved_value, 'value') and hasattr(resolved_value, 'name'):  # Enum
@@ -143,7 +155,7 @@ class LazyDefaultPlaceholderService:
                     value_text = str(resolved_value)
             else:
                 value_text = str(resolved_value)
-        
+
         # Apply prefix formatting
         if not prefix:
             return value_text

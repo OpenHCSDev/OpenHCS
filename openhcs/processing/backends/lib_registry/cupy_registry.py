@@ -22,6 +22,9 @@ cucim_skimage = optional_import("cucim.skimage")
 class CupyRegistry(RuntimeTestingRegistryBase):
     """Clean CuPy registry with internal GPU handling logic."""
 
+    # Registry name for auto-registration
+    _registry_name = 'cupy'
+
     # Library-specific exclusions (uses common ones)
     EXCLUSIONS = LibraryRegistryBase.COMMON_EXCLUSIONS
 

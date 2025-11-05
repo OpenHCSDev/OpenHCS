@@ -258,9 +258,8 @@ class DualEditorWindow(BaseOpenHCSWindow):
                 step_id = getattr(self.editing_step, 'name', 'unknown_step')
                 self.func_editor = FunctionListEditorWidget(func_data, step_identifier=step_id)
 
-                # Initialize step configuration settings in function editor
-                self.func_editor.current_group_by = self.editing_step.group_by
-                self.func_editor.current_variable_components = self.editing_step.variable_components or []
+                # SINGLE SOURCE OF TRUTH: Initialize function editor state from step
+                self._sync_function_editor_from_step()
 
                 yield self.func_editor
 
@@ -295,15 +294,56 @@ class DualEditorWindow(BaseOpenHCSWindow):
         self._update_change_tracking()
         self._update_status("Modified step configuration")
 
+    def _sync_function_editor_from_step(self):
+        """
+        SINGLE SOURCE OF TRUTH: Sync function editor state from current step.
+
+        This method extracts all step configuration that affects the function editor
+        and updates it. Call this whenever ANY step parameter changes to ensure
+        the function editor stays in sync.
+
+        If the step structure changes in the future, only this method needs updating.
+        """
+        # Guard: Only sync if function editor exists
+        if not hasattr(self, 'func_editor') or self.func_editor is None:
+            return
+
+        # CRITICAL: Use config_context to enable lazy resolution
+        # Without this context, lazy dataclass fields resolve to None
+        from openhcs.config_framework.context_manager import config_context
+
+        try:
+            with config_context(self.orchestrator.pipeline_config):
+                with config_context(self.editing_step):
+                    # Extract group_by from processing_config (lazy resolution happens here)
+                    group_by = self.editing_step.processing_config.group_by
+
+                    # Extract variable_components from processing_config
+                    variable_components = self.editing_step.processing_config.variable_components or []
+        except Exception as e:
+            logger.error(f"Failed to resolve lazy values in config_context: {e}", exc_info=True)
+            group_by = None
+            variable_components = []
+
+        # Update function editor with extracted values
+        self.func_editor.set_effective_group_by(group_by)
+        self.func_editor.current_variable_components = variable_components
+
+        logger.debug(f"Synced function editor: group_by={group_by}, variable_components={variable_components}")
+
     def on_step_parameter_editor_widget_step_parameter_changed(
         self, event: StepParameterEditorWidget.StepParameterChanged # Listen for the specific message
     ) -> None:
-        """Handle parameter changes from the step editor widget."""
+        """Handle parameter changes from the step editor widget.
+
+        SINGLE SOURCE OF TRUTH: Always sync function editor on any parameter change.
+        This ensures the function editor stays in sync regardless of which parameter
+        changed or how the step structure evolves in the future.
+        """
         logger.debug("Received StepParameterChanged from child StepParameterEditorWidget")
 
-        # Sync step configuration settings to function editor for dynamic component selection
-        self.func_editor.current_group_by = self.editing_step.group_by
-        self.func_editor.current_variable_components = self.editing_step.variable_components or []
+        # SINGLE SOURCE OF TRUTH: Always sync function editor from step
+        self._sync_function_editor_from_step()
 
         self._update_change_tracking()
         self._update_status("Modified step parameters (via message)")

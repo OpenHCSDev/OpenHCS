@@ -486,16 +486,17 @@ class OpenHCSMetadataGenerator:
     def _extract_metadata_from_disk_state(self, context: 'ProcessingContext', output_dir: str, write_backend: str, is_main: bool, sub_dir: str, results_dir: str = None) -> OpenHCSMetadata:
         """Extract metadata reflecting current disk state after processing.
 
-        Returns OpenHCSMetadata with None for fields that should be preserved from existing metadata.
-        The caller filters out None values before merging to avoid overwriting existing fields.
+        CRITICAL: Extracts component metadata (channels, wells, sites, z_indexes, timepoints)
+        by parsing actual filenames in output_dir, NOT from the original input metadata cache.
+        This ensures metadata accurately reflects what was actually written, not what was in the input.
+
+        For example, if processing filters to only channels 1-2, the metadata will show only those channels.
         """
         handler = context.microscope_handler
 
         # metadata_cache is always set by create_context() - fail if not present
         if not hasattr(context, 'metadata_cache'):
             raise RuntimeError("ProcessingContext missing metadata_cache - must be created via create_context()")
-
-        cache = context.metadata_cache
 
         actual_files = self.filemanager.list_image_files(output_dir, write_backend)
         relative_files = [f"{sub_dir}/{Path(f).name}" for f in actual_files]
@@ -507,7 +508,7 @@ class OpenHCSMetadataGenerator:
             results_path = Path(results_dir)
             relative_results_dir = results_path.name  # Just the directory name, not full path
 
-        # Extract grid_dimensions and pixel_size, with fallback to existing metadata
+        # Extract grid_dimensions and pixel_size from input metadata
         grid_dimensions = handler.metadata_handler._get_with_fallback('get_grid_dimensions', context.input_dir)
         pixel_size = handler.metadata_handler._get_with_fallback('get_pixel_size', context.input_dir)
 
@@ -530,6 +531,14 @@ class OpenHCSMetadataGenerator:
             except Exception as e:
                 self.logger.debug(f"Could not retrieve grid_dimensions from existing metadata: {e}")
 
+        # CRITICAL: Extract component metadata from actual output files by parsing filenames
+        # This ensures metadata reflects what was actually written, not the original input
+        component_metadata = self._extract_component_metadata_from_files(actual_files, handler.parser)
+
+        # Merge extracted component keys with display names from original metadata cache
+        # This preserves display names (e.g., "tl-20") while using actual output components
+        merged_metadata = self._merge_component_metadata(component_metadata, context.metadata_cache)
+
         # CRITICAL: Use AllComponents enum for cache lookups (cache is keyed by AllComponents)
         # GroupBy and AllComponents have same values but different hashes, so dict.get() fails with GroupBy
         return OpenHCSMetadata(
@@ -538,18 +547,82 @@ class OpenHCSMetadataGenerator:
             grid_dimensions=grid_dimensions,
             pixel_size=pixel_size,
             image_files=relative_files,
-            channels=cache.get(AllComponents.CHANNEL),
-            wells=cache.get(AllComponents.WELL),
-            sites=cache.get(AllComponents.SITE),
-            z_indexes=cache.get(AllComponents.Z_INDEX),
-            timepoints=cache.get(AllComponents.TIMEPOINT),
+            channels=merged_metadata.get(AllComponents.CHANNEL),
+            wells=merged_metadata.get(AllComponents.WELL),
+            sites=merged_metadata.get(AllComponents.SITE),
+            z_indexes=merged_metadata.get(AllComponents.Z_INDEX),
+            timepoints=merged_metadata.get(AllComponents.TIMEPOINT),
             available_backends={write_backend: True},
             workspace_mapping=None,  # Preserve existing - filtered out by create_metadata()
             main=is_main if is_main else None,
             results_dir=relative_results_dir
         )
 
+    def _extract_component_metadata_from_files(self, file_paths: list, parser) -> Dict[AllComponents, Optional[Dict[str, Optional[str]]]]:
+        """
+        Extract component metadata by parsing actual filenames.
 
+        Filenames are architecturally guaranteed to be properly formed by the pipeline.
+        Parser.parse_filename() is guaranteed to succeed. No defensive checks.
+
+        Args:
+            file_paths: List of image file paths (guaranteed properly formed)
+            parser: FilenameParser instance
+
+        Returns:
+            Dict mapping AllComponents to component metadata dicts (key -> display_name)
+        """
+        result = {component: {} for component in AllComponents}
+
+        for file_path in file_paths:
+            filename = Path(file_path).name
+            parsed = parser.parse_filename(filename)
+
+            # Extract each component from the parsed filename
+            for component in AllComponents:
+                component_name = component.value
+                if component_name in parsed:
+                    component_value = str(parsed[component_name])
+                    # Store with None as display name (will be merged with original metadata display names)
+                    if component_value not in result[component]:
+                        result[component][component_value] = None
+
+        # Convert empty dicts to None (no metadata for that component)
+        return {component: metadata_dict if metadata_dict else None for component, metadata_dict in result.items()}
+
+    def _merge_component_metadata(self, extracted: Dict[AllComponents, Optional[Dict[str, Optional[str]]]], cache: Dict[AllComponents, Optional[Dict[str, Optional[str]]]]) -> Dict[AllComponents, Optional[Dict[str, Optional[str]]]]:
+        """
+        Merge extracted component keys with display names from original metadata cache.
+
+        For each component:
+        - Use extracted keys (what actually exists in output)
+        - Preserve display names from cache (e.g., "tl-20" for channel "1")
+        - If no display name in cache, use None
+
+        Args:
+            extracted: Component metadata extracted from output filenames
+            cache: Original metadata cache with display names
+
+        Returns:
+            Merged metadata with actual components and preserved display names
+        """
+        result = {}
+        for component in AllComponents:
+            extracted_dict = extracted.get(component)
+            cache_dict = cache.get(component)
+
+            if extracted_dict is None:
+                result[component] = None
+            else:
+                # For each extracted key, get display name from cache if available
+                merged = {}
+                for key in extracted_dict.keys():
+                    display_name = cache_dict.get(key) if cache_dict else None
+                    merged[key] = display_name
+
+                result[component] = merged if merged else None
+
+        return result
 
 
 

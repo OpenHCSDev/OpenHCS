@@ -25,6 +25,9 @@ class OpenHCSRegistry(LibraryRegistryBase):
     while producing the same FunctionMetadata format as external libraries.
     """
 
+    # Registry name for auto-registration
+    _registry_name = 'openhcs'
+
     # Required abstract class attributes
     MODULES_TO_SCAN = []  # Will be set dynamically
     MEMORY_TYPE = None  # OpenHCS functions have their own memory type attributes
@@ -116,21 +119,41 @@ class OpenHCSRegistry(LibraryRegistryBase):
 
 
     def discover_functions(self) -> Dict[str, FunctionMetadata]:
-        """Discover OpenHCS functions with explicit contracts and filter by backend availability."""
+        """Discover OpenHCS functions with memory type decorators and assign default contracts."""
+        from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract
+
         functions = {}
         modules = self.get_modules_to_scan()
 
+        logger.info(f"🔍 OpenHCS Registry: Scanning {len(modules)} modules for functions with memory type decorators")
+
         for module_name, module in modules:
             import inspect
+            module_function_count = 0
+
             for name, func in inspect.getmembers(module, inspect.isfunction):
-                # Simple: if it has a processing contract, include it
-                if hasattr(func, '__processing_contract__'):
-                    contract = getattr(func, '__processing_contract__')
+                # Look for functions with memory type attributes (added by @numpy, @cupy, etc.)
+                if hasattr(func, 'input_memory_type') and hasattr(func, 'output_memory_type'):
+                    input_type = getattr(func, 'input_memory_type')
+                    output_type = getattr(func, 'output_memory_type')
+
+                    # Skip if memory types are invalid
+                    valid_memory_types = {'numpy', 'cupy', 'torch', 'tensorflow', 'jax', 'pyclesperanto'}
+                    if input_type not in valid_memory_types or output_type not in valid_memory_types:
+                        logger.debug(f"Skipping {name} - invalid memory types: {input_type} -> {output_type}")
+                        continue
 
                     # Check if function's backend is available before including it
                     if not self._is_function_backend_available(func):
                         logger.debug(f"Skipping {name} - backend not available")
                         continue
+
+                    # Assign default contract for OpenHCS functions
+                    # Most OpenHCS functions are FLEXIBLE (can handle both 2D and 3D)
+                    contract = ProcessingContract.FLEXIBLE
+
+                    # Add the contract attribute so other parts of the system can find it
+                    func.__processing_contract__ = contract
 
                     # Apply contract wrapper (adds slice_by_slice for FLEXIBLE)
                     wrapped_func = self.apply_contract_wrapper(func, contract)
@@ -153,7 +176,11 @@ class OpenHCSRegistry(LibraryRegistryBase):
                     )
 
                     functions[unique_name] = metadata
+                    module_function_count += 1
 
+            logger.debug(f"  📦 {module_name}: Found {module_function_count} OpenHCS functions")
+
+        logger.info(f"✅ OpenHCS Registry: Discovered {len(functions)} total functions")
         return functions
 
 

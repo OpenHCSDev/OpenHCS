@@ -16,6 +16,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
 
 from openhcs.core.steps.function_step import FunctionStep
+from openhcs.constants.constants import GroupBy
 from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
@@ -287,12 +288,8 @@ class DualEditorWindow(BaseFormDialog):
         if main_window:
             self.func_editor.main_window = main_window
 
-        # Initialize step configuration settings in function editor (mirrors Textual TUI)
-        self.func_editor.current_group_by = self.editing_step.group_by
-        self.func_editor.current_variable_components = self.editing_step.variable_components or []
-
-        # Refresh component button to show correct text and state (mirrors Textual TUI reactive updates)
-        self.func_editor._refresh_component_button()
+        # SINGLE SOURCE OF TRUTH: Initialize function editor state from step
+        self._sync_function_editor_from_step()
 
         # Connect function pattern changes
         self.func_editor.function_pattern_changed.connect(self._on_function_pattern_changed)
@@ -338,6 +335,77 @@ class DualEditorWindow(BaseFormDialog):
         result = self.editing_step.func
         print(f"🔍 DUAL EDITOR _convert_step_func_to_list: returning {result}")
         return result
+
+    def _sync_function_editor_from_step(self):
+        """
+        SINGLE SOURCE OF TRUTH: Sync function editor state from step editor's CURRENT form values.
+
+        CRITICAL: This reads from the form manager's current values (live context), NOT from self.editing_step.
+        The form manager's values are the live working copy that updates as the user types.
+        self.editing_step only gets updated when the user saves.
+
+        This method extracts all step configuration that affects the function editor
+        and updates it. Call this whenever ANY step parameter changes to ensure
+        the function editor stays in sync.
+
+        If the step structure changes in the future, only this method needs updating.
+        """
+        logger.info("🔄 _sync_function_editor_from_step called")
+
+        # Guard: Only sync if function editor exists
+        if not hasattr(self, 'func_editor') or self.func_editor is None:
+            logger.info("⏭️  Function editor doesn't exist yet, skipping sync")
+            return
+
+        # CRITICAL: Read from form manager's current values (live context), not from self.editing_step
+        # The form manager updates its self.parameters dict as the user types, but doesn't update
+        # the dataclass instance until save. So we need to read from the form's current state.
+        #
+        # CRITICAL: Also apply lazy resolution to handle None values (inherit from pipeline config)
+        from openhcs.config_framework.context_manager import config_context
+
+        try:
+            # Get current values from step editor form (includes nested dataclasses)
+            current_values = self.step_editor.form_manager.get_current_values()
+            processing_config = current_values.get('processing_config')
+
+            if processing_config:
+                # CRITICAL: Apply config_context to enable lazy resolution for None values
+                # When group_by is None, it should inherit from pipeline config
+                # We need to create a temporary step-like object with the live processing_config
+                # so that lazy resolution can work properly
+
+                # Create a simple object that mimics the step's structure for lazy resolution
+                class TempStep:
+                    def __init__(self, processing_config):
+                        self.processing_config = processing_config
+
+                temp_step = TempStep(processing_config)
+
+                with config_context(self.orchestrator.pipeline_config):
+                    with config_context(temp_step):
+                        # Read from the live processing_config with lazy resolution
+                        # If group_by is None, this will resolve to pipeline config's value
+                        effective_group_by = processing_config.group_by
+                        variable_components = processing_config.variable_components or []
+                        logger.info(f"🔍 Live form values (lazy-resolved): group_by={effective_group_by}, variable_components={variable_components}")
+            else:
+                # Fallback: processing_config not in current values (shouldn't happen)
+                logger.warning("⚠️  processing_config not found in current form values, using defaults")
+                effective_group_by = None
+                variable_components = []
+        except Exception as e:
+            logger.error(f"❌ Failed to read live form values: {e}", exc_info=True)
+            effective_group_by = None
+            variable_components = []
+
+        # Update function editor with extracted values
+        logger.info(f"📤 Updating function editor: group_by={effective_group_by}, variable_components={variable_components}")
+        self.func_editor.set_effective_group_by(effective_group_by)
+        self.func_editor.current_variable_components = variable_components
+        self.func_editor._refresh_component_button()
+
+        logger.info(f"✅ Synced function editor: group_by={effective_group_by}, variable_components={variable_components}")
 
 
 
@@ -420,7 +488,42 @@ class DualEditorWindow(BaseFormDialog):
         return info
     
     def on_form_parameter_changed(self, param_name: str, value):
-        """Handle form parameter changes directly from form manager."""
+        """Handle form parameter changes directly from form manager.
+
+        SINGLE SOURCE OF TRUTH: Always sync function editor on any parameter change.
+        This ensures the function editor stays in sync regardless of which parameter
+        changed or how the step structure evolves in the future.
+
+        Handles both top-level parameters (e.g., 'name', 'processing_config') and
+        nested parameters from nested forms (e.g., 'group_by' from processing_config form).
+        """
+        logger.info(f"🔔 on_form_parameter_changed: param_name={param_name}, value type={type(value).__name__}")
+
+        # Handle reset_all completion signal
+        if param_name == "__reset_all_complete__":
+            logger.info("🔄 Received reset_all_complete signal, syncing function editor")
+            # Sync function editor after reset_all completes
+            self._sync_function_editor_from_step()
+            self.detect_changes()
+            return
+
+        # CRITICAL: Check if this is a nested parameter (from a nested form manager)
+        # Nested parameters are fields within nested dataclasses (e.g., processing_config.group_by)
+        # They don't exist as direct attributes on FunctionStep
+        # Known nested parameters from processing_config: group_by, variable_components, input_source
+        NESTED_PARAMS = {'group_by', 'variable_components', 'input_source'}
+
+        if param_name in NESTED_PARAMS:
+            logger.info(f"🔍 {param_name} is a nested parameter from processing_config")
+            # This is a nested parameter change - the nested form manager already updated
+            # the processing_config dataclass, so we just need to sync the function editor
+            # The step_editor.form_manager has a nested manager for processing_config that
+            # already updated self.editing_step.processing_config.{param_name}
+            logger.info(f"🔄 Calling _sync_function_editor_from_step after nested {param_name} change")
+            self._sync_function_editor_from_step()
+            self.detect_changes()
+            return
+
         # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
         if param_name == 'func' and callable(value) and hasattr(value, '__module__'):
             try:
@@ -430,12 +533,41 @@ class DualEditorWindow(BaseFormDialog):
             except Exception:
                 pass  # Use original if refresh fails
 
-        setattr(self.editing_step, param_name, value)
+        # CRITICAL FIX: For nested dataclass parameters (like processing_config),
+        # don't replace the entire lazy dataclass - instead update individual fields
+        # This preserves lazy resolution for fields that weren't changed
+        from dataclasses import is_dataclass, fields
+        if is_dataclass(value) and not isinstance(value, type):
+            logger.info(f"📦 {param_name} is a nested dataclass, updating fields individually")
+            # This is a nested dataclass - update fields individually
+            existing_config = getattr(self.editing_step, param_name, None)
+            if existing_config is not None and hasattr(existing_config, '_resolve_field_value'):
+                logger.info(f"✅ {param_name} is lazy, preserving lazy resolution")
+                # Existing config is lazy - update fields individually to preserve lazy resolution
+                for field in fields(value):
+                    # Use object.__getattribute__ to get raw value (not lazy-resolved)
+                    raw_value = object.__getattribute__(value, field.name)
+                    logger.info(f"  📝 Field {field.name}: raw_value={raw_value} (type={type(raw_value).__name__})")
+                    # CRITICAL: Always update the field, even if None
+                    # When user resets a field, we MUST update it to None so lazy resolution can inherit from context
+                    # When user sets a concrete value, we update it to that value
+                    object.__setattr__(existing_config, field.name, raw_value)
+                    logger.info(f"    ✏️  Updated {field.name} to {raw_value}")
+                logger.info(f"✅ Updated lazy {param_name} fields individually to preserve lazy resolution")
+            else:
+                logger.info(f"⚠️  {param_name} is not lazy or doesn't exist, replacing entire config")
+                # Not lazy or doesn't exist - just replace it
+                setattr(self.editing_step, param_name, value)
+        else:
+            logger.info(f"📄 {param_name} is not a nested dataclass, setting normally")
+            # Not a nested dataclass - just set it normally
+            setattr(self.editing_step, param_name, value)
 
-        if param_name in ('group_by', 'variable_components'):
-            self.func_editor.current_group_by = self.editing_step.group_by
-            self.func_editor.current_variable_components = self.editing_step.variable_components or []
-            self.func_editor._refresh_component_button()
+        # SINGLE SOURCE OF TRUTH: Always sync function editor from step
+        # This handles any parameter that might affect component selection
+        # (group_by, variable_components, processing_config, etc.)
+        logger.info(f"🔄 Calling _sync_function_editor_from_step after {param_name} change")
+        self._sync_function_editor_from_step()
 
         self.detect_changes()
     

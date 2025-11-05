@@ -38,10 +38,20 @@ class MaterializationFlagPlanner:
         plate_path: Path,
         pipeline_config
     ) -> None:
-        """Set read/write backends for pipeline steps."""
+        """
+        Set read/write backends for pipeline steps.
+
+        Args:
+            context: ProcessingContext with step_plans
+            pipeline_definition: List of pipeline steps
+            plate_path: Path to plate data
+            pipeline_config: Merged GlobalPipelineConfig (from context.global_config)
+                           NOT the raw PipelineConfig - ensures proper global config inheritance
+        """
 
         # === SETUP ===
-        # Access config directly from pipeline_config (lazy resolution via config_context)
+        # CRITICAL: pipeline_config is now the merged config (GlobalPipelineConfig) from context.global_config
+        # This ensures proper inheritance from global config without needing field-specific code
         vfs_config = pipeline_config.vfs_config
         step_plans = context.step_plans
 
@@ -59,7 +69,7 @@ class MaterializationFlagPlanner:
                 if READ_BACKEND not in step_plan:
                     # Check if this step reads from PIPELINE_START (original input)
                     from openhcs.core.steps.abstract import InputSource
-                    if step.input_source == InputSource.PIPELINE_START:
+                    if step.processing_config.input_source == InputSource.PIPELINE_START:
                         # Use the same backend as the first step
                         step_plan[READ_BACKEND] = step_plans[0][READ_BACKEND]
                     else:

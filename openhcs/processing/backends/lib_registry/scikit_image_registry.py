@@ -20,6 +20,9 @@ skimage = optional_import("skimage")
 class SkimageRegistry(RuntimeTestingRegistryBase):
     """Clean scikit-image registry with internal array compliance logic."""
 
+    # Registry name for auto-registration
+    _registry_name = 'skimage'
+
     # Library-specific exclusions (uses common ones)
     EXCLUSIONS = LibraryRegistryBase.COMMON_EXCLUSIONS
 

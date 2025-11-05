@@ -179,63 +179,47 @@ class OperaPhenixHandler(MicroscopeHandler):
         filemanager: FileManager
     ) -> int:
         """
-        Fill in missing images with black pixels for wells where autofocus failed.
+        Fill in missing images with black pixels by detecting gaps in continuous sequences.
 
-        Opera Phenix autofocus failures result in missing images. This method:
-        1. Extracts expected image structure from Index.xml
-        2. Compares with actual files in workspace
-        3. Creates black (zero-filled) images for missing files
+        This method:
+        1. Parses all existing files to extract dimension indices
+        2. Finds all unique values for each dimension (wells, channels, sites, z-planes, timepoints)
+        3. Generates all expected combinations (cartesian product)
+        4. Creates black placeholder images for missing combinations
 
         Args:
             image_dir: Path to the image directory
-            xml_parser: Parsed Index.xml
+            xml_parser: Parsed Index.xml (unused, kept for signature compatibility)
             filemanager: FileManager for file operations
 
         Returns:
             Number of missing images created
         """
         import numpy as np
+        from itertools import product
 
-        logger.debug("Checking for missing images in Opera Phenix workspace")
+        logger.debug("Checking for missing images in Opera Phenix workspace using continuous sequence detection")
 
-        # 1. Get expected images from XML
-        try:
-            image_info = xml_parser.get_image_info()
-            field_mapping = xml_parser.get_field_id_mapping()
-        except Exception as e:
-            logger.warning(f"Could not extract image info from XML: {e}")
-            return 0
-
-        # 2. Build set of expected filenames (with remapped field IDs)
-        expected_files = set()
-        for img_id, img_data in image_info.items():
-            # Remap field ID
-            original_field = img_data['field_id']
-            remapped_field = xml_parser.remap_field_id(original_field, field_mapping)
-
-            # Construct filename
-            well = f"R{img_data['row']:02d}C{img_data['col']:02d}"
-
-            # Note: plane_id in XML corresponds to z_index in filenames
-            # For timepoint, we default to 1 as XML doesn't always have explicit timepoint info
-            # Use ORIGINAL Opera Phenix padding (1-digit site, 2-digit z-index)
-            # NOT the standardized 3-digit padding used in virtual workspace mapping
-            filename = self.parser.construct_filename(
-                well=well,
-                site=remapped_field,
-                channel=img_data['channel_id'],
-                z_index=img_data['plane_id'],
-                timepoint=1,  # Default timepoint
-                extension='.tiff',
-                site_padding=1,  # Original Opera Phenix format
-                z_padding=2      # Original Opera Phenix format
-            )
-            expected_files.add(filename)
-
-        # 3. Get actual files (excluding broken symlinks)
+        # 1. Get actual files (excluding broken symlinks)
         # Clause 245: Workspace operations are disk-only by design
         actual_file_paths = filemanager.list_image_files(image_dir, Backend.DISK.value)
-        actual_files = set()
+
+        if not actual_file_paths:
+            logger.debug("No existing images found, skipping missing image detection")
+            return 0
+
+        # 2. Parse all files and collect dimension values
+        wells = set()
+        channels = set()
+        sites = set()
+        z_indices = set()
+        timepoints = set()
+        actual_combinations = set()  # Store parsed component tuples, not filenames
+
+        # Track filename format from first file
+        has_timepoint = None
+        sample_metadata = None
+
         for file_path in actual_file_paths:
             # Check if file is a broken symlink
             file_path_obj = Path(file_path)
@@ -243,39 +227,115 @@ class OperaPhenixHandler(MicroscopeHandler):
                 # Broken symlink - treat as missing
                 logger.debug(f"Found broken symlink (will be replaced): {file_path}")
                 continue
-            actual_files.add(os.path.basename(file_path))
 
-        # 4. Find missing files
-        missing_files = expected_files - actual_files
+            filename = os.path.basename(file_path)
 
-        if not missing_files:
-            logger.debug("No missing images detected")
+            # Parse filename
+            metadata = self.parser.parse_filename(filename)
+            if not metadata:
+                logger.warning(f"Could not parse filename: {filename}")
+                continue
+
+            # Store first valid metadata as sample
+            if sample_metadata is None:
+                sample_metadata = metadata
+
+            # Collect dimension values
+            well = metadata.get('well')
+            channel = metadata.get('channel')
+            site = metadata.get('site')
+            z_index = metadata.get('z_index')
+            timepoint = metadata.get('timepoint')
+
+            if well:
+                wells.add(well)
+            if channel is not None:
+                channels.add(channel)
+            if site is not None:
+                sites.add(site)
+            if z_index is not None:
+                z_indices.add(z_index)
+            if timepoint is not None:
+                timepoints.add(timepoint)
+                has_timepoint = True
+            elif has_timepoint is None:
+                has_timepoint = False
+
+            # Store the actual combination tuple for comparison
+            actual_combinations.add((well, channel, site, z_index, timepoint))
+
+        if not wells or not channels or not sites:
+            logger.warning("Could not extract sufficient dimension information from filenames")
             return 0
 
-        logger.info(f"Found {len(missing_files)} missing images (likely autofocus failures)")
+        # Default z_index to 1 if not present in any file
+        if not z_indices:
+            z_indices.add(1)
 
-        # 5. Get image dimensions from first existing image
-        if actual_file_paths:
-            try:
-                first_image_path = actual_file_paths[0]
-                # Clause 245: Workspace operations are disk-only by design
-                first_image = filemanager.load(first_image_path, Backend.DISK.value)
-                height, width = first_image.shape
-                dtype = first_image.dtype
-                logger.debug(f"Using dimensions from existing image: {height}x{width}, dtype={dtype}")
-            except Exception as e:
-                logger.warning(f"Could not load existing image for dimensions: {e}")
-                # Default dimensions for Opera Phenix
-                height, width = 2160, 2160
-                dtype = np.uint16
-                logger.debug(f"Using default dimensions: {height}x{width}, dtype={dtype}")
-        else:
+        # Handle timepoint dimension
+        if not timepoints and has_timepoint:
+            timepoints.add(1)
+
+        logger.info(f"Detected dimensions: {len(wells)} wells, {len(channels)} channels, "
+                   f"{len(sites)} sites, {len(z_indices)} z-planes" +
+                   (f", {len(timepoints)} timepoints" if timepoints else ""))
+
+        # 3. Generate all expected combinations
+        expected_combinations = set()
+        for well, channel, site, z_index in product(wells, channels, sites, z_indices):
+            if timepoints:
+                for timepoint in timepoints:
+                    expected_combinations.add((well, channel, site, z_index, timepoint))
+            else:
+                expected_combinations.add((well, channel, site, z_index, None))
+
+        logger.debug(f"Expected total images: {len(expected_combinations)}")
+        logger.debug(f"Actual images found: {len(actual_combinations)}")
+
+        # 4. Find missing combinations by comparing component tuples (not filenames)
+        missing_combinations = expected_combinations - actual_combinations
+
+        if not missing_combinations:
+            logger.debug("No missing images detected in continuous sequence")
+            return 0
+
+        logger.info(f"Found {len(missing_combinations)} missing images in continuous sequence")
+
+        # 5. Construct filenames for missing combinations
+        missing_files = []
+        for combination in missing_combinations:
+            well, channel, site, z_index, timepoint = combination
+
+            # Construct filename using standardized format
+            filename = self.parser.construct_filename(
+                well=well,
+                site=site,
+                channel=channel,
+                z_index=z_index,
+                timepoint=timepoint,
+                extension=sample_metadata.get('extension', '.tiff'),
+                site_padding=3,  # Virtual workspace uses standardized 3-digit padding
+                z_padding=3
+            )
+
+            missing_files.append(filename)
+
+        # 6. Get image dimensions from first existing image
+        try:
+            first_image_path = actual_file_paths[0]
+            # Clause 245: Workspace operations are disk-only by design
+            first_image = filemanager.load(first_image_path, Backend.DISK.value)
+            height, width = first_image.shape
+            dtype = first_image.dtype
+            logger.debug(f"Using dimensions from existing image: {height}x{width}, dtype={dtype}")
+        except Exception as e:
+            logger.warning(f"Could not load existing image for dimensions: {e}")
             # Default dimensions for Opera Phenix
             height, width = 2160, 2160
             dtype = np.uint16
-            logger.debug(f"No existing images, using default dimensions: {height}x{width}, dtype={dtype}")
+            logger.debug(f"Using default dimensions: {height}x{width}, dtype={dtype}")
 
-        # 6. Create black images for missing files
+        # 7. Create black images for missing files
         black_image = np.zeros((height, width), dtype=dtype)
 
         for filename in missing_files:
@@ -428,7 +488,8 @@ class OperaPhenixFilenameParser(FilenameParser):
         else:
             raise ValueError(f"Invalid well format: {well}. Expected format: 'R01C03'")
 
-        # Default Z-index and timepoint to 1 if not provided
+        # Default all components to 1 if not provided - ensures consistent filename structure
+        site = 1 if site is None else site
         z_index = 1 if z_index is None else z_index
         channel = 1 if channel is None else channel
         timepoint = 1 if timepoint is None else timepoint

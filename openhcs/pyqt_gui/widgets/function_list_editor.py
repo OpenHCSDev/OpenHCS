@@ -287,7 +287,37 @@ class FunctionListEditorWidget(QWidget):
 
                 self.function_panes.append(pane)
                 self.function_layout.addWidget(pane)
+
+                # CRITICAL FIX: Apply initial enabled styling for function panes
+                # This ensures that when the function pattern editor opens, disabled functions
+                # show the correct dimmed styling immediately, not just after toggling
+                if hasattr(pane, 'form_manager') and pane.form_manager is not None:
+                    # Use QTimer to ensure this runs after the widget is fully constructed
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(0, lambda p=pane: self._apply_initial_enabled_styling_to_pane(p))
     
+    def _apply_initial_enabled_styling_to_pane(self, pane):
+        """Apply initial enabled styling to a function pane.
+
+        This is called after a function pane is created to ensure that disabled functions
+        show the correct dimmed styling immediately when the function pattern editor opens.
+
+        Args:
+            pane: FunctionPaneWidget instance to apply styling to
+        """
+        try:
+            if hasattr(pane, 'form_manager') and pane.form_manager is not None:
+                # Check if the form manager has an enabled field
+                if 'enabled' in pane.form_manager.parameters:
+                    # Apply the initial enabled styling
+                    if hasattr(pane.form_manager, '_apply_initial_enabled_styling'):
+                        pane.form_manager._apply_initial_enabled_styling()
+        except Exception as e:
+            # Log error but don't crash the UI
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to apply initial enabled styling to function pane: {e}")
+
     def setup_connections(self):
         """Setup signal/slot connections."""
         pass
@@ -545,6 +575,17 @@ class FunctionListEditorWidget(QWidget):
         self.functions = functions.copy() if functions else []
         self._update_pattern_data()
         self._populate_function_list()
+
+    def set_effective_group_by(self, group_by: Optional[GroupBy]) -> None:
+        """Accept authoritative GroupBy from parent (step.processing_config) and refresh UI.
+
+        The parent (window) is responsible for providing the correct GroupBy instance
+        from the step.processing_config. This method trusts the type and simply
+        updates the widget state and refreshes dependent controls.
+        """
+        self.current_group_by = group_by
+        # Update the button text/state immediately
+        self._refresh_component_button()
 
     def _get_component_button_text(self) -> str:
         """Get text for the component selection button (mirrors Textual TUI)."""

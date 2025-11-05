@@ -185,18 +185,46 @@ def get_all_streaming_ports(
     # Extract all streaming config fields from the config
     # Works for both GlobalPipelineConfig and PipelineConfig
     import dataclasses
+    import typing
+    import inspect
+
+    # Get global config to extract default ports from concrete streaming configs
+    global_config = get_current_global_config(GlobalPipelineConfig)
+
     for field in dataclasses.fields(config):
-        field_value = getattr(config, field.name)
+        # Check if the field TYPE is a StreamingConfig subclass (not the value!)
+        # This is critical for PipelineConfig where all fields default to None
+        field_type = field.type
 
-        # Check if this field is a StreamingConfig
-        if field_value is not None and isinstance(field_value, StreamingConfig):
-            port = field_value.port
+        # Handle Optional[StreamingConfig] types
+        if hasattr(typing, 'get_origin') and typing.get_origin(field_type) is typing.Union:
+            # Extract the non-None type from Optional[T]
+            args = typing.get_args(field_type)
+            field_type = next((arg for arg in args if arg is not type(None)), None)
 
-            # Fail-loud if concrete config has None port (configuration error)
+        # Check if field_type is a StreamingConfig subclass
+        if field_type is not None and inspect.isclass(field_type) and issubclass(field_type, StreamingConfig):
+            # Get the port from the field value or global config
+            field_value = getattr(config, field.name)
+
+            if field_value is not None:
+                # Concrete config - use the instance's port
+                port = field_value.port
+            elif global_config is not None:
+                # Lazy config (PipelineConfig) - get port from global config's concrete instance
+                global_field_value = getattr(global_config, field.name, None)
+                if global_field_value is not None:
+                    port = global_field_value.port
+                else:
+                    port = None
+            else:
+                port = None
+
+            # Fail-loud if we couldn't determine the port
             if port is None:
                 raise ValueError(
-                    f"Streaming config {field.name} has None port. "
-                    f"All StreamingConfig instances must have a port."
+                    f"Streaming config field '{field.name}' (type {field_type.__name__}) has no port. "
+                    f"Could not find port in config instance or global config."
                 )
 
             # Generate port range for this streaming type

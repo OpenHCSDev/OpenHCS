@@ -31,6 +31,7 @@ from openhcs.core.context.processing_context import ProcessingContext
 from openhcs.core.pipeline.compiler import PipelineCompiler
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.components.validation import convert_enum_by_value
+from openhcs.core.orchestrator.execution_result import ExecutionResult, ExecutionStatus
 from openhcs.io.filemanager import FileManager
 # Zarr backend is CPU-only; always import it (even in subprocess/no-GPU mode)
 import os
@@ -75,6 +76,42 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _merge_nested_dataclass(pipeline_value, global_value):
+    """
+    Recursively merge nested dataclass configs.
+
+    For each field in the dataclass:
+    - If pipeline value is not None, use it
+    - Otherwise, use global value
+
+    This ensures that None values in nested configs resolve to global config values.
+    """
+    from dataclasses import is_dataclass, fields as dataclass_fields
+
+    if not is_dataclass(pipeline_value) or not is_dataclass(global_value):
+        # Not dataclasses, return pipeline value as-is
+        return pipeline_value
+
+    # Both are dataclasses - merge field by field
+    merged_values = {}
+    for field in dataclass_fields(type(pipeline_value)):
+        pipeline_field_value = getattr(pipeline_value, field.name)
+        global_field_value = getattr(global_value, field.name)
+
+        if pipeline_field_value is not None:
+            # Pipeline has a value - check if it's a nested dataclass that needs merging
+            if is_dataclass(pipeline_field_value) and is_dataclass(global_field_value):
+                merged_values[field.name] = _merge_nested_dataclass(pipeline_field_value, global_field_value)
+            else:
+                merged_values[field.name] = pipeline_field_value
+        else:
+            # Pipeline value is None - use global value
+            merged_values[field.name] = global_field_value
+
+    # Create new instance with merged values
+    return type(pipeline_value)(**merged_values)
+
+
 def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: GlobalPipelineConfig) -> GlobalPipelineConfig:
     """
     Pure function for creating merged config that preserves None values for sibling inheritance.
@@ -84,36 +121,39 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
     """
     logger.debug(f"Starting merge with pipeline_config={type(pipeline_config)} and global_config={type(global_config)}")
 
-    # DEBUG: Check what the global_config looks like
-    if hasattr(global_config, 'step_well_filter_config'):
-        step_config = getattr(global_config, 'step_well_filter_config')
-        if hasattr(step_config, 'well_filter'):
-            well_filter_value = getattr(step_config, 'well_filter')
-            logger.debug(f"global_config has step_well_filter_config.well_filter = {well_filter_value}")
-
     merged_config_values = {}
     for field in fields(GlobalPipelineConfig):
         # Fail-loud: Let AttributeError bubble up naturally (no getattr fallbacks)
         pipeline_value = getattr(pipeline_config, field.name)
 
-        if field.name == 'step_well_filter_config':
-            logger.debug(f"Processing step_well_filter_config: pipeline_value = {pipeline_value}")
-
         if pipeline_value is not None:
-            # CRITICAL FIX: Convert lazy configs to base configs with resolved values
-            # This ensures that user-set values from lazy configs are preserved in the thread-local context
-            # instead of being replaced with static defaults when GlobalPipelineConfig is instantiated
+            # CRITICAL FIX: For lazy configs, merge with global config BEFORE converting to base
+            # This ensures None values in lazy configs resolve to global values
+            # Then convert to base config to store in thread-local context
             if hasattr(pipeline_value, 'to_base_config'):
-                # This is a lazy config - convert to base config with resolved values
-                converted_value = pipeline_value.to_base_config()
-                merged_config_values[field.name] = converted_value
-                if field.name == 'step_well_filter_config':
-                    logger.debug(f"Converted lazy config to base: {converted_value}")
+                # This is a lazy config - merge with global config first
+                global_value = getattr(global_config, field.name)
+                from dataclasses import is_dataclass
+                if is_dataclass(global_value):
+                    # Merge lazy config with global config to resolve None values
+                    merged_lazy = _merge_nested_dataclass(pipeline_value, global_value)
+                    # Now convert merged result to base config
+                    converted_value = merged_lazy.to_base_config() if hasattr(merged_lazy, 'to_base_config') else merged_lazy
+                    merged_config_values[field.name] = converted_value
+                else:
+                    # No global value to merge with, just convert to base
+                    converted_value = pipeline_value.to_base_config()
+                    merged_config_values[field.name] = converted_value
             else:
-                # Regular value - use as-is
-                merged_config_values[field.name] = pipeline_value
-                if field.name == 'step_well_filter_config':
-                    logger.debug(f"Using pipeline value as-is: {pipeline_value}")
+                # CRITICAL FIX: For base dataclass configs, merge nested fields
+                # This ensures None values in nested configs resolve to global values
+                global_value = getattr(global_config, field.name)
+                from dataclasses import is_dataclass
+                if is_dataclass(pipeline_value) and is_dataclass(global_value):
+                    merged_config_values[field.name] = _merge_nested_dataclass(pipeline_value, global_value)
+                else:
+                    # Regular value - use as-is
+                    merged_config_values[field.name] = pipeline_value
         else:
             global_value = getattr(global_config, field.name)
             merged_config_values[field.name] = global_value
@@ -122,11 +162,69 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
     return result
 
 
+def _execute_axis_with_sequential_combinations(
+    pipeline_definition: List[AbstractStep],
+    axis_contexts: List[tuple],  # List of (context_key, frozen_context) tuples
+    visualizer: Optional['NapariVisualizerType']
+) -> ExecutionResult:
+    """
+    Execute all sequential combinations for a single axis in order.
+
+    This function runs in a worker process and handles VFS clearing between combinations.
+    Multiple axes can run in parallel, but combinations within an axis are sequential.
+
+    Args:
+        pipeline_definition: List of pipeline steps to execute
+        axis_contexts: List of (context_key, frozen_context) tuples for this axis
+        visualizer: Optional Napari visualizer (not used in multiprocessing)
+
+    Returns:
+        ExecutionResult with status for the entire axis (all combinations)
+    """
+    # Precondition: axis_contexts must not be empty
+    if not axis_contexts:
+        raise ValueError("axis_contexts cannot be empty - this indicates a bug in the caller")
+
+    # Extract axis_id from first context
+    first_context_key, first_context = axis_contexts[0]
+    axis_id = first_context.axis_id
+
+    logger.info(f"🔄 WORKER: Processing {len(axis_contexts)} combination(s) for axis {axis_id}")
+
+    for combo_idx, (context_key, frozen_context) in enumerate(axis_contexts):
+        logger.info(f"🔄 WORKER: Processing combination {combo_idx + 1}/{len(axis_contexts)}: {context_key}")
+
+        # Execute this combination
+        result = _execute_single_axis_static(pipeline_definition, frozen_context, visualizer)
+
+        # Check if this combination failed
+        if not result.is_success():
+            logger.error(f"🔄 WORKER: Combination {context_key} failed for axis {axis_id}")
+            return ExecutionResult.error(
+                axis_id=axis_id,
+                failed_combination=context_key,
+                error_message=result.error_message
+            )
+
+        # Clear VFS between combinations (except after the last one)
+        if combo_idx < len(axis_contexts) - 1:
+            from openhcs.io.base import reset_memory_backend
+            from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+
+            logger.info(f"🔄 WORKER: Clearing VFS after combination {combo_idx + 1}/{len(axis_contexts)}")
+            reset_memory_backend()
+            if cleanup_all_gpu_frameworks:
+                cleanup_all_gpu_frameworks()
+
+    logger.info(f"🔄 WORKER: Completed all {len(axis_contexts)} combination(s) for axis {axis_id}")
+    return ExecutionResult.success(axis_id=axis_id)
+
+
 def _execute_single_axis_static(
     pipeline_definition: List[AbstractStep],
     frozen_context: 'ProcessingContext',
     visualizer: Optional['NapariVisualizerType']
-) -> Dict[str, Any]:
+) -> ExecutionResult:
     """
     Static version of _execute_single_axis for multiprocessing compatibility.
 
@@ -137,6 +235,9 @@ def _execute_single_axis_static(
         pipeline_definition: List of pipeline steps to execute
         frozen_context: Frozen processing context for this axis
         visualizer: Optional Napari visualizer (not used in multiprocessing)
+
+    Returns:
+        ExecutionResult with status for this axis
     """
     axis_id = frozen_context.axis_id
 
@@ -156,6 +257,7 @@ def _execute_single_axis_static(
         step_name = frozen_context.step_plans[step_index]["step_name"]
 
         # Verify step has process method (should always be true for AbstractStep subclasses)
+        # This check is acceptable because AbstractStep is an abstract base class
         if not hasattr(step, 'process'):
             error_msg = f"Step {step_index+1} missing process method for axis {axis_id}"
             logger.error(error_msg)
@@ -182,10 +284,7 @@ def _execute_single_axis_static(
                     logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
 
     logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
-    result = {"status": "success", "axis_id": axis_id}
-    logger.info(f"🔥 SINGLE_AXIS: Returning result: {result}")
-    logger.info(f"🔥 SINGLE_AXIS: Result type check - status: {type(result['status'])}, axis_id: {type(result['axis_id'])}")
-    return result
+    return ExecutionResult.success(axis_id=axis_id)
 
 
 def _configure_worker_logging(log_file_base: str):
@@ -392,12 +491,13 @@ class PipelineOrchestrator(ContextProvider):
             self.registry = storage_registry
             logger.info("PipelineOrchestrator using provided StorageRegistry instance.")
         else:
-            # Create a copy of the global registry to avoid modifying shared state
+            # Use the global registry directly (don't copy) so that reset_memory_backend() works correctly
+            # The global registry is a singleton, and VFS clearing needs to clear the same instance
             from openhcs.io.base import storage_registry as global_storage_registry, ensure_storage_registry
-            # Ensure registry is initialized before copying
+            # Ensure registry is initialized
             ensure_storage_registry()
-            self.registry = global_storage_registry.copy()
-            logger.info("PipelineOrchestrator created its own StorageRegistry instance (copy of global).")
+            self.registry = global_storage_registry
+            logger.info("PipelineOrchestrator using global StorageRegistry instance.")
 
         # Override zarr backend with orchestrator's config
         shared_context = get_current_global_config(GlobalPipelineConfig)
@@ -730,7 +830,7 @@ class PipelineOrchestrator(ContextProvider):
                     'total_steps': len(pipeline_definition)
                 })
             except Exception as e:
-                logger.warning(f"Progress callback failed for axis {axis_id} start: {e}")
+                logger.warning(f"Progress_callback failed for axis {axis_id} start: {e}")
 
         # NUCLEAR VALIDATION
         if not frozen_context.is_frozen():
@@ -743,13 +843,26 @@ class PipelineOrchestrator(ContextProvider):
             logger.error(error_msg)
             raise RuntimeError(error_msg)
 
-        # Step IDs are consistent since pipeline_definition comes from UI (no remapping needed)
+        # Debug: Log sequential mode status
+        logger.info(f"🔍 DISPATCH: axis={axis_id}, pipeline_sequential_mode={frozen_context.pipeline_sequential_mode}, "
+                   f"combinations={frozen_context.pipeline_sequential_combinations}")
 
-        logger.info(f"🔥 SINGLE_AXIS: Processing {len(pipeline_definition)} steps for axis {axis_id}")
+        # All execution goes through step-sequential now
+        # Sequential combinations are handled by compiling separate contexts
+        return self._execute_step_sequential(pipeline_definition, frozen_context, visualizer)
+
+    def _execute_step_sequential(
+        self,
+        pipeline_definition: List[AbstractStep],
+        frozen_context: ProcessingContext,
+        visualizer: Optional[NapariVisualizerType]
+    ) -> Dict[str, Any]:
+        """Execute pipeline with step-wide sequential processing (current behavior)."""
+        axis_id = frozen_context.axis_id
+        logger.info(f"🔥 SINGLE_AXIS: Processing {len(pipeline_definition)} steps for axis {axis_id} (step-wide sequential)")
 
         for step_index, step in enumerate(pipeline_definition):
             step_name = frozen_context.step_plans[step_index]["step_name"]
-
             logger.info(f"🔥 SINGLE_AXIS: Executing step {step_index+1}/{len(pipeline_definition)} - {step_name} for axis {axis_id}")
 
             # Send progress: step started
@@ -762,7 +875,7 @@ class PipelineOrchestrator(ContextProvider):
                 except Exception as e:
                     logger.warning(f"Progress callback failed for axis {axis_id} step {step_name} start: {e}")
 
-            # Verify step has process method (should always be true for AbstractStep subclasses)
+            # Verify step has process method
             if not hasattr(step, 'process'):
                 error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} missing process method for axis {axis_id}"
                 logger.error(error_msg)
@@ -782,14 +895,6 @@ class PipelineOrchestrator(ContextProvider):
                 except Exception as e:
                     logger.warning(f"Progress callback failed for axis {axis_id} step {step_name} completion: {e}")
 
-    #        except Exception as step_error:
-    #            import traceback
-    #            full_traceback = traceback.format_exc()
-    #            error_msg = f"🔥 SINGLE_AXIS ERROR: Step {step_index+1} ({step_id}) failed for axis {axis_id}: {step_error}"
-    #            logger.error(error_msg, exc_info=True)
-    #            logger.error(f"🔥 SINGLE_AXIS TRACEBACK for axis {axis_id}, step {step_index+1} ({step_id}):\n{full_traceback}")
-    #            raise RuntimeError(error_msg) from step_error
-
             if visualizer:
                 step_plan = frozen_context.step_plans[step_index]
                 if step_plan['visualize']:
@@ -805,7 +910,7 @@ class PipelineOrchestrator(ContextProvider):
                         )
                     else:
                         logger.warning(f"Step {step_index} in axis {axis_id} flagged for visualization but 'output_dir' is missing in its plan.")
-        
+
         logger.info(f"🔥 SINGLE_AXIS: Pipeline execution completed successfully for axis {axis_id}")
 
         # Send progress: axis completed
@@ -816,6 +921,66 @@ class PipelineOrchestrator(ContextProvider):
                 })
             except Exception as e:
                 logger.warning(f"Progress callback failed for axis {axis_id} completion: {e}")
+
+        return {"status": "success", "axis_id": axis_id}
+
+    def _execute_pipeline_sequential(
+        self,
+        pipeline_definition: List[AbstractStep],
+        frozen_context: ProcessingContext,
+        visualizer: Optional[NapariVisualizerType]
+    ) -> Dict[str, Any]:
+        """Execute pipeline with pipeline-wide sequential processing.
+
+        Combinations are precomputed at compile time and stored in context.pipeline_sequential_combinations.
+        Loop: combinations → steps (process one combo through all steps before moving to next).
+        VFS is cleared between combinations to prevent memory accumulation.
+        """
+        axis_id = frozen_context.axis_id
+
+        # Combinations were precomputed at compile time
+        combinations = frozen_context.pipeline_sequential_combinations or []
+
+        if not combinations:
+            logger.warning(f"Pipeline sequential mode enabled but no combinations found for axis {axis_id}")
+            # Fallback to normal execution
+            for step_index, step in enumerate(pipeline_definition):
+                step.process(frozen_context, step_index)
+        else:
+            logger.info(f"🔄 PIPELINE_SEQUENTIAL: {len(combinations)} combinations for axis {axis_id}")
+
+            # Loop: combinations → steps
+            for combo_idx, combo in enumerate(combinations):
+                frozen_context.current_sequential_combination = combo
+                logger.info(f"🔄 ORCHESTRATOR: Set current_sequential_combination = {combo}")
+                logger.info(f"🔄 ORCHESTRATOR: Verify frozen_context.current_sequential_combination = {frozen_context.current_sequential_combination}")
+                logger.info(f"🔄 Processing combination {combo_idx + 1}/{len(combinations)}: {combo}")
+
+                # Process all steps for this combination
+                for step_index, step in enumerate(pipeline_definition):
+                    step.process(frozen_context, step_index)
+
+                # Clear VFS after each combination (except the last one, to preserve final outputs)
+                # The last combination's outputs need to remain in VFS for any post-processing
+                if combo_idx < len(combinations) - 1:
+                    try:
+                        from openhcs.io.base import reset_memory_backend
+                        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+
+                        logger.info(f"🔄 SEQUENTIAL: Clearing VFS after combination {combo}")
+                        reset_memory_backend()
+                        cleanup_all_gpu_frameworks()
+                        logger.info(f"🔄 SEQUENTIAL: VFS cleared, ready for next combination")
+                    except Exception as e:
+                        logger.warning(f"Failed to clear VFS after combination {combo}: {e}")
+
+        frozen_context.current_sequential_combination = None
+
+        if self.progress_callback:
+            try:
+                self.progress_callback(axis_id, 'pipeline', 'completed', {'total_steps': len(pipeline_definition)})
+            except Exception as e:
+                logger.warning(f"Progress callback failed: {e}")
 
         return {"status": "success", "axis_id": axis_id}
 
@@ -935,7 +1100,7 @@ class PipelineOrchestrator(ContextProvider):
         logger.info(f"Starting execution for {len(compiled_contexts)} axis values with max_workers={actual_max_workers}.")
 
         try:
-            execution_results: Dict[str, Dict[str, Any]] = {}
+            execution_results: Dict[str, ExecutionResult] = {}
 
             # CUDA COMPATIBILITY: Set spawn method for multiprocessing to support CUDA
             try:
@@ -1008,20 +1173,39 @@ class PipelineOrchestrator(ContextProvider):
                 if not config:
                     raise RuntimeError("Component configuration is required for orchestrator execution")
                 axis_name = config.multiprocessing_axis.value
-                for axis_id, context in contexts_snapshot.items():
-                    try:
-                        logger.info(f"🔥 DEATH_MARKER: SUBMITTING_TASK_FOR_{axis_name.upper()}_{axis_id}")
-                        logger.info(f"🔥 ORCHESTRATOR: Submitting task for {axis_name} {axis_id}")
-                        # Resolve all arguments before passing to ProcessPoolExecutor
-                        resolved_context = resolve_lazy_configurations_for_serialization(context)
 
-                        # Use static function to avoid pickling the orchestrator instance
-                        # Note: Use original pipeline_definition to preserve collision-resolved configs
-                        # Don't pass visualizer to worker processes - they communicate via ZeroMQ
+                # Group contexts by axis to detect sequential combinations
+                from collections import defaultdict
+                contexts_by_axis = defaultdict(list)
+                for context_key, context in contexts_snapshot.items():
+                    # Extract axis_id from context_key (either "axis_id" or "axis_id__combo_N")
+                    if "__combo_" in context_key:
+                        axis_id = context_key.split("__combo_")[0]
+                        contexts_by_axis[axis_id].append((context_key, context))
+                    else:
+                        contexts_by_axis[context_key].append((context_key, context))
+
+                logger.info(f"🔄 ORCHESTRATOR: Processing {len(contexts_by_axis)} {axis_name}s with {len(contexts_snapshot)} total contexts")
+
+                # Submit one task per axis (each task handles its own sequential combinations)
+                for axis_id, axis_contexts in contexts_by_axis.items():
+                    logger.info(f"🔄 ORCHESTRATOR: Axis {axis_id} has {len(axis_contexts)} context(s)")
+
+                    try:
+                        # Resolve all contexts for this axis
+                        resolved_axis_contexts = [
+                            (context_key, resolve_lazy_configurations_for_serialization(context))
+                            for context_key, context in axis_contexts
+                        ]
+
+                        logger.info(f"🔥 DEATH_MARKER: SUBMITTING_TASK_FOR_{axis_name.upper()}_{axis_id}")
+                        logger.info(f"🔥 ORCHESTRATOR: Submitting task for {axis_name} {axis_id} with {len(resolved_axis_contexts)} combination(s)")
+
+                        # Submit task that will handle all combinations for this axis sequentially
                         future = executor.submit(
-                            _execute_single_axis_static,
+                            _execute_axis_with_sequential_combinations,
                             pipeline_definition,
-                            resolved_context,
+                            resolved_axis_contexts,
                             None  # visualizer
                         )
                         future_to_axis_id[future] = axis_id
@@ -1147,7 +1331,7 @@ class PipelineOrchestrator(ContextProvider):
 
             # Update state based on execution results
             logger.info("🔥 ORCHESTRATOR: Updating orchestrator state based on execution results")
-            if all(result.get("status") == "success" for result in execution_results.values()):
+            if all(result.is_success() for result in execution_results.values()):
                 self._state = OrchestratorState.COMPLETED
             else:
                 self._state = OrchestratorState.EXEC_FAILED
@@ -1388,14 +1572,6 @@ class PipelineOrchestrator(ContextProvider):
 
         if for_serialization:
             result = self.pipeline_config.to_base_config()
-
-            # DEBUG: Check what the serialization result looks like
-            if hasattr(result, 'step_well_filter_config'):
-                step_config = getattr(result, 'step_well_filter_config')
-                if hasattr(step_config, 'well_filter'):
-                    well_filter_value = getattr(step_config, 'well_filter')
-                    logger.debug(f"Serialization result has step_well_filter_config.well_filter = {well_filter_value}")
-
             return result
         else:
             # Reuse existing merged config logic from apply_pipeline_config
@@ -1403,22 +1579,7 @@ class PipelineOrchestrator(ContextProvider):
             if not shared_context:
                 raise RuntimeError("No global configuration context available for merging")
 
-            # DEBUG: Check what the shared context looks like before merging
-            if hasattr(shared_context, 'step_well_filter_config'):
-                step_config = getattr(shared_context, 'step_well_filter_config')
-                if hasattr(step_config, 'well_filter'):
-                    well_filter_value = getattr(step_config, 'well_filter')
-                    logger.debug(f"Shared context before merge has step_well_filter_config.well_filter = {well_filter_value}")
-
             result = _create_merged_config(self.pipeline_config, shared_context)
-
-            # DEBUG: Check what the merged result looks like
-            if hasattr(result, 'step_well_filter_config'):
-                step_config = getattr(result, 'step_well_filter_config')
-                if hasattr(step_config, 'well_filter'):
-                    well_filter_value = getattr(step_config, 'well_filter')
-                    logger.debug(f"Merged result has step_well_filter_config.well_filter = {well_filter_value}")
-
             return result
 
 

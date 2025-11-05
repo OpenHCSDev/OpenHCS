@@ -162,14 +162,11 @@ except ImportError:
 
 from openhcs.constants.constants import Backend
 from openhcs.io.base import StorageBackend
-from openhcs.io.backend_registry import StorageBackendMeta
 from openhcs.io.exceptions import StorageResolutionError
 
 
-class ZarrStorageBackend(StorageBackend, metaclass=StorageBackendMeta):
-    """Zarr storage backend with automatic metaclass registration."""
-
-    # Backend type from enum for registration
+class ZarrStorageBackend(StorageBackend):
+    """Zarr storage backend with automatic registration."""
     _backend_type = Backend.ZARR.value
     """
     Zarr storage backend implementation with configurable compression.

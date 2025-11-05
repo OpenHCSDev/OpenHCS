@@ -54,7 +54,8 @@ class PathPlanner:
 
     def __init__(self, context: ProcessingContext, pipeline_config):
         self.ctx = context
-        # Access config directly from pipeline_config (lazy resolution happens via config_context)
+        # CRITICAL: pipeline_config is now the merged config (GlobalPipelineConfig) from context.global_config
+        # This ensures proper inheritance from global config without needing field-specific code
         self.cfg = pipeline_config.path_planning_config
         self.vfs = pipeline_config.vfs_config
         self.plans = context.step_plans
@@ -207,12 +208,16 @@ class PathPlanner:
 
         # Type-specific logic
         if dir_type == 'input':
-            if i == 0 or getattr(step, 'input_source', None) == InputSource.PIPELINE_START:
+            # Access input_source from processing_config (new API)
+            input_source = getattr(step.processing_config, 'input_source', None) if hasattr(step, 'processing_config') else None
+            if i == 0 or input_source == InputSource.PIPELINE_START:
                 return self.initial_input
             prev_step_index = i - 1  # Use previous step index instead of step_id
             return Path(self.plans[prev_step_index]['output_dir'])
         else:  # output
-            if i == 0 or getattr(step, 'input_source', None) == InputSource.PIPELINE_START:
+            # Access input_source from processing_config (new API)
+            input_source = getattr(step.processing_config, 'input_source', None) if hasattr(step, 'processing_config') else None
+            if i == 0 or input_source == InputSource.PIPELINE_START:
                 return self._build_output_path()
             return fallback  # Work in place
 
@@ -333,7 +338,7 @@ class PathPlanner:
 
     def _get_input_source(self, step: AbstractStep, i: int) -> str:
         """Get input source string."""
-        if step.input_source == InputSource.PIPELINE_START:
+        if step.processing_config.input_source == InputSource.PIPELINE_START:
             return 'PIPELINE_START'
         return 'PREVIOUS_STEP'
 
@@ -361,7 +366,9 @@ class PathPlanner:
         # Existing connectivity validation
         for i in range(1, len(pipeline)):
             curr, prev = pipeline[i], pipeline[i-1]
-            if getattr(curr, 'input_source', None) == InputSource.PIPELINE_START:
+            # Access input_source from processing_config (new API)
+            input_source = getattr(curr.processing_config, 'input_source', None) if hasattr(curr, 'processing_config') else None
+            if input_source == InputSource.PIPELINE_START:
                 continue
             curr_in = self.plans[i]['input_dir']  # Use step index i
             prev_out = self.plans[i-1]['output_dir']  # Use step index i-1
@@ -434,7 +441,15 @@ class PipelinePathPlanner:
     def prepare_pipeline_paths(context: ProcessingContext,
                               pipeline_definition: List[AbstractStep],
                               pipeline_config) -> Dict:
-        """Prepare pipeline paths."""
+        """
+        Prepare pipeline paths.
+
+        Args:
+            context: ProcessingContext with step_plans
+            pipeline_definition: List of pipeline steps
+            pipeline_config: Merged GlobalPipelineConfig (from context.global_config)
+                           NOT the raw PipelineConfig - ensures proper global config inheritance
+        """
         return PathPlanner(context, pipeline_config).plan(pipeline_definition)
 
     @staticmethod

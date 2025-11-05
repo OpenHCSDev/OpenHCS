@@ -231,6 +231,14 @@ def _value_to_repr(value, required_imports=None, name_mappings=None):
             path_name = name_mappings[('Path', 'pathlib')]
 
         return f'{path_name}({repr(str(value))})'
+    elif isinstance(value, list):
+        # CRITICAL: Handle lists recursively to properly format enum elements
+        # Without this, repr([enum1, enum2]) gives "<EnumClass.MEMBER: 'value'>" format
+        # which is not valid Python code
+        if not value:
+            return '[]'
+        elements = [_value_to_repr(item, required_imports, name_mappings) for item in value]
+        return f"[{', '.join(elements)}]"
     return repr(value)
 
 def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, required_imports=None, name_mappings=None):

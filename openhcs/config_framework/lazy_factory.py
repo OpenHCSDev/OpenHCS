@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 
 # OpenHCS imports
 from openhcs.config_framework.placeholder import LazyDefaultPlaceholderService
+from openhcs.core.auto_register_meta import AutoRegisterMeta, RegistryConfig
 # Note: dual_axis_resolver_recursive and lazy_placeholder imports kept inline to avoid circular imports
 
 
@@ -336,7 +337,13 @@ class LazyDataclassFactory:
                 if field.default is not MISSING:
                     field_def = (field.name, final_field_type, dataclasses.field(default=field.default, metadata=field.metadata))
                 elif field.default_factory is not MISSING:
-                    field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory, metadata=field.metadata))
+                    # CRITICAL: For lazy configs (PipelineConfig), dataclass fields with default_factory
+                    # should become None instead of creating instances
+                    # This enables proper inheritance from GlobalPipelineConfig
+                    if is_dataclass(field.type):
+                        field_def = (field.name, final_field_type, dataclasses.field(default=None, metadata=field.metadata))
+                    else:
+                        field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory, metadata=field.metadata))
                 else:
                     # Field has metadata but no default - use MISSING to indicate required field
                     field_def = (field.name, final_field_type, dataclasses.field(default=MISSING, metadata=field.metadata))
@@ -519,19 +526,24 @@ def ensure_global_config_context(global_config_type: Type, global_config_instanc
 CONTEXT_PROVIDERS = {}
 
 
-class ContextProviderMeta(ABCMeta):
+# Configuration for context provider registration
+_CONTEXT_PROVIDER_REGISTRY_CONFIG = RegistryConfig(
+    registry_dict=CONTEXT_PROVIDERS,
+    key_attribute='_context_type',
+    key_extractor=None,  # Requires explicit _context_type
+    skip_if_no_key=True,  # Skip if no _context_type set
+    secondary_registries=None,
+    log_registration=True,
+    registry_name='context provider'
+)
+
+
+class ContextProviderMeta(AutoRegisterMeta):
     """Metaclass for automatic registration of context provider classes."""
 
-    def __new__(cls, name, bases, attrs):
-        new_class = super().__new__(cls, name, bases, attrs)
-
-        # Only register concrete classes that have a context_type attribute
-        context_type = getattr(new_class, '_context_type', None)
-        if context_type and not getattr(new_class, '__abstractmethods__', None):
-            CONTEXT_PROVIDERS[context_type] = new_class
-            logger.debug(f"Auto-registered context provider: {context_type} -> {name}")
-
-        return new_class
+    def __new__(mcs, name, bases, attrs):
+        return super().__new__(mcs, name, bases, attrs,
+                              registry_config=_CONTEXT_PROVIDER_REGISTRY_CONFIG)
 
 
 class ContextProvider(metaclass=ContextProviderMeta):
@@ -1089,8 +1101,9 @@ def _inject_multiple_fields_into_dataclass(target_class: Type, configs: List[Dic
             field_type = Union[field_type, type(None)]
             default_value = None
         else:
-            # Both inherit_as_none and regular cases use same default factory
-            # Add ui_hidden metadata to the field so UI layer can check it
+            # CRITICAL: GlobalPipelineConfig needs default_factory to create instances with defaults
+            # PipelineConfig (created by make_lazy_simple) automatically gets default=None
+            # So we use default_factory here for GlobalPipelineConfig fields
             default_value = field(default_factory=field_type, metadata={'ui_hidden': is_ui_hidden})
 
         return (config['field_name'], field_type, default_value)

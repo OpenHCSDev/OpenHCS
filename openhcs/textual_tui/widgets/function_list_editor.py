@@ -57,6 +57,20 @@ class FunctionListEditorWidget(Container):
 
         logger.debug(f"FunctionListEditorWidget initialized for step '{self.step_identifier}' with {len(self.functions)} functions, dict_mode={self.is_dict_mode}")
 
+    def set_effective_group_by(self, group_by: Optional[GroupBy]) -> None:
+        """Set authoritative GroupBy value provided by parent window.
+
+        Parent windows should provide the actual GroupBy enum from the step's
+        ProcessingConfig (no fallback or duck-typing here). The textual widget
+        will update its reactive property and refresh UI.
+        """
+        self.current_group_by = group_by
+        # Try to refresh UI if mounted
+        try:
+            self._refresh_component_button()
+        except Exception:
+            pass
+
     @property
     def current_pattern(self) -> Union[List, Dict]:
         """Get the current pattern data (for parent widgets to access)."""

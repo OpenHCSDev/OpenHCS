@@ -72,6 +72,56 @@ def _filter_special_outputs_for_function(
     return result
 
 
+def _filter_patterns_by_component(
+    patterns: Union[List, Dict],
+    component: str,
+    target_value: str,
+    microscope_handler
+) -> Union[List, Dict]:
+    """Filter patterns to only include those matching a specific component value.
+
+    Pattern strings encode fixed component values (e.g., 'A01_s{iii}_w1_z003_t001.tif' has z=003).
+    This function extracts those values by temporarily replacing placeholders with dummy values
+    to parse the pattern, following the same convention used in PatternDiscoveryEngine.
+
+    Args:
+        patterns: List of patterns or dict of grouped patterns
+        component: Component name to filter by (e.g., 'z_index', 'channel')
+        target_value: Target component value (e.g., '3' for z-slice 3)
+        microscope_handler: MicroscopeHandler for parsing patterns
+
+    Returns:
+        Filtered patterns in the same format as input
+    """
+    from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
+
+    def filter_pattern_list(pattern_list: List) -> List:
+        """Filter a list of patterns by component value."""
+        filtered = []
+        for pattern in pattern_list:
+            # Replace placeholder with dummy value to make pattern parseable
+            # This follows the same convention as PatternDiscoveryEngine
+            pattern_template = str(pattern).replace(PatternDiscoveryEngine.PLACEHOLDER_PATTERN, '001')
+            metadata = microscope_handler.parser.parse_filename(pattern_template)
+
+            if metadata and str(metadata.get(component)) == str(target_value):
+                filtered.append(pattern)
+
+        return filtered
+
+    # If patterns is already grouped (dict), filter within each group
+    if isinstance(patterns, dict):
+        filtered = {}
+        for group_key, pattern_list in patterns.items():
+            filtered_list = filter_pattern_list(pattern_list)
+            if filtered_list:
+                filtered[group_key] = filtered_list
+        return filtered
+    else:
+        # Patterns is a flat list
+        return filter_pattern_list(patterns)
+
+
 def _save_materialized_data(filemanager, memory_data: List, materialized_paths: List[str],
                            materialized_backend: str, step_plan: Dict, context, axis_id: str) -> None:
     """Save data to materialized location using appropriate backend."""
@@ -175,13 +225,19 @@ def _bulk_preload_step_images(
     patterns_by_well: Dict[str, Any],
     filemanager: 'FileManager',
     microscope_handler: 'MicroscopeHandler',
-    zarr_config: Optional[Dict[str, Any]] = None
+    zarr_config: Optional[Dict[str, Any]] = None,
+    patterns_to_preload: Optional[List[str]] = None,
+    variable_components: Optional[List[str]] = None
 ) -> None:
     """
-    Pre-load all images for this step from source backend into memory backend.
+    Pre-load images for this step from source backend into memory backend.
 
     This reduces I/O overhead by doing a single bulk read operation
     instead of loading images per pattern group.
+
+    Args:
+        patterns_to_preload: Optional list of specific patterns to preload (for sequential mode).
+        variable_components: Required when patterns_to_preload is provided, for pattern expansion.
 
     Note: External conditional logic ensures this is only called for non-memory backends.
     """
@@ -190,13 +246,18 @@ def _bulk_preload_step_images(
 
     logger.debug(f"🔄 BULK PRELOAD: Loading images from {read_backend} to memory for well {axis_id}")
 
-    # Get all files for this well from patterns
-    all_files = []
-    # Create specialized path getter for this well
-    get_paths_for_axis = create_image_path_getter(axis_id, filemanager, microscope_handler)
-
-    # Get all image paths for this well
-    full_file_paths = get_paths_for_axis(step_input_dir, read_backend)
+    # Get file paths based on mode
+    if patterns_to_preload is not None:
+        # Sequential mode: expand patterns to files
+        all_files = [f for p in patterns_to_preload
+                     for f in microscope_handler.path_list_from_pattern(
+                         str(step_input_dir), p, filemanager, read_backend, variable_components)]
+        # Ensure full paths (prepend directory if needed)
+        full_file_paths = [str(step_input_dir / f) if not Path(f).is_absolute() else f for f in set(all_files)]
+    else:
+        # Normal mode: get all files for well
+        get_paths_for_axis = create_image_path_getter(axis_id, filemanager, microscope_handler)
+        full_file_paths = get_paths_for_axis(step_input_dir, read_backend)
 
     if not full_file_paths:
         raise RuntimeError(f"🔄 BULK PRELOAD: No files found for well {axis_id} in {step_input_dir} with backend {read_backend}")
@@ -218,7 +279,7 @@ def _bulk_preload_step_images(
             logger.debug(f"🔄 BULK PRELOAD: Deleted existing file {file_path} before bulk preload")
 
     filemanager.save_batch(raw_images, full_file_paths, Backend.MEMORY.value)
-    logger.debug(f"🔄 BULK PRELOAD: Saving {file_path} to memory")
+    logger.info(f"🔄 BULK PRELOAD: Saved {len(full_file_paths)} files to memory for well {axis_id}")
 
     # Clean up source references - keep only memory backend references
     del raw_images
@@ -458,6 +519,25 @@ def _execute_function_core(
                # prefixed_vfs_path = str(vfs_path_obj.parent / prefixed_filename)
 
                 logger.info(f"🔍 SPECIAL_SAVE: Saving '{output_key}' to '{vfs_path}' (memory backend)")
+
+                # DEBUG: List what's currently in VFS before saving
+                from openhcs.io.base import storage_registry as global_storage_registry
+                global_memory_backend = global_storage_registry[Backend.MEMORY.value]
+                global_existing_keys = list(global_memory_backend._memory_store.keys())
+                logger.info(f"🔍 VFS_DEBUG: GLOBAL memory backend has {len(global_existing_keys)} entries before save")
+                logger.info(f"🔍 VFS_DEBUG: GLOBAL memory backend ID: {id(global_memory_backend)}")
+                logger.info(f"🔍 VFS_DEBUG: GLOBAL first 10 keys: {global_existing_keys[:10]}")
+
+                # Check filemanager's memory backend
+                filemanager_memory_backend = context.filemanager._get_backend(Backend.MEMORY.value)
+                filemanager_existing_keys = list(filemanager_memory_backend._memory_store.keys())
+                logger.info(f"🔍 VFS_DEBUG: FILEMANAGER memory backend has {len(filemanager_existing_keys)} entries before save")
+                logger.info(f"🔍 VFS_DEBUG: FILEMANAGER memory backend ID: {id(filemanager_memory_backend)}")
+                logger.info(f"🔍 VFS_DEBUG: FILEMANAGER first 10 keys: {filemanager_existing_keys[:10]}")
+
+                if vfs_path in filemanager_existing_keys:
+                    logger.warning(f"🔍 VFS_DEBUG: WARNING - '{vfs_path}' ALREADY EXISTS in FILEMANAGER memory backend!")
+
                 # Ensure directory exists for memory backend
                 parent_dir = str(Path(vfs_path).parent)
                 context.filemanager.ensure_directory(parent_dir, Backend.MEMORY.value)
@@ -847,6 +927,18 @@ class FunctionStep(AbstractStep):
                 **filter_kwargs               # Dynamic filter parameter
             )
 
+            # Debug: Log discovered patterns
+            logger.info(f"🔍 PATTERN DISCOVERY: Step {step_index} ({step_name}) discovered patterns for well {axis_id}")
+            logger.info(f"🔍 PATTERN DISCOVERY: step_input_dir={step_input_dir}, read_backend={read_backend}")
+            if axis_id in patterns_by_well:
+                if isinstance(patterns_by_well[axis_id], dict):
+                    for comp_val, pattern_list in patterns_by_well[axis_id].items():
+                        logger.info(f"🔍 PATTERN DISCOVERY: Component '{comp_val}' has {len(pattern_list)} patterns: {pattern_list}")
+                else:
+                    logger.info(f"🔍 PATTERN DISCOVERY: Found {len(patterns_by_well[axis_id])} ungrouped patterns: {patterns_by_well[axis_id]}")
+            else:
+                logger.warning(f"🔍 PATTERN DISCOVERY: No patterns found for well {axis_id}!")
+
 
             # Only access gpu_id if the step requires GPU (has GPU memory types)
             from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES
@@ -873,10 +965,9 @@ class FunctionStep(AbstractStep):
             logger.info(f"Step {step_index} ({step_name}) I/O: read='{read_backend}', write='{write_backend}'.")
             logger.info(f"Step {step_index} ({step_name}) Paths: input_dir='{step_input_dir}', output_dir='{step_output_dir}', same_dir={same_dir}")
 
-            # 🔄 MATERIALIZATION READ: Bulk preload if not reading from memory
-            if read_backend != Backend.MEMORY.value:
-                _bulk_preload_step_images(step_input_dir, step_output_dir, axis_id, read_backend,
-                                        patterns_by_well,filemanager, microscope_handler, step_plan["zarr_config"])
+            # Import psutil for memory logging
+            import psutil
+            import os
 
             # 🔄 INPUT CONVERSION: Convert loaded input data to zarr if configured
             if "input_conversion_dir" in step_plan:
@@ -934,6 +1025,28 @@ class FunctionStep(AbstractStep):
             if func_from_plan is None:
                 raise ValueError(f"Step plan missing 'func' for step: {step_plan.get('step_name', 'Unknown')} (index: {step_index})")
 
+            # 🔄 SEQUENTIAL PROCESSING: Filter patterns BEFORE grouping by group_by component
+            # This ensures sequential filtering works independently of group_by
+            if context.current_sequential_combination:
+                seq_config = context.global_config.sequential_processing_config
+                seq_component = seq_config.sequential_components[0].value
+                target_value = context.current_sequential_combination[0]
+
+                logger.info(f"🔄 SEQUENTIAL: Filtering patterns by {seq_component}={target_value}")
+                logger.info(f"🔄 SEQUENTIAL: Before filtering: {len(patterns_by_well[axis_id]) if isinstance(patterns_by_well[axis_id], list) else sum(len(v) for v in patterns_by_well[axis_id].values())} patterns")
+
+                # Filter patterns by sequential component
+                patterns_by_well[axis_id] = _filter_patterns_by_component(
+                    patterns_by_well[axis_id],
+                    seq_component,
+                    target_value,
+                    microscope_handler
+                )
+
+                filtered_count = len(patterns_by_well[axis_id]) if isinstance(patterns_by_well[axis_id], list) else sum(len(v) for v in patterns_by_well[axis_id].values())
+                logger.info(f"🔄 SEQUENTIAL: After filtering: {filtered_count} patterns remain")
+
+            # Now group patterns by group_by component (if set)
             grouped_patterns, comp_to_funcs, comp_to_base_args = prepare_patterns_and_functions(
                 patterns_by_well[axis_id], func_from_plan, component=group_by.value if group_by else None
             )
@@ -944,21 +1057,69 @@ class FunctionStep(AbstractStep):
             if isinstance(func_from_plan, dict):
                 logger.info(f"🔍 DICT_PATTERN: func_from_plan keys: {list(func_from_plan.keys())}")
 
+            # DEBUG: Log VFS state at the start of step processing
+            from openhcs.io.base import storage_registry
+            memory_backend = storage_registry[Backend.MEMORY.value]
+            existing_keys = list(memory_backend._memory_store.keys())
+            logger.info(f"🔍 VFS_START: Memory backend has {len(existing_keys)} entries at START of step '{step_name}' for well {axis_id}")
+            # Filter to show only files in results directory
+            results_keys = [k for k in existing_keys if 'results/' in k]
+            logger.info(f"🔍 VFS_START: Results directory has {len(results_keys)} entries: {results_keys}")
+
+            # Sequential filtering now happens BEFORE prepare_patterns_and_functions() above
+            # This ensures it works correctly when sequential_components != group_by
+
+            # Non-sequential processing: process all patterns for all component values
+            process = psutil.Process(os.getpid())
+
+            # Preload files ONCE for all filtered patterns (before processing loop)
+            if read_backend != Backend.MEMORY.value:
+                mem_before_mb = process.memory_info().rss / 1024 / 1024
+                logger.info(f"📊 MEMORY: Before preload: {mem_before_mb:.1f} MB RSS")
+
+                # If sequential mode, only preload filtered patterns
+                if context.current_sequential_combination:
+                    # Collect all patterns from filtered grouped_patterns
+                    patterns_to_preload = []
+                    for comp_val, pattern_list in grouped_patterns.items():
+                        patterns_to_preload.extend(pattern_list)
+
+                    logger.info(f"� SEQUENTIAL: Preloading {len(patterns_to_preload)} filtered patterns")
+                    _bulk_preload_step_images(
+                        step_input_dir, step_output_dir, axis_id, read_backend,
+                        patterns_by_well, filemanager, microscope_handler, step_plan["zarr_config"],
+                        patterns_to_preload=patterns_to_preload,
+                        variable_components=[vc.value for vc in variable_components] if variable_components else []
+                    )
+                else:
+                    # Non-sequential: preload all patterns
+                    _bulk_preload_step_images(
+                        step_input_dir, step_output_dir, axis_id, read_backend,
+                        patterns_by_well, filemanager, microscope_handler, step_plan["zarr_config"]
+                    )
+
+                mem_after_mb = process.memory_info().rss / 1024 / 1024
+                logger.info(f"📊 MEMORY: After preload: {mem_after_mb:.1f} MB RSS (+{mem_after_mb - mem_before_mb:.1f} MB)")
+
+            # Process each component value
             for comp_val, current_pattern_list in grouped_patterns.items():
-                logger.info(f"🔍 DICT_PATTERN: Processing component '{comp_val}' with {len(current_pattern_list)} patterns")
                 exec_func_or_chain = comp_to_funcs[comp_val]
                 base_kwargs = comp_to_base_args[comp_val]
-                logger.info(f"🔍 DICT_PATTERN: Component '{comp_val}' exec_func_or_chain: {exec_func_or_chain}")
+
+                logger.info(f"🔍 DICT_PATTERN: Processing component '{comp_val}' with {len(current_pattern_list)} patterns")
+
+                # Process all patterns for this component value
                 for pattern_item in current_pattern_list:
                     _process_single_pattern_group(
                         context, pattern_item, exec_func_or_chain, base_kwargs,
                         step_input_dir, step_output_dir, axis_id, comp_val,
                         read_backend, write_backend, input_mem_type, output_mem_type,
                         device_id, same_dir,
-                        special_inputs, special_outputs, # Pass the maps from step_plan
+                        special_inputs, special_outputs,
                         step_plan["zarr_config"],
-                        variable_components, step_index  # Pass step_index for funcplan lookup
+                        variable_components, step_index
                     )
+
             logger.info(f"🔥 STEP: Completed processing for '{step_name}' well {axis_id}.")
 
             # 📄 MATERIALIZATION WRITE: Only if not writing to memory
