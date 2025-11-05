@@ -331,7 +331,7 @@ class ImageBrowserWidget(QWidget):
         self.lazy_napari_config = LazyNapariStreamingConfig()
 
         # Create parameter form for the lazy config
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
 
         # Set up context for placeholder resolution
         if self.orchestrator:
@@ -339,12 +339,16 @@ class ImageBrowserWidget(QWidget):
         else:
             context_obj = None
 
-        self.napari_config_form = ParameterFormManager(
-            object_instance=self.lazy_napari_config,
-            field_id="napari_config",
+        # CRITICAL FIX: Use FormManagerConfig to wrap configuration parameters
+        config = FormManagerConfig(
             parent=panel,
             context_obj=context_obj,
             color_scheme=self.color_scheme
+        )
+        self.napari_config_form = ParameterFormManager(
+            object_instance=self.lazy_napari_config,
+            field_id="napari_config",
+            config=config
         )
 
         # Wrap in scroll area for long forms (vertical scrolling only)
@@ -377,7 +381,7 @@ class ImageBrowserWidget(QWidget):
         self.lazy_fiji_config = LazyFijiStreamingConfig()
 
         # Create parameter form for the lazy config
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager, FormManagerConfig
 
         # Set up context for placeholder resolution
         if self.orchestrator:
@@ -385,12 +389,16 @@ class ImageBrowserWidget(QWidget):
         else:
             context_obj = None
 
-        self.fiji_config_form = ParameterFormManager(
-            object_instance=self.lazy_fiji_config,
-            field_id="fiji_config",
+        # CRITICAL FIX: Use FormManagerConfig to wrap configuration parameters
+        config = FormManagerConfig(
             parent=panel,
             context_obj=context_obj,
             color_scheme=self.color_scheme
+        )
+        self.fiji_config_form = ParameterFormManager(
+            object_instance=self.lazy_fiji_config,
+            field_id="fiji_config",
+            config=config
         )
 
         # Wrap in scroll area for long forms (vertical scrolling only)
