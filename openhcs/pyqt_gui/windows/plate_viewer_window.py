@@ -289,13 +289,9 @@ class PlateViewerWindow(QDialog):
     def _consolidate_results(self):
         """Manually trigger analysis results consolidation."""
         from PyQt6.QtWidgets import QMessageBox
-        from openhcs.core.config import get_current_global_config, GlobalPipelineConfig
         from pathlib import Path
 
         try:
-            # Get global config
-            shared_context = get_current_global_config(GlobalPipelineConfig)
-
             # Find results directory from orchestrator
             results_dir = None
             if hasattr(self.orchestrator, '_compiled_contexts') and self.orchestrator._compiled_contexts:
@@ -343,14 +339,17 @@ class PlateViewerWindow(QDialog):
             # Import consolidation function
             from openhcs.core.orchestrator.orchestrator import _get_consolidate_analysis_results
 
+            # Get configs from orchestrator's pipeline_config (same pattern as image browser)
+            pipeline_config = self.orchestrator.pipeline_config
+
             # Run consolidation
             logger.info(f"Manual consolidation: {len(csv_files)} CSV files in {results_dir}")
             consolidate_fn = _get_consolidate_analysis_results()
             consolidate_fn(
                 results_directory=str(results_dir),
                 well_ids=well_ids,
-                consolidation_config=shared_context.analysis_consolidation_config,
-                plate_metadata_config=shared_context.plate_metadata_config
+                consolidation_config=pipeline_config.analysis_consolidation_config,
+                plate_metadata_config=pipeline_config.plate_metadata_config
             )
 
             QMessageBox.information(
