@@ -45,7 +45,10 @@ class ImageBrowserWidget(QWidget):
         self.orchestrator = orchestrator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_gen = StyleSheetGenerator(self.color_scheme)
-        self.filemanager = FileManager(storage_registry)
+        # Use orchestrator's filemanager if available, otherwise create a new one with global registry
+        # This ensures the image browser can access all backends registered in the orchestrator's registry
+        # (e.g., virtual_workspace backend)
+        self.filemanager = orchestrator.filemanager if orchestrator else FileManager(storage_registry)
 
         # Lazy config widgets (will be created in init_ui)
         self.napari_config_form = None
@@ -591,8 +594,10 @@ class ImageBrowserWidget(QWidget):
                         # Format like TUI: "Channel 1 | HOECHST 33342"
                         # But for table cells, just show "1 | W1" (more compact)
                         return f"{value_str} | {metadata_name}"
+                    else:
+                        logger.debug(f"No metadata name found for {metadata_key} {value_str}")
             except Exception as e:
-                logger.debug(f"Could not get metadata for {metadata_key} {value_str}: {e}")
+                logger.warning(f"Could not get metadata for {metadata_key} {value_str}: {e}", exc_info=True)
 
         # Fallback to raw value only
         return value_str
@@ -1300,6 +1305,7 @@ class ImageBrowserWidget(QWidget):
                     'port': viewer.port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
+                    'plate_path': self.orchestrator.plate_path,
                     'source': source
                 }
 
@@ -1314,12 +1320,11 @@ class ImageBrowserWidget(QWidget):
             except Exception as e:
                 logger.error(f"Failed to load/stream batch to Napari: {e}")
                 # Show error in UI thread
-                from PyQt6.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    self, "_show_streaming_error",
-                    Qt.ConnectionType.QueuedConnection,
-                    str(e)
-                )
+                # Use signal to safely update UI from background thread
+                self._status_update_signal.emit(f"Error: {e}")
+                # Also show error dialog
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self._show_streaming_error(str(e)))
 
         # Start loading and streaming in background thread
         thread = threading.Thread(target=load_and_stream, daemon=True)
@@ -1369,6 +1374,7 @@ class ImageBrowserWidget(QWidget):
                     'port': viewer.port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
+                    'plate_path': self.orchestrator.plate_path,
                     'source': source
                 }
 
@@ -1383,12 +1389,11 @@ class ImageBrowserWidget(QWidget):
             except Exception as e:
                 logger.error(f"Failed to stream batch to Napari: {e}")
                 # Show error in UI thread
-                from PyQt6.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    self, "_show_streaming_error",
-                    Qt.ConnectionType.QueuedConnection,
-                    str(e)
-                )
+                # Use signal to safely update UI from background thread
+                self._status_update_signal.emit(f"Error: {e}")
+                # Also show error dialog
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self._show_streaming_error(str(e)))
 
         # Start streaming in background thread
         thread = threading.Thread(target=stream_async, daemon=True)
@@ -1465,6 +1470,7 @@ class ImageBrowserWidget(QWidget):
                     'port': viewer.port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
+                    'plate_path': self.orchestrator.plate_path,
                     'source': source
                 }
 
@@ -1480,12 +1486,11 @@ class ImageBrowserWidget(QWidget):
             except Exception as e:
                 logger.error(f"Failed to load/stream batch to Fiji: {e}")
                 # Show error in UI thread
-                from PyQt6.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    self, "_show_fiji_streaming_error",
-                    Qt.ConnectionType.QueuedConnection,
-                    str(e)
-                )
+                # Use signal to safely update UI from background thread
+                self._status_update_signal.emit(f"Error: {e}")
+                # Also show error dialog
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self._show_fiji_streaming_error(str(e)))
 
         # Start loading and streaming in background thread
         thread = threading.Thread(target=load_and_stream, daemon=True)
@@ -1535,6 +1540,7 @@ class ImageBrowserWidget(QWidget):
                     'port': viewer.port,
                     'display_config': config,
                     'microscope_handler': self.orchestrator.microscope_handler,
+                    'plate_path': self.orchestrator.plate_path,
                     'source': source
                 }
 
@@ -1549,12 +1555,11 @@ class ImageBrowserWidget(QWidget):
             except Exception as e:
                 logger.error(f"Failed to stream batch to Fiji: {e}")
                 # Show error in UI thread
-                from PyQt6.QtCore import QMetaObject, Qt
-                QMetaObject.invokeMethod(
-                    self, "_show_fiji_streaming_error",
-                    Qt.ConnectionType.QueuedConnection,
-                    str(e)
-                )
+                # Use signal to safely update UI from background thread
+                self._status_update_signal.emit(f"Error: {e}")
+                # Also show error dialog
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self._show_fiji_streaming_error(str(e)))
 
         # Start streaming in background thread
         thread = threading.Thread(target=stream_async, daemon=True)

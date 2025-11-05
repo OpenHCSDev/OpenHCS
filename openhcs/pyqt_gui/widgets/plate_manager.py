@@ -1801,7 +1801,7 @@ class PlateManagerWidget(QWidget):
 
     def _auto_scroll_status(self):
         """
-        Auto-scroll the status text back and forth.
+        Auto-scroll the status text continuously in a cycle.
 
         This runs on the Qt event loop via QTimer, so it's non-blocking.
         Kept minimal to ensure it never blocks the UI thread.
@@ -1822,13 +1822,11 @@ class PlateManagerWidget(QWidget):
         # Simple arithmetic update (non-blocking)
         self.status_scroll_position += self.status_scroll_direction * 2  # Scroll speed
 
-        # Reverse direction at boundaries
+        # Cycle continuously - reset to start when reaching the end
         if self.status_scroll_position >= max_scroll:
-            self.status_scroll_position = max_scroll
-            self.status_scroll_direction = -1
-        elif self.status_scroll_position <= 0:
             self.status_scroll_position = 0
-            self.status_scroll_direction = 1
+        elif self.status_scroll_position < 0:
+            self.status_scroll_position = 0
 
         # Single UI update (non-blocking)
         scrollbar.setValue(int(self.status_scroll_position))

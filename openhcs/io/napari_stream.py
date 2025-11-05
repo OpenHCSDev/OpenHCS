@@ -120,6 +120,26 @@ class NapariStreamingBackend(StreamingBackend):
                 mode = getattr(display_config, mode_field)
                 component_modes[comp_name] = mode.value
 
+        # Try to get component name metadata (channels, wells, etc.) from microscope handler
+        # This will be used for dimension labels in napari (e.g., "Ch1: DAPI" instead of "Channel 1")
+        component_names_metadata = {}
+        plate_path = kwargs.get('plate_path')
+        if plate_path and microscope_handler:
+            try:
+                # Get metadata for common components using metadata_handler methods
+                for comp_name in ['channel', 'well', 'site']:
+                    try:
+                        method_name = f'get_{comp_name}_values'
+                        if hasattr(microscope_handler.metadata_handler, method_name):
+                            method = getattr(microscope_handler.metadata_handler, method_name)
+                            metadata = method(plate_path)
+                            if metadata:
+                                component_names_metadata[comp_name] = metadata
+                    except Exception as e:
+                        logger.debug(f"Could not get {comp_name} metadata: {e}")
+            except Exception as e:
+                logger.debug(f"Could not get component metadata: {e}")
+        
         # Send batch message
         message = {
             'type': 'batch',
@@ -130,6 +150,7 @@ class NapariStreamingBackend(StreamingBackend):
                 'component_order': display_config.COMPONENT_ORDER,
                 'variable_size_handling': display_config.variable_size_handling.value if hasattr(display_config, 'variable_size_handling') and display_config.variable_size_handling else None
             },
+            'component_names_metadata': component_names_metadata,  # Add component names for dimension labels
             'timestamp': time.time()
         }
 

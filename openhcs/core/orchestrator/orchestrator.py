@@ -521,8 +521,9 @@ class PipelineOrchestrator(ContextProvider):
         # Component keys cache for fast access - uses AllComponents (includes multiprocessing axis)
         self._component_keys_cache: Dict['AllComponents', List[str]] = {}
 
-        # Metadata cache service
-        self._metadata_cache_service = get_metadata_cache()
+        # Metadata cache service - per-orchestrator instance (not global singleton)
+        from openhcs.core.metadata_cache import MetadataCache
+        self._metadata_cache_service = MetadataCache()
 
         # Viewer management - shared between pipeline execution and image browser
         self._visualizers = {}  # Dict[(backend_name, port)] -> visualizer instance
@@ -1589,6 +1590,9 @@ class PipelineOrchestrator(ContextProvider):
         # REMOVED: Thread-local modification - dual-axis resolver handles context automatically
         # No need to modify thread-local storage when clearing orchestrator config
         self.pipeline_config = None
+        # Clear metadata cache for this orchestrator
+        if hasattr(self, '_metadata_cache_service') and self._metadata_cache_service:
+            self._metadata_cache_service.clear_cache()
         logger.info(f"Cleared per-orchestrator config for plate: {self.plate_path}")
 
     def cleanup_pipeline_config(self) -> None:
