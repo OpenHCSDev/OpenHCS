@@ -296,7 +296,7 @@ class PlateViewerWindow(QDialog):
             plate_path = self.orchestrator.plate_path
             metadata_handler = self.orchestrator.microscope_handler.metadata_handler
 
-            # Load metadata to get subdirectories
+            # Load metadata to get subdirectories (same pattern as metadata viewer)
             from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
             if isinstance(metadata_handler, OpenHCSMetadataHandler):
                 metadata_dict = metadata_handler._load_metadata_dict(plate_path)
@@ -305,14 +305,16 @@ class PlateViewerWindow(QDialog):
                 # For non-OpenHCS formats, assume single output directory
                 subdirs = {}
 
-            # Find all *_results directories
+            # Find all results directories from subdirectory keys
             results_dirs = []
             if subdirs:
-                # Check each subdirectory for corresponding results directory
+                # Each subdirectory key is the actual directory name (e.g., "images", "images_results")
+                # Filter for directories that end with "_results"
                 for subdir_name in subdirs.keys():
-                    results_dir = plate_path / f"{subdir_name}_results"
-                    if results_dir.exists() and results_dir.is_dir():
-                        results_dirs.append(results_dir)
+                    if subdir_name.endswith('_results'):
+                        results_dir = plate_path / subdir_name
+                        if results_dir.exists() and results_dir.is_dir():
+                            results_dirs.append(results_dir)
             else:
                 # Fallback: scan plate directory for any *_results directories
                 for item in plate_path.iterdir():
