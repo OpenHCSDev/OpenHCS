@@ -200,7 +200,7 @@ class OperaPhenixHandler(MicroscopeHandler):
 
         logger.debug("Checking for missing images in Opera Phenix workspace using continuous sequence detection")
 
-        # 1. Get actual files (excluding broken symlinks)
+        # 1. Get actual files
         # Clause 245: Workspace operations are disk-only by design
         actual_file_paths = filemanager.list_image_files(image_dir, Backend.DISK.value)
 
@@ -221,13 +221,6 @@ class OperaPhenixHandler(MicroscopeHandler):
         sample_metadata = None
 
         for file_path in actual_file_paths:
-            # Check if file is a broken symlink
-            file_path_obj = Path(file_path)
-            if file_path_obj.is_symlink() and not file_path_obj.exists():
-                # Broken symlink - treat as missing
-                logger.debug(f"Found broken symlink (will be replaced): {file_path}")
-                continue
-
             filename = os.path.basename(file_path)
 
             # Parse filename
@@ -338,14 +331,28 @@ class OperaPhenixHandler(MicroscopeHandler):
         # 7. Create black images for missing files
         black_image = np.zeros((height, width), dtype=dtype)
 
+        created_count = 0
+        skipped_count = 0
+        
         for filename in missing_files:
             output_path = image_dir / filename
+            
+            # CRITICAL SAFETY CHECK: Never overwrite existing files
+            if output_path.exists():
+                # File already exists - DO NOT OVERWRITE to prevent data loss
+                logger.warning(f"Image already exists, skipping to prevent data loss: {filename}")
+                skipped_count += 1
+                continue
+            
             # Clause 245: Workspace operations are disk-only by design
             filemanager.save(black_image, output_path, Backend.DISK.value)
             logger.debug(f"Created missing image: {filename}")
+            created_count += 1
 
-        logger.info(f"Successfully created {len(missing_files)} missing images with black pixels")
-        return len(missing_files)
+        if skipped_count > 0:
+            logger.warning(f"Skipped {skipped_count} existing files to prevent overwriting")
+        logger.info(f"Successfully created {created_count} missing images with black pixels")
+        return created_count
 
 
 class OperaPhenixFilenameParser(FilenameParser):
