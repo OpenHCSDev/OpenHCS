@@ -571,6 +571,8 @@ class NapariViewerServer(ZMQServer):
         self.viewer = None
         self.layers = {}
         self.component_groups = {}
+        self.dimension_labels = {}  # Store dimension label mappings: layer_key -> {component: [labels]}
+        self.component_metadata = {}  # Store component metadata from microscope handler: {component: {id: name}}
 
         # Debouncing + locking for layer updates to prevent race conditions
         import threading
@@ -684,6 +686,61 @@ class NapariViewerServer(ZMQServer):
                     f"🔬 NAPARI PROCESS: Unknown data type {data_type} for {layer_key}"
                 )
 
+    def _setup_dimension_label_handler(self, layer_key, stack_components):
+        """
+        Set up event handler to update text overlay when dimensions change.
+        
+        This connects the viewer's dimension slider changes to text overlay updates,
+        displaying categorical labels (like well IDs) instead of numeric indices.
+        
+        Args:
+            layer_key: The layer to monitor for dimension changes
+            stack_components: List of components that are stacked (e.g., ['well', 'channel'])
+        """
+        if not self.viewer or not stack_components:
+            return
+            
+        # Get dimension label mappings for this layer
+        layer_labels = self.dimension_labels.get(layer_key, {})
+        if not layer_labels:
+            return
+        
+        def update_dimension_label(event=None):
+            """Update text overlay with current dimension labels."""
+            try:
+                current_step = self.viewer.dims.current_step
+
+                # Build label text from stacked components
+                label_parts = []
+                for i, component in enumerate(stack_components):
+                    if component in layer_labels:
+                        labels = layer_labels[component]
+                        # Get current index for this dimension
+                        if i < len(current_step):
+                            idx = current_step[i]
+                            if 0 <= idx < len(labels):
+                                label = labels[idx]
+                                # Don't show if label is None or "None"
+                                if label and str(label).lower() != 'none':
+                                    label_parts.append(label)
+
+                if label_parts:
+                    self.viewer.text_overlay.text = " | ".join(label_parts)
+                else:
+                    self.viewer.text_overlay.text = ""
+
+            except Exception as e:
+                logger.debug(f"🔬 NAPARI PROCESS: Error updating dimension label: {e}")
+        
+        # Connect to dimension change events
+        try:
+            self.viewer.dims.events.current_step.connect(update_dimension_label)
+            # Initial update
+            update_dimension_label()
+            logger.info(f"🔬 NAPARI PROCESS: Set up dimension label handler for {layer_key}")
+        except Exception as e:
+            logger.warning(f"🔬 NAPARI PROCESS: Failed to setup dimension label handler: {e}")
+
     def _update_image_layer(
         self, layer_key, layer_items, stack_components, component_modes
     ):
@@ -751,10 +808,58 @@ class NapariViewerServer(ZMQServer):
                 f"🔬 NAPARI PROCESS: Built axis_labels={axis_labels} for stack_components={stack_components}"
             )
 
+        # Build dimension labels from component values
+        # For each stacked component, collect the unique values in order
+        # Try to use metadata names (from openhcs_metadata.json) if available, fall back to indices
+        dimension_labels = {}
+
+        # Component abbreviation mapping
+        COMPONENT_ABBREV = {
+            "channel": "Ch",
+            "z_index": "Z",
+            "timepoint": "T",
+            "site": "Site",
+            "well": "Well"
+        }
+
+        for comp in stack_components:
+            values = sorted(set(item["components"].get(comp, 0) for item in layer_items))
+
+            # Try to get human-readable labels from metadata if available
+            labels = []
+
+            # Check if we have metadata for this component type
+            comp_metadata = self.component_metadata.get(comp, {})
+
+            for v in values:
+                # First try to get name from metadata (e.g., channel name)
+                metadata_name = comp_metadata.get(str(v))
+
+                if metadata_name and str(metadata_name).lower() != 'none':
+                    # Use metadata name with index for clarity
+                    if comp == "channel":
+                        labels.append(f"Ch{v}: {metadata_name}")
+                    elif comp == "well":
+                        labels.append(f"{metadata_name}")  # Well names are already good (e.g., "A01")
+                    else:
+                        labels.append(f"{comp.title()} {v}: {metadata_name}")
+                else:
+                    # No metadata - use abbreviated component name + index
+                    abbrev = COMPONENT_ABBREV.get(comp, comp)
+                    labels.append(f"{abbrev} {v}")
+
+            dimension_labels[comp] = labels
+        
+        # Store dimension labels for this layer
+        self.dimension_labels[layer_key] = dimension_labels
+        
         # Create or update the layer
         _create_or_update_image_layer(
             self.viewer, self.layers, layer_key, stacked_data, colormap, axis_labels
         )
+        
+        # Set up dimension label handler (connects dimension changes to text overlay)
+        self._setup_dimension_label_handler(layer_key, stack_components)
 
     def _update_shapes_layer(
         self, layer_key, layer_items, stack_components, component_modes
@@ -966,6 +1071,13 @@ class NapariViewerServer(ZMQServer):
             # Handle batch of images/shapes
             images = data.get("images", [])
             display_config_dict = data.get("display_config")
+            
+            # Extract component names metadata for dimension labels (e.g., channel names)
+            component_names_metadata = data.get("component_names_metadata", {})
+            if component_names_metadata:
+                # Update server's component metadata cache
+                self.component_metadata.update(component_names_metadata)
+                logger.info(f"🔬 NAPARI PROCESS: Updated component metadata: {list(component_names_metadata.keys())}")
 
             for image_info in images:
                 self._process_single_image(image_info, display_config_dict)
@@ -1127,6 +1239,15 @@ def _napari_viewer_process(
         # Initialize layers dictionary with existing layers (for reconnection scenarios)
         for layer in viewer.layers:
             server.layers[layer.name] = layer
+
+        # Set up dimension label tracking for well names
+        # This will be populated as metadata arrives and used to update text overlay
+        server.dimension_labels = {}  # layer_key -> {component: [label1, label2, ...]}
+        
+        # Enable text overlay for dimension labels
+        viewer.text_overlay.visible = True
+        viewer.text_overlay.color = 'white'
+        viewer.text_overlay.font_size = 14
 
         logger.info(
             f"🔬 NAPARI PROCESS: Viewer started on data port {port}, control port {server.control_port}"

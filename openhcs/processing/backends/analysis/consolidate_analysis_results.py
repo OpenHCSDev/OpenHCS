@@ -38,9 +38,35 @@ def extract_well_id(filename: str, pattern: str = r"([A-Z]\d{2})") -> Optional[s
 
 
 def extract_analysis_type(filename: str, well_id: str) -> str:
-    """Extract analysis type from filename after removing well ID and extension."""
-    # Remove well ID prefix and file extension
-    analysis_type = filename.replace(f"{well_id}_", "").replace(Path(filename).suffix, "")
+    """Extract analysis type from filename after removing well ID and extension.
+
+    Handles both ImageXpress (A01_cell_counts_step2.csv) and Opera Phenix
+    (r02c02f001p001-ch1sk1fk1fl1_match_results_step3.csv) formats.
+    """
+    # Remove file extension first
+    name_without_ext = filename.replace(Path(filename).suffix, "")
+
+    # Find the well ID in the filename (case-insensitive)
+    well_lower = well_id.lower()
+    name_lower = name_without_ext.lower()
+
+    if well_lower in name_lower:
+        # Find position after well ID
+        well_end_pos = name_lower.index(well_lower) + len(well_lower)
+        # Get everything after the well ID
+        after_well = name_without_ext[well_end_pos:]
+
+        # Find first underscore (analysis type starts after this)
+        if '_' in after_well:
+            # Remove everything up to and including first underscore
+            analysis_type = after_well[after_well.index('_') + 1:]
+        else:
+            # No underscore found, use everything after well ID
+            analysis_type = after_well
+    else:
+        # Fallback: use entire filename without extension
+        analysis_type = name_without_ext
+
     return analysis_type
 
 
@@ -296,14 +322,16 @@ def consolidate_analysis_results(
     # Group files by well ID and analysis type
     wells_data = {}
     analysis_types = set()
-    
+
     for file_path in all_files:
         filename = Path(file_path).name
 
-        # Find well ID by substring matching (much more robust than regex)
+        # Find well ID by case-insensitive substring matching
+        # (Opera Phenix parser returns uppercase R02C02 but CSV filenames have lowercase r02c02)
         well_id = None
+        filename_lower = filename.lower()
         for candidate_well in well_ids:
-            if candidate_well in filename:
+            if candidate_well.lower() in filename_lower:
                 well_id = candidate_well
                 break
 
@@ -374,7 +402,7 @@ def consolidate_analysis_results(
     
     # Save to CSV if output path specified
     if output_path is None:
-        output_path = results_dir / consolidation_config.output_filename
+        output_path = str(results_dir / consolidation_config.output_filename)
 
     if consolidation_config.metaxpress_style:
         # Create plate metadata dictionary from config

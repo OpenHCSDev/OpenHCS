@@ -123,6 +123,38 @@ class FijiStreamingBackend(StreamingBackend):
                 mode = getattr(display_config, mode_field)
                 component_modes[comp_name] = mode.value
 
+        # Try to get component name metadata (channels, wells, etc.) from microscope handler
+        # This will be used for dimension labels in Fiji (e.g., "Ch1: DAPI" instead of "Channel 1")
+        component_names_metadata = {}
+        plate_path = kwargs.get('plate_path')
+        logger.info(f"🏷️  FIJI BACKEND: plate_path = {plate_path}")
+        logger.info(f"🏷️  FIJI BACKEND: microscope_handler = {microscope_handler}")
+        if plate_path and microscope_handler:
+            try:
+                logger.info(f"🏷️  FIJI BACKEND: Attempting to get component metadata")
+                # Get metadata for common components using metadata_handler methods
+                for comp_name in ['channel', 'well', 'site']:
+                    try:
+                        method_name = f'get_{comp_name}_values'
+                        if hasattr(microscope_handler.metadata_handler, method_name):
+                            method = getattr(microscope_handler.metadata_handler, method_name)
+                            metadata = method(plate_path)
+                            logger.info(f"🏷️  FIJI BACKEND: Got {comp_name} metadata: {metadata}")
+                            if metadata:
+                                component_names_metadata[comp_name] = metadata
+                        else:
+                            logger.info(f"🏷️  FIJI BACKEND: No method {method_name} on metadata_handler")
+                    except Exception as e:
+                        logger.warning(f"Could not get {comp_name} metadata: {e}", exc_info=True)
+                logger.info(f"🏷️  FIJI BACKEND: Final component_names_metadata: {component_names_metadata}")
+            except Exception as e:
+                logger.warning(f"Could not get component metadata: {e}", exc_info=True)
+        else:
+            if not plate_path:
+                logger.warning(f"🏷️  FIJI BACKEND: No plate_path in kwargs")
+            if not microscope_handler:
+                logger.warning(f"🏷️  FIJI BACKEND: No microscope_handler")
+
         # Send batch message
         message = {
             'type': 'batch',
@@ -133,6 +165,7 @@ class FijiStreamingBackend(StreamingBackend):
                 'component_order': display_config.COMPONENT_ORDER,
                 'auto_contrast': display_config.auto_contrast if hasattr(display_config, 'auto_contrast') else True
             },
+            'component_names_metadata': component_names_metadata,  # Add component names for dimension labels
             'images_dir': images_dir,  # Source image subdirectory for ROI->image mapping
             'timestamp': time.time()
         }

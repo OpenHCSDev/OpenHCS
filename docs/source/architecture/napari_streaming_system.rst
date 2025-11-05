@@ -204,4 +204,31 @@ Viewers persist across pipeline runs for efficient resource usage:
 
 This enables efficient resource usage by maintaining napari viewers across multiple pipeline executions rather than creating new processes each time.
 
-**Architecture Benefits**: The napari streaming system provides real-time visualization without compromising pipeline performance, intelligent data filtering to show only relevant outputs, and persistent viewer management for efficient resource usage across multiple pipeline runs.
+Dimension Label Overlay
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The viewer automatically displays categorical labels for stacked dimensions instead of numeric indices:
+
+.. code-block:: python
+
+   # When well component is in STACK mode, viewer shows "Well 1", "Well 2" etc.
+   # in text overlay as user navigates dimension sliders
+   
+   # System automatically:
+   # 1. Extracts unique component values from streamed data
+   # 2. Builds label mappings (well: ["Well 1", "Well 2", ...])
+   # 3. Connects dimension change events to text overlay updates
+   # 4. Updates overlay text as user moves sliders
+
+**Implementation Details**: The dimension label system integrates with the component-aware display logic. When images are stacked along dimensions (component mode = STACK), the system:
+
+1. Collects unique values for each stacked component from component metadata
+2. Stores label mappings in the viewer server instance
+3. Connects ``viewer.dims.events.current_step`` to an update handler
+4. Updates ``viewer.text_overlay.text`` with current dimension labels
+
+This provides immediate visual feedback about which well, channel, or other component is currently displayed without requiring users to correlate numeric indices with metadata tables.
+
+**Future Enhancement**: The system is designed to support rich well labels (A01, B03, etc.) when microscope handler metadata is passed through the streaming protocol. Current implementation uses "Well N" format as a baseline.
+
+**Architecture Benefits**: The napari streaming system provides real-time visualization without compromising pipeline performance, intelligent data filtering to show only relevant outputs, persistent viewer management for efficient resource usage across multiple pipeline runs, and automatic dimension labeling for improved usability.

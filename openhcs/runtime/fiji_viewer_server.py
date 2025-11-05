@@ -79,6 +79,7 @@ class FijiViewerServer(ZMQServer):
         self._pending_items = []  # Queue of copied items waiting to be processed
         self._pending_display_config = None  # Display config for pending batch
         self._pending_images_dir = None  # Images dir for pending batch
+        self._pending_component_names_metadata = {}  # Component names metadata for dimension labels
         self._debounce_timer = None  # Timer for debounced processing
         self._debounce_lock = threading.Lock()  # Lock for pending queue
         self._debounce_delay = self.DEBOUNCE_DELAY_MS / 1000.0  # Convert ms to seconds
@@ -317,7 +318,7 @@ class FijiViewerServer(ZMQServer):
 
         return copied_items
 
-    def _queue_for_debounced_processing(self, items: List[Dict[str, Any]], display_config_dict: Dict[str, Any], images_dir: str):
+    def _queue_for_debounced_processing(self, items: List[Dict[str, Any]], display_config_dict: Dict[str, Any], images_dir: str, component_names_metadata: Dict[str, Any] = None):
         """
         Queue items for debounced batch processing.
 
@@ -328,12 +329,14 @@ class FijiViewerServer(ZMQServer):
             items: List of items with copied data
             display_config_dict: Display configuration
             images_dir: Source image subdirectory
+            component_names_metadata: Component name mappings for dimension labels
         """
         with self._debounce_lock:
             # Add items to pending queue
             self._pending_items.extend(items)
             self._pending_display_config = display_config_dict
             self._pending_images_dir = images_dir
+            self._pending_component_names_metadata = component_names_metadata or {}
 
             # Track first message time for max wait enforcement
             if self._first_message_time is None:
@@ -365,11 +368,13 @@ class FijiViewerServer(ZMQServer):
             items = self._pending_items
             display_config_dict = self._pending_display_config
             images_dir = self._pending_images_dir
+            component_names_metadata = self._pending_component_names_metadata
 
             # Clear pending queue
             self._pending_items = []
             self._pending_display_config = None
             self._pending_images_dir = None
+            self._pending_component_names_metadata = {}
             self._debounce_timer = None
             self._first_message_time = None
 
@@ -377,7 +382,7 @@ class FijiViewerServer(ZMQServer):
 
         # Process batch (outside lock to avoid blocking new messages)
         try:
-            self._process_items_from_batch(items, display_config_dict, images_dir)
+            self._process_items_from_batch(items, display_config_dict, images_dir, component_names_metadata)
         except Exception as e:
             logger.error(f"🔄 FIJI SERVER: Error processing debounced batch: {e}", exc_info=True)
 
@@ -407,6 +412,7 @@ class FijiViewerServer(ZMQServer):
                 items = data.get('images', [])
                 display_config_dict = data.get('display_config', {})
                 images_dir = data.get('images_dir')
+                component_names_metadata = data.get('component_names_metadata', {})
 
                 logger.info(f"📨 FIJI SERVER: Received batch message with {len(items)} items")
 
@@ -418,7 +424,7 @@ class FijiViewerServer(ZMQServer):
                 copied_items = self._copy_items_from_shared_memory(items)
 
                 # Queue copied items for debounced processing
-                self._queue_for_debounced_processing(copied_items, display_config_dict, images_dir)
+                self._queue_for_debounced_processing(copied_items, display_config_dict, images_dir, component_names_metadata)
 
             else:
                 # Single image message (fallback)
@@ -435,7 +441,7 @@ class FijiViewerServer(ZMQServer):
             logger.error(f"📨 FIJI SERVER: Error processing message: {e}", exc_info=True)
             return {'status': 'error', 'message': str(e)}
 
-    def _process_items_from_batch(self, items: List[Dict[str, Any]], display_config_dict: Dict[str, Any], images_dir: str = None):
+    def _process_items_from_batch(self, items: List[Dict[str, Any]], display_config_dict: Dict[str, Any], images_dir: str = None, component_names_metadata: Dict[str, Any] = None):
         """
         Unified processing for all item types (images, ROIs, future types).
 
@@ -446,9 +452,14 @@ class FijiViewerServer(ZMQServer):
             items: List of items (mixed types allowed)
             display_config_dict: Display configuration with component_modes
             images_dir: Source image subdirectory (for mapping ROI source to image source)
+            component_names_metadata: Component name mappings for dimension labels (e.g., channel names)
         """
         if not items:
             return
+        
+        # Default to empty dict if not provided
+        if component_names_metadata is None:
+            component_names_metadata = {}
 
         # STEP 1: SHARED - Get component modes and order
         component_modes = display_config_dict.get('component_modes', {})
@@ -528,14 +539,16 @@ class FijiViewerServer(ZMQServer):
         for window_key, window_items in windows.items():
             self._process_window_group(
                 window_key, window_items, display_config_dict,
-                channel_components, slice_components, frame_components
+                channel_components, slice_components, frame_components,
+                component_names_metadata
             )
 
     def _process_window_group(self, window_key: str, items: List[Dict[str, Any]],
                               display_config_dict: Dict[str, Any],
                               channel_components: List[str],
                               slice_components: List[str],
-                              frame_components: List[str]):
+                              frame_components: List[str],
+                              component_names_metadata: Dict[str, Any] = None):
         """
         Process all items for a single window group.
 
@@ -548,18 +561,21 @@ class FijiViewerServer(ZMQServer):
             channel_components: Components mapped to Channel dimension
             slice_components: Components mapped to Slice dimension
             frame_components: Components mapped to Frame dimension
+            component_names_metadata: Component name mappings for dimension labels
         """
         # Lock to prevent concurrent batches from overwriting each other's hyperstacks
         # (race condition in fast sequential mode where multiple debounce timers fire)
         with self._hyperstack_lock:
             self._process_window_group_locked(window_key, items, display_config_dict,
-                                              channel_components, slice_components, frame_components)
+                                              channel_components, slice_components, frame_components,
+                                              component_names_metadata)
 
     def _process_window_group_locked(self, window_key: str, items: List[Dict[str, Any]],
                                      display_config_dict: Dict[str, Any],
                                      channel_components: List[str],
                                      slice_components: List[str],
-                                     frame_components: List[str]):
+                                     frame_components: List[str],
+                                     component_names_metadata: Dict[str, Any] = None):
         """
         Process window group with hyperstack lock held.
 
@@ -645,7 +661,8 @@ class FijiViewerServer(ZMQServer):
             handler(
                 self, window_key, type_items, display_config_dict,
                 channel_components, slice_components, frame_components,
-                channel_values, slice_values, frame_values
+                channel_values, slice_values, frame_values,
+                component_names_metadata
             )
 
     def _merge_dimension_values(self, stored_values: List[tuple],
@@ -829,7 +846,8 @@ class FijiViewerServer(ZMQServer):
                                   frame_components: List[str],
                                   channel_values: List[tuple] = None,
                                   slice_values: List[tuple] = None,
-                                  frame_values: List[tuple] = None):
+                                  frame_values: List[tuple] = None,
+                                  component_names_metadata: Dict[str, Any] = None):
         """
         Build or update a single ImageJ hyperstack from images.
 
@@ -875,7 +893,8 @@ class FijiViewerServer(ZMQServer):
         self._build_new_hyperstack(
             images, window_key, channel_components, slice_components,
             frame_components, display_config_dict, is_new=True,
-            channel_values=channel_values, slice_values=slice_values, frame_values=frame_values
+            channel_values=channel_values, slice_values=slice_values, frame_values=frame_values,
+            component_names_metadata=component_names_metadata
         )
 
     def _build_image_lookup(self, images, channel_components, slice_components, frame_components):
@@ -1001,13 +1020,388 @@ class FijiViewerServer(ZMQServer):
                 except Exception as e:
                     logger.warning(f"🔬 FIJI SERVER: Failed to apply auto-contrast: {e}")
 
+    def _create_dimension_label_overlay(self, imp, channel_components: List[str], slice_components: List[str],
+                                       frame_components: List[str], channel_values: List[tuple],
+                                       slice_values: List[tuple], frame_values: List[tuple],
+                                       component_names_metadata: Dict[str, Any]):
+        """
+        Create a text overlay showing current dimension labels (like napari's text_overlay).
+        
+        This creates an actual on-screen text overlay that updates when dimensions change,
+        matching napari's behavior.
+        
+        Args:
+            imp: ImagePlus instance
+            channel_components: Components mapped to Channel dimension
+            slice_components: Components mapped to Slice dimension  
+            frame_components: Components mapped to Frame dimension
+            channel_values: Channel dimension values
+            slice_values: Slice dimension values
+            frame_values: Frame dimension values
+            component_names_metadata: Dict mapping component names to {id: name} dicts
+        """
+        import scyjava as sj
+        
+        try:
+            logger.info(f"🏷️  FIJI SERVER: Creating dimension label overlay")
+            
+            # Component abbreviation mapping
+            COMPONENT_ABBREV = {
+                "channel": "Ch",
+                "z_index": "Z",
+                "timepoint": "T",
+                "site": "Site",
+                "well": "Well"
+            }
+
+            # Build label text showing actual component names and values
+            label_parts = []
+
+            def add_component_label(comp_name, comp_value):
+                """Helper to add a component label with metadata if available."""
+                if comp_name in component_names_metadata:
+                    metadata_dict = component_names_metadata[comp_name]
+                    metadata_name = metadata_dict.get(str(comp_value))
+                    if metadata_name and str(metadata_name).lower() != 'none':
+                        # Show metadata name (e.g., "Brightfield", "DAPI")
+                        label_parts.append(metadata_name)
+                    else:
+                        # No metadata - use abbreviated component name + index
+                        abbrev = COMPONENT_ABBREV.get(comp_name, comp_name)
+                        label_parts.append(f"{abbrev} {comp_value}")
+                else:
+                    # No metadata - use abbreviated component name + index
+                    abbrev = COMPONENT_ABBREV.get(comp_name, comp_name)
+                    label_parts.append(f"{abbrev} {comp_value}")
+            
+            # Channel dimension - show actual channel component values
+            if channel_components and channel_values:
+                current_channel = imp.getChannel()  # 1-indexed
+                if 0 < current_channel <= len(channel_values):
+                    channel_tuple = channel_values[current_channel - 1]
+                    for comp_idx, comp_name in enumerate(channel_components):
+                        comp_value = channel_tuple[comp_idx]
+                        add_component_label(comp_name, comp_value)
+            
+            # Slice dimension - show actual slice component values
+            if slice_components and slice_values:
+                current_slice = imp.getSlice()  # 1-indexed
+                if 0 < current_slice <= len(slice_values):
+                    slice_tuple = slice_values[current_slice - 1]
+                    for comp_idx, comp_name in enumerate(slice_components):
+                        comp_value = slice_tuple[comp_idx]
+                        add_component_label(comp_name, comp_value)
+            
+            # Frame dimension - show actual frame component values (well, site, timepoint, etc.)
+            if frame_components and frame_values:
+                current_frame = imp.getFrame()  # 1-indexed
+                if 0 < current_frame <= len(frame_values):
+                    frame_tuple = frame_values[current_frame - 1]
+                    for comp_idx, comp_name in enumerate(frame_components):
+                        comp_value = frame_tuple[comp_idx]
+                        add_component_label(comp_name, comp_value)
+            
+            if not label_parts:
+                logger.info(f"🏷️  FIJI SERVER: No dimensions to label (no channels/slices/frames)")
+                # Still create a test overlay to verify the mechanism works
+                label_parts = ["TEST OVERLAY"]
+            
+            label_text = " | ".join(label_parts)
+            logger.info(f"🏷️  FIJI SERVER: Creating overlay with text: '{label_text}'")
+            
+            # Create text overlay using ImageJ Overlay API
+            TextRoi = sj.jimport('ij.gui.TextRoi')
+            Overlay = sj.jimport('ij.gui.Overlay')
+            Font = sj.jimport('java.awt.Font')
+            Color = sj.jimport('java.awt.Color')
+            
+            # Position text in top-left corner
+            x = 10
+            y = 20
+            
+            # Create text ROI with white fill color
+            text_roi = TextRoi(x, y, label_text)
+            text_roi.setFont(Font("SansSerif", Font.BOLD, 16))
+            
+            # Set fill color to white (this is what shows)
+            text_roi.setFillColor(Color.WHITE)
+            # Set stroke (outline) color to black for contrast
+            text_roi.setStrokeColor(Color.BLACK)
+            text_roi.setStrokeWidth(2.0)
+            
+            # Create or get overlay
+            overlay = imp.getOverlay()
+            if overlay is None:
+                overlay = Overlay()
+            
+            # Clear any existing overlays first
+            overlay.clear()
+            
+            # Add text ROI to overlay
+            overlay.add(text_roi)
+            imp.setOverlay(overlay)
+            
+            logger.info(f"🏷️  FIJI SERVER: Text overlay created successfully with white text")
+            
+            # Add listener to update overlay when hyperstack position changes
+            self._add_dimension_change_listener(imp, channel_components, slice_components, frame_components,
+                                               channel_values, slice_values, frame_values,
+                                               component_names_metadata)
+            
+        except Exception as e:
+            logger.error(f"🏷️  FIJI SERVER: Failed to create dimension label overlay: {e}", exc_info=True)
+    
+    def _add_dimension_change_listener(self, imp, channel_components: List[str], slice_components: List[str],
+                                      frame_components: List[str], channel_values: List[tuple],
+                                      slice_values: List[tuple], frame_values: List[tuple],
+                                      component_names_metadata: Dict[str, Any]):
+        """
+        Add a listener to update the text overlay when hyperstack position changes.
+        
+        Uses AdjustmentListener on the StackWindow scrollbars to detect dimension changes.
+        Based on ImageJ source: ij.gui.StackWindow implements AdjustmentListener for its scrollbars.
+        """
+        import scyjava as sj
+        import jpype
+        
+        try:
+            # Component abbreviation mapping
+            COMPONENT_ABBREV = {
+                "channel": "Ch",
+                "z_index": "Z",
+                "timepoint": "T",
+                "site": "Site",
+                "well": "Well"
+            }
+
+            # Helper function to build label text from current position
+            def build_label_text():
+                label_parts = []
+
+                def add_component_label(comp_name, comp_value):
+                    """Helper to add a component label with metadata if available."""
+                    if comp_name in component_names_metadata:
+                        metadata_dict = component_names_metadata[comp_name]
+                        metadata_name = metadata_dict.get(str(comp_value))
+                        if metadata_name and str(metadata_name).lower() != 'none':
+                            # Use metadata name (e.g., "DAPI")
+                            label_parts.append(metadata_name)
+                        else:
+                            # No metadata - use abbreviated component name + index
+                            abbrev = COMPONENT_ABBREV.get(comp_name, comp_name)
+                            label_parts.append(f"{abbrev} {comp_value}")
+                    else:
+                        # No metadata - use abbreviated component name + index
+                        abbrev = COMPONENT_ABBREV.get(comp_name, comp_name)
+                        label_parts.append(f"{abbrev} {comp_value}")
+
+                # Channel
+                if channel_components and channel_values:
+                    current_channel = imp.getChannel()
+                    if 0 < current_channel <= len(channel_values):
+                        channel_tuple = channel_values[current_channel - 1]
+                        for comp_idx, comp_name in enumerate(channel_components):
+                            add_component_label(comp_name, channel_tuple[comp_idx])
+
+                # Slice
+                if slice_components and slice_values:
+                    current_slice = imp.getSlice()
+                    if 0 < current_slice <= len(slice_values):
+                        slice_tuple = slice_values[current_slice - 1]
+                        for comp_idx, comp_name in enumerate(slice_components):
+                            add_component_label(comp_name, slice_tuple[comp_idx])
+
+                # Frame
+                if frame_components and frame_values:
+                    current_frame = imp.getFrame()
+                    if 0 < current_frame <= len(frame_values):
+                        frame_tuple = frame_values[current_frame - 1]
+                        for comp_idx, comp_name in enumerate(frame_components):
+                            add_component_label(comp_name, frame_tuple[comp_idx])
+
+                return " | ".join(label_parts) if label_parts else "TEST OVERLAY"
+            
+            # Helper function to update overlay text
+            def update_overlay():
+                try:
+                    label_text = build_label_text()
+                    logger.info(f"🔄 FIJI SERVER: Updating overlay text to: '{label_text}'")
+
+                    TextRoi = sj.jimport('ij.gui.TextRoi')
+                    Overlay = sj.jimport('ij.gui.Overlay')
+                    Font = sj.jimport('java.awt.Font')
+                    Color = sj.jimport('java.awt.Color')
+
+                    text_roi = TextRoi(10, 20, label_text)
+                    text_roi.setFont(Font("SansSerif", Font.BOLD, 16))
+                    text_roi.setFillColor(Color.WHITE)
+                    text_roi.setStrokeColor(Color.BLACK)
+                    text_roi.setStrokeWidth(2.0)
+
+                    overlay = Overlay()
+                    overlay.add(text_roi)
+                    imp.setOverlay(overlay)
+                    # Force canvas repaint - this triggers the overlay redraw
+                    canvas = imp.getCanvas()
+                    if canvas is not None:
+                        canvas.repaint()
+                    logger.info(f"🔄 FIJI SERVER: Overlay updated successfully")
+                except Exception as e:
+                    logger.error(f"🔄 FIJI SERVER: Error updating overlay: {e}", exc_info=True)
+            
+            # Get the StackWindow and add AdjustmentListener to its scrollbars
+            window = imp.getWindow()
+            if window is not None:
+                try:
+                    # Define listener class using jpype @JImplements decorator
+                    @jpype.JImplements('java.awt.event.AdjustmentListener')
+                    class DimensionScrollbarListener:
+                        @jpype.JOverride
+                        def adjustmentValueChanged(self, event):
+                            # Called when user scrolls through C/Z/T dimensions
+                            update_overlay()
+                    
+                    listener = DimensionScrollbarListener()
+
+                    # StackWindow has cSelector, zSelector, tSelector scrollbars
+                    # ImageJ only creates scrollbars when that dimension > 1
+                    # Note: hasattr() doesn't work with JPype Java fields, must access directly
+                    added = []
+
+                    logger.info(f"🏷️  FIJI SERVER: Window type: {type(window).__name__}")
+                    logger.info(f"🏷️  FIJI SERVER: Hyperstack: {imp.getNChannels()}C x {imp.getNSlices()}Z x {imp.getNFrames()}T")
+
+                    # Scrollbars are AWT components, not fields
+                    # Find all ScrollbarWithLabel components and attach listeners
+                    import scyjava as sj
+                    try:
+                        components = window.getComponents()
+                        logger.info(f"🏷️  FIJI SERVER: Window has {len(components)} components")
+
+                        scrollbar_count = 0
+                        for i, comp in enumerate(components):
+                            comp_type = type(comp).__name__
+                            logger.info(f"🏷️  FIJI SERVER:   Component {i}: {comp_type}")
+
+                            # ScrollbarWithLabel is the hyperstack dimension scrollbar
+                            if 'ScrollbarWithLabel' in comp_type:
+                                try:
+                                    # Just attach listener to all scrollbars
+                                    # The update_overlay() function will read current position from imp
+                                    comp.addAdjustmentListener(listener)
+                                    scrollbar_count += 1
+                                    added.append(f'scrollbar_{i}')
+                                    logger.info(f"🏷️  FIJI SERVER:     Added listener to scrollbar {i}")
+                                except Exception as e:
+                                    logger.warning(f"🏷️  FIJI SERVER:     Could not attach listener: {e}")
+
+                        logger.info(f"🏷️  FIJI SERVER: Attached listeners to {scrollbar_count} scrollbars")
+                    except Exception as e:
+                        logger.warning(f"🏷️  FIJI SERVER: Could not enumerate components: {e}")
+
+                    if added:
+                        logger.info(f"🏷️  FIJI SERVER: Added scrollbar listeners for: {', '.join(added)}")
+                    else:
+                        logger.warning(f"🏷️  FIJI SERVER: No scrollbars found to attach listener (not a hyperstack?)")
+                    
+                except Exception as e:
+                    logger.warning(f"Could not add scrollbar listeners: {e}", exc_info=True)
+            else:
+                logger.warning(f"🏷️  FIJI SERVER: No window found, cannot add listeners")
+            
+        except Exception as e:
+            logger.error(f"🏷️  FIJI SERVER: Failed to add dimension change listener: {e}", exc_info=True)
+    
+    def _set_dimension_labels(self, imp, channel_components: List[str], slice_components: List[str],
+                              frame_components: List[str], channel_values: List[tuple],
+                              slice_values: List[tuple], frame_values: List[tuple],
+                              component_names_metadata: Dict[str, Any]):
+        """
+        Set dimension labels on ImagePlus using component metadata.
+        
+        Sets both:
+        1. ImageJ property metadata (for channel selector UI)
+        2. Text overlay (for on-screen display like napari)
+        
+        Args:
+            imp: ImagePlus instance
+            channel_components: Components mapped to Channel dimension
+            slice_components: Components mapped to Slice dimension  
+            frame_components: Components mapped to Frame dimension
+            channel_values: Channel dimension values
+            slice_values: Slice dimension values
+            frame_values: Frame dimension values
+            component_names_metadata: Dict mapping component names to {id: name} dicts
+        """
+        try:
+            logger.info(f"🏷️  FIJI SERVER: _set_dimension_labels called with {len(channel_values) if channel_values else 0} channels")
+            logger.info(f"🏷️  FIJI SERVER: channel_components = {channel_components}")
+            logger.info(f"🏷️  FIJI SERVER: component_names_metadata = {component_names_metadata}")
+            
+            # Set channel labels
+            if channel_components and channel_values:
+                logger.info(f"🏷️  FIJI SERVER: Setting labels for {len(channel_values)} channels")
+                for idx, channel_tuple in enumerate(channel_values, start=1):
+                    # Build label from component metadata
+                    label_parts = []
+                    for comp_idx, comp_name in enumerate(channel_components):
+                        comp_value = str(channel_tuple[comp_idx])
+                        # Try to get metadata name for this component value
+                        if comp_name in component_names_metadata:
+                            metadata_dict = component_names_metadata[comp_name]
+                            metadata_name = metadata_dict.get(comp_value)
+                            logger.debug(f"🏷️  Found metadata for {comp_name}[{comp_value}]: {metadata_name}")
+                            if metadata_name and str(metadata_name).lower() != 'none':
+                                # Use metadata name (e.g., "DAPI")
+                                label_parts.append(metadata_name)
+                            else:
+                                # No metadata - use abbreviated component name + index
+                                if comp_name == "channel":
+                                    label_parts.append(f"Ch {comp_value}")
+                                elif comp_name == "z_index":
+                                    label_parts.append(f"Z {comp_value}")
+                                elif comp_name == "timepoint":
+                                    label_parts.append(f"T {comp_value}")
+                                elif comp_name == "site":
+                                    label_parts.append(f"Site {comp_value}")
+                                else:
+                                    label_parts.append(f"{comp_name} {comp_value}")
+                        else:
+                            # No metadata - use abbreviated component name + index
+                            if comp_name == "channel":
+                                label_parts.append(f"Ch {comp_value}")
+                            elif comp_name == "z_index":
+                                label_parts.append(f"Z {comp_value}")
+                            elif comp_name == "timepoint":
+                                label_parts.append(f"T {comp_value}")
+                            elif comp_name == "site":
+                                label_parts.append(f"Site {comp_value}")
+                            else:
+                                label_parts.append(f"{comp_name} {comp_value}")
+
+                    # Set the label property (ImageJ uses "Label1", "Label2", etc. for channels)
+                    label = " | ".join(label_parts) if label_parts else f"Ch{idx}"
+                    imp.setProperty(f"Label{idx}", label)
+                    logger.info(f"🏷️  FIJI SERVER: Set channel {idx} label: '{label}' (property key: 'Label{idx}')")
+                    
+                    # Verify the property was set
+                    verified_label = imp.getProperty(f"Label{idx}")
+                    logger.info(f"🏷️  FIJI SERVER: Verified channel {idx} label: '{verified_label}'")
+            
+            # Note: ImageJ doesn't have built-in properties for slice/frame labels like it does for channels
+            # Those would require custom overlays or other visualization methods
+            
+        except Exception as e:
+            logger.warning(f"Failed to set dimension labels: {e}", exc_info=True)
+
     def _build_new_hyperstack(self, all_images: List[Dict[str, Any]], window_key: str,
                                channel_components: List[str], slice_components: List[str],
                                frame_components: List[str], display_config_dict: Dict[str, Any],
                                is_new: bool, preserved_display_ranges: List[tuple] = None,
                                channel_values: List[tuple] = None,
                                slice_values: List[tuple] = None,
-                               frame_values: List[tuple] = None):
+                               frame_values: List[tuple] = None,
+                               component_names_metadata: Dict[str, Any] = None):
         """Build a new hyperstack from scratch."""
         import scyjava as sj
 
@@ -1049,11 +1443,47 @@ class FijiViewerServer(ZMQServer):
         # Convert to hyperstack
         imp = self._convert_to_hyperstack(imp, nChannels, nSlices, nFrames, window_key)
 
+        # Set dimension labels from metadata (e.g., channel names like "DAPI", "GFP")
+        logger.info(f"🏷️  FIJI SERVER: component_names_metadata = {component_names_metadata}")
+        
+        # Note: Text overlay will be created AFTER imp.show() so the window exists for listeners
+        
+        title_suffix = ""
+        if component_names_metadata:
+            logger.info(f"🏷️  FIJI SERVER: Setting dimension labels for {window_key}")
+            # Set property metadata for channel selector UI
+            self._set_dimension_labels(imp, channel_components, slice_components, frame_components,
+                                      channel_values, slice_values, frame_values,
+                                      component_names_metadata)
+            
+            # For single-channel images, add channel name to window title since no slider appears
+            if nChannels == 1 and channel_components and channel_values:
+                first_comp = channel_components[0]
+                # channel_values is a list of tuples, e.g., [(1,)]
+                first_value_tuple = channel_values[0]
+                first_value_str = str(first_value_tuple[0])
+                
+                if first_comp in component_names_metadata:
+                    comp_metadata = component_names_metadata[first_comp]
+                    if first_value_str in comp_metadata:
+                        channel_name = comp_metadata[first_value_str]
+                        if channel_name and str(channel_name).lower() != 'none':
+                            title_suffix = f" [{channel_name}]"
+                            logger.info(f"🏷️  FIJI SERVER: Adding channel name to window title: {title_suffix}")
+        else:
+            logger.info(f"🏷️  FIJI SERVER: No component_names_metadata available for {window_key}")
+        
+        # Update window title with suffix if present
+        if title_suffix:
+            imp.setTitle(f"{window_key}{title_suffix}")
+
         # Apply display settings
         lut_name = display_config_dict.get('lut', 'Grays')
         auto_contrast = display_config_dict.get('auto_contrast', True)
+        # Only apply auto-contrast for NEW hyperstacks; for updates, use preserved ranges
+        # This avoids expensive O(n²) recalculation when adding slices incrementally
         self._apply_display_settings(
-            imp, lut_name, auto_contrast, nChannels,
+            imp, lut_name, auto_contrast if is_new else False, nChannels,
             preserved_ranges=None if is_new else preserved_display_ranges
         )
 
@@ -1070,6 +1500,12 @@ class FijiViewerServer(ZMQServer):
         imp.show()
 
         logger.info(f"🔬 FIJI SERVER: Displayed hyperstack '{window_key}' with {stack.getSize()} slices")
+
+        # NOW create text overlay AFTER window exists (so listeners can be attached)
+        logger.info(f"🏷️  FIJI SERVER: Creating dimension label overlay for {window_key}")
+        self._create_dimension_label_overlay(imp, channel_components, slice_components, frame_components,
+                                            channel_values, slice_values, frame_values,
+                                            component_names_metadata or {})
 
         # Send acknowledgments
         for img_data in all_images:
@@ -1090,7 +1526,8 @@ def _handle_images_for_window(self, window_key: str, items: List[Dict[str, Any]]
                                frame_components: List[str],
                                channel_values: List[tuple],
                                slice_values: List[tuple],
-                               frame_values: List[tuple]):
+                               frame_values: List[tuple],
+                               component_names_metadata: Dict[str, Any] = None):
     """
     Handle images for a window group.
 
@@ -1120,7 +1557,8 @@ def _handle_images_for_window(self, window_key: str, items: List[Dict[str, Any]]
     self._build_single_hyperstack(
         window_key, image_data_list, display_config_dict,
         channel_components, slice_components, frame_components,
-        channel_values, slice_values, frame_values
+        channel_values, slice_values, frame_values,
+        component_names_metadata
     )
 
 
@@ -1132,7 +1570,8 @@ def _handle_rois_for_window(self, window_key: str, items: List[Dict[str, Any]],
                              frame_components: List[str],
                              channel_values: List[tuple],
                              slice_values: List[tuple],
-                             frame_values: List[tuple]):
+                             frame_values: List[tuple],
+                             component_names_metadata: Dict[str, Any] = None):
     """
     Handle ROIs for a window group.
 

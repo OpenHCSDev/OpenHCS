@@ -123,8 +123,10 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
 
     merged_config_values = {}
     for field in fields(GlobalPipelineConfig):
-        # Fail-loud: Let AttributeError bubble up naturally (no getattr fallbacks)
-        pipeline_value = getattr(pipeline_config, field.name)
+        # CRITICAL: Access raw stored value from __dict__ to avoid lazy resolution fallback to MRO defaults
+        # For lazy dataclasses, getattr() triggers resolution which falls back to GlobalPipelineConfig defaults
+        # We need the actual None value to know if it should inherit from global config
+        pipeline_value = pipeline_config.__dict__.get(field.name)
 
         if pipeline_value is not None:
             # CRITICAL FIX: For lazy configs, merge with global config BEFORE converting to base
@@ -206,15 +208,15 @@ def _execute_axis_with_sequential_combinations(
                 error_message=result.error_message
             )
 
-        # Clear VFS between combinations (except after the last one)
-        if combo_idx < len(axis_contexts) - 1:
-            from openhcs.io.base import reset_memory_backend
-            from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+        # Clear VFS after each combination to prevent memory accumulation
+        # This is critical when worker processes handle multiple wells sequentially
+        from openhcs.io.base import reset_memory_backend
+        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
 
-            logger.info(f"🔄 WORKER: Clearing VFS after combination {combo_idx + 1}/{len(axis_contexts)}")
-            reset_memory_backend()
-            if cleanup_all_gpu_frameworks:
-                cleanup_all_gpu_frameworks()
+        logger.info(f"🔄 WORKER: Clearing VFS after combination {combo_idx + 1}/{len(axis_contexts)}")
+        reset_memory_backend()
+        if cleanup_all_gpu_frameworks:
+            cleanup_all_gpu_frameworks()
 
     logger.info(f"🔄 WORKER: Completed all {len(axis_contexts)} combination(s) for axis {axis_id}")
     return ExecutionResult.success(axis_id=axis_id)
@@ -521,8 +523,9 @@ class PipelineOrchestrator(ContextProvider):
         # Component keys cache for fast access - uses AllComponents (includes multiprocessing axis)
         self._component_keys_cache: Dict['AllComponents', List[str]] = {}
 
-        # Metadata cache service
-        self._metadata_cache_service = get_metadata_cache()
+        # Metadata cache service - per-orchestrator instance (not global singleton)
+        from openhcs.core.metadata_cache import MetadataCache
+        self._metadata_cache_service = MetadataCache()
 
         # Viewer management - shared between pipeline execution and image browser
         self._visualizers = {}  # Dict[(backend_name, port)] -> visualizer instance
@@ -960,19 +963,17 @@ class PipelineOrchestrator(ContextProvider):
                 for step_index, step in enumerate(pipeline_definition):
                     step.process(frozen_context, step_index)
 
-                # Clear VFS after each combination (except the last one, to preserve final outputs)
-                # The last combination's outputs need to remain in VFS for any post-processing
-                if combo_idx < len(combinations) - 1:
-                    try:
-                        from openhcs.io.base import reset_memory_backend
-                        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+                # Clear VFS after each combination to prevent memory accumulation
+                try:
+                    from openhcs.io.base import reset_memory_backend
+                    from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
 
-                        logger.info(f"🔄 SEQUENTIAL: Clearing VFS after combination {combo}")
-                        reset_memory_backend()
-                        cleanup_all_gpu_frameworks()
-                        logger.info(f"🔄 SEQUENTIAL: VFS cleared, ready for next combination")
-                    except Exception as e:
-                        logger.warning(f"Failed to clear VFS after combination {combo}: {e}")
+                    logger.info(f"🔄 SEQUENTIAL: Clearing VFS after combination {combo}")
+                    reset_memory_backend()
+                    cleanup_all_gpu_frameworks()
+                    logger.info(f"🔄 SEQUENTIAL: VFS cleared, ready for next combination")
+                except Exception as e:
+                    logger.warning(f"Failed to clear VFS after combination {combo}: {e}")
 
         frozen_context.current_sequential_combination = None
 
@@ -1041,8 +1042,8 @@ class PipelineOrchestrator(ContextProvider):
             logger.warning("No compiled contexts provided for execution.")
             return {}
         
-        # Use effective config (includes pipeline config) instead of global config directly
-        actual_max_workers = max_workers if max_workers is not None else self.get_effective_config().num_workers
+        # Access num_workers from effective config (merged pipeline + global config)
+        actual_max_workers = max_workers or self.get_effective_config().num_workers
         if actual_max_workers <= 0: # Ensure positive number of workers
             actual_max_workers = 1
 
@@ -1282,21 +1283,24 @@ class PipelineOrchestrator(ContextProvider):
             if shared_context.analysis_consolidation_config.enabled:
                 try:
                     logger.info("🔥 ORCHESTRATOR: Starting consolidation - finding results directory")
-                    # Get results directory using same logic as path planner (single source of truth)
+                    # Get results directory from compiled contexts (path planner already determined it)
                     results_dir = None
                     for axis_id, context in compiled_contexts.items():
-                        # Use the same logic as PathPlanner._get_results_path()
-                        plate_path = Path(context.plate_path)
-                        materialization_path = shared_context.materialization_results_path
+                        # Check if context has step plans with special outputs
+                        for step_plan in context.step_plans:
+                            special_outputs = step_plan.get('special_outputs', {})
+                            if special_outputs:
+                                # Extract results directory from first special output path
+                                first_output = next(iter(special_outputs.values()))
+                                output_path = Path(first_output['path'])
+                                potential_results_dir = output_path.parent
 
-                        if Path(materialization_path).is_absolute():
-                            potential_results_dir = Path(materialization_path)
-                        else:
-                            potential_results_dir = plate_path / materialization_path
+                                if potential_results_dir.exists():
+                                    results_dir = potential_results_dir
+                                    logger.info(f"🔍 CONSOLIDATION: Found results directory from special outputs: {results_dir}")
+                                    break
 
-                        if potential_results_dir.exists():
-                            results_dir = potential_results_dir
-                            logger.info(f"🔍 CONSOLIDATION: Found results directory: {results_dir}")
+                        if results_dir:
                             break
 
                     if results_dir and results_dir.exists():
@@ -1589,6 +1593,9 @@ class PipelineOrchestrator(ContextProvider):
         # REMOVED: Thread-local modification - dual-axis resolver handles context automatically
         # No need to modify thread-local storage when clearing orchestrator config
         self.pipeline_config = None
+        # Clear metadata cache for this orchestrator
+        if hasattr(self, '_metadata_cache_service') and self._metadata_cache_service:
+            self._metadata_cache_service.clear_cache()
         logger.info(f"Cleared per-orchestrator config for plate: {self.plate_path}")
 
     def cleanup_pipeline_config(self) -> None:

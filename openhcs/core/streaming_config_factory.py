@@ -76,6 +76,7 @@ def create_streaming_config(
                 kwargs[field_name] = getattr(self, field_name)
         if context:
             kwargs["microscope_handler"] = context.microscope_handler
+            kwargs["plate_path"] = context.plate_path
         return kwargs
     
     def _create_visualizer(self, filemanager, visualizer_config):

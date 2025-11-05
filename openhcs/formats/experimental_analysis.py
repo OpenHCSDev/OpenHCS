@@ -427,23 +427,66 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
             break
 
     if well_row_idx is not None:
-        # CSV format: data starts after the "Well" header row
-        # Get plate name from earlier rows
-        plate_name = None
-        for i in range(well_row_idx):
-            if str(raw_df.iloc[i, 0]).strip() == "Plate ID":
-                plate_name = str(raw_df.iloc[i, 1]).strip()
-                break
+        # CSV format: may have multiple plates in same file
+        # Find all plate sections (each starts with "Barcode" and has a "Well" header)
+        plate_sections = []
+        i = 0
+        while i < len(raw_df):
+            # Look for "Barcode" row (start of plate section)
+            if str(raw_df.iloc[i, 0]).strip() == "Barcode":
+                section_start = i
+                # Find "Plate ID" in this section
+                plate_id = None
+                well_header_idx = None
+                for j in range(i, min(i + 10, len(raw_df))):
+                    if str(raw_df.iloc[j, 0]).strip() == "Plate ID":
+                        plate_id = str(raw_df.iloc[j, 1]).strip()
+                    if str(raw_df.iloc[j, 0]).strip().lower() == 'well':
+                        well_header_idx = j
+                        break
 
-        # Process data rows (starting after the header row)
-        for i in range(well_row_idx + 1, len(raw_df)):
-            row = raw_df.iloc[i]
-            well_id = str(row.iloc[0]).strip()
-            if well_id and well_id != 'nan' and well_id != '':
-                # Map features by position (feature[j] corresponds to column[j+1])
-                for j, feature in enumerate(features):
-                    if j + 1 < len(row):  # Make sure we don't go out of bounds
-                        plates_dict[plate_name][well_id][feature] = row.iloc[j + 1]
+                if plate_id and well_header_idx is not None:
+                    # Find end of data section (next "Barcode" or end of file)
+                    section_end = len(raw_df)
+                    for j in range(well_header_idx + 1, len(raw_df)):
+                        if str(raw_df.iloc[j, 0]).strip() == "Barcode":
+                            section_end = j
+                            break
+
+                    plate_sections.append({
+                        'plate_id': plate_id,
+                        'well_header_idx': well_header_idx,
+                        'data_start': well_header_idx + 1,
+                        'data_end': section_end
+                    })
+                    i = section_end
+                else:
+                    i += 1
+            else:
+                i += 1
+
+        # Process each plate section
+        for section in plate_sections:
+            plate_name = section['plate_id']
+            # Process data rows for this plate
+            wells_filled = 0
+            for i in range(section['data_start'], section['data_end']):
+                row = raw_df.iloc[i]
+                well_id = str(row.iloc[0]).strip()
+                if well_id and well_id != 'nan' and well_id != '' and well_id.lower() != 'well':
+                    # Skip wells that don't exist in plates_dict (e.g., wells not in config)
+                    if plate_name not in plates_dict:
+                        continue
+                    if well_id not in plates_dict[plate_name]:
+                        continue
+                    # Map features by position (feature[j] corresponds to column[j+1])
+                    for j, feature in enumerate(features):
+                        if j + 1 < len(row):  # Make sure we don't go out of bounds
+                            plates_dict[plate_name][well_id][feature] = row.iloc[j + 1]
+                    wells_filled += 1
+            if wells_filled == 0:
+                import logging
+                logging.warning(f"No wells filled for plate {plate_name}. Plate in dict: {plate_name in plates_dict}")
     else:
         # Original Excel format
         df_col_names = raw_df.set_axis(["Well","Laser Focus"]+features, axis=1)
@@ -453,8 +496,12 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
             if row[0] == "Barcode":
                 start_collect=False
             if start_collect:
+                well_id = row[0]
+                # Skip wells that don't exist in plates_dict (e.g., wells not in config)
+                if plate_name not in plates_dict or well_id not in plates_dict[plate_name]:
+                    continue
                 for feature in features:
-                    plates_dict[plate_name][row[0]][feature]=row[feature]
+                    plates_dict[plate_name][well_id][feature]=row[feature]
             if row[0] == "Plate Name":
                 plate_name=row[1]
             elif pd.isnull(row[0]):
@@ -719,6 +766,11 @@ def create_table_for_feature(feature,experiment_dict_values):
         condition_data[condition].append(values[i])
 
     # Create DataFrame with conditions as columns and N as rows
+    # Handle case where all conditions are empty (no data available)
+    if not condition_data or all(len(vals) == 0 for vals in condition_data.values()):
+        # Return empty DataFrame with condition columns
+        return pd.DataFrame(columns=sorted(condition_data.keys()) if condition_data else [])
+
     max_n = max(len(vals) for vals in condition_data.values())
     data_matrix = []
     for n in range(max_n):

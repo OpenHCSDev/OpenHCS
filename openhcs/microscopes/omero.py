@@ -252,11 +252,15 @@ class OMEROMetadataHandler(MetadataHandler):
         # Fallback to default
         return self.FALLBACK_VALUES.get('pixel_size', 1.0)
 
-    def get_image_files(self, plate_path: Union[str, Path, int]) -> List[str]:
+    def get_image_files(self, plate_path: Union[str, Path, int], all_subdirs: bool = False) -> List[str]:
         """
         Get list of virtual filenames from OMERO backend.
 
         Delegates to OMEROLocalBackend.list_files() to generate virtual filenames.
+
+        Args:
+            plate_path: Path to the plate folder or plate ID
+            all_subdirs: Unused for OMERO (no subdirectories), kept for interface compatibility
         """
         plate_id = plate_path if isinstance(plate_path, int) else int(Path(plate_path).name)
 

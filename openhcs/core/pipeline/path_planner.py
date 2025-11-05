@@ -121,13 +121,9 @@ class PathPlanner:
             materialization_filter = step_axis_filters.get('step_materialization_config')
 
             if materialization_filter:
-                # Inline simple conditional logic for axis filtering
-                from openhcs.core.config import WellFilterMode
-                axis_in_filter = self.ctx.axis_id in materialization_filter['resolved_axis_values']
-                should_materialize = (
-                    axis_in_filter if materialization_filter['filter_mode'] == WellFilterMode.INCLUDE
-                    else not axis_in_filter
-                )
+                # Check if current axis is in the resolved values
+                # Note: resolved_axis_values already has mode (INCLUDE/EXCLUDE) applied
+                should_materialize = self.ctx.axis_id in materialization_filter['resolved_axis_values']
 
                 if should_materialize:
                     materialized_output_dir = self._build_output_path(step.step_materialization_config)
