@@ -1768,9 +1768,21 @@ class PlateManagerWidget(QWidget):
         # Store current message for resize handling
         self.current_status_message = message
 
+        # For continuous scrolling, duplicate the text with spacing
+        # This creates a seamless loop effect
+        separator = "     "  # Spacing between duplicates
+        display_text = f"{message}{separator}{message}{separator}"
+
         # Set the text and adjust label size to fit content
-        self.status_label.setText(message)
+        self.status_label.setText(display_text)
         self.status_label.adjustSize()
+
+        # Calculate and store the single message width for loop reset
+        # Create temporary label to measure just the original message + separator
+        temp_label = QLabel(f"{message}{separator}")
+        temp_label.setFont(self.status_label.font())
+        temp_label.adjustSize()
+        self.status_single_message_width = temp_label.width()
 
         # Restart scrolling logic
         self._restart_status_scrolling()
@@ -1822,8 +1834,16 @@ class PlateManagerWidget(QWidget):
         # Simple arithmetic update (non-blocking)
         self.status_scroll_position += self.status_scroll_direction * 2  # Scroll speed
 
-        # Cycle continuously - reset to start when reaching the end
-        if self.status_scroll_position >= max_scroll:
+        # Reset at the exact point where the duplicated text starts
+        # This creates seamless looping since the second copy looks identical
+        if hasattr(self, 'status_single_message_width'):
+            reset_point = self.status_single_message_width
+        else:
+            # Fallback to halfway if width not calculated
+            reset_point = max_scroll / 2
+
+        # Cycle continuously - reset to start when reaching the reset point
+        if self.status_scroll_position >= reset_point:
             self.status_scroll_position = 0
         elif self.status_scroll_position < 0:
             self.status_scroll_position = 0
