@@ -695,10 +695,10 @@ class ImageBrowserWidget(QWidget):
             metadata_handler = handler.metadata_handler
             logger.info(f"IMAGE BROWSER: Got metadata handler: {type(metadata_handler).__name__}")
 
-            # Get image files from metadata
+            # Get image files from metadata (all subdirectories for browsing)
             plate_path = self.orchestrator.plate_path
             logger.info(f"IMAGE BROWSER: Calling get_image_files for plate: {plate_path}")
-            image_files = metadata_handler.get_image_files(plate_path)
+            image_files = metadata_handler.get_image_files(plate_path, all_subdirs=True)
             logger.info(f"IMAGE BROWSER: get_image_files returned {len(image_files) if image_files else 0} files")
 
             if not image_files:
