@@ -871,7 +871,7 @@ class NapariViewerServer(ZMQServer):
 
         # Convert shapes to label masks (much faster than individual shapes)
         # This happens synchronously but is fast because we're just creating arrays
-        labels_data = self._shapes_to_labels(layer_items, stack_components)
+        labels_data = self._shapes_to_labels(layer_items, stack_components, layer_key)
 
         # Remove existing layer if it exists
         if layer_key in self.layers:
@@ -892,17 +892,57 @@ class NapariViewerServer(ZMQServer):
             f"🔬 NAPARI PROCESS: Created labels layer {layer_key} with shape {labels_data.shape}"
         )
 
-    def _shapes_to_labels(self, layer_items, stack_components):
-        """Convert shapes data to label masks."""
+    def _shapes_to_labels(self, layer_items, stack_components, layer_key=None):
+        """Convert shapes data to label masks.
+        
+        Args:
+            layer_items: List of shape items to convert
+            stack_components: List of component names for stack dimensions
+            layer_key: Optional layer key to align with corresponding image layer
+        """
         from skimage import draw
 
         # Build component value to index mapping
+        # If layer_key ends with _shapes, try to use the corresponding image layer's component mapping
         component_values = {}
-        for comp in stack_components:
-            values = sorted(
-                set(item["components"].get(comp, 0) for item in layer_items)
-            )
-            component_values[comp] = values
+        
+        if layer_key and layer_key.endswith('_shapes'):
+            # Strip _shapes suffix to get the base layer name
+            base_layer_key = layer_key[:-7]  # Remove '_shapes'
+            
+            # Check if we have a corresponding image layer
+            if base_layer_key in self.component_groups:
+                image_layer_items = self.component_groups[base_layer_key]
+                logger.info(
+                    f"🔬 NAPARI PROCESS: Aligning ROIs with image layer '{base_layer_key}' ({len(image_layer_items)} items)"
+                )
+                
+                # Build component mapping from the image layer items
+                for comp in stack_components:
+                    values = sorted(
+                        set(item["components"].get(comp, 0) for item in image_layer_items)
+                    )
+                    component_values[comp] = values
+                    logger.info(
+                        f"🔬 NAPARI PROCESS: Component '{comp}' aligned with image layer values: {values}"
+                    )
+            else:
+                logger.info(
+                    f"🔬 NAPARI PROCESS: No corresponding image layer found for '{base_layer_key}', using ROI-only mapping"
+                )
+                # Fallback to original behavior if no image layer found
+                for comp in stack_components:
+                    values = sorted(
+                        set(item["components"].get(comp, 0) for item in layer_items)
+                    )
+                    component_values[comp] = values
+        else:
+            # Original behavior for non-shapes layers or when no layer_key provided
+            for comp in stack_components:
+                values = sorted(
+                    set(item["components"].get(comp, 0) for item in layer_items)
+                )
+                component_values[comp] = values
 
         # Determine output shape
         # Get image shape from first item's shapes data
