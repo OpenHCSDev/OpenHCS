@@ -351,8 +351,18 @@ class PlateViewerWindow(QDialog):
             # Import consolidation function
             from openhcs.core.orchestrator.orchestrator import _get_consolidate_analysis_results
 
-            # Get configs from orchestrator's pipeline_config (same pattern as image browser)
-            pipeline_config = self.orchestrator.pipeline_config
+            # Get configs from global config (same pattern as image browser)
+            from openhcs.config_framework.global_config import get_current_global_config
+            from openhcs.core.config import GlobalPipelineConfig
+            global_config = get_current_global_config(GlobalPipelineConfig)
+
+            if not global_config:
+                QMessageBox.warning(
+                    self,
+                    "No Global Config",
+                    "No global configuration found. Please ensure the application is properly initialized."
+                )
+                return
 
             # Consolidate each results directory
             consolidate_fn = _get_consolidate_analysis_results()
@@ -370,8 +380,8 @@ class PlateViewerWindow(QDialog):
                 consolidate_fn(
                     results_directory=str(results_dir),
                     well_ids=well_ids,
-                    consolidation_config=pipeline_config.analysis_consolidation_config,
-                    plate_metadata_config=pipeline_config.plate_metadata_config
+                    consolidation_config=global_config.analysis_consolidation_config,
+                    plate_metadata_config=global_config.plate_metadata_config
                 )
 
             if total_csv_files == 0:
