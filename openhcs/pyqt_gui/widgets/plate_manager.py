@@ -18,9 +18,9 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
     QListWidgetItem, QLabel,
-    QSplitter, QApplication
+    QSplitter, QApplication, QSizePolicy, QScrollArea
 )
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
 from PyQt6.QtGui import QFont
 
 from openhcs.core.config import GlobalPipelineConfig
@@ -116,7 +116,13 @@ class PlateManagerWidget(QWidget):
         self.plate_list: Optional[QListWidget] = None
         self.buttons: Dict[str, QPushButton] = {}
         self.status_label: Optional[QLabel] = None
-        
+        self.status_scroll: Optional[QScrollArea] = None
+
+        # Auto-scroll state for status
+        self.status_scroll_timer = None
+        self.status_scroll_position = 0
+        self.status_scroll_direction = 1  # 1 for right, -1 for left
+
         # Setup UI
         self.setup_ui()
         self.setup_connections()
@@ -169,20 +175,45 @@ class PlateManagerWidget(QWidget):
 
         # Header with title and status
         header_widget = QWidget()
+        header_widget.setContentsMargins(0, 0, 0, 0)
         header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(5, 5, 5, 5)
+        header_layout.setContentsMargins(5, 0, 5, 0)  # No vertical padding
+        header_layout.setSpacing(10)
 
         title_label = QLabel("Plate Manager")
         title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        title_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)}; padding: 0px; margin: 0px;")
+        title_label.setContentsMargins(0, 0, 0, 0)
         header_layout.addWidget(title_label)
 
-        header_layout.addStretch()
+        # Status label in scrollable area - takes all remaining space, right-aligned
+        self.status_scroll = QScrollArea()
+        self.status_scroll.setWidgetResizable(False)  # Don't resize the label, allow scrolling
+        self.status_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # Hide scrollbar
+        self.status_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.status_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.status_scroll.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)  # Right-aligned
+        self.status_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.status_scroll.setFixedHeight(20)  # Tight height to reduce padding
+        self.status_scroll.setContentsMargins(0, 0, 0, 0)  # Remove internal margins
+        self.status_scroll.setStyleSheet("QScrollArea { padding: 0px; margin: 0px; background: transparent; }")
 
-        # Status label in header
         self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_success)}; font-weight: bold;")
-        header_layout.addWidget(self.status_label)
+        self.status_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.status_success)}; font-weight: bold; padding: 0px; margin: 0px;")
+        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.status_label.setFixedHeight(20)  # Match scroll area height
+        self.status_label.setContentsMargins(0, 0, 0, 0)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight)  # Right-align text
+
+        self.status_scroll.setWidget(self.status_label)
+        header_layout.addWidget(self.status_scroll, 1)  # Stretch factor 1 to take remaining space
+
+        # Store current status message for resize handling
+        self.current_status_message = "Ready"
+
+        # Trigger initial layout to fix "Ready" text display
+        QTimer.singleShot(0, lambda: self.status_label.adjustSize())
 
         layout.addWidget(header_widget)
         
@@ -1729,13 +1760,86 @@ class PlateManagerWidget(QWidget):
     
     def update_status(self, message: str):
         """
-        Update status label.
-        
+        Update status label with auto-scrolling when text is too long.
+
         Args:
             message: Status message to display
         """
+        # Store current message for resize handling
+        self.current_status_message = message
+
+        # Set the text and adjust label size to fit content
         self.status_label.setText(message)
-    
+        self.status_label.adjustSize()
+
+        # Restart scrolling logic
+        self._restart_status_scrolling()
+
+    def _restart_status_scrolling(self):
+        """Restart status scrolling if needed (called on update or resize)."""
+        # Stop any existing scroll timer
+        if self.status_scroll_timer:
+            self.status_scroll_timer.stop()
+            self.status_scroll_timer = None
+
+        # Reset scroll position
+        self.status_scroll.horizontalScrollBar().setValue(0)
+        self.status_scroll_position = 0
+        self.status_scroll_direction = 1
+
+        # Check if text is wider than available space
+        label_width = self.status_label.width()
+        scroll_width = self.status_scroll.viewport().width()
+
+        if label_width > scroll_width:
+            # Text is too long - start auto-scrolling
+            # Use QTimer with Qt.TimerType.PreciseTimer for non-blocking animation
+            self.status_scroll_timer = QTimer(self)
+            self.status_scroll_timer.setTimerType(Qt.TimerType.PreciseTimer)
+            self.status_scroll_timer.timeout.connect(self._auto_scroll_status)
+            self.status_scroll_timer.start(50)  # Scroll every 50ms (non-blocking)
+
+    def _auto_scroll_status(self):
+        """
+        Auto-scroll the status text back and forth.
+
+        This runs on the Qt event loop via QTimer, so it's non-blocking.
+        Kept minimal to ensure it never blocks the UI thread.
+        """
+        # Fast early exit if widgets don't exist
+        if not self.status_scroll or not self.status_label:
+            return
+
+        scrollbar = self.status_scroll.horizontalScrollBar()
+        max_scroll = scrollbar.maximum()
+
+        # Fast exit if no scrolling needed
+        if max_scroll == 0:
+            if self.status_scroll_timer:
+                self.status_scroll_timer.stop()
+            return
+
+        # Simple arithmetic update (non-blocking)
+        self.status_scroll_position += self.status_scroll_direction * 2  # Scroll speed
+
+        # Reverse direction at boundaries
+        if self.status_scroll_position >= max_scroll:
+            self.status_scroll_position = max_scroll
+            self.status_scroll_direction = -1
+        elif self.status_scroll_position <= 0:
+            self.status_scroll_position = 0
+            self.status_scroll_direction = 1
+
+        # Single UI update (non-blocking)
+        scrollbar.setValue(int(self.status_scroll_position))
+
+    def resizeEvent(self, event):
+        """Handle resize events to restart status scrolling if needed."""
+        super().resizeEvent(event)
+        # Restart scrolling check when window is resized
+        if hasattr(self, 'status_scroll') and self.status_scroll:
+            self._restart_status_scrolling()
+
     def on_selection_changed(self):
         """Handle plate list selection changes using utility."""
         def on_selected(selected_plates):
