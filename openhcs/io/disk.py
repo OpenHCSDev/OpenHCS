@@ -170,6 +170,11 @@ class DiskStorageBackend(StorageBackend):
 
     def _csv_writer(self, path, data, **kwargs):
         import csv
+        # Handle pre-formatted CSV strings (from pandas to_csv)
+        if isinstance(data, str):
+            path.write_text(data)
+            return
+
         # Assume data is a list of rows or a dict
         with path.open('w', newline='') as f:
             if isinstance(data, dict):
