@@ -329,14 +329,17 @@ class PlateViewerWindow(QDialog):
                 )
                 return
 
-            # Get well IDs from metadata (parse from image files)
-            image_files = metadata_handler.get_image_files(plate_path)
+            # Get well IDs from CSV filenames (same pattern as orchestrator uses axis_ids)
+            # CSV filenames have the actual well IDs as they appear in execution
             parser = self.orchestrator.microscope_handler.parser
             well_ids = set()
-            for filename in image_files:
-                parsed = parser.parse_filename(Path(filename).name)
-                if 'well' in parsed:
-                    well_ids.add(parsed['well'])
+
+            for results_dir in results_dirs:
+                csv_files = list(results_dir.glob("*.csv"))
+                for csv_file in csv_files:
+                    parsed = parser.parse_filename(csv_file.name)
+                    if 'well' in parsed:
+                        well_ids.add(parsed['well'])
 
             well_ids = sorted(list(well_ids))
 
@@ -344,7 +347,7 @@ class PlateViewerWindow(QDialog):
                 QMessageBox.warning(
                     self,
                     "No Wells Found",
-                    "No well IDs found in metadata. Cannot consolidate."
+                    "No well IDs found in CSV filenames. Cannot consolidate."
                 )
                 return
 
