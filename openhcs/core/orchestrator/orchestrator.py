@@ -1283,21 +1283,24 @@ class PipelineOrchestrator(ContextProvider):
             if shared_context.analysis_consolidation_config.enabled:
                 try:
                     logger.info("🔥 ORCHESTRATOR: Starting consolidation - finding results directory")
-                    # Get results directory using same logic as path planner (single source of truth)
+                    # Get results directory from compiled contexts (path planner already determined it)
                     results_dir = None
                     for axis_id, context in compiled_contexts.items():
-                        # Use the same logic as PathPlanner._get_results_path()
-                        plate_path = Path(context.plate_path)
-                        materialization_path = shared_context.materialization_results_path
+                        # Check if context has step plans with special outputs
+                        for step_plan in context.step_plans:
+                            special_outputs = step_plan.get('special_outputs', {})
+                            if special_outputs:
+                                # Extract results directory from first special output path
+                                first_output = next(iter(special_outputs.values()))
+                                output_path = Path(first_output['path'])
+                                potential_results_dir = output_path.parent
 
-                        if Path(materialization_path).is_absolute():
-                            potential_results_dir = Path(materialization_path)
-                        else:
-                            potential_results_dir = plate_path / materialization_path
+                                if potential_results_dir.exists():
+                                    results_dir = potential_results_dir
+                                    logger.info(f"🔍 CONSOLIDATION: Found results directory from special outputs: {results_dir}")
+                                    break
 
-                        if potential_results_dir.exists():
-                            results_dir = potential_results_dir
-                            logger.info(f"🔍 CONSOLIDATION: Found results directory: {results_dir}")
+                        if results_dir:
                             break
 
                     if results_dir and results_dir.exists():
