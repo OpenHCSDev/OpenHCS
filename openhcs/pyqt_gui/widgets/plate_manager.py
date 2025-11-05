@@ -489,10 +489,16 @@ class PlateManagerWidget(QWidget):
         # Functional pattern: async map with enumerate
         async def init_single_plate(i, plate):
             plate_path = plate['path']
+
+            # Each plate gets its own isolated registry to prevent VirtualWorkspace backend conflicts
+            # VirtualWorkspace backend is plate-specific (has plate_root), so sharing causes wrong plate_root
+            from openhcs.io.base import _create_storage_registry
+            plate_registry = _create_storage_registry()
+
             # Create orchestrator in main thread (has access to global context)
             orchestrator = PipelineOrchestrator(
                 plate_path=plate_path,
-                storage_registry=self.file_manager.registry
+                storage_registry=plate_registry
             )
             # Only run heavy initialization in worker thread
             # Need to set up context in worker thread too since initialize() runs there
@@ -520,7 +526,7 @@ class PlateManagerWidget(QWidget):
                 # Create a failed orchestrator to track the error state
                 failed_orchestrator = PipelineOrchestrator(
                     plate_path=plate_path,
-                    storage_registry=self.file_manager.registry
+                    storage_registry=plate_registry
                 )
                 failed_orchestrator._state = OrchestratorState.INIT_FAILED
                 self.orchestrators[plate_path] = failed_orchestrator
@@ -803,10 +809,15 @@ class PlateManagerWidget(QWidget):
                         loop = asyncio.get_event_loop()
                         await loop.run_in_executor(None, initialize_with_context)
                 else:
+                    # Each plate gets its own isolated registry to prevent VirtualWorkspace backend conflicts
+                    # VirtualWorkspace backend is plate-specific (has plate_root), so sharing causes wrong plate_root
+                    from openhcs.io.base import _create_storage_registry
+                    plate_registry = _create_storage_registry()
+
                     # Create orchestrator in main thread (has access to global context)
                     orchestrator = PipelineOrchestrator(
                         plate_path=plate_path,
-                        storage_registry=self.file_manager.registry
+                        storage_registry=plate_registry
                     )
                     # Only run heavy initialization in worker thread
                     # Need to set up context in worker thread too since initialize() runs there

@@ -210,9 +210,11 @@ class MicroscopeHandler(ABC, metaclass=AutoRegisterMeta):
 
     def _register_virtual_workspace_backend(self, plate_path: Union[str, Path], filemanager: FileManager) -> None:
         """
-        Register virtual workspace backend if not already registered.
+        Register virtual workspace backend for this plate.
 
-        Centralized registration logic to avoid duplication across handlers.
+        VirtualWorkspace backends are plate-specific (each has a plate_root),
+        so we always create a new backend for each plate, replacing any existing one.
+        This ensures each plate uses the correct virtual workspace mapping.
 
         Args:
             plate_path: Path to plate directory
@@ -221,10 +223,10 @@ class MicroscopeHandler(ABC, metaclass=AutoRegisterMeta):
         from openhcs.io.virtual_workspace import VirtualWorkspaceBackend
         from openhcs.constants.constants import Backend
 
-        if Backend.VIRTUAL_WORKSPACE.value not in filemanager.registry:
-            backend = VirtualWorkspaceBackend(plate_root=Path(plate_path))
-            filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
-            logger.info(f"Registered virtual workspace backend for {plate_path}")
+        # Always create a new backend for this plate (VirtualWorkspace is plate-specific)
+        backend = VirtualWorkspaceBackend(plate_root=Path(plate_path))
+        filemanager.registry[Backend.VIRTUAL_WORKSPACE.value] = backend
+        logger.info(f"Registered virtual workspace backend for {plate_path}")
 
     def initialize_workspace(self, plate_path: Path, filemanager: FileManager) -> Path:
         """
