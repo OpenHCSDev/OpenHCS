@@ -56,6 +56,7 @@ def convert_summary_well_ids(csv_path: Path) -> Path:
     """
     Convert Opera Phenix well IDs in summary CSV to standard format.
 
+    Handles multiple summaries (multiple plates) in the same CSV file.
     Creates a new file with _converted suffix.
 
     Args:
@@ -68,54 +69,76 @@ def convert_summary_well_ids(csv_path: Path) -> Path:
     with open(csv_path, 'r') as f:
         lines = f.readlines()
 
-    # Find the "Well" header row
-    well_row_idx = None
+    # Find ALL "Well" header rows (one per plate/summary)
+    well_row_indices = []
     for i, line in enumerate(lines):
         if line.startswith('Well,'):
-            well_row_idx = i
-            break
+            well_row_indices.append(i)
 
-    if well_row_idx is None:
+    if not well_row_indices:
         # No Well column found, return original
         return csv_path
 
-    # Check first data row to see if it has Opera Phenix format
-    if well_row_idx + 1 < len(lines):
-        first_data_line = lines[well_row_idx + 1]
-        first_well = first_data_line.split(',')[0].strip()
+    # Check if any data rows have Opera Phenix format
+    needs_conversion = False
+    for well_row_idx in well_row_indices:
+        if well_row_idx + 1 < len(lines):
+            first_data_line = lines[well_row_idx + 1]
+            first_well = first_data_line.split(',')[0].strip()
+            if re.match(r'[Rr]\d+[Cc]\d+', first_well):
+                needs_conversion = True
+                break
 
-        if re.match(r'[Rr]\d+[Cc]\d+', first_well):
-            print(f"Converting Opera Phenix well IDs to standard format...")
-            print(f"  Example: {first_well} -> {convert_opera_phenix_to_standard_well_id(first_well)}")
+    if not needs_conversion:
+        return csv_path
 
-            # Convert all data rows (after the Well header)
-            converted_lines = lines[:well_row_idx + 1]  # Keep header rows
+    print(f"Converting Opera Phenix well IDs to standard format...")
+    print(f"  Found {len(well_row_indices)} summary section(s)")
 
-            for line in lines[well_row_idx + 1:]:
-                parts = line.split(',', 1)  # Split only on first comma
-                if len(parts) >= 2:
-                    well_id = parts[0].strip()
-                    rest = parts[1]
+    # Convert line by line, tracking which section we're in
+    converted_lines = []
+    in_data_section = False
 
-                    # Convert well ID if it matches Opera Phenix format
-                    if re.match(r'[Rr]\d+[Cc]\d+', well_id):
-                        converted_well = convert_opera_phenix_to_standard_well_id(well_id)
-                        converted_lines.append(f"{converted_well},{rest}")
-                    else:
-                        converted_lines.append(line)
+    for i, line in enumerate(lines):
+        # Check if this is a "Well," header row
+        if line.startswith('Well,'):
+            converted_lines.append(line)
+            in_data_section = True
+            continue
+
+        # Check if we're in a data section
+        if in_data_section:
+            # Empty line or new header section ends data section
+            if not line.strip() or (line.startswith('Barcode,') or line.startswith('Plate Name,')):
+                converted_lines.append(line)
+                in_data_section = False
+                continue
+
+            # Convert data row
+            parts = line.split(',', 1)  # Split only on first comma
+            if len(parts) >= 2:
+                well_id = parts[0].strip()
+                rest = parts[1]
+
+                # Convert well ID if it matches Opera Phenix format
+                if re.match(r'[Rr]\d+[Cc]\d+', well_id):
+                    converted_well = convert_opera_phenix_to_standard_well_id(well_id)
+                    converted_lines.append(f"{converted_well},{rest}")
                 else:
                     converted_lines.append(line)
+            else:
+                converted_lines.append(line)
+        else:
+            # Not in data section, keep line as-is
+            converted_lines.append(line)
 
-            # Save to new file
-            converted_path = csv_path.parent / f"{csv_path.stem}_converted{csv_path.suffix}"
-            with open(converted_path, 'w') as f:
-                f.writelines(converted_lines)
+    # Save to new file
+    converted_path = csv_path.parent / f"{csv_path.stem}_converted{csv_path.suffix}"
+    with open(converted_path, 'w') as f:
+        f.writelines(converted_lines)
 
-            print(f"  Saved converted file: {converted_path.name}")
-            return converted_path
-
-    # No conversion needed
-    return csv_path
+    print(f"  Saved converted file: {converted_path.name}")
+    return converted_path
 
 
 def main():
