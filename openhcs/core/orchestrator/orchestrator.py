@@ -123,8 +123,10 @@ def _create_merged_config(pipeline_config: 'PipelineConfig', global_config: Glob
 
     merged_config_values = {}
     for field in fields(GlobalPipelineConfig):
-        # Fail-loud: Let AttributeError bubble up naturally (no getattr fallbacks)
-        pipeline_value = getattr(pipeline_config, field.name)
+        # CRITICAL: Access raw stored value from __dict__ to avoid lazy resolution fallback to MRO defaults
+        # For lazy dataclasses, getattr() triggers resolution which falls back to GlobalPipelineConfig defaults
+        # We need the actual None value to know if it should inherit from global config
+        pipeline_value = pipeline_config.__dict__.get(field.name)
 
         if pipeline_value is not None:
             # CRITICAL FIX: For lazy configs, merge with global config BEFORE converting to base
@@ -206,15 +208,15 @@ def _execute_axis_with_sequential_combinations(
                 error_message=result.error_message
             )
 
-        # Clear VFS between combinations (except after the last one)
-        if combo_idx < len(axis_contexts) - 1:
-            from openhcs.io.base import reset_memory_backend
-            from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+        # Clear VFS after each combination to prevent memory accumulation
+        # This is critical when worker processes handle multiple wells sequentially
+        from openhcs.io.base import reset_memory_backend
+        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
 
-            logger.info(f"🔄 WORKER: Clearing VFS after combination {combo_idx + 1}/{len(axis_contexts)}")
-            reset_memory_backend()
-            if cleanup_all_gpu_frameworks:
-                cleanup_all_gpu_frameworks()
+        logger.info(f"🔄 WORKER: Clearing VFS after combination {combo_idx + 1}/{len(axis_contexts)}")
+        reset_memory_backend()
+        if cleanup_all_gpu_frameworks:
+            cleanup_all_gpu_frameworks()
 
     logger.info(f"🔄 WORKER: Completed all {len(axis_contexts)} combination(s) for axis {axis_id}")
     return ExecutionResult.success(axis_id=axis_id)
@@ -961,19 +963,17 @@ class PipelineOrchestrator(ContextProvider):
                 for step_index, step in enumerate(pipeline_definition):
                     step.process(frozen_context, step_index)
 
-                # Clear VFS after each combination (except the last one, to preserve final outputs)
-                # The last combination's outputs need to remain in VFS for any post-processing
-                if combo_idx < len(combinations) - 1:
-                    try:
-                        from openhcs.io.base import reset_memory_backend
-                        from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
+                # Clear VFS after each combination to prevent memory accumulation
+                try:
+                    from openhcs.io.base import reset_memory_backend
+                    from openhcs.core.memory.gpu_cleanup import cleanup_all_gpu_frameworks
 
-                        logger.info(f"🔄 SEQUENTIAL: Clearing VFS after combination {combo}")
-                        reset_memory_backend()
-                        cleanup_all_gpu_frameworks()
-                        logger.info(f"🔄 SEQUENTIAL: VFS cleared, ready for next combination")
-                    except Exception as e:
-                        logger.warning(f"Failed to clear VFS after combination {combo}: {e}")
+                    logger.info(f"🔄 SEQUENTIAL: Clearing VFS after combination {combo}")
+                    reset_memory_backend()
+                    cleanup_all_gpu_frameworks()
+                    logger.info(f"🔄 SEQUENTIAL: VFS cleared, ready for next combination")
+                except Exception as e:
+                    logger.warning(f"Failed to clear VFS after combination {combo}: {e}")
 
         frozen_context.current_sequential_combination = None
 
@@ -1042,8 +1042,8 @@ class PipelineOrchestrator(ContextProvider):
             logger.warning("No compiled contexts provided for execution.")
             return {}
         
-        # Use effective config (includes pipeline config) instead of global config directly
-        actual_max_workers = max_workers if max_workers is not None else self.get_effective_config().num_workers
+        # Access num_workers from effective config (merged pipeline + global config)
+        actual_max_workers = max_workers or self.get_effective_config().num_workers
         if actual_max_workers <= 0: # Ensure positive number of workers
             actual_max_workers = 1
 
