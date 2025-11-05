@@ -563,20 +563,26 @@ class PipelineEditorWidget(QWidget):
     
     def action_delete_step(self):
         """Handle Delete Step button (extracted from Textual version)."""
-        selected_items = self.get_selected_steps()
-        if not selected_items:
+        # Get selected item indices instead of step objects to handle duplicate names
+        selected_indices = []
+        for item in self.step_list.selectedItems():
+            step_index = item.data(Qt.ItemDataRole.UserRole)
+            if step_index is not None:
+                selected_indices.append(step_index)
+
+        if not selected_indices:
             self.service_adapter.show_error_dialog("No steps selected to delete.")
             return
-        
-        # Remove selected steps
-        steps_to_remove = set(getattr(item, 'name', '') for item in selected_items)
-        new_steps = [step for step in self.pipeline_steps if getattr(step, 'name', '') not in steps_to_remove]
-        
+
+        # Remove selected steps by index (not by name to handle duplicates)
+        indices_to_remove = set(selected_indices)
+        new_steps = [step for i, step in enumerate(self.pipeline_steps) if i not in indices_to_remove]
+
         self.pipeline_steps = new_steps
         self.update_step_list()
         self.pipeline_changed.emit(self.pipeline_steps)
-        
-        deleted_count = len(selected_items)
+
+        deleted_count = len(selected_indices)
         self.status_message.emit(f"Deleted {deleted_count} steps")
     
     def action_edit_step(self):
