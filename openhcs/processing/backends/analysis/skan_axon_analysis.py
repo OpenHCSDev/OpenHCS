@@ -46,8 +46,8 @@ def materialize_axon_analysis(
     axon_analysis_data: Dict[str, Any],
     path: str,
     filemanager,
-    backend: str,
-    **kwargs
+    backends,
+    backend_kwargs: dict = None
 ) -> str:
     """
     Materialize axon analysis results to disk using filemanager.
@@ -61,67 +61,81 @@ def materialize_axon_analysis(
         axon_analysis_data: The axon analysis results dictionary
         path: Base path for output files (from special output path)
         filemanager: FileManager instance for consistent I/O
-        backend: Backend to use for materialization
-        **kwargs: Additional materialization options
+        backends: Single backend string or list of backends to save to
+        backend_kwargs: Dict mapping backend names to their kwargs
 
     Returns:
         str: Path to the primary output file (JSON summary)
     """
-    logger.info(f"🔬 SKAN_MATERIALIZE: Called with path={path}, backend={backend}, data_keys={list(axon_analysis_data.keys()) if axon_analysis_data else 'None'}")
+    # Normalize backends to list
+    if isinstance(backends, str):
+        backends = [backends]
+
+    if backend_kwargs is None:
+        backend_kwargs = {}
+
+    logger.info(f"🔬 SKAN_MATERIALIZE: Called with path={path}, backends={backends}, data_keys={list(axon_analysis_data.keys()) if axon_analysis_data else 'None'}")
     import json
     from openhcs.constants.constants import Backend
 
     # Generate output file paths based on the input path
-    # Use clean naming: preserve namespaced path structure, don't duplicate special output key
-    base_path = path.replace('.pkl', '')
-    json_path = f"{base_path}.json"
-    csv_path = f"{base_path}_branches.csv"
+    # Replace extension properly (handles .pkl, .roi.zip, or any extension)
+    base_path = Path(path).stem
+    parent_dir = Path(path).parent
+    json_path = str(parent_dir / f"{base_path}.json")
+    csv_path = str(parent_dir / f"{base_path}_branches.csv")
 
-    # Ensure output directory exists for disk backend
-    output_dir = Path(json_path).parent
-    if backend == Backend.DISK.value:
-        filemanager.ensure_directory(str(output_dir), backend)
-
-    # 1. Save summary and metadata as JSON (primary output)
+    # 1. Prepare summary and metadata as JSON (primary output)
     summary_data = {
         'analysis_type': 'axon_skeleton_analysis',
         'summary': axon_analysis_data['summary'],
         'metadata': axon_analysis_data['metadata']
     }
     json_content = json.dumps(summary_data, indent=2, default=str)
-    # Remove existing file if it exists using filemanager
-    if filemanager.exists(json_path, backend):
-        filemanager.delete(json_path, backend)
-    filemanager.save(json_content, json_path, backend)
 
-    # 2. Save detailed branch data as CSV
+    # 2. Prepare detailed branch data as CSV
     branch_df = pd.DataFrame(axon_analysis_data['branch_data'])
     csv_content = branch_df.to_csv(index=False)
-    # Remove existing file if it exists using filemanager
-    if filemanager.exists(csv_path, backend):
-        filemanager.delete(csv_path, backend)
-    filemanager.save(csv_content, csv_path, backend)
 
-    # 3. Optional: Create Excel file with multiple sheets (using direct file I/O for Excel)
-    # Note: Excel files require actual file paths, not compatible with OMERO backend
-    if kwargs.get('create_excel', True) and backend == Backend.DISK.value:
-        excel_path = f"{base_path}_complete.xlsx"
-        # Remove existing file if it exists
-        if Path(excel_path).exists():
-            Path(excel_path).unlink()
-        with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
-            # Branch data sheet
-            branch_df.to_excel(writer, sheet_name='Branch_Data', index=False)
+    # 3. Save to all backends
+    for backend in backends:
+        # Ensure output directory exists for disk backend
+        if backend == Backend.DISK.value:
+            filemanager.ensure_directory(str(parent_dir), backend)
 
-            # Summary sheet
-            summary_df = pd.DataFrame([axon_analysis_data['summary']])
-            summary_df.to_excel(writer, sheet_name='Summary', index=False)
+        # Get backend-specific kwargs
+        kwargs = backend_kwargs.get(backend, {})
 
-            # Metadata sheet
-            metadata_df = pd.DataFrame([axon_analysis_data['metadata']])
-            metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
+        # Remove existing files if they exist
+        if filemanager.exists(json_path, backend):
+            filemanager.delete(json_path, backend)
+        if filemanager.exists(csv_path, backend):
+            filemanager.delete(csv_path, backend)
 
-        logger.info(f"Created Excel file: {excel_path}")
+        # Save JSON and CSV
+        filemanager.save(json_content, json_path, backend, **kwargs)
+        filemanager.save(csv_content, csv_path, backend, **kwargs)
+
+        # 4. Optional: Create Excel file with multiple sheets (using direct file I/O for Excel)
+        # Note: Excel files require actual file paths, not compatible with OMERO backend
+        if kwargs.get('create_excel', True) and backend == Backend.DISK.value:
+            excel_path = str(parent_dir / f"{base_path}_complete.xlsx")
+            # Remove existing file if it exists
+            if Path(excel_path).exists():
+                Path(excel_path).unlink()
+            with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+                # Branch data sheet
+                branch_df.to_excel(writer, sheet_name='Branch_Data', index=False)
+
+                # Summary sheet
+                summary_df = pd.DataFrame([axon_analysis_data['summary']])
+                summary_df.to_excel(writer, sheet_name='Summary', index=False)
+
+                # Metadata sheet
+                metadata_df = pd.DataFrame([axon_analysis_data['metadata']])
+                metadata_df.to_excel(writer, sheet_name='Metadata', index=False)
+
+            logger.info(f"Created Excel file: {excel_path}")
 
     # 4. Log materialization
     logger.info("Materialized axon analysis:")
@@ -131,22 +145,32 @@ def materialize_axon_analysis(
     return json_path
 
 
-def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filemanager, backend: str) -> str:
+def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filemanager, backends, backend_kwargs: dict = None) -> str:
     """Materialize skeleton visualizations as individual TIFF files."""
+
+    # Normalize backends to list
+    if isinstance(backends, str):
+        backends = [backends]
+
+    if backend_kwargs is None:
+        backend_kwargs = {}
+
+    # Generate output file paths based on the input path
+    base_path = Path(path).stem
+    parent_dir = Path(path).parent
 
     if not data:
         # Create empty summary file to indicate no visualizations were generated
-        summary_path = path.replace('.pkl', '_skeleton_summary.txt')
+        summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
         summary_content = "No skeleton visualizations generated (return_skeleton_visualizations=False)\n"
-        filemanager.save(summary_content, summary_path, backend)
+        for backend in backends:
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(summary_content, summary_path, backend, **kwargs)
         return summary_path
-
-    # Generate output file paths based on the input path
-    base_path = path.replace('.pkl', '')
 
     # Save each visualization as a separate TIFF file
     for i, visualization in enumerate(data):
-        viz_filename = f"{base_path}_slice_{i:03d}.tif"
+        viz_filename = str(parent_dir / f"{base_path}_slice_{i:03d}.tif")
 
         # Convert visualization to appropriate dtype for saving (uint16 to match input images)
         if visualization.dtype != np.uint16:
@@ -158,18 +182,23 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
         else:
             viz_uint16 = visualization
 
-        # Save using filemanager
-        from openhcs.constants.constants import Backend
-        filemanager.save(viz_uint16, viz_filename, Backend.DISK.value)
+        # Save to all backends
+        for backend in backends:
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(viz_uint16, viz_filename, backend, **kwargs)
 
     # Return summary path
-    summary_path = f"{base_path}_skeleton_summary.txt"
+    summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
     summary_content = f"Skeleton visualizations saved: {len(data)} files\n"
     summary_content += f"Base filename pattern: {base_path}_slice_XXX.tif\n"
     summary_content += f"Visualization dtype: {data[0].dtype}\n"
     summary_content += f"Visualization shape: {data[0].shape}\n"
 
-    filemanager.save(summary_content, summary_path, Backend.DISK.value)
+    # Save summary to all backends
+    from openhcs.constants.constants import Backend
+    for backend in backends:
+        kwargs = backend_kwargs.get(backend, {})
+        filemanager.save(summary_content, summary_path, backend, **kwargs)
 
     return summary_path
 
