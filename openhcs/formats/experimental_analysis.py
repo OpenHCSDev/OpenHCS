@@ -440,6 +440,9 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
             row = raw_df.iloc[i]
             well_id = str(row.iloc[0]).strip()
             if well_id and well_id != 'nan' and well_id != '':
+                # Skip wells that don't exist in plates_dict (e.g., wells not in config)
+                if plate_name not in plates_dict or well_id not in plates_dict[plate_name]:
+                    continue
                 # Map features by position (feature[j] corresponds to column[j+1])
                 for j, feature in enumerate(features):
                     if j + 1 < len(row):  # Make sure we don't go out of bounds
@@ -453,8 +456,12 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
             if row[0] == "Barcode":
                 start_collect=False
             if start_collect:
+                well_id = row[0]
+                # Skip wells that don't exist in plates_dict (e.g., wells not in config)
+                if plate_name not in plates_dict or well_id not in plates_dict[plate_name]:
+                    continue
                 for feature in features:
-                    plates_dict[plate_name][row[0]][feature]=row[feature]
+                    plates_dict[plate_name][well_id][feature]=row[feature]
             if row[0] == "Plate Name":
                 plate_name=row[1]
             elif pd.isnull(row[0]):
