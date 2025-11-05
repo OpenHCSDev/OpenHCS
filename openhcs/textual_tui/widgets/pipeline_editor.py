@@ -749,7 +749,21 @@ class PipelineEditorWidget(ButtonListWidget):
                 try:
                     # Execute the code (it has all necessary imports)
                     namespace = {}
-                    exec(edited_code, namespace)
+                    try:
+                        # Try normal execution first
+                        exec(edited_code, namespace)
+                    except TypeError as e:
+                        # If TypeError about unexpected keyword arguments (old-format constructors), retry with migration
+                        error_msg = str(e)
+                        if "unexpected keyword argument" in error_msg and ("group_by" in error_msg or "variable_components" in error_msg):
+                            logger.info(f"Detected old-format step constructor, retrying with migration patch: {e}")
+                            namespace = {}
+                            from openhcs.io.pipeline_migration import patch_step_constructors_for_migration
+                            with patch_step_constructors_for_migration():
+                                exec(edited_code, namespace)
+                        else:
+                            # Not a migration issue, re-raise
+                            raise
 
                     # Get the pipeline_steps from the namespace
                     if 'pipeline_steps' in namespace:

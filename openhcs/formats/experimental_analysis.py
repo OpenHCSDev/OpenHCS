@@ -40,7 +40,8 @@ def read_results(results_path: str, scope: Optional[str] = None) -> pd.DataFrame
     """
     if results_path.endswith('.csv'):
         # Handle CSV files (like MetaXpress consolidated output)
-        raw_df = pd.read_csv(results_path)
+        # Use header=None to preserve all rows including metadata headers
+        raw_df = pd.read_csv(results_path, header=None)
     else:
         # Handle Excel files
         xls = pd.ExcelFile(results_path)
@@ -118,10 +119,16 @@ def read_plate_layout(config_path):
         if len(string2) > 0 and not string2[-1] == 's': string2 +='s'
         return string1 == string2
 
+    import logging
+    logger = logging.getLogger(__name__)
+    
     for i,row in df.iterrows():
         #check max number of replicates
         row_content = str(row.iloc[0]) if pd.notna(row.iloc[0]) else ''
         row_name = str(i) if pd.notna(i) else ''
+        
+
+
 
         # Check both row_content and row_name for N parameter (for compatibility)
         if is_N_row(row_content) or is_N_row(row_name):
@@ -172,7 +179,8 @@ def read_plate_layout(config_path):
 #            continue
 
         #get control wells
-        if sanitize_compare(row.name,'control') or sanitize_compare(row.name,'control well'):
+        # Only process if there's actual well data (not just the "Controls" header row)
+        if (sanitize_compare(row.name,'control') or sanitize_compare(row.name,'control well')) and len(row.dropna().tolist()) > 0:
             if ctrl_wells is None:
                 ctrl_wells = []
             ctrl_wells+=row.dropna().tolist()
@@ -183,8 +191,10 @@ def read_plate_layout(config_path):
         row_name = str(row.name) if pd.notna(row.name) else ''
 
         # Check both row_content and row_name for compatibility with existing inconsistent logic
-        if (sanitize_compare(row_content,'exclude wells') or sanitize_compare(row_content,'excluded wells') or sanitize_compare(row_content,'exclude') or
-            sanitize_compare(row_name,'exclude wells') or sanitize_compare(row_name,'excluded wells') or sanitize_compare(row_name,'exclude')):
+        # Only process if there's actual well data (not just a header row)
+        if ((sanitize_compare(row_content,'exclude wells') or sanitize_compare(row_content,'excluded wells') or sanitize_compare(row_content,'exclude') or
+            sanitize_compare(row_name,'exclude wells') or sanitize_compare(row_name,'excluded wells') or sanitize_compare(row_name,'exclude')) and
+            len(row.dropna().tolist()) > 0):
             if excluded_wells is None:
                 excluded_wells = []
             excluded_wells+=row.dropna().tolist()
@@ -223,13 +233,15 @@ def read_plate_layout(config_path):
         #get new condition name
         #finished reading controls and excluded wells
         if sanitize_compare(row_content,'condition') or sanitize_compare(row_name,'condition'):
+            # Reset ctrl_wells to prevent it from catching dose-curve "Plate Group" rows
+            ctrl_wells = None
+            
             # make control well dict
             if ctrl_wells_aligned is not None:
                 ctrl_positions = {"N"+str(i+1):[] for i in range(N)}
                 for i in range(len(ctrl_wells_aligned)):
                     if ctrl_positions_replicates is not None:
                         ctrl_positions["N"+str(ctrl_positions_replicates[i])].append((ctrl_wells_aligned[i],ctrl_groups[i]))
-                        ctrl_wells = None
                     else:
                         ctrl_positions = None
             else:
@@ -433,7 +445,8 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
         i = 0
         while i < len(raw_df):
             # Look for "Barcode" row (start of plate section)
-            if str(raw_df.iloc[i, 0]).strip() == "Barcode":
+            cell_value = str(raw_df.iloc[i, 0]).strip()
+            if cell_value == "Barcode":
                 section_start = i
                 # Find "Plate ID" in this section
                 plate_id = None
@@ -459,6 +472,8 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
                         'data_start': well_header_idx + 1,
                         'data_end': section_end
                     })
+                    # Move to the next "Barcode" (which we already found) or end of file
+                    # Don't increment here because section_end points to the next "Barcode"
                     i = section_end
                 else:
                     i += 1
@@ -469,7 +484,6 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
         for section in plate_sections:
             plate_name = section['plate_id']
             # Process data rows for this plate
-            wells_filled = 0
             for i in range(section['data_start'], section['data_end']):
                 row = raw_df.iloc[i]
                 well_id = str(row.iloc[0]).strip()
@@ -483,10 +497,6 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
                     for j, feature in enumerate(features):
                         if j + 1 < len(row):  # Make sure we don't go out of bounds
                             plates_dict[plate_name][well_id][feature] = row.iloc[j + 1]
-                    wells_filled += 1
-            if wells_filled == 0:
-                import logging
-                logging.warning(f"No wells filled for plate {plate_name}. Plate in dict: {plate_name in plates_dict}")
     else:
         # Original Excel format
         df_col_names = raw_df.set_axis(["Well","Laser Focus"]+features, axis=1)
@@ -988,7 +998,13 @@ def write_values_heat_map(plates_dict,features,outpath):
                     row=[]
                     for c in range(12):
                         well=chr(r)+str(c+1).zfill(2)
-                        row.append(plates_dict[plate][well][feature])
+                        value = plates_dict[plate][well][feature]
+                        # Convert to float to ensure numeric formatting in Excel
+                        try:
+                            value = float(value) if value is not None else None
+                        except (ValueError, TypeError):
+                            pass  # Keep original value if conversion fails
+                        row.append(value)
                     sheet_rows.append(row)
             sheet_rows.append([""])
             pd.DataFrame(sheet_rows).to_excel(writer, sheet_name=remove_inval_chars(feature[:31]))
