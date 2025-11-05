@@ -296,14 +296,16 @@ def consolidate_analysis_results(
     # Group files by well ID and analysis type
     wells_data = {}
     analysis_types = set()
-    
+
     for file_path in all_files:
         filename = Path(file_path).name
 
-        # Find well ID by substring matching (much more robust than regex)
+        # Find well ID by case-insensitive substring matching
+        # (Opera Phenix parser returns uppercase R02C02 but CSV filenames have lowercase r02c02)
         well_id = None
+        filename_lower = filename.lower()
         for candidate_well in well_ids:
-            if candidate_well in filename:
+            if candidate_well.lower() in filename_lower:
                 well_id = candidate_well
                 break
 
