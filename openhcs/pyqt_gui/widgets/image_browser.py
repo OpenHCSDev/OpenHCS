@@ -711,7 +711,25 @@ class ImageBrowserWidget(QWidget):
             self.all_images = {}
             for filename in image_files:
                 parsed = handler.parser.parse_filename(filename)
-                metadata = {'filename': filename}
+                
+                # Get file size
+                file_path = plate_path / filename
+                if file_path.exists():
+                    size_bytes = file_path.stat().st_size
+                    if size_bytes < 1024:
+                        size_str = f"{size_bytes} B"
+                    elif size_bytes < 1024 * 1024:
+                        size_str = f"{size_bytes / 1024:.1f} KB"
+                    else:
+                        size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+                else:
+                    size_str = "N/A"
+                
+                metadata = {
+                    'filename': filename,
+                    'type': 'Image',
+                    'size': size_str
+                }
                 if parsed:
                     metadata.update(parsed)
                 self.all_images[filename] = metadata
