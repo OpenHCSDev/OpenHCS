@@ -272,23 +272,19 @@ class MetadataHandler(ABC):
             subdirs = metadata.get("subdirectories", {})
             logger.info(f"get_image_files: Found {len(subdirs)} subdirectories")
 
-            # Find main subdirectory
-            main_subdir_key = next((key for key, data in subdirs.items() if data.get("main")), None)
-            if not main_subdir_key:
-                main_subdir_key = next(iter(subdirs.keys()))
+            # Collect files from ALL subdirectories, not just main
+            all_files = []
+            for subdir_key, subdir_data in subdirs.items():
+                # Prefer workspace_mapping keys (virtual paths) if available
+                if workspace_mapping := subdir_data.get("workspace_mapping"):
+                    all_files.extend(workspace_mapping.keys())
+                else:
+                    # Otherwise use image_files list
+                    image_files = subdir_data.get("image_files", [])
+                    all_files.extend(image_files)
 
-            logger.info(f"get_image_files: Using main subdirectory '{main_subdir_key}'")
-            subdir_data = subdirs[main_subdir_key]
-
-            # Prefer workspace_mapping keys (virtual paths) if available
-            if workspace_mapping := subdir_data.get("workspace_mapping"):
-                logger.info(f"get_image_files: Returning {len(workspace_mapping)} files from workspace_mapping")
-                return list(workspace_mapping.keys())
-
-            # Otherwise use image_files list
-            image_files = subdir_data.get("image_files", [])
-            logger.info(f"get_image_files: Returning {len(image_files)} files from image_files list")
-            return image_files
+            logger.info(f"get_image_files: Returning {len(all_files)} files from {len(subdirs)} subdirectories")
+            return all_files
 
         except Exception:
             # Fallback: no metadata yet, return empty list
