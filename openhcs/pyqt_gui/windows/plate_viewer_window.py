@@ -94,6 +94,13 @@ class PlateViewerWindow(QDialog):
 
         tab_row.addStretch()
 
+        # Consolidate Results button
+        consolidate_btn = QPushButton("Consolidate Results")
+        consolidate_btn.clicked.connect(self._consolidate_results)
+        consolidate_btn.setToolTip("Generate MetaXpress-style summary CSV from analysis results")
+        consolidate_btn.setStyleSheet(self.style_gen.generate_button_style())
+        tab_row.addWidget(consolidate_btn)
+
         # Close button
         close_btn = QPushButton("Close")
         close_btn.clicked.connect(self.accept)
@@ -278,6 +285,88 @@ class PlateViewerWindow(QDialog):
             group_layout.addWidget(metadata_form)
 
             layout.addWidget(group_box)
+
+    def _consolidate_results(self):
+        """Manually trigger analysis results consolidation."""
+        from PyQt6.QtWidgets import QMessageBox
+        from openhcs.core.config import get_current_global_config, GlobalPipelineConfig
+        from pathlib import Path
+
+        try:
+            # Get global config
+            shared_context = get_current_global_config(GlobalPipelineConfig)
+
+            # Find results directory from orchestrator
+            results_dir = None
+            if hasattr(self.orchestrator, '_compiled_contexts') and self.orchestrator._compiled_contexts:
+                # Use compiled contexts if available
+                for axis_id, context in self.orchestrator._compiled_contexts.items():
+                    for step_plan in context.step_plans:
+                        special_outputs = step_plan.get('special_outputs', {})
+                        if special_outputs:
+                            first_output = next(iter(special_outputs.values()))
+                            output_path = Path(first_output['path'])
+                            results_dir = output_path.parent
+                            break
+                    if results_dir:
+                        break
+
+            if not results_dir or not results_dir.exists():
+                QMessageBox.warning(
+                    self,
+                    "No Results Found",
+                    "No analysis results directory found. Please run the pipeline first."
+                )
+                return
+
+            # Check for CSV files
+            csv_files = list(results_dir.glob("*.csv"))
+            if not csv_files:
+                QMessageBox.warning(
+                    self,
+                    "No CSV Files",
+                    f"No CSV files found in {results_dir}. Nothing to consolidate."
+                )
+                return
+
+            # Get well IDs from compiled contexts
+            well_ids = list(self.orchestrator._compiled_contexts.keys()) if hasattr(self.orchestrator, '_compiled_contexts') else []
+
+            if not well_ids:
+                QMessageBox.warning(
+                    self,
+                    "No Wells Found",
+                    "No well IDs found in compiled contexts. Please compile the pipeline first."
+                )
+                return
+
+            # Import consolidation function
+            from openhcs.core.orchestrator.orchestrator import _get_consolidate_analysis_results
+
+            # Run consolidation
+            logger.info(f"Manual consolidation: {len(csv_files)} CSV files in {results_dir}")
+            consolidate_fn = _get_consolidate_analysis_results()
+            consolidate_fn(
+                results_directory=str(results_dir),
+                well_ids=well_ids,
+                consolidation_config=shared_context.analysis_consolidation_config,
+                plate_metadata_config=shared_context.plate_metadata_config
+            )
+
+            QMessageBox.information(
+                self,
+                "Consolidation Complete",
+                f"Successfully consolidated {len(csv_files)} CSV files from {len(well_ids)} wells.\n\n"
+                f"Output saved to: {results_dir}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to consolidate results: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "Consolidation Failed",
+                f"Failed to consolidate results:\n\n{str(e)}"
+            )
 
     def cleanup(self):
         """Clean up resources."""
