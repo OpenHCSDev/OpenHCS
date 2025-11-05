@@ -172,7 +172,8 @@ def _connect_optional_checkbox_logic(manager, param_info, checkbox, nested_form,
             help_btn.setEnabled(True)
 
             # Trigger the nested config's enabled handler to apply enabled styling
-            QTimer.singleShot(0, nested_manager._apply_initial_enabled_styling)
+            # CRITICAL FIX: Call the service method, not a non-existent manager method
+            QTimer.singleShot(0, lambda: nested_manager._enabled_field_styling_service.apply_initial_enabled_styling(nested_manager))
         else:
             # Config is None - set to None and block inputs
             manager.update_parameter(param_info.name, None)

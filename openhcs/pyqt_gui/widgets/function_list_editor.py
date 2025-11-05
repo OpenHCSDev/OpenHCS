@@ -309,9 +309,8 @@ class FunctionListEditorWidget(QWidget):
             if hasattr(pane, 'form_manager') and pane.form_manager is not None:
                 # Check if the form manager has an enabled field
                 if 'enabled' in pane.form_manager.parameters:
-                    # Apply the initial enabled styling
-                    if hasattr(pane.form_manager, '_apply_initial_enabled_styling'):
-                        pane.form_manager._apply_initial_enabled_styling()
+                    # CRITICAL FIX: Call the service method, not a non-existent manager method
+                    pane.form_manager._enabled_field_styling_service.apply_initial_enabled_styling(pane.form_manager)
         except Exception as e:
             # Log error but don't crash the UI
             import logging
