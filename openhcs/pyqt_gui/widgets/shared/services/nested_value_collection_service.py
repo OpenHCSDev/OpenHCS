@@ -111,11 +111,11 @@ class NestedValueCollectionService(ParameterServiceABC):
         checkbox = WidgetFinderService.find_nested_checkbox(manager, param_name)
         if checkbox and not checkbox.isChecked():
             return None
-        
-        # Check if current value has enabled=False
-        current_values = manager.get_current_values()
-        if current_values.get(param_name) and not current_values[param_name].enabled:
-            return None
+
+        # CRITICAL FIX: Don't call get_current_values() here - causes infinite recursion!
+        # We're already inside get_current_values() when this is called.
+        # The checkbox check above is sufficient - if checkbox is checked, the field is enabled.
+        # The enabled=False check was redundant and caused recursion.
         
         # Get nested values
         nested_values = nested_manager.get_current_values()
