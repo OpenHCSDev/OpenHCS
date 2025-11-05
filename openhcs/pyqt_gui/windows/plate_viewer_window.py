@@ -292,47 +292,57 @@ class PlateViewerWindow(QDialog):
         from pathlib import Path
 
         try:
-            # Find results directory from orchestrator
-            results_dir = None
-            if hasattr(self.orchestrator, '_compiled_contexts') and self.orchestrator._compiled_contexts:
-                # Use compiled contexts if available
-                for axis_id, context in self.orchestrator._compiled_contexts.items():
-                    for step_plan in context.step_plans:
-                        special_outputs = step_plan.get('special_outputs', {})
-                        if special_outputs:
-                            first_output = next(iter(special_outputs.values()))
-                            output_path = Path(first_output['path'])
-                            results_dir = output_path.parent
-                            break
-                    if results_dir:
-                        break
+            # Find results directories by iterating subdirectories in metadata
+            plate_path = self.orchestrator.plate_path
+            metadata_handler = self.orchestrator.microscope_handler.metadata_handler
 
-            if not results_dir or not results_dir.exists():
+            # Load metadata to get subdirectories
+            from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
+            if isinstance(metadata_handler, OpenHCSMetadataHandler):
+                metadata_dict = metadata_handler._load_metadata_dict(plate_path)
+                subdirs = metadata_dict.get('subdirectories', {})
+            else:
+                # For non-OpenHCS formats, assume single output directory
+                subdirs = {}
+
+            # Find all *_results directories
+            results_dirs = []
+            if subdirs:
+                # Check each subdirectory for corresponding results directory
+                for subdir_name in subdirs.keys():
+                    results_dir = plate_path / f"{subdir_name}_results"
+                    if results_dir.exists() and results_dir.is_dir():
+                        results_dirs.append(results_dir)
+            else:
+                # Fallback: scan plate directory for any *_results directories
+                for item in plate_path.iterdir():
+                    if item.is_dir() and item.name.endswith('_results'):
+                        results_dirs.append(item)
+
+            if not results_dirs:
                 QMessageBox.warning(
                     self,
                     "No Results Found",
-                    "No analysis results directory found. Please run the pipeline first."
+                    f"No *_results directories found in {plate_path}."
                 )
                 return
 
-            # Check for CSV files
-            csv_files = list(results_dir.glob("*.csv"))
-            if not csv_files:
-                QMessageBox.warning(
-                    self,
-                    "No CSV Files",
-                    f"No CSV files found in {results_dir}. Nothing to consolidate."
-                )
-                return
+            # Get well IDs from metadata (parse from image files)
+            image_files = metadata_handler.get_image_files(plate_path)
+            parser = self.orchestrator.microscope_handler.parser
+            well_ids = set()
+            for filename in image_files:
+                parsed = parser.parse_filename(Path(filename).name)
+                if 'well' in parsed:
+                    well_ids.add(parsed['well'])
 
-            # Get well IDs from compiled contexts
-            well_ids = list(self.orchestrator._compiled_contexts.keys()) if hasattr(self.orchestrator, '_compiled_contexts') else []
+            well_ids = sorted(list(well_ids))
 
             if not well_ids:
                 QMessageBox.warning(
                     self,
                     "No Wells Found",
-                    "No well IDs found in compiled contexts. Please compile the pipeline first."
+                    "No well IDs found in metadata. Cannot consolidate."
                 )
                 return
 
@@ -342,21 +352,39 @@ class PlateViewerWindow(QDialog):
             # Get configs from orchestrator's pipeline_config (same pattern as image browser)
             pipeline_config = self.orchestrator.pipeline_config
 
-            # Run consolidation
-            logger.info(f"Manual consolidation: {len(csv_files)} CSV files in {results_dir}")
+            # Consolidate each results directory
             consolidate_fn = _get_consolidate_analysis_results()
-            consolidate_fn(
-                results_directory=str(results_dir),
-                well_ids=well_ids,
-                consolidation_config=pipeline_config.analysis_consolidation_config,
-                plate_metadata_config=pipeline_config.plate_metadata_config
-            )
+            total_csv_files = 0
+
+            for results_dir in results_dirs:
+                csv_files = list(results_dir.glob("*.csv"))
+                if not csv_files:
+                    logger.info(f"Skipping {results_dir} - no CSV files found")
+                    continue
+
+                total_csv_files += len(csv_files)
+                logger.info(f"Manual consolidation: {len(csv_files)} CSV files in {results_dir}")
+
+                consolidate_fn(
+                    results_directory=str(results_dir),
+                    well_ids=well_ids,
+                    consolidation_config=pipeline_config.analysis_consolidation_config,
+                    plate_metadata_config=pipeline_config.plate_metadata_config
+                )
+
+            if total_csv_files == 0:
+                QMessageBox.warning(
+                    self,
+                    "No CSV Files",
+                    f"No CSV files found in any results directories. Nothing to consolidate."
+                )
+                return
 
             QMessageBox.information(
                 self,
                 "Consolidation Complete",
-                f"Successfully consolidated {len(csv_files)} CSV files from {len(well_ids)} wells.\n\n"
-                f"Output saved to: {results_dir}"
+                f"Successfully consolidated {total_csv_files} CSV files from {len(well_ids)} wells.\n\n"
+                f"Processed {len(results_dirs)} results directories."
             )
 
         except Exception as e:
