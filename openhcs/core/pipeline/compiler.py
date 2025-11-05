@@ -51,7 +51,7 @@ from collections import OrderedDict # For special_outputs and special_inputs ord
 
 from openhcs.constants.constants import VALID_GPU_MEMORY_TYPES, READ_BACKEND, WRITE_BACKEND, Backend
 from openhcs.core.context.processing_context import ProcessingContext
-from openhcs.core.config import MaterializationBackend, PathPlanningConfig, WellFilterMode
+from openhcs.core.config import MaterializationBackend, PathPlanningConfig
 from openhcs.core.pipeline.funcstep_contract_validator import \
     FuncStepContractValidator
 from openhcs.core.pipeline.materialization_flag_planner import \
@@ -478,12 +478,9 @@ class PipelineCompiler:
                     if isinstance(config, WellFilterConfig) and config.well_filter is not None:
                         config_filter = step_axis_filters.get(attr_name)
                         if config_filter:
-                            # Apply axis filter logic
-                            axis_in_filter = context.axis_id in config_filter['resolved_axis_values']
-                            include_config = (
-                                axis_in_filter if config_filter['filter_mode'] == WellFilterMode.INCLUDE
-                                else not axis_in_filter
-                            )
+                            # Check if current axis is in the resolved values
+                            # Note: resolved_axis_values already has mode (INCLUDE/EXCLUDE) applied
+                            include_config = context.axis_id in config_filter['resolved_axis_values']
 
                     # Add config to plan if it passed all checks
                     if include_config:
@@ -1065,11 +1062,13 @@ class PipelineCompiler:
                 if well_filter_config and hasattr(well_filter_config, 'well_filter') and well_filter_config.well_filter is not None:
                     from openhcs.core.utils import WellFilterProcessor
                     available_wells = orchestrator.get_component_keys(MULTIPROCESSING_AXIS)
-                    resolved_wells = list(WellFilterProcessor.resolve_compilation_filter(
+                    resolved_wells = WellFilterProcessor.resolve_filter_with_mode(
                         well_filter_config.well_filter,
+                        well_filter_config.well_filter_mode,
                         available_wells
-                    ))
-                    logger.info(f"Resolved well_filter_config.well_filter={well_filter_config.well_filter} to {len(resolved_wells)} wells: {resolved_wells}")
+                    )
+                    logger.info(f"Well filter: {well_filter_config.well_filter} (mode={well_filter_config.well_filter_mode.value}) "
+                               f"→ {len(resolved_wells)} wells to process: {resolved_wells}")
 
                     # If axis_filter was also provided, intersect them
                     if axis_filter:
@@ -1303,23 +1302,24 @@ def _resolve_step_axis_filters(resolved_steps: List[AbstractStep], context, orch
                 config = getattr(resolved_step, attr_name, None)
                 if config is not None and isinstance(config, WellFilterConfig) and config.well_filter is not None:
                     try:
-                        # Resolve the axis filter pattern to concrete axis values
-                        resolved_axis_values = WellFilterProcessor.resolve_compilation_filter(
+                        # Resolve the axis filter pattern to concrete axis values WITH mode applied
+                        resolved_axis_values = WellFilterProcessor.resolve_filter_with_mode(
                             config.well_filter,
+                            config.well_filter_mode,
                             available_axis_values
                         )
 
                         # Store resolved axis values for this config
+                        # Note: resolved_axis_values already has mode applied, so we store them as a set
                         step_filters[attr_name] = {
-                            'resolved_axis_values': sorted(resolved_axis_values),
+                            'resolved_axis_values': set(resolved_axis_values),
                             'filter_mode': config.well_filter_mode,
                             'original_filter': config.well_filter
                         }
 
                         logger.debug(f"Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
-                                   f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
-                        logger.debug(f"Step '{resolved_step.name}' {attr_name} filter '{config.well_filter}' "
-                                   f"resolved to {len(resolved_axis_values)} axis values: {sorted(resolved_axis_values)}")
+                                   f"(mode={config.well_filter_mode.value}) resolved to {len(resolved_axis_values)} "
+                                   f"axis values: {sorted(resolved_axis_values)}")
 
                     except Exception as e:
                         logger.error(f"Failed to resolve axis filter for step '{resolved_step.name}' {attr_name}: {e}")
@@ -1332,12 +1332,3 @@ def _resolve_step_axis_filters(resolved_steps: List[AbstractStep], context, orch
 
     total_filters = sum(len(filters) for filters in context.step_axis_filters.values())
     logger.debug(f"Axis filter resolution complete. {len(context.step_axis_filters)} steps have axis filters, {total_filters} total filters.")
-
-
-def _should_process_for_well(axis_id, well_filter_config):
-    """Unified well filtering logic for all WellFilterConfig systems."""
-    if well_filter_config.well_filter is None:
-        return True
-
-    well_in_filter = axis_id in well_filter_config.well_filter
-    return well_in_filter if well_filter_config.well_filter_mode == WellFilterMode.INCLUDE else not well_in_filter
