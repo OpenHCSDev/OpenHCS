@@ -72,6 +72,56 @@ def _filter_special_outputs_for_function(
     return result
 
 
+def _filter_patterns_by_component(
+    patterns: Union[List, Dict],
+    component: str,
+    target_value: str,
+    microscope_handler
+) -> Union[List, Dict]:
+    """Filter patterns to only include those matching a specific component value.
+
+    Pattern strings encode fixed component values (e.g., 'A01_s{iii}_w1_z003_t001.tif' has z=003).
+    This function extracts those values by temporarily replacing placeholders with dummy values
+    to parse the pattern, following the same convention used in PatternDiscoveryEngine.
+
+    Args:
+        patterns: List of patterns or dict of grouped patterns
+        component: Component name to filter by (e.g., 'z_index', 'channel')
+        target_value: Target component value (e.g., '3' for z-slice 3)
+        microscope_handler: MicroscopeHandler for parsing patterns
+
+    Returns:
+        Filtered patterns in the same format as input
+    """
+    from openhcs.formats.pattern.pattern_discovery import PatternDiscoveryEngine
+
+    def filter_pattern_list(pattern_list: List) -> List:
+        """Filter a list of patterns by component value."""
+        filtered = []
+        for pattern in pattern_list:
+            # Replace placeholder with dummy value to make pattern parseable
+            # This follows the same convention as PatternDiscoveryEngine
+            pattern_template = str(pattern).replace(PatternDiscoveryEngine.PLACEHOLDER_PATTERN, '001')
+            metadata = microscope_handler.parser.parse_filename(pattern_template)
+
+            if metadata and str(metadata.get(component)) == str(target_value):
+                filtered.append(pattern)
+
+        return filtered
+
+    # If patterns is already grouped (dict), filter within each group
+    if isinstance(patterns, dict):
+        filtered = {}
+        for group_key, pattern_list in patterns.items():
+            filtered_list = filter_pattern_list(pattern_list)
+            if filtered_list:
+                filtered[group_key] = filtered_list
+        return filtered
+    else:
+        # Patterns is a flat list
+        return filter_pattern_list(patterns)
+
+
 def _save_materialized_data(filemanager, memory_data: List, materialized_paths: List[str],
                            materialized_backend: str, step_plan: Dict, context, axis_id: str) -> None:
     """Save data to materialized location using appropriate backend."""
@@ -975,6 +1025,28 @@ class FunctionStep(AbstractStep):
             if func_from_plan is None:
                 raise ValueError(f"Step plan missing 'func' for step: {step_plan.get('step_name', 'Unknown')} (index: {step_index})")
 
+            # 🔄 SEQUENTIAL PROCESSING: Filter patterns BEFORE grouping by group_by component
+            # This ensures sequential filtering works independently of group_by
+            if context.current_sequential_combination:
+                seq_config = context.global_config.sequential_processing_config
+                seq_component = seq_config.sequential_components[0].value
+                target_value = context.current_sequential_combination[0]
+
+                logger.info(f"🔄 SEQUENTIAL: Filtering patterns by {seq_component}={target_value}")
+                logger.info(f"🔄 SEQUENTIAL: Before filtering: {len(patterns_by_well[axis_id]) if isinstance(patterns_by_well[axis_id], list) else sum(len(v) for v in patterns_by_well[axis_id].values())} patterns")
+
+                # Filter patterns by sequential component
+                patterns_by_well[axis_id] = _filter_patterns_by_component(
+                    patterns_by_well[axis_id],
+                    seq_component,
+                    target_value,
+                    microscope_handler
+                )
+
+                filtered_count = len(patterns_by_well[axis_id]) if isinstance(patterns_by_well[axis_id], list) else sum(len(v) for v in patterns_by_well[axis_id].values())
+                logger.info(f"🔄 SEQUENTIAL: After filtering: {filtered_count} patterns remain")
+
+            # Now group patterns by group_by component (if set)
             grouped_patterns, comp_to_funcs, comp_to_base_args = prepare_patterns_and_functions(
                 patterns_by_well[axis_id], func_from_plan, component=group_by.value if group_by else None
             )
@@ -994,33 +1066,8 @@ class FunctionStep(AbstractStep):
             results_keys = [k for k in existing_keys if 'results/' in k]
             logger.info(f"🔍 VFS_START: Results directory has {len(results_keys)} entries: {results_keys}")
 
-            # 🔄 SEQUENTIAL PROCESSING: Filter patterns BEFORE preload
-            logger.info(f"🔄 SEQUENTIAL CHECK: context.current_sequential_combination = {context.current_sequential_combination}")
-            logger.info(f"🔄 SEQUENTIAL CHECK: context.pipeline_sequential_mode = {context.pipeline_sequential_mode}")
-
-            if context.current_sequential_combination:
-                # Filter grouped_patterns to only include the current combination
-                seq_config = context.global_config.sequential_processing_config
-                seq_comps = [sc.value for sc in seq_config.sequential_components]
-                target_combo = context.current_sequential_combination
-
-                logger.info(f"🔄 SEQUENTIAL: Filtering patterns for combination {target_combo} (components: {seq_comps})")
-
-                # Filter grouped_patterns dict to only include matching comp_val
-                filtered_grouped_patterns = {}
-                for comp_val, pattern_list in grouped_patterns.items():
-                    # For single sequential component (most common case)
-                    if len(target_combo) == 1 and len(seq_comps) == 1:
-                        if comp_val == target_combo[0]:
-                            filtered_grouped_patterns[comp_val] = pattern_list
-                            logger.info(f"🔄 SEQUENTIAL: Keeping component '{comp_val}' ({len(pattern_list)} patterns)")
-                        else:
-                            logger.debug(f"🔄 SEQUENTIAL: Filtering out component '{comp_val}'")
-                    # TODO: Handle multi-component combinations if needed
-
-                # Replace grouped_patterns with filtered version
-                grouped_patterns = filtered_grouped_patterns
-                logger.info(f"🔄 SEQUENTIAL: After filtering, processing {len(grouped_patterns)} component(s)")
+            # Sequential filtering now happens BEFORE prepare_patterns_and_functions() above
+            # This ensures it works correctly when sequential_components != group_by
 
             # Non-sequential processing: process all patterns for all component values
             process = psutil.Process(os.getpid())
