@@ -112,7 +112,9 @@ class GenericValidator(Generic[T]):
                         error_message=f"Variable component {component.value} not available (multiprocessing axis: {self.config.multiprocessing_axis.value})"
                     )
 
-            if group_by and group_by.value not in remaining_values:
+            # Check group_by is valid if it's not None
+            # Note: group_by can be an enum with .value = None, so check the value explicitly
+            if group_by is not None and group_by.value is not None and group_by.value not in remaining_values:
                 return ValidationResult(
                     is_valid=False,
                     error_message=f"Group_by component {group_by.value} not available (multiprocessing axis: {self.config.multiprocessing_axis.value})"
