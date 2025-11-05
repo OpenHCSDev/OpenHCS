@@ -55,7 +55,11 @@ def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, fi
     if backend_kwargs is None:
         backend_kwargs = {}
 
-    csv_path = path.replace('.pkl', '_mtm_matches.csv')
+    # Replace extension with _mtm_matches.csv (handles .pkl, .roi.zip, or any extension)
+    from pathlib import Path as PathLib
+    base_path = PathLib(path).stem  # Remove extension
+    parent_dir = PathLib(path).parent
+    csv_path = str(parent_dir / f"{base_path}_mtm_matches.csv")
 
     rows = []
     for result in data:
