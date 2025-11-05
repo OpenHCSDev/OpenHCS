@@ -292,27 +292,27 @@ class PlateViewerWindow(QDialog):
         from pathlib import Path
 
         try:
-            # Find results directories by iterating subdirectories in metadata
+            # Find results directories from metadata (same pattern as metadata viewer)
             plate_path = self.orchestrator.plate_path
             metadata_handler = self.orchestrator.microscope_handler.metadata_handler
 
-            # Load metadata to get subdirectories (same pattern as metadata viewer)
+            # Load metadata to get subdirectories
             from openhcs.microscopes.openhcs import OpenHCSMetadataHandler
             if isinstance(metadata_handler, OpenHCSMetadataHandler):
                 metadata_dict = metadata_handler._load_metadata_dict(plate_path)
                 subdirs = metadata_dict.get('subdirectories', {})
             else:
-                # For non-OpenHCS formats, assume single output directory
+                # For non-OpenHCS formats, no subdirectories
                 subdirs = {}
 
-            # Find all results directories from subdirectory keys
+            # Collect results directories from results_dir field in each subdirectory
             results_dirs = []
             if subdirs:
-                # Each subdirectory key is the actual directory name (e.g., "images", "images_results")
-                # Filter for directories that end with "_results"
-                for subdir_name in subdirs.keys():
-                    if subdir_name.endswith('_results'):
-                        results_dir = plate_path / subdir_name
+                for subdir_data in subdirs.values():
+                    # Each subdirectory has a results_dir field pointing to its results directory
+                    results_dir_name = subdir_data.get('results_dir')
+                    if results_dir_name:
+                        results_dir = plate_path / results_dir_name
                         if results_dir.exists() and results_dir.is_dir():
                             results_dirs.append(results_dir)
             else:
