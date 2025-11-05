@@ -329,18 +329,14 @@ class PlateViewerWindow(QDialog):
                 )
                 return
 
-            # Get well IDs from CSV filenames in results directories
-            # (CSV filenames have the actual well IDs as they appear in the files)
+            # Get well IDs from metadata (parse from image files)
+            image_files = metadata_handler.get_image_files(plate_path)
             parser = self.orchestrator.microscope_handler.parser
             well_ids = set()
-
-            # Extract well IDs from all CSV files across all results directories
-            for results_dir in results_dirs:
-                csv_files = list(results_dir.glob("*.csv"))
-                for csv_file in csv_files:
-                    parsed = parser.parse_filename(csv_file.name)
-                    if 'well' in parsed:
-                        well_ids.add(parsed['well'])
+            for filename in image_files:
+                parsed = parser.parse_filename(Path(filename).name)
+                if 'well' in parsed:
+                    well_ids.add(parsed['well'])
 
             well_ids = sorted(list(well_ids))
 
@@ -348,7 +344,7 @@ class PlateViewerWindow(QDialog):
                 QMessageBox.warning(
                     self,
                     "No Wells Found",
-                    "No well IDs found in CSV filenames. Cannot consolidate."
+                    "No well IDs found in metadata. Cannot consolidate."
                 )
                 return
 
@@ -371,6 +367,8 @@ class PlateViewerWindow(QDialog):
             # Consolidate each results directory
             consolidate_fn = _get_consolidate_analysis_results()
             total_csv_files = 0
+            successful_dirs = []
+            failed_dirs = []
 
             for results_dir in results_dirs:
                 csv_files = list(results_dir.glob("*.csv"))
@@ -381,12 +379,17 @@ class PlateViewerWindow(QDialog):
                 total_csv_files += len(csv_files)
                 logger.info(f"Manual consolidation: {len(csv_files)} CSV files in {results_dir}")
 
-                consolidate_fn(
-                    results_directory=str(results_dir),
-                    well_ids=well_ids,
-                    consolidation_config=global_config.analysis_consolidation_config,
-                    plate_metadata_config=global_config.plate_metadata_config
-                )
+                try:
+                    consolidate_fn(
+                        results_directory=str(results_dir),
+                        well_ids=well_ids,
+                        consolidation_config=global_config.analysis_consolidation_config,
+                        plate_metadata_config=global_config.plate_metadata_config
+                    )
+                    successful_dirs.append(results_dir.name)
+                except Exception as e:
+                    logger.error(f"Failed to consolidate {results_dir}: {e}", exc_info=True)
+                    failed_dirs.append((results_dir.name, str(e)))
 
             if total_csv_files == 0:
                 QMessageBox.warning(
@@ -396,12 +399,29 @@ class PlateViewerWindow(QDialog):
                 )
                 return
 
-            QMessageBox.information(
-                self,
-                "Consolidation Complete",
-                f"Successfully consolidated {total_csv_files} CSV files from {len(well_ids)} wells.\n\n"
-                f"Processed {len(results_dirs)} results directories."
-            )
+            # Show results
+            if successful_dirs and not failed_dirs:
+                QMessageBox.information(
+                    self,
+                    "Consolidation Complete",
+                    f"Successfully consolidated {total_csv_files} CSV files from {len(well_ids)} wells.\n\n"
+                    f"Processed {len(successful_dirs)} results directories:\n" + "\n".join(f"  ✓ {d}" for d in successful_dirs)
+                )
+            elif successful_dirs and failed_dirs:
+                QMessageBox.warning(
+                    self,
+                    "Partial Success",
+                    f"Consolidated {len(successful_dirs)} of {len(results_dirs)} directories.\n\n"
+                    f"Successful:\n" + "\n".join(f"  ✓ {d}" for d in successful_dirs) + "\n\n"
+                    f"Failed:\n" + "\n".join(f"  ✗ {d}: {e}" for d, e in failed_dirs)
+                )
+            else:
+                QMessageBox.critical(
+                    self,
+                    "Consolidation Failed",
+                    f"All {len(failed_dirs)} directories failed to consolidate:\n\n" +
+                    "\n".join(f"  ✗ {d}: {e}" for d, e in failed_dirs)
+                )
 
         except Exception as e:
             logger.error(f"Failed to consolidate results: {e}", exc_info=True)
