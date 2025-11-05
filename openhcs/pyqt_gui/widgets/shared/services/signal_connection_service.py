@@ -35,8 +35,10 @@ class SignalConnectionService:
         # CRITICAL: Don't refresh during reset operations - reset handles placeholders itself
         # CRITICAL: Always use live context from other open windows for placeholder resolution
         # CRITICAL: Don't refresh when 'enabled' field changes - it's styling-only and doesn't affect placeholders
+        # CRITICAL: Don't refresh nested managers here - parent's _on_nested_parameter_changed handles it
+        # Refreshing here causes stale context because siblings haven't been notified yet
         def on_parameter_changed(param_name, value):
-            if not getattr(manager, '_in_reset', False) and param_name != 'enabled':
+            if not getattr(manager, '_in_reset', False) and param_name != 'enabled' and manager._parent_manager is None:
                 manager._placeholder_refresh_service.refresh_with_live_context(manager)
 
         manager.parameter_changed.connect(on_parameter_changed)
@@ -83,21 +85,37 @@ class SignalConnectionService:
         
         # Connect parameter_changed to emit cross-window context changes
         manager.parameter_changed.connect(manager._emit_cross_window_change)
-        
+
         # Connect this instance's signal to all existing instances (bidirectional)
-        for existing_manager in manager._active_form_managers:
-            # Connect this instance to existing instances
-            manager.context_value_changed.connect(existing_manager._on_cross_window_context_changed)
-            manager.context_refreshed.connect(existing_manager._on_cross_window_context_refreshed)
-            
-            # Connect existing instances to this instance
-            existing_manager.context_value_changed.connect(manager._on_cross_window_context_changed)
-            existing_manager.context_refreshed.connect(manager._on_cross_window_context_refreshed)
-        
-        # Add this instance to the registry
-        manager._active_form_managers.append(manager)
+        # Use tree registry to find existing managers in same scope
+        from openhcs.config_framework.config_tree_registry import ConfigTreeRegistry
+        registry = ConfigTreeRegistry.instance()
+        scope_nodes = registry.get_scope_nodes(manager.scope_id)
 
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"🔍 REGISTER: {manager.field_id} (id={id(manager)}) registered. Total managers: {len(manager._active_form_managers)}")
+        logger.info(f"🔍 REGISTER: {manager.field_id} connecting to {len(scope_nodes)-1} existing managers in scope")
+
+        for node in scope_nodes:
+            # Skip self
+            if node == manager._config_node:
+                continue
+
+            # Get manager from weak reference
+            manager_ref = node._form_manager
+            if not manager_ref:
+                continue
+            existing_manager = manager_ref()
+            if not existing_manager:
+                continue
+
+            # Connect this instance to existing instance
+            manager.context_value_changed.connect(existing_manager._on_cross_window_context_changed)
+            manager.context_refreshed.connect(existing_manager._on_cross_window_context_refreshed)
+
+            # Connect existing instance to this instance
+            existing_manager.context_value_changed.connect(manager._on_cross_window_context_changed)
+            existing_manager.context_refreshed.connect(manager._on_cross_window_context_refreshed)
+
+        logger.info(f"🔍 REGISTER: {manager.field_id} (id={id(manager)}) registered. Total nodes in scope: {len(scope_nodes)}")
 

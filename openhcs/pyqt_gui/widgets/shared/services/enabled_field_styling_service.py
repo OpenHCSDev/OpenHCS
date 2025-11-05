@@ -43,19 +43,19 @@ class EnabledFieldStylingService:
         # Get the enabled widget
         enabled_widget = manager.widgets.get('enabled')
         if not enabled_widget:
-            logger.info(f"[INITIAL ENABLED STYLING] field_id={manager.field_id}, no enabled widget found")
+            logger.debug(f"[INITIAL ENABLED STYLING] field_id={manager.field_id}, no enabled widget found")
             return
-        
+
         # Get resolved value from checkbox
         if isinstance(enabled_widget, QCheckBox):
             resolved_value = enabled_widget.isChecked()
-            logger.info(f"[INITIAL ENABLED STYLING] field_id={manager.field_id}, resolved_value={resolved_value} (from checkbox)")
+            logger.debug(f"[INITIAL ENABLED STYLING] field_id={manager.field_id}, resolved_value={resolved_value} (from checkbox)")
         else:
             # Fallback to parameter value
             resolved_value = manager.parameters.get('enabled')
             if resolved_value is None:
                 resolved_value = True  # Default to enabled if we can't resolve
-            logger.info(f"[INITIAL ENABLED STYLING] field_id={manager.field_id}, resolved_value={resolved_value} (from parameter)")
+            logger.debug(f"[INITIAL ENABLED STYLING] field_id={manager.field_id}, resolved_value={resolved_value} (from parameter)")
         
         # Call the enabled handler with the resolved value
         self.on_enabled_field_changed(manager, 'enabled', resolved_value)
@@ -110,9 +110,9 @@ class EnabledFieldStylingService:
         """
         if param_name != 'enabled':
             return
-        
-        logger.info(f"[ENABLED HANDLER CALLED] field_id={manager.field_id}, param_name={param_name}, value={value}")
-        
+
+        logger.debug(f"[ENABLED HANDLER CALLED] field_id={manager.field_id}, param_name={param_name}, value={value}")
+
         # Resolve lazy value
         if value is None:
             # Lazy field - get the resolved placeholder value from the widget
@@ -124,13 +124,13 @@ class EnabledFieldStylingService:
                 resolved_value = True
         else:
             resolved_value = value
-        
-        logger.info(f"[ENABLED HANDLER] field_id={manager.field_id}, resolved_value={resolved_value}")
-        
+
+        logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, resolved_value={resolved_value}")
+
         # Get direct widgets (excluding nested managers)
         direct_widgets = self._get_direct_widgets(manager)
         widget_names = [f"{w.__class__.__name__}({w.objectName() or 'no-name'})" for w in direct_widgets[:5]]
-        logger.info(f"[ENABLED HANDLER] field_id={manager.field_id}, found {len(direct_widgets)} direct widgets, first 5: {widget_names}")
+        logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, found {len(direct_widgets)} direct widgets, first 5: {widget_names}")
         
         # Check if this is a nested config
         is_nested_config = manager._parent_manager is not None and any(
@@ -161,9 +161,9 @@ class EnabledFieldStylingService:
                         from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
                         if ParameterTypeUtils.is_optional_dataclass(param_type):
                             instance = manager._parent_manager.parameters.get(param_name)
-                            logger.info(f"[{log_prefix}] field_id={manager.field_id}, optional dataclass check: param_name={param_name}, instance={instance}, is_none={instance is None}")
+                            logger.debug(f"[{log_prefix}] field_id={manager.field_id}, optional dataclass check: param_name={param_name}, instance={instance}, is_none={instance is None}")
                             if instance is None:
-                                logger.info(f"[{log_prefix}] field_id={manager.field_id}, skipping (optional dataclass instance is None)")
+                                logger.debug(f"[{log_prefix}] field_id={manager.field_id}, skipping (optional dataclass instance is None)")
                                 return True
                     break
         return False
@@ -180,26 +180,26 @@ class EnabledFieldStylingService:
         """
         direct_widgets = []
         all_widgets = self.widget_ops.get_all_value_widgets(manager)
-        logger.info(f"[GET_DIRECT_WIDGETS] field_id={manager.field_id}, total widgets found: {len(all_widgets)}, nested_managers: {list(manager.nested_managers.keys())}")
-        
+        logger.debug(f"[GET_DIRECT_WIDGETS] field_id={manager.field_id}, total widgets found: {len(all_widgets)}, nested_managers: {list(manager.nested_managers.keys())}")
+
         for widget in all_widgets:
             widget_name = f"{widget.__class__.__name__}({widget.objectName() or 'no-name'})"
             object_name = widget.objectName()
-            
+
             # Check if widget belongs to a nested manager
             belongs_to_nested = False
             for nested_name, nested_manager in manager.nested_managers.items():
                 nested_field_id = nested_manager.field_id
                 if object_name and object_name.startswith(nested_field_id + '_'):
                     belongs_to_nested = True
-                    logger.info(f"[GET_DIRECT_WIDGETS] ❌ EXCLUDE {widget_name} - belongs to nested manager {nested_field_id}")
+                    logger.debug(f"[GET_DIRECT_WIDGETS] ❌ EXCLUDE {widget_name} - belongs to nested manager {nested_field_id}")
                     break
-            
+
             if not belongs_to_nested:
                 direct_widgets.append(widget)
-                logger.info(f"[GET_DIRECT_WIDGETS] ✅ INCLUDE {widget_name}")
-        
-        logger.info(f"[GET_DIRECT_WIDGETS] field_id={manager.field_id}, returning {len(direct_widgets)} direct widgets")
+                logger.debug(f"[GET_DIRECT_WIDGETS] ✅ INCLUDE {widget_name}")
+
+        logger.debug(f"[GET_DIRECT_WIDGETS] field_id={manager.field_id}, returning {len(direct_widgets)} direct widgets")
         return direct_widgets
     
     def _is_any_ancestor_disabled(self, manager) -> bool:
@@ -243,27 +243,27 @@ class EnabledFieldStylingService:
         if not group_box:
             return
 
-        logger.info(f"[ENABLED HANDLER] field_id={manager.field_id}, applying to GroupBox container")
+        logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, applying to GroupBox container")
 
         # Check if ANY ancestor has enabled=False
         ancestor_is_disabled = self._is_any_ancestor_disabled(manager)
-        logger.info(f"[ENABLED HANDLER] field_id={manager.field_id}, ancestor_is_disabled={ancestor_is_disabled}")
+        logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, ancestor_is_disabled={ancestor_is_disabled}")
 
         if resolved_value and not ancestor_is_disabled:
             # Enabled=True AND no ancestor is disabled: Remove dimming from GroupBox
-            logger.info(f"[ENABLED HANDLER] field_id={manager.field_id}, removing dimming from GroupBox")
+            logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, removing dimming from GroupBox")
             for widget in self.widget_ops.get_all_value_widgets(group_box):
                 widget.setGraphicsEffect(None)
         elif ancestor_is_disabled:
             # Ancestor is disabled - keep dimming regardless of child's enabled value
-            logger.info(f"[ENABLED HANDLER] field_id={manager.field_id}, keeping dimming (ancestor disabled)")
+            logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, keeping dimming (ancestor disabled)")
             for widget in self.widget_ops.get_all_value_widgets(group_box):
                 effect = QGraphicsOpacityEffect()
                 effect.setOpacity(0.4)
                 widget.setGraphicsEffect(effect)
         else:
             # Enabled=False: Apply dimming to GroupBox widgets
-            logger.info(f"[ENABLED HANDLER] field_id={manager.field_id}, applying dimming to GroupBox")
+            logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, applying dimming to GroupBox")
             for widget in self.widget_ops.get_all_value_widgets(group_box):
                 effect = QGraphicsOpacityEffect()
                 effect.setOpacity(0.4)
@@ -280,17 +280,17 @@ class EnabledFieldStylingService:
         """
         if resolved_value:
             # Enabled=True: Remove dimming from direct widgets
-            logger.info(f"[ENABLED HANDLER] field_id={manager.field_id}, removing dimming (enabled=True)")
+            logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, removing dimming (enabled=True)")
             for widget in direct_widgets:
                 widget.setGraphicsEffect(None)
 
             # Trigger refresh of all nested configs' enabled styling
-            logger.info(f"[ENABLED HANDLER] Refreshing nested configs' enabled styling")
+            logger.debug(f"[ENABLED HANDLER] Refreshing nested configs' enabled styling")
             for nested_manager in manager.nested_managers.values():
                 self.refresh_enabled_styling(nested_manager)
         else:
             # Enabled=False: Apply dimming to direct widgets + ALL nested configs
-            logger.info(f"[ENABLED HANDLER] field_id={manager.field_id}, applying dimming (enabled=False)")
+            logger.debug(f"[ENABLED HANDLER] field_id={manager.field_id}, applying dimming (enabled=False)")
             for widget in direct_widgets:
                 # Skip QLabel widgets when dimming (only dim inputs)
                 if isinstance(widget, QLabel):
@@ -300,21 +300,21 @@ class EnabledFieldStylingService:
                 widget.setGraphicsEffect(effect)
 
             # Also dim all nested configs
-            logger.info(f"[ENABLED HANDLER] Dimming nested configs, found {len(manager.nested_managers)} nested managers")
-            logger.info(f"[ENABLED HANDLER] Available widget keys: {list(manager.widgets.keys())}")
+            logger.debug(f"[ENABLED HANDLER] Dimming nested configs, found {len(manager.nested_managers)} nested managers")
+            logger.debug(f"[ENABLED HANDLER] Available widget keys: {list(manager.widgets.keys())}")
             for param_name, nested_manager in manager.nested_managers.items():
                 group_box = manager.widgets.get(param_name)
-                logger.info(f"[ENABLED HANDLER] Checking nested config {param_name}, group_box={group_box.__class__.__name__ if group_box else 'None'}")
+                logger.debug(f"[ENABLED HANDLER] Checking nested config {param_name}, group_box={group_box.__class__.__name__ if group_box else 'None'}")
                 if not group_box:
-                    logger.info(f"[ENABLED HANDLER] ⚠️ No group_box found for nested config {param_name}, trying nested_manager.field_id={nested_manager.field_id}")
+                    logger.debug(f"[ENABLED HANDLER] ⚠️ No group_box found for nested config {param_name}, trying nested_manager.field_id={nested_manager.field_id}")
                     # Try using the nested manager's field_id instead
                     group_box = manager.widgets.get(nested_manager.field_id)
                     if not group_box:
-                        logger.info(f"[ENABLED HANDLER] ⚠️ Still no group_box found, skipping")
+                        logger.debug(f"[ENABLED HANDLER] ⚠️ Still no group_box found, skipping")
                         continue
 
                 widgets_to_dim = self.widget_ops.get_all_value_widgets(group_box)
-                logger.info(f"[ENABLED HANDLER] Applying dimming to nested config {param_name}, found {len(widgets_to_dim)} widgets")
+                logger.debug(f"[ENABLED HANDLER] Applying dimming to nested config {param_name}, found {len(widgets_to_dim)} widgets")
                 for widget in widgets_to_dim:
                     effect = QGraphicsOpacityEffect()
                     effect.setOpacity(0.4)

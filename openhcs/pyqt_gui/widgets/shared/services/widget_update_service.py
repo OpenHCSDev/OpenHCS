@@ -93,12 +93,8 @@ class WidgetUpdateService:
             return
         
         if value is None:
-            # Build overlay from current form state
-            overlay = manager.get_current_values()
-
-            # Build context stack for placeholder resolution
-            from openhcs.pyqt_gui.widgets.shared.context_layer_builders import build_context_stack
-            with build_context_stack(manager, overlay):
+            # Build context stack for placeholder resolution using tree registry
+            with manager._config_node.build_context_stack():
                 placeholder_text = manager.service.get_placeholder_text(param_name, manager.dataclass_type)
                 if placeholder_text:
                     self.widget_enhancer.apply_placeholder_text(widget, placeholder_text)

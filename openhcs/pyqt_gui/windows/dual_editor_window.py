@@ -223,6 +223,33 @@ class DualEditorWindow(BaseFormDialog):
         # Step must be nested: GlobalPipelineConfig -> PipelineConfig -> Step
         # CRITICAL: Pass orchestrator's plate_path as scope_id to limit cross-window updates to same orchestrator
         scope_id = str(self.orchestrator.plate_path) if self.orchestrator else None
+
+        # TREE REGISTRY: Get or create plate node, determine step index
+        from openhcs.config_framework.config_tree_registry import ConfigTreeRegistry
+        registry = ConfigTreeRegistry.instance()
+
+        # Get or create plate node
+        plate_node = None
+        step_index = None
+        if scope_id:
+            plate_node = registry.get_node(scope_id)
+            if not plate_node:
+                # Create plate node (parent is global)
+                global_node = registry.get_node("global")
+                if not global_node:
+                    # Create global node on demand
+                    from openhcs.config_framework.context_manager import get_base_global_config
+                    global_config = get_base_global_config()
+                    global_node = registry.register("global", global_config, parent=None)
+                plate_node = registry.register(scope_id, self.orchestrator.pipeline_config, parent=global_node)
+
+            # Find step index in pipeline config
+            if self.orchestrator and hasattr(self.orchestrator.pipeline_config, 'steps'):
+                try:
+                    step_index = self.orchestrator.pipeline_config.steps.index(self.editing_step)
+                except ValueError:
+                    step_index = None  # Step not in pipeline (new step)
+
         with config_context(self.orchestrator.pipeline_config):  # Pipeline level
             with config_context(self.editing_step):              # Step level
                 self.step_editor = StepParameterEditorWidget(
@@ -230,7 +257,9 @@ class DualEditorWindow(BaseFormDialog):
                     service_adapter=None,
                     color_scheme=self.color_scheme,
                     pipeline_config=self.orchestrator.pipeline_config,
-                    scope_id=scope_id
+                    scope_id=scope_id,
+                    step_index=step_index,
+                    parent_node=plate_node
                 )
 
         # Connect parameter changes - use form manager signal for immediate response

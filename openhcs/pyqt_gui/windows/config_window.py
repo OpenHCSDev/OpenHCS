@@ -106,15 +106,40 @@ class ConfigWindow(BaseFormDialog):
 
         # CRITICAL: Config window manages its own scroll area, so tell form_manager NOT to create one
         # This prevents double scroll areas which cause navigation bugs
+
+        # TREE REGISTRY: Determine parent node based on config type
+        from openhcs.config_framework.config_tree_registry import ConfigTreeRegistry
+        registry = ConfigTreeRegistry.instance()
+
+        # Determine parent node and field_id based on config type:
+        # - GlobalPipelineConfig: No parent (root of tree), field_id = "global"
+        # - PipelineConfig (Plate): Parent is global node, field_id = scope_id
+        is_global_config = (root_field_id == "GlobalPipelineConfig")
+
+        if is_global_config:
+            parent_node = None
+            field_id = "global"
+        else:
+            # Plate config - parent is global node (get or create)
+            global_node = registry.get_node("global")
+            if not global_node:
+                # Create global node on demand
+                from openhcs.config_framework.context_manager import get_base_global_config
+                global_config = get_base_global_config()
+                global_node = registry.register("global", global_config, parent=None)
+            parent_node = global_node
+            field_id = self.scope_id if self.scope_id else root_field_id
+
         self.form_manager = ParameterFormManager.from_dataclass_instance(
             dataclass_instance=current_config,
-            field_id=root_field_id,
+            field_id=field_id,
             placeholder_prefix=placeholder_prefix,
             color_scheme=self.color_scheme,
             use_scroll_area=False,  # Config window handles scrolling
             global_config_type=global_config_type,
             context_obj=None,  # Inherit from thread-local GlobalPipelineConfig only
-            scope_id=self.scope_id  # Pass scope_id to limit cross-window updates to same orchestrator
+            scope_id=self.scope_id,  # Pass scope_id to limit cross-window updates to same orchestrator
+            parent_node=parent_node  # Parent ConfigNode for tree registry
         )
 
         # No config_editor needed - everything goes through form_manager
@@ -123,11 +148,9 @@ class ConfigWindow(BaseFormDialog):
         # Setup UI
         self.setup_ui()
 
-        # LIVE UPDATES ARCHITECTURE: Connect to parameter_changed signal
-        # Every change updates the live context (as if saving on each keystroke)
-        # This makes changes visible to other windows immediately
-        self.form_manager.parameter_changed.connect(self._on_parameter_changed_live_update)
-        logger.debug(f"🔍 LIVE_UPDATES: Connected parameter_changed signal for live context updates")
+        # LIVE UPDATES ARCHITECTURE: ParameterFormManager now handles thread-local updates
+        # automatically via _emit_cross_window_change() - no need to connect here
+        # ConfigWindow only needs to handle Cancel restoration (see reject() method)
 
         logger.debug(f"Config window initialized for {config_class.__name__}")
 
@@ -541,13 +564,62 @@ class ConfigWindow(BaseFormDialog):
                 # Get only values that were explicitly set by the user (non-None raw values)
                 user_modified_values = self.form_manager.get_user_modified_values()
 
+                # CRITICAL FIX: Reconstruct nested dataclasses from (type, dict) tuples
+                # get_user_modified_values() returns nested dataclasses as (type, dict) tuples
+                # We need to convert them to actual dataclass instances before passing to constructor
+                # Pass self.current_config as base_instance to merge user-modified fields into base nested dataclasses
+                from openhcs.pyqt_gui.widgets.shared.services.dataclass_reconstruction_utils import reconstruct_nested_dataclasses
+                reconstructed_values = reconstruct_nested_dataclasses(user_modified_values, base_instance=self.current_config)
+
                 # Create fresh lazy instance with only user-modified values
                 # This preserves lazy resolution for unmodified fields
-                new_config = self.config_class(**user_modified_values)
+                new_config = self.config_class(**reconstructed_values)
+
+                # CRITICAL FIX: Track explicitly set fields for PipelineConfig
+                # This allows the config window to distinguish between user-set values
+                # and inherited values when reopening the window
+                # Track both top-level fields and nested dataclass fields
+                explicitly_set_fields = set(user_modified_values.keys())
+                object.__setattr__(new_config, '_explicitly_set_fields', explicitly_set_fields)
+
+                # CRITICAL FIX: Also set _explicitly_set_fields on nested dataclasses
+                # This preserves which nested fields were user-set vs inherited
+                for field_name, value in user_modified_values.items():
+                    if isinstance(value, tuple) and len(value) == 2:
+                        # Nested dataclass in tuple format: (type, dict)
+                        _, field_dict = value  # We only need field_dict, not dataclass_type
+                        nested_instance = getattr(new_config, field_name)
+                        if nested_instance is not None:
+                            nested_explicitly_set = set(field_dict.keys())
+                            object.__setattr__(nested_instance, '_explicitly_set_fields', nested_explicitly_set)
+                            logger.debug(f"🔍 SAVE_CONFIG: Set {field_name}._explicitly_set_fields = {nested_explicitly_set}")
+
+                logger.debug(f"🔍 SAVE_CONFIG: Set _explicitly_set_fields = {explicitly_set_fields}")
             else:
                 # For non-lazy dataclasses, use all current values
                 current_values = self.form_manager.get_current_values()
                 new_config = self.config_class(**current_values)
+
+                # CRITICAL FIX: Track explicitly set fields for PipelineConfig (even non-lazy)
+                # This allows the config window to distinguish between user-set values
+                # and inherited values when reopening the window
+                user_modified_values = self.form_manager.get_user_modified_values()
+                explicitly_set_fields = set(user_modified_values.keys())
+                object.__setattr__(new_config, '_explicitly_set_fields', explicitly_set_fields)
+
+                # CRITICAL FIX: Also set _explicitly_set_fields on nested dataclasses
+                # This preserves which nested fields were user-set vs inherited
+                for field_name, value in user_modified_values.items():
+                    if isinstance(value, tuple) and len(value) == 2:
+                        # Nested dataclass in tuple format: (type, dict)
+                        _, field_dict = value
+                        nested_instance = getattr(new_config, field_name)
+                        if nested_instance is not None:
+                            nested_explicitly_set = set(field_dict.keys())
+                            object.__setattr__(nested_instance, '_explicitly_set_fields', nested_explicitly_set)
+                            logger.debug(f"🔍 SAVE_CONFIG (non-lazy): Set {field_name}._explicitly_set_fields = {nested_explicitly_set}")
+
+                logger.debug(f"🔍 SAVE_CONFIG (non-lazy): Set _explicitly_set_fields = {explicitly_set_fields}")
 
             # CRITICAL: Set flag to prevent refresh_config from recreating the form
             # The window already has the correct data - it just saved it!
@@ -780,58 +852,11 @@ class ConfigWindow(BaseFormDialog):
                     else:
                         nested_manager.update_parameter(field.name, nested_field_value)
 
-    def _on_parameter_changed_live_update(self, param_name: str, value: Any):
-        """
-        LIVE UPDATES ARCHITECTURE: Update context on every parameter change.
-
-        This makes changes visible to other windows immediately (WYSIWYG).
-        Every keystroke updates the live context as if saving.
-        Cancel button will restore the original state.
-        """
-        logger.debug(f"🔍 LIVE_UPDATES: Parameter changed: {param_name} = {value}")
-
-        # Get current values from form
-        if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
-            current_values = self.form_manager.get_user_modified_values()
-        else:
-            current_values = self.form_manager.get_current_values()
-
-        # Create config instance with current values
-        try:
-            new_config = self.config_class(**current_values)
-        except Exception as e:
-            logger.debug(f"🔍 LIVE_UPDATES: Failed to create config instance: {e}")
-            return
-
-        # Update context based on config type
-        if self.config_class == GlobalPipelineConfig:
-            # For GlobalPipelineConfig: Update thread-local storage
-            from openhcs.config_framework.global_config import set_global_config_for_editing
-            set_global_config_for_editing(GlobalPipelineConfig, new_config)
-            logger.debug(f"🔍 LIVE_UPDATES: Updated thread-local GlobalPipelineConfig")
-
-            # ANTI-DUCK-TYPING: Use explicit isinstance check instead of hasattr
-            # Parent is PlateManagerWidget when editing PipelineConfig
-            from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
-            parent = self.parent()
-            if isinstance(parent, PlateManagerWidget):
-                parent.global_config_changed.emit()
-                logger.debug(f"🔍 LIVE_UPDATES: Emitted global_config_changed signal")
-        else:
-            # For PipelineConfig: Update orchestrator context
-            if self.orchestrator:
-                self.orchestrator.apply_pipeline_config(new_config)
-                logger.debug(f"🔍 LIVE_UPDATES: Updated orchestrator PipelineConfig for {self.orchestrator.plate_path}")
-
-                # ANTI-DUCK-TYPING: Use explicit isinstance check instead of hasattr
-                from openhcs.pyqt_gui.widgets.plate_manager import PlateManagerWidget
-                parent = self.parent()
-                if isinstance(parent, PlateManagerWidget):
-                    effective_config = self.orchestrator.get_effective_config()
-                    parent.orchestrator_config_changed.emit(str(self.orchestrator.plate_path), effective_config)
-                    logger.debug(f"🔍 LIVE_UPDATES: Emitted orchestrator_config_changed signal")
-            else:
-                logger.debug(f"🔍 LIVE_UPDATES: PipelineConfig live update - no orchestrator reference")
+    # DELETED: _on_parameter_changed_live_update() - moved to ParameterFormManager
+    # Live updates are now handled by ParameterFormManager._update_thread_local_global_config()
+    # which is called automatically from _emit_cross_window_change()
+    # This is architecturally correct - parameter management belongs in the infrastructure layer,
+    # not the UI layer.
 
     def reject(self):
         """

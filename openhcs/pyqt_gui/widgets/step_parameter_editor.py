@@ -39,7 +39,8 @@ class StepParameterEditorWidget(QWidget):
     step_parameter_changed = pyqtSignal()
     
     def __init__(self, step: FunctionStep, service_adapter=None, color_scheme: Optional[PyQt6ColorScheme] = None,
-                 gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None, scope_id: Optional[str] = None):
+                 gui_config: Optional[PyQtGUIConfig] = None, parent=None, pipeline_config=None, scope_id: Optional[str] = None,
+                 step_index: Optional[int] = None, parent_node: Optional[Any] = None):
         super().__init__(parent)
 
         # Initialize color scheme and GUI config
@@ -50,6 +51,8 @@ class StepParameterEditorWidget(QWidget):
         self.service_adapter = service_adapter
         self.pipeline_config = pipeline_config  # Store pipeline config for context hierarchy
         self.scope_id = scope_id  # Store scope_id for cross-window update scoping
+        self.step_index = step_index  # Step position index for tree registry
+        self.parent_node = parent_node  # Parent ConfigNode for tree registry
 
         # Live placeholder updates not yet ready - disable for now
         self._step_editor_coordinator = None
@@ -98,17 +101,25 @@ class StepParameterEditorWidget(QWidget):
         # CRITICAL FIX: Exclude 'func' parameter - it's handled by the Function Pattern tab
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import FormManagerConfig
 
+        # Construct unique field_id based on step index for tree registry
+        # Format: "{plate_node_id}.step_{index}" or fallback to "step" if no index provided
+        if self.step_index is not None and self.scope_id:
+            field_id = f"{self.scope_id}.step_{self.step_index}"
+        else:
+            field_id = "step"  # Fallback for backward compatibility
+
         config = FormManagerConfig(
             parent=self,                         # Pass self as parent widget
             context_obj=self.pipeline_config,    # Pipeline config as parent context for inheritance
             exclude_params=['func'],             # Exclude func - it has its own dedicated tab
             scope_id=self.scope_id,              # Pass scope_id to limit cross-window updates to same orchestrator
-            color_scheme=self.color_scheme       # Pass color scheme for consistent theming
+            color_scheme=self.color_scheme,      # Pass color scheme for consistent theming
+            parent_node=self.parent_node         # Parent ConfigNode for tree registry
         )
 
         self.form_manager = ParameterFormManager(
             object_instance=self.step,           # Step instance being edited (overlay)
-            field_id="step",                     # Use "step" as field identifier
+            field_id=field_id,                   # Unique field_id based on step index
             config=config                        # Pass configuration object
         )
         

@@ -104,8 +104,8 @@ class ParameterResetService(ParameterServiceABC):
         if nested_manager:
             nested_manager.reset_all_parameters()
 
-        # Emit signal
-        manager.parameter_changed.emit(param_name, reset_value)
+        # CRITICAL: Do NOT emit signal here - it will be emitted by reset_parameter() after _in_reset flag is restored
+        # This prevents parent managers from skipping updates due to _in_reset=True check in _should_skip_updates()
     
     def _reset_DirectDataclassInfo(self, info: DirectDataclassInfo, manager) -> None:
         """
@@ -133,8 +133,8 @@ class ParameterResetService(ParameterServiceABC):
                 manager=manager
             )
 
-        # Emit signal with unchanged container value
-        manager.parameter_changed.emit(param_name, manager.parameters.get(param_name))
+        # CRITICAL: Do NOT emit signal here - it will be emitted by reset_parameter() after _in_reset flag is restored
+        # This prevents parent managers from skipping updates due to _in_reset=True check in _should_skip_updates()
     
     def _reset_GenericInfo(self, info: GenericInfo, manager) -> None:
         """
@@ -156,10 +156,9 @@ class ParameterResetService(ParameterServiceABC):
             widget = manager.widgets[param_name]
             manager._widget_update_service.update_widget_value(widget, reset_value, param_name, skip_context_behavior=True, manager=manager)
 
-        # Emit signal
-        # NOTE: Placeholder refresh is handled by the caller (reset_parameter or reset_all_parameters)
-        # This ensures sibling inheritance works correctly via refresh_with_live_context()
-        manager.parameter_changed.emit(param_name, reset_value)
+        # CRITICAL: Do NOT emit signal here - it will be emitted by reset_parameter() after _in_reset flag is restored
+        # This prevents parent managers from skipping updates due to _in_reset=True check in _should_skip_updates()
+        # The signal emission is deferred to reset_parameter() which emits after FlagContextManager exits
     
     # ========== HELPER METHODS ==========
     
