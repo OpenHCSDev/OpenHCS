@@ -7,7 +7,7 @@ to detect and crop regions of interest in image stacks.
 
 import numpy as np
 import cv2
-from typing import Tuple, List, Dict, Any, Optional
+from typing import Tuple, List, Dict, Any, Optional, Union
 from dataclasses import dataclass
 import logging
 import pandas as pd
@@ -35,8 +35,26 @@ class TemplateMatchResult:
     best_rotation_angle: float  # Angle of best matching template
     error_message: Optional[str] = None
 
-def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, filemanager, backend: str) -> str:
-    """Materialize MTM match results as analysis-ready CSV with confidence analysis."""
+def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, filemanager, backends: Union[str, List[str]], backend_kwargs: dict = None) -> str:
+    """Materialize MTM match results as analysis-ready CSV with confidence analysis.
+
+    Args:
+        data: List of template match results
+        path: Output path for results
+        filemanager: FileManager instance for I/O operations
+        backends: Single backend string or list of backends to save to
+        backend_kwargs: Dict mapping backend names to their kwargs
+
+    Returns:
+        Path to the saved results file (first backend in list)
+    """
+    # Normalize backends to list
+    if isinstance(backends, str):
+        backends = [backends]
+
+    if backend_kwargs is None:
+        backend_kwargs = {}
+
     csv_path = path.replace('.pkl', '_mtm_matches.csv')
 
     rows = []
@@ -111,10 +129,16 @@ def materialize_mtm_match_results(data: List[TemplateMatchResult], path: str, fi
                     df['spatial_cluster'] = 0
 
         csv_content = df.to_csv(index=False)
-        # Ensure output directory exists for disk backend
-        if backend == Backend.DISK.value:
-            filemanager.ensure_directory(Path(csv_path).parent, backend)
-        filemanager.save(csv_content, csv_path, backend)
+
+        # Save to all backends
+        for backend in backends:
+            # Ensure output directory exists for disk backend
+            if backend == Backend.DISK.value:
+                filemanager.ensure_directory(Path(csv_path).parent, backend)
+
+            # Get backend-specific kwargs
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(csv_content, csv_path, backend, **kwargs)
 
     return csv_path
 
