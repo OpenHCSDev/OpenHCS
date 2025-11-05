@@ -602,6 +602,12 @@ class SignatureAnalyzer:
 
             parameters = {}
 
+            # CRITICAL FIX: Check if this is a lazy dataclass
+            # For lazy dataclasses, we should NOT call default_factory() because
+            # all fields should default to None for inheritance
+            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+            is_lazy_dataclass = get_base_type_for_lazy(dataclass_type) is not None
+
             for field in dataclasses.fields(dataclass_type):
                 param_type = type_hints.get(field.name, str)
 
@@ -610,7 +616,12 @@ class SignatureAnalyzer:
                     default_value = field.default
                     is_required = False
                 elif field.default_factory != dataclasses.MISSING:
-                    default_value = field.default_factory()
+                    # CRITICAL FIX: For lazy dataclasses, don't call default_factory
+                    # All fields should be None for inheritance from parent configs
+                    if is_lazy_dataclass:
+                        default_value = None
+                    else:
+                        default_value = field.default_factory()
                     is_required = False
                 else:
                     default_value = None

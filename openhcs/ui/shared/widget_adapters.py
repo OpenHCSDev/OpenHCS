@@ -20,7 +20,7 @@ from abc import ABCMeta
 
 try:
     from PyQt6.QtWidgets import (
-        QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QWidget
+        QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QWidget, QGroupBox
     )
     from PyQt6.QtCore import Qt, QObject
     PYQT6_AVAILABLE = True
@@ -248,28 +248,148 @@ if PYQT6_AVAILABLE:
                          ChangeSignalEmitter, metaclass=PyQtWidgetMeta):
         """
         Adapter for QCheckBox implementing OpenHCS ABCs.
-        
+
         Returns bool values, treats None as False.
         """
-        
+
         _widget_id = "check_box"
-        
+
         def get_value(self) -> Any:
             """Implement ValueGettable ABC."""
             return self.isChecked()
-        
+
         def set_value(self, value: Any) -> None:
             """Implement ValueSettable ABC."""
             self.setChecked(bool(value) if value is not None else False)
-        
+
         def connect_change_signal(self, callback: Callable[[Any], None]) -> None:
             """Implement ChangeSignalEmitter ABC."""
             self.stateChanged.connect(lambda: callback(self.get_value()))
-        
+
         def disconnect_change_signal(self, callback: Callable[[Any], None]) -> None:
             """Implement ChangeSignalEmitter ABC."""
             try:
                 self.stateChanged.disconnect(callback)
             except TypeError:
                 pass
+
+
+    class CheckboxGroupAdapter(QGroupBox, ValueGettable, ValueSettable,
+                               ChangeSignalEmitter, metaclass=PyQtWidgetMeta):
+        """
+        Adapter for checkbox group (List[Enum]) implementing OpenHCS ABCs.
+
+        Manages a group of NoneAwareCheckBox widgets for multi-selection.
+        Returns List[Enum] or None (for placeholder state).
+
+        This eliminates duck typing - instead of checking for _checkboxes attribute,
+        we use proper ABC inheritance.
+        """
+
+        _widget_id = "checkbox_group"
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            # Dictionary mapping enum values to checkbox widgets
+            self._checkboxes = {}
+
+        def get_value(self) -> Any:
+            """
+            Implement ValueGettable ABC.
+
+            Returns:
+                - None if all checkboxes are in placeholder state (inherit from parent)
+                - List[Enum] of checked items if any checkbox has been clicked
+            """
+            # Check if any checkbox has a concrete value (not placeholder)
+            has_concrete_value = any(
+                checkbox.get_value() is not None
+                for checkbox in self._checkboxes.values()
+            )
+
+            if not has_concrete_value:
+                # All checkboxes are in placeholder state - return None to inherit from parent
+                return None
+
+            # All checkboxes are concrete (signal handler converted them)
+            # Return list of enum values where checkbox is checked
+            return [
+                enum_val for enum_val, checkbox in self._checkboxes.items()
+                if checkbox.get_value() == True
+            ]
+
+        def set_value(self, value: Any) -> None:
+            """
+            Implement ValueSettable ABC.
+
+            Args:
+                value: None (placeholder state) or List[Enum] (concrete values)
+            """
+            if value is None:
+                # None means inherit from parent - initialize all checkboxes in placeholder state
+                for checkbox in self._checkboxes.values():
+                    checkbox.set_value(None)
+            elif isinstance(value, list):
+                # Explicit list - set concrete values
+                for enum_value, checkbox in self._checkboxes.items():
+                    # Set to True if in list, False if not (both are concrete values)
+                    checkbox.set_value(enum_value in value)
+            else:
+                # Fallback: treat as None (placeholder state)
+                for checkbox in self._checkboxes.values():
+                    checkbox.set_value(None)
+
+        def connect_change_signal(self, callback: Callable[[Any], None]) -> None:
+            """
+            Implement ChangeSignalEmitter ABC.
+
+            Connects to all checkboxes in the group.
+            """
+            for checkbox in self._checkboxes.values():
+                checkbox.stateChanged.connect(lambda: callback(self.get_value()))
+
+        def disconnect_change_signal(self, callback: Callable[[Any], None]) -> None:
+            """Implement ChangeSignalEmitter ABC."""
+            for checkbox in self._checkboxes.values():
+                try:
+                    checkbox.stateChanged.disconnect(callback)
+                except TypeError:
+                    pass
+
+
+# Manual registration of adapters in WIDGET_IMPLEMENTATIONS
+# (PyQtWidgetMeta doesn't auto-register like WidgetMeta does)
+if PYQT6_AVAILABLE:
+    from .widget_registry import WIDGET_IMPLEMENTATIONS, WIDGET_CAPABILITIES
+    from .widget_protocols import (
+        ValueGettable, ValueSettable, PlaceholderCapable,
+        RangeConfigurable, ChangeSignalEmitter
+    )
+
+    # Register all adapter classes
+    adapters = [
+        LineEditAdapter,
+        SpinBoxAdapter,
+        DoubleSpinBoxAdapter,
+        ComboBoxAdapter,
+        CheckBoxAdapter,
+        CheckboxGroupAdapter,
+    ]
+
+    for adapter_class in adapters:
+        widget_id = adapter_class._widget_id
+        WIDGET_IMPLEMENTATIONS[widget_id] = adapter_class
+
+        # Track capabilities
+        capabilities = set()
+        abc_types = {
+            ValueGettable, ValueSettable, PlaceholderCapable,
+            RangeConfigurable, ChangeSignalEmitter
+        }
+
+        for abc_type in abc_types:
+            if issubclass(adapter_class, abc_type):
+                capabilities.add(abc_type)
+
+        WIDGET_CAPABILITIES[adapter_class] = capabilities
 

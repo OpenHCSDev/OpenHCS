@@ -1,513 +1,246 @@
-# Configuration Tree Refactoring Plan
+# Context Tree Refactoring
 
-## Executive Summary
+## Problem
 
-Refactor the configuration resolution system from a "layer-based" abstraction to an explicit tree structure. The current system obscures the fact that configuration resolution is simply walking up a three-level hierarchy: Global → Plate → Step.
+`context_layer_builders.py` (200+ lines) obscures tree structure (Global→Plate→Step). Magic strings, global `_active_form_managers`.
 
----
+## Solution
 
-## Current System Analysis
+Generic tree. Node discovery via type introspection. No hardcoded levels.
 
-### The "Layer" Abstraction Problem
+## Design
 
-The current code uses a "layer" metaphor that doesn't match reality:
-```python
-class ContextLayerType(Enum):
-    GLOBAL_STATIC_DEFAULTS = 1   # Actually: 1 node (singleton)
-    GLOBAL_LIVE_VALUES = 2       # Actually: 0-1 nodes (if window open)
-    PARENT_CONTEXT = 3            # Actually: 1 node (the context_obj)
-    PARENT_OVERLAY = 4            # Actually: 1 node (parent form)
-    SIBLING_CONTEXTS = 5          # Actually: N nodes! (all siblings)
-    CURRENT_OVERLAY = 6           # Actually: 1 node (self)
-```
+### ConfigNode (Generic)
 
-**The core issue**: "Layers" implies a flat stack, but at each level there are potentially N nodes (especially siblings). The `SiblingContextsBuilder` returns `List[ContextLayer]`, exposing that this isn't really a layer—it's a collection of nodes at the same level.
-
-### Current Architecture
-```
-context_layer_builders.py (200+ lines)
-├─ ContextLayerType enum (6 types)
-├─ ContextLayerBuilderMeta (auto-registration)
-├─ 6 builder classes (one per layer type)
-└─ build_context_stack() orchestrator
-
-Flow:
-1. Iterate through ContextLayerType enum
-2. For each type, get registered builder
-3. Builder queries _active_form_managers to find other windows
-4. Builder returns ContextLayer or List[ContextLayer]
-5. Flatten all layers into ExitStack
-6. Apply contexts bottom-up for lazy resolution
-```
-
-**Why it's complex**:
-- Builders must query global `_active_form_managers` registry
-- Complex scope filtering logic (`scope_id` matching)
-- Special cases for `is_global_config_editing`, `skip_parent_overlay`, `use_user_modified_only`
-- Sibling discovery via parent's `nested_managers` dict
-- Cross-window live value collection
-
-### What's Actually Happening
-
-Despite the "layer" abstraction, the system is actually building a path through a tree:
-```
-Thread-Local Global (implicit)
-    ↓
-Plate (PipelineConfig)
-    ↓
-Step (Step instance)
-```
-
-Each node contains all its nested configs (e.g., `well_filter_config`, `path_planning_config`). Sibling inheritance works because they're **part of the same object** in the context stack.
-
----
-
-## The Reality: Three-Level Hierarchy
-
-### The Actual Structure
-```
-Global Level (scope_id=None)
-└─ GlobalPipelineConfig (thread-local singleton)
-    ├─ well_filter_config: WellFilterConfig
-    ├─ path_planning_config: PathPlanningConfig
-    ├─ napari_streaming_config: NapariStreamingConfig
-    └─ ... (all @global_pipeline_config decorated types)
-
-Plate Level (scope_id="plate_A", "plate_B", etc.)
-├─ PipelineConfig instance
-│   ├─ well_filter_config: WellFilterConfig = None (lazy)
-│   ├─ path_planning_config: PathPlanningConfig = None (lazy)
-│   └─ ... (same fields as Global, but lazy/None by default)
-│
-├─ Step1 instance
-│   ├─ well_filter_config: WellFilterConfig = None (optional)
-│   └─ step_materialization_config: StepMaterializationConfig = None (optional)
-│
-├─ Step2 instance
-│   └─ well_filter_config: WellFilterConfig = None (optional)
-│
-└─ Step3 instance
-    └─ path_planning_config: PathPlanningConfig = None (optional)
-```
-
-### Key Insights
-
-1. **Tree nodes are whole objects**, not individual nested configs
-   - A node is a `PipelineConfig` or `Step` instance
-   - Each node contains multiple nested configs as fields
-
-2. **Sibling inheritance is automatic**
-   - `step_materialization_config` inherits from `well_filter_config`
-   - They're both fields on the same `Step` instance
-   - When you apply `config_context(step_instance)`, both configs are available
-
-3. **Global is implicit**
-   - Stored in thread-local storage via `set_base_global_config()`
-   - Lazy resolution automatically walks up to thread-local global
-   - No need to explicitly add to context stack
-
-4. **Steps are peers, not siblings**
-   - Step1 and Step2 don't see each other's values
-   - They only see their parent (Plate) and global
-   - They're separate branches of the tree, not siblings
-
----
-
-## Proposed Design
-
-### Tree Structure
 ```python
 @dataclass
 class ConfigNode:
-    """
-    A node in the configuration tree.
+    """Generic tree node. Depth-agnostic."""
+    node_id: str
+    object_instance: Any
+    parent: Optional['ConfigNode'] = None
+    children: List['ConfigNode'] = field(default_factory=list)
+    _form_manager: Optional[weakref.ref] = None
+    # scope_id derived from parent chain, stored on node after creation
     
-    Each node represents a whole object (PipelineConfig or Step),
-    not an individual nested config.
-    """
+    def ancestors(self) -> List['ConfigNode']:
+        """Root → self."""
+        path, cur = [], self
+        while cur:
+            path.append(cur)
+            cur = cur.parent
+        return list(reversed(path))
     
-    # Identity
-    node_id: str              # "plate_A", "plate_A.step1", etc.
-    scope_id: str             # "plate_A", "plate_B" (for cross-window filtering)
-    level: Literal["plate", "step"]  # No "global" - it's thread-local
+    def siblings(self) -> List['ConfigNode']:
+        """Siblings exclude self."""
+        return [n for n in (self.parent.children if self.parent else []) if n != self]
     
-    # Data
-    object_instance: Any      # PipelineConfig or Step instance
-    user_values: Dict[str, Any] = field(default_factory=dict)
+    def descendants(self) -> List['ConfigNode']:
+        """Recursive descent."""
+        result = []
+        for child in self.children:
+            result.append(child)
+            result.extend(child.descendants())
+        return result
     
-    # Tree structure (data inheritance hierarchy)
-    parent: Optional['ConfigNode'] = None  # Step → Plate, Plate → None
-    children: List['ConfigNode'] = field(default_factory=list)  # Plate → [Step1, Step2, ...]
+    def _get_from_manager(self, method_name: str) -> Any:
+        """Template method: get value from manager or fallback to object_instance."""
+        if not self._form_manager:
+            return self.object_instance
+        manager = self._form_manager()
+        return getattr(manager, method_name)() if manager else self.object_instance
     
-    def build_context_stack(self) -> ExitStack:
-        """
-        Build context stack by walking up tree to root.
-        Global is implicit (thread-local), so not included.
-        """
+    def get_live_instance(self) -> Any:
+        """Get instance with current form values (if form is open)."""
+        return self._get_from_manager('get_current_values_as_instance')
+    
+    def get_user_modified_instance(self) -> Any:
+        """Get instance with only user-edited fields (for reset behavior)."""
+        return self._get_from_manager('get_user_modified_instance')
+    
+    def get_affected_nodes(self) -> List['ConfigNode']:
+        """Get nodes that should be notified when this node changes."""
+        # Root of tree (Global): notify all descendants
+        if self.parent is None:
+            return self.descendants()
+
+        # Plate: notify children (steps)
+        if self.parent.parent is None:
+            return self.children
+
+        # Step (or deeper): notify siblings
+        return self.siblings()
+
+    def build_context_stack(self, use_user_modified_only: bool = False) -> ExitStack:
+        """Apply config_context() for each ancestor. Tree provides structure, config_context() provides mechanics."""
         stack = ExitStack()
-        
-        # Build path from self to root (Plate)
-        path = []
-        current = self
-        while current:
-            path.append(current)
-            current = current.parent
-        
-        # Apply root to leaf
-        for node in reversed(path):
-            stack.enter_context(config_context(node.object_instance))
-        
+        for node in self.ancestors():
+            if use_user_modified_only:
+                instance = node.get_user_modified_instance()
+            else:
+                instance = node.get_live_instance()
+            stack.enter_context(config_context(instance))
         return stack
-    
-    def resolve(self, field_name: str) -> Any:
-        """
-        Resolve a field value using context stack.
-        Lazy resolution system handles the actual lookup.
-        """
-        with self.build_context_stack():
-            return getattr(self.object_instance, field_name)
 ```
 
-### Tree Registry
+### ConfigTreeRegistry (Singleton)
+
 ```python
 class ConfigTreeRegistry:
-    """
-    Registry of all active config trees.
-    Replaces _active_form_managers class-level list.
-    """
+    """Singleton registry. Depth-agnostic."""
+    _instance = None
     
     def __init__(self):
-        self.trees: Dict[str, ConfigNode] = {}  # scope_id → root (Plate) node
-        self.all_nodes: Dict[str, ConfigNode] = {}  # node_id → node
-    
-    def register_plate(self, scope_id: str, plate_config: Any) -> ConfigNode:
-        """Register a new plate (root of a tree)."""
-        node = ConfigNode(
-            node_id=scope_id,
-            scope_id=scope_id,
-            level="plate",
-            object_instance=plate_config,
-            parent=None
-        )
-        self.trees[scope_id] = node
-        self.all_nodes[scope_id] = node
+        self.trees: Dict[Optional[str], ConfigNode] = {}  # scope_id → root (None for Global)
+        self.all_nodes: Dict[str, ConfigNode] = {}        # node_id → node
+
+    @classmethod
+    def instance(cls):
+        if not cls._instance:
+            cls._instance = cls()
+        return cls._instance
+
+    def register(self, node_id: str, obj: Any, parent: Optional[ConfigNode] = None) -> ConfigNode:
+        """
+        Generic registration. Simplified signature - no redundant parameters.
+
+        Args:
+            node_id: Unique ID constructed by caller.
+                     Convention:
+                     - Global: "global"
+                     - Plate: "plate_A", "plate_B", etc.
+                     - Step: "{plate_node_id}.step_{index}" (e.g., "plate_A.step_0")
+            obj: Configuration object (GlobalPipelineConfig, PipelineConfig, Step, etc.)
+            parent: Parent ConfigNode object (None for root)
+
+        Returns:
+            The created ConfigNode
+
+        Note:
+            scope_id is derived from parent chain:
+            - Global: scope_id = None
+            - Plate: scope_id = node_id
+            - Step: scope_id = parent.scope_id
+        """
+        # Derive scope_id from parent chain
+        if parent is None:
+            scope_id = None  # Global
+        elif parent.parent is None:
+            scope_id = node_id  # Plate (direct child of Global)
+        else:
+            scope_id = parent.scope_id  # Step or deeper (inherit)
+
+        # Create and register node
+        node = ConfigNode(node_id, obj, parent)
+        node.scope_id = scope_id
+        self.all_nodes[node_id] = node
+
+        if not parent:
+            self.trees[scope_id] = node
+        else:
+            parent.children.append(node)
+
         return node
-    
-    def register_step(self, scope_id: str, step_id: str, step_instance: Any) -> ConfigNode:
-        """Register a step under a plate."""
-        plate_node = self.trees[scope_id]
-        
-        node = ConfigNode(
-            node_id=f"{scope_id}.{step_id}",
-            scope_id=scope_id,
-            level="step",
-            object_instance=step_instance,
-            parent=plate_node
-        )
-        
-        plate_node.children.append(node)
-        self.all_nodes[node.node_id] = node
-        return node
-    
-    def get_plate(self, scope_id: str) -> Optional[ConfigNode]:
-        """Get the plate node for a scope."""
-        return self.trees.get(scope_id)
     
     def get_node(self, node_id: str) -> Optional[ConfigNode]:
-        """Get any node by ID."""
+        """Get node by ID."""
         return self.all_nodes.get(node_id)
-```
-
-### Resolution Example
-
-**Question**: What is `Step1.step_materialization_config.well_filter`?
-
-**Current system** (6-layer approach):
-```python
-1. Check CURRENT_OVERLAY (Step1's user values)
-2. Check SIBLING_CONTEXTS (Step1.well_filter_config) ← Found here!
-3. Check PARENT_OVERLAY (Plate's user values)
-4. Check PARENT_CONTEXT (Plate's lazy values)
-5. Check GLOBAL_LIVE_VALUES (other windows editing Global)
-6. Check GLOBAL_STATIC_DEFAULTS (fresh GlobalPipelineConfig)
-```
-
-**Proposed system** (tree walk):
-```python
-# Build context stack
-step1_node.build_context_stack()
-→ Returns: [plate_node, step1_node]
-
-# Apply contexts
-with config_context(plate_config):      # Plate level
-    with config_context(step1_instance): # Step level (contains both configs!)
-        # Lazy resolution walks up automatically:
-        # step1_instance.step_materialization_config.well_filter
-        # → None? Check step1_instance context
-        # → step1_instance.well_filter_config.well_filter = ["A01"]
-        # → Found!
-```
-
-**Key difference**: Sibling inheritance "just works" because both configs are part of the same `step1_instance` object in the context stack.
-
----
-
-## Implementation Plan
-
-Implement the tree model directly—no compatibility layer or staged cutover.
-
-1. **Introduce the tree primitives**
-    - Add `ConfigNode` plus `ConfigTreeRegistry` (singleton accessor via `instance()`).
-    - Each `ParameterFormManager` constructs/registers its node on init and stores `self._config_node`.
-    - Tree nodes keep weak refs back to live managers so they can expose user-edited values on demand.
-
-2. **Replace context building**
-    - Delete `context_layer_builders.py`; re‑implement `build_context_stack` as a thin wrapper that walks `ConfigNode.build_path_to_root()` and applies `config_context(...)` per ancestor.
-    - Update `PlaceholderRefreshService` (and any other call sites) to use `self._config_node.build_context_stack()` plus explicit overlay application for user-modified fields.
-
-3. **Wire cross-window behavior through the tree**
-    - Remove `_active_form_managers`; `SignalConnectionService` and `ParameterFormManager` signal handlers look up affected nodes via the registry.
-    - Tree traversal handles scope filtering and sibling notifications (plate node → child nodes, nested managers notified through their parent manager as today).
-
-4. **Tidy the UI surface**
-    - Keep `nested_managers` for widget orchestration, but ensure data flow uses the tree (parent manager updates node state instead of reconciling through builders).
-    - Strip any dead helpers that only served the old layer stack (e.g., `_reconstruct_nested_dataclasses`).
-
-5. **Backfill integrity checks**
-    - Add sanity assertions to `ConfigTreeRegistry` (unique node IDs per scope, orphan detection) since we no longer rely on incremental migration safety nets.
-    - Update documentation and diagrams to reflect the new single-tree model.
-
-All changes land together so no legacy layer code remains on this branch.
-
-## Benefits
-
-### Code Simplification
-
-| Aspect | Current | Proposed | Improvement |
-|--------|---------|----------|-------------|
-| Lines of code | 200+ (builders) | ~50 (tree) | 75% reduction |
-| Concepts | 6 layer types | 1 tree structure | 6→1 |
-| Context building | Builder dispatch | Tree walk | Direct |
-| Sibling discovery | Query parent's `nested_managers` dict | Automatic (same object) | Implicit |
-
-### Conceptual Clarity
-
-**Before**: "We have 6 layers that apply in sequence, but actually one of them is a list of layers..."
-
-**After**: "Walk up the tree from leaf to root, apply each node as a context."
-
-### Maintainability
-
-- **Adding new config types**: No builder classes needed
-- **Debugging**: Visualize tree structure directly
-- **Testing**: Mock tree nodes instead of complex manager setup
-
-### Performance
-
-- **Fewer queries**: No searching through `_active_form_managers`
-- **Explicit relationships**: Parent/child links instead of scope filtering
-- **Simpler stack building**: Direct path traversal
-
----
-
-## Special Cases to Handle
-
-### 1. Global Config Editing
-
-When editing `GlobalPipelineConfig` directly, we want to show static defaults (not loaded values).
-
-**Solution**:
-```python
-if editing_global_config:
-    # Don't build tree-based stack
-    # Instead, mask thread-local with fresh instance
-    with config_context(GlobalPipelineConfig(), mask_with_none=True):
-        # Show static defaults
-```
-
-### 2. Reset Behavior
-
-When resetting a field, we want to use only user-modified values for sibling inheritance (not all values).
-
-**Current**: `use_user_modified_only` flag in builders
-
-**Proposed**: 
-```python
-def build_context_stack(self, use_user_modified_only: bool = False) -> ExitStack:
-    stack = ExitStack()
-    for node in self.build_path_to_root():
-        if use_user_modified_only:
-            instance = node.get_user_modified_instance()
+    
+    def get_scope_nodes(self, scope_id: Optional[str]) -> List[ConfigNode]:
+        """Root + descendants."""
+        root = self.trees.get(scope_id)
+        return [root] + root.descendants() if root else []
+    
+    def find_nodes_by_type(self, obj_type: Type) -> List[ConfigNode]:
+        """Find all nodes holding instances of given type (for cross-scope updates)."""
+        return [n for n in self.all_nodes.values() if isinstance(n.object_instance, obj_type)]
+    
+    def unregister(self, node_id: str):
+        """Recursive removal."""
+        node = self.all_nodes.pop(node_id, None)
+        if not node:
+            return
+        if not node.parent:
+            self.trees.pop(node.scope_id, None)
         else:
-            instance = node.object_instance
-        stack.enter_context(config_context(instance))
-    return stack
+            node.parent.children.remove(node)
+        for child in list(node.children):
+            self.unregister(child.node_id)
 ```
 
-### 3. Cross-Window Live Values
+### Integration with config_context()
 
-When another window is editing the same config, we want to see their live values.
+Tree provides structure (what/order), `config_context()` provides mechanics (lazy resolution, context stacking).
 
-**Current**: Query `_active_form_managers` for same type, merge live values
-
-**Proposed**: Query tree registry for same scope, get live values from tree node:
 ```python
-def get_live_instance(self) -> Any:
-    """Get instance with current live values from UI."""
-    if self._form_manager:
-        return self._form_manager.get_current_values_as_instance()
-    return self.object_instance
+# Before: Manual stacking
+with config_context(plate):
+    with config_context(step):
+        resolve_placeholders()
+
+# After: Tree determines stack
+with step_node.build_context_stack():
+    resolve_placeholders()
 ```
 
-### 4. Nested Manager UI
+Sibling inheritance automatic: both `step_materialization_config` and `well_filter_config` are fields on same `step_instance` object.
 
-Nested managers (e.g., `well_filter_config` widget within `PipelineConfig` form) are **UI concerns**, not tree concerns.
+### Tree Structure
 
-**Keep**:
-- `ParameterFormManager.nested_managers` dict (for UI)
-- `parent_manager` reference (for UI hierarchy)
+```
+global (node_id="global", scope_id=None)
+├─ plate_A (node_id="plate_A", scope_id="plate_A")
+│   ├─ step_0 (node_id="plate_A.step_0", scope_id="plate_A")
+│   └─ step_1 (node_id="plate_A.step_1", scope_id="plate_A")
+└─ plate_B (node_id="plate_B", scope_id="plate_B")
+    └─ step_0 (node_id="plate_B.step_0", scope_id="plate_B")
+```
 
-**Use tree for**:
-- Context resolution
-- Cross-window updates
-- Value inheritance
+Note: Step node_id uses position index (e.g., "step_0", "step_1") rather than step name.
+This handles duplicate names and step reordering (re-register nodes with updated indices).
 
----
+### Cross-Window Notification
 
-## Testing Strategy
-
-### Unit Tests
-
-1. **Tree construction**:
-   - Create Plate node → verify structure
-   - Add Step node → verify parent/child links
-   - Multiple plates → verify scope isolation
-
-2. **Context building**:
-   - Step node → stack should be [Plate, Step]
-   - Plate node → stack should be [Plate]
-   - Verify global is NOT in stack (thread-local)
-
-3. **Resolution**:
-   - Step inherits from Plate
-   - Step's nested config inherits from sibling nested config
-   - Plate inherits from thread-local Global
-
-### Integration Tests
-
-1. **Cross-window updates**:
-   - Open Plate editor, change value
-   - Open Step editor → verify it sees new value
-   - Change in Step → verify Plate doesn't see it
-
-2. **Scope isolation**:
-   - Two Plate editors (different scopes)
-   - Change in Plate1 → Plate2 unaffected
-   - Change in Plate1 → Plate1's Steps see it
-
-3. **Reset behavior**:
-   - Set value in Plate → Step sees it
-   - Set value in Step → overrides Plate
-   - Reset in Step → reverts to Plate value
-
-### Regression Tests
-
-Run full existing test suite once the tree-backed resolution is in place.
-
----
-
-## Open Questions
-
-### 1. UI Parent vs Data Parent
-
-Currently, `parent_manager` serves two purposes:
-- UI hierarchy (who created this nested form?)
-- Data inheritance (where do values come from?)
-
-**Proposed split**:
 ```python
-# ParameterFormManager
-self._ui_parent_manager = parent_manager  # UI hierarchy
-self._config_node.parent = data_parent     # Data hierarchy
+# When a node changes, notify affected nodes:
+def _emit_cross_window_change(self, param_name, value):
+    affected = self._config_node.get_affected_nodes()
+    for node in affected:
+        manager = node._form_manager() if node._form_manager else None
+        if manager:
+            manager.refresh_placeholders()
+
+# Or keep Qt signals and use registry for discovery:
+def _emit_cross_window_change(self, param_name, value):
+    affected = self._config_node.get_affected_nodes()
+    for node in affected:
+        manager = node._form_manager() if node._form_manager else None
+        if manager:
+            self.context_value_changed.emit(param_name, value, self.object_instance, self.context_obj)
 ```
 
-Do we need this split, or can we derive data parent from UI parent?
+## Implementation
 
-### 2. Nested Manager Siblings
+1. **Add tree primitives**: `ConfigNode`, `ConfigTreeRegistry` in `openhcs/config_framework/config_tree_registry.py` ✅
+2. **Ensure Global node**: Create singleton Global node on app startup or first GlobalPipelineConfig edit
+3. **Wire to ParameterFormManager**: Store `self._config_node`, register on init
+   - Global editor: `parent=None` (root of tree)
+   - Plate editor: `parent=global_node`
+   - Step editor: `parent=plate_node`, `node_id=f"{plate_node_id}.step_{index}"`
+4. **Update StepParameterEditorWidget**: Pass unique `field_id` based on step position index
+5. **Delete context_layer_builders.py**: Replace with `node.build_context_stack()`
+6. **Remove _active_form_managers**: Use `registry.find_nodes_by_type()` or `node.get_affected_nodes()`
+7. **Keep nested_managers**: UI orchestration only, tree handles data flow
 
-Within a form, nested managers need to see each other for sibling inheritance. Currently handled by `SiblingContextsBuilder`.
+## Special Cases
 
-**With tree model**: Siblings are automatic (part of same object in context). But what about the **UI refresh**—when one nested manager changes, how do we notify its siblings?
+- **Global editing**: Mask thread-local with fresh `GlobalPipelineConfig()`
+- **Reset**: Pass `use_user_modified_only=True` to `build_context_stack()`
+- **Nested UI**: Keep `nested_managers` dict, tree handles inheritance
 
-**Option A**: Keep hub-and-spoke (child notifies parent, parent broadcasts to all children)
-**Option B**: Direct sibling notification (but need to maintain sibling list)
+## Testing
 
-### 3. Registry API Surface
-
-Once `_active_form_managers` disappears, which helper methods should `ConfigTreeRegistry` expose so callers stay simple? Candidates include:
-- `iter_scope(scope_id)`
-- `get_live_node(node_id)`
-- `broadcast(scope_id, event)`
-
-Need to design these upfront since we are switching everything over in one shot.
-
-### 4. Cross-Window Live Value Collection
-
-How do we efficiently get live values from a tree node that has an open editor?
-
-**Option A**: Store weak reference to `ParameterFormManager` in ConfigNode
-**Option B**: Registry maps `node_id` → `ParameterFormManager`
-**Option C**: Emit signals through tree structure
-
----
-
-## Success Criteria
-
-### Functional
-- [ ] All existing tests pass
-- [ ] Cross-window updates work correctly
-- [ ] Sibling inheritance works
-- [ ] Reset behavior unchanged
-- [ ] Global editing shows static defaults
-
-### Non-Functional
-- [ ] <50 lines of code for context building (vs 200+)
-- [ ] No performance regression (measure with existing benchmarks)
-- [ ] Tree structure visualizable for debugging
-
-### Code Quality
-- [ ] No `_active_form_managers` global state (replaced with registry)
-- [ ] No builder pattern boilerplate
-- [ ] Clear separation: tree = data structure, managers = UI
-
----
-
-## Timeline Estimate
-
-| Task | Estimated Time | Risk |
-|------|----------------|------|
-| Implement tree primitives and registry | 2-3 days | Medium (new core objects) |
-| Rip out context builders and rewire placeholder refresh | 3-4 days | Medium (touches hot path) |
-| Replace cross-window plumbing with registry lookups | 2-3 days | Medium (signal choreography) |
-| Cleanup + integrity guards + docs | 1-2 days | Low |
-| **Total** | **8-12 days** | |
-
-Additional time for:
-- Comprehensive testing: +2-3 days
-- Documentation updates: +1 day
-- Code review and iteration: +2-3 days
-
-**Total with buffer**: 13-18 days
-
----
-
-## Conclusion
-
-The current "layer" abstraction obscures a simple truth: configuration resolution is walking up a three-level tree (Global → Plate → Step). By making this explicit, we can:
-
-1. **Reduce complexity**: 200+ lines → 50 lines
-2. **Improve clarity**: One tree structure vs. six layer types
-3. **Simplify maintenance**: No builder pattern boilerplate
-4. **Enable debugging**: Visualize tree structure directly
-
-The refactoring is low-risk because we can build the tree structure alongside the existing system, verify equivalence, then cut over.
+- Tree construction (parent/child links, scope isolation)
+- Context stacks correct (root→leaf order)
+- Cross-window updates (change propagation, scope filtering)
+- Regression suite with tree-backed resolution

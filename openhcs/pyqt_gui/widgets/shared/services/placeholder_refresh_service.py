@@ -95,15 +95,13 @@ class PlaceholderRefreshService:
                     # Check current value from parameters
                     current_value = manager.parameters.get(param_name)
 
-                    # Check if widget is in placeholder state
-                    widget_in_placeholder_state = widget.property("is_placeholder_state")
+                    # CRITICAL FIX (from commit 548a362):
+                    # Only apply placeholder styling if current_value is None
+                    # Do NOT apply placeholder to concrete values, even if they match the parent
+                    # This preserves the distinction between 'explicitly set to match parent' vs 'inheriting from parent'
+                    should_apply_placeholder = (current_value is None)
 
-                    # CRITICAL: Only apply placeholder text if widget is actually showing a placeholder
-                    # (i.e., current_value is None OR widget is already in placeholder state)
-                    # Do NOT apply placeholder text to widgets with actual user-entered values
-                    should_apply_placeholder = (current_value is None or widget_in_placeholder_state)
-
-                    logger.debug(f"[PLACEHOLDER] {manager.field_id}.{param_name}: value={current_value}, in_placeholder_state={widget_in_placeholder_state}, should_apply={should_apply_placeholder}, widget_type={type(widget).__name__}")
+                    logger.debug(f"[PLACEHOLDER] {manager.field_id}.{param_name}: value={current_value}, should_apply={should_apply_placeholder}, widget_type={type(widget).__name__}")
 
                     if should_apply_placeholder:
                         with monitor.measure():

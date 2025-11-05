@@ -323,39 +323,23 @@ class LazyDataclassFactory:
             else:
                 final_field_type = field_type
 
-            # CRITICAL FIX: Create default factory for Optional dataclass fields
-            # This eliminates the need for field introspection and ensures UI always has instances to render
+            # CRITICAL FIX: For lazy configs, Optional dataclass fields should default to None
+            # This enables proper placeholder styling and inheritance from parent configs
+            # The UI will handle None values by showing placeholders
             # CRITICAL: Always preserve metadata from original field (e.g., ui_hidden flag)
             if (is_already_optional or not has_default) and is_dataclass(field.type):
-                # For Optional dataclass fields, create default factory that creates lazy instances
-                # This ensures the UI always has nested lazy instances to render recursively
-                # CRITICAL: field_type is already the lazy type, so use it directly
-                field_def = (field.name, final_field_type, dataclasses.field(default_factory=field_type, metadata=field.metadata))
+                # For Optional dataclass fields in lazy configs, use None as default
+                # This ensures all fields show as placeholders initially
+                field_def = (field.name, final_field_type, dataclasses.field(default=None, metadata=field.metadata))
             elif field.metadata:
-                # For fields with metadata but no dataclass default factory, create a Field object to preserve metadata
-                # We need to replicate the original field's default behavior
-                if field.default is not MISSING:
-                    field_def = (field.name, final_field_type, dataclasses.field(default=field.default, metadata=field.metadata))
-                elif field.default_factory is not MISSING:
-                    # CRITICAL: For lazy configs (PipelineConfig), dataclass fields with default_factory
-                    # should become None instead of creating instances
-                    # This enables proper inheritance from GlobalPipelineConfig
-                    if is_dataclass(field.type):
-                        field_def = (field.name, final_field_type, dataclasses.field(default=None, metadata=field.metadata))
-                    else:
-                        field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory, metadata=field.metadata))
-                else:
-                    # Field has metadata but no default - use MISSING to indicate required field
-                    field_def = (field.name, final_field_type, dataclasses.field(default=MISSING, metadata=field.metadata))
+                # CRITICAL FIX: For lazy configs, ALL fields should default to None
+                # This enables proper inheritance from parent configs and placeholder styling
+                # We preserve metadata but override all defaults to None
+                field_def = (field.name, final_field_type, dataclasses.field(default=None, metadata=field.metadata))
             else:
-                # No metadata, but preserve original field's default value
-                if field.default is not MISSING:
-                    field_def = (field.name, final_field_type, dataclasses.field(default=field.default))
-                elif field.default_factory is not MISSING:
-                    field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory))
-                else:
-                    # No default - field is required
-                    field_def = (field.name, final_field_type)
+                # CRITICAL FIX: For lazy configs, ALL fields should default to None
+                # This enables proper inheritance from parent configs and placeholder styling
+                field_def = (field.name, final_field_type, dataclasses.field(default=None))
 
             lazy_field_definitions.append(field_def)
 

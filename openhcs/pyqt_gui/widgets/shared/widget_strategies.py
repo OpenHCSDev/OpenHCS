@@ -335,20 +335,18 @@ class MagicGuiWidgetFactory:
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
         """Create multi-selection checkbox group for List[Enum] parameters.
 
-        Uses NoneAwareCheckBox pattern consistently with bool parameters:
-        - Initialize all checkboxes with set_value(None) for placeholder state
-        - Use set_value() instead of setChecked() to properly track placeholder state
-        - Use get_value() in get_selected_values() to distinguish placeholder vs concrete
+        Uses CheckboxGroupAdapter to properly implement ValueGettable/ValueSettable ABCs.
+        This eliminates duck typing in favor of explicit ABC contracts.
         """
         from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+        from openhcs.ui.shared.widget_adapters import CheckboxGroupAdapter
 
         enum_type = get_enum_from_list(param_type)
-        widget = QGroupBox(param_name.replace('_', ' ').title())
+        widget = CheckboxGroupAdapter()
+        widget.setTitle(param_name.replace('_', ' ').title())
         layout = QVBoxLayout(widget)
 
-        # Store checkboxes for value retrieval
-        widget._checkboxes = {}
-
+        # Populate checkboxes for each enum value
         for enum_value in enum_type:
             checkbox = NoneAwareCheckBox()
             checkbox.setText(enum_value.value)
@@ -356,49 +354,8 @@ class MagicGuiWidgetFactory:
             widget._checkboxes[enum_value] = checkbox
             layout.addWidget(checkbox)
 
-        # Set current values using set_value() to properly handle None/placeholder state
-        if current_value is None:
-            # None means inherit from parent - initialize all checkboxes in placeholder state
-            for checkbox in widget._checkboxes.values():
-                checkbox.set_value(None)
-        elif isinstance(current_value, list):
-            # Explicit list - set concrete values
-            for enum_value, checkbox in widget._checkboxes.items():
-                # Set to True if in list, False if not (both are concrete values)
-                checkbox.set_value(enum_value in current_value)
-        else:
-            # Fallback: treat as None (placeholder state)
-            for checkbox in widget._checkboxes.values():
-                checkbox.set_value(None)
-
-        # Add method to get selected values using get_value() pattern
-        def get_selected_values():
-            """Get selected enum values, returning None if all checkboxes are in placeholder state.
-
-            Treats List[Enum] like a list of independent bools:
-            - If ALL checkboxes are in placeholder state → return None (inherit from parent)
-            - If ANY checkbox has been clicked → ALL become concrete, return list of checked items
-
-            Note: The signal handler ensures that clicking ANY checkbox converts ALL to concrete,
-            so we should never have a mixed state (some placeholder, some concrete).
-            """
-            # Check if any checkbox has a concrete value (not placeholder)
-            has_concrete_value = any(
-                checkbox.get_value() is not None
-                for checkbox in widget._checkboxes.values()
-            )
-
-            if not has_concrete_value:
-                # All checkboxes are in placeholder state - return None to inherit from parent
-                return None
-
-            # All checkboxes are concrete (signal handler converted them)
-            # Return list of enum values where checkbox is checked
-            return [
-                enum_val for enum_val, checkbox in widget._checkboxes.items()
-                if checkbox.get_value() == True
-            ]
-        widget.get_selected_values = get_selected_values
+        # Set current value using ABC method
+        widget.set_value(current_value)
 
         return widget
 
@@ -773,9 +730,6 @@ SIGNAL_CONNECTION_REGISTRY: Dict[str, callable] = {
     # Magicgui-specific widget signals
     'changed': lambda widget, param_name, callback:
         widget.changed.connect(lambda: callback(param_name, widget.value)),
-    # Checkbox group signal (custom attribute for multi-selection widgets)
-    'get_selected_values': lambda widget, param_name, callback:
-        PyQt6WidgetEnhancer._connect_checkbox_group_signals(widget, param_name, callback),
 }
 
 
@@ -862,6 +816,16 @@ class PyQt6WidgetEnhancer:
             )
             return
 
+        # Check for CheckboxGroupAdapter using isinstance (anti-duck-typing)
+        from openhcs.ui.shared.widget_adapters import CheckboxGroupAdapter
+        if isinstance(widget, CheckboxGroupAdapter):
+            placeholder_aware_callback = lambda pn, val: (
+                PyQt6WidgetEnhancer._clear_placeholder_state(widget),
+                callback(pn, val)
+            )[-1]
+            PyQt6WidgetEnhancer._connect_checkbox_group_signals(widget, param_name, placeholder_aware_callback)
+            return
+
         # Fallback to native PyQt6 signals
         connector = next(
             (connector for signal_name, connector in SIGNAL_CONNECTION_REGISTRY.items()
@@ -907,8 +871,8 @@ class PyQt6WidgetEnhancer:
                         # Clear placeholder state from the group widget itself
                         PyQt6WidgetEnhancer._clear_placeholder_state(widget)
 
-                        # Get selected values (now all concrete)
-                        selected = widget.get_selected_values()
+                        # Get selected values (now all concrete) using ABC method
+                        selected = widget.get_value()
                         # Handle None (placeholder state) in logging
                         selected_str = "None (inherit from parent)" if selected is None else [v.name for v in selected]
                         logger.info(f"🔘 Checkbox {cb.text()} changed to {state}, selected values: {selected_str}")
