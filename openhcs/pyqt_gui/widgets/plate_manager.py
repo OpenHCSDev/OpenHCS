@@ -383,34 +383,36 @@ class PlateManagerWidget(QWidget):
         """Handle Add Plate button (adapted from Textual version)."""
         from openhcs.core.path_cache import PathCacheKey
 
-        # Use cached directory dialog (mirrors Textual TUI pattern)
-        directory_path = self.service_adapter.show_cached_directory_dialog(
+        # Use cached directory dialog with multi-selection support
+        selected_paths = self.service_adapter.show_cached_directory_dialog(
             cache_key=PathCacheKey.PLATE_IMPORT,
             title="Select Plate Directory",
-            fallback_path=Path.home()
+            fallback_path=Path.home(),
+            allow_multiple=True
         )
 
-        if directory_path:
-            self.add_plate_callback([directory_path])
+        if selected_paths:
+            self.add_plate_callback(selected_paths)
     
     def add_plate_callback(self, selected_paths: List[Path]):
         """
         Handle plate directory selection (extracted from Textual version).
-        
+
         Args:
             selected_paths: List of selected directory paths
         """
         if not selected_paths:
             self.status_message.emit("Plate selection cancelled")
             return
-        
+
         added_plates = []
-        
+        last_added_path = None
+
         for selected_path in selected_paths:
             # Check if plate already exists
             if any(plate['path'] == str(selected_path) for plate in self.plates):
                 continue
-            
+
             # Add the plate to the list
             plate_name = selected_path.name
             plate_path = str(selected_path)
@@ -418,12 +420,17 @@ class PlateManagerWidget(QWidget):
                 'name': plate_name,
                 'path': plate_path,
             }
-            
+
             self.plates.append(plate_entry)
             added_plates.append(plate_name)
-        
+            last_added_path = plate_path
+
         if added_plates:
             self.update_plate_list()
+            # Select the last added plate to ensure pipeline assignment works correctly
+            if last_added_path:
+                self.selected_plate_path = last_added_path
+                self.plate_selected.emit(last_added_path)
             self.status_message.emit(f"Added {len(added_plates)} plate(s): {', '.join(added_plates)}")
         else:
             self.status_message.emit("No new plates added (duplicates skipped)")

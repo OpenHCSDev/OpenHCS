@@ -212,8 +212,9 @@ class PyQtServiceAdapter:
         self,
         cache_key: PathCacheKey,
         title: str = "Select Directory",
-        fallback_path: Optional[Path] = None
-    ) -> Optional[Path]:
+        fallback_path: Optional[Path] = None,
+        allow_multiple: bool = False
+    ) -> Optional[Path | list[Path]]:
         """
         Show directory dialog with path caching.
 
@@ -221,27 +222,56 @@ class PyQtServiceAdapter:
             cache_key: Cache key for remembering last used path
             title: Dialog title
             fallback_path: Fallback path if no cached path exists
+            allow_multiple: If True, allow selecting multiple directories
 
         Returns:
-            Selected directory path or None if cancelled
+            Selected directory path(s) or None if cancelled
+            - Single Path if allow_multiple=False
+            - List[Path] if allow_multiple=True
         """
         # Get cached initial directory
         initial_dir = str(get_cached_dialog_path(cache_key, fallback_path))
 
         try:
-            dir_path = QFileDialog.getExistingDirectory(
-                self.main_window,
-                title,
-                initial_dir
-            )
+            if allow_multiple:
+                # Use custom QFileDialog for multi-directory selection
+                dialog = QFileDialog(self.main_window, title, initial_dir)
+                dialog.setFileMode(QFileDialog.FileMode.Directory)
+                dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
 
-            if dir_path:
-                selected_path = Path(dir_path)
-                # Cache the selected directory
-                cache_dialog_path(cache_key, selected_path)
-                return selected_path
+                # Enable multi-selection in the list view
+                list_view = dialog.findChild(QWidget, "listView")
+                if list_view:
+                    from PyQt6.QtWidgets import QAbstractItemView
+                    list_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
-            return None
+                tree_view = dialog.findChild(QWidget, "treeView")
+                if tree_view:
+                    from PyQt6.QtWidgets import QAbstractItemView
+                    tree_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+
+                if dialog.exec():
+                    selected_paths = [Path(p) for p in dialog.selectedFiles()]
+                    if selected_paths:
+                        # Cache the first selected directory
+                        cache_dialog_path(cache_key, selected_paths[0])
+                        return selected_paths
+                return None
+            else:
+                # Single directory selection (native dialog)
+                dir_path = QFileDialog.getExistingDirectory(
+                    self.main_window,
+                    title,
+                    initial_dir
+                )
+
+                if dir_path:
+                    selected_path = Path(dir_path)
+                    # Cache the selected directory
+                    cache_dialog_path(cache_key, selected_path)
+                    return selected_path
+
+                return None
 
         except Exception as e:
             logger.error(f"Directory dialog failed: {e}")
