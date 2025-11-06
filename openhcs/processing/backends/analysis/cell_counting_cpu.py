@@ -570,13 +570,15 @@ def _materialize_single_channel_results(data: List[CellCountResult], path: str, 
     json_content = json.dumps(summary, indent=2, default=str)
     for backend in backends:
         kwargs = backend_kwargs.get(backend, {})
-        # Only check exists/delete for storage backends (streaming backends don't support these operations)
-        try:
+        
+        # Get backend instance to check capabilities (polymorphic dispatch)
+        backend_instance = filemanager._get_backend(backend)
+        
+        # Only check exists/delete for backends that support filesystem operations
+        if backend_instance.requires_filesystem_validation:
             if filemanager.exists(json_path, backend):
                 filemanager.delete(json_path, backend)
-        except AttributeError:
-            # Streaming backend doesn't have exists/delete - that's fine
-            pass
+        
         filemanager.save(json_content, json_path, backend, **kwargs)
 
     # Save CSV details to all backends (backends will ignore if they don't support text data)
@@ -585,13 +587,15 @@ def _materialize_single_channel_results(data: List[CellCountResult], path: str, 
         csv_content = df.to_csv(index=False)
         for backend in backends:
             kwargs = backend_kwargs.get(backend, {})
-            # Only check exists/delete for storage backends (streaming backends don't support these operations)
-            try:
+            
+            # Get backend instance to check capabilities (polymorphic dispatch)
+            backend_instance = filemanager._get_backend(backend)
+            
+            # Only check exists/delete for backends that support filesystem operations
+            if backend_instance.requires_filesystem_validation:
                 if filemanager.exists(csv_path, backend):
                     filemanager.delete(csv_path, backend)
-            except AttributeError:
-                # Streaming backend doesn't have exists/delete - that's fine
-                pass
+            
             filemanager.save(csv_content, csv_path, backend, **kwargs)
 
     return json_path
@@ -673,13 +677,15 @@ def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str
     json_content = json.dumps(summary, indent=2, default=str)
     for backend in backends:
         kwargs = backend_kwargs.get(backend, {})
-        # Only check exists/delete for storage backends (streaming backends don't support these operations)
-        try:
+        
+        # Get backend instance to check capabilities (polymorphic dispatch)
+        backend_instance = filemanager._get_backend(backend)
+        
+        # Only check exists/delete for backends that support filesystem operations
+        if backend_instance.requires_filesystem_validation:
             if filemanager.exists(json_path, backend):
                 filemanager.delete(json_path, backend)
-        except AttributeError:
-            # Streaming backend doesn't have exists/delete - that's fine
-            pass
+        
         filemanager.save(json_content, json_path, backend, **kwargs)
 
     # Save CSV details to all backends (backends will ignore if they don't support text data)
@@ -688,13 +694,15 @@ def _materialize_multi_channel_results(data: List[MultiChannelResult], path: str
         csv_content = df.to_csv(index=False)
         for backend in backends:
             kwargs = backend_kwargs.get(backend, {})
-            # Only check exists/delete for storage backends (streaming backends don't support these operations)
-            try:
+            
+            # Get backend instance to check capabilities (polymorphic dispatch)
+            backend_instance = filemanager._get_backend(backend)
+            
+            # Only check exists/delete for backends that support filesystem operations
+            if backend_instance.requires_filesystem_validation:
                 if filemanager.exists(csv_path, backend):
                     filemanager.delete(csv_path, backend)
-            except AttributeError:
-                # Streaming backend doesn't have exists/delete - that's fine
-                pass
+            
             filemanager.save(csv_content, csv_path, backend, **kwargs)
 
     return json_path

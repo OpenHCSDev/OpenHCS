@@ -142,8 +142,17 @@ def materialize_trace_visualizations(data: List[np.ndarray], path: str, filemana
     return summary_path
 
 # Import alvahmm - use torbi version from GitHub dependency
-from alva_machinery.markov import aChain_torbi as alva_MCMC_torbi
-from alva_machinery.branching import aWay as alva_branch
+alva_machinery = optional_import("alva_machinery")
+if alva_machinery:
+    from alva_machinery.markov import aChain_torbi as alva_MCMC_torbi
+    from alva_machinery.markov import aChain as alva_MCMC
+    from alva_machinery.branching import aWay as alva_branch
+    ALVA_AVAILABLE = True
+else:
+    ALVA_AVAILABLE = False
+    alva_MCMC_torbi = None
+    alva_MCMC = None
+    alva_branch = None
 
 
 class SeedingMethod(Enum):

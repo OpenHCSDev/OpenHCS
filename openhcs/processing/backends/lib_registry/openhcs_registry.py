@@ -158,6 +158,10 @@ class OpenHCSRegistry(LibraryRegistryBase):
                     # Apply contract wrapper (adds slice_by_slice for FLEXIBLE)
                     wrapped_func = self.apply_contract_wrapper(func, contract)
 
+                    # Override the function in the module with the wrapped version
+                    # This ensures that imports from the module get the wrapped version with 'enabled'
+                    setattr(module, name, wrapped_func)
+
                     # Generate unique function name using module information
                     unique_name = self._generate_function_name(name, module_name)
 

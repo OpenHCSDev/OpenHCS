@@ -469,7 +469,14 @@ class SignatureAnalyzer:
                 continue 
 
             from typing import Any
-            param_type = type_hints.get(param_name, Any)
+            # Try to get type from type_hints first, then fall back to signature annotation
+            # This is critical for parameters added by decorators (like dtype_conversion, slice_by_slice)
+            # which set __signature__ but not __annotations__
+            param_type = type_hints.get(param_name)
+            if param_type is None:
+                # Fall back to signature annotation if available
+                param_type = param.annotation if param.annotation != inspect.Parameter.empty else Any
+
             default_value = param.default if param.default != inspect.Parameter.empty else None
             is_required = param.default == inspect.Parameter.empty
 

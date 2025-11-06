@@ -1676,23 +1676,28 @@ class PlateManagerWidget(QWidget):
         # Store current message for resize handling
         self.current_status_message = message
 
-        # For continuous scrolling, duplicate the text with spacing
-        # This creates a seamless loop effect
-        separator = "     "  # Spacing between duplicates
-        display_text = f"{message}{separator}{message}{separator}"
-
-        # Set the text and adjust label size to fit content
-        self.status_label.setText(display_text)
+        # First, set the text without duplication to check if scrolling is needed
+        self.status_label.setText(message)
         self.status_label.adjustSize()
 
         # Calculate and store the single message width for loop reset
-        # Create temporary label to measure just the original message + separator
+        separator = "     "  # Spacing between duplicates
         temp_label = QLabel(f"{message}{separator}")
         temp_label.setFont(self.status_label.font())
         temp_label.adjustSize()
         self.status_single_message_width = temp_label.width()
 
-        # Restart scrolling logic
+        # Check if scrolling will be needed
+        label_width = self.status_label.width()
+        scroll_width = self.status_scroll.viewport().width()
+
+        if label_width > scroll_width:
+            # Text is too long - duplicate for continuous scrolling effect
+            display_text = f"{message}{separator}{message}{separator}"
+            self.status_label.setText(display_text)
+            self.status_label.adjustSize()
+
+        # Restart scrolling logic (will only scroll if needed)
         self._restart_status_scrolling()
 
     def _restart_status_scrolling(self):
@@ -1763,8 +1768,9 @@ class PlateManagerWidget(QWidget):
         """Handle resize events to restart status scrolling if needed."""
         super().resizeEvent(event)
         # Restart scrolling check when window is resized
-        if hasattr(self, 'status_scroll') and self.status_scroll:
-            self._restart_status_scrolling()
+        if hasattr(self, 'status_scroll') and self.status_scroll and hasattr(self, 'current_status_message'):
+            # Re-apply the status message to recalculate duplication
+            self.update_status(self.current_status_message)
 
     def on_selection_changed(self):
         """Handle plate list selection changes using utility."""

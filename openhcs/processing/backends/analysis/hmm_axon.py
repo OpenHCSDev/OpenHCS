@@ -17,10 +17,18 @@ from skimage.filters import median, threshold_li
 from skimage.morphology import skeletonize
 from openhcs.core.memory.decorators import numpy
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.core.utils import optional_import
 
 # Import alvahmm from GitHub dependency
-from alva_machinery.markov import aChain as alva_MCMC
-from alva_machinery.branching import aWay as alva_branch
+alva_machinery = optional_import("alva_machinery")
+if alva_machinery:
+    from alva_machinery.markov import aChain as alva_MCMC
+    from alva_machinery.branching import aWay as alva_branch
+    ALVA_AVAILABLE = True
+else:
+    ALVA_AVAILABLE = False
+    alva_MCMC = None
+    alva_branch = None
 
 
 def materialize_hmm_analysis(

@@ -21,6 +21,7 @@ Usage:
 import logging
 from pathlib import Path
 from typing import Any, List, Dict, Optional
+from contextlib import contextmanager
 import dill as pickle
 
 logger = logging.getLogger(__name__)
@@ -28,29 +29,41 @@ logger = logging.getLogger(__name__)
 
 def detect_legacy_pipeline(steps: List[Any]) -> bool:
     """
-    Detect if pipeline contains legacy enum values that need migration.
-    
+    Detect if pipeline contains legacy format with direct attributes on step.
+
+    OLD format: step.group_by and step.variable_components as direct attributes
+    NEW format: step.processing_config.group_by and step.processing_config.variable_components
+
     Args:
         steps: List of pipeline steps
-        
+
     Returns:
         True if legacy format detected, False otherwise
     """
     try:
         for step in steps:
-            # Check if step has group_by attribute with string value
-            if hasattr(step, 'group_by') and step.processing_config.group_by is not None:
-                if isinstance(step.processing_config.group_by, str):
-                    logger.debug(f"Legacy string group_by detected: {step.processing_config.group_by}")
+            # Check if step has direct group_by attribute (OLD format)
+            if hasattr(step, 'group_by') and not hasattr(step, 'processing_config'):
+                logger.debug(f"Legacy direct group_by attribute detected on step")
+                return True
+
+            # Check if step has direct variable_components attribute (OLD format)
+            if hasattr(step, 'variable_components') and not hasattr(step, 'processing_config'):
+                logger.debug(f"Legacy direct variable_components attribute detected on step")
+                return True
+
+            # Also check for string-based enum values in processing_config (secondary migration)
+            if hasattr(step, 'processing_config'):
+                if hasattr(step.processing_config, 'group_by') and isinstance(step.processing_config.group_by, str):
+                    logger.debug(f"Legacy string group_by detected in processing_config: {step.processing_config.group_by}")
                     return True
-            
-            # Check variable_components for string values
-            if hasattr(step, 'variable_components') and step.processing_config.variable_components:
-                for component in step.processing_config.variable_components:
-                    if isinstance(component, str):
-                        logger.debug(f"Legacy string variable_component detected: {component}")
-                        return True
-        
+
+                if hasattr(step.processing_config, 'variable_components') and step.processing_config.variable_components:
+                    for component in step.processing_config.variable_components:
+                        if isinstance(component, str):
+                            logger.debug(f"Legacy string variable_component detected in processing_config: {component}")
+                            return True
+
         return False
     except Exception as e:
         logger.warning(f"Error detecting legacy pipeline format: {e}")
@@ -132,30 +145,65 @@ def migrate_legacy_variable_components(variable_components: List[Any]) -> List[A
 
 def migrate_pipeline_steps(steps: List[Any]) -> List[Any]:
     """
-    Migrate pipeline steps from legacy format to new enum structure.
-    
+    Migrate pipeline steps from legacy format to new LazyProcessingConfig structure.
+
+    OLD format: step.group_by and step.variable_components as direct attributes
+    NEW format: step.processing_config.group_by and step.processing_config.variable_components
+
     Args:
         steps: List of pipeline steps to migrate
-        
+
     Returns:
         List of migrated pipeline steps
     """
+    from openhcs.core.config import LazyProcessingConfig
+
     migrated_steps = []
-    
+
     for step in steps:
-        # Create a copy of the step to avoid modifying the original
-        migrated_step = step
-        
-        # Migrate group_by if present
-        if hasattr(step, 'group_by') and step.processing_config.group_by is not None:
-            migrated_step.processing_config.group_by = migrate_legacy_group_by(step.processing_config.group_by)
-        
-        # Migrate variable_components if present
-        if hasattr(step, 'variable_components') and step.processing_config.variable_components:
-            migrated_step.processing_config.variable_components = migrate_legacy_variable_components(step.processing_config.variable_components)
-        
-        migrated_steps.append(migrated_step)
-    
+        # Handle OLD format: direct attributes on step
+        if hasattr(step, 'group_by') or hasattr(step, 'variable_components'):
+            # Ensure step has processing_config
+            if not hasattr(step, 'processing_config'):
+                step.processing_config = LazyProcessingConfig()
+
+            # Migrate group_by from direct attribute to processing_config
+            if hasattr(step, 'group_by'):
+                old_group_by = getattr(step, 'group_by')
+                migrated_group_by = migrate_legacy_group_by(old_group_by)
+                # Set in processing_config (need to handle frozen dataclass)
+                object.__setattr__(step.processing_config, 'group_by', migrated_group_by)
+                # Remove old direct attribute
+                delattr(step, 'group_by')
+                logger.debug(f"Migrated group_by from direct attribute to processing_config")
+
+            # Migrate variable_components from direct attribute to processing_config
+            if hasattr(step, 'variable_components'):
+                old_variable_components = getattr(step, 'variable_components')
+                migrated_variable_components = migrate_legacy_variable_components(old_variable_components)
+                # Set in processing_config (need to handle frozen dataclass)
+                object.__setattr__(step.processing_config, 'variable_components', migrated_variable_components)
+                # Remove old direct attribute
+                delattr(step, 'variable_components')
+                logger.debug(f"Migrated variable_components from direct attribute to processing_config")
+
+        # Handle secondary migration: string-based enums in processing_config
+        if hasattr(step, 'processing_config'):
+            # Migrate string-based group_by in processing_config
+            if hasattr(step.processing_config, 'group_by') and isinstance(step.processing_config.group_by, str):
+                migrated_group_by = migrate_legacy_group_by(step.processing_config.group_by)
+                object.__setattr__(step.processing_config, 'group_by', migrated_group_by)
+                logger.debug(f"Migrated string group_by in processing_config to enum")
+
+            # Migrate string-based variable_components in processing_config
+            if hasattr(step.processing_config, 'variable_components') and step.processing_config.variable_components:
+                if any(isinstance(comp, str) for comp in step.processing_config.variable_components):
+                    migrated_variable_components = migrate_legacy_variable_components(step.processing_config.variable_components)
+                    object.__setattr__(step.processing_config, 'variable_components', migrated_variable_components)
+                    logger.debug(f"Migrated string variable_components in processing_config to enums")
+
+        migrated_steps.append(step)
+
     return migrated_steps
 
 
@@ -322,3 +370,68 @@ def load_pipeline_with_migration(pipeline_path: Path) -> Optional[List[Any]]:
     except Exception as e:
         logger.error(f"Failed to load pipeline from {pipeline_path}: {e}")
         return None
+
+
+@contextmanager
+def patch_step_constructors_for_migration():
+    """
+    Context manager that patches AbstractStep constructors to accept old-format parameters.
+
+    OLD format: step = SomeStep(name="test", group_by=GroupBy.WELL, variable_components=[...])
+    NEW format: step = SomeStep(name="test", processing_config=LazyProcessingConfig(group_by=GroupBy.WELL, ...))
+
+    This allows Python source code with old-style step constructors to work without modification.
+    Only applied when TypeError is detected, so no overhead for new-format code.
+
+    Usage:
+        try:
+            exec(code, namespace)
+        except TypeError as e:
+            if "unexpected keyword argument" in str(e) and "group_by" in str(e):
+                with patch_step_constructors_for_migration():
+                    exec(code, namespace)
+    """
+    from openhcs.core.steps.abstract import AbstractStep
+    from openhcs.core.config import LazyProcessingConfig
+    from dataclasses import replace
+
+    # Save original __init__
+    original_init = AbstractStep.__init__
+
+    def migrating_init(self, **kwargs):
+        """Wrapper that migrates old-format parameters to new processing_config structure."""
+        # Extract old-format parameters if present
+        old_group_by = kwargs.pop('group_by', None)
+        old_variable_components = kwargs.pop('variable_components', None)
+
+        # If old-format parameters exist, merge them into processing_config
+        if old_group_by is not None or old_variable_components is not None:
+            logger.debug(f"Migrating old-format constructor parameters for {self.__class__.__name__}")
+
+            # Get existing processing_config or create new one
+            existing_config = kwargs.get('processing_config', LazyProcessingConfig())
+
+            # Build new config with migrated values
+            config_kwargs = {}
+            if old_group_by is not None:
+                config_kwargs['group_by'] = old_group_by
+                logger.debug(f"  - Migrated group_by: {old_group_by}")
+            if old_variable_components is not None:
+                config_kwargs['variable_components'] = old_variable_components
+                logger.debug(f"  - Migrated variable_components: {old_variable_components}")
+
+            # Merge with existing config using dataclass replace
+            if config_kwargs:
+                kwargs['processing_config'] = replace(existing_config, **config_kwargs)
+
+        # Call original __init__ with migrated kwargs
+        original_init(self, **kwargs)
+
+    # Apply patch
+    AbstractStep.__init__ = migrating_init
+
+    try:
+        yield
+    finally:
+        # Restore original __init__
+        AbstractStep.__init__ = original_init

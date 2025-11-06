@@ -491,8 +491,7 @@ def mist_compute_tile_positions(
     # Phase correlation tuning parameters
     magnitude_threshold_multiplier: float = 1e-6,
     peak_candidates_multiplier: int = 4,
-    min_peak_distance: int = 5,
-    **kwargs
+    min_peak_distance: int = 5
 ) -> Tuple["cp.ndarray", "cp.ndarray"]:  # type: ignore
     """
     Full GPU MIST implementation with zero CPU operations.

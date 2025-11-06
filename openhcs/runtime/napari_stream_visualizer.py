@@ -163,59 +163,74 @@ def _build_nd_shapes(layer_items, stack_components):
     return all_shapes_nd, all_shape_types, all_properties
 
 
-def _build_nd_image_array(layer_items, stack_components):
+def _build_nd_image_array(layer_items, stack_components, component_values=None):
     """
     Build nD image array by stacking images along stack component dimensions.
 
     Args:
         layer_items: List of items with 'data' (image arrays) and 'components'
         stack_components: List of component names to stack
+        component_values: Optional dict of {component: [sorted values]} to use for mapping.
+                         If provided, uses this for building the stack dimensions.
+                         If None, derives from layer_items (old behavior).
 
     Returns:
         np.ndarray: Stacked image array
     """
-    if len(stack_components) == 1:
-        # Single stack component - simple 3D stack
+    # When component_values is provided (global tracker), always build multi-dimensional array
+    # This ensures ROIs at non-first indices get proper stack dimensions immediately
+    if component_values is not None:
+        # Using global component values - build proper multi-dimensional array
+        # even if we only have one item currently
+        pass  # Fall through to multi-dimensional logic below
+    elif len(stack_components) == 1 and len(layer_items) > 1:
+        # Old behavior: Single stack component with multiple items - simple 3D stack
         image_stack = [img["data"] for img in layer_items]
         from openhcs.core.memory.stack_utils import stack_slices
 
         return stack_slices(image_stack, memory_type="numpy", gpu_id=0)
-    else:
-        # Multiple stack components - create multi-dimensional array
+    elif len(stack_components) == 1 and len(layer_items) == 1:
+        # Single item, single component, no global values - just return as-is
+        # (Will be wrapped in extra dimension if needed by caller)
+        return layer_items[0]["data"]
+    
+    # Multiple stack components OR using global component values - create multi-dimensional array
+    if component_values is None:
+        # Derive from layer items (old behavior when no global tracker)
         component_values = {}
         for comp in stack_components:
             values = sorted(set(img["components"].get(comp, 0) for img in layer_items))
             component_values[comp] = values
 
-        # Log component values for debugging
-        logger.info(
-            f"🔬 NAPARI PROCESS: Building nD array with stack_components={stack_components}, component_values={component_values}"
-        )
+    # Log component values for debugging
+    logger.info(
+        f"🔬 NAPARI PROCESS: Building nD array with stack_components={stack_components}, component_values={component_values}"
+    )
 
-        # Create empty array with shape (comp1_size, comp2_size, ..., y, x)
-        first_img = layer_items[0]["data"]
-        stack_shape = (
-            tuple(len(component_values[comp]) for comp in stack_components)
-            + first_img.shape
-        )
-        stacked_array = np.zeros(stack_shape, dtype=first_img.dtype)
-        logger.info(
-            f"🔬 NAPARI PROCESS: Created nD array with shape {stack_shape} from {len(layer_items)} items"
-        )
+    # Create empty array with shape (comp1_size, comp2_size, ..., y, x)
+    first_img = layer_items[0]["data"]
+    stack_shape = (
+        tuple(len(component_values[comp]) for comp in stack_components)
+        + first_img.shape
+    )
+    stacked_array = np.zeros(stack_shape, dtype=first_img.dtype)
+    logger.info(
+        f"🔬 NAPARI PROCESS: Created nD array with shape {stack_shape} from {len(layer_items)} items"
+    )
 
-        # Fill array
-        for img in layer_items:
-            # Get indices for this image
-            indices = tuple(
-                component_values[comp].index(img["components"].get(comp, 0))
-                for comp in stack_components
-            )
-            logger.debug(
-                f"🔬 NAPARI PROCESS: Placing image at indices {indices}, components={img['components']}"
-            )
-            stacked_array[indices] = img["data"]
+    # Fill array
+    for img in layer_items:
+        # Get indices for this image
+        indices = tuple(
+            component_values[comp].index(img["components"].get(comp, 0))
+            for comp in stack_components
+        )
+        logger.debug(
+            f"🔬 NAPARI PROCESS: Placing image at indices {indices}, components={img['components']}"
+        )
+        stacked_array[indices] = img["data"]
 
-        return stacked_array
+    return stacked_array
 
 
 def _create_or_update_shapes_layer(
@@ -573,6 +588,11 @@ class NapariViewerServer(ZMQServer):
         self.component_groups = {}
         self.dimension_labels = {}  # Store dimension label mappings: layer_key -> {component: [labels]}
         self.component_metadata = {}  # Store component metadata from microscope handler: {component: {id: name}}
+        
+        # Global component value tracker for shared dimension mapping
+        # Maps tuple of stack_components -> {component: set of values}
+        # All layers with the same stack_components share the same global mapping
+        self.global_component_values = {}
 
         # Debouncing + locking for layer updates to prevent race conditions
         import threading
@@ -601,6 +621,86 @@ class NapariViewerServer(ZMQServer):
         except Exception as e:
             logger.warning(f"🔬 NAPARI SERVER: Failed to setup ack socket: {e}")
             self.ack_socket = None
+
+    def _update_global_component_values(self, stack_components, layer_items):
+        """
+        Update the global component value tracker with values from new items.
+        
+        All layers sharing the same stack_components will use the same global mapping,
+        ensuring consistent component-to-index mapping across image and ROI layers.
+        
+        Args:
+            stack_components: Tuple/list of component names (e.g., ['channel', 'well'])
+            layer_items: List of items with 'components' dict
+        """
+        # Use tuple as dict key (lists aren't hashable)
+        components_key = tuple(stack_components)
+        
+        # Initialize if needed
+        if components_key not in self.global_component_values:
+            self.global_component_values[components_key] = {
+                comp: set() for comp in stack_components
+            }
+        
+        # Add values from these items
+        global_values = self.global_component_values[components_key]
+        for item in layer_items:
+            for comp in stack_components:
+                value = item["components"].get(comp, 0)
+                global_values[comp].add(value)
+        
+        logger.info(
+            f"🔬 NAPARI PROCESS: Updated global component values for {stack_components}"
+        )
+        for comp, values in global_values.items():
+            sorted_values = sorted(values)
+            logger.info(f"🔬 NAPARI PROCESS:   {comp}: {sorted_values}")
+    
+    def _get_global_component_values(self, stack_components):
+        """
+        Get the global component values for a given set of stack components.
+        
+        For indexed components (channel, z_index, timepoint), expands to include
+        all values from 1 to max. For example, if only channel 2 is seen, returns [1, 2].
+        This ensures proper stack dimensions even when some indices aren't present.
+        
+        Returns a dict of {component: sorted list of values} for all components
+        that have been seen across all layers sharing these stack components.
+        """
+        components_key = tuple(stack_components)
+        
+        if components_key not in self.global_component_values:
+            return {comp: [] for comp in stack_components}
+        
+        # Convert sets to sorted lists and expand indexed components
+        global_values = self.global_component_values[components_key]
+        result = {}
+        
+        # Components that should be expanded from 1 to max (1-indexed)
+        INDEXED_COMPONENTS = {'channel', 'z_index', 'timepoint'}
+        
+        for comp, values in global_values.items():
+            sorted_values = sorted(values)
+            
+            if comp in INDEXED_COMPONENTS and sorted_values:
+                # Expand to include all indices from 1 to max
+                # E.g., if we have [2, 4], expand to [1, 2, 3, 4]
+                max_value = max(sorted_values)
+                if max_value > 1:
+                    # Create range from 1 to max_value (inclusive)
+                    expanded_values = list(range(1, max_value + 1))
+                    result[comp] = expanded_values
+                    logger.info(
+                        f"🔬 NAPARI PROCESS: Expanded {comp} from {sorted_values} to {expanded_values}"
+                    )
+                else:
+                    # Max is 1, no expansion needed
+                    result[comp] = sorted_values
+            else:
+                # Non-indexed component (well, site, etc.) - use actual values
+                result[comp] = sorted_values
+        
+        return result
 
     def _schedule_layer_update(
         self, layer_key, data_type, component_modes, component_order
@@ -745,6 +845,13 @@ class NapariViewerServer(ZMQServer):
         self, layer_key, layer_items, stack_components, component_modes
     ):
         """Update an image layer with the current items."""
+        
+        # Update global component tracker with values from these items
+        self._update_global_component_values(stack_components, layer_items)
+        
+        # Get global component values (union of all layers with same stack_components)
+        global_component_values = self._get_global_component_values(stack_components)
+        
         # Check if images have different shapes and pad if needed
         shapes = [item["data"].shape for item in layer_items]
         if len(set(shapes)) > 1:
@@ -785,7 +892,7 @@ class NapariViewerServer(ZMQServer):
         logger.info(
             f"🔬 NAPARI PROCESS: Building nD data for {layer_key} from {len(layer_items)} items"
         )
-        stacked_data = _build_nd_image_array(layer_items, stack_components)
+        stacked_data = _build_nd_image_array(layer_items, stack_components, global_component_values)
 
         # Determine colormap
         colormap = None
@@ -809,8 +916,7 @@ class NapariViewerServer(ZMQServer):
             )
 
         # Build dimension labels from component values
-        # For each stacked component, collect the unique values in order
-        # Try to use metadata names (from openhcs_metadata.json) if available, fall back to indices
+        # Use global component values to ensure consistency across all layers
         dimension_labels = {}
 
         # Component abbreviation mapping
@@ -823,7 +929,8 @@ class NapariViewerServer(ZMQServer):
         }
 
         for comp in stack_components:
-            values = sorted(set(item["components"].get(comp, 0) for item in layer_items))
+            # Use global component values instead of just this layer's values
+            values = global_component_values[comp]
 
             # Try to get human-readable labels from metadata if available
             labels = []
@@ -869,9 +976,15 @@ class NapariViewerServer(ZMQServer):
             f"🔬 NAPARI PROCESS: Converting shapes to labels for {layer_key} from {len(layer_items)} items"
         )
 
+        # Update global component tracker with values from these items
+        self._update_global_component_values(stack_components, layer_items)
+        
+        # Get global component values (union of all layers with same stack_components)
+        global_component_values = self._get_global_component_values(stack_components)
+
         # Convert shapes to label masks (much faster than individual shapes)
         # This happens synchronously but is fast because we're just creating arrays
-        labels_data = self._shapes_to_labels(layer_items, stack_components)
+        labels_data = self._shapes_to_labels(layer_items, stack_components, global_component_values)
 
         # Remove existing layer if it exists
         if layer_key in self.layers:
@@ -892,17 +1005,23 @@ class NapariViewerServer(ZMQServer):
             f"🔬 NAPARI PROCESS: Created labels layer {layer_key} with shape {labels_data.shape}"
         )
 
-    def _shapes_to_labels(self, layer_items, stack_components):
-        """Convert shapes data to label masks."""
+    def _shapes_to_labels(self, layer_items, stack_components, component_values):
+        """Convert shapes data to label masks.
+        
+        Args:
+            layer_items: List of shape items to convert
+            stack_components: List of component names for stack dimensions
+            component_values: Dict of {component: [sorted values]} from global tracker
+        """
         from skimage import draw
 
-        # Build component value to index mapping
-        component_values = {}
-        for comp in stack_components:
-            values = sorted(
-                set(item["components"].get(comp, 0) for item in layer_items)
-            )
-            component_values[comp] = values
+        # Use global component values passed in
+        # This ensures ROIs and images share the same component-to-index mapping
+        logger.info(
+            f"🔬 NAPARI PROCESS: Building ROI stack with global component values"
+        )
+        for comp, values in component_values.items():
+            logger.info(f"🔬 NAPARI PROCESS:   {comp}: {values}")
 
         # Determine output shape
         # Get image shape from first item's shapes data

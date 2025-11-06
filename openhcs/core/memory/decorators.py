@@ -200,12 +200,28 @@ def _create_dtype_wrapper(func, mem_type: MemoryType, func_name: str):
     # Update function signature to include new parameters
     try:
         original_sig = inspect.signature(func)
-        new_params = list(original_sig.parameters.values())
+        original_params = list(original_sig.parameters.values())
         
         # Check if parameters already exist
-        param_names = [p.name for p in new_params]
+        param_names = [p.name for p in original_params]
         
-        # Add dtype_conversion parameter first (before slice_by_slice)
+        # Find the position of VAR_KEYWORD (**kwargs) if it exists
+        var_keyword_idx = None
+        for idx, param in enumerate(original_params):
+            if param.kind == inspect.Parameter.VAR_KEYWORD:
+                var_keyword_idx = idx
+                break
+        
+        # Build new parameter list with correct ordering
+        new_params = []
+        
+        # Add all parameters except **kwargs
+        if var_keyword_idx is not None:
+            new_params.extend(original_params[:var_keyword_idx])
+        else:
+            new_params.extend(original_params)
+        
+        # Add dtype_conversion parameter (keyword-only, before **kwargs)
         if 'dtype_conversion' not in param_names:
             dtype_param = inspect.Parameter(
                 'dtype_conversion',
@@ -215,7 +231,7 @@ def _create_dtype_wrapper(func, mem_type: MemoryType, func_name: str):
             )
             new_params.append(dtype_param)
         
-        # Add slice_by_slice parameter
+        # Add slice_by_slice parameter (keyword-only, before **kwargs)
         if 'slice_by_slice' not in param_names:
             slice_param = inspect.Parameter(
                 'slice_by_slice',
@@ -224,6 +240,10 @@ def _create_dtype_wrapper(func, mem_type: MemoryType, func_name: str):
                 annotation=bool
             )
             new_params.append(slice_param)
+        
+        # Add **kwargs at the end if it existed
+        if var_keyword_idx is not None:
+            new_params.append(original_params[var_keyword_idx])
         
         # Create new signature
         new_sig = original_sig.replace(parameters=new_params)

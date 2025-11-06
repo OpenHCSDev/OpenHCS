@@ -68,33 +68,53 @@ _registry_initializing = False
 
 
 def _create_virtual_modules() -> None:
-    """Create virtual modules that mirror external library structure under openhcs namespace."""
+    """
+    Create virtual modules for external libraries and override OpenHCS module functions.
+
+    For external libraries (pyclesperanto, skimage, etc.):
+        - Create virtual modules under openhcs.* namespace (e.g., openhcs.pyclesperanto)
+        - This is necessary because we can't override the real external modules
+
+    For OpenHCS functions:
+        - Override functions in their existing modules with registry-wrapped versions
+        - This ensures imports get the version with 'enabled' parameter added by registry
+    """
     import types
     from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 
     # Get all registered functions
     all_functions = RegistryService.get_all_functions_with_metadata()
 
-    # Group functions by their full module path
-    functions_by_module = {}
-    for composite_key, metadata in all_functions.items():
-        # Only create virtual modules for external library functions with slice_by_slice
-        if (hasattr(metadata.func, 'slice_by_slice') and
-            not hasattr(metadata.func, '__processing_contract__') and
-            not metadata.func.__module__.startswith('openhcs.')):
+    # Group external library functions by virtual module path
+    external_functions_by_module = {}
+    # Group OpenHCS functions by their real module path
+    openhcs_functions_by_module = {}
 
+    for composite_key, metadata in all_functions.items():
+        # Check if this is an OpenHCS function by looking at the registry library_name
+        is_openhcs = metadata.registry.library_name == 'openhcs'
+
+        if is_openhcs:
+            # OpenHCS functions: override in their existing modules
+            real_module = metadata.func.__module__
+            if real_module not in openhcs_functions_by_module:
+                openhcs_functions_by_module[real_module] = {}
+            openhcs_functions_by_module[real_module][metadata.func.__name__] = metadata.func
+            logger.debug(f"Added OpenHCS function {metadata.func.__name__} from {real_module}")
+        else:
+            # External library functions: create virtual modules under openhcs.* namespace
             original_module = metadata.func.__module__
             virtual_module = f'openhcs.{original_module}'
-            if virtual_module not in functions_by_module:
-                functions_by_module[virtual_module] = {}
-            functions_by_module[virtual_module][metadata.func.__name__] = metadata.func
+            if virtual_module not in external_functions_by_module:
+                external_functions_by_module[virtual_module] = {}
+            external_functions_by_module[virtual_module][metadata.func.__name__] = metadata.func
 
-    # Create virtual modules for each module path
+    # Create virtual modules for external libraries
     created_modules = []
     all_virtual_modules = set()
 
     # First, collect all module paths including intermediate ones
-    for virtual_module in functions_by_module.keys():
+    for virtual_module in external_functions_by_module.keys():
         parts = virtual_module.split('.')
         for i in range(2, len(parts) + 1):  # Start from 'openhcs.xxx'
             intermediate_module = '.'.join(parts[:i])
@@ -109,7 +129,7 @@ def _create_virtual_modules() -> None:
             created_modules.append(virtual_module)
 
     # Then add functions to the leaf modules
-    for virtual_module, functions in functions_by_module.items():
+    for virtual_module, functions in external_functions_by_module.items():
         if virtual_module in sys.modules:
             module = sys.modules[virtual_module]
             # Add all functions from this module
@@ -117,7 +137,32 @@ def _create_virtual_modules() -> None:
                 setattr(module, func_name, func)
 
     if created_modules:
-        logger.info(f"Created {len(created_modules)} virtual modules: {', '.join(created_modules)}")
+        logger.info(f"Created {len(created_modules)} virtual modules for external libraries: {', '.join(created_modules)}")
+
+    # Override OpenHCS functions in their existing modules
+    logger.debug(f"Found {len(openhcs_functions_by_module)} OpenHCS modules to override")
+    overridden_count = 0
+    for real_module_path, functions in openhcs_functions_by_module.items():
+        logger.debug(f"Checking module {real_module_path}: in sys.modules = {real_module_path in sys.modules}")
+
+        # Import the module if it's not already in sys.modules
+        if real_module_path not in sys.modules:
+            try:
+                logger.debug(f"  Importing {real_module_path}...")
+                importlib.import_module(real_module_path)
+            except Exception as e:
+                logger.warning(f"Could not import {real_module_path}: {e}")
+                continue
+
+        module = sys.modules[real_module_path]
+        # Override each function with the registry-wrapped version
+        for func_name, wrapped_func in functions.items():
+            setattr(module, func_name, wrapped_func)
+            overridden_count += 1
+            logger.debug(f"  Overridden {func_name} in {real_module_path}")
+
+    if overridden_count > 0:
+        logger.info(f"Overridden {overridden_count} OpenHCS functions in their modules with registry-wrapped versions")
 
 
 def _auto_initialize_registry() -> None:

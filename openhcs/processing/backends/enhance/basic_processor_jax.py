@@ -78,8 +78,7 @@ def basic_flatfield_correction_jax(
     get_darkfield: bool = False,
     fitting_mode: str = "ladmap",
     working_size: Optional[Union[int, list]] = 128,
-    verbose: bool = False,
-    **kwargs
+    verbose: bool = False
 ) -> "jnp.ndarray":
     """
     Perform BaSiC-style illumination correction on a 3D image stack using JAX via BaSiCPy.
@@ -168,7 +167,17 @@ def basic_flatfield_correction_batch_jax(
     image_batch: "jnp.ndarray",
     *,
     batch_dim: int = 0,
-    **kwargs
+    max_iters: int = 50,
+    lambda_sparse: float = 0.01,
+    lambda_lowrank: float = 0.1,
+    epsilon: float = 0.1,
+    smoothness_flatfield: float = 1.0,
+    smoothness_darkfield: float = 1.0,
+    sparse_cost_darkfield: float = 0.01,
+    get_darkfield: bool = False,
+    fitting_mode: str = "ladmap",
+    working_size: Optional[Union[int, list]] = 128,
+    verbose: bool = False
 ) -> "jnp.ndarray":
     """
     Apply BaSiC flatfield correction to a batch of 3D image stacks.
@@ -202,7 +211,20 @@ def basic_flatfield_correction_batch_jax(
     if batch_dim == 0:
         # Batch is organized as (B, Z, Y, X)
         for b in range(image_batch.shape[0]):
-            corrected = basic_flatfield_correction_jax(image_batch[b], **kwargs)
+            corrected = basic_flatfield_correction_jax(
+                image_batch[b],
+                max_iters=max_iters,
+                lambda_sparse=lambda_sparse,
+                lambda_lowrank=lambda_lowrank,
+                epsilon=epsilon,
+                smoothness_flatfield=smoothness_flatfield,
+                smoothness_darkfield=smoothness_darkfield,
+                sparse_cost_darkfield=sparse_cost_darkfield,
+                get_darkfield=get_darkfield,
+                fitting_mode=fitting_mode,
+                working_size=working_size,
+                verbose=verbose
+            )
             result_list.append(corrected)
 
         # Stack along batch dimension
@@ -211,7 +233,20 @@ def basic_flatfield_correction_batch_jax(
 
     # Batch is organized as (Z, B, Y, X)
     for b in range(image_batch.shape[1]):
-        corrected = basic_flatfield_correction_jax(image_batch[:, b], **kwargs)
+        corrected = basic_flatfield_correction_jax(
+            image_batch[:, b],
+            max_iters=max_iters,
+            lambda_sparse=lambda_sparse,
+            lambda_lowrank=lambda_lowrank,
+            epsilon=epsilon,
+            smoothness_flatfield=smoothness_flatfield,
+            smoothness_darkfield=smoothness_darkfield,
+            sparse_cost_darkfield=sparse_cost_darkfield,
+            get_darkfield=get_darkfield,
+            fitting_mode=fitting_mode,
+            working_size=working_size,
+            verbose=verbose
+        )
         result_list.append(corrected)
 
     # Stack along batch dimension

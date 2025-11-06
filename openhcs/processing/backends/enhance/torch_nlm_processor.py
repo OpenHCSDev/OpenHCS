@@ -58,8 +58,7 @@ def non_local_means_denoise_torch(
     std: float = 1.0,
     kernel_size_mean: int = 3,
     sub_filter_size: int = 32,
-    slice_by_slice: bool = True,
-    **kwargs
+    slice_by_slice: bool = True
 ) -> "torch.Tensor":
     """
     Apply Non-Local Means denoising to a 3D image stack using torch_nlm.

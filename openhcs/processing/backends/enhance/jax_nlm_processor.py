@@ -195,8 +195,7 @@ def non_local_means_denoise_jax(
     filter_radius: int = 1,
     h: Optional[float] = None,
     sigma: Optional[float] = None,
-    slice_by_slice: bool = False,
-    **kwargs
+    slice_by_slice: bool = False
 ) -> "jnp.ndarray":
     """
     Apply Non-Local Means denoising to image(s) using JAX.
