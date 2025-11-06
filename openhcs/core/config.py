@@ -498,3 +498,74 @@ class StreamingConfig(StreamingDefaults, ABC):
     @property
     @abstractmethod
     def step_plan_output_key(self) -> str:
+        """Key to use in step_plan for this config's output paths."""
+        pass
+
+    @abstractmethod
+    def get_streaming_kwargs(self, global_config) -> dict:
+        """Return kwargs needed for this streaming backend."""
+        pass
+
+    @abstractmethod
+    def create_visualizer(self, filemanager, visualizer_config):
+        """Create and return the appropriate visualizer for this streaming config."""
+        pass
+
+
+# Auto-generate streaming configs using factory (reduces ~110 lines to ~20 lines)
+from openhcs.core.streaming_config_factory import create_streaming_config
+
+NapariStreamingConfig = create_streaming_config(
+    viewer_name='napari',
+    port=5555,
+    backend=Backend.NAPARI_STREAM,
+    display_config_class=NapariDisplayConfig,
+    visualizer_module='openhcs.runtime.napari_stream_visualizer',
+    visualizer_class_name='NapariStreamVisualizer'
+)
+
+FijiStreamingConfig = create_streaming_config(
+    viewer_name='fiji',
+    port=5565,
+    backend=Backend.FIJI_STREAM,
+    display_config_class=FijiDisplayConfig,
+    visualizer_module='openhcs.runtime.fiji_stream_visualizer',
+    visualizer_class_name='FijiStreamVisualizer',
+    extra_fields={
+        'fiji_executable_path': (Optional[Path], None)
+    }
+)
+
+# Inject all accumulated fields at the end of module loading
+from openhcs.config_framework.lazy_factory import _inject_all_pending_fields
+_inject_all_pending_fields()
+
+
+# ============================================================================
+# Streaming Port Utilities
+# ============================================================================
+
+# Import streaming port utility from factory module
+from openhcs.core.streaming_config_factory import get_all_streaming_ports
+
+
+# ============================================================================
+# Configuration Framework Initialization
+# ============================================================================
+
+# Initialize configuration framework with OpenHCS types
+from openhcs.config_framework import set_base_config_type
+
+set_base_config_type(GlobalPipelineConfig)
+
+# Note: We use the framework's default MRO-based priority function.
+# More derived classes automatically get higher priority through MRO depth.
+# No custom priority function needed - the framework handles it generically.
+
+logger.debug("Configuration framework initialized with OpenHCS types")
+
+# PERFORMANCE OPTIMIZATION: Cache warming is now done asynchronously in GUI startup
+# to avoid blocking imports. For non-GUI contexts (CLI, subprocess), cache warming
+# happens on-demand when config windows are first opened.
+
+# NOTE: Step editor cache warming is done in openhcs.core.steps.__init__ to avoid circular imports
