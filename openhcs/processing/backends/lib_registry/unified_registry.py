@@ -220,6 +220,10 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
         for param_name, _, annotation in injectable_params:
             wrapper.__annotations__[param_name] = annotation
 
+        # Explicitly copy __processing_contract__ if it exists
+        if hasattr(func, '__processing_contract__'):
+            wrapper.__processing_contract__ = func.__processing_contract__
+
         return wrapper
 
     def _inject_optional_dataclass_params(self, func: Callable) -> Callable:
@@ -622,7 +626,6 @@ class RuntimeTestingRegistryBase(LibraryRegistryBase):
         if self.MEMORY_TYPE is not None:
             wrapped_adapter.input_memory_type = self.MEMORY_TYPE
             wrapped_adapter.output_memory_type = self.MEMORY_TYPE
-        wrapped_adapter.stream_to_napari = False
 
         return wrapped_adapter
 

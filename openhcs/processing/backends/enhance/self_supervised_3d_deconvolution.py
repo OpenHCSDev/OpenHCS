@@ -136,8 +136,7 @@ def self_supervised_3d_deconvolution(
     blur_mode: str = "gaussian",  # 'fft', 'gaussian', 'learned'
     blur_sigma_spatial: float = 1.5,
     blur_sigma_depth: float = 1.5,
-    blur_kernel_size: int = 5,  # For gaussian/learned conv blur
-    **kwargs
+    blur_kernel_size: int = 5  # For gaussian/learned conv blur
 ) -> torch.Tensor:
 
     if not isinstance(image_volume, torch.Tensor):

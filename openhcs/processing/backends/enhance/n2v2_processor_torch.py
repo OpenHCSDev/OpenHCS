@@ -293,8 +293,7 @@ def n2v2_denoise_torch(
     patch_size: int = 64,
     learning_rate: float = 1e-4,
     save_model_path: Optional[str] = None,
-    verbose: bool = False,
-    **kwargs
+    verbose: bool = False
 ) -> torch.Tensor:
     """
     Ultra-optimized N2V2 denoising with 10-100x speedup over original implementation.
@@ -323,7 +322,7 @@ def n2v2_denoise_torch(
     max_val = image.max()
     image = image / max_val
     
-    model = N2V2UNet(features=[64, 128, 256, 512], **kwargs).to(device)
+    model = N2V2UNet(features=[64, 128, 256, 512]).to(device)
     
     # Load or train model
     if model_path is not None:

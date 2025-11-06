@@ -177,50 +177,60 @@ def _build_nd_image_array(layer_items, stack_components, component_values=None):
     Returns:
         np.ndarray: Stacked image array
     """
-    if len(stack_components) == 1:
-        # Single stack component - simple 3D stack
+    # When component_values is provided (global tracker), always build multi-dimensional array
+    # This ensures ROIs at non-first indices get proper stack dimensions immediately
+    if component_values is not None:
+        # Using global component values - build proper multi-dimensional array
+        # even if we only have one item currently
+        pass  # Fall through to multi-dimensional logic below
+    elif len(stack_components) == 1 and len(layer_items) > 1:
+        # Old behavior: Single stack component with multiple items - simple 3D stack
         image_stack = [img["data"] for img in layer_items]
         from openhcs.core.memory.stack_utils import stack_slices
 
         return stack_slices(image_stack, memory_type="numpy", gpu_id=0)
-    else:
-        # Multiple stack components - create multi-dimensional array
-        if component_values is None:
-            # Derive from layer items (old behavior)
-            component_values = {}
-            for comp in stack_components:
-                values = sorted(set(img["components"].get(comp, 0) for img in layer_items))
-                component_values[comp] = values
+    elif len(stack_components) == 1 and len(layer_items) == 1:
+        # Single item, single component, no global values - just return as-is
+        # (Will be wrapped in extra dimension if needed by caller)
+        return layer_items[0]["data"]
+    
+    # Multiple stack components OR using global component values - create multi-dimensional array
+    if component_values is None:
+        # Derive from layer items (old behavior when no global tracker)
+        component_values = {}
+        for comp in stack_components:
+            values = sorted(set(img["components"].get(comp, 0) for img in layer_items))
+            component_values[comp] = values
 
-        # Log component values for debugging
-        logger.info(
-            f"🔬 NAPARI PROCESS: Building nD array with stack_components={stack_components}, component_values={component_values}"
+    # Log component values for debugging
+    logger.info(
+        f"🔬 NAPARI PROCESS: Building nD array with stack_components={stack_components}, component_values={component_values}"
+    )
+
+    # Create empty array with shape (comp1_size, comp2_size, ..., y, x)
+    first_img = layer_items[0]["data"]
+    stack_shape = (
+        tuple(len(component_values[comp]) for comp in stack_components)
+        + first_img.shape
+    )
+    stacked_array = np.zeros(stack_shape, dtype=first_img.dtype)
+    logger.info(
+        f"🔬 NAPARI PROCESS: Created nD array with shape {stack_shape} from {len(layer_items)} items"
+    )
+
+    # Fill array
+    for img in layer_items:
+        # Get indices for this image
+        indices = tuple(
+            component_values[comp].index(img["components"].get(comp, 0))
+            for comp in stack_components
         )
-
-        # Create empty array with shape (comp1_size, comp2_size, ..., y, x)
-        first_img = layer_items[0]["data"]
-        stack_shape = (
-            tuple(len(component_values[comp]) for comp in stack_components)
-            + first_img.shape
+        logger.debug(
+            f"🔬 NAPARI PROCESS: Placing image at indices {indices}, components={img['components']}"
         )
-        stacked_array = np.zeros(stack_shape, dtype=first_img.dtype)
-        logger.info(
-            f"🔬 NAPARI PROCESS: Created nD array with shape {stack_shape} from {len(layer_items)} items"
-        )
+        stacked_array[indices] = img["data"]
 
-        # Fill array
-        for img in layer_items:
-            # Get indices for this image
-            indices = tuple(
-                component_values[comp].index(img["components"].get(comp, 0))
-                for comp in stack_components
-            )
-            logger.debug(
-                f"🔬 NAPARI PROCESS: Placing image at indices {indices}, components={img['components']}"
-            )
-            stacked_array[indices] = img["data"]
-
-        return stacked_array
+    return stacked_array
 
 
 def _create_or_update_shapes_layer(
@@ -650,6 +660,10 @@ class NapariViewerServer(ZMQServer):
         """
         Get the global component values for a given set of stack components.
         
+        For indexed components (channel, z_index, timepoint), expands to include
+        all values from 1 to max. For example, if only channel 2 is seen, returns [1, 2].
+        This ensures proper stack dimensions even when some indices aren't present.
+        
         Returns a dict of {component: sorted list of values} for all components
         that have been seen across all layers sharing these stack components.
         """
@@ -658,9 +672,35 @@ class NapariViewerServer(ZMQServer):
         if components_key not in self.global_component_values:
             return {comp: [] for comp in stack_components}
         
-        # Convert sets to sorted lists
+        # Convert sets to sorted lists and expand indexed components
         global_values = self.global_component_values[components_key]
-        return {comp: sorted(values) for comp, values in global_values.items()}
+        result = {}
+        
+        # Components that should be expanded from 1 to max (1-indexed)
+        INDEXED_COMPONENTS = {'channel', 'z_index', 'timepoint'}
+        
+        for comp, values in global_values.items():
+            sorted_values = sorted(values)
+            
+            if comp in INDEXED_COMPONENTS and sorted_values:
+                # Expand to include all indices from 1 to max
+                # E.g., if we have [2, 4], expand to [1, 2, 3, 4]
+                max_value = max(sorted_values)
+                if max_value > 1:
+                    # Create range from 1 to max_value (inclusive)
+                    expanded_values = list(range(1, max_value + 1))
+                    result[comp] = expanded_values
+                    logger.info(
+                        f"🔬 NAPARI PROCESS: Expanded {comp} from {sorted_values} to {expanded_values}"
+                    )
+                else:
+                    # Max is 1, no expansion needed
+                    result[comp] = sorted_values
+            else:
+                # Non-indexed component (well, site, etc.) - use actual values
+                result[comp] = sorted_values
+        
+        return result
 
     def _schedule_layer_update(
         self, layer_key, data_type, component_modes, component_order

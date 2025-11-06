@@ -1123,12 +1123,10 @@ class ImageBrowserWidget(QWidget):
                 image_filenames.append(filename)
 
         try:
-            # Stream ROI files separately
+            # Stream ROI files in a batch (get viewer once, stream all ROIs)
             if roi_filenames:
                 plate_path = Path(self.orchestrator.plate_path)
-                for roi_filename in roi_filenames:
-                    roi_path = plate_path / roi_filename
-                    self._stream_roi_file(roi_path)
+                self._stream_roi_batch_to_napari(roi_filenames, plate_path)
 
             # Stream image files as a batch
             if image_filenames:
@@ -1164,12 +1162,10 @@ class ImageBrowserWidget(QWidget):
             logger.info(f"🎯 IMAGE BROWSER: ROI filenames: {roi_filenames}")
 
         try:
-            # Stream ROI files separately
+            # Stream ROI files in a batch (get viewer once, stream all ROIs)
             if roi_filenames:
                 plate_path = Path(self.orchestrator.plate_path)
-                for roi_filename in roi_filenames:
-                    roi_path = plate_path / roi_filename
-                    self._stream_roi_file(roi_path)
+                self._stream_roi_batch_to_fiji(roi_filenames, plate_path)
 
             # Stream image files as a batch
             if image_filenames:
@@ -1674,6 +1670,95 @@ class ImageBrowserWidget(QWidget):
         except Exception as e:
             logger.error(f"Failed to stream ROIs to Fiji: {e}")
             raise
+
+    def _stream_roi_batch_to_napari(self, roi_filenames: list, plate_path: Path):
+        """Stream a batch of ROI files to Napari."""
+        self._stream_batch_to_viewer(roi_filenames, plate_path, 'napari', is_roi=True)
+
+    def _stream_roi_batch_to_fiji(self, roi_filenames: list, plate_path: Path):
+        """Stream a batch of ROI files to Fiji."""
+        self._stream_batch_to_viewer(roi_filenames, plate_path, 'fiji', is_roi=True)
+    
+    def _stream_batch_to_viewer(self, filenames: list, plate_path: Path, viewer_type: str, is_roi: bool = False):
+        """Generic method to stream batch of files (images or ROIs) to a viewer (Napari or Fiji).
+        
+        Args:
+            filenames: List of file names to stream
+            plate_path: Path to the plate directory
+            viewer_type: 'napari' or 'fiji'
+            is_roi: True for ROI files, False for image files
+        """
+        from openhcs.config_framework.context_manager import config_context
+        from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
+        from openhcs.constants.constants import Backend as BackendEnum
+        
+        # Get appropriate config class and form
+        if viewer_type == 'napari':
+            from openhcs.core.config import LazyNapariStreamingConfig
+            config_class = LazyNapariStreamingConfig
+            config_form = self.napari_config_form
+            backend_enum = BackendEnum.NAPARI_STREAM
+        else:  # fiji
+            from openhcs.core.config import LazyFijiStreamingConfig
+            config_class = LazyFijiStreamingConfig
+            config_form = self.fiji_config_form
+            backend_enum = BackendEnum.FIJI_STREAM
+        
+        # Resolve config
+        current_values = config_form.get_current_values()
+        temp_config = config_class(**{k: v for k, v in current_values.items() if v is not None})
+        
+        with config_context(self.orchestrator.pipeline_config):
+            with config_context(temp_config):
+                config = resolve_lazy_configurations_for_serialization(temp_config)
+        
+        # Get or create viewer
+        viewer = self.orchestrator.get_or_create_visualizer(config)
+        
+        # Wait for viewer to be ready
+        is_already_running = viewer.wait_for_ready(timeout=0.1)
+        if not is_already_running:
+            logger.info(f"Waiting for {viewer_type.capitalize()} viewer on port {viewer.port} to be ready...")
+            if not viewer.wait_for_ready(timeout=15.0):
+                raise RuntimeError(f"{viewer_type.capitalize()} viewer on port {viewer.port} failed to become ready")
+            logger.info(f"{viewer_type.capitalize()} viewer on port {viewer.port} is ready")
+        else:
+            logger.info(f"{viewer_type.capitalize()} viewer on port {viewer.port} is already running")
+        
+        # Load data
+        if is_roi:
+            from openhcs.core.roi import load_rois_from_zip
+            data_list = []
+            paths = []
+            for filename in filenames:
+                file_path = plate_path / filename
+                rois = load_rois_from_zip(file_path)
+                if not rois:
+                    logger.warning(f"No ROIs found in {file_path.name}")
+                    continue
+                data_list.append(rois)
+                paths.append(filename)
+            
+            if not data_list:
+                logger.warning("No ROIs loaded from any files")
+                return
+        else:
+            # For images, this would load image data - not currently used but kept for future
+            raise NotImplementedError("Image loading through generic method not yet implemented")
+        
+        # Prepare metadata for streaming
+        source = Path(paths[0]).parent.name if paths else 'unknown_source'
+        metadata = {
+            'port': viewer.port,
+            'display_config': config,
+            'microscope_handler': self.orchestrator.microscope_handler,
+            'plate_path': self.orchestrator.plate_path,
+            'source': source
+        }
+        
+        # Stream batch
+        self.filemanager.save_batch(data_list, paths, backend_enum.value, **metadata)
+        logger.info(f"Successfully streamed batch of {len(paths)} {'ROI' if is_roi else 'image'} files to {viewer_type.capitalize()} on port {viewer.port}")
 
     def _display_csv_file(self, csv_path: Path):
         """Display CSV file in preview area."""

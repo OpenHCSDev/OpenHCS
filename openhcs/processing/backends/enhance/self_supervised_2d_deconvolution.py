@@ -121,8 +121,7 @@ def self_supervised_2d_deconvolution(
     learning_rate: float = 4e-4,  # Paper: Adam 4e-4
     blur_mode: str = "gaussian",  # 'fft', 'gaussian', 'learned'
     blur_sigma_spatial: float = 1.5,
-    blur_kernel_size: int = 5,
-    **kwargs
+    blur_kernel_size: int = 5
 ) -> torch.Tensor:
     """
     Self-supervised 2D deconvolution optimized for 2D imaging data.

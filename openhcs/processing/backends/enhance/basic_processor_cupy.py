@@ -259,8 +259,7 @@ def basic_flatfield_correction_cupy(
     correction_mode: str = "divide",
     normalize_output: bool = True,
     verbose: bool = False,
-    max_memory_gb: float = 1.0,
-    **kwargs
+    max_memory_gb: float = 1.0
 ) -> "cp.ndarray":
     """
     Perform BaSiC-style illumination correction on a 3D image stack using CuPy.
@@ -501,7 +500,15 @@ def basic_flatfield_correction_batch_cupy(
     image_batch: "cp.ndarray",
     *,
     batch_dim: int = 0,
-    **kwargs
+    max_iters: int = 50,
+    lambda_sparse: float = 0.01,
+    lambda_lowrank: float = 0.1,
+    rank: int = 3,
+    tol: float = 1e-4,
+    correction_mode: str = "divide",
+    normalize_output: bool = True,
+    verbose: bool = False,
+    max_memory_gb: float = 1.0
 ) -> "cp.ndarray":
     """
     Apply BaSiC flatfield correction to a batch of 3D image stacks.
@@ -537,7 +544,18 @@ def basic_flatfield_correction_batch_cupy(
     if batch_dim == 0:
         # Batch is organized as (B, Z, Y, X)
         for b in range(image_batch.shape[0]):
-            corrected = basic_flatfield_correction_cupy(image_batch[b], **kwargs)
+            corrected = basic_flatfield_correction_cupy(
+                image_batch[b],
+                max_iters=max_iters,
+                lambda_sparse=lambda_sparse,
+                lambda_lowrank=lambda_lowrank,
+                rank=rank,
+                tol=tol,
+                correction_mode=correction_mode,
+                normalize_output=normalize_output,
+                verbose=verbose,
+                max_memory_gb=max_memory_gb
+            )
             result_list.append(corrected)
 
         # Stack along batch dimension
@@ -545,7 +563,18 @@ def basic_flatfield_correction_batch_cupy(
 
     # Batch is organized as (Z, B, Y, X)
     for b in range(image_batch.shape[1]):
-        corrected = basic_flatfield_correction_cupy(image_batch[:, b], **kwargs)
+        corrected = basic_flatfield_correction_cupy(
+            image_batch[:, b],
+            max_iters=max_iters,
+            lambda_sparse=lambda_sparse,
+            lambda_lowrank=lambda_lowrank,
+            rank=rank,
+            tol=tol,
+            correction_mode=correction_mode,
+            normalize_output=normalize_output,
+            verbose=verbose,
+            max_memory_gb=max_memory_gb
+        )
         result_list.append(corrected)
 
     # Stack along batch dimension

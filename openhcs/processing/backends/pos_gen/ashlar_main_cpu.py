@@ -642,8 +642,7 @@ def ashlar_compute_tile_positions_cpu(
     permutation_samples: int = 1000,
     min_permutation_samples: int = 10,
     max_permutation_tries: int = 100,
-    window_size_factor: float = 0.1,
-    **kwargs
+    window_size_factor: float = 0.1
 ) -> Tuple[np.ndarray, List[Tuple[float, float]]]:
     """
     Compute tile positions using the complete Ashlar algorithm - pure position calculation only.

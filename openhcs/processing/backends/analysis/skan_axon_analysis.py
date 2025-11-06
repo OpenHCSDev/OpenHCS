@@ -106,13 +106,18 @@ def materialize_axon_analysis(
         # Get backend-specific kwargs
         kwargs = backend_kwargs.get(backend, {})
 
-        # Remove existing files if they exist
-        if filemanager.exists(json_path, backend):
-            filemanager.delete(json_path, backend)
-        if filemanager.exists(csv_path, backend):
-            filemanager.delete(csv_path, backend)
+        # Get backend instance to check capabilities (polymorphic dispatch)
+        backend_instance = filemanager._get_backend(backend)
+        
+        # Only check exists/delete for backends that support filesystem operations
+        if backend_instance.requires_filesystem_validation:
+            # Storage backend - check and delete if exists
+            if filemanager.exists(json_path, backend):
+                filemanager.delete(json_path, backend)
+            if filemanager.exists(csv_path, backend):
+                filemanager.delete(csv_path, backend)
 
-        # Save JSON and CSV
+        # Save JSON and CSV (works for all backends)
         filemanager.save(json_content, json_path, backend, **kwargs)
         filemanager.save(csv_content, csv_path, backend, **kwargs)
 
@@ -159,7 +164,8 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
     base_path = Path(path).stem
     parent_dir = Path(path).parent
 
-    if not data:
+    # Check if data is None or empty (handle both None and empty arrays)
+    if data is None or (isinstance(data, np.ndarray) and data.size == 0):
         # Create empty summary file to indicate no visualizations were generated
         summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
         summary_content = "No skeleton visualizations generated (return_skeleton_visualizations=False)\n"
@@ -203,7 +209,90 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
     return summary_path
 
 
-@special_outputs(("axon_analysis", materialize_axon_analysis), ("skeleton_visualizations", materialize_skeleton_visualizations))
+def materialize_skeleton_rois(skeleton_mask, path: str, filemanager, backends, backend_kwargs: dict = None) -> str:
+    """
+    Materialize skeleton mask to ImageJ-compatible ROI ZIP files.
+    
+    Converts binary skeleton mask to polyline ROIs for visualization in Napari/Fiji.
+    Similar to cell counting's materialize_segmentation_masks.
+    
+    Args:
+        skeleton_mask: Binary skeleton array (Z, Y, X) or list of arrays with skeleton pixels
+        path: Base path for output files
+        filemanager: FileManager instance
+        backends: Backend(s) to save to
+        backend_kwargs: Backend-specific kwargs
+        
+    Returns:
+        str: Path to the saved ROI file
+    """
+    # Normalize backends to list
+    if isinstance(backends, str):
+        backends = [backends]
+    
+    if backend_kwargs is None:
+        backend_kwargs = {}
+    
+    # Handle data that comes as a list (from multiple items/slices)
+    if isinstance(skeleton_mask, list):
+        if len(skeleton_mask) == 0:
+            skeleton_mask = np.zeros((0, 0, 0), dtype=bool)
+        elif len(skeleton_mask) == 1:
+            skeleton_mask = skeleton_mask[0]
+        else:
+            # Stack multiple masks into 3D array
+            skeleton_mask = np.stack(skeleton_mask, axis=0)
+    
+    logger.info(f"🔬 SKELETON_ROI_MATERIALIZE: Called with path={path}, mask_shape={skeleton_mask.shape if hasattr(skeleton_mask, 'shape') and skeleton_mask.size > 0 else 'empty'}, backends={backends}")
+    
+    # Check if skeleton mask is empty (return_skeleton_mask=False)
+    if not hasattr(skeleton_mask, 'size') or skeleton_mask.size == 0:
+        logger.info("🔬 SKELETON_ROI_MATERIALIZE: No skeleton mask to materialize (return_skeleton_mask=False)")
+        # Create empty summary file
+        base_path = Path(path).stem
+        parent_dir = Path(path).parent
+        summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
+        summary_content = "No skeleton mask generated (return_skeleton_mask=False)\n"
+        for backend in backends:
+            filemanager.save(summary_content, summary_path, backend)
+        return summary_path
+    
+    # Convert skeleton mask to polyline ROIs
+    skeleton_rois = _skeleton_to_rois(skeleton_mask)
+    logger.info(f"🔬 SKELETON_ROI_MATERIALIZE: Converted skeleton mask to {len(skeleton_rois)} polyline ROIs")
+    
+    # Generate ROI file path
+    base_path = Path(path).stem
+    parent_dir = Path(path).parent
+    roi_path = str(parent_dir / f"{base_path}_skeleton.roi.zip")
+    
+    # Save ROIs to all backends
+    if skeleton_rois:
+        for backend in backends:
+            kwargs = backend_kwargs.get(backend, {})
+            filemanager.save(skeleton_rois, roi_path, backend, **kwargs)
+            logger.info(f"🔬 SKELETON_ROI_MATERIALIZE: Saved {len(skeleton_rois)} skeleton ROIs to {roi_path} ({backend})")
+    else:
+        logger.warning(f"🔬 SKELETON_ROI_MATERIALIZE: No ROIs extracted from skeleton mask")
+    
+    # Save summary
+    summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
+    summary_content = f"Skeleton ROIs: {len(skeleton_rois)} polylines\n"
+    summary_content += f"Z-planes: {skeleton_mask.shape[0]}\n"
+    if skeleton_rois:
+        summary_content += f"ROI file: {roi_path}\n"
+    
+    for backend in backends:
+        filemanager.save(summary_content, summary_path, backend)
+    
+    return roi_path
+
+
+@special_outputs(
+    ("axon_analysis", materialize_axon_analysis),
+    ("skeleton_visualizations", materialize_skeleton_visualizations),
+    ("skeleton_masks", materialize_skeleton_rois)  # Mask output gets converted to ROIs
+)
 @numpy_func
 def skan_axon_skeletonize_and_analyze(
     image_stack: np.ndarray,
@@ -214,8 +303,9 @@ def skan_axon_skeletonize_and_analyze(
     min_branch_length: float = 0.0,
     return_skeleton_visualizations: bool = False,
     skeleton_visualization_mode: OutputMode = OutputMode.SKELETON_OVERLAY,
-    analysis_dimension: AnalysisDimension = AnalysisDimension.THREE_D
-) -> Tuple[np.ndarray, Dict[str, Any], List[np.ndarray]]:
+    analysis_dimension: AnalysisDimension = AnalysisDimension.THREE_D,
+    return_skeleton_mask: bool = True  # Return skeleton mask (gets converted to ROIs)
+) -> Tuple[np.ndarray, Dict[str, Any], List[np.ndarray], np.ndarray]:
     """
     Skeletonize axon images and perform comprehensive skeleton analysis.
 
@@ -231,12 +321,14 @@ def skan_axon_skeletonize_and_analyze(
         return_skeleton_visualizations: Whether to generate skeleton visualizations as special output
         skeleton_visualization_mode: Type of visualization (SKELETON, SKELETON_OVERLAY, ORIGINAL, COMPOSITE)
         analysis_dimension: Analysis mode (TWO_D or THREE_D)
+        return_skeleton_mask: Whether to return skeleton binary mask (converted to ROIs for Napari/Fiji)
 
     Returns:
         Tuple containing:
         - Original image stack: Input image unchanged (Z, Y, X)
         - Axon analysis results: Complete analysis data structure
         - Skeleton visualizations: (Special output) List of visualization arrays if return_skeleton_visualizations=True
+        - Skeleton mask: (Special output) Binary skeleton mask (Z, Y, X) - gets converted to ROIs by materializer
     """
     # Validate input
     if len(image_stack.shape) != 3:
@@ -289,16 +381,21 @@ def skan_axon_skeletonize_and_analyze(
             )
             skeleton_visualizations.append(visualization)
 
-    # Step 7: Compile comprehensive results
+    # Step 7: Return skeleton mask if requested (materializer will convert to ROIs)
+    skeleton_mask_output = skeleton_stack if return_skeleton_mask else np.zeros((0, 0, 0), dtype=bool)
+
+    # Step 8: Compile comprehensive results
     results = _compile_analysis_results(
         branch_data, skeleton_stack, binary_stack, image_stack,
         voxel_spacing, analysis_type, threshold_method, min_object_size, min_branch_length
     )
 
     logger.info(f"Analysis complete: {len(branch_data)} branches found")
+    if return_skeleton_mask:
+        logger.info(f"Returning skeleton mask for ROI conversion: {skeleton_mask_output.shape}")
 
-    # Always return original image, analysis results, and skeleton visualizations
-    return image_stack, results, skeleton_visualizations
+    # Return: original image, analysis results, skeleton visualizations, skeleton mask
+    return image_stack, results, skeleton_visualizations, skeleton_mask_output
 
 
 # Helper functions for segmentation and preprocessing
@@ -657,3 +754,115 @@ def _get_skan_version():
         return skan.__version__
     except (ImportError, AttributeError):
         return "unknown"
+
+
+def _skeleton_to_rois(skeleton_stack: np.ndarray) -> List[Dict[str, Any]]:
+    """
+    Convert skeleton pixels to ROI polylines for visualization in Napari/Fiji.
+    
+    Extracts connected skeleton paths and converts them to polyline ROIs.
+    Each skeleton branch becomes a separate polyline ROI.
+    
+    Args:
+        skeleton_stack: Binary skeleton array (Z, Y, X) with skeleton pixels
+        
+    Returns:
+        List of ROI dictionaries compatible with openhcs.core.roi format
+    """
+    from scipy import ndimage
+    from skimage import morphology
+    
+    rois = []
+    roi_id = 1
+    
+    # Process each Z slice independently
+    for z_idx in range(skeleton_stack.shape[0]):
+        skeleton_slice = skeleton_stack[z_idx]
+        
+        if not skeleton_slice.any():
+            continue  # Skip empty slices
+        
+        # Label connected components in skeleton
+        labeled_skeleton, num_features = ndimage.label(skeleton_slice)
+        
+        # Extract each connected component as a separate ROI
+        for label_id in range(1, num_features + 1):
+            # Get coordinates of this skeleton component
+            coords = np.argwhere(labeled_skeleton == label_id)
+            
+            if len(coords) < 2:
+                continue  # Skip single-pixel skeletons
+            
+            # Validate coords shape before processing
+            if coords.ndim != 2 or coords.shape[1] != 2:
+                logger.warning(f"Skipping skeleton component {label_id} in slice {z_idx}: "
+                             f"coords has unexpected shape {coords.shape}, expected (n, 2)")
+                continue
+            
+            # Sort coordinates to create a path (simple nearest-neighbor ordering)
+            # For complex skeletons, this creates an approximate path
+            ordered_coords = _order_skeleton_coords(coords)
+            
+            # Create polyline ROI in ImageJ format
+            # Coordinates are (x, y) in ImageJ, but numpy gives (y, x)
+            x_coords = ordered_coords[:, 1].tolist()  # Column indices = X
+            y_coords = ordered_coords[:, 0].tolist()  # Row indices = Y
+            
+            roi = {
+                'type': 'polyline',
+                'coordinates': list(zip(x_coords, y_coords)),
+                'name': f'Skeleton_Z{z_idx:03d}_Branch{label_id:03d}',
+                'position': z_idx,  # Z-position
+                'stroke_color': '#00FF00',  # Green for skeletons
+                'stroke_width': 1
+            }
+            
+            rois.append(roi)
+            roi_id += 1
+    
+    logger.info(f"Converted skeleton to {len(rois)} polyline ROIs across {skeleton_stack.shape[0]} slices")
+    return rois
+
+
+def _order_skeleton_coords(coords: np.ndarray) -> np.ndarray:
+    """
+    Order skeleton coordinates to form a connected path.
+    
+    Uses a simple nearest-neighbor approach to connect skeleton pixels.
+    For branched skeletons, this creates an approximate path traversal.
+    
+    Args:
+        coords: Array of (y, x) coordinates with shape (n, 2)
+        
+    Returns:
+        Ordered array of coordinates forming a path with shape (n, 2)
+    """
+    # Validate input shape
+    if coords.ndim != 2 or coords.shape[1] != 2:
+        raise ValueError(f"Expected coords with shape (n, 2), got {coords.shape}")
+    
+    if len(coords) <= 2:
+        # For 1 or 2 points, no ordering needed - return as-is
+        return coords
+    
+    # Start with first point
+    ordered = [coords[0]]
+    remaining = list(coords[1:])
+    
+    while remaining:
+        # Find nearest unvisited point to current endpoint
+        current = ordered[-1]
+        distances = np.sum((np.array(remaining) - current) ** 2, axis=1)
+        nearest_idx = np.argmin(distances)
+        
+        ordered.append(remaining[nearest_idx])
+        remaining.pop(nearest_idx)
+    
+    # Convert back to array, ensuring proper shape (n, 2)
+    result = np.array(ordered)
+    
+    # Double-check output shape
+    if result.ndim != 2 or result.shape[1] != 2:
+        raise ValueError(f"Output array has unexpected shape {result.shape}, expected (n, 2)")
+    
+    return result

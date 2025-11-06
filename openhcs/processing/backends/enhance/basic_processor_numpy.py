@@ -94,8 +94,7 @@ def basic_flatfield_correction_numpy(
     tol: float = 1e-4,
     correction_mode: str = "divide",
     normalize_output: bool = True,
-    verbose: bool = False,
-    **kwargs
+    verbose: bool = False
 ) -> np.ndarray:
     """
     Perform BaSiC-style illumination correction on a 3D image stack using NumPy.
@@ -207,7 +206,14 @@ def basic_flatfield_correction_batch_numpy(
     image_batch: np.ndarray,
     *,
     batch_dim: int = 0,
-    **kwargs
+    max_iters: int = 50,
+    lambda_sparse: float = 0.01,
+    lambda_lowrank: float = 0.1,
+    rank: int = 3,
+    tol: float = 1e-4,
+    correction_mode: str = "divide",
+    normalize_output: bool = True,
+    verbose: bool = False
 ) -> np.ndarray:
     """
     Apply BaSiC flatfield correction to a batch of 3D image stacks.
@@ -217,7 +223,14 @@ def basic_flatfield_correction_batch_numpy(
     Args:
         image_batch: 4D NumPy array of shape (B, Z, Y, X) or (Z, B, Y, X)
         batch_dim: Dimension along which the batch is organized (0 or 1)
-        **kwargs: Additional parameters passed to basic_flatfield_correction_numpy
+        max_iters: Maximum number of iterations for the alternating minimization
+        lambda_sparse: Regularization parameter for sparse component
+        lambda_lowrank: Regularization parameter for low-rank component  
+        rank: Rank constraint for the low-rank matrix
+        tol: Convergence tolerance
+        correction_mode: How to apply correction ("divide" or "subtract")
+        normalize_output: Whether to normalize output to [0, 1]
+        verbose: Whether to print progress information
 
     Returns:
         Corrected 4D NumPy array of the same shape as input
@@ -241,7 +254,17 @@ def basic_flatfield_correction_batch_numpy(
     if batch_dim == 0:
         # Batch is organized as (B, Z, Y, X)
         for b in range(image_batch.shape[0]):
-            corrected = basic_flatfield_correction_numpy(image_batch[b], **kwargs)
+            corrected = basic_flatfield_correction_numpy(
+                image_batch[b],
+                max_iters=max_iters,
+                lambda_sparse=lambda_sparse,
+                lambda_lowrank=lambda_lowrank,
+                rank=rank,
+                tol=tol,
+                correction_mode=correction_mode,
+                normalize_output=normalize_output,
+                verbose=verbose
+            )
             result_list.append(corrected)
 
         # Stack along batch dimension
@@ -249,7 +272,17 @@ def basic_flatfield_correction_batch_numpy(
     else:
         # Batch is organized as (Z, B, Y, X)
         for b in range(image_batch.shape[1]):
-            corrected = basic_flatfield_correction_numpy(image_batch[:, b], **kwargs)
+            corrected = basic_flatfield_correction_numpy(
+                image_batch[:, b],
+                max_iters=max_iters,
+                lambda_sparse=lambda_sparse,
+                lambda_lowrank=lambda_lowrank,
+                rank=rank,
+                tol=tol,
+                correction_mode=correction_mode,
+                normalize_output=normalize_output,
+                verbose=verbose
+            )
             result_list.append(corrected)
 
         # Stack along batch dimension
