@@ -2008,6 +2008,24 @@ class ParameterFormManager(QWidget):
         if param_name != 'enabled':
             return
 
+        # CRITICAL FIX: Ignore propagated 'enabled' signals from nested forms
+        # When a nested form's enabled field changes, it handles its own styling,
+        # then propagates the signal up. The parent should NOT apply styling changes
+        # in response to this propagated signal - only to direct changes to its own enabled field.
+        if getattr(self, '_propagating_nested_enabled', False):
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, ignoring propagated 'enabled' signal from nested form")
+            return
+
+        # Also check: does this form actually HAVE an 'enabled' parameter?
+        # This is a redundant safety check in case the flag mechanism fails
+        if 'enabled' not in self.parameters:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, ignoring 'enabled' signal (not in parameters)")
+            return
+
         # DEBUG: Log when this handler is called
         import logging
         logger = logging.getLogger(__name__)
@@ -2113,13 +2131,54 @@ class ParameterFormManager(QWidget):
                 for widget in direct_widgets:
                     widget.setGraphicsEffect(None)
 
-                # CRITICAL: Trigger refresh of all nested configs' enabled styling
-                # This ensures that nested configs re-evaluate their styling based on:
-                # 1. Their own enabled field value
-                # 2. Whether any ancestor is disabled (now False since parent is enabled)
-                # This handles deeply nested configs correctly
-                logger.info(f"[ENABLED HANDLER] Refreshing nested configs' enabled styling")
-                for nested_manager in self.nested_managers.values():
+                # CRITICAL: Restore nested configs, but respect their own state
+                # Don't restore if:
+                # 1. Nested form has enabled=False
+                # 2. Nested form is Optional dataclass with None value
+                logger.info(f"[ENABLED HANDLER] Restoring nested configs, found {len(self.nested_managers)} nested managers")
+                for param_name, nested_manager in self.nested_managers.items():
+                    # Check if this is an Optional dataclass with None value
+                    param_type = self.parameter_types.get(param_name)
+                    is_optional_none = False
+                    if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
+                        instance = self.parameters.get(param_name)
+                        if instance is None:
+                            is_optional_none = True
+                            logger.info(f"[ENABLED HANDLER] Skipping {param_name} - Optional dataclass is None")
+                            continue  # Don't restore - keep dimmed
+                    
+                    # Check if nested form has its own enabled=False
+                    nested_has_enabled_false = False
+                    if 'enabled' in nested_manager.parameters:
+                        enabled_widget = nested_manager.widgets.get('enabled')
+                        if enabled_widget and hasattr(enabled_widget, 'isChecked'):
+                            nested_enabled = enabled_widget.isChecked()
+                        else:
+                            nested_enabled = nested_manager.parameters.get('enabled', True)
+                        
+                        if not nested_enabled:
+                            nested_has_enabled_false = True
+                            logger.info(f"[ENABLED HANDLER] Skipping {param_name} - nested form has enabled=False")
+                            continue  # Don't restore - keep dimmed
+                    
+                    # Safe to restore this nested config
+                    group_box = self.widgets.get(param_name)
+                    logger.info(f"[ENABLED HANDLER] Restoring nested config {param_name}, group_box={group_box.__class__.__name__ if group_box else 'None'}")
+                    if not group_box:
+                        # Try using the nested manager's field_id instead
+                        group_box = self.widgets.get(nested_manager.field_id)
+                        if not group_box:
+                            logger.info(f"[ENABLED HANDLER] ⚠️ No group_box found for {param_name}, skipping")
+                            continue
+                    
+                    # Remove dimming from ALL widgets in the GroupBox
+                    widgets_to_restore = group_box.findChildren(ALL_INPUT_WIDGET_TYPES)
+                    logger.info(f"[ENABLED HANDLER] Restoring {len(widgets_to_restore)} widgets in nested config {param_name}")
+                    for widget in widgets_to_restore:
+                        widget.setGraphicsEffect(None)
+                    
+                    # Recursively handle nested managers within this nested manager
+                    # This ensures deeply nested forms are also restored correctly
                     nested_manager._refresh_enabled_styling()
             else:
                 # Enabled=False: Apply dimming to direct widgets + ALL nested configs
@@ -2208,16 +2267,38 @@ class ParameterFormManager(QWidget):
                 else logger.info(f"⏭️ Skipping refresh of {name} (it just emitted {param_name} change)")
             )
 
-            # CRITICAL: Also refresh enabled styling for all nested managers
-            # This ensures that when one config's enabled field changes, siblings that inherit from it update their styling
-            # Example: fiji_streaming_config.enabled inherits from napari_streaming_config.enabled
-            self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+            # CRITICAL: Only refresh enabled styling for siblings if the changed param is 'enabled'
+            # AND only if this is necessary for lazy inheritance scenarios
+            # FIX: Do NOT refresh when a nested form's own 'enabled' field changes -
+            # this was causing styling pollution where toggling a nested enabled field
+            # would incorrectly trigger styling updates on parents and siblings
+            # The nested form handles its own styling via _on_enabled_field_changed_universal
+            if param_name == 'enabled' and emitting_manager_name:
+                # Only refresh siblings that might inherit from this nested form's enabled value
+                # Skip the emitting manager itself (it already handled its own styling)
+                logger.info(f"🔄 Nested 'enabled' field changed in {emitting_manager_name}, refreshing sibling styling")
+                self._apply_to_nested_managers(
+                    lambda name, manager: manager._refresh_enabled_styling()
+                    if name != emitting_manager_name
+                    else logger.info(f"⏭️ Skipping enabled refresh of {name} (it just changed its own enabled)")
+                )
 
         # CRITICAL: ALWAYS propagate parameter change signal up the hierarchy, even during reset
         # This ensures the dual editor window can sync the function editor when reset changes group_by
         # The root manager will emit context_value_changed via _emit_cross_window_change
         # IMPORTANT: We DO propagate 'enabled' field changes for cross-window styling updates
+        # 
+        # CRITICAL FIX: When propagating 'enabled' changes from nested forms, set a flag
+        # to prevent the parent's _on_enabled_field_changed_universal from incorrectly
+        # applying styling changes (the nested form already handled its own styling)
+        if param_name == 'enabled':
+            # Mark that this is a propagated signal, not a direct change to parent's enabled field
+            self._propagating_nested_enabled = True
+        
         self.parameter_changed.emit(param_name, value)
+        
+        if param_name == 'enabled':
+            self._propagating_nested_enabled = False
 
     def _refresh_with_live_context(self, live_context: dict = None, exclude_param: str = None) -> None:
         """Refresh placeholders using live context from other open windows.
