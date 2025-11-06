@@ -455,7 +455,7 @@ _DEFAULT_TRANSPORT_MODE = TransportMode.TCP if platform.system() == 'Windows' el
 
 @global_pipeline_config
 @dataclass(frozen=True)
-class StreamingDefaults:
+class StreamingDefaults(StepWellFilterConfig):
     """Default configuration for streaming to visualizers."""
     persistent: bool = True
     """Whether viewer stays open after pipeline completion."""
@@ -474,7 +474,7 @@ class StreamingDefaults:
 
 @global_pipeline_config(ui_hidden=True)
 @dataclass(frozen=True)
-class StreamingConfig(StepWellFilterConfig, StreamingDefaults, ABC):
+class StreamingConfig(StreamingDefaults, ABC):
     """Abstract base configuration for streaming to visualizers.
 
     Uses multiple inheritance from StepWellFilterConfig and StreamingDefaults.
