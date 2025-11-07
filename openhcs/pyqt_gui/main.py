@@ -620,6 +620,9 @@ class OpenHCSMainWindow(QMainWindow):
                 if hasattr(plate_manager_widget, 'set_pipeline_editor'):
                     plate_manager_widget.set_pipeline_editor(pipeline_widget)
 
+                # Set plate manager reference in pipeline editor (for step editor signal connections)
+                pipeline_widget.plate_manager = plate_manager_widget
+
                 # Set current plate if one is already selected
                 if plate_manager_widget.selected_plate_path:
                     pipeline_widget.set_current_plate(plate_manager_widget.selected_plate_path)
@@ -653,6 +656,9 @@ class OpenHCSMainWindow(QMainWindow):
                 # Set pipeline editor reference in plate manager
                 if hasattr(plate_manager_widget, 'set_pipeline_editor'):
                     plate_manager_widget.set_pipeline_editor(pipeline_editor_widget)
+
+                # Set plate manager reference in pipeline editor (for step editor signal connections)
+                pipeline_editor_widget.plate_manager = plate_manager_widget
 
                 # Set current plate if one is already selected
                 if plate_manager_widget.selected_plate_path:

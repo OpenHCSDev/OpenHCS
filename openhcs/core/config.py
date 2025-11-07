@@ -463,8 +463,6 @@ class StreamingDefaults(StepWellFilterConfig):
     host: str = 'localhost'
     """Host for streaming communication. Use 'localhost' for local, or remote IP for network streaming."""
 
-    port: int = None  # Subclasses must override with their specific default
-    """Port for streaming communication. Each streamer type has its own default."""
 
     transport_mode: TransportMode = _DEFAULT_TRANSPORT_MODE
     """ZMQ transport mode: Platform-aware default (TCP on Windows, IPC on Unix/Mac)."""
@@ -482,6 +480,11 @@ class StreamingConfig(StreamingDefaults, ABC):
     by @global_pipeline_config(inherit_as_none=True), enabling polymorphic access without
     type-specific attribute names.
     """
+    @property
+    @abstractmethod
+    def port(self) -> int:
+        """Port for streaming communication. Each streamer type has its own default."""
+        pass
 
     @property
     @abstractmethod

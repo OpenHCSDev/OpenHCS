@@ -176,7 +176,7 @@ class ConfigWindow(BaseFormDialog):
         save_button = QPushButton("Save")
         save_button.setFixedHeight(28)
         save_button.setMinimumWidth(70)
-        save_button.clicked.connect(self.save_config)
+        self._setup_save_button(save_button, self.save_config)
         save_button.setStyleSheet(button_styles["save"])
         header_layout.addWidget(save_button)
 
@@ -540,8 +540,8 @@ class ConfigWindow(BaseFormDialog):
 
         logger.debug("Reset all parameters using enhanced ParameterFormManager service")
 
-    def save_config(self):
-        """Save the configuration preserving lazy behavior for unset fields."""
+    def save_config(self, *, close_window=True):
+        """Save the configuration preserving lazy behavior for unset fields. If close_window is True, close after saving; else, keep open."""
         try:
             if LazyDefaultPlaceholderService.has_lazy_resolution(self.config_class):
                 # BETTER APPROACH: For lazy dataclasses, only save user-modified values
@@ -572,7 +572,8 @@ class ConfigWindow(BaseFormDialog):
                 self._saving = False
                 logger.info(f"🔍 SAVE_CONFIG: Reset _saving=False (id={id(self)})")
 
-            self.accept()
+            if close_window:
+                self.accept()
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")

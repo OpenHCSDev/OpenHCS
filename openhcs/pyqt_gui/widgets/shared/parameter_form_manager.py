@@ -1759,6 +1759,7 @@ class ParameterFormManager(QWidget):
                 # This preserves inheritance: only concrete (non-None) live values override the saved instance
                 ctx_type = type(self.context_obj)
                 live_values = self._find_live_values_for_type(ctx_type, live_context)
+
                 if live_values is not None:
                     try:
                         # CRITICAL: Reconstruct nested dataclasses from tuple format, merging into saved instance's nested dataclasses
@@ -1773,6 +1774,8 @@ class ParameterFormManager(QWidget):
                         logger.warning(f"Failed to apply live parent context: {e}")
                         stack.enter_context(config_context(self.context_obj))
                 else:
+                    # No live values from other windows - use context_obj directly
+                    # This happens when the parent config window is closed after saving
                     stack.enter_context(config_context(self.context_obj))
 
         # CRITICAL: For nested forms, include parent's USER-MODIFIED values for sibling inheritance
