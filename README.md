@@ -11,17 +11,15 @@
 [![GPU Accelerated](https://img.shields.io/badge/GPU-Accelerated-green.svg)](https://github.com/trissim/openhcs)
 [![Documentation Status](https://readthedocs.org/projects/openhcs/badge/?version=latest)](https://openhcs.readthedocs.io/en/latest/?badge=latest)
 
-**Bioimage analysis platform with research-level software architecture solving real problems in high-content screening.**
+**A bioimage analysis platform for high-content screening with compile-time validation and bidirectional GUI-code conversion.**
 
-OpenHCS addresses the computational challenges of analyzing 100GB+ microscopy datasets through novel architectural patterns not found in traditional scientific software. Built to solve real research problems in neuroscience, the platform combines compile-time pipeline validation, live cross-window configuration updates, and bidirectional UI-code conversion with perfect round-trip integrity.
+OpenHCS is designed to handle large microscopy datasets (100GB+) with an architecture that emphasizes early error detection and flexible workflows. The platform provides compile-time pipeline validation, live configuration updates across windows, and bidirectional conversion between GUI and code representations.
 
-## What Makes OpenHCS Different
+## Key Features
 
-### 1. Compile-Time Pipeline Validation (Not Runtime Failures)
+### 1. Compile-Time Pipeline Validation
 
-**The Problem**: CellProfiler, ImageJ, and similar tools fail at runtime after hours of processing. You discover incompatible modules, memory issues, or type mismatches only after your pipeline has already started running.
-
-**OpenHCS Solution**: 5-phase compilation system validates entire processing chains before execution:
+Many bioimage analysis tools validate pipelines at runtime, which can lead to failures after hours of processing. OpenHCS uses a 5-phase compilation system to catch errors before execution starts:
 
 ```python
 # Compilation produces immutable execution contexts
@@ -39,13 +37,11 @@ for well_id in wells_to_process:
     compiled_contexts[well_id] = context
 ```
 
-**Impact**: Catch errors at compile time, not after hours of processing. Immutable frozen contexts prevent the state mutation bugs common in scientific software.
+This approach catches errors at compile time rather than after hours of processing. Immutable frozen contexts help prevent state mutation bugs during execution.
 
 ### 2. Live Cross-Window Configuration Updates
 
-**The Problem**: Most scientific software treats each configuration window as isolated. Change a global setting, and you have to close and reopen everything to see the effects.
-
-**OpenHCS Solution**: Multi-window lazy configuration resolution with live cross-window inheritance updates using Python's contextvars and MRO-based resolution:
+Configuration changes propagate across windows in real-time using lazy resolution with Python's contextvars and MRO-based inheritance:
 
 - Open 3 windows simultaneously: GlobalPipelineConfig, PipelineConfig, StepConfig
 - Edit a value in GlobalPipelineConfig
@@ -53,15 +49,11 @@ for well_id in wells_to_process:
 - Proper inheritance chain: Global → Pipeline → Step with scope isolation per orchestrator
 - Save PipelineConfig, and step editors immediately use the new saved values
 
-**Technical Implementation**: Class-level registry of active form managers, Qt signals for cross-window updates, contextvars-based context stacking, and MRO-based dual-axis resolution (context hierarchy + class inheritance).
+This uses a class-level registry of active form managers, Qt signals for cross-window updates, and contextvars-based context stacking with MRO-based dual-axis resolution.
 
-**Impact**: See configuration changes immediately across all open windows. No more close-reopen cycles. No more wondering "did that change take effect?"
+### 3. Bidirectional UI-Code Conversion
 
-### 3. Bidirectional UI-Code Conversion (Perfect Round-Trip)
-
-**The Problem**: CellProfiler can export pipelines to code but can't re-import them. ImageJ macros are one-way. You're forced to choose between GUI convenience or code flexibility.
-
-**OpenHCS Solution**: True bidirectional conversion with perfect round-trip integrity:
+Pipelines can be designed in the GUI, exported to Python code, edited as code, and re-imported back to the GUI with full fidelity:
 
 1. **Design in GUI**: Build pipeline visually with drag-and-drop
 2. **Export to Code**: Click "Code" button → get complete executable Python script
@@ -80,74 +72,71 @@ Orchestrator Config (Tier 3)
 Complete Executable Script
 ```
 
-**Impact**: Get the best of both worlds. Visual tools for rapid prototyping, code editing for complex modifications, version control for collaboration. One source of truth, two representations.
+This enables visual tools for rapid prototyping, code editing for complex modifications, and version control for collaboration.
 
-### 4. Handles Datasets That Break Other Tools
+### 4. Large Dataset Support
 
-OpenHCS was built to process 100GB+ high-content screening datasets that exceed the capabilities of traditional tools:
+OpenHCS is designed to handle large high-content screening datasets (100GB+):
 
 - **Virtual File System**: Automatic backend switching between memory, disk, and ZARR storage
 - **OME-ZARR Compression**: Configurable algorithms (LZ4, ZLIB, ZSTD, Blosc) with adaptive chunking
 - **GPU Resource Management**: Automatic assignment and load balancing across multiple GPUs
 - **Parallel Processing**: Scales to arbitrary CPU cores with configurable worker processes
 
-**Real Use Case**: Process entire 96-well plates with 9 sites per well, 4 channels, 100+ timepoints (100GB+ per plate) without running out of memory.
+For example, processing entire 96-well plates with 9 sites per well, 4 channels, and 100+ timepoints (100GB+ per plate).
 
-## Why This Architecture Matters
+## Background
 
-### Built to Solve Real Research Problems
+OpenHCS evolved from EZStitcher, a microscopy stitching library, into a more general bioimage analysis platform. The architecture addresses some common challenges in scientific software:
 
-OpenHCS evolved from EZStitcher, a microscopy stitching library, into a comprehensive bioimage analysis platform when we encountered the limitations of existing tools:
+- Early error detection through compile-time validation
+- Flexible workflows that work both in GUI and as code
+- Handling datasets that exceed available memory
+- Multi-GPU resource management
 
-- **CellProfiler**: Excellent for standard workflows, but runtime failures on complex pipelines, no compile-time validation, limited GPU support
-- **ImageJ/Fiji**: Powerful but macro-based (no type safety), no pipeline validation, limited to single-machine processing
-- **Custom Scripts**: Full flexibility but no GUI, no validation, everyone reinvents the wheel
+### Architecture
 
-**OpenHCS provides**: Research-level software architecture (compile-time validation, immutable contexts, type-safe pipelines) + scientist-friendly GUI (visual pipeline editor, live configuration updates, bidirectional code conversion) + production-scale processing (100GB+ datasets, multi-GPU, parallel execution).
+The codebase implements several patterns that may be of interest:
 
-### Architectural Patterns Worth Studying
+1. **Dual-Axis Configuration Framework**: Combines context hierarchy (global → pipeline → step) with class inheritance (MRO) for configuration resolution. Extracted as standalone library: [hieraconf](https://github.com/trissim/hieraconf)
 
-The codebase demonstrates several novel patterns applicable beyond microscopy:
+2. **Lazy Dataclass Factory**: Runtime generation of configuration classes with `__getattribute__` interception for on-demand resolution.
 
-1. **Dual-Axis Configuration Framework**: Combines context hierarchy (global → pipeline → step) with class inheritance (MRO) for sophisticated configuration resolution. Extracted as standalone library: [hieraconf](https://github.com/trissim/hieraconf)
+3. **Cross-Window Live Updates**: Class-level registry of active form managers with Qt signals for propagating changes across windows.
 
-2. **Lazy Dataclass Factory**: Runtime generation of configuration classes with `__getattribute__` interception for on-demand resolution. Preserves None vs concrete value distinction for proper inheritance.
+4. **5-Phase Pipeline Compiler**: Separates pipeline definition from execution to enable compile-time validation.
 
-3. **Cross-Window Live Updates**: Class-level registry of active form managers with Qt signals for propagating changes. Contextvars-based context stacking for placeholder resolution.
-
-4. **5-Phase Pipeline Compiler**: Declarative compilation architecture separating definition from execution. Enables compile-time validation and prevents runtime failures.
-
-5. **Bidirectional Code Generation**: Three-tier generation system (function patterns → pipeline steps → orchestrator) with perfect round-trip integrity between GUI and code representations.
+5. **Bidirectional Code Generation**: Three-tier generation system (function patterns → pipeline steps → orchestrator) for round-trip conversion between GUI and code.
 
 **See**: [Architecture Documentation](https://openhcs.readthedocs.io/en/latest/architecture/) for detailed technical analysis.
 
 ## Flexible Pipeline Platform
 
 ### General-Purpose Bioimage Analysis
-OpenHCS provides a flexible platform for creating custom image analysis pipelines. Researchers can combine processing functions to build workflows tailored to their specific experimental needs, from basic image preprocessing to complex multi-step analysis protocols.
+OpenHCS provides a flexible platform for creating custom image analysis pipelines. Researchers can combine processing functions to build workflows tailored to their experimental needs.
 
-### Extensive Function Library
-The platform automatically discovers and integrates 574+ functions from multiple libraries (pyclesperanto, CuPy, PyTorch, JAX, TensorFlow, scikit-image), providing a comprehensive toolkit for image processing, segmentation, measurement, and analysis. This unified access eliminates the need to learn multiple software packages.
+### Function Library
+The platform automatically discovers and integrates 574+ functions from multiple libraries (pyclesperanto, CuPy, PyTorch, JAX, TensorFlow, scikit-image), providing unified access to image processing, segmentation, and analysis tools.
 
-### Easy Function Integration
-Adding custom functions requires minimal code changes. Researchers can integrate their own algorithms by following simple function signature conventions, enabling the platform to automatically discover and incorporate new processing capabilities without modifying core code.
+### Custom Function Integration
+Adding custom functions requires following simple signature conventions, allowing the platform to automatically discover and incorporate new processing capabilities.
 
 ## Comparison with Existing Tools
 
 | Feature | OpenHCS | CellProfiler | ImageJ/Fiji | Custom Scripts |
 |---------|---------|--------------|-------------|----------------|
-| **Compile-Time Validation** | ✅ 5-phase compilation | ❌ Runtime failures | ❌ Runtime failures | ❌ No validation |
-| **Bidirectional UI-Code** | ✅ Perfect round-trip | ⚠️ Export only | ⚠️ Macro export only | ❌ No GUI |
-| **Live Cross-Window Updates** | ✅ Real-time inheritance | ❌ Isolated windows | ❌ No multi-window | ❌ No GUI |
-| **GPU Acceleration** | ✅ Multi-GPU, auto-assignment | ⚠️ Limited GPU support | ⚠️ Plugin-dependent | ✅ Manual implementation |
-| **Large Dataset Handling** | ✅ 100GB+ with ZARR | ⚠️ Memory-limited | ⚠️ Memory-limited | ✅ Manual implementation |
-| **Type Safety** | ✅ Compile-time checks | ❌ Runtime discovery | ❌ No type system | ⚠️ Depends on code |
-| **Parallel Processing** | ✅ Multi-core, multi-GPU | ⚠️ Limited parallelism | ⚠️ Plugin-dependent | ✅ Manual implementation |
-| **Configuration Inheritance** | ✅ 3-tier hierarchy | ❌ Flat config | ❌ No inheritance | ❌ Manual implementation |
-| **Microscope Format Support** | ✅ Extensible, auto-detect | ⚠️ Plugin-based | ⚠️ Plugin-based | ❌ Manual parsing |
+| **Compile-Time Validation** | ✅ 5-phase compilation | ❌ Runtime only | ❌ Runtime only | ⚠️ Depends on code |
+| **Bidirectional UI-Code** | ✅ Round-trip conversion | ⚠️ Export only | ⚠️ Macro export only | ❌ No GUI |
+| **Live Config Updates** | ✅ Cross-window | ❌ Isolated windows | ❌ No multi-window | ❌ No GUI |
+| **GPU Acceleration** | ✅ Multi-GPU | ⚠️ Limited | ⚠️ Plugin-dependent | ✅ Manual |
+| **Large Dataset Handling** | ✅ ZARR backend | ⚠️ Memory-limited | ⚠️ Memory-limited | ✅ Manual |
+| **Type Safety** | ✅ Compile-time | ❌ Runtime | ❌ No type system | ⚠️ Depends on code |
+| **Parallel Processing** | ✅ Multi-core/GPU | ⚠️ Limited | ⚠️ Plugin-dependent | ✅ Manual |
+| **Configuration Hierarchy** | ✅ 3-tier | ❌ Flat | ❌ No hierarchy | ❌ Manual |
+| **Microscope Formats** | ✅ Auto-detect | ⚠️ Plugin-based | ⚠️ Plugin-based | ❌ Manual parsing |
 | **Learning Curve** | Medium | Medium | Low-Medium | High |
 
-**Key Insight**: OpenHCS provides the architectural sophistication of custom scripts with the usability of GUI tools, plus novel features (compile-time validation, live updates) not available in any existing tool.
+OpenHCS aims to combine the flexibility of custom scripts with the usability of GUI tools, while adding compile-time validation and live configuration updates.
 
 ## Supported Microscope Systems
 
@@ -161,13 +150,13 @@ OpenHCS provides unified interfaces for multiple microscope formats with automat
 ## Desktop Interface and Workflow
 
 ### Visual Pipeline Editor
-The PyQt6 desktop interface provides drag-and-drop pipeline creation, real-time parameter adjustment, and live preview of processing results. Users can design complex analysis workflows without programming knowledge.
+The PyQt6 desktop interface provides drag-and-drop pipeline creation with real-time parameter adjustment and live preview of processing results.
 
 ### Bidirectional Code Integration
-Unique UI-to-code conversion allows researchers to export visual pipelines as executable Python scripts for advanced customization, then re-import modified code back to the interface. This bridges the gap between visual tools and programmatic analysis.
+Pipelines can be exported as executable Python scripts for customization, then re-imported back to the interface.
 
 ### Real-Time Visualization
-Integrated napari viewers provide immediate visualization of processing results. Persistent viewers survive pipeline completion, allowing researchers to examine intermediate results and validate analysis parameters.
+Integrated napari viewers provide immediate visualization of processing results, with persistent viewers that survive pipeline completion for examining intermediate results.
 
 ## Installation
 
