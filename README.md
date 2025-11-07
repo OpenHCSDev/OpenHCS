@@ -121,23 +121,6 @@ The platform automatically discovers and integrates 574+ functions from multiple
 ### Custom Function Integration
 Adding custom functions requires following simple signature conventions, allowing the platform to automatically discover and incorporate new processing capabilities.
 
-## Comparison with Existing Tools
-
-| Feature | OpenHCS | CellProfiler | ImageJ/Fiji | Custom Scripts |
-|---------|---------|--------------|-------------|----------------|
-| **Compile-Time Validation** | ✅ 5-phase compilation | ❌ Runtime only | ❌ Runtime only | ⚠️ Depends on code |
-| **Bidirectional UI-Code** | ✅ Round-trip conversion | ⚠️ Export only | ⚠️ Macro export only | ❌ No GUI |
-| **Live Config Updates** | ✅ Cross-window | ❌ Isolated windows | ❌ No multi-window | ❌ No GUI |
-| **GPU Acceleration** | ✅ Multi-GPU | ⚠️ Limited | ⚠️ Plugin-dependent | ✅ Manual |
-| **Large Dataset Handling** | ✅ ZARR backend | ⚠️ Memory-limited | ⚠️ Memory-limited | ✅ Manual |
-| **Type Safety** | ✅ Compile-time | ❌ Runtime | ❌ No type system | ⚠️ Depends on code |
-| **Parallel Processing** | ✅ Multi-core/GPU | ⚠️ Limited | ⚠️ Plugin-dependent | ✅ Manual |
-| **Configuration Hierarchy** | ✅ 3-tier | ❌ Flat | ❌ No hierarchy | ❌ Manual |
-| **Microscope Formats** | ✅ Auto-detect | ⚠️ Plugin-based | ⚠️ Plugin-based | ❌ Manual parsing |
-| **Learning Curve** | Medium | Medium | Low-Medium | High |
-
-OpenHCS aims to combine the flexibility of custom scripts with the usability of GUI tools, while adding compile-time validation and live configuration updates.
-
 ## Supported Microscope Systems
 
 OpenHCS provides unified interfaces for multiple microscope formats with automatic format detection:
