@@ -13,7 +13,7 @@ from openhcs.constants.constants import READ_BACKEND, WRITE_BACKEND, Backend
 from openhcs.constants.input_source import InputSource
 from openhcs.core.config import MaterializationBackend
 from openhcs.core.context.processing_context import ProcessingContext
-from openhcs.core.pipeline.pipeline_utils import get_core_callable
+from openhcs.formats.func_arg_prep import get_core_callable, iter_pattern_items
 from openhcs.core.steps.abstract import AbstractStep
 from openhcs.core.steps.function_step import FunctionStep
 
@@ -23,18 +23,15 @@ logger = logging.getLogger(__name__)
 # ===== PATTERN NORMALIZATION (ONE place) =====
 
 def normalize_pattern(pattern: Any) -> Iterator[Tuple[Callable, str, int]]:
-    """THE single pattern normalizer - 15 lines, no duplication."""
-    if isinstance(pattern, dict):
-        for key, value in pattern.items():
-            for pos, func in enumerate(value if isinstance(value, list) else [value]):
-                if callable_func := get_core_callable(func):
-                    yield (callable_func, key, pos)
-    elif isinstance(pattern, list):
-        for pos, func in enumerate(pattern):
-            if callable_func := get_core_callable(func):
-                yield (callable_func, "default", pos)
-    elif callable_func := get_core_callable(pattern):
-        yield (callable_func, "default", 0)
+    """Extract enabled functions from any pattern."""
+    for func, key, pos in iter_pattern_items(pattern):
+        # Skip disabled functions
+        if isinstance(func, tuple) and len(func) == 2 and isinstance(func[1], dict):
+            if func[1].get('enabled', True) is False:
+                continue
+        # Extract callable and yield
+        if core := get_core_callable(func):
+            yield (core, key, pos)
 
 
 def extract_attributes(pattern: Any) -> Dict[str, Any]:

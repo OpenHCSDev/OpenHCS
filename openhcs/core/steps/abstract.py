@@ -29,7 +29,7 @@ from openhcs.constants.constants import VariableComponents, GroupBy, get_default
 from openhcs.constants.input_source import InputSource
 
 # Import LazyStepMaterializationConfig for type hints
-from openhcs.core.config import LazyStepMaterializationConfig
+from openhcs.core.config import LazyStepMaterializationConfig, LazyStreamingDefaults
 from openhcs.core.config import LazyStepWellFilterConfig
 from openhcs.core.config import LazyProcessingConfig
 
@@ -124,7 +124,11 @@ class AbstractStep(abc.ABC, ContextProvider):
         enabled: bool = True,
         processing_config: 'LazyProcessingConfig' = LazyProcessingConfig(),
         step_well_filter_config: 'LazyStepWellFilterConfig' = LazyStepWellFilterConfig(),
+        #step_materialization_config: Optional['LazyStepMaterializationConfig'] = None,
+        #napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
+        #fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
         step_materialization_config: Optional['LazyStepMaterializationConfig'] = None,
+        #streaming_defaults: 'LazyStreamingDefaults' = LazyStreamingDefaults(),
         napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
         fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
     ) -> None:
@@ -155,6 +159,7 @@ class AbstractStep(abc.ABC, ContextProvider):
         self.enabled = enabled
         self.processing_config = processing_config
         self.step_well_filter_config = step_well_filter_config
+        self.steaming_defaults = streaming_defaults
         self.step_materialization_config = step_materialization_config
         self.napari_streaming_config = napari_streaming_config
         self.fiji_streaming_config = fiji_streaming_config

@@ -976,12 +976,13 @@ class FunctionStep(AbstractStep):
 
                 logger.info(f"Converting input data to zarr: {input_conversion_dir}")
 
-                # Get memory paths from input data (already loaded)
-                memory_paths = get_paths_for_axis(step_input_dir, Backend.MEMORY.value)
-                memory_data = filemanager.load_batch(memory_paths, Backend.MEMORY.value)
+                # Get paths from input data using the original read backend (e.g., disk)
+                # NOT from memory - the data hasn't been converted yet!
+                source_paths = get_paths_for_axis(step_input_dir, read_backend)
+                memory_data = filemanager.load_batch(source_paths, read_backend)
 
                 # Generate conversion paths (input_dir → conversion_dir)
-                conversion_paths = _generate_materialized_paths(memory_paths, Path(step_input_dir), Path(input_conversion_dir))
+                conversion_paths = _generate_materialized_paths(source_paths, Path(step_input_dir), Path(input_conversion_dir))
 
                 # Parse actual filenames to determine dimensions
                 # Calculate zarr dimensions from conversion paths (which contain the filenames)
@@ -1253,7 +1254,8 @@ class FunctionStep(AbstractStep):
                 logger.info(f"🔬 MATERIALIZATION: Starting materialization for {len(special_outputs)} special outputs")
                 # Special outputs ALWAYS use the main materialization backend (disk/zarr),
                 # not the step's write backend (which may be memory for intermediate steps).
-                # This ensures analysis results are always persisted to disk.
+                # This ensures analysis results are always persisted.
+                # Note: _materialize_special_outputs will replace zarr with disk automatically
                 from openhcs.core.pipeline.materialization_flag_planner import MaterializationFlagPlanner
                 vfs_config = context.get_vfs_config()
                 materialization_backend = MaterializationFlagPlanner._resolve_materialization_backend(context, vfs_config)
@@ -1455,6 +1457,15 @@ class FunctionStep(AbstractStep):
         """Materialize special outputs (ROIs, cell counts) to disk and streaming backends."""
         # Collect backends: main + streaming
         from openhcs.core.config import StreamingConfig
+        from openhcs.io.backend_registry import STORAGE_BACKENDS
+        
+        # Special outputs (ROIs, CSVs, visualizations) are arbitrary file formats
+        # Check if the backend class supports them using capability checking
+        backend_class = STORAGE_BACKENDS.get(backend.lower())
+        if backend_class and not backend_class.supports_arbitrary_files:
+            backend = Backend.DISK.value
+            logger.debug(f"🔍 MATERIALIZATION: Backend {backend} doesn't support arbitrary files, using disk for special outputs")
+        
         backends = [backend]
         backend_kwargs = {backend: {}}
 

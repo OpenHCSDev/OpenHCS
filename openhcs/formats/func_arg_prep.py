@@ -1,3 +1,58 @@
+from typing import Any, Callable, Iterator, Optional, Tuple
+
+
+def iter_pattern_items(pattern: Any) -> Iterator[Tuple[Any, str, int]]:
+    """Iterate all items in a pattern regardless of structure (dict/list/single).
+    
+    Yields (func_item, key, position) tuples where:
+    - func_item: raw function item (callable, tuple, or nested pattern)
+    - key: dict key or "default" for list/single patterns
+    - position: index within the list at that key
+    """
+    if isinstance(pattern, dict):
+        for key, value in pattern.items():
+            items = value if isinstance(value, list) else [value]
+            for pos, func in enumerate(items):
+                yield (func, key, pos)
+    elif isinstance(pattern, list):
+        for pos, func in enumerate(pattern):
+            yield (func, "default", pos)
+    else:
+        yield (pattern, "default", 0)
+
+
+def get_core_callable(func_pattern: Any) -> Optional[Callable[..., Any]]:
+    """Extract the first effective Python callable from a func_pattern.
+    
+    Handles: direct callable, (callable, kwargs) tuple, list (chain), dict pattern.
+    """
+    # Check for FunctionReference first
+    try:
+        from openhcs.core.pipeline.compiler import FunctionReference
+        if isinstance(func_pattern, FunctionReference):
+            return func_pattern.resolve()
+    except ImportError:
+        pass
+
+    if callable(func_pattern) and not isinstance(func_pattern, type):
+        return func_pattern
+    elif isinstance(func_pattern, tuple) and func_pattern:
+        first_element = func_pattern[0]
+        try:
+            from openhcs.core.pipeline.compiler import FunctionReference
+            if isinstance(first_element, FunctionReference):
+                return first_element.resolve()
+        except ImportError:
+            pass
+        if callable(first_element) and not isinstance(first_element, type):
+            return first_element
+    elif isinstance(func_pattern, list) and func_pattern:
+        return get_core_callable(func_pattern[0])
+    elif isinstance(func_pattern, dict) and func_pattern:
+        for key, value in func_pattern.items():
+            if core_callable := get_core_callable(value):
+                return core_callable
+    return None
 
 
 def _resolve_function_references(func_value):

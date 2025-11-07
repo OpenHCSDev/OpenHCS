@@ -70,8 +70,15 @@ class MaterializationFlagPlanner:
                     # Check if this step reads from PIPELINE_START (original input)
                     from openhcs.core.steps.abstract import InputSource
                     if step.processing_config.input_source == InputSource.PIPELINE_START:
-                        # Use the same backend as the first step
-                        step_plan[READ_BACKEND] = step_plans[0][READ_BACKEND]
+                        # Check if input conversion will happen - if so, use zarr backend
+                        if "input_conversion_dir" in step_plans[0]:
+                            step_plan[READ_BACKEND] = Backend.ZARR.value
+                            # Also update input_dir to point to conversion target
+                            step_plan['input_dir'] = step_plans[0]["input_conversion_dir"]
+                            logger.debug(f"Step {i}: PIPELINE_START with conversion → zarr backend, input_dir={step_plan['input_dir']}")
+                        else:
+                            # No conversion - use the same backend as the first step
+                            step_plan[READ_BACKEND] = step_plans[0][READ_BACKEND]
                     else:
                         step_plan[READ_BACKEND] = Backend.MEMORY.value
 

@@ -1,6 +1,26 @@
 # openhcs/core/pipeline/pipeline_utils.py
 """Utility functions for the OpenHCS pipeline system."""
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterator, Optional, Tuple
+
+def iter_pattern_items(pattern: Any) -> Iterator[Tuple[Any, str, int]]:
+    """Iterate all items in a pattern regardless of structure (dict/list/single).
+    
+    Yields (func_item, key, position) tuples where:
+    - func_item: raw function item (callable, tuple, or nested pattern)
+    - key: dict key or "default" for list/single patterns
+    - position: index within the list at that key
+    """
+    if isinstance(pattern, dict):
+        for key, value in pattern.items():
+            items = value if isinstance(value, list) else [value]
+            for pos, func in enumerate(items):
+                yield (func, key, pos)
+    elif isinstance(pattern, list):
+        for pos, func in enumerate(pattern):
+            yield (func, "default", pos)
+    else:
+        yield (pattern, "default", 0)
+
 
 def get_core_callable(func_pattern: Any) -> Optional[Callable[..., Any]]:
     """
