@@ -119,19 +119,29 @@ class StreamingBackend(DataSink):
 
     def _detect_data_type(self, data: Any):
         """
-        Detect if data is ROI or image (common for all streaming backends).
+        Detect if data is ROI (shapes/points) or image (common for all streaming backends).
 
         Args:
             data: Data to check
 
         Returns:
-            StreamingDataType enum value
+            StreamingDataType enum value (IMAGE, SHAPES, or POINTS)
         """
-        from openhcs.core.roi import ROI
+        from openhcs.core.roi import ROI, PointShape
         from openhcs.constants.streaming import StreamingDataType
 
         is_roi = isinstance(data, list) and len(data) > 0 and isinstance(data[0], ROI)
-        return StreamingDataType.SHAPES if is_roi else StreamingDataType.IMAGE
+        
+        if not is_roi:
+            return StreamingDataType.IMAGE
+        
+        # Check if all ROIs contain only PointShape objects (for points layer)
+        all_points = all(
+            roi.shapes and all(isinstance(shape, PointShape) for shape in roi.shapes)
+            for roi in data
+        )
+        
+        return StreamingDataType.POINTS if all_points else StreamingDataType.SHAPES
 
     def _create_shared_memory(self, data: Any, file_path: Union[str, Path]) -> dict:
         """

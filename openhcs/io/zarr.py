@@ -168,6 +168,7 @@ from openhcs.io.exceptions import StorageResolutionError
 class ZarrStorageBackend(StorageBackend):
     """Zarr storage backend with automatic registration."""
     _backend_type = Backend.ZARR.value
+    supports_arbitrary_files = False  # Class attribute: zarr only handles array data
     """
     Zarr storage backend implementation with configurable compression.
 
@@ -180,6 +181,10 @@ class ZarrStorageBackend(StorageBackend):
     - Configurable compression (Blosc, Zlib, LZ4, Zstd, or none)
     - Configurable compression levels
     - Full path mapping for batch operations
+    
+    Limitations:
+    - Only supports array data (numpy arrays)
+    - Cannot save arbitrary file formats (CSV, ROI.ZIP, etc.)
     """
 
     def __init__(self, zarr_config: Optional['ZarrConfig'] = None):

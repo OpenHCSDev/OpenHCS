@@ -99,7 +99,8 @@ class NapariStreamingBackend(StreamingBackend):
             )
 
             # Prepare data based on type
-            if data_type == StreamingDataType.SHAPES:
+            if data_type == StreamingDataType.SHAPES or data_type == StreamingDataType.POINTS:
+                # Both shapes and points use the same converter (it marks them appropriately)
                 item_data = self._prepare_shapes_data(data, file_path)
             else:  # IMAGE
                 item_data = self._create_shared_memory(data, file_path)

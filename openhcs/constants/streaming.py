@@ -11,7 +11,8 @@ from enum import Enum
 class StreamingDataType(Enum):
     """Types of data that can be streamed to viewers."""
     IMAGE = 'image'
-    SHAPES = 'shapes'  # For Napari
+    SHAPES = 'shapes'  # For Napari shapes layer
+    POINTS = 'points'  # For Napari points layer (e.g., skeleton tracings)
     ROIS = 'rois'      # For Fiji
 
 
