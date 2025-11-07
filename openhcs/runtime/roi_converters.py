@@ -79,29 +79,40 @@ class NapariROIConverter:
         
         shapes_data = []
         for roi in rois:
-            for shape in roi.shapes:
-                if isinstance(shape, PolygonShape):
-                    # Napari expects (y, x) coordinates - same as OpenHCS
-                    shapes_data.append({
-                        'type': 'polygon',
-                        'coordinates': shape.coordinates.tolist(),
-                        'metadata': roi.metadata
-                    })
-                elif isinstance(shape, EllipseShape):
-                    # Napari ellipse format: center (y, x) and radii (ry, rx)
-                    shapes_data.append({
-                        'type': 'ellipse',
-                        'center': [shape.center_y, shape.center_x],
-                        'radii': [shape.radius_y, shape.radius_x],
-                        'metadata': roi.metadata
-                    })
-                elif isinstance(shape, PointShape):
-                    # Napari point format: (y, x)
-                    shapes_data.append({
-                        'type': 'point',
-                        'coordinates': [shape.y, shape.x],
-                        'metadata': roi.metadata
-                    })
+            # Check if this ROI contains only PointShape objects (for points layer)
+            if roi.shapes and all(isinstance(shape, PointShape) for shape in roi.shapes):
+                # Collect all points from this ROI into a single entry
+                points = [[shape.y, shape.x] for shape in roi.shapes]
+                shapes_data.append({
+                    'type': 'points',  # Special type for points layer
+                    'coordinates': points,
+                    'metadata': roi.metadata
+                })
+            else:
+                # Handle other shape types individually
+                for shape in roi.shapes:
+                    if isinstance(shape, PolygonShape):
+                        # Napari expects (y, x) coordinates - same as OpenHCS
+                        shapes_data.append({
+                            'type': 'polygon',
+                            'coordinates': shape.coordinates.tolist(),
+                            'metadata': roi.metadata
+                        })
+                    elif isinstance(shape, EllipseShape):
+                        # Napari ellipse format: center (y, x) and radii (ry, rx)
+                        shapes_data.append({
+                            'type': 'ellipse',
+                            'center': [shape.center_y, shape.center_x],
+                            'radii': [shape.radius_y, shape.radius_x],
+                            'metadata': roi.metadata
+                        })
+                    elif isinstance(shape, PointShape):
+                        # Single point
+                        shapes_data.append({
+                            'type': 'point',
+                            'coordinates': [shape.y, shape.x],
+                            'metadata': roi.metadata
+                        })
         
         return shapes_data
     

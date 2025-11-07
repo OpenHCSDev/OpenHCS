@@ -248,23 +248,22 @@ def materialize_skeleton_rois(skeleton_mask, path: str, filemanager, backends, b
     # Check if skeleton mask is empty (return_skeleton_mask=False)
     if not hasattr(skeleton_mask, 'size') or skeleton_mask.size == 0:
         logger.info("🔬 SKELETON_ROI_MATERIALIZE: No skeleton mask to materialize (return_skeleton_mask=False)")
-        # Create empty summary file
-        base_path = Path(path).stem
-        parent_dir = Path(path).parent
-        summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
+        # Create empty summary file - use same path convention as cell counting
+        base_path = path.replace('.pkl', '').replace('.roi.zip', '')
+        summary_path = f"{base_path}_skeleton_summary.txt"
         summary_content = "No skeleton mask generated (return_skeleton_mask=False)\n"
         for backend in backends:
             filemanager.save(summary_content, summary_path, backend)
         return summary_path
     
-    # Convert skeleton mask to polyline ROIs
-    skeleton_rois = _skeleton_to_rois(skeleton_mask)
+    # Convert skeleton mask to polyline ROIs (FAST: skip coordinate ordering)
+    skeleton_rois = _skeleton_to_rois_fast(skeleton_mask)
     logger.info(f"🔬 SKELETON_ROI_MATERIALIZE: Converted skeleton mask to {len(skeleton_rois)} polyline ROIs")
     
-    # Generate ROI file path
-    base_path = Path(path).stem
-    parent_dir = Path(path).parent
-    roi_path = str(parent_dir / f"{base_path}_skeleton.roi.zip")
+    # Generate ROI file path - use same convention as cell counting
+    # This preserves the full path structure including well/site/channel information
+    base_path = path.replace('.pkl', '').replace('.roi.zip', '')
+    roi_path = f"{base_path}_skeleton.roi.zip"
     
     # Save ROIs to all backends
     if skeleton_rois:
@@ -276,9 +275,9 @@ def materialize_skeleton_rois(skeleton_mask, path: str, filemanager, backends, b
         logger.warning(f"🔬 SKELETON_ROI_MATERIALIZE: No ROIs extracted from skeleton mask")
     
     # Save summary
-    summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
+    summary_path = f"{base_path}_skeleton_summary.txt"
     summary_content = f"Skeleton ROIs: {len(skeleton_rois)} polylines\n"
-    summary_content += f"Z-planes: {skeleton_mask.shape[0]}\n"
+    summary_content += f"Skeleton shape: {skeleton_mask.shape}\n"
     if skeleton_rois:
         summary_content += f"ROI file: {roi_path}\n"
     
@@ -332,12 +331,12 @@ def skan_axon_skeletonize_and_analyze(
     """
     # Validate input
     if len(image_stack.shape) != 3:
-        raise ValueError(f"Expected 3D image, got {len(image_stack.shape)}D")
+        raise ValueError(f"Expected 3D image, got {len(image_stack.shape)}D with shape {image_stack.shape}")
     
     if threshold_method == ThresholdMethod.MANUAL and threshold_value is None:
         raise ValueError("threshold_value required when threshold_method=MANUAL")
     
-    logger.info(f"Starting skan axon analysis: {image_stack.shape} image")
+    logger.info(f"Starting skan axon analysis: {image_stack.shape} image (ndim={image_stack.ndim}, dtype={image_stack.dtype})")
     logger.info(f"Parameters: threshold={threshold_method.value}, "
                 f"analysis={analysis_dimension.value}, visualizations={return_skeleton_visualizations}")
     
@@ -756,6 +755,97 @@ def _get_skan_version():
         return "unknown"
 
 
+def _skeleton_to_rois_fast(skeleton_stack: np.ndarray) -> List[Dict[str, Any]]:
+    """
+    FAST conversion of skeleton to ROI points for visualization.
+    
+    Converts skeleton pixels to individual point ROIs (one ROI per skeleton branch).
+    Each ROI contains multiple PointShape objects representing the skeleton pixels.
+    Perfect for visualization as Napari points layer.
+    
+    Args:
+        skeleton_stack: Binary skeleton array (Z, Y, X) or (Y, X)
+        
+    Returns:
+        List of ROI objects with PointShape for skeleton visualization
+    """
+    from scipy import ndimage
+    from openhcs.core.roi import ROI, PointShape
+    
+    rois = []
+    
+    logger.info(f"🔍 SKELETON_TO_ROIS_FAST: Input skeleton_stack shape: {skeleton_stack.shape}, dtype: {skeleton_stack.dtype}")
+    
+    # Handle 2D skeleton (single image) - reshape to 3D with Z=1
+    if skeleton_stack.ndim == 2:
+        logger.info(f"🔍 SKELETON_TO_ROIS_FAST: Reshaping single 2D skeleton {skeleton_stack.shape} to 3D")
+        skeleton_stack = skeleton_stack[np.newaxis, :, :]  # (Y, X) -> (1, Y, X)
+    elif skeleton_stack.ndim != 3:
+        logger.error(f"🔍 SKELETON_TO_ROIS_FAST: Expected 2D or 3D skeleton, got {skeleton_stack.ndim}D")
+        return []
+    
+    # Process each Z slice
+    for z_idx in range(skeleton_stack.shape[0]):
+        skeleton_slice = skeleton_stack[z_idx]
+        
+        if not skeleton_slice.any():
+            continue  # Skip empty slices
+        
+        # Label connected components using full connectivity (diagonal connections count)
+        # This helps connect skeleton fragments that are close together
+        structure = np.ones((3, 3), dtype=int)  # 8-connectivity (includes diagonals)
+        labeled_skeleton, num_features = ndimage.label(skeleton_slice, structure=structure)
+        
+        logger.info(f"🔍 SKELETON_TO_ROIS_FAST: Z={z_idx}, found {num_features} skeleton components")
+        
+        # Limit processing if there are too many components (performance safeguard)
+        if num_features > 1000:
+            logger.warning(f"🔍 SKELETON_TO_ROIS_FAST: {num_features} components is too many, creating single aggregate ROI")
+            # Create a single ROI with all skeleton pixels as points
+            skeleton_coords = np.argwhere(skeleton_slice > 0)
+            if len(skeleton_coords) > 0:
+                # Create one PointShape per pixel
+                point_shapes = [PointShape(y=float(coord[0]), x=float(coord[1])) 
+                               for coord in skeleton_coords]
+                
+                metadata = {
+                    'label': f'Skeleton_Z{z_idx:03d}_AllBranches',
+                    'position': z_idx,
+                    'num_components': num_features,
+                    'num_pixels': len(skeleton_coords)
+                }
+                
+                roi = ROI(shapes=point_shapes, metadata=metadata)
+                rois.append(roi)
+            continue
+        
+        # Extract each component as an ROI with PointShape objects
+        for label_id in range(1, num_features + 1):
+            # Get coordinates (returns (y, x) pairs)
+            coords = np.argwhere(labeled_skeleton == label_id)
+            
+            if len(coords) < 1:
+                continue  # Skip empty components
+            
+            # Create one PointShape per pixel in this skeleton branch
+            point_shapes = [PointShape(y=float(coord[0]), x=float(coord[1])) 
+                           for coord in coords]
+            
+            # Create ROI with metadata
+            metadata = {
+                'label': f'Skeleton_Z{z_idx:03d}_Branch{label_id:03d}',
+                'position': z_idx,
+                'num_pixels': len(coords)
+            }
+            
+            roi = ROI(shapes=point_shapes, metadata=metadata)
+            
+            rois.append(roi)
+    
+    logger.info(f"Converted skeleton to {len(rois)} ROIs across {skeleton_stack.shape[0]} slices")
+    return rois
+
+
 def _skeleton_to_rois(skeleton_stack: np.ndarray) -> List[Dict[str, Any]]:
     """
     Convert skeleton pixels to ROI polylines for visualization in Napari/Fiji.
@@ -775,12 +865,37 @@ def _skeleton_to_rois(skeleton_stack: np.ndarray) -> List[Dict[str, Any]]:
     rois = []
     roi_id = 1
     
+    logger.info(f"🔍 SKELETON_TO_ROIS: Input skeleton_stack shape: {skeleton_stack.shape}, dtype: {skeleton_stack.dtype}")
+    
+    # Handle 2D skeleton (single image) - reshape to 3D with Z=1
+    # A single 2D image (Y, X) becomes (1, Y, X) for processing
+    if skeleton_stack.ndim == 2:
+        logger.info(f"🔍 SKELETON_TO_ROIS: Reshaping single 2D skeleton {skeleton_stack.shape} to 3D (1, Y, X)")
+        skeleton_stack = skeleton_stack[np.newaxis, :, :]  # Add Z dimension at start: (Y, X) -> (1, Y, X)
+        logger.info(f"🔍 SKELETON_TO_ROIS: Reshaped to 3D: {skeleton_stack.shape}")
+    elif skeleton_stack.ndim != 3:
+        logger.error(f"🔍 SKELETON_TO_ROIS: Expected 2D or 3D skeleton, got {skeleton_stack.ndim}D")
+        return []
+    
     # Process each Z slice independently
     for z_idx in range(skeleton_stack.shape[0]):
         skeleton_slice = skeleton_stack[z_idx]
         
+        # Ensure skeleton_slice is 2D
+        if skeleton_slice.ndim == 1:
+            # If skeleton got squeezed to 1D, skip it (this shouldn't happen)
+            logger.warning(f"Skipping slice {z_idx}: skeleton_slice is 1D with shape {skeleton_slice.shape}")
+            continue
+        elif skeleton_slice.ndim > 2:
+            logger.warning(f"Skipping slice {z_idx}: skeleton_slice has {skeleton_slice.ndim} dimensions")
+            continue
+        
         if not skeleton_slice.any():
             continue  # Skip empty slices
+        
+        # Debug: Check skeleton slice shape
+        if z_idx < 5 or skeleton_slice.ndim != 2:  # Log first 5 slices or any problem slices
+            logger.debug(f"🔍 SKELETON_TO_ROIS: Z={z_idx}, skeleton_slice.shape={skeleton_slice.shape}, ndim={skeleton_slice.ndim}")
         
         # Label connected components in skeleton
         labeled_skeleton, num_features = ndimage.label(skeleton_slice)
@@ -796,7 +911,8 @@ def _skeleton_to_rois(skeleton_stack: np.ndarray) -> List[Dict[str, Any]]:
             # Validate coords shape before processing
             if coords.ndim != 2 or coords.shape[1] != 2:
                 logger.warning(f"Skipping skeleton component {label_id} in slice {z_idx}: "
-                             f"coords has unexpected shape {coords.shape}, expected (n, 2)")
+                             f"coords has unexpected shape {coords.shape}, expected (n, 2). "
+                             f"labeled_skeleton.shape={labeled_skeleton.shape}, skeleton_slice.shape={skeleton_slice.shape}")
                 continue
             
             # Sort coordinates to create a path (simple nearest-neighbor ordering)
