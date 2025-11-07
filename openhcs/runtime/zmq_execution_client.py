@@ -27,12 +27,16 @@ class ZMQExecutionClient(ZMQClient):
 
     def _start_progress_listener(self):
         if self._progress_thread and self._progress_thread.is_alive():
+            logger.info("🎧 Progress listener already running")
             return
         if not self.progress_callback:
+            logger.info("🎧 No progress callback, skipping listener")
             return
+        logger.info("🎧 Starting progress listener thread")
         self._progress_stop_event.clear()
         self._progress_thread = threading.Thread(target=self._progress_listener_loop, daemon=True)
         self._progress_thread.start()
+        logger.info("🎧 Progress listener thread started")
 
     def _stop_progress_listener(self):
         if not self._progress_thread:
@@ -43,28 +47,36 @@ class ZMQExecutionClient(ZMQClient):
         self._progress_thread = None
 
     def _progress_listener_loop(self):
+        logger.info("🎧 Progress listener loop started")
         try:
+            message_count = 0
             while not self._progress_stop_event.is_set():
                 if not self.data_socket:
                     time.sleep(0.1)
                     continue
                 try:
                     message = self.data_socket.recv_string(zmq.NOBLOCK)
+                    message_count += 1
+                    logger.debug(f"🎧 Received message #{message_count}: {message[:100]}")
                     try:
                         data = json.loads(message)
                         if self.progress_callback and data.get('type') == 'progress':
+                            logger.debug(f"🎧 Calling progress callback for: {data.get('well_id')}")
                             try:
                                 self.progress_callback(data)
-                            except:
-                                pass
-                    except json.JSONDecodeError:
-                        pass
+                            except Exception as e:
+                                logger.warning(f"🎧 Progress callback error: {e}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"🎧 JSON decode error: {e}")
                 except zmq.Again:
                     time.sleep(0.05)
-                except:
+                except Exception as e:
+                    logger.warning(f"🎧 Progress listener error: {e}")
                     time.sleep(0.1)
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"🎧 Progress listener loop crashed: {e}", exc_info=True)
+        finally:
+            logger.info("🎧 Progress listener loop exited")
 
     def submit_pipeline(self, plate_id, pipeline_steps, global_config, pipeline_config=None, config_params=None):
         """

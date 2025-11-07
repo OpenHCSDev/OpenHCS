@@ -127,6 +127,12 @@ class ZMQExecutionServer(ZMQServer):
                         self.execution_queue.task_done()
                         break
 
+                    # Check if execution was cancelled while queued
+                    if record[MessageFields.STATUS] == ExecutionStatus.CANCELLED.value:
+                        logger.info(f"[{execution_id}] Execution was cancelled while queued, skipping")
+                        self.execution_queue.task_done()
+                        continue
+
                     # Run the execution (this blocks until complete)
                     self._run_execution(execution_id, request, record)
 
@@ -354,10 +360,13 @@ class ZMQExecutionServer(ZMQServer):
             if not plate_path_str.startswith("/omero/"):
                 plate_path_str = f"/omero/plate_{plate_path_str}"
 
+        # CRITICAL: Don't pass progress_callback - it can't be pickled for ProcessPoolExecutor
+        # Progress updates would need a multiprocessing-safe mechanism (e.g., Manager().Queue())
+        # For now, progress is tracked via worker process monitoring in get_server_info()
         orchestrator = PipelineOrchestrator(
             plate_path=Path(plate_path_str),
             pipeline_config=pipeline_config,
-            progress_callback=lambda axis_id, step, status, _metadata: self.send_progress_update(axis_id, step, status)
+            progress_callback=None  # Can't pickle lambdas for multiprocessing
         )
         orchestrator.initialize()
         self.active_executions[execution_id]['orchestrator'] = orchestrator
