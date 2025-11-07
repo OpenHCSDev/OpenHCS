@@ -73,8 +73,9 @@ class PlateManagerWidget(QWidget):
     execution_error = pyqtSignal(str)  # error_message
 
     # Internal signals for thread-safe completion handling
-    _execution_complete_signal = pyqtSignal(dict, list)  # result, ready_items
+    _execution_complete_signal = pyqtSignal(dict, str)  # result, plate_path
     _execution_error_signal = pyqtSignal(str)  # error_msg
+    _execution_status_changed_signal = pyqtSignal(str, str)  # plate_path, new_status ("queued" | "running")
     
     def __init__(self, file_manager: FileManager, service_adapter,
                  color_scheme: Optional[PyQt6ColorScheme] = None, parent=None):
@@ -111,6 +112,10 @@ class PlateManagerWidget(QWidget):
         self.execution_state = "idle"
         self.log_file_path: Optional[str] = None
         self.log_file_position: int = 0
+
+        # Track per-plate execution state
+        self.plate_execution_ids: Dict[str, str] = {}  # plate_path -> execution_id
+        self.plate_execution_states: Dict[str, str] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
         
         # UI components
         self.plate_list: Optional[QListWidget] = None
@@ -342,6 +347,11 @@ class PlateManagerWidget(QWidget):
         self.compilation_error.connect(self._handle_compilation_error)
         self.initialization_error.connect(self._handle_initialization_error)
         self.execution_error.connect(self._handle_execution_error)
+
+        # ZMQ execution signals
+        self._execution_complete_signal.connect(self._on_execution_complete)
+        self._execution_error_signal.connect(self._on_execution_error)
+        self._execution_status_changed_signal.connect(self._on_execution_status_changed)
     
     def handle_button_action(self, action: str):
         """
@@ -1006,15 +1016,22 @@ class PlateManagerWidget(QWidget):
 
             logger.info("✅ Connected to ZMQ execution server")
 
-            # Update orchestrator states to show running state
+            # Clear previous execution tracking
+            self.plate_execution_ids.clear()
+            self.plate_execution_states.clear()
+
+            # Set all plates to EXECUTING state (they're in the execution pipeline)
+            # Use internal plate_execution_states to track queued vs running
             for plate in ready_items:
                 plate_path = plate['path']
+                self.plate_execution_states[plate_path] = "queued"
+                # Set orchestrator to EXECUTING (they're in the execution pipeline)
                 if plate_path in self.orchestrators:
                     self.orchestrators[plate_path]._state = OrchestratorState.EXECUTING
                     self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXECUTING.value)
 
             self.execution_state = "running"
-            self.status_message.emit(f"Running {len(ready_items)} plate(s) via ZMQ...")
+            self.status_message.emit(f"Submitting {len(ready_items)} plate(s) to ZMQ server...")
             self.update_button_states()
 
             # Execute each plate
@@ -1052,43 +1069,48 @@ class PlateManagerWidget(QWidget):
 
                 response = await loop.run_in_executor(None, _submit)
 
-                # Track execution ID for cancellation
-                if response.get('execution_id'):
-                    self.current_execution_id = response['execution_id']
+                # Track execution ID per plate
+                execution_id = response.get('execution_id')
+                if execution_id:
+                    self.plate_execution_ids[plate_path] = execution_id
+                    self.current_execution_id = execution_id  # Keep for backward compatibility
 
                 logger.info(f"Plate {plate_path} submission response: {response.get('status')}")
 
                 # Handle submission response (not completion - that comes via progress callback)
                 status = response.get('status')
                 if status == 'accepted':
-                    # Execution submitted successfully - it's now running in background
-                    logger.info(f"Plate {plate_path} execution submitted successfully, ID={response.get('execution_id')}")
-                    self.status_message.emit(f"Executing {plate_path}... (check progress below)")
+                    # Execution submitted successfully - it's now queued on server
+                    logger.info(f"Plate {plate_path} execution submitted successfully, ID={execution_id}")
+                    self.status_message.emit(f"Submitted {plate_path} (queued on server)")
 
-                    # Start polling for completion in background (non-blocking)
-                    execution_id = response.get('execution_id')
+                    # Start polling for THIS plate's completion in background (non-blocking)
                     if execution_id:
-                        self._start_completion_poller(execution_id, plate_paths_to_run, ready_items)
+                        self._start_completion_poller(execution_id, plate_path)
                 else:
-                    # Submission failed - handle error
+                    # Submission failed - handle error for THIS plate only
                     error_msg = response.get('message', 'Unknown error')
                     logger.error(f"Plate {plate_path} submission failed: {error_msg}")
                     self.execution_error.emit(f"Submission failed for {plate_path}: {error_msg}")
 
-                    # Reset state on submission failure
-                    self.execution_state = "idle"
-                    self.current_execution_id = None
-                    for plate in ready_items:
-                        plate_path = plate['path']
-                        if plate_path in self.orchestrators:
-                            self.orchestrators[plate_path]._state = OrchestratorState.READY
-                            self.orchestrator_state_changed.emit(plate_path, OrchestratorState.READY.value)
-                    self.update_button_states()
+                    # Mark THIS plate as failed
+                    self.plate_execution_states[plate_path] = "failed"
+                    if plate_path in self.orchestrators:
+                        self.orchestrators[plate_path]._state = OrchestratorState.EXEC_FAILED
+                        self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXEC_FAILED.value)
 
         except Exception as e:
             logger.error(f"Failed to execute plates via ZMQ: {e}", exc_info=True)
             # Use signal for thread-safe error reporting
             self.execution_error.emit(f"Failed to execute: {e}")
+
+            # Mark all plates as failed
+            for plate_path in self.plate_execution_states.keys():
+                self.plate_execution_states[plate_path] = "failed"
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.EXEC_FAILED
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXEC_FAILED.value)
+
             self.execution_state = "idle"
 
             # Disconnect client on error
@@ -1105,76 +1127,148 @@ class PlateManagerWidget(QWidget):
             self.current_execution_id = None
             self.update_button_states()
 
-    def _start_completion_poller(self, execution_id, plate_paths, ready_items):
+    def _start_completion_poller(self, execution_id, plate_path):
         """
-        Start background thread to poll for execution completion (non-blocking).
+        Start background thread to poll for THIS plate's execution completion (non-blocking).
+
+        Also detects status transitions (queued → running) and emits signals for UI updates.
 
         Args:
             execution_id: Execution ID to poll
-            plate_paths: List of plate paths being executed
-            ready_items: List of plate items being executed
+            plate_path: Plate path being executed
         """
         import threading
+        import time
 
         def poll_completion():
             """Poll for completion in background thread."""
             try:
-                # Wait for completion (blocking in this thread, but not UI thread)
-                result = self.zmq_client.wait_for_completion(execution_id)
+                # Track previous status to detect transitions
+                previous_status = "queued"
+                poll_count = 0
 
-                # Emit completion signal (thread-safe via Qt signal)
-                self._execution_complete_signal.emit(result, ready_items)
+                # Poll status until completion
+                while True:
+                    time.sleep(0.5)  # Poll every 0.5 seconds
+                    poll_count += 1
+
+                    try:
+                        status_response = self.zmq_client.get_status(execution_id)
+
+                        if status_response.get('status') == 'ok':
+                            execution = status_response.get('execution', {})
+                            exec_status = execution.get('status')
+
+                            # Detect status transitions
+                            if exec_status == 'running' and previous_status == 'queued':
+                                logger.info(f"🔄 Detected transition: {plate_path} queued → running")
+                                self._execution_status_changed_signal.emit(plate_path, "running")
+                                previous_status = "running"
+
+                            # Check for completion
+                            if exec_status == 'complete':
+                                logger.info(f"✅ Execution complete: {plate_path}")
+                                result = {'status': 'complete', 'execution_id': execution_id, 'results': execution.get('results_summary', {})}
+                                self._execution_complete_signal.emit(result, plate_path)
+                                break
+                            elif exec_status == 'failed':
+                                logger.info(f"❌ Execution failed: {plate_path}")
+                                result = {'status': 'error', 'execution_id': execution_id, 'message': execution.get('error')}
+                                self._execution_complete_signal.emit(result, plate_path)
+                                break
+                            elif exec_status == 'cancelled':
+                                logger.info(f"🚫 Execution cancelled: {plate_path}")
+                                result = {'status': 'cancelled', 'execution_id': execution_id, 'message': 'Execution was cancelled'}
+                                self._execution_complete_signal.emit(result, plate_path)
+                                break
+
+                    except Exception as poll_error:
+                        logger.warning(f"Error polling status for {plate_path}: {poll_error}")
+                        # Continue polling despite errors
 
             except Exception as e:
-                logger.error(f"Error polling for completion: {e}", exc_info=True)
+                logger.error(f"Error in completion poller for {plate_path}: {e}", exc_info=True)
                 # Emit error signal (thread-safe via Qt signal)
-                self._execution_error_signal.emit(str(e))
+                self._execution_error_signal.emit(f"{plate_path}: {e}")
 
         # Start polling thread
         thread = threading.Thread(target=poll_completion, daemon=True)
         thread.start()
 
-    def _on_execution_complete(self, result, ready_items):
-        """Handle execution completion (called from main thread via signal)."""
+    def _on_execution_status_changed(self, plate_path, new_status):
+        """Handle execution status change (queued → running) for a single plate."""
+        try:
+            logger.info(f"🔄 Status changed for {plate_path}: {new_status}")
+
+            # Update internal state
+            self.plate_execution_states[plate_path] = new_status
+
+            # Update UI to show new status
+            self.update_plate_list()
+
+            # Emit status message
+            if new_status == "running":
+                self.status_message.emit(f"▶️ Running {plate_path}")
+
+        except Exception as e:
+            logger.error(f"Error handling status change for {plate_path}: {e}", exc_info=True)
+
+    def _on_execution_complete(self, result, plate_path):
+        """Handle execution completion for a single plate (called from main thread via signal)."""
         try:
             status = result.get('status')
-            logger.info(f"Execution completed with status: {status}")
+            logger.info(f"Plate {plate_path} completed with status: {status}")
 
+            # Update THIS plate's state
             if status == 'complete':
-                self.status_message.emit(f"Completed {len(ready_items)} plate(s)")
-            elif status == 'cancelled':
-                self.status_message.emit(f"Execution cancelled")
-            else:
-                error_msg = result.get('message', 'Unknown error')
-                self.execution_error.emit(f"Execution failed: {error_msg}")
-
-            # Disconnect ZMQ client on completion
-            if self.zmq_client is not None:
-                try:
-                    logger.info("Disconnecting ZMQ client after execution completion")
-                    self.zmq_client.disconnect()
-                except Exception as disconnect_error:
-                    logger.warning(f"Failed to disconnect ZMQ client: {disconnect_error}")
-                finally:
-                    self.zmq_client = None
-
-            # Update state
-            self.execution_state = "idle"
-            self.current_execution_id = None
-
-            # Update orchestrator states
-            # Note: orchestrator_state_changed signal triggers on_orchestrator_state_changed()
-            # which calls update_plate_list(), so we don't need to call update_button_states() here
-            # (calling it here causes recursive repaint and crashes)
-            for plate in ready_items:
-                plate_path = plate['path']
+                self.plate_execution_states[plate_path] = "completed"
+                self.status_message.emit(f"✓ Completed {plate_path}")
                 if plate_path in self.orchestrators:
-                    if status == 'complete':
-                        self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
-                        self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
-                    else:
-                        self.orchestrators[plate_path]._state = OrchestratorState.READY
-                        self.orchestrator_state_changed.emit(plate_path, OrchestratorState.READY.value)
+                    self.orchestrators[plate_path]._state = OrchestratorState.COMPLETED
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.COMPLETED.value)
+            elif status == 'cancelled':
+                self.plate_execution_states[plate_path] = "failed"
+                self.status_message.emit(f"✗ Cancelled {plate_path}")
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.READY
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.READY.value)
+            else:
+                self.plate_execution_states[plate_path] = "failed"
+                error_msg = result.get('message', 'Unknown error')
+                self.execution_error.emit(f"Execution failed for {plate_path}: {error_msg}")
+                if plate_path in self.orchestrators:
+                    self.orchestrators[plate_path]._state = OrchestratorState.EXEC_FAILED
+                    self.orchestrator_state_changed.emit(plate_path, OrchestratorState.EXEC_FAILED.value)
+
+            # Check if ALL plates are done
+            all_done = all(
+                state in ("completed", "failed")
+                for state in self.plate_execution_states.values()
+            )
+
+            if all_done:
+                logger.info("All plates completed - disconnecting ZMQ client")
+                # Disconnect ZMQ client when ALL plates are done
+                if self.zmq_client is not None:
+                    try:
+                        logger.info("Disconnecting ZMQ client after all executions complete")
+                        self.zmq_client.disconnect()
+                    except Exception as disconnect_error:
+                        logger.warning(f"Failed to disconnect ZMQ client: {disconnect_error}")
+                    finally:
+                        self.zmq_client = None
+
+                # Update global state
+                self.execution_state = "idle"
+                self.current_execution_id = None
+
+                # Count results
+                completed_count = sum(1 for s in self.plate_execution_states.values() if s == "completed")
+                failed_count = sum(1 for s in self.plate_execution_states.values() if s == "failed")
+                self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed")
+
+                # Update button states to show "Run" instead of "Stop"
+                self.update_button_states()
 
         except Exception as e:
             logger.error(f"Error handling execution completion: {e}", exc_info=True)
@@ -1189,6 +1283,10 @@ class PlateManagerWidget(QWidget):
     def _on_zmq_progress(self, message):
         """
         Handle progress updates from ZMQ execution server.
+
+        NOTE: Progress updates don't currently work with ProcessPoolExecutor because
+        progress callbacks can't be pickled across process boundaries. This method
+        is kept for future implementation of multiprocessing-safe progress (e.g., Manager().Queue()).
 
         This is called from the progress listener thread (background thread),
         so we must use QMetaObject.invokeMethod to safely emit signals from the main thread.
@@ -1219,6 +1317,11 @@ class PlateManagerWidget(QWidget):
     def _emit_status_message(self, message: str):
         """Emit status message from main thread (called via QMetaObject.invokeMethod)."""
         self.status_message.emit(message)
+
+    @pyqtSlot(str, str)
+    def _emit_orchestrator_state_changed(self, plate_path: str, state: str):
+        """Emit orchestrator state changed from main thread (called via QMetaObject.invokeMethod)."""
+        self.orchestrator_state_changed.emit(plate_path, state)
 
     async def action_stop_execution(self):
         """Handle Stop Execution - cancel ZMQ execution or terminate subprocess.
@@ -1260,11 +1363,13 @@ class PlateManagerWidget(QWidget):
 
                     if success:
                         logger.info(f"✅ Successfully {'quit' if graceful else 'force killed'} server on port {port}")
-                        # Emit signal to update UI on main thread
-                        self._execution_complete_signal.emit(
-                            {'status': 'cancelled'},
-                            []  # No ready_items needed for cancellation
-                        )
+                        # Mark all tracked plates as cancelled
+                        for plate_path in list(self.plate_execution_states.keys()):
+                            # Emit signal to update UI on main thread for each plate
+                            self._execution_complete_signal.emit(
+                                {'status': 'cancelled'},
+                                plate_path
+                            )
                     else:
                         logger.warning(f"❌ Failed to {'quit' if graceful else 'force kill'} server on port {port}")
                         self._execution_error_signal.emit(f"Failed to stop execution on port {port}")
@@ -1645,7 +1750,14 @@ class PlateManagerWidget(QWidget):
                 elif orchestrator.state == OrchestratorState.COMPILED:
                     status_indicators.append("✓ Compiled")
                 elif orchestrator.state == OrchestratorState.EXECUTING:
-                    status_indicators.append("🔄 Running")
+                    # Check actual execution state (queued vs running)
+                    exec_state = self.plate_execution_states.get(plate['path'])
+                    if exec_state == "queued":
+                        status_indicators.append("⏳ Queued")
+                    elif exec_state == "running":
+                        status_indicators.append("🔄 Running")
+                    else:
+                        status_indicators.append("🔄 Executing")  # Fallback
                 elif orchestrator.state == OrchestratorState.COMPLETED:
                     status_indicators.append("✅ Complete")
                 elif orchestrator.state == OrchestratorState.INIT_FAILED:
