@@ -450,6 +450,11 @@ class FunctionListEditorWidget(QWidget):
             self._populate_function_list()
             self.function_pattern_changed.emit()
 
+            # CRITICAL: Trigger global cross-window refresh for ALL open windows
+            # This ensures any window with placeholders (configs, steps, etc.) refreshes
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            ParameterFormManager.trigger_global_cross_window_refresh()
+
         except Exception as e:
             if self.service_adapter:
                 self.service_adapter.show_error_dialog(f"Failed to apply edited pattern: {str(e)}")

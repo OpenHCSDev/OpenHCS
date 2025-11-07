@@ -253,6 +253,9 @@ class DualEditorWindow(BaseFormDialog):
         # Connect parameter changes - use form manager signal for immediate response
         self.step_editor.form_manager.parameter_changed.connect(self.on_form_parameter_changed)
 
+        # CRITICAL: Connect context_refreshed signal for cross-window updates from code editor
+        self.step_editor.form_manager.context_refreshed.connect(self._on_step_context_refreshed)
+
         self.tab_widget.addTab(self.step_editor, "Step Settings")
 
     def create_function_tab(self):
@@ -301,8 +304,12 @@ class DualEditorWindow(BaseFormDialog):
         self.detect_changes()
         logger.debug(f"Function pattern changed: {current_pattern}")
 
-
-
+    def _on_step_context_refreshed(self, object_instance, context_obj):
+        """Handle context refresh from step editor code editor save."""
+        # The step editor already updated self.step and the function list editor
+        # We just need to refresh our own UI and detect changes
+        self.detect_changes()
+        logger.debug("Step context refreshed from code editor save")
 
 
     def setup_connections(self):

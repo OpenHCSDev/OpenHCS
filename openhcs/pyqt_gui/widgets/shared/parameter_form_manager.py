@@ -185,6 +185,20 @@ class ParameterFormManager(QWidget):
         """
         return cls.ASYNC_WIDGET_CREATION and param_count > cls.ASYNC_THRESHOLD
 
+    @classmethod
+    def trigger_global_cross_window_refresh(cls):
+        """Trigger cross-window refresh for all active form managers.
+
+        This is called when global config changes (e.g., from plate manager code editor)
+        to ensure all open windows refresh their placeholders with the new values.
+        """
+        logger.debug(f"Triggering global cross-window refresh for {len(cls._active_form_managers)} active managers")
+        for manager in cls._active_form_managers:
+            try:
+                manager._refresh_with_live_context()
+            except Exception as e:
+                logger.warning(f"Failed to refresh manager during global refresh: {e}")
+
     def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None, read_only: bool = False, scope_id: Optional[str] = None, color_scheme=None):
         """
         Initialize PyQt parameter form manager with generic object introspection.
@@ -2314,6 +2328,10 @@ class ParameterFormManager(QWidget):
         # If parent has "well_filter" and nested form also has "well_filter", they're different fields
         self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
 
+        # After placeholders are refreshed, keep enabled styling in sync with the resolved values
+        # This ensures inheritance-driven changes (like streaming defaults) immediately update styling
+        self._refresh_enabled_styling()
+
     def _refresh_all_placeholders(self, live_context: dict = None, exclude_param: str = None) -> None:
         """Refresh placeholder text for all widgets in this form.
 
@@ -2783,7 +2801,7 @@ class ParameterFormManager(QWidget):
         # CRITICAL: Also refresh enabled styling for all nested managers
         # This ensures that when 'enabled' field changes in another window, styling updates here
         # Example: User changes napari_streaming_config.enabled in one window, other windows update styling
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+        self._refresh_enabled_styling()
 
         # CRITICAL: Only emit context_refreshed signal if requested
         # When emit_signal=False, this refresh was triggered by another window's context_refreshed,

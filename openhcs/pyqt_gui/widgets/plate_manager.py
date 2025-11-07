@@ -1599,6 +1599,12 @@ class PlateManagerWidget(QWidget):
 
                     self.global_config_changed.emit()
 
+                    # CRITICAL: Trigger cross-window refresh for all open config windows
+                    # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
+                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                    ParameterFormManager.trigger_global_cross_window_refresh()
+                    logger.debug("Triggered global cross-window refresh after global config update")
+
                 # Handle per-plate configs (preferred) or single pipeline_config (legacy)
                 if 'per_plate_configs' in namespace:
                     # New per-plate config system

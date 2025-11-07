@@ -760,6 +760,11 @@ class PipelineEditorWidget(QWidget):
                 self.update_step_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Pipeline updated with {len(new_pipeline_steps)} steps")
+
+                # CRITICAL: Trigger global cross-window refresh for ALL open windows
+                # This ensures any window with placeholders (configs, steps, etc.) refreshes
+                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                ParameterFormManager.trigger_global_cross_window_refresh()
             else:
                 raise ValueError("No 'pipeline_steps = [...]' assignment found in edited code")
 

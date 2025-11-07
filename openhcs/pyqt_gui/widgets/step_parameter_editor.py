@@ -579,6 +579,14 @@ class StepParameterEditorWidget(QWidget):
             self.form_manager._refresh_with_live_context()
             self.form_manager.context_refreshed.emit(self.form_manager.object_instance, self.form_manager.context_obj)
 
+            # Emit step parameter changed signal for parent window
+            self.step_parameter_changed.emit()
+
+            # CRITICAL: Trigger global cross-window refresh for ALL open windows
+            # This ensures any window with placeholders (configs, other steps, etc.) refreshes
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            ParameterFormManager.trigger_global_cross_window_refresh()
+
             logger.info(f"Updated step from code editor: {new_step.name}")
 
         except Exception as e:

@@ -591,6 +591,11 @@ class ConfigWindow(BaseFormDialog):
         # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
         self.form_manager.context_refreshed.emit(self.form_manager.object_instance, self.form_manager.context_obj)
 
+        # CRITICAL: Trigger global cross-window refresh for ALL open windows
+        # This ensures any window with placeholders (configs, steps, etc.) refreshes
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        ParameterFormManager.trigger_global_cross_window_refresh()
+
     def _update_nested_dataclass(self, field_name: str, new_value):
         """Recursively update a nested dataclass field and all its children."""
         from dataclasses import fields, is_dataclass
