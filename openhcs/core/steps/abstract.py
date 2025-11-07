@@ -159,7 +159,6 @@ class AbstractStep(abc.ABC, ContextProvider):
         self.enabled = enabled
         self.processing_config = processing_config
         self.step_well_filter_config = step_well_filter_config
-        self.steaming_defaults = streaming_defaults
         self.step_materialization_config = step_materialization_config
         self.napari_streaming_config = napari_streaming_config
         self.fiji_streaming_config = fiji_streaming_config
