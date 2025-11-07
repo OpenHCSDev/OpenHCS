@@ -185,11 +185,14 @@ class ConfigWindow(BaseFormDialog):
         layout.addWidget(header_widget)
 
         # Create splitter with tree view on left and form on right
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setChildrenCollapsible(True)  # Allow collapsing to 0
+        self.splitter.setHandleWidth(5)  # Make handle more visible
 
         # Left panel - Inheritance hierarchy tree
         self.tree_widget = self._create_inheritance_tree()
-        splitter.addWidget(self.tree_widget)
+        self.tree_widget.setMinimumWidth(0)  # Allow collapsing to 0
+        self.splitter.addWidget(self.tree_widget)
 
         # Right panel - Parameter form with scroll area
         # Always use scroll area for consistent navigation behavior
@@ -198,19 +201,66 @@ class ConfigWindow(BaseFormDialog):
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll_area.setWidget(self.form_manager)
-        splitter.addWidget(self.scroll_area)
+        self.splitter.addWidget(self.scroll_area)
 
         # Set splitter proportions (30% tree, 70% form)
-        splitter.setSizes([300, 700])
+        self.splitter.setSizes([300, 700])
+
+        # Track tree visibility state for toggle
+        self._tree_visible = True
+        self._tree_last_size = 300  # Remember last size when collapsed
+
+        # Install event filter on splitter handle for double-click toggle
+        self._install_splitter_handle_filter()
 
         # Add splitter with stretch factor so it expands to fill available space
-        layout.addWidget(splitter, 1)  # stretch factor = 1
+        layout.addWidget(self.splitter, 1)  # stretch factor = 1
 
         # Apply centralized styling (config window style includes tree styling now)
         self.setStyleSheet(
             self.style_generator.generate_config_window_style() + "\n" +
             self.style_generator.generate_tree_widget_style()
         )
+
+    def _install_splitter_handle_filter(self):
+        """Install event filter on splitter handle for double-click toggle."""
+        from PyQt6.QtCore import QEvent, QObject
+
+        class SplitterHandleFilter(QObject):
+            """Event filter for splitter handle to detect double-clicks."""
+            def __init__(self, parent_window):
+                super().__init__()
+                self.parent_window = parent_window
+
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.MouseButtonDblClick:
+                    self.parent_window._toggle_tree_visibility()
+                    return True
+                return False
+
+        # Get the splitter handle (index 0 is the handle between widgets 0 and 1)
+        handle = self.splitter.handle(1)
+        if handle:
+            self._handle_filter = SplitterHandleFilter(self)
+            handle.installEventFilter(self._handle_filter)
+
+    def _toggle_tree_visibility(self):
+        """Toggle tree panel visibility by collapsing/expanding."""
+        sizes = self.splitter.sizes()
+
+        if self._tree_visible and sizes[0] > 0:
+            # Tree is visible - collapse it
+            self._tree_last_size = sizes[0]  # Remember current size
+            self.splitter.setSizes([0, sizes[0] + sizes[1]])
+            self._tree_visible = False
+            logger.debug("Collapsed tree panel")
+        else:
+            # Tree is collapsed - expand it
+            total = sum(sizes)
+            new_tree_size = min(self._tree_last_size, total - 100)  # Ensure form has at least 100px
+            self.splitter.setSizes([new_tree_size, total - new_tree_size])
+            self._tree_visible = True
+            logger.debug(f"Expanded tree panel to {new_tree_size}px")
 
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""

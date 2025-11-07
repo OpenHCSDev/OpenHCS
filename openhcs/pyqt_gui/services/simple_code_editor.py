@@ -86,8 +86,11 @@ class SimpleCodeEditorService:
                 logger.debug("QScintilla not available, using QTextEdit fallback")
                 dialog = CodeEditorDialog(self.parent, initial_content, title)
 
-            # Execute dialog - callback is now handled inside the dialog
-            dialog.exec()
+            # Show dialog as non-blocking floating window (like other OpenHCS windows)
+            # Use .show() instead of .exec() to allow interaction with other windows
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
 
         except Exception as e:
             logger.error(f"Qt native editor failed: {e}")
@@ -164,7 +167,7 @@ class QScintillaCodeEditorDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.setModal(True)
+        self.setModal(False)  # Non-modal - allow other windows to be interactable
         self.resize(900, 700)
 
         # Store callback and code generation context
@@ -219,7 +222,8 @@ class QScintillaCodeEditorDialog(QDialog):
         button_layout = QHBoxLayout()
 
         self.save_btn = QPushButton("Save")
-        self.save_btn.clicked.connect(self._handle_save)
+        # Support Shift+Click for 'Save without close'
+        self.save_btn.clicked.connect(self._on_save_clicked)
         button_layout.addWidget(self.save_btn)
 
         self.cancel_btn = QPushButton("Cancel")
@@ -375,8 +379,8 @@ class QScintillaCodeEditorDialog(QDialog):
         # Enable UTF-8
         self.editor.setUtf8(True)
 
-        # Configure autocomplete
-        self._configure_autocomplete()
+        # Autocomplete disabled - causes Qt event loop crashes with widget deletion
+        # self._configure_autocomplete()
 
     def _configure_autocomplete(self):
         """Configure autocomplete for Python code."""
@@ -411,18 +415,23 @@ class QScintillaCodeEditorDialog(QDialog):
 
     def eventFilter(self, obj, event):
         """Filter events to trigger Jedi autocomplete on '.' """
-        from PyQt6.QtCore import QEvent
+        try:
+            from PyQt6.QtCore import QEvent
 
-        if obj == self.editor and event.type() == QEvent.Type.KeyPress:
-            key_event = event
-            # Trigger autocomplete when '.' is typed
-            if key_event.text() == '.':
-                logger.info("🔍 Detected '.' keypress - triggering Jedi autocomplete")
-                # Let the '.' be inserted first
-                from PyQt6.QtCore import QTimer
-                QTimer.singleShot(10, self._show_jedi_completions)
+            if obj == self.editor and event.type() == QEvent.Type.KeyPress:
+                key_event = event
+                # Trigger autocomplete when '.' is typed
+                if key_event.text() == '.':
+                    logger.info("🔍 Detected '.' keypress - triggering Jedi autocomplete")
+                    # Let the '.' be inserted first
+                    from PyQt6.QtCore import QTimer
+                    # Use a lambda to check if dialog still exists before calling autocomplete
+                    QTimer.singleShot(10, lambda: self._show_jedi_completions() if hasattr(self, 'editor') else None)
 
-        return super().eventFilter(obj, event)
+            return super().eventFilter(obj, event)
+        except Exception as e:
+            logger.warning(f"Autocomplete event filter error (ignoring): {e}")
+            return super().eventFilter(obj, event)
 
     def _setup_jedi_api(self):
         """Setup initial API with basic Python keywords for fallback."""
@@ -458,6 +467,20 @@ class QScintillaCodeEditorDialog(QDialog):
         """Show Jedi-powered autocomplete suggestions."""
         logger.info("🧠 _show_jedi_completions called")
         try:
+            # Check if editor still exists and is valid
+            if not hasattr(self, 'editor') or self.editor is None:
+                logger.warning("Editor widget no longer exists, skipping autocomplete")
+                return
+
+            # Check if editor widget is still valid (not deleted)
+            try:
+                # Try to access a property - will raise RuntimeError if C++ object deleted
+                _ = self.editor.isVisible()
+            except RuntimeError:
+                logger.warning("Editor widget has been deleted, skipping autocomplete")
+                return
+
+            # Wrap entire autocomplete logic to catch widget deletion errors
             import jedi
 
             # Get current code and cursor position
@@ -524,10 +547,21 @@ class QScintillaCodeEditorDialog(QDialog):
                 sample = [c.name for c in completions[:5]]
                 logger.info(f"  📋 Sample completions: {sample}")
 
+                # Check if editor is still valid before showing autocomplete
+                try:
+                    _ = self.editor.isVisible()
+                except RuntimeError:
+                    logger.warning("Editor deleted before showing completions")
+                    return
+
                 # Check if autocomplete is already active
-                if self.editor.isListActive():
-                    logger.info("  ⚠️  Autocomplete list already active, canceling first")
-                    self.editor.cancelList()
+                try:
+                    if self.editor.isListActive():
+                        logger.info("  ⚠️  Autocomplete list already active, canceling first")
+                        self.editor.cancelList()
+                except RuntimeError:
+                    logger.warning("Editor deleted while checking list state")
+                    return
 
                 # Build completion list
                 # Format for each item: "name?type" where ?type is optional
@@ -542,27 +576,39 @@ class QScintillaCodeEditorDialog(QDialog):
 
                 # Use showUserList instead of autoCompleteFromAll to avoid QScintilla's filtering
                 # showUserList(id, list) - id=1 for user completions, list is an iterable of strings
-                self.editor.showUserList(1, completion_items)
-                logger.info(f"  ✅ Called showUserList() with {len(completions)} completions")
+                try:
+                    self.editor.showUserList(1, completion_items)
+                    logger.info(f"  ✅ Called showUserList() with {len(completions)} completions")
 
-                # Check if it's showing
-                if self.editor.isListActive():
-                    logger.info("  ✅ Autocomplete list is now active!")
-                else:
-                    logger.info("  ❌ Autocomplete list is NOT active")
+                    # Check if it's showing
+                    if self.editor.isListActive():
+                        logger.info("  ✅ Autocomplete list is now active!")
+                    else:
+                        logger.info("  ❌ Autocomplete list is NOT active")
+                except RuntimeError:
+                    logger.warning("Editor deleted while showing autocomplete list")
+                    return
 
             else:
                 logger.info("  ⚠️  No Jedi completions - trying standard autocomplete")
                 # No Jedi completions, try standard autocomplete
-                self.editor.autoCompleteFromAll()
+                try:
+                    self.editor.autoCompleteFromAll()
+                except RuntimeError:
+                    logger.warning("Editor deleted while showing standard autocomplete")
+                    return
 
+        except RuntimeError as e:
+            # Widget deletion errors - just log as warning and ignore
+            logger.warning(f"Autocomplete widget error (ignoring): {e}")
         except Exception as e:
-            logger.error(f"❌ Jedi autocomplete failed: {e}", exc_info=True)
+            # Other autocomplete errors - log as warning and try fallback
+            logger.warning(f"Jedi autocomplete failed (ignoring): {e}")
             # Fall back to standard autocomplete
             try:
                 self.editor.autoCompleteFromAll()
-            except:
-                pass
+            except Exception as fallback_error:
+                logger.warning(f"Standard autocomplete also failed (ignoring): {fallback_error}")
 
     def _apply_theme(self):
         """Apply PyQt6ColorScheme theming to QScintilla editor."""
@@ -829,17 +875,28 @@ class QScintillaCodeEditorDialog(QDialog):
         """Get the edited content."""
         return self.editor.text()
 
-    def _handle_save(self) -> None:
+    def _on_save_clicked(self) -> None:
+        """Handle save button click with Shift+Click detection."""
+        from PyQt6.QtWidgets import QApplication
+        modifiers = QApplication.keyboardModifiers()
+        is_shift = modifiers & Qt.KeyboardModifier.ShiftModifier
+        self._handle_save(close_window=not is_shift)
+
+    def _handle_save(self, *, close_window=True) -> None:
         """
         Handle save button click - validate code before closing.
-        Only closes dialog if callback succeeds, otherwise shows error and keeps dialog open.
+        Only closes dialog if callback succeeds and close_window=True, otherwise shows error and keeps dialog open.
+
+        Args:
+            close_window: If True, close dialog after successful save. If False (Shift+Click), keep open.
         """
-        logger.info("Save button clicked")
+        logger.info(f"Save button clicked (close_window={close_window})")
 
         if self.callback is None:
-            # No callback, just close
-            logger.info("No callback, closing dialog")
-            self.accept()
+            # No callback, just close if requested
+            if close_window:
+                logger.info("No callback, closing dialog")
+                self.accept()
             return
 
         edited_content = self.get_content()
@@ -848,9 +905,12 @@ class QScintillaCodeEditorDialog(QDialog):
             # Try to execute the callback
             logger.info("Executing callback...")
             self.callback(edited_content)
-            # Success - close the dialog
-            logger.info("Callback succeeded, closing dialog")
-            self.accept()
+            # Success - close the dialog only if close_window=True
+            if close_window:
+                logger.info("Callback succeeded, closing dialog")
+                self.accept()
+            else:
+                logger.info("Callback succeeded, keeping dialog open (Shift+Click)")
 
         except Exception as e:
             # Error - extract line number and show error
