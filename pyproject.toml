@@ -241,3 +241,19 @@ openhcs = ["**/*.css", "**/*.yaml", "**/*.yml", "**/*.json"]
 # - With GPU support: pip install "openhcs[gpu]"
 # - Full installation: pip install "openhcs[all]"
 
+[tool.coverage.run]
+omit = [
+    "openhcs/textual_tui/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
