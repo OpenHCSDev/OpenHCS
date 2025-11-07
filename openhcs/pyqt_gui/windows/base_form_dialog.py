@@ -37,6 +37,11 @@ from typing import Optional, Protocol
 from PyQt6.QtWidgets import QDialog
 from PyQt6.QtCore import QEvent
 
+# For save button setup
+from PyQt6.QtWidgets import QPushButton
+from typing import Callable
+from PyQt6.QtCore import Qt
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,6 +51,19 @@ class HasUnregisterMethod(Protocol):
 
 
 class BaseFormDialog(QDialog):
+
+    def _setup_save_button(self, button: 'QPushButton', save_callback: Callable):
+        """
+        Connects a save button to support Shift+Click for 'Save without close'.
+        The save_callback should accept only close_window as a keyword argument.
+        If Shift is held, close_window will be False (update only); otherwise True.
+        """
+        from PyQt6.QtWidgets import QApplication
+        def _on_save():
+            modifiers = QApplication.keyboardModifiers()
+            is_shift = modifiers & Qt.KeyboardModifier.ShiftModifier
+            save_callback(close_window=not is_shift)
+        button.clicked.connect(_on_save)
     """
     Base class for dialogs that use ParameterFormManager.
     
@@ -174,9 +192,9 @@ class BaseFormDialog(QDialog):
         self._unregister_all_form_managers()
         super().reject()
         
-    def closeEvent(self, event):
+    def closeEvent(self, a0):
         """Override closeEvent to unregister before closing."""
         logger.info(f"🔍 {self.__class__.__name__}: closeEvent() called")
         self._unregister_all_form_managers()
-        super().closeEvent(event)
+        super().closeEvent(a0)
 

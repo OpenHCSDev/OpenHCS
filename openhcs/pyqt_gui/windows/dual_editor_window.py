@@ -6,7 +6,7 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 """
 
 import logging
-from typing import Optional, Callable, Dict
+from typing import Optional, Callable, Dict, List
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
@@ -22,6 +22,7 @@ from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
+from typing import List
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +50,7 @@ class DualEditorWindow(BaseFormDialog):
         Initialize the dual editor window.
 
         Args:
+        if self.tab_bar is not None:
             step_data: FunctionStep to edit (None for new step)
             is_new: Whether this is a new step
             on_save_callback: Function to call when step is saved
@@ -76,7 +78,8 @@ class DualEditorWindow(BaseFormDialog):
         self.pattern_manager = PatternDataManager()
 
         # Store original step reference (never modified)
-        self.original_step_reference = step_data
+        # CRITICAL: For new steps, this must be None until first save
+        self.original_step_reference = None if is_new else step_data
 
         if step_data:
             # CRITICAL FIX: Work on a copy to prevent immediate modification of original
@@ -109,10 +112,7 @@ class DualEditorWindow(BaseFormDialog):
 
     def setup_ui(self):
         """Setup the user interface."""
-        title = "New Step" if self.is_new else f"Edit Step: {getattr(self.editing_step, 'name', 'Unknown')}"
-        self.setWindowTitle(title)
-        # Keep non-modal (already set in __init__)
-        # No minimum size - let it be determined by content
+        self._update_window_title()
         self.resize(1000, 700)
 
         layout = QVBoxLayout(self)
@@ -126,20 +126,18 @@ class DualEditorWindow(BaseFormDialog):
 
         # Tab widget (tabs on the left)
         self.tab_widget = QTabWidget()
-        # Get the tab bar and add it to our horizontal layout
         self.tab_bar = self.tab_widget.tabBar()
-        # Prevent tab scrolling by setting expanding to false and using minimum size hint
         self.tab_bar.setExpanding(False)
         self.tab_bar.setUsesScrollButtons(False)
-        tab_row.addWidget(self.tab_bar, 0)  # 0 stretch - don't expand
+        tab_row.addWidget(self.tab_bar, 0)
 
-        # Title on the right of tabs (allow it to be cropped if needed)
-        header_label = QLabel(title)
-        header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
+        # Title label
+        self.header_label = QLabel()
+        self.header_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.header_label.setStyleSheet(f"color: {self.color_scheme.to_hex(self.color_scheme.text_accent)};")
         from PyQt6.QtWidgets import QSizePolicy
-        header_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        tab_row.addWidget(header_label, 1)  # 1 stretch - allow to expand and be cropped
+        self.header_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        tab_row.addWidget(self.header_label, 1)
 
         tab_row.addStretch()
 
@@ -159,12 +157,13 @@ class DualEditorWindow(BaseFormDialog):
         cancel_button.setStyleSheet(button_styles["cancel"])
         tab_row.addWidget(cancel_button)
 
-        # Save button
-        self.save_button = QPushButton("Save")
+        # Save/Create button
+        self.save_button = QPushButton()
+        self._update_save_button_text()
         self.save_button.setFixedHeight(28)
         self.save_button.setMinimumWidth(70)
-        self.save_button.setEnabled(False)  # Initially disabled
-        self.save_button.clicked.connect(self.save_edit)
+        self.save_button.setEnabled(False)
+        self._setup_save_button(self.save_button, self.save_edit)
         self.save_button.setStyleSheet(button_styles["save"] + f"""
             QPushButton:disabled {{
                 background-color: {self.color_scheme.to_hex(self.color_scheme.panel_bg)};
@@ -175,6 +174,7 @@ class DualEditorWindow(BaseFormDialog):
         tab_row.addWidget(self.save_button)
 
         layout.addLayout(tab_row)
+
         # Style the tab bar
         self.tab_bar.setStyleSheet(f"""
             QTabBar::tab {{
@@ -214,6 +214,18 @@ class DualEditorWindow(BaseFormDialog):
 
         # Apply centralized styling
         self.setStyleSheet(self.style_generator.generate_config_window_style())
+
+    def _update_window_title(self):
+        title = "New Step" if getattr(self, 'is_new', False) else f"Edit Step: {getattr(self.editing_step, 'name', 'Unknown')}"
+        self.setWindowTitle(title)
+        if hasattr(self, 'header_label'):
+            self.header_label.setText(title)
+
+    def _update_save_button_text(self):
+        if hasattr(self, 'save_button'):
+            new_text = "Create" if getattr(self, 'is_new', False) else "Save"
+            logger.info(f"🔘 Updating save button text: is_new={self.is_new} → '{new_text}'")
+            self.save_button.setText(new_text)
     
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""
@@ -458,6 +470,59 @@ class DualEditorWindow(BaseFormDialog):
         
         return info
     
+    def on_orchestrator_config_changed(self, plate_path: str, effective_config):
+        """Handle orchestrator configuration changes for placeholder refresh.
+
+        This is called when the pipeline config is saved and the orchestrator's
+        effective config changes. We need to update our stored pipeline_config
+        reference and refresh the step editor's placeholders.
+
+        Args:
+            plate_path: Path of the plate whose orchestrator config changed
+            effective_config: The orchestrator's new effective configuration
+        """
+        # Only refresh if this is for our orchestrator
+        if self.orchestrator and str(self.orchestrator.plate_path) == plate_path:
+            logger.debug(f"Step editor received orchestrator config change for {plate_path}")
+
+            # Update our stored pipeline_config reference to the orchestrator's current config
+            self.pipeline_config = self.orchestrator.pipeline_config
+
+            # Update the step editor's pipeline_config reference
+            if hasattr(self, 'step_editor') and self.step_editor:
+                self.step_editor.pipeline_config = self.orchestrator.pipeline_config
+
+                # Update the form manager's context_obj to use the new pipeline config
+                if hasattr(self.step_editor, 'form_manager') and self.step_editor.form_manager:
+                    # CRITICAL: Update context_obj for root form manager AND all nested managers
+                    # Nested managers (e.g., processing_config) also have context_obj references that need updating
+                    self._update_context_obj_recursively(self.step_editor.form_manager, self.orchestrator.pipeline_config)
+
+                    # Refresh placeholders to show new inherited values
+                    self.step_editor.form_manager._refresh_all_placeholders()
+                    logger.debug("Refreshed step editor placeholders after pipeline config change")
+
+    def _update_context_obj_recursively(self, form_manager, new_context_obj):
+        """Recursively update context_obj for a form manager and all its nested managers.
+
+        This is critical for proper placeholder resolution after pipeline config changes.
+        When the pipeline config is saved, we get a new PipelineConfig object from the
+        orchestrator. We need to update not just the root form manager's context_obj,
+        but also all nested managers (processing_config, zarr_config, etc.) so they
+        resolve placeholders against the new config.
+
+        Args:
+            form_manager: The ParameterFormManager to update
+            new_context_obj: The new context object (pipeline_config)
+        """
+        # Update this manager's context_obj
+        form_manager.context_obj = new_context_obj
+
+        # Recursively update all nested managers
+        if hasattr(form_manager, 'nested_managers'):
+            for nested_name, nested_manager in form_manager.nested_managers.items():
+                self._update_context_obj_recursively(nested_manager, new_context_obj)
+
     def on_form_parameter_changed(self, param_name: str, value):
         """Handle form parameter changes directly from form manager.
 
@@ -573,8 +638,8 @@ class DualEditorWindow(BaseFormDialog):
             self.changes_label.setText("")
             self.save_button.setEnabled(False)
     
-    def save_edit(self):
-        """Save the edited step."""
+    def save_edit(self, *, close_window=True):
+        """Save the edited step. If close_window is True, close after saving; else, keep open."""
         try:
             # CRITICAL FIX: Sync function pattern from function editor BEFORE collecting form values
             # The function editor doesn't use a form manager, so we need to explicitly sync it
@@ -616,21 +681,33 @@ class DualEditorWindow(BaseFormDialog):
 
             # CRITICAL FIX: For existing steps, apply changes to original step object
             # This ensures the pipeline gets the updated step with the same object identity
+            logger.info(f"💾 Save: is_new={self.is_new}, original_step_reference={self.original_step_reference is not None}")
+
             if self.original_step_reference is not None:
-                # Copy all attributes from editing_step to original_step_reference
+                # Editing existing step
+                logger.info(f"💾 Editing existing step: {getattr(self.original_step_reference, 'name', 'Unknown')}")
                 self._apply_changes_to_original()
                 step_to_save = self.original_step_reference
             else:
-                # For new steps, use the editing_step directly
+                # For new steps, after first save, switch to edit mode
+                logger.info(f"💾 Creating new step, switching to edit mode")
                 step_to_save = self.editing_step
+                self.original_step_reference = self.editing_step
+                self.is_new = False
+                logger.info(f"💾 Set is_new=False, original_step_reference set")
+                self._update_window_title()
+                self._update_save_button_text()
 
             # Emit signals and call callback
+            logger.info(f"💾 Emitting step_saved signal for: {getattr(step_to_save, 'name', 'Unknown')}")
             self.step_saved.emit(step_to_save)
 
             if self.on_save_callback:
+                logger.info(f"💾 Calling on_save_callback")
                 self.on_save_callback(step_to_save)
 
-            self.accept()  # BaseFormDialog handles unregistration
+            if close_window:
+                self.accept()  # BaseFormDialog handles unregistration
             logger.debug(f"Step saved: {getattr(step_to_save, 'name', 'Unknown')}")
 
         except Exception as e:

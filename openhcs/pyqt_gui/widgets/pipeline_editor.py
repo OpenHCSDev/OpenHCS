@@ -534,10 +534,16 @@ class PipelineEditorWidget(QWidget):
 
         def handle_save(edited_step):
             """Handle step save from editor."""
-            self.pipeline_steps.append(edited_step)
+            # Check if step already exists in pipeline (for Shift+Click saves)
+            if edited_step not in self.pipeline_steps:
+                self.pipeline_steps.append(edited_step)
+                self.status_message.emit(f"Added new step: {edited_step.name}")
+            else:
+                # Step already exists, just update the display
+                self.status_message.emit(f"Updated step: {edited_step.name}")
+
             self.update_step_list()
             self.pipeline_changed.emit(self.pipeline_steps)
-            self.status_message.emit(f"Added new step: {edited_step.name}")
 
         # Create and show editor dialog within the correct config context
         orchestrator = self._get_current_orchestrator()
@@ -557,6 +563,13 @@ class PipelineEditorWidget(QWidget):
         )
         # Set original step for change detection
         editor.set_original_step_for_change_detection()
+
+        # Connect orchestrator config changes to step editor for live placeholder updates
+        # This ensures the step editor's placeholders update when pipeline config is saved
+        if self.plate_manager and hasattr(self.plate_manager, 'orchestrator_config_changed'):
+            self.plate_manager.orchestrator_config_changed.connect(editor.on_orchestrator_config_changed)
+            logger.debug("Connected orchestrator_config_changed signal to step editor")
+
         editor.show()
         editor.raise_()
         editor.activateWindow()
@@ -624,6 +637,13 @@ class PipelineEditorWidget(QWidget):
         )
         # Set original step for change detection
         editor.set_original_step_for_change_detection()
+
+        # Connect orchestrator config changes to step editor for live placeholder updates
+        # This ensures the step editor's placeholders update when pipeline config is saved
+        if self.plate_manager and hasattr(self.plate_manager, 'orchestrator_config_changed'):
+            self.plate_manager.orchestrator_config_changed.connect(editor.on_orchestrator_config_changed)
+            logger.debug("Connected orchestrator_config_changed signal to step editor")
+
         editor.show()
         editor.raise_()
         editor.activateWindow()
