@@ -20,6 +20,7 @@ from openhcs.introspection.signature_analyzer import SignatureAnalyzer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 # REMOVED: LazyDataclassFactory import - no longer needed since step editor
 # uses existing lazy dataclass instances from the step
@@ -46,6 +47,7 @@ class StepParameterEditorWidget(QWidget):
         # Initialize color scheme and GUI config
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.gui_config = gui_config or get_default_pyqt_gui_config()
+        self.style_generator = StyleSheetGenerator(self.color_scheme)
 
         self.step = step
         self.service_adapter = service_adapter
@@ -298,6 +300,12 @@ class StepParameterEditorWidget(QWidget):
         header_layout.addStretch()
 
         # Action buttons in header (preserving functionality)
+        code_btn = QPushButton("Code")
+        code_btn.setMaximumWidth(60)
+        code_btn.setStyleSheet(self._get_button_style())
+        code_btn.clicked.connect(self.view_step_code)
+        header_layout.addWidget(code_btn)
+
         load_btn = QPushButton("Load .step")
         load_btn.setMaximumWidth(100)
         load_btn.setStyleSheet(self._get_button_style())
@@ -324,7 +332,7 @@ class StepParameterEditorWidget(QWidget):
         hierarchy_tree = self._create_configuration_tree()
         if hierarchy_tree:
             splitter = QSplitter(Qt.Orientation.Horizontal)
-            splitter.setChildrenCollapsible(False)
+            splitter.setChildrenCollapsible(True)  # CRITICAL: Allow tree to collapse
             splitter.setHandleWidth(2)
             splitter.addWidget(hierarchy_tree)
             splitter.addWidget(self.scroll_area)
@@ -336,6 +344,9 @@ class StepParameterEditorWidget(QWidget):
             layout.addWidget(self.scroll_area)
             self.hierarchy_tree = None
             self.content_splitter = None
+
+        # Apply tree widget styling (matches config window)
+        self.setStyleSheet(self.style_generator.generate_tree_widget_style())
     
     def _get_button_style(self) -> str:
         """Get consistent button styling."""
@@ -484,5 +495,67 @@ class StepParameterEditorWidget(QWidget):
         for param_name in self.form_manager.parameters.keys():
             current_value = getattr(self.step, param_name, None)
             self.form_manager.update_parameter(param_name, current_value)
-        
+
         logger.debug(f"Updated step parameter editor for step: {getattr(step, 'name', 'Unknown')}")
+
+    def view_step_code(self):
+        """View the complete FunctionStep as Python code."""
+        try:
+            from openhcs.pyqt_gui.services.simple_code_editor import SimpleCodeEditorService
+            from openhcs.debug.pickle_to_python import generate_step_code
+            import os
+
+            # CRITICAL: Refresh with live context BEFORE getting current values
+            self.form_manager._refresh_with_live_context()
+
+            # Get current step from form (includes live context values)
+            current_values = self.form_manager.get_current_values()
+            from openhcs.core.steps.function_step import FunctionStep
+            current_step = FunctionStep(**current_values)
+
+            # Generate code using existing pattern
+            python_code = generate_step_code(current_step, clean_mode=False)
+
+            # Launch editor
+            editor_service = SimpleCodeEditorService(self)
+            use_external = os.environ.get('OPENHCS_USE_EXTERNAL_EDITOR', '').lower() in ('1', 'true', 'yes')
+
+            editor_service.edit_code(
+                initial_content=python_code,
+                title=f"Edit Step: {current_step.name}",
+                callback=self._handle_edited_step_code,
+                use_external=use_external,
+                code_type='step'
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to open step code editor: {e}")
+            if self.service_adapter:
+                self.service_adapter.show_error_dialog(f"Failed to open code editor: {str(e)}")
+
+    def _handle_edited_step_code(self, edited_code: str) -> None:
+        """Handle the edited step code from code editor."""
+        try:
+            namespace = {}
+            exec(edited_code, namespace)
+
+            new_step = namespace.get('step')
+            if not new_step:
+                raise ValueError("No 'step' variable found in edited code")
+
+            # Update step object
+            self.step = new_step
+
+            # Update form with new values
+            for param_name in self.form_manager.parameters.keys():
+                self.form_manager.update_parameter(param_name, getattr(new_step, param_name, None))
+
+            # CRITICAL: Refresh with live context AND emit signal for cross-window updates
+            self.form_manager._refresh_with_live_context()
+            self.form_manager.context_refreshed.emit(self.form_manager.object_instance, self.form_manager.context_obj)
+
+            logger.info(f"Updated step from code editor: {new_step.name}")
+
+        except Exception as e:
+            logger.error(f"Failed to apply edited step code: {e}")
+            raise

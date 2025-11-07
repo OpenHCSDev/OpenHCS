@@ -835,11 +835,6 @@ class ParameterFormManager(QWidget):
         # Store widgets and connect signals
         with timer("          Store and connect signals", threshold_ms=0.5):
             self.widgets[param_info.name] = widget
-            # DEBUG: Log what we're storing
-            import logging
-            logger = logging.getLogger(__name__)
-            if param_info.is_nested:
-                logger.info(f"[STORE_WIDGET] Storing nested widget: param_info.name={param_info.name}, widget={widget.__class__.__name__}")
             PyQt6WidgetEnhancer.connect_change_signal(widget, param_info.name, self._emit_parameter_change)
 
         # PERFORMANCE OPTIMIZATION: Don't apply context behavior during widget creation
@@ -952,11 +947,6 @@ class ParameterFormManager(QWidget):
 
         # CRITICAL: Store the GroupBox in self.widgets so enabled handler can find it
         self.widgets[param_info.name] = group_box
-
-        # DEBUG: Log what we're storing
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"[CREATE_NESTED_DATACLASS] param_info.name={param_info.name}, nested_manager.field_id={nested_manager.field_id}, stored GroupBoxWithHelp in self.widgets")
 
         return group_box
 
@@ -1274,8 +1264,6 @@ class ParameterFormManager(QWidget):
         fire the user click handler, creating an infinite loop.
         """
         import traceback
-        logger.info(f"🔄 _update_checkbox_group called with value={[v.name if hasattr(v, 'name') else v for v in value] if value else value}")
-        logger.info(f"   Call stack: {''.join(traceback.format_stack()[-4:-1])}")
 
         if not hasattr(widget, '_checkboxes'):
             return
@@ -1927,8 +1915,6 @@ class ParameterFormManager(QWidget):
         CRITICAL: This should NOT be called for optional dataclass nested managers when instance is None.
         The None state dimming is handled by the optional dataclass checkbox handler.
         """
-        import logging
-        logger = logging.getLogger(__name__)
 
         # CRITICAL: Check if this is a nested manager inside an optional dataclass
         # If the parent's parameter for this nested manager is None, skip enabled styling
@@ -1944,28 +1930,23 @@ class ParameterFormManager(QWidget):
                         if ParameterTypeUtils.is_optional_dataclass(param_type):
                             # This is an optional dataclass - check if instance is None
                             instance = self._parent_manager.parameters.get(param_name)
-                            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, optional dataclass check: param_name={param_name}, instance={instance}, is_none={instance is None}")
                             if instance is None:
-                                logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, skipping (optional dataclass instance is None)")
                                 return
                     break
 
         # Get the enabled widget
         enabled_widget = self.widgets.get('enabled')
         if not enabled_widget:
-            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, no enabled widget found")
             return
 
         # Get resolved value from widget
         if hasattr(enabled_widget, 'isChecked'):
             resolved_value = enabled_widget.isChecked()
-            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, resolved_value={resolved_value} (from checkbox)")
         else:
             # Fallback to parameter value
             resolved_value = self.parameters.get('enabled')
             if resolved_value is None:
                 resolved_value = True  # Default to enabled if we can't resolve
-            logger.info(f"[INITIAL ENABLED STYLING] field_id={self.field_id}, resolved_value={resolved_value} (from parameter)")
 
         # Call the enabled handler with the resolved value
         self._on_enabled_field_changed_universal('enabled', resolved_value)
@@ -1999,8 +1980,6 @@ class ParameterFormManager(QWidget):
 
         CRITICAL: Skip optional dataclass nested managers when instance is None.
         """
-        import logging
-        logger = logging.getLogger(__name__)
 
         # CRITICAL: Check if this is a nested manager inside an optional dataclass with None instance
         # If so, skip enabled styling - the None state dimming takes precedence
@@ -2012,9 +1991,7 @@ class ParameterFormManager(QWidget):
                         from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
                         if ParameterTypeUtils.is_optional_dataclass(param_type):
                             instance = self._parent_manager.parameters.get(param_name)
-                            logger.info(f"[REFRESH ENABLED STYLING] field_id={self.field_id}, optional dataclass check: param_name={param_name}, instance={instance}, is_none={instance is None}")
                             if instance is None:
-                                logger.info(f"[REFRESH ENABLED STYLING] field_id={self.field_id}, skipping (optional dataclass instance is None)")
                                 # Skip enabled styling - None state dimming is already applied
                                 return
                     break
@@ -2058,23 +2035,14 @@ class ParameterFormManager(QWidget):
         # then propagates the signal up. The parent should NOT apply styling changes
         # in response to this propagated signal - only to direct changes to its own enabled field.
         if getattr(self, '_propagating_nested_enabled', False):
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, ignoring propagated 'enabled' signal from nested form")
             return
 
         # Also check: does this form actually HAVE an 'enabled' parameter?
         # This is a redundant safety check in case the flag mechanism fails
         if 'enabled' not in self.parameters:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, ignoring 'enabled' signal (not in parameters)")
             return
 
         # DEBUG: Log when this handler is called
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"[ENABLED HANDLER CALLED] field_id={self.field_id}, param_name={param_name}, value={value}")
 
         # Resolve lazy value: None means inherit from parent context
         if value is None:
@@ -2088,7 +2056,6 @@ class ParameterFormManager(QWidget):
         else:
             resolved_value = value
 
-        logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, resolved_value={resolved_value}")
 
         # Apply styling to the entire form based on resolved enabled value
         # Inputs stay editable - only visual dimming changes
@@ -2098,7 +2065,6 @@ class ParameterFormManager(QWidget):
             """Get widgets that belong to this form, excluding nested ParameterFormManager widgets."""
             direct_widgets = []
             all_widgets = parent_widget.findChildren(ALL_INPUT_WIDGET_TYPES)
-            logger.info(f"[GET_DIRECT_WIDGETS] field_id={self.field_id}, total widgets found: {len(all_widgets)}, nested_managers: {list(self.nested_managers.keys())}")
 
             for widget in all_widgets:
                 widget_name = f"{widget.__class__.__name__}({widget.objectName() or 'no-name'})"
@@ -2110,19 +2076,15 @@ class ParameterFormManager(QWidget):
                     nested_field_id = nested_manager.field_id
                     if object_name and object_name.startswith(nested_field_id + '_'):
                         belongs_to_nested = True
-                        logger.info(f"[GET_DIRECT_WIDGETS] ❌ EXCLUDE {widget_name} - belongs to nested manager {nested_field_id}")
                         break
 
                 if not belongs_to_nested:
                     direct_widgets.append(widget)
-                    logger.info(f"[GET_DIRECT_WIDGETS] ✅ INCLUDE {widget_name}")
 
-            logger.info(f"[GET_DIRECT_WIDGETS] field_id={self.field_id}, returning {len(direct_widgets)} direct widgets")
             return direct_widgets
 
         direct_widgets = get_direct_widgets(self)
         widget_names = [f"{w.__class__.__name__}({w.objectName() or 'no-name'})" for w in direct_widgets[:5]]  # First 5
-        logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, found {len(direct_widgets)} direct widgets, first 5: {widget_names}")
 
         # CRITICAL: For nested configs (inside GroupBox), apply styling to the GroupBox container
         # For top-level forms (step, function), apply styling to direct widgets
@@ -2140,30 +2102,25 @@ class ParameterFormManager(QWidget):
                     break
 
             if group_box:
-                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying to GroupBox container")
                 from PyQt6.QtWidgets import QGraphicsOpacityEffect
 
                 # CRITICAL: Check if ANY ancestor has enabled=False
                 # If any ancestor is disabled, child should remain dimmed regardless of its own enabled value
                 ancestor_is_disabled = self._is_any_ancestor_disabled()
-                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, ancestor_is_disabled={ancestor_is_disabled}")
 
                 if resolved_value and not ancestor_is_disabled:
                     # Enabled=True AND no ancestor is disabled: Remove dimming from GroupBox
-                    logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, removing dimming from GroupBox")
                     # Clear effects from all widgets in the GroupBox
                     for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
                         widget.setGraphicsEffect(None)
                 elif ancestor_is_disabled:
                     # Ancestor is disabled - keep dimming regardless of child's enabled value
-                    logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, keeping dimming (ancestor disabled)")
                     for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
                         effect = QGraphicsOpacityEffect()
                         effect.setOpacity(0.4)
                         widget.setGraphicsEffect(effect)
                 else:
                     # Enabled=False: Apply dimming to GroupBox widgets
-                    logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying dimming to GroupBox")
                     for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
                         effect = QGraphicsOpacityEffect()
                         effect.setOpacity(0.4)
@@ -2172,7 +2129,6 @@ class ParameterFormManager(QWidget):
             # This is a top-level form (step, function) - apply styling to direct widgets + nested configs
             if resolved_value:
                 # Enabled=True: Remove dimming from direct widgets
-                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, removing dimming (enabled=True)")
                 for widget in direct_widgets:
                     widget.setGraphicsEffect(None)
 
@@ -2180,7 +2136,6 @@ class ParameterFormManager(QWidget):
                 # Don't restore if:
                 # 1. Nested form has enabled=False
                 # 2. Nested form is Optional dataclass with None value
-                logger.info(f"[ENABLED HANDLER] Restoring nested configs, found {len(self.nested_managers)} nested managers")
                 for param_name, nested_manager in self.nested_managers.items():
                     # Check if this is an Optional dataclass with None value
                     param_type = self.parameter_types.get(param_name)
@@ -2189,7 +2144,6 @@ class ParameterFormManager(QWidget):
                         instance = self.parameters.get(param_name)
                         if instance is None:
                             is_optional_none = True
-                            logger.info(f"[ENABLED HANDLER] Skipping {param_name} - Optional dataclass is None")
                             continue  # Don't restore - keep dimmed
                     
                     # Check if nested form has its own enabled=False
@@ -2203,22 +2157,18 @@ class ParameterFormManager(QWidget):
                         
                         if not nested_enabled:
                             nested_has_enabled_false = True
-                            logger.info(f"[ENABLED HANDLER] Skipping {param_name} - nested form has enabled=False")
                             continue  # Don't restore - keep dimmed
                     
                     # Safe to restore this nested config
                     group_box = self.widgets.get(param_name)
-                    logger.info(f"[ENABLED HANDLER] Restoring nested config {param_name}, group_box={group_box.__class__.__name__ if group_box else 'None'}")
                     if not group_box:
                         # Try using the nested manager's field_id instead
                         group_box = self.widgets.get(nested_manager.field_id)
                         if not group_box:
-                            logger.info(f"[ENABLED HANDLER] ⚠️ No group_box found for {param_name}, skipping")
                             continue
                     
                     # Remove dimming from ALL widgets in the GroupBox
                     widgets_to_restore = group_box.findChildren(ALL_INPUT_WIDGET_TYPES)
-                    logger.info(f"[ENABLED HANDLER] Restoring {len(widgets_to_restore)} widgets in nested config {param_name}")
                     for widget in widgets_to_restore:
                         widget.setGraphicsEffect(None)
                     
@@ -2227,7 +2177,6 @@ class ParameterFormManager(QWidget):
                     nested_manager._refresh_enabled_styling()
             else:
                 # Enabled=False: Apply dimming to direct widgets + ALL nested configs
-                logger.info(f"[ENABLED HANDLER] field_id={self.field_id}, applying dimming (enabled=False)")
                 from PyQt6.QtWidgets import QGraphicsOpacityEffect
                 for widget in direct_widgets:
                     # Skip QLabel widgets when dimming (only dim inputs)
@@ -2238,20 +2187,14 @@ class ParameterFormManager(QWidget):
                     widget.setGraphicsEffect(effect)
 
                 # Also dim all nested configs (entire step is disabled)
-                logger.info(f"[ENABLED HANDLER] Dimming nested configs, found {len(self.nested_managers)} nested managers")
-                logger.info(f"[ENABLED HANDLER] Available widget keys: {list(self.widgets.keys())}")
                 for param_name, nested_manager in self.nested_managers.items():
                     group_box = self.widgets.get(param_name)
-                    logger.info(f"[ENABLED HANDLER] Checking nested config {param_name}, group_box={group_box.__class__.__name__ if group_box else 'None'}")
                     if not group_box:
-                        logger.info(f"[ENABLED HANDLER] ⚠️ No group_box found for nested config {param_name}, trying nested_manager.field_id={nested_manager.field_id}")
                         # Try using the nested manager's field_id instead
                         group_box = self.widgets.get(nested_manager.field_id)
                         if not group_box:
-                            logger.info(f"[ENABLED HANDLER] ⚠️ Still no group_box found, skipping")
                             continue
                     widgets_to_dim = group_box.findChildren(ALL_INPUT_WIDGET_TYPES)
-                    logger.info(f"[ENABLED HANDLER] Applying dimming to nested config {param_name}, found {len(widgets_to_dim)} widgets")
                     for widget in widgets_to_dim:
                         effect = QGraphicsOpacityEffect()
                         effect.setOpacity(0.4)
@@ -2307,9 +2250,10 @@ class ParameterFormManager(QWidget):
                     break
 
             self._apply_to_nested_managers(
-                lambda name, manager: manager._refresh_all_placeholders(live_context=live_context)
-                if name != emitting_manager_name
-                else logger.info(f"⏭️ Skipping refresh of {name} (it just emitted {param_name} change)")
+                lambda name, manager: (
+                    manager._refresh_all_placeholders(live_context=live_context)
+                    if name != emitting_manager_name else None
+                )
             )
 
             # CRITICAL: Only refresh enabled styling for siblings if the changed param is 'enabled'
@@ -2321,11 +2265,11 @@ class ParameterFormManager(QWidget):
             if param_name == 'enabled' and emitting_manager_name:
                 # Only refresh siblings that might inherit from this nested form's enabled value
                 # Skip the emitting manager itself (it already handled its own styling)
-                logger.info(f"🔄 Nested 'enabled' field changed in {emitting_manager_name}, refreshing sibling styling")
                 self._apply_to_nested_managers(
-                    lambda name, manager: manager._refresh_enabled_styling()
-                    if name != emitting_manager_name
-                    else logger.info(f"⏭️ Skipping enabled refresh of {name} (it just changed its own enabled)")
+                    lambda name, manager: (
+                        manager._refresh_enabled_styling()
+                        if name != emitting_manager_name else None
+                    )
                 )
 
         # CRITICAL: ALWAYS propagate parameter change signal up the hierarchy, even during reset
@@ -2355,9 +2299,6 @@ class ParameterFormManager(QWidget):
             live_context: Optional pre-collected live context. If None, will collect it.
             exclude_param: Optional parameter name to exclude from refresh (e.g., the param that just changed)
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"🔍 REFRESH: {self.field_id} (id={id(self)}) refreshing with live context (exclude_param={exclude_param})")
 
         # Only root managers should collect live context (nested managers inherit from parent)
         # If live_context is already provided (e.g., from parent), use it to avoid redundant collection
@@ -2398,7 +2339,6 @@ class ParameterFormManager(QWidget):
                 for param_name, widget in self.widgets.items():
                     # CRITICAL: Skip the parameter that just changed (user edited it, it's not inherited)
                     if exclude_param and param_name == exclude_param:
-                        logger.info(f"🔍 SKIP REFRESH: {param_name} (user just edited it)")
                         continue
                     # CRITICAL: Check current value from self.parameters (has correct None values)
                     current_value = self.parameters.get(param_name)
@@ -2417,7 +2357,6 @@ class ParameterFormManager(QWidget):
                         with monitor.measure():
                             placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                             if placeholder_text:
-                                logger.info(f"🎨 Applying placeholder to {param_name}: {placeholder_text}")
                                 from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
                                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
@@ -2590,10 +2529,6 @@ class ParameterFormManager(QWidget):
         This should be called when the window is closing (before destruction) to ensure
         other windows refresh their placeholders without this window's live values.
         """
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"🔍 UNREGISTER: {self.field_id} (id={id(self)}) unregistering from cross-window updates")
-        logger.info(f"🔍 UNREGISTER: Active managers before: {len(self._active_form_managers)}")
 
         try:
             if self in self._active_form_managers:
@@ -2614,7 +2549,6 @@ class ParameterFormManager(QWidget):
 
                 # Remove from registry
                 self._active_form_managers.remove(self)
-                logger.info(f"🔍 UNREGISTER: Active managers after: {len(self._active_form_managers)}")
 
                 # CRITICAL: Trigger refresh in all remaining windows
                 # They were using this window's live values, now they need to revert to saved values
@@ -2780,15 +2714,11 @@ class ParameterFormManager(QWidget):
         """
         from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
         from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
-        import logging
-        logger = logging.getLogger(__name__)
 
         live_context = {}
         alias_context = {}
         my_type = type(self.object_instance)
 
-        logger.info(f"🔍 COLLECT_CONTEXT: {self.field_id} (id={id(self)}) collecting from {len(self._active_form_managers)} managers")
-        logger.info(f"🔍 COLLECT_CONTEXT: my_type={my_type.__name__}, scope_id={self.scope_id}")
 
         for manager in self._active_form_managers:
             if manager is not self:
@@ -2798,14 +2728,12 @@ class ParameterFormManager(QWidget):
                 if manager.scope_id is not None and self.scope_id is not None and manager.scope_id != self.scope_id:
                     continue  # Different orchestrator - skip
 
-                logger.info(f"🔍 COLLECT_CONTEXT: Checking manager {manager.field_id} (id={id(manager)}), type={type(manager.object_instance).__name__}, scope_id={manager.scope_id}")
 
                 # CRITICAL: Get only user-modified (concrete, non-None) values
                 # This preserves inheritance hierarchy: None values don't override parent values
                 live_values = manager.get_user_modified_values()
                 obj_type = type(manager.object_instance)
 
-                logger.info(f"🔍 COLLECT_CONTEXT: Got {len(live_values)} live values from {manager.field_id}: {list(live_values.keys())}")
 
                 # CRITICAL: Only skip if this is EXACTLY the same type as us
                 # E.g., PipelineConfig editor should not use live values from another PipelineConfig editor
@@ -2835,7 +2763,6 @@ class ParameterFormManager(QWidget):
             if alias_type not in live_context:
                 live_context[alias_type] = values
 
-        logger.info(f"🔍 COLLECT_CONTEXT: Collected live context with {len(live_context)} types: {[t.__name__ for t in live_context.keys()]}")
         return live_context
 
     def _do_cross_window_refresh(self, emit_signal: bool = True):

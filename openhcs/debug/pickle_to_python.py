@@ -614,6 +614,20 @@ def _generate_step_parameters(step, default_step, clean_mode=False, name_mapping
             if not clean_mode or getattr(step, name, param.default) != getattr(default_step, name, param.default)]
 
 
+def generate_step_code(step, clean_mode=False):
+    """Generate complete Python code for a single FunctionStep with imports."""
+    return generate_complete_pipeline_steps_code([step], clean_mode=clean_mode).replace(
+        "# Pipeline steps\npipeline_steps = []\n\n# Step 1:",
+        "# Function Step\n#"
+    ).replace(
+        "step_1 = FunctionStep(",
+        "step = FunctionStep("
+    ).replace(
+        "\npipeline_steps.append(step_1)",
+        ""
+    )
+
+
 def generate_complete_pipeline_steps_code(pipeline_steps, clean_mode=False):
     """Generate complete Python code for pipeline steps with imports."""
     # Build code with imports and steps

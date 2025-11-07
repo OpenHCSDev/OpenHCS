@@ -1,0 +1,99 @@
+================================================================================
+CONTEXT-ENGINE MCP SERVER - INSTALLATION COMPLETE ✅
+================================================================================
+
+LOCATION: /home/ts/code/projects/context-engine
+REPOSITORY: https://github.com/m1rl0k/Context-Engine.git
+STATUS: Docker containers are starting
+
+================================================================================
+WHAT'S INSTALLED
+================================================================================
+
+✅ Qdrant Vector Database (Port 6333)
+   - Stores code embeddings and search indices
+   - Running: docker compose ps shows qdrant-db
+
+✅ Memory MCP Server (Ports 8000/8002)
+   - SSE transport on 8000
+   - HTTP/RMCP transport on 8002
+   - Tools: store, find
+
+✅ Indexer MCP Server (Ports 8001/8003)
+   - SSE transport on 8001
+   - HTTP/RMCP transport on 8003
+   - Tools: repo_search, code_search, context_search, context_answer, qdrant_*
+
+✅ Optional llama.cpp (Port 8080)
+   - Q&A decoder for context_answer tool
+   - Disabled by default (enable in .env)
+
+✅ File Watcher
+   - Auto-reindex on file changes
+   - Keeps search index up-to-date
+
+================================================================================
+QUICK START
+================================================================================
+
+1. Check if services are running:
+   cd /home/ts/code/projects/context-engine
+   docker compose ps
+
+2. View logs:
+   docker compose logs -f
+
+3. Index your OpenHCS codebase:
+   cd /home/ts/code/projects/context-engine
+   HOST_INDEX_PATH=/home/ts/code/projects/openhcs \
+   COLLECTION_NAME=codebase \
+   REPO_NAME=openhcs \
+   docker compose run --rm indexer --root /work
+
+4. Configure your IDE agent with MCP endpoints:
+   - Memory: http://localhost:8000/sse (SSE) or http://localhost:8002/mcp (HTTP)
+   - Indexer: http://localhost:8001/sse (SSE) or http://localhost:8003/mcp (HTTP)
+
+================================================================================
+DOCUMENTATION FILES
+================================================================================
+
+📄 CONTEXT_ENGINE_SETUP.md
+   - Detailed setup instructions
+   - Configuration options
+   - Troubleshooting guide
+
+📄 CONTEXT_ENGINE_QUICK_REFERENCE.md
+   - Quick reference for all commands
+   - Port mappings
+   - IDE agent configuration examples
+   - Common tasks
+
+================================================================================
+NEXT STEPS
+================================================================================
+
+1. Verify services are running:
+   docker compose ps
+
+2. Index your codebase (see CONTEXT_ENGINE_QUICK_REFERENCE.md)
+
+3. Configure your IDE agent to use the MCP endpoints
+
+4. Start using context-aware code search!
+
+================================================================================
+SUPPORT
+================================================================================
+
+Full documentation: https://github.com/m1rl0k/Context-Engine/blob/test/README.md
+
+Key features:
+- ReFRAG micro-chunking for precise retrieval
+- Token budgeting to keep prompts lean
+- Multi-repo unified search
+- Automatic cache/collection sync
+- Production-ready operational playbooks
+
+================================================================================
+

@@ -463,7 +463,13 @@ class ConfigWindow(BaseFormDialog):
             from openhcs.debug.pickle_to_python import generate_config_code
             import os
 
-            # Get current config from form
+            # CRITICAL: Refresh with live context BEFORE getting current values
+            # This ensures code editor shows unsaved changes from other open windows
+            # Example: GlobalPipelineConfig editor open with unsaved zarr_config changes
+            #          → PipelineConfig code editor should show those live zarr_config values
+            self.form_manager._refresh_with_live_context()
+
+            # Get current config from form (now includes live context values)
             current_values = self.form_manager.get_current_values()
             current_config = self.config_class(**current_values)
 
@@ -578,9 +584,12 @@ class ConfigWindow(BaseFormDialog):
                     else:
                         self.form_manager.update_parameter(field.name, new_value)
 
-        # Refresh placeholders to reflect the new values
-        self.form_manager._refresh_all_placeholders()
-        self.form_manager._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+        # CRITICAL: Refresh placeholders with live context AND emit signal for cross-window updates
+        # Code editor saves should trigger cross-window refreshes just like form edits
+        self.form_manager._refresh_with_live_context()
+        # CRITICAL: Emit context_refreshed signal to notify other open windows
+        # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
+        self.form_manager.context_refreshed.emit(self.form_manager.object_instance, self.form_manager.context_obj)
 
     def _update_nested_dataclass(self, field_name: str, new_value):
         """Recursively update a nested dataclass field and all its children."""
