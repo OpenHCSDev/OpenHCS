@@ -99,6 +99,9 @@ class PlateManagerWidget(QWidget):
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or service_adapter.get_current_color_scheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
+
+        # Get event bus for cross-window communication
+        self.event_bus = service_adapter.get_event_bus() if service_adapter else None
         
         # Business logic state (extracted from Textual version)
         self.plates: List[Dict] = []  # List of plate dictionaries
@@ -1599,6 +1602,10 @@ class PlateManagerWidget(QWidget):
 
                     self.global_config_changed.emit()
 
+                    # CRITICAL: Broadcast to global event bus for ALL windows to receive
+                    # This is the OpenHCS "set and forget" pattern - one broadcast reaches everyone
+                    self._broadcast_config_to_event_bus(new_global_config)
+
                     # CRITICAL: Trigger cross-window refresh for all open config windows
                     # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
                     from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
@@ -1678,6 +1685,26 @@ class PlateManagerWidget(QWidget):
             logger.error(f"Failed to parse edited orchestrator code: {e}\nFull traceback:\n{full_traceback}")
             # Re-raise so the code editor can handle it (keep dialog open, move cursor to error line)
             raise
+
+    def _broadcast_config_to_event_bus(self, config):
+        """Broadcast config changed event to global event bus.
+
+        Args:
+            config: Updated config object
+        """
+        if self.event_bus:
+            self.event_bus.emit_config_changed(config)
+            logger.debug("Broadcasted config_changed to event bus")
+
+    def _broadcast_pipeline_to_event_bus(self, pipeline_steps: list):
+        """Broadcast pipeline changed event to global event bus.
+
+        Args:
+            pipeline_steps: Updated list of FunctionStep objects
+        """
+        if self.event_bus:
+            self.event_bus.emit_pipeline_changed(pipeline_steps)
+            logger.debug(f"Broadcasted pipeline_changed to event bus ({len(pipeline_steps)} steps)")
 
     def _invalidate_orchestrator_compilation_state(self, plate_path: str):
         """Invalidate compilation state for an orchestrator when its pipeline changes.

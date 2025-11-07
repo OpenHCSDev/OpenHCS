@@ -591,6 +591,10 @@ class ConfigWindow(BaseFormDialog):
         # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
         self.form_manager.context_refreshed.emit(self.form_manager.object_instance, self.form_manager.context_obj)
 
+        # CRITICAL: Broadcast to global event bus for ALL windows to receive
+        # This is the OpenHCS "set and forget" pattern - one broadcast reaches everyone
+        self._broadcast_config_changed(new_config)
+
         # CRITICAL: Trigger global cross-window refresh for ALL open windows
         # This ensures any window with placeholders (configs, steps, etc.) refreshes
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager

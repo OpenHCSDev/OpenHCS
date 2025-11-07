@@ -166,6 +166,9 @@ class PipelineEditorWidget(QWidget):
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or service_adapter.get_current_color_scheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
+
+        # Get event bus for cross-window communication
+        self.event_bus = service_adapter.get_event_bus() if service_adapter else None
         
         # Business logic state (extracted from Textual version)
         self.pipeline_steps: List[FunctionStep] = []
@@ -761,6 +764,10 @@ class PipelineEditorWidget(QWidget):
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Pipeline updated with {len(new_pipeline_steps)} steps")
 
+                # CRITICAL: Broadcast to global event bus for ALL windows to receive
+                # This is the OpenHCS "set and forget" pattern - one broadcast reaches everyone
+                self._broadcast_to_event_bus(new_pipeline_steps)
+
                 # CRITICAL: Trigger global cross-window refresh for ALL open windows
                 # This ensures any window with placeholders (configs, steps, etc.) refreshes
                 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
@@ -899,6 +906,16 @@ class PipelineEditorWidget(QWidget):
         self.update_step_list()
         self.update_button_states()
         logger.debug(f"Current plate changed: {plate_path}")
+
+    def _broadcast_to_event_bus(self, pipeline_steps: list):
+        """Broadcast pipeline changed event to global event bus.
+
+        Args:
+            pipeline_steps: Updated list of FunctionStep objects
+        """
+        if self.event_bus:
+            self.event_bus.emit_pipeline_changed(pipeline_steps)
+            logger.debug(f"Broadcasted pipeline_changed to event bus ({len(pipeline_steps)} steps)")
 
     def on_orchestrator_config_changed(self, plate_path: str, effective_config):
         """

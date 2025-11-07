@@ -87,6 +87,17 @@ class BaseFormDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._unregistered = False  # Track if we've already unregistered
+
+        # CRITICAL: Register with global event bus for cross-window updates
+        # This is the OpenHCS "set and forget" pattern - all windows automatically
+        # receive updates from all other windows without manual connections
+        event_bus = self._get_event_bus()
+        if event_bus:
+            event_bus.register_window(self)
+            # Connect to pipeline_changed signal if this window cares about pipeline updates
+            if hasattr(self, '_on_pipeline_changed'):
+                event_bus.pipeline_changed.connect(self._on_pipeline_changed)
+            logger.debug(f"{self.__class__.__name__}: Registered with global event bus")
         
     def _get_form_managers(self):
         """
@@ -156,27 +167,73 @@ class BaseFormDialog(QDialog):
                 else:
                     self._collect_form_managers_recursive(attr_value, managers, visited)
     
+    def _get_event_bus(self):
+        """Get the global event bus from the service adapter.
+
+        Returns:
+            GlobalEventBus instance or None if not found
+        """
+        try:
+            # Navigate up to find main window with service adapter
+            current = self.parent()
+            while current:
+                if hasattr(current, 'service_adapter'):
+                    return current.service_adapter.get_event_bus()
+                current = current.parent()
+
+            logger.debug(f"{self.__class__.__name__}: Could not find service adapter for event bus")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting event bus: {e}")
+            return None
+
+    def _broadcast_pipeline_changed(self, pipeline_steps: list):
+        """Broadcast pipeline changed event to all windows via event bus.
+
+        Args:
+            pipeline_steps: Updated list of FunctionStep objects
+        """
+        event_bus = self._get_event_bus()
+        if event_bus:
+            event_bus.emit_pipeline_changed(pipeline_steps)
+
+    def _broadcast_config_changed(self, config):
+        """Broadcast config changed event to all windows via event bus.
+
+        Args:
+            config: Updated config object
+        """
+        event_bus = self._get_event_bus()
+        if event_bus:
+            event_bus.emit_config_changed(config)
+
     def _unregister_all_form_managers(self):
         """Unregister all form managers from cross-window updates."""
         if self._unregistered:
             logger.debug(f"🔍 {self.__class__.__name__}: Already unregistered, skipping")
             return
-            
+
         logger.info(f"🔍 {self.__class__.__name__}: Unregistering all form managers")
-        
+
+        # Unregister from event bus
+        event_bus = self._get_event_bus()
+        if event_bus:
+            event_bus.unregister_window(self)
+            logger.debug(f"{self.__class__.__name__}: Unregistered from global event bus")
+
         managers = self._get_form_managers()
-        
+
         if not managers:
             logger.debug(f"🔍 {self.__class__.__name__}: No form managers found to unregister")
             return
-            
+
         for manager in managers:
             try:
                 logger.info(f"🔍 {self.__class__.__name__}: Calling unregister on {manager.field_id} (id={id(manager)})")
                 manager.unregister_from_cross_window_updates()
             except Exception as e:
                 logger.error(f"Failed to unregister form manager {manager.field_id}: {e}")
-                
+
         self._unregistered = True
         logger.info(f"🔍 {self.__class__.__name__}: All form managers unregistered")
     

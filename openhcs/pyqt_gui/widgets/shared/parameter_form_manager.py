@@ -193,11 +193,54 @@ class ParameterFormManager(QWidget):
         to ensure all open windows refresh their placeholders with the new values.
         """
         logger.debug(f"Triggering global cross-window refresh for {len(cls._active_form_managers)} active managers")
-        for manager in cls._active_form_managers:
+
+        # Create a copy of the list to avoid modification during iteration
+        managers_to_refresh = list(cls._active_form_managers)
+
+        for manager in managers_to_refresh:
             try:
+                # Check if manager's widgets are still valid before refreshing
+                if not cls._is_manager_valid(manager):
+                    logger.debug(f"Skipping refresh for invalid manager: {manager.field_id}")
+                    # Remove from active managers list
+                    if manager in cls._active_form_managers:
+                        cls._active_form_managers.remove(manager)
+                    continue
+
                 manager._refresh_with_live_context()
+            except RuntimeError as e:
+                # Widget has been deleted - remove from active managers
+                logger.debug(f"Manager widgets deleted during refresh: {manager.field_id}, removing from active list")
+                if manager in cls._active_form_managers:
+                    cls._active_form_managers.remove(manager)
             except Exception as e:
                 logger.warning(f"Failed to refresh manager during global refresh: {e}")
+
+    @staticmethod
+    def _is_manager_valid(manager) -> bool:
+        """Check if a form manager's widgets are still valid and ready.
+
+        Args:
+            manager: ParameterFormManager instance
+
+        Returns:
+            True if manager is valid and ready, False if widgets have been deleted or not yet created
+        """
+        try:
+            # Check if the manager has finished initial setup
+            # During construction, widgets dict might not exist yet
+            if not hasattr(manager, 'widgets') or not manager.widgets:
+                return False
+
+            # Check if the manager's main widget still exists
+            if hasattr(manager, 'form_widget') and manager.form_widget:
+                # Try to access a property - this will raise RuntimeError if deleted
+                _ = manager.form_widget.isVisible()
+                return True
+            return False
+        except RuntimeError:
+            # Widget has been deleted
+            return False
 
     def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None, read_only: bool = False, scope_id: Optional[str] = None, color_scheme=None):
         """
@@ -1995,8 +2038,9 @@ class ParameterFormManager(QWidget):
         CRITICAL: Skip optional dataclass nested managers when instance is None.
         """
 
-        # CRITICAL: Check if this is a nested manager inside an optional dataclass with None instance
-        # If so, skip enabled styling - the None state dimming takes precedence
+        # CRITICAL: Track if this nested manager lives inside an optional dataclass that is currently None
+        # Instead of skipping styling entirely, we propagate the state so we can keep the dimming applied
+        is_optional_none = False
         if self._parent_manager is not None:
             for param_name, nested_manager in self._parent_manager.nested_managers.items():
                 if nested_manager is self:
@@ -2006,8 +2050,7 @@ class ParameterFormManager(QWidget):
                         if ParameterTypeUtils.is_optional_dataclass(param_type):
                             instance = self._parent_manager.parameters.get(param_name)
                             if instance is None:
-                                # Skip enabled styling - None state dimming is already applied
-                                return
+                                is_optional_none = True
                     break
 
         # Refresh this form's enabled styling if it has an enabled field
@@ -2122,19 +2165,13 @@ class ParameterFormManager(QWidget):
                 # If any ancestor is disabled, child should remain dimmed regardless of its own enabled value
                 ancestor_is_disabled = self._is_any_ancestor_disabled()
 
-                if resolved_value and not ancestor_is_disabled:
+                if resolved_value and not ancestor_is_disabled and not is_optional_none:
                     # Enabled=True AND no ancestor is disabled: Remove dimming from GroupBox
                     # Clear effects from all widgets in the GroupBox
                     for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
                         widget.setGraphicsEffect(None)
-                elif ancestor_is_disabled:
-                    # Ancestor is disabled - keep dimming regardless of child's enabled value
-                    for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
-                        effect = QGraphicsOpacityEffect()
-                        effect.setOpacity(0.4)
-                        widget.setGraphicsEffect(effect)
                 else:
-                    # Enabled=False: Apply dimming to GroupBox widgets
+                    # Ancestor disabled, optional None, or resolved False → apply dimming
                     for widget in group_box.findChildren(ALL_INPUT_WIDGET_TYPES):
                         effect = QGraphicsOpacityEffect()
                         effect.setOpacity(0.4)
@@ -2746,10 +2783,20 @@ class ParameterFormManager(QWidget):
                 if manager.scope_id is not None and self.scope_id is not None and manager.scope_id != self.scope_id:
                     continue  # Different orchestrator - skip
 
+                # CRITICAL: Skip managers that haven't finished building their widgets yet
+                # During initial construction, some managers might still be in setup_ui()
+                # and their widgets aren't ready to be queried
+                if not self._is_manager_valid(manager):
+                    continue
 
                 # CRITICAL: Get only user-modified (concrete, non-None) values
                 # This preserves inheritance hierarchy: None values don't override parent values
-                live_values = manager.get_user_modified_values()
+                try:
+                    live_values = manager.get_user_modified_values()
+                except RuntimeError:
+                    # Widget was deleted during iteration - skip this manager
+                    continue
+
                 obj_type = type(manager.object_instance)
 
 

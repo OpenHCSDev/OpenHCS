@@ -311,6 +311,80 @@ class DualEditorWindow(BaseFormDialog):
         self.detect_changes()
         logger.debug("Step context refreshed from code editor save")
 
+    def _get_event_bus(self):
+        """Get the global event bus from the service adapter.
+
+        Returns:
+            GlobalEventBus instance or None if not found
+        """
+        try:
+            # Navigate up to find main window with service adapter
+            current = self.parent()
+            while current:
+                if hasattr(current, 'service_adapter'):
+                    return current.service_adapter.get_event_bus()
+                current = current.parent()
+
+            logger.warning("Could not find service adapter for event bus")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting event bus: {e}")
+            return None
+
+    def _on_pipeline_changed(self, new_pipeline_steps: list):
+        """Handle pipeline_changed signal from global event bus.
+
+        CRITICAL: This is connected to the global event bus in setup_connections().
+        It receives updates from ANY window that modifies the pipeline:
+        - Pipeline editor code button
+        - Plate manager code button
+        - Pipeline editor UI
+        - Any future pipeline editing source
+
+        This is the OpenHCS "set and forget" pattern - one handler receives ALL updates.
+
+        Args:
+            new_pipeline_steps: Updated list of FunctionStep objects from the pipeline
+        """
+        # Find our step in the new pipeline by matching the original step reference
+        # (The step we're editing might have been modified in the code editor)
+        original_step = getattr(self, 'original_step', None)
+        if not original_step:
+            return
+
+        # Try to find the updated version of our step in the new pipeline
+        # Match by object identity first (if editing existing step)
+        updated_step = None
+        for step in new_pipeline_steps:
+            if step is original_step:
+                updated_step = step
+                break
+
+        # If we found an updated version, refresh our editor with the new values
+        if updated_step and updated_step is not self.editing_step:
+            logger.debug(f"Pipeline changed - updating step editor with new step: {updated_step.name}")
+
+            # Update our editing step reference
+            self.editing_step = updated_step
+            self.step = updated_step
+
+            # Update step editor's step reference
+            if hasattr(self, 'step_editor') and self.step_editor:
+                self.step_editor.step = updated_step
+
+                # Refresh the form manager with new values
+                if hasattr(self.step_editor, 'form_manager') and self.step_editor.form_manager:
+                    self.step_editor.form_manager.object_instance = updated_step
+                    self.step_editor.form_manager._refresh_with_live_context()
+
+            # Update function list editor with new func
+            if hasattr(self, 'func_editor') and self.func_editor and hasattr(updated_step, 'func'):
+                self.func_editor._initialize_pattern_data(updated_step.func)
+                self.func_editor._populate_function_list()
+
+            # Detect changes (might have unsaved changes now)
+            self.detect_changes()
+
 
     def setup_connections(self):
         """Setup signal/slot connections."""
@@ -319,6 +393,14 @@ class DualEditorWindow(BaseFormDialog):
 
         # Change detection
         self.changes_detected.connect(self.on_changes_detected)
+
+        # CRITICAL: Connect to global event bus for cross-window updates
+        # This is the OpenHCS "set and forget" pattern - one connection handles ALL sources
+        event_bus = self._get_event_bus()
+        if event_bus:
+            event_bus.pipeline_changed.connect(self._on_pipeline_changed)
+            event_bus.register_window(self)
+            logger.debug("Connected to global event bus for cross-window updates")
 
     def _convert_step_func_to_list(self):
         """Convert step func to initial pattern format for function list editor."""
