@@ -510,6 +510,22 @@ class StepParameterEditorWidget(QWidget):
 
             # Get current step from form (includes live context values)
             current_values = self.form_manager.get_current_values()
+
+            # CRITICAL: Get func from parent dual editor's function list editor if available
+            # The func is managed by the Function Pattern tab in the dual editor
+            func = self.step.func  # Default to step's current func
+
+            # Check if we're inside a dual editor window with a function list editor
+            parent_window = self.window()
+            if hasattr(parent_window, 'func_editor') and parent_window.func_editor:
+                # Get live func pattern from function list editor
+                func = parent_window.func_editor.current_pattern
+                logger.debug(f"Using live func from function list editor: {func}")
+            else:
+                logger.debug(f"Using func from step instance: {func}")
+
+            current_values['func'] = func
+
             from openhcs.core.steps.function_step import FunctionStep
             current_step = FunctionStep(**current_values)
 
@@ -549,6 +565,15 @@ class StepParameterEditorWidget(QWidget):
             # Update form with new values
             for param_name in self.form_manager.parameters.keys():
                 self.form_manager.update_parameter(param_name, getattr(new_step, param_name, None))
+
+            # CRITICAL: Update function list editor if we're inside a dual editor window
+            parent_window = self.window()
+            if hasattr(parent_window, 'func_editor') and parent_window.func_editor:
+                # Update function list editor with new func pattern
+                func_editor = parent_window.func_editor
+                func_editor._initialize_pattern_data(new_step.func)
+                func_editor._populate_function_list()
+                logger.debug(f"Updated function list editor with new func: {new_step.func}")
 
             # CRITICAL: Refresh with live context AND emit signal for cross-window updates
             self.form_manager._refresh_with_live_context()
