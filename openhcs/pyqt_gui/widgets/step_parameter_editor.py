@@ -552,13 +552,6 @@ class StepParameterEditorWidget(QWidget):
     def _handle_edited_step_code(self, edited_code: str) -> None:
         """Handle the edited step code from code editor."""
         try:
-            # CRITICAL: Parse the code to extract explicitly specified fields
-            # This prevents overwriting None values for unspecified fields
-            from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
-            explicitly_set_fields = CodeEditorFormUpdater.extract_explicitly_set_fields(
-                edited_code, 'FunctionStep', variable_name='step'
-            )
-
             namespace = {}
             exec(edited_code, namespace)
 
@@ -569,11 +562,21 @@ class StepParameterEditorWidget(QWidget):
             # Update step object
             self.step = new_step
 
-            # Update form with new values using shared utility
-            # CRITICAL: Only update fields that were explicitly set in the code
-            CodeEditorFormUpdater.update_form_from_dataclass(
-                self.form_manager, new_step, explicitly_set_fields
-            )
+            # OPTIMIZATION: Block cross-window updates during bulk update
+            # This prevents expensive refreshes for each field update
+            self.form_manager._block_cross_window_updates = True
+            try:
+                # Update form with new values, including nested dataclasses
+                from dataclasses import is_dataclass
+                for param_name in self.form_manager.parameters.keys():
+                    new_value = getattr(new_step, param_name, None)
+                    # For nested dataclasses, recursively update nested managers
+                    if is_dataclass(new_value) and not isinstance(new_value, type):
+                        self._update_nested_dataclass(param_name, new_value)
+                    else:
+                        self.form_manager.update_parameter(param_name, new_value)
+            finally:
+                self.form_manager._block_cross_window_updates = False
 
             # CRITICAL: Update function list editor if we're inside a dual editor window
             parent_window = self.window()
@@ -583,6 +586,10 @@ class StepParameterEditorWidget(QWidget):
                 func_editor._initialize_pattern_data(new_step.func)
                 func_editor._populate_function_list()
                 logger.debug(f"Updated function list editor with new func: {new_step.func}")
+
+            # CRITICAL: Refresh with live context AND emit signal for cross-window updates
+            self.form_manager._refresh_with_live_context()
+            self.form_manager.context_refreshed.emit(self.form_manager.object_instance, self.form_manager.context_obj)
 
             # Emit step parameter changed signal for parent window
             self.step_parameter_changed.emit()
@@ -597,3 +604,41 @@ class StepParameterEditorWidget(QWidget):
         except Exception as e:
             logger.error(f"Failed to apply edited step code: {e}")
             raise
+
+    def _update_nested_dataclass(self, field_name: str, new_value):
+        """Recursively update a nested dataclass field and all its children."""
+        from dataclasses import fields, is_dataclass
+
+        # Update the parent field first
+        self.form_manager.update_parameter(field_name, new_value)
+
+        # Get the nested manager for this field
+        nested_manager = self.form_manager.nested_managers.get(field_name)
+        if nested_manager:
+            # Nested manager exists - update each field in the nested manager
+            for field in fields(new_value):
+                nested_field_value = getattr(new_value, field.name)
+                if field.name in nested_manager.parameters:
+                    # Recursively handle nested dataclasses
+                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
+                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
+                    else:
+                        nested_manager.update_parameter(field.name, nested_field_value)
+        # If nested manager doesn't exist (field was None before), the update_parameter call above
+        # will trigger the form to rebuild with the nested manager when needed
+
+    def _update_nested_dataclass_in_manager(self, manager, field_name: str, new_value):
+        """Helper to update nested dataclass within a specific manager."""
+        from dataclasses import fields, is_dataclass
+
+        manager.update_parameter(field_name, new_value)
+
+        nested_manager = manager.nested_managers.get(field_name)
+        if nested_manager:
+            for field in fields(new_value):
+                nested_field_value = getattr(new_value, field.name)
+                if field.name in nested_manager.parameters:
+                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
+                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
+                    else:
+                        nested_manager.update_parameter(field.name, nested_field_value)

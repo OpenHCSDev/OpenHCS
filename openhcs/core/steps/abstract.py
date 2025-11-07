@@ -129,8 +129,8 @@ class AbstractStep(abc.ABC, ContextProvider):
         #fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
         step_materialization_config: 'LazyStepMaterializationConfig' = None,
         streaming_defaults: 'LazyStreamingDefaults' = LazyStreamingDefaults(),
-        napari_streaming_config: 'LazyNapariStreamingConfig' = None,
-        fiji_streaming_config: 'LazyFijiStreamingConfig' = None,
+        napari_streaming_config: 'LazyNapariStreamingConfig' = LazyNapariStreamingConfig(),
+        fiji_streaming_config: 'LazyFijiStreamingConfig' = LazyFijiStreamingConfig(),
     ) -> None:
         """
         Initialize a step. These attributes are primarily used during the

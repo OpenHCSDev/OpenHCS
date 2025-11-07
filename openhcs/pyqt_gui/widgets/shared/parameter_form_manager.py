@@ -2056,6 +2056,9 @@ class ParameterFormManager(QWidget):
         if 'enabled' not in self.parameters:
             return
 
+        # Import ParameterTypeUtils at the top of the method for use throughout
+        from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+
         # DEBUG: Log when this handler is called
 
         # Resolve lazy value: None means inherit from parent context
@@ -2139,6 +2142,19 @@ class ParameterFormManager(QWidget):
                 # CRITICAL: Check if ANY ancestor has enabled=False
                 # If any ancestor is disabled, child should remain dimmed regardless of its own enabled value
                 ancestor_is_disabled = self._is_any_ancestor_disabled()
+
+                # CRITICAL: Check if this nested manager lives inside an optional dataclass that is currently None
+                is_optional_none = False
+                if self._parent_manager is not None:
+                    for param_name, nested_manager in self._parent_manager.nested_managers.items():
+                        if nested_manager is self:
+                            param_type = self._parent_manager.parameter_types.get(param_name)
+                            if param_type:
+                                if ParameterTypeUtils.is_optional_dataclass(param_type):
+                                    instance = self._parent_manager.parameters.get(param_name)
+                                    if instance is None:
+                                        is_optional_none = True
+                            break
 
                 if resolved_value and not ancestor_is_disabled and not is_optional_none:
                     # Enabled=True AND no ancestor is disabled: Remove dimming from GroupBox
@@ -2343,6 +2359,11 @@ class ParameterFormManager(QWidget):
         # After placeholders are refreshed, keep enabled styling in sync with the resolved values
         # This ensures inheritance-driven changes (like streaming defaults) immediately update styling
         self._refresh_enabled_styling()
+
+        # CRITICAL: Also refresh enabled styling for all nested managers
+        # This ensures that when 'enabled' field changes (e.g., via reset), styling updates in sync with placeholders
+        # Example: Reset streaming_defaults.enabled → napari/fiji nested configs update styling
+        self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
 
     def _refresh_all_placeholders(self, live_context: dict = None, exclude_param: str = None) -> None:
         """Refresh placeholder text for all widgets in this form.

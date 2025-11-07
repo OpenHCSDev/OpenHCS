@@ -1156,6 +1156,11 @@ class PlateManagerWidget(QWidget):
                     poll_count += 1
 
                     try:
+                        # Check if client still exists (may be disconnected after completion)
+                        if self.zmq_client is None:
+                            logger.debug(f"ZMQ client disconnected, stopping poller for {plate_path}")
+                            break
+
                         status_response = self.zmq_client.get_status(execution_id)
 
                         if status_response.get('status') == 'ok':

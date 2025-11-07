@@ -81,13 +81,6 @@ class ConfigWindow(BaseFormDialog):
         self.style_generator = StyleSheetGenerator(self.color_scheme)
         self.tree_helper = ConfigHierarchyTreeHelper()
 
-        # CRITICAL: Connect to config_changed signal from event bus
-        # BaseFormDialog registers us with the event bus, but we need to connect to the signal
-        event_bus = self._get_event_bus()
-        if event_bus:
-            event_bus.config_changed.connect(self._on_config_changed)
-            logger.debug(f"ConfigWindow: Connected to event bus config_changed signal")
-
         # SIMPLIFIED: Use dual-axis resolution
         from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 
@@ -463,42 +456,6 @@ class ConfigWindow(BaseFormDialog):
 
         return patch_context()
 
-    def _on_config_changed(self, config):
-        """Handle config_changed signal from global event bus.
-
-        This is called when ANY window modifies a config (plate manager code editor, etc.).
-        We check if it's the same type as our config and update the form to show the changes.
-
-        Args:
-            config: Updated config object
-        """
-        # Skip if we're currently saving (avoid circular updates)
-        if self._saving:
-            return
-
-        # Check if this is the same type of config we're editing
-        if type(config) != self.config_class:
-            return
-
-        logger.info(f"ConfigWindow: Received config_changed for {self.config_class.__name__}, updating form")
-
-        # Update our current config reference
-        self.current_config = config
-
-        # Update the form with the new config values
-        # This updates all widgets to show the new values from the code editor
-        if hasattr(self, 'form_manager'):
-            from dataclasses import fields
-
-            # Update each field in the form with the new value from the config
-            for field in fields(config):
-                new_value = getattr(config, field.name)
-                if field.name in self.form_manager.parameters:
-                    self.form_manager.update_parameter(field.name, new_value)
-
-            # Refresh placeholders to show the updated values
-            self.form_manager._refresh_with_live_context()
-
     def _view_code(self):
         """Open code editor to view/edit the configuration as Python code."""
         try:
@@ -542,10 +499,7 @@ class ConfigWindow(BaseFormDialog):
         try:
             # CRITICAL: Parse the code to extract explicitly specified fields
             # This prevents overwriting None values for unspecified fields
-            from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
-            explicitly_set_fields = CodeEditorFormUpdater.extract_explicitly_set_fields(
-                edited_code, self.config_class.__name__, variable_name='config'
-            )
+            explicitly_set_fields = self._extract_explicitly_set_fields(edited_code)
 
             namespace = {}
 
@@ -578,16 +532,7 @@ class ConfigWindow(BaseFormDialog):
             # Code edits just update the form, actual application happens on Save
 
             # Update form values from the new config without rebuilding
-            CodeEditorFormUpdater.update_form_from_dataclass(
-                self.form_manager, new_config, explicitly_set_fields,
-                broadcast_callback=self._broadcast_config_changed
-            )
-
-            # CRITICAL: Trigger global cross-window refresh for ALL open windows
-            # This ensures any window with placeholders (configs, steps, etc.) refreshes
-            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-            ParameterFormManager.trigger_global_cross_window_refresh()
-            logger.debug("Triggered global cross-window refresh after config code edit")
+            self._update_form_from_config(new_config, explicitly_set_fields)
 
             logger.info("Updated config from edited code")
 
@@ -596,7 +541,108 @@ class ConfigWindow(BaseFormDialog):
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
 
+    def _extract_explicitly_set_fields(self, code: str) -> set:
+        """
+        Parse code to extract which fields were explicitly set.
 
+        Returns a set of field names that appear in the config constructor call.
+        For nested fields, uses dot notation like 'zarr_config.chunk_size'.
+        """
+        import re
+
+        # Find the config = ClassName(...) pattern
+        # Match the class name and capture everything inside parentheses
+        pattern = rf'config\s*=\s*{self.config_class.__name__}\s*\((.*?)\)\s*$'
+        match = re.search(pattern, code, re.DOTALL | re.MULTILINE)
+
+        if not match:
+            return set()
+
+        constructor_args = match.group(1)
+
+        # Extract field names (simple pattern: field_name=...)
+        # This handles both simple fields and nested dataclass fields
+        field_pattern = r'(\w+)\s*='
+        fields_found = set(re.findall(field_pattern, constructor_args))
+
+        logger.debug(f"Explicitly set fields from code: {fields_found}")
+        return fields_found
+
+    def _update_form_from_config(self, new_config, explicitly_set_fields: set):
+        """Update form values from new config without rebuilding the entire form."""
+        from dataclasses import fields, is_dataclass
+
+        # OPTIMIZATION: Block cross-window updates during bulk update
+        # This prevents expensive refreshes for each field update
+        self.form_manager._block_cross_window_updates = True
+        try:
+            # CRITICAL: Only update fields that were explicitly set in the code
+            # This preserves None values for fields not mentioned in the code
+            for field in fields(new_config):
+                if field.name in explicitly_set_fields:
+                    new_value = getattr(new_config, field.name)
+                    if field.name in self.form_manager.parameters:
+                        # For nested dataclasses, we need to recursively update nested fields
+                        if is_dataclass(new_value) and not isinstance(new_value, type):
+                            self._update_nested_dataclass(field.name, new_value)
+                        else:
+                            self.form_manager.update_parameter(field.name, new_value)
+        finally:
+            self.form_manager._block_cross_window_updates = False
+
+        # CRITICAL: Refresh placeholders with live context AND emit signal for cross-window updates
+        # Code editor saves should trigger cross-window refreshes just like form edits
+        self.form_manager._refresh_with_live_context()
+        # CRITICAL: Emit context_refreshed signal to notify other open windows
+        # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
+        self.form_manager.context_refreshed.emit(self.form_manager.object_instance, self.form_manager.context_obj)
+
+        # CRITICAL: Broadcast to global event bus for ALL windows to receive
+        # This is the OpenHCS "set and forget" pattern - one broadcast reaches everyone
+        self._broadcast_config_changed(new_config)
+
+        # CRITICAL: Trigger global cross-window refresh for ALL open windows
+        # This ensures any window with placeholders (configs, steps, etc.) refreshes
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        ParameterFormManager.trigger_global_cross_window_refresh()
+
+    def _update_nested_dataclass(self, field_name: str, new_value):
+        """Recursively update a nested dataclass field and all its children."""
+        from dataclasses import fields, is_dataclass
+
+        # Update the parent field first
+        self.form_manager.update_parameter(field_name, new_value)
+
+        # Get the nested manager for this field
+        nested_manager = self.form_manager.nested_managers.get(field_name)
+        if nested_manager:
+            # Nested manager exists - update each field in the nested manager
+            for field in fields(new_value):
+                nested_field_value = getattr(new_value, field.name)
+                if field.name in nested_manager.parameters:
+                    # Recursively handle nested dataclasses
+                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
+                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
+                    else:
+                        nested_manager.update_parameter(field.name, nested_field_value)
+        # If nested manager doesn't exist (field was None before), the update_parameter call above
+        # will trigger the form to rebuild with the nested manager when needed
+
+    def _update_nested_dataclass_in_manager(self, manager, field_name: str, new_value):
+        """Helper to update nested dataclass within a specific manager."""
+        from dataclasses import fields, is_dataclass
+
+        manager.update_parameter(field_name, new_value)
+
+        nested_manager = manager.nested_managers.get(field_name)
+        if nested_manager:
+            for field in fields(new_value):
+                nested_field_value = getattr(new_value, field.name)
+                if field.name in nested_manager.parameters:
+                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
+                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
+                    else:
+                        nested_manager.update_parameter(field.name, nested_field_value)
 
     def reject(self):
         """Handle dialog rejection (Cancel button)."""
