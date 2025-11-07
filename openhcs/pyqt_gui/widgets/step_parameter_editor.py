@@ -19,6 +19,7 @@ from openhcs.core.steps.function_step import FunctionStep
 from openhcs.introspection.signature_analyzer import SignatureAnalyzer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
+from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
@@ -333,13 +334,17 @@ class StepParameterEditorWidget(QWidget):
         if hierarchy_tree:
             splitter = QSplitter(Qt.Orientation.Horizontal)
             splitter.setChildrenCollapsible(True)  # CRITICAL: Allow tree to collapse
-            splitter.setHandleWidth(2)
+            splitter.setHandleWidth(5)  # Make handle more visible
             splitter.addWidget(hierarchy_tree)
             splitter.addWidget(self.scroll_area)
             splitter.setSizes([280, 720])
             layout.addWidget(splitter, 1)
             self.hierarchy_tree = hierarchy_tree
             self.content_splitter = splitter
+
+            # Install collapsible splitter helper for double-click toggle
+            self.splitter_helper = CollapsibleSplitterHelper(splitter, left_panel_index=0)
+            self.splitter_helper.set_initial_size(280)
         else:
             layout.addWidget(self.scroll_area)
             self.hierarchy_tree = None

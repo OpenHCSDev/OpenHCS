@@ -28,12 +28,12 @@ class ConfigHierarchyTreeHelper:
         self,
         *,
         header_label: str = "Configuration Hierarchy",
-        minimum_width: int = 200,
+        minimum_width: int = 0,  # Allow collapsing to 0 for splitter
     ) -> QTreeWidget:
         """Create a pre-configured QTreeWidget for hierarchy display."""
         tree = QTreeWidget()
         tree.setHeaderLabel(header_label)
-        tree.setMinimumWidth(minimum_width)
+        tree.setMinimumWidth(minimum_width)  # 0 allows free movement in splitter
         tree.setExpandsOnDoubleClick(False)
         return tree
 
