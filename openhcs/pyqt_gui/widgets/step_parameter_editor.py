@@ -216,7 +216,8 @@ class StepParameterEditorWidget(QWidget):
         if not getattr(self, '_tree_dataclass_params', None):
             return None
 
-        tree = self.tree_helper.create_tree_widget(minimum_width=220)
+        # Use default minimum_width=0 from shared helper (allows collapsing)
+        tree = self.tree_helper.create_tree_widget()
         self.tree_helper.populate_from_mapping(tree, self._tree_dataclass_params)
 
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
