@@ -193,54 +193,11 @@ class ParameterFormManager(QWidget):
         to ensure all open windows refresh their placeholders with the new values.
         """
         logger.debug(f"Triggering global cross-window refresh for {len(cls._active_form_managers)} active managers")
-
-        # Create a copy of the list to avoid modification during iteration
-        managers_to_refresh = list(cls._active_form_managers)
-
-        for manager in managers_to_refresh:
+        for manager in cls._active_form_managers:
             try:
-                # Check if manager's widgets are still valid before refreshing
-                if not cls._is_manager_valid(manager):
-                    logger.debug(f"Skipping refresh for invalid manager: {manager.field_id}")
-                    # Remove from active managers list
-                    if manager in cls._active_form_managers:
-                        cls._active_form_managers.remove(manager)
-                    continue
-
                 manager._refresh_with_live_context()
-            except RuntimeError as e:
-                # Widget has been deleted - remove from active managers
-                logger.debug(f"Manager widgets deleted during refresh: {manager.field_id}, removing from active list")
-                if manager in cls._active_form_managers:
-                    cls._active_form_managers.remove(manager)
             except Exception as e:
                 logger.warning(f"Failed to refresh manager during global refresh: {e}")
-
-    @staticmethod
-    def _is_manager_valid(manager) -> bool:
-        """Check if a form manager's widgets are still valid and ready.
-
-        Args:
-            manager: ParameterFormManager instance
-
-        Returns:
-            True if manager is valid and ready, False if widgets have been deleted or not yet created
-        """
-        try:
-            # Check if the manager has finished initial setup
-            # During construction, widgets dict might not exist yet
-            if not hasattr(manager, 'widgets') or not manager.widgets:
-                return False
-
-            # Check if the manager's main widget still exists
-            if hasattr(manager, 'form_widget') and manager.form_widget:
-                # Try to access a property - this will raise RuntimeError if deleted
-                _ = manager.form_widget.isVisible()
-                return True
-            return False
-        except RuntimeError:
-            # Widget has been deleted
-            return False
 
     def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None, read_only: bool = False, scope_id: Optional[str] = None, color_scheme=None):
         """
@@ -2143,6 +2100,24 @@ class ParameterFormManager(QWidget):
         direct_widgets = get_direct_widgets(self)
         widget_names = [f"{w.__class__.__name__}({w.objectName() or 'no-name'})" for w in direct_widgets[:5]]  # First 5
 
+        # CRITICAL: Check if this is an Optional dataclass with None value
+        # This needs to be checked BEFORE applying styling logic
+        is_optional_none = False
+        if self._parent_manager:
+            # Find our parameter name in parent
+            our_param_name = None
+            for param_name, nested_manager in self._parent_manager.nested_managers.items():
+                if nested_manager == self:
+                    our_param_name = param_name
+                    break
+
+            if our_param_name:
+                param_type = self._parent_manager.parameter_types.get(our_param_name)
+                if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
+                    instance = self._parent_manager.parameters.get(our_param_name)
+                    if instance is None:
+                        is_optional_none = True
+
         # CRITICAL: For nested configs (inside GroupBox), apply styling to the GroupBox container
         # For top-level forms (step, function), apply styling to direct widgets
         is_nested_config = self._parent_manager is not None and any(
@@ -2783,20 +2758,10 @@ class ParameterFormManager(QWidget):
                 if manager.scope_id is not None and self.scope_id is not None and manager.scope_id != self.scope_id:
                     continue  # Different orchestrator - skip
 
-                # CRITICAL: Skip managers that haven't finished building their widgets yet
-                # During initial construction, some managers might still be in setup_ui()
-                # and their widgets aren't ready to be queried
-                if not self._is_manager_valid(manager):
-                    continue
 
                 # CRITICAL: Get only user-modified (concrete, non-None) values
                 # This preserves inheritance hierarchy: None values don't override parent values
-                try:
-                    live_values = manager.get_user_modified_values()
-                except RuntimeError:
-                    # Widget was deleted during iteration - skip this manager
-                    continue
-
+                live_values = manager.get_user_modified_values()
                 obj_type = type(manager.object_instance)
 
 

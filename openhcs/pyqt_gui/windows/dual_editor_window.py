@@ -385,6 +385,50 @@ class DualEditorWindow(BaseFormDialog):
             # Detect changes (might have unsaved changes now)
             self.detect_changes()
 
+    def _on_config_changed(self, config):
+        """Handle config_changed signal from global event bus.
+
+        CRITICAL: This is connected to the global event bus in setup_connections().
+        It receives updates from ANY window that modifies configs:
+        - PlateManager code button (GlobalPipelineConfig, PipelineConfig)
+        - ConfigWindow code button (GlobalPipelineConfig, PipelineConfig, StepConfig)
+        - Any future config editing source
+
+        This is the OpenHCS "set and forget" pattern - one handler receives ALL updates.
+
+        Args:
+            config: Updated config object (GlobalPipelineConfig, PipelineConfig, or StepConfig)
+        """
+        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+        from openhcs.config_framework.global_config import get_current_global_config
+
+        # Only care about GlobalPipelineConfig and PipelineConfig changes
+        # (StepConfig changes are handled by the step editor's own form manager)
+        if not isinstance(config, (GlobalPipelineConfig, PipelineConfig)):
+            return
+
+        # Only refresh if this is for our orchestrator
+        if not self.orchestrator:
+            return
+
+        # Check if this config belongs to our orchestrator
+        if isinstance(config, PipelineConfig):
+            # Check if this is our orchestrator's pipeline config
+            if config is not self.orchestrator.pipeline_config:
+                return
+        elif isinstance(config, GlobalPipelineConfig):
+            # Check if this is the current global config
+            current_global = get_current_global_config(GlobalPipelineConfig)
+            if config is not current_global:
+                return
+
+        logger.debug(f"Step editor received config change: {type(config).__name__}")
+
+        # Trigger cross-window refresh for all form managers
+        # This will update placeholders in the step editor to show new inherited values
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        ParameterFormManager.trigger_global_cross_window_refresh()
+        logger.debug("Triggered global cross-window refresh after config change")
 
     def setup_connections(self):
         """Setup signal/slot connections."""
@@ -399,6 +443,7 @@ class DualEditorWindow(BaseFormDialog):
         event_bus = self._get_event_bus()
         if event_bus:
             event_bus.pipeline_changed.connect(self._on_pipeline_changed)
+            event_bus.config_changed.connect(self._on_config_changed)
             event_bus.register_window(self)
             logger.debug("Connected to global event bus for cross-window updates")
 

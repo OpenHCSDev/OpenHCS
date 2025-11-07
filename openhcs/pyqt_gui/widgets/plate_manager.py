@@ -1619,6 +1619,7 @@ class PlateManagerWidget(QWidget):
 
                     # CRITICAL FIX: Match string keys to actual plate path objects
                     # The keys in per_plate_configs are strings, but orchestrators dict uses Path/str objects
+                    last_pipeline_config = None  # Track last config for broadcasting
                     for plate_path_str, new_pipeline_config in per_plate_configs.items():
                         # Find matching orchestrator by comparing string representations
                         matched_orchestrator = None
@@ -1633,12 +1634,34 @@ class PlateManagerWidget(QWidget):
                             # Emit signal for UI components to refresh (including config windows)
                             effective_config = matched_orchestrator.get_effective_config()
                             self.orchestrator_config_changed.emit(str(matched_key), effective_config)
+                            last_pipeline_config = new_pipeline_config
                             logger.debug(f"Applied per-plate pipeline config to orchestrator: {matched_key}")
                         else:
                             logger.warning(f"No orchestrator found for plate path: {plate_path_str}")
+
+                    # CRITICAL: Broadcast PipelineConfig to event bus ONCE after all updates
+                    # This ensures ConfigWindow instances showing PipelineConfig will update
+                    if last_pipeline_config:
+                        self._broadcast_config_to_event_bus(last_pipeline_config)
+
+                        # CRITICAL: Trigger cross-window refresh for all open config windows
+                        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                        ParameterFormManager.trigger_global_cross_window_refresh()
+                        logger.debug("Triggered global cross-window refresh after per-plate pipeline config update")
                 elif 'pipeline_config' in namespace:
                     # Legacy single pipeline_config for all plates
                     new_pipeline_config = namespace['pipeline_config']
+
+                    # CRITICAL: Broadcast PipelineConfig to event bus ONCE for cross-window updates
+                    # This ensures ConfigWindow instances showing PipelineConfig will update
+                    self._broadcast_config_to_event_bus(new_pipeline_config)
+
+                    # CRITICAL: Trigger cross-window refresh for all open config windows
+                    # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
+                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                    ParameterFormManager.trigger_global_cross_window_refresh()
+                    logger.debug("Triggered global cross-window refresh after pipeline config update")
+
                     # Apply the new pipeline config to all affected orchestrators
                     for plate_path in new_plate_paths:
                         if plate_path in self.orchestrators:
@@ -1669,6 +1692,10 @@ class PlateManagerWidget(QWidget):
                             self.pipeline_editor.update_step_list()
                             # Emit pipeline changed signal to cascade to step editors
                             self.pipeline_editor.pipeline_changed.emit(new_steps)
+
+                            # CRITICAL: Also broadcast to event bus for ALL windows
+                            self._broadcast_pipeline_to_event_bus(new_steps)
+
                             logger.debug(f"Triggered UI cascade refresh for current plate: {plate_path}")
                 else:
                     logger.warning("No pipeline editor available to update pipeline data")
