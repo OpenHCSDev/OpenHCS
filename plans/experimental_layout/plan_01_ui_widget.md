@@ -409,18 +409,99 @@ class ExperimentalLayoutService:
 
 Create `openhcs/pyqt_gui/widgets/experimental_layout_widget.py`:
 
-Following OpenHCS UI patterns - functional dispatch, no if/elif chains, service layer separation:
+Following OpenHCS UI patterns - functional dispatch, no if/elif chains, service layer separation.
+
+##### UI Design: Hybrid Approach (Collapsible + Modal)
+
+**Best of both worlds** - PyQt6 supports both inline preview AND detailed modal editing:
+
+```
+Conditions Section:
+┌──────────────────────────────────────────────────────────┐
+│ Condition: Drug_A                                        │
+│ Doses: 0, 10, 50, 100                                    │
+│                                                          │
+│ ▼ N1 (2 technical replicates)       [Edit Details...] │ ← Click to expand/collapse
+│   ├─ Tech Rep 1: A01, A02, A03, A04                    │ ← Inline preview
+│   │  Plate Groups: 1, 1, 1, 1                          │
+│   └─ Tech Rep 2: B01, B02, B03, B04                    │
+│      Plate Groups: 1, 1, 1, 1                          │
+│                                                          │
+│ ▶ N2 (1 technical replicate)        [Edit Details...] │ ← Collapsed state
+│                                                          │
+│ ▼ N3 (1 technical replicate)        [Edit Details...] │
+│   └─ Tech Rep 1: A09, A10, A11, A12                    │
+│      Plate Groups: 1, 1, 1, 1                          │
+│                                                          │
+│ [+ Add Condition] [Remove Condition]                    │
+└──────────────────────────────────────────────────────────┘
+```
+
+**[Edit Details...] Button opens modal dialog:**
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Edit Wells for Drug_A, N1                           │
+│                                                     │
+│ Doses: 0, 10, 50, 100                               │
+│                                                     │
+│ ┌─ Technical Replicate 1 ────────────────────────┐ │
+│ │ Wells (comma-separated):                       │ │
+│ │ ┌───────────────────────────────────────────┐  │ │
+│ │ │ A01, A02, A03, A04                       │  │ │
+│ │ └───────────────────────────────────────────┘  │ │
+│ │ Plate Groups (comma-separated):                │ │
+│ │ ┌───────────────────────────────────────────┐  │ │
+│ │ │ 1, 1, 1, 1                               │  │ │
+│ │ └───────────────────────────────────────────┘  │ │
+│ │ [Remove Tech Rep]                              │ │
+│ └────────────────────────────────────────────────┘ │
+│                                                     │
+│ ┌─ Technical Replicate 2 ────────────────────────┐ │
+│ │ Wells: ┌────────────────────────────────────┐  │ │
+│ │        │ B01, B02, B03, B04                │  │ │
+│ │        └────────────────────────────────────┘  │ │
+│ │ Plate Groups: ┌─────────────────────────────┐  │ │
+│ │               │ 1, 1, 1, 1                 │  │ │
+│ │               └─────────────────────────────┘  │ │
+│ │ [Remove Tech Rep]                              │ │
+│ └────────────────────────────────────────────────┘ │
+│                                                     │
+│ [+ Add Technical Replicate]                         │
+│                                                     │
+│ [Save Changes] [Cancel]                             │
+└─────────────────────────────────────────────────────┘
+```
+
+**User Workflow:**
+1. **Quick View**: Expand/collapse replicates inline for quick overview
+2. **Detailed Edit**: Click "Edit Details..." for full editing in modal
+3. **Add/Remove Tech Reps**: Only in modal (keeps inline view clean)
+4. **Both Views**: Update the same immutable `ExperimentalLayoutConfig`
+
+**Implementation Details:**
+- **Inline Preview**: Custom collapsible `QWidget` with `QTreeWidget` or `QGroupBox`
+- **Modal Editor**: `QDialog` with scrollable form
+- **State Sync**: Both views read from and update the same frozen config
+- **Validation**: Real-time in modal, summary in inline view
+
+**PyQt6 Widgets Used:**
+- `QTreeWidget` for collapsible replicate tree
+- `QDialog` for modal editing
+- `QLineEdit` for comma-separated input
+- `QPushButton` with click → open modal
 
 ```python
 from PyQt6.QtWidgets import *
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from typing import Callable, Dict, Type
 
 # Functional dispatch tables (OpenHCS pattern)
 CELL_WIDGET_FACTORIES: Dict[str, Callable] = {
     'condition': lambda: QLineEdit(),
     'doses': lambda: QLineEdit(),  # Comma-separated
-    'wells': lambda: QPushButton("Edit..."),  # Opens modal
+    'wells_tree': lambda: QTreeWidget(),  # Collapsible inline preview
+    'wells_edit_button': lambda: QPushButton("Edit Details..."),  # Opens modal
     'plate_groups': lambda: QLineEdit(),
 }
 
@@ -510,18 +591,16 @@ class ExperimentalLayoutWidget(QWidget):
         return group
 
     def _create_conditions_section(self) -> QWidget:
-        """Create conditions table section with functional dispatch."""
+        """Create conditions section with collapsible tree + modal editing."""
         group = QGroupBox("Experimental Conditions")
         layout = QVBoxLayout()
 
-        # Table
-        self.conditions_table = QTableWidget()
-        self.conditions_table.setColumnCount(5)
-        self.conditions_table.setHorizontalHeaderLabels([
-            "Condition", "Doses", "Replicates", "Tech Reps", "Actions"
-        ])
-        self.conditions_table.cellChanged.connect(self._on_condition_cell_changed)
-        layout.addWidget(self.conditions_table)
+        # For each condition, create collapsible section
+        self.condition_widgets = []
+        for condition in self._config.conditions:
+            condition_widget = self._create_condition_widget(condition)
+            layout.addWidget(condition_widget)
+            self.condition_widgets.append(condition_widget)
 
         # Buttons
         button_layout = QHBoxLayout()
@@ -535,6 +614,76 @@ class ExperimentalLayoutWidget(QWidget):
 
         group.setLayout(layout)
         return group
+
+    def _create_condition_widget(self, condition: ConditionConfig) -> QWidget:
+        """Create widget for single condition with collapsible replicates."""
+        widget = QGroupBox(f"Condition: {condition.name}")
+        layout = QVBoxLayout()
+
+        # Doses display
+        doses_label = QLabel(f"Doses: {', '.join(condition.doses)}")
+        layout.addWidget(doses_label)
+
+        # Collapsible tree for replicates
+        tree = QTreeWidget()
+        tree.setHeaderLabels(["Replicate", "Details"])
+        tree.setColumnWidth(0, 200)
+
+        for replicate_num, wells_rows in condition.wells_by_replicate.items():
+            replicate_item = QTreeWidgetItem(tree, [
+                f"N{replicate_num} ({len(wells_rows)} technical replicates)",
+                ""
+            ])
+
+            # Add edit button
+            edit_btn = QPushButton("Edit Details...")
+            edit_btn.clicked.connect(
+                lambda checked, cond=condition, rep=replicate_num:
+                    self._open_wells_editor_dialog(cond, rep)
+            )
+            tree.setItemWidget(replicate_item, 1, edit_btn)
+
+            # Add tech rep preview items
+            for tech_rep_idx, wells_row in enumerate(wells_rows, start=1):
+                tech_rep_item = QTreeWidgetItem(replicate_item, [
+                    f"Tech Rep {tech_rep_idx}",
+                    f"Wells: {', '.join(wells_row.wells[:4])}..." if len(wells_row.wells) > 4
+                    else f"Wells: {', '.join(wells_row.wells)}"
+                ])
+                plate_group_item = QTreeWidgetItem(tech_rep_item, [
+                    "Plate Groups",
+                    f"{', '.join(wells_row.plate_groups[:4])}..." if len(wells_row.plate_groups) > 4
+                    else f"{', '.join(wells_row.plate_groups)}"
+                ])
+
+        layout.addWidget(tree)
+        widget.setLayout(layout)
+        return widget
+
+    def _open_wells_editor_dialog(self, condition: ConditionConfig, replicate_num: int):
+        """Open modal dialog for detailed wells editing."""
+        dialog = WellsEditorDialog(
+            condition=condition,
+            replicate_num=replicate_num,
+            service=self.service,
+            parent=self
+        )
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Get updated config from dialog
+            updated_config = dialog.get_updated_config()
+
+            # Update internal state
+            self._config = updated_config
+
+            # Refresh UI
+            self._populate_from_config()
+
+            # Validate and emit signals
+            validation_result = self.service.validate_config(updated_config)
+            self.config_changed.emit(updated_config)
+            self.validation_changed.emit(validation_result)
+            self._update_validation_panel(validation_result)
 
     def _get_widget_value(self, widget: QWidget) -> any:
         """
@@ -593,6 +742,112 @@ class ExperimentalLayoutWidget(QWidget):
         """
         self._config = config
         self._populate_from_config()
+
+
+class WellsEditorDialog(QDialog):
+    """
+    Modal dialog for detailed technical replicate editing.
+
+    Features:
+    - Add/remove technical replicates
+    - Edit wells and plate groups per tech rep
+    - Real-time validation with error display
+    - Comma-separated input with validation
+    """
+
+    def __init__(self, condition: ConditionConfig, replicate_num: int,
+                 service: ExperimentalLayoutService, parent=None):
+        super().__init__(parent)
+        self.condition = condition
+        self.replicate_num = replicate_num
+        self.service = service
+        self.setWindowTitle(f"Edit Wells for {condition.name}, N{replicate_num}")
+        self.setMinimumWidth(600)
+
+        self._build_ui()
+        self._populate_from_config()
+
+    def _build_ui(self):
+        """Build modal dialog UI."""
+        layout = QVBoxLayout(self)
+
+        # Doses display (read-only)
+        doses_label = QLabel(f"Doses: {', '.join(self.condition.doses)}")
+        doses_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(doses_label)
+
+        # Scrollable area for tech reps
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_content = QWidget()
+        self.tech_reps_layout = QVBoxLayout(scroll_content)
+
+        # Will be populated with tech rep forms
+        self.tech_rep_forms = []
+
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
+
+        # Add tech rep button
+        add_btn = QPushButton("+ Add Technical Replicate")
+        add_btn.clicked.connect(self._on_add_tech_rep)
+        layout.addWidget(add_btn)
+
+        # Validation display
+        self.validation_label = QLabel()
+        layout.addWidget(self.validation_label)
+
+        # Dialog buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(self._on_save)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def _create_tech_rep_form(self, tech_rep_idx: int, wells_row: WellsRow) -> QWidget:
+        """Create form for single technical replicate."""
+        group = QGroupBox(f"Technical Replicate {tech_rep_idx}")
+        form = QFormLayout()
+
+        # Wells input (comma-separated)
+        wells_edit = QLineEdit(", ".join(wells_row.wells))
+        wells_edit.textChanged.connect(self._on_form_changed)
+        form.addRow("Wells (comma-separated):", wells_edit)
+
+        # Plate groups input (comma-separated)
+        plate_groups_edit = QLineEdit(", ".join(wells_row.plate_groups))
+        plate_groups_edit.textChanged.connect(self._on_form_changed)
+        form.addRow("Plate Groups (comma-separated):", plate_groups_edit)
+
+        # Remove button
+        remove_btn = QPushButton("Remove Tech Rep")
+        remove_btn.clicked.connect(lambda: self._on_remove_tech_rep(tech_rep_idx))
+        form.addRow("", remove_btn)
+
+        group.setLayout(form)
+        return group, wells_edit, plate_groups_edit
+
+    def _on_form_changed(self):
+        """Real-time validation on form changes."""
+        # Extract current state
+        # Validate using service
+        # Update validation_label
+        pass  # Implementation details...
+
+    def _on_save(self):
+        """Validate and save changes."""
+        # Extract wells_rows from forms
+        # Create updated ConditionConfig
+        # Validate
+        # If valid, accept dialog
+        pass  # Implementation details...
+
+    def get_updated_config(self) -> ExperimentalLayoutConfig:
+        """Get updated config with changes from dialog."""
+        # Return new frozen config with updated condition
+        pass  # Implementation details...
 ```
 
 **Structure:**
@@ -601,6 +856,7 @@ class ExperimentalLayoutWidget(QWidget):
 - Frozen dataclass configuration (immutable updates)
 - Registry-based validation service
 - Direct attribute access (no defensive programming)
+- **Hybrid UI**: Collapsible inline preview + modal editor for details
 
 #### 5. Excel I/O (Service Layer)
 
