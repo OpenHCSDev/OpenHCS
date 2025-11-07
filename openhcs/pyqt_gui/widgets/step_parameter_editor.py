@@ -11,13 +11,14 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QScrollArea
+    QScrollArea, QSplitter, QTreeWidget, QTreeWidgetItem
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.introspection.signature_analyzer import SignatureAnalyzer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 # REMOVED: LazyDataclassFactory import - no longer needed since step editor
@@ -89,6 +90,10 @@ class StepParameterEditorWidget(QWidget):
 
             parameters[name] = current_value
             parameter_types[name] = info.param_type
+
+        # Track dataclass-backed parameters for the hierarchy tree
+        self._tree_dataclass_params = self._collect_dataclass_parameters(parameter_types)
+        self.tree_helper = ConfigHierarchyTreeHelper()
         
         # SIMPLIFIED: Create parameter form manager using dual-axis resolution
 
@@ -104,7 +109,9 @@ class StepParameterEditorWidget(QWidget):
             exclude_params=['func'],             # Exclude func - it has its own dedicated tab
             scope_id=self.scope_id               # Pass scope_id to limit cross-window updates to same orchestrator
         )
-        
+        self.hierarchy_tree = None
+        self.content_splitter = None
+
         self.setup_ui()
         self.setup_connections()
 
@@ -163,6 +170,111 @@ class StepParameterEditorWidget(QWidget):
     # not create new "StepLevel" versions. The AbstractStep already has the correct
     # lazy dataclass types (LazyNapariStreamingConfig, LazyStepMaterializationConfig, etc.)
 
+    def _collect_dataclass_parameters(self, parameter_types):
+        """Return dataclass-based parameters for building the hierarchy tree."""
+        dataclass_params = {}
+        for field_name, param_type in parameter_types.items():
+            if field_name == 'func':
+                continue
+
+            dataclass_type = self._extract_dataclass_from_param_type(param_type)
+            if dataclass_type is not None:
+                dataclass_params[field_name] = dataclass_type
+
+        return dataclass_params
+
+    def _extract_dataclass_from_param_type(self, param_type):
+        """Resolve the concrete dataclass type from the annotated parameter."""
+        import dataclasses
+        from typing import Union, get_args, get_origin
+
+        resolved_type = param_type
+
+        try:
+            origin = get_origin(param_type)
+        except Exception:
+            origin = None
+
+        if origin is Union:
+            args = [arg for arg in get_args(param_type) if arg is not type(None)]
+            if len(args) == 1:
+                resolved_type = args[0]
+
+        if resolved_type is None or isinstance(resolved_type, str):
+            return None
+
+        if dataclasses.is_dataclass(resolved_type):
+            return resolved_type
+
+        return None
+
+    def _create_configuration_tree(self) -> Optional[QTreeWidget]:
+        """Create and populate the configuration hierarchy tree."""
+        if not getattr(self, '_tree_dataclass_params', None):
+            return None
+
+        tree = self.tree_helper.create_tree_widget(minimum_width=220)
+        self.tree_helper.populate_from_mapping(tree, self._tree_dataclass_params)
+
+        tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
+        return tree
+
+    def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
+        """Scroll to the associated form section when a tree item is activated."""
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        if not data or data.get('ui_hidden'):
+            return
+
+        item_type = data.get('type')
+        if item_type == 'dataclass':
+            field_name = data.get('field_name')
+            if field_name:
+                self._scroll_to_section(field_name)
+        elif item_type == 'inheritance_link':
+            target_class = data.get('target_class')
+            if target_class:
+                field_name = self._find_field_for_class(target_class)
+                if field_name:
+                    self._scroll_to_section(field_name)
+
+    def _find_field_for_class(self, target_class) -> Optional[str]:
+        """Locate the parameter field that edits the given dataclass."""
+        for field_name, dataclass_type in self._tree_dataclass_params.items():
+            base_type = self.tree_helper.get_base_type(dataclass_type)
+            if target_class in (dataclass_type, base_type):
+                return field_name
+        return None
+
+    def _scroll_to_section(self, field_name: str):
+        """Ensure the requested parameter section is visible."""
+        if not hasattr(self, 'scroll_area') or self.scroll_area is None:
+            logger.warning("Scroll area not initialized; cannot navigate to section")
+            return
+
+        nested_managers = getattr(self.form_manager, 'nested_managers', {})
+        nested_manager = nested_managers.get(field_name)
+        if not nested_manager:
+            logger.warning(f"Field '{field_name}' not found in nested managers")
+            return
+
+        first_widget = None
+        if hasattr(nested_manager, 'widgets') and nested_manager.widgets:
+            first_param_name = next(iter(nested_manager.widgets.keys()))
+            first_widget = nested_manager.widgets[first_param_name]
+
+        if first_widget:
+            self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
+            return
+
+        from PyQt6.QtWidgets import QGroupBox
+        current = nested_manager.parentWidget()
+        while current:
+            if isinstance(current, QGroupBox):
+                self.scroll_area.ensureWidgetVisible(current, 50, 50)
+                return
+            current = current.parentWidget()
+
+        logger.warning(f"Could not locate widget for '{field_name}' to scroll into view")
 
 
 
@@ -209,7 +321,21 @@ class StepParameterEditorWidget(QWidget):
 
         # Add form manager directly to scroll area (like config window)
         self.scroll_area.setWidget(self.form_manager)
-        layout.addWidget(self.scroll_area)
+        hierarchy_tree = self._create_configuration_tree()
+        if hierarchy_tree:
+            splitter = QSplitter(Qt.Orientation.Horizontal)
+            splitter.setChildrenCollapsible(False)
+            splitter.setHandleWidth(2)
+            splitter.addWidget(hierarchy_tree)
+            splitter.addWidget(self.scroll_area)
+            splitter.setSizes([280, 720])
+            layout.addWidget(splitter, 1)
+            self.hierarchy_tree = hierarchy_tree
+            self.content_splitter = splitter
+        else:
+            layout.addWidget(self.scroll_area)
+            self.hierarchy_tree = None
+            self.content_splitter = None
     
     def _get_button_style(self) -> str:
         """Get consistent button styling."""

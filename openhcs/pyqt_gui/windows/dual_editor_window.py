@@ -22,6 +22,7 @@ from openhcs.ui.shared.pattern_data_manager import PatternDataManager
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
+from openhcs.introspection.unified_parameter_analyzer import UnifiedParameterAnalyzer
 from typing import List
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,9 @@ class DualEditorWindow(BaseFormDialog):
         else:
             self.editing_step = self._create_new_step()
             self.original_step = None
+
+        # Snapshot of last-saved state for change detection
+        self._baseline_snapshot = self._serialize_for_change_detection(self.editing_step)
         
         # Change tracking
         self.has_changes = False
@@ -616,14 +620,9 @@ class DualEditorWindow(BaseFormDialog):
     
     def detect_changes(self):
         """Detect if changes have been made."""
-        has_changes = self.original_step != self.editing_step
-
-        # Check function pattern
-        if not has_changes:
-            original_func = getattr(self.original_step, 'func', None)
-            current_func = getattr(self.editing_step, 'func', None)
-            # Simple comparison - could be enhanced for deep comparison
-            has_changes = str(original_func) != str(current_func)
+        current_snapshot = self._serialize_for_change_detection(self.editing_step)
+        baseline_snapshot = getattr(self, '_baseline_snapshot', None)
+        has_changes = current_snapshot != baseline_snapshot
 
         if has_changes != self.has_changes:
             self.has_changes = has_changes
@@ -706,6 +705,12 @@ class DualEditorWindow(BaseFormDialog):
                 logger.info(f"💾 Calling on_save_callback")
                 self.on_save_callback(step_to_save)
 
+            # After a successful save, refresh the baseline snapshot used for change detection.
+            # This ensures Shift+Save (which keeps the window open) clears the "Unsaved changes" label.
+            self.original_step = self._clone_step(self.editing_step)
+            self._baseline_snapshot = self._serialize_for_change_detection(self.editing_step)
+            self.detect_changes()
+
             if close_window:
                 self.accept()  # BaseFormDialog handles unregistration
             logger.debug(f"Step saved: {getattr(step_to_save, 'name', 'Unknown')}")
@@ -745,6 +750,63 @@ class DualEditorWindow(BaseFormDialog):
         """Clone a step object using deep copy."""
         import copy
         return copy.deepcopy(step)
+
+    _CHANGE_DETECTION_EXCLUDE_PARAMS = {'kwargs'}
+
+    def _serialize_for_change_detection(self, step):
+        """Create a normalized snapshot of the step for change detection."""
+        params = UnifiedParameterAnalyzer.analyze(step)
+        snapshot = {}
+        for name, param_info in params.items():
+            if name in self._CHANGE_DETECTION_EXCLUDE_PARAMS:
+                continue
+            snapshot[name] = self._normalize_value_for_change_detection(param_info.default_value)
+        return snapshot
+
+    def _normalize_value_for_change_detection(self, value):
+        """Normalize complex values into comparison-friendly primitives."""
+        from dataclasses import is_dataclass, fields
+        from pathlib import Path
+
+        if value is None:
+            return None
+
+        if isinstance(value, (str, int, float, bool)):
+            return value
+
+        if isinstance(value, Path):
+            return str(value)
+
+        if isinstance(value, list):
+            return [self._normalize_value_for_change_detection(v) for v in value]
+
+        if isinstance(value, tuple):
+            return tuple(self._normalize_value_for_change_detection(v) for v in value)
+
+        if isinstance(value, dict):
+            return {k: self._normalize_value_for_change_detection(v) for k, v in value.items()}
+
+        if hasattr(value, 'value') and hasattr(value, 'name'):
+            return value.value
+
+        if callable(value):
+            module = getattr(value, '__module__', '')
+            qualname = getattr(value, '__qualname__', getattr(value, '__name__', repr(value)))
+            return f"{module}.{qualname}"
+
+        if is_dataclass(value):
+            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+            is_lazy_dataclass = get_base_type_for_lazy(type(value)) is not None
+            normalized = {}
+            for field in fields(value):
+                if is_lazy_dataclass:
+                    raw_field_value = object.__getattribute__(value, field.name)
+                else:
+                    raw_field_value = getattr(value, field.name)
+                normalized[field.name] = self._normalize_value_for_change_detection(raw_field_value)
+            return normalized
+
+        return repr(value)
 
     def _create_new_step(self):
         """Create a new empty step."""

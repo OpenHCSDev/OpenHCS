@@ -15,10 +15,11 @@ from PyQt6.QtWidgets import (
     QLineEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont
 
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
@@ -78,6 +79,7 @@ class ConfigWindow(BaseFormDialog):
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
         self.style_generator = StyleSheetGenerator(self.color_scheme)
+        self.tree_helper = ConfigHierarchyTreeHelper()
 
         # SIMPLIFIED: Use dual-axis resolution
         from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
@@ -212,185 +214,13 @@ class ConfigWindow(BaseFormDialog):
 
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""
-        tree = QTreeWidget()
-        tree.setHeaderLabel("Configuration Hierarchy")
-        # Remove width restrictions to allow horizontal dragging
-        tree.setMinimumWidth(200)
-
-        # Disable expand on double-click (use arrow only)
-        tree.setExpandsOnDoubleClick(False)
-
-        # Build inheritance hierarchy
-        self._populate_inheritance_tree(tree)
+        tree = self.tree_helper.create_tree_widget()
+        self.tree_helper.populate_from_root_dataclass(tree, self.config_class)
 
         # Connect double-click to navigation
         tree.itemDoubleClicked.connect(self._on_tree_item_double_clicked)
 
         return tree
-
-    def _populate_inheritance_tree(self, tree: QTreeWidget):
-        """Populate the inheritance tree with only dataclasses visible in the UI.
-
-        Excludes the root node (PipelineConfig/GlobalPipelineConfig) and shows
-        its attributes directly as top-level items.
-        """
-        import dataclasses
-
-        # Skip creating root item - add children directly to tree as top-level items
-        if dataclasses.is_dataclass(self.config_class):
-            self._add_ui_visible_dataclasses_to_tree(tree, self.config_class, is_root=True)
-
-        # Leave tree collapsed by default (user can expand as needed)
-
-    def _get_base_type(self, dataclass_type):
-        """Get base (non-lazy) type for a dataclass - type-based detection."""
-        from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
-
-        # Type-based lazy detection
-        if LazyDefaultPlaceholderService.has_lazy_resolution(dataclass_type):
-            # Get first non-Lazy base class
-            for base in dataclass_type.__bases__:
-                if base.__name__ != 'object' and not LazyDefaultPlaceholderService.has_lazy_resolution(base):
-                    return base
-
-        return dataclass_type
-
-    def _add_ui_visible_dataclasses_to_tree(self, parent_item, dataclass_type, is_root=False):
-        """Add only dataclasses that are visible in the UI form.
-
-        Args:
-            parent_item: Either a QTreeWidgetItem or QTreeWidget (for root level)
-            dataclass_type: The dataclass type to process
-            is_root: True if adding direct children of the root config class
-        """
-        import dataclasses
-
-        # Get all fields from this dataclass
-        fields = dataclasses.fields(dataclass_type)
-
-        for field in fields:
-            field_name = field.name
-            field_type = field.type
-
-            # Only show dataclass fields (these appear as sections in the UI)
-            if dataclasses.is_dataclass(field_type):
-                # Get the base (non-lazy) type for display and inheritance
-                base_type = self._get_base_type(field_type)
-                display_name = base_type.__name__
-
-                # Check if this field is hidden from UI
-                is_ui_hidden = self._is_field_ui_hidden(dataclass_type, field_name, field_type)
-
-                # Skip root-level ui_hidden items entirely (don't show them in tree at all)
-                # For nested items, show them but styled differently (for inheritance visibility)
-                if is_root and is_ui_hidden:
-                    continue
-
-                # For root-level items, show only the class name (matching child style)
-                # For nested items, show "field_name (ClassName)"
-                if is_root:
-                    label = display_name
-                else:
-                    label = f"{field_name} ({display_name})"
-
-                # Create a child item for this nested dataclass
-                field_item = QTreeWidgetItem([label])
-                field_item.setData(0, Qt.ItemDataRole.UserRole, {
-                    'type': 'dataclass',
-                    'class': field_type,  # Store original type for field lookup
-                    'field_name': field_name,
-                    'ui_hidden': is_ui_hidden  # Store ui_hidden flag
-                })
-
-                # Style ui_hidden items differently (grayed out, italicized)
-                if is_ui_hidden:
-                    font = field_item.font(0)
-                    font.setItalic(True)
-                    field_item.setFont(0, font)
-                    field_item.setForeground(0, QColor(128, 128, 128))
-                    field_item.setToolTip(0, "This configuration is not editable in the UI (inherited by other configs)")
-
-                # Add to parent (either QTreeWidget for root or QTreeWidgetItem for nested)
-                if is_root:
-                    parent_item.addTopLevelItem(field_item)
-                else:
-                    parent_item.addChild(field_item)
-
-                # Show inheritance hierarchy using the BASE type (not lazy type)
-                # This automatically skips the lazy→base transition
-                self._add_inheritance_info(field_item, base_type)
-
-                # Recursively add nested dataclasses using BASE type (not root anymore)
-                self._add_ui_visible_dataclasses_to_tree(field_item, base_type, is_root=False)
-
-    def _is_field_ui_hidden(self, dataclass_type, field_name: str, field_type) -> bool:
-        """Check if a field should be hidden from the UI.
-
-        Args:
-            dataclass_type: The parent dataclass containing the field
-            field_name: Name of the field
-            field_type: Type of the field
-
-        Returns:
-            True if the field should be hidden from UI
-        """
-        import dataclasses
-
-        # Check field metadata for ui_hidden flag
-        try:
-            field_obj = next(f for f in dataclasses.fields(dataclass_type) if f.name == field_name)
-            if field_obj.metadata.get('ui_hidden', False):
-                return True
-        except (StopIteration, TypeError):
-            pass
-
-        # Check if the field's type itself has _ui_hidden attribute
-        # IMPORTANT: Check __dict__ directly to avoid inheriting _ui_hidden from parent classes
-        # We only want to hide fields whose type DIRECTLY has _ui_hidden=True
-        base_type = self._get_base_type(field_type)
-        if hasattr(base_type, '__dict__') and '_ui_hidden' in base_type.__dict__ and base_type._ui_hidden:
-            return True
-
-        return False
-
-    def _add_inheritance_info(self, parent_item: QTreeWidgetItem, dataclass_type):
-        """Add inheritance information for a dataclass with proper hierarchy."""
-        # Get direct base classes (dataclass_type is already the base/non-lazy type)
-        direct_bases = []
-        for cls in dataclass_type.__bases__:
-            if cls.__name__ == 'object':
-                continue
-            if not hasattr(cls, '__dataclass_fields__'):
-                continue
-
-            # Always use base type (no lazy wrappers at this point)
-            base_type = self._get_base_type(cls)
-            direct_bases.append(base_type)
-
-        # Add base classes directly as children (no "Inherits from:" label)
-        for base_class in direct_bases:
-            # Check if this base class is ui_hidden
-            is_ui_hidden = hasattr(base_class, '__dict__') and '_ui_hidden' in base_class.__dict__ and base_class._ui_hidden
-
-            base_item = QTreeWidgetItem([base_class.__name__])
-            base_item.setData(0, Qt.ItemDataRole.UserRole, {
-                'type': 'inheritance_link',
-                'target_class': base_class,
-                'ui_hidden': is_ui_hidden
-            })
-
-            # Style ui_hidden items differently (grayed out, italicized)
-            if is_ui_hidden:
-                font = base_item.font(0)
-                font.setItalic(True)
-                base_item.setFont(0, font)
-                base_item.setForeground(0, QColor(128, 128, 128))
-                base_item.setToolTip(0, "This configuration is not editable in the UI (inherited by other configs)")
-
-            parent_item.addChild(base_item)
-
-            # Recursively add inheritance for this base class
-            self._add_inheritance_info(base_item, base_class)
 
     def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
         """Handle tree item double-clicks for navigation."""

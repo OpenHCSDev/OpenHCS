@@ -323,7 +323,19 @@ class ParameterFormManager(QWidget):
             # CRITICAL: Always use live context from other open windows for placeholder resolution
             # CRITICAL: Don't refresh when 'enabled' field changes - it's styling-only and doesn't affect placeholders
             # CRITICAL: Pass the changed param_name so we can skip refreshing it (user just edited it, it's not inherited)
-            self.parameter_changed.connect(lambda param_name, value: self._refresh_with_live_context(exclude_param=param_name) if not getattr(self, '_in_reset', False) and param_name != 'enabled' else None)
+            # CRITICAL: Nested managers must trigger refresh on ROOT manager to collect live context
+            if self._parent_manager is None:
+                # Root manager: refresh self with live context
+                self.parameter_changed.connect(lambda param_name, value: self._refresh_with_live_context(exclude_param=param_name) if not getattr(self, '_in_reset', False) and param_name != 'enabled' else None)
+            else:
+                # Nested manager: trigger refresh on root manager to collect live context
+                def _trigger_root_refresh(param_name, value):
+                    if not getattr(self, '_in_reset', False) and param_name != 'enabled':
+                        root = self._parent_manager
+                        while root._parent_manager is not None:
+                            root = root._parent_manager
+                        root._refresh_with_live_context()
+                self.parameter_changed.connect(_trigger_root_refresh)
 
             # UNIVERSAL ENABLED FIELD BEHAVIOR: Watch for 'enabled' parameter changes and apply styling
             # This works for any form (function parameters, dataclass fields, etc.) that has an 'enabled' parameter
@@ -650,8 +662,10 @@ class ParameterFormManager(QWidget):
 
                     # Apply placeholders to initial widgets immediately for fast visual feedback
                     # These will be refreshed again at the end when all widgets are ready
+                    # CRITICAL: Collect live context even for this early refresh to show unsaved values from open windows
                     with timer(f"        Initial placeholder refresh ({len(sync_params)} widgets)", threshold_ms=5.0):
-                        self._refresh_all_placeholders()
+                        early_live_context = self._collect_live_context_from_other_windows() if self._parent_manager is None else None
+                        self._refresh_all_placeholders(live_context=early_live_context)
 
                 def on_async_complete():
                     """Called when all async widgets are created for THIS manager."""
@@ -677,10 +691,10 @@ class ParameterFormManager(QWidget):
                                 self._apply_all_styling_callbacks()
 
                             # STEP 2: Refresh placeholders for ALL widgets (including initial sync widgets)
-                            with timer(f"  Complete placeholder refresh (all widgets ready)", threshold_ms=10.0):
-                                self._refresh_all_placeholders()
-                            with timer(f"  Nested placeholder refresh (all widgets ready)", threshold_ms=5.0):
-                                self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+                            # CRITICAL: Use _refresh_with_live_context() to collect live values from other open windows
+                            # This ensures new windows immediately show unsaved changes from already-open windows
+                            with timer(f"  Complete placeholder refresh with live context (all widgets ready)", threshold_ms=10.0):
+                                self._refresh_with_live_context()
 
                 # Create remaining widgets asynchronously
                 if async_params:
@@ -707,10 +721,10 @@ class ParameterFormManager(QWidget):
                     self._on_build_complete_callbacks.clear()
 
                 # STEP 2: Refresh placeholders (resolve inherited values)
-                with timer("  Initial placeholder refresh (sync)", threshold_ms=10.0):
-                    self._refresh_all_placeholders()
-                with timer("  Nested placeholder refresh (sync)", threshold_ms=5.0):
-                    self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+                # CRITICAL: Use _refresh_with_live_context() to collect live values from other open windows
+                # This ensures new windows immediately show unsaved changes from already-open windows
+                with timer("  Initial placeholder refresh with live context (sync)", threshold_ms=10.0):
+                    self._refresh_with_live_context()
 
                 # STEP 3: Apply post-placeholder callbacks (enabled styling that needs resolved values)
                 with timer("  Apply post-placeholder callbacks (sync)", threshold_ms=5.0):
@@ -1350,10 +1364,29 @@ class ParameterFormManager(QWidget):
 
             # OPTIMIZATION: Single placeholder refresh at the end instead of per-parameter
             # This is much faster than refreshing after each reset
-            # Use _refresh_all_placeholders directly to avoid cross-window context collection
-            # (reset to defaults doesn't need live context from other windows)
-            self._refresh_all_placeholders()
-            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+            # CRITICAL: Use _refresh_with_live_context() to collect live values from other open windows
+            # Reset should show inherited values from parent contexts, including unsaved changes
+            # CRITICAL: Nested managers must trigger refresh on ROOT manager to collect live context
+            if self._parent_manager is None:
+                self._refresh_with_live_context()
+                # CRITICAL: Also refresh enabled styling for nested managers after reset
+                # This ensures optional dataclass fields respect None/not-None and enabled=True/False states
+                # Example: Reset optional dataclass to None → nested fields should be dimmed
+                self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+                # CRITICAL: Emit context_refreshed signal to trigger cross-window updates
+                # This tells other open windows to refresh their placeholders with the reset values
+                # Example: Reset PipelineConfig → Step editors refresh to show reset inherited values
+                self.context_refreshed.emit(self.object_instance, self.context_obj)
+            else:
+                # Nested manager: trigger refresh on root manager
+                root = self._parent_manager
+                while root._parent_manager is not None:
+                    root = root._parent_manager
+                root._refresh_with_live_context()
+                # CRITICAL: Also refresh enabled styling for root's nested managers
+                root._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
+                # CRITICAL: Emit from root manager to trigger cross-window updates
+                root.context_refreshed.emit(root.object_instance, root.context_obj)
 
 
 
@@ -1413,8 +1446,17 @@ class ParameterFormManager(QWidget):
             # CRITICAL: Manually refresh placeholders BEFORE clearing _in_reset
             # This ensures queued parameter_changed signals don't trigger automatic refresh
             # This matches the behavior of reset_all_parameters() which also refreshes before clearing flag
-            self._refresh_all_placeholders()
-            self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+            # CRITICAL: Use _refresh_with_live_context() to collect live values from other open windows
+            # Reset should show inherited values from parent contexts, including unsaved changes
+            # CRITICAL: Nested managers must trigger refresh on ROOT manager to collect live context
+            if self._parent_manager is None:
+                self._refresh_with_live_context()
+            else:
+                # Nested manager: trigger refresh on root manager
+                root = self._parent_manager
+                while root._parent_manager is not None:
+                    root = root._parent_manager
+                root._refresh_with_live_context()
         finally:
             self._in_reset = False
 
@@ -2432,11 +2474,11 @@ class ParameterFormManager(QWidget):
                 with timer(f"  Apply styling callbacks", threshold_ms=5.0):
                     self._apply_all_styling_callbacks()
 
-                # STEP 2: Refresh placeholders
-                with timer(f"  Complete placeholder refresh (all nested ready)", threshold_ms=10.0):
-                    self._refresh_all_placeholders()
-                with timer(f"  Nested placeholder refresh (all nested ready)", threshold_ms=5.0):
-                    self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders())
+                # STEP 2: Refresh placeholders with live context
+                # CRITICAL: Use _refresh_with_live_context() to collect live values from other open windows
+                # This ensures new windows show unsaved changes from already-open windows
+                with timer(f"  Complete placeholder refresh with live context (all nested ready)", threshold_ms=10.0):
+                    self._refresh_with_live_context()
 
                 # STEP 2.5: Apply post-placeholder callbacks (enabled styling that needs resolved values)
                 with timer(f"  Apply post-placeholder callbacks (async)", threshold_ms=5.0):
@@ -2630,8 +2672,10 @@ class ParameterFormManager(QWidget):
         if not self._is_affected_by_context_change(editing_object, context_object):
             return
 
-        # Debounce the refresh to avoid excessive updates
-        self._schedule_cross_window_refresh()
+        # CRITICAL: Don't emit signal when refreshing due to another window's refresh
+        # This prevents infinite ping-pong loops between windows
+        # Example: GlobalPipelineConfig refresh → PipelineConfig refresh (no signal) → stops
+        self._schedule_cross_window_refresh(emit_signal=False)
 
     def _is_affected_by_context_change(self, editing_object: object, context_object: object) -> bool:
         """Determine if a context change from another window affects this form.
@@ -2662,8 +2706,14 @@ class ParameterFormManager(QWidget):
         # Step changes don't affect other windows (leaf node)
         return False
 
-    def _schedule_cross_window_refresh(self):
-        """Schedule a debounced placeholder refresh for cross-window updates."""
+    def _schedule_cross_window_refresh(self, emit_signal: bool = True):
+        """Schedule a debounced placeholder refresh for cross-window updates.
+
+        Args:
+            emit_signal: Whether to emit context_refreshed signal after refresh.
+                        Set to False when refresh is triggered by another window's
+                        context_refreshed to prevent infinite ping-pong loops.
+        """
         from PyQt6.QtCore import QTimer
 
         # Cancel existing timer if any
@@ -2673,7 +2723,7 @@ class ParameterFormManager(QWidget):
         # Schedule new refresh after 200ms delay (debounce)
         self._cross_window_refresh_timer = QTimer()
         self._cross_window_refresh_timer.setSingleShot(True)
-        self._cross_window_refresh_timer.timeout.connect(self._do_cross_window_refresh)
+        self._cross_window_refresh_timer.timeout.connect(lambda: self._do_cross_window_refresh(emit_signal=emit_signal))
         self._cross_window_refresh_timer.start(200)  # 200ms debounce
 
     def _find_live_values_for_type(self, ctx_type: type, live_context: dict) -> dict:
@@ -2734,9 +2784,11 @@ class ParameterFormManager(QWidget):
         logger = logging.getLogger(__name__)
 
         live_context = {}
+        alias_context = {}
         my_type = type(self.object_instance)
 
         logger.info(f"🔍 COLLECT_CONTEXT: {self.field_id} (id={id(self)}) collecting from {len(self._active_form_managers)} managers")
+        logger.info(f"🔍 COLLECT_CONTEXT: my_type={my_type.__name__}, scope_id={self.scope_id}")
 
         for manager in self._active_form_managers:
             if manager is not self:
@@ -2746,12 +2798,14 @@ class ParameterFormManager(QWidget):
                 if manager.scope_id is not None and self.scope_id is not None and manager.scope_id != self.scope_id:
                     continue  # Different orchestrator - skip
 
-                logger.info(f"🔍 COLLECT_CONTEXT: Calling get_user_modified_values() on {manager.field_id} (id={id(manager)})")
+                logger.info(f"🔍 COLLECT_CONTEXT: Checking manager {manager.field_id} (id={id(manager)}), type={type(manager.object_instance).__name__}, scope_id={manager.scope_id}")
 
                 # CRITICAL: Get only user-modified (concrete, non-None) values
                 # This preserves inheritance hierarchy: None values don't override parent values
                 live_values = manager.get_user_modified_values()
                 obj_type = type(manager.object_instance)
+
+                logger.info(f"🔍 COLLECT_CONTEXT: Got {len(live_values)} live values from {manager.field_id}: {list(live_values.keys())}")
 
                 # CRITICAL: Only skip if this is EXACTLY the same type as us
                 # E.g., PipelineConfig editor should not use live values from another PipelineConfig editor
@@ -2769,17 +2823,29 @@ class ParameterFormManager(QWidget):
                 # If this is a lazy type, also map by its base type
                 base_type = get_base_type_for_lazy(obj_type)
                 if base_type and base_type != obj_type:
-                    live_context[base_type] = live_values
+                    alias_context.setdefault(base_type, live_values)
 
                 # If this is a base type, also map by its lazy type
                 lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
                 if lazy_type and lazy_type != obj_type:
-                    live_context[lazy_type] = live_values
+                    alias_context.setdefault(lazy_type, live_values)
 
+        # Apply alias mappings only where no direct mapping exists
+        for alias_type, values in alias_context.items():
+            if alias_type not in live_context:
+                live_context[alias_type] = values
+
+        logger.info(f"🔍 COLLECT_CONTEXT: Collected live context with {len(live_context)} types: {[t.__name__ for t in live_context.keys()]}")
         return live_context
 
-    def _do_cross_window_refresh(self):
-        """Actually perform the cross-window placeholder refresh using live values from other windows."""
+    def _do_cross_window_refresh(self, emit_signal: bool = True):
+        """Actually perform the cross-window placeholder refresh using live values from other windows.
+
+        Args:
+            emit_signal: Whether to emit context_refreshed signal after refresh.
+                        Set to False when refresh is triggered by another window's
+                        context_refreshed to prevent infinite ping-pong loops.
+        """
         # Collect live context values from other open windows
         live_context = self._collect_live_context_from_other_windows()
 
@@ -2792,8 +2858,12 @@ class ParameterFormManager(QWidget):
         # Example: User changes napari_streaming_config.enabled in one window, other windows update styling
         self._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
 
-        # CRITICAL: Emit context_refreshed signal to cascade the refresh downstream
-        # This allows Step editors to know that PipelineConfig's effective context changed
-        # even though no actual field values were modified (only placeholders updated)
-        # Example: GlobalPipelineConfig change → PipelineConfig placeholders update → Step editor needs to refresh
-        self.context_refreshed.emit(self.object_instance, self.context_obj)
+        # CRITICAL: Only emit context_refreshed signal if requested
+        # When emit_signal=False, this refresh was triggered by another window's context_refreshed,
+        # so we don't emit to prevent infinite ping-pong loops between windows
+        # Example: GlobalPipelineConfig value change → emits signal → PipelineConfig refreshes (no emit) → stops
+        if emit_signal:
+            # This allows Step editors to know that PipelineConfig's effective context changed
+            # even though no actual field values were modified (only placeholders updated)
+            # Example: GlobalPipelineConfig change → PipelineConfig placeholders update → Step editor needs to refresh
+            self.context_refreshed.emit(self.object_instance, self.context_obj)

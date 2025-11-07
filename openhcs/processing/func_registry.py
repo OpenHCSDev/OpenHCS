@@ -495,8 +495,10 @@ def _register_function(func: Callable, registry_name: str) -> None:
     setattr(func, "registry", registry_name)
 
     logger.debug(
-        "Registered function '%s' for memory type '%s'",
-        func.__name__, memory_type
+        "Registered function '%s' in registry '%s' (input=%s output=%s)",
+        func.__name__, registry_name,
+        getattr(func, 'input_memory_type', '<unknown>'),
+        getattr(func, 'output_memory_type', '<unknown>')
     )
 
 

@@ -444,7 +444,7 @@ class StepMaterializationConfig(StepWellFilterConfig, PathPlanningConfig):
     sub_dir: str = "checkpoints"
     """Subdirectory for materialized outputs (different from global 'images')."""
 
-    enabled: bool = True
+    enabled: bool = False
     """Whether this materialization config is enabled. When False, config exists but materialization is disabled."""
 
 
@@ -467,7 +467,7 @@ class StreamingDefaults(StepWellFilterConfig):
     transport_mode: TransportMode = _DEFAULT_TRANSPORT_MODE
     """ZMQ transport mode: Platform-aware default (TCP on Windows, IPC on Unix/Mac)."""
 
-    enabled: bool = True
+    enabled: bool = False
     """Whether this streaming config is enabled. When False, config exists but streaming is disabled."""
 
 @global_pipeline_config(ui_hidden=True)

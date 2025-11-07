@@ -29,7 +29,7 @@ from openhcs.constants.constants import VariableComponents, GroupBy, get_default
 from openhcs.constants.input_source import InputSource
 
 # Import LazyStepMaterializationConfig for type hints
-from openhcs.core.config import LazyStepMaterializationConfig, LazyStreamingDefaults
+from openhcs.core.config import LazyStepMaterializationConfig, LazyStreamingDefaults, LazyNapariStreamingConfig, LazyFijiStreamingConfig
 from openhcs.core.config import LazyStepWellFilterConfig
 from openhcs.core.config import LazyProcessingConfig
 
@@ -127,10 +127,10 @@ class AbstractStep(abc.ABC, ContextProvider):
         #step_materialization_config: Optional['LazyStepMaterializationConfig'] = None,
         #napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
         #fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
-        step_materialization_config: Optional['LazyStepMaterializationConfig'] = None,
-        #streaming_defaults: 'LazyStreamingDefaults' = LazyStreamingDefaults(),
-        napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
-        fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
+        step_materialization_config: 'LazyStepMaterializationConfig' = None,
+        streaming_defaults: 'LazyStreamingDefaults' = LazyStreamingDefaults(),
+        napari_streaming_config: 'LazyNapariStreamingConfig' = None,
+        fiji_streaming_config: 'LazyFijiStreamingConfig' = None,
     ) -> None:
         """
         Initialize a step. These attributes are primarily used during the
@@ -160,6 +160,7 @@ class AbstractStep(abc.ABC, ContextProvider):
         self.processing_config = processing_config
         self.step_well_filter_config = step_well_filter_config
         self.step_materialization_config = step_materialization_config
+        self.streaming_defaults = streaming_defaults
         self.napari_streaming_config = napari_streaming_config
         self.fiji_streaming_config = fiji_streaming_config
 
