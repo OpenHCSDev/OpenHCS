@@ -26,6 +26,14 @@ Context Behavior Application
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._apply_context_behavior` decides whether to show placeholder text. If the value is None and we're in a lazy dataclass context, it calls the placeholder resolution system. If the value is not None, it clears any existing placeholder state. This creates the dynamic "Pipeline default: X" behavior.
 
+Rendering Optimizations
+~~~~~~~~~~~~~~~~~~~~~~~
+Several recent improvements keep typing responsive even with large forms:
+
+* :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._store_parameter_value` mirrors each edit into an in-memory cache so :py:meth:`get_current_values` no longer rereads every widget.
+* ``_placeholder_candidates`` tracks only the parameters that currently resolve to ``None``. Placeholder refreshes iterate over this set instead of the entire form.
+* Each widget stores a ``placeholder_signature`` (see :mod:`openhcs.pyqt_gui.widgets.shared.widget_strategies`) so placeholders that have not changed are skipped entirely, avoiding redundant repaints.
+
 Parameter Change Propagation
 ----------------------------
 Changes flow from widgets through internal state to context synchronization.
@@ -68,6 +76,14 @@ Live Context Collection
 ~~~~~~~~~~~~~~~~~~~~~~~~
 :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._collect_live_context_from_other_windows` gathers current user-modified values from all active form managers. When a user types in one window, other windows immediately see the updated value in their placeholders. This creates a live preview system where configuration changes are visible before saving.
 
+Live Context Snapshots
+~~~~~~~~~~~~~~~~~~~~~~
+:py:class:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.LiveContextSnapshot` wraps the collected values together with a monotonically increasing ``token``. As long as the token remains unchanged, :py:meth:`_build_context_stack` reuses cached GlobalPipelineConfig and PipelineConfig overlays instead of rebuilding them on every keystroke.
+
+Async Placeholder Resolution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Once the initial load completes, :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._schedule_async_placeholder_refresh` offloads placeholder work to :class:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager._PlaceholderRefreshTask`. The worker receives the parameter snapshot, the ``_placeholder_candidates`` list, and the current :class:`LiveContextSnapshot`, resolves placeholders off the UI thread, then emits the results back to the main thread for application. This keeps the UI responsive even when dozens of placeholders participate.
+
 Active Manager Registry
 ~~~~~~~~~~~~~~~~~~~~~~~~
 :py:attr:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._active_form_managers` maintains a class-level list of all active form manager instances. When a form manager is created, it registers itself in this list. When a dialog closes, it must unregister to prevent ghost references that cause infinite refresh loops.
@@ -75,6 +91,10 @@ Active Manager Registry
 Signal-Based Synchronization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Form managers emit :py:attr:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.context_value_changed` and :py:attr:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.context_refreshed` signals when values change. Other active managers listen to these signals and refresh their placeholders accordingly. This creates a reactive system where all windows stay synchronized.
+
+Cross-Window Debounce
+~~~~~~~~~~~~~~~~~~~~~
+:py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._schedule_cross_window_refresh` debounces placeholder refreshes with :pyattr:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.CROSS_WINDOW_REFRESH_DELAY_MS` (currently 60 ms). Multiple rapid edits are coalesced into a single refresh burst without sacrificing the “live preview” feel.
 
 Dialog Lifecycle Management
 ----------------------------
