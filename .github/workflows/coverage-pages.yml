@@ -38,12 +38,60 @@ jobs:
           python -m pip install --upgrade pip
           pip install coverage[toml] genbadge[coverage]
 
-      - name: Download all coverage artifacts
-        uses: actions/download-artifact@v4
+      - name: Download all coverage artifacts from triggering workflow
+        uses: actions/github-script@v7
         with:
-          pattern: coverage-*
-          path: coverage-reports/
-          merge-multiple: false
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Get all artifacts from the triggering workflow run
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id,
+            });
+
+            console.log(`Found ${artifacts.data.artifacts.length} artifacts`);
+
+            // Create coverage-reports directory
+            const coverageDir = 'coverage-reports';
+            if (!fs.existsSync(coverageDir)) {
+              fs.mkdirSync(coverageDir, { recursive: true });
+            }
+
+            // Download each coverage artifact
+            for (const artifact of artifacts.data.artifacts) {
+              if (artifact.name.startsWith('coverage-')) {
+                console.log(`Downloading artifact: ${artifact.name}`);
+
+                const download = await github.rest.actions.downloadArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id,
+                  archive_format: 'zip',
+                });
+
+                // Save the zip file
+                const zipPath = path.join(coverageDir, `${artifact.name}.zip`);
+                fs.writeFileSync(zipPath, Buffer.from(download.data));
+
+                // Unzip the artifact
+                const artifactDir = path.join(coverageDir, artifact.name);
+                if (!fs.existsSync(artifactDir)) {
+                  fs.mkdirSync(artifactDir, { recursive: true });
+                }
+
+                // Use unzip command to extract
+                const { execSync } = require('child_process');
+                execSync(`unzip -q "${zipPath}" -d "${artifactDir}"`);
+
+                // Remove the zip file
+                fs.unlinkSync(zipPath);
+
+                console.log(`Extracted ${artifact.name} to ${artifactDir}`);
+              }
+            }
 
       - name: Combine coverage reports
         run: |
