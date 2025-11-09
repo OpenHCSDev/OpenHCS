@@ -9,31 +9,58 @@ import dataclasses
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Type, Optional, Tuple
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton, QLineEdit, QCheckBox, QComboBox, QGroupBox
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton,
+    QLineEdit, QCheckBox, QComboBox, QGroupBox, QSpinBox, QDoubleSpinBox
+)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QObject, QRunnable, QThreadPool
 import weakref
 
 # Performance monitoring
 from openhcs.utils.performance_monitor import timer, get_monitor
 
-# SIMPLIFIED: Removed thread-local imports - dual-axis resolver handles context automatically
-# Mathematical simplification: Shared dispatch tables to eliminate duplication
+# Type-based dispatch tables - NO duck typing, explicit type checks only
+# Import all widget types needed for dispatch
+from openhcs.pyqt_gui.widgets.shared.checkbox_group_widget import CheckboxGroupWidget
+from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
+from openhcs.pyqt_gui.widgets.enhanced_path_widget import EnhancedPathWidget
+
+# Forward reference for NoneAwareIntEdit and NoneAwareLineEdit (defined below in this file)
+# These will be resolved at runtime when the dispatch is actually used
+
 WIDGET_UPDATE_DISPATCH = [
     (QComboBox, 'update_combo_box'),
-    ('get_selected_values', 'update_checkbox_group'),
-    ('set_value', lambda w, v: w.set_value(v)),  # Handles NoneAwareCheckBox, NoneAwareIntEdit, etc.
-    ('setValue', lambda w, v: w.setValue(v if v is not None else w.minimum())),  # CRITICAL FIX: Set to minimum for None values to enable placeholder
-    ('setText', lambda w, v: v is not None and w.setText(str(v)) or (v is None and w.clear())),  # CRITICAL FIX: Handle None values by clearing
-    ('set_path', lambda w, v: w.set_path(v)),  # EnhancedPathWidget support
+    (CheckboxGroupWidget, 'update_checkbox_group'),
+    # NoneAware widgets with set_value() method - checked by type, not duck typing
+    # Note: NoneAwareIntEdit and NoneAwareLineEdit are defined later in this file
+    ('NoneAwareCheckBox', lambda w, v: w.set_value(v)),
+    ('NoneAwareIntEdit', lambda w, v: w.set_value(v)),
+    ('NoneAwareLineEdit', lambda w, v: w.set_value(v)),
+    (EnhancedPathWidget, lambda w, v: w.set_path(v)),
+    # Qt built-in widgets with setValue() method
+    (QSpinBox, lambda w, v: w.setValue(v if v is not None else w.minimum())),
+    (QDoubleSpinBox, lambda w, v: w.setValue(v if v is not None else w.minimum())),
+    (NoScrollSpinBox, lambda w, v: w.setValue(v if v is not None else w.minimum())),
+    (NoScrollDoubleSpinBox, lambda w, v: w.setValue(v if v is not None else w.minimum())),
+    # Qt built-in widgets with setText() method
+    (QLineEdit, lambda w, v: v is not None and w.setText(str(v)) or (v is None and w.clear())),
 ]
 
 WIDGET_GET_DISPATCH = [
     (QComboBox, lambda w: w.itemData(w.currentIndex()) if w.currentIndex() >= 0 else None),
-    ('get_selected_values', lambda w: w.get_selected_values()),
-    ('get_value', lambda w: w.get_value()),  # Handles NoneAwareCheckBox, NoneAwareIntEdit, etc.
-    ('value', lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
-    ('get_path', lambda w: w.get_path()),  # EnhancedPathWidget support
-    ('text', lambda w: w.text())
+    (CheckboxGroupWidget, lambda w: w.get_selected_values()),
+    # NoneAware widgets with get_value() method - checked by type, not duck typing
+    ('NoneAwareCheckBox', lambda w: w.get_value()),
+    ('NoneAwareIntEdit', lambda w: w.get_value()),
+    ('NoneAwareLineEdit', lambda w: w.get_value()),
+    (EnhancedPathWidget, lambda w: w.get_path()),
+    # Qt built-in spinboxes with value() method and placeholder support
+    (QSpinBox, lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
+    (QDoubleSpinBox, lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
+    (NoScrollSpinBox, lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
+    (NoScrollDoubleSpinBox, lambda w: None if (hasattr(w, 'specialValueText') and w.value() == w.minimum() and w.specialValueText()) else w.value()),
+    # Qt built-in QLineEdit with text() method
+    (QLineEdit, lambda w: w.text()),
 ]
 
 logger = logging.getLogger(__name__)
@@ -52,9 +79,7 @@ from .layout_constants import CURRENT_LAYOUT
 
 # SINGLE SOURCE OF TRUTH: All input widget types that can receive styling (dimming, etc.)
 # This includes all widgets created by the widget creation registry
-from PyQt6.QtWidgets import QLineEdit, QComboBox, QPushButton, QCheckBox, QLabel, QSpinBox, QDoubleSpinBox
-from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox
-from openhcs.pyqt_gui.widgets.enhanced_path_widget import EnhancedPathWidget
+# All widget types already imported above for dispatch tables
 
 # Tuple of all input widget types for findChildren() calls
 ALL_INPUT_WIDGET_TYPES = (
@@ -1312,14 +1337,21 @@ class ParameterFormManager(QWidget):
             self._apply_context_behavior(widget, value, param_name, exclude_field)
 
     def _dispatch_widget_update(self, widget: QWidget, value: Any) -> None:
-        """Algebraic simplification: Single dispatch logic for all widget updates."""
+        """Type-based dispatch for widget updates - NO duck typing."""
         for matcher, updater in WIDGET_UPDATE_DISPATCH:
-            if isinstance(widget, matcher) if isinstance(matcher, type) else hasattr(widget, matcher):
-                if isinstance(updater, str):
-                    getattr(self, f'_{updater}')(widget, value)
-                else:
+            # Type-based matching only
+            if isinstance(matcher, type):
+                if isinstance(widget, matcher):
+                    if isinstance(updater, str):
+                        getattr(self, f'_{updater}')(widget, value)
+                    else:
+                        updater(widget, value)
+                    return
+            elif isinstance(matcher, str):
+                # Forward reference to class defined later in this file
+                if type(widget).__name__ == matcher:
                     updater(widget, value)
-                return
+                    return
 
     def _clear_widget_to_default_state(self, widget: QWidget) -> None:
         """Clear widget to its default/empty state for reset operations."""
@@ -1403,15 +1435,21 @@ class ParameterFormManager(QWidget):
 
 
     def get_widget_value(self, widget: QWidget) -> Any:
-        """Mathematical simplification: Unified widget value extraction using shared dispatch."""
+        """Type-based dispatch for widget value extraction - NO duck typing."""
         # CRITICAL: Check if widget is in placeholder state first
         # If it's showing a placeholder, the actual parameter value is None
         if widget.property("is_placeholder_state"):
             return None
 
         for matcher, extractor in WIDGET_GET_DISPATCH:
-            if isinstance(widget, matcher) if isinstance(matcher, type) else hasattr(widget, matcher):
-                return extractor(widget)
+            # Type-based matching only
+            if isinstance(matcher, type):
+                if isinstance(widget, matcher):
+                    return extractor(widget)
+            elif isinstance(matcher, str):
+                # Forward reference to class defined later in this file
+                if type(widget).__name__ == matcher:
+                    return extractor(widget)
         return None
 
     # Framework-specific methods for backward compatibility
@@ -1542,7 +1580,7 @@ class ParameterFormManager(QWidget):
 
         # Function parameters reset to static defaults from param_defaults
         if self._is_function_parameter(param_name):
-            reset_value = self.param_defaults.get(param_name) if hasattr(self, 'param_defaults') else None
+            reset_value = self.param_defaults.get(param_name)
             self._store_parameter_value(param_name, reset_value)
 
             if param_name in self.widgets:
@@ -1836,7 +1874,8 @@ class ParameterFormManager(QWidget):
                         try:
                             live_instance = self._get_cached_parent_context(ctx, live_context_token, live_context)
                             stack.enter_context(config_context(live_instance))
-                        except:
+                        except Exception as e:
+                            logger.warning(f"Failed to apply live parent context for {type(ctx).__name__}: {e}")
                             stack.enter_context(config_context(ctx))
                     else:
                         stack.enter_context(config_context(ctx))

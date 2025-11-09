@@ -335,72 +335,12 @@ class MagicGuiWidgetFactory:
     def _create_checkbox_group_widget(self, param_name: str, param_type: Type, current_value: Any):
         """Create multi-selection checkbox group for List[Enum] parameters.
 
-        Uses NoneAwareCheckBox pattern consistently with bool parameters:
-        - Initialize all checkboxes with set_value(None) for placeholder state
-        - Use set_value() instead of setChecked() to properly track placeholder state
-        - Use get_value() in get_selected_values() to distinguish placeholder vs concrete
+        Uses CheckboxGroupWidget class for explicit type-based dispatch.
         """
-        from openhcs.pyqt_gui.widgets.shared.no_scroll_spinbox import NoneAwareCheckBox
+        from openhcs.pyqt_gui.widgets.shared.checkbox_group_widget import CheckboxGroupWidget
 
         enum_type = get_enum_from_list(param_type)
-        widget = QGroupBox(param_name.replace('_', ' ').title())
-        layout = QVBoxLayout(widget)
-
-        # Store checkboxes for value retrieval
-        widget._checkboxes = {}
-
-        for enum_value in enum_type:
-            checkbox = NoneAwareCheckBox()
-            checkbox.setText(enum_value.value)
-            checkbox.setObjectName(f"{param_name}_{enum_value.value}")
-            widget._checkboxes[enum_value] = checkbox
-            layout.addWidget(checkbox)
-
-        # Set current values using set_value() to properly handle None/placeholder state
-        if current_value is None:
-            # None means inherit from parent - initialize all checkboxes in placeholder state
-            for checkbox in widget._checkboxes.values():
-                checkbox.set_value(None)
-        elif isinstance(current_value, list):
-            # Explicit list - set concrete values
-            for enum_value, checkbox in widget._checkboxes.items():
-                # Set to True if in list, False if not (both are concrete values)
-                checkbox.set_value(enum_value in current_value)
-        else:
-            # Fallback: treat as None (placeholder state)
-            for checkbox in widget._checkboxes.values():
-                checkbox.set_value(None)
-
-        # Add method to get selected values using get_value() pattern
-        def get_selected_values():
-            """Get selected enum values, returning None if all checkboxes are in placeholder state.
-
-            Treats List[Enum] like a list of independent bools:
-            - If ALL checkboxes are in placeholder state → return None (inherit from parent)
-            - If ANY checkbox has been clicked → ALL become concrete, return list of checked items
-
-            Note: The signal handler ensures that clicking ANY checkbox converts ALL to concrete,
-            so we should never have a mixed state (some placeholder, some concrete).
-            """
-            # Check if any checkbox has a concrete value (not placeholder)
-            has_concrete_value = any(
-                checkbox.get_value() is not None
-                for checkbox in widget._checkboxes.values()
-            )
-
-            if not has_concrete_value:
-                # All checkboxes are in placeholder state - return None to inherit from parent
-                return None
-
-            # All checkboxes are concrete (signal handler converted them)
-            # Return list of enum values where checkbox is checked
-            return [
-                enum_val for enum_val, checkbox in widget._checkboxes.items()
-                if checkbox.get_value() == True
-            ]
-        widget.get_selected_values = get_selected_values
-
-        return widget
+        return CheckboxGroupWidget(param_name, enum_type, current_value)
 
 
 # Registry pattern removed - use create_pyqt6_widget from widget_creation_registry.py instead
@@ -906,7 +846,9 @@ class PyQt6WidgetEnhancer:
         - When user clicks ANY checkbox, ALL checkboxes convert from placeholder to concrete
         - This ensures the entire list becomes concrete once the user starts editing
         """
-        if hasattr(widget, '_checkboxes'):
+        from openhcs.pyqt_gui.widgets.shared.checkbox_group_widget import CheckboxGroupWidget
+
+        if isinstance(widget, CheckboxGroupWidget):
             # Connect to each checkbox's stateChanged signal
             for checkbox in widget._checkboxes.values():
                 def make_handler(cb):
@@ -932,9 +874,11 @@ class PyQt6WidgetEnhancer:
 
     @staticmethod
     def _clear_placeholder_state(widget: Any) -> None:
-        """Clear placeholder state using functional approach."""
+        """Clear placeholder state using type-based dispatch."""
+        from openhcs.pyqt_gui.widgets.shared.checkbox_group_widget import CheckboxGroupWidget
+
         # Handle checkbox groups by clearing each checkbox's placeholder state
-        if hasattr(widget, '_checkboxes'):
+        if isinstance(widget, CheckboxGroupWidget):
             for checkbox in widget._checkboxes.values():
                 if checkbox.property("is_placeholder_state"):
                     checkbox.setStyleSheet("")
