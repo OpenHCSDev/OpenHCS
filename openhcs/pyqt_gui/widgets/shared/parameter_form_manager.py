@@ -1483,7 +1483,7 @@ class ParameterFormManager(QWidget):
 
             # Update corresponding widget if it exists
             if param_name in self.widgets:
-                self.update_widget_value(self.widgets[param_name], converted_value)
+                self.update_widget_value(self.widgets[param_name], converted_value, param_name=param_name)
 
             # Emit signal for PyQt6 compatibility
             # This will trigger both local placeholder refresh AND cross-window updates (via _emit_cross_window_change)
@@ -1612,6 +1612,8 @@ class ParameterFormManager(QWidget):
         # Generic config field reset - use context-aware reset value
         reset_value = self._get_reset_value(param_name)
         self._store_parameter_value(param_name, reset_value)
+        if param_name in self._user_set_fields:
+            self._user_set_fields.discard(param_name)
 
         # Track reset fields only for lazy behavior (when reset_value is None)
         if reset_value is None:
@@ -1649,6 +1651,10 @@ class ParameterFormManager(QWidget):
 
         # Emit parameter change to notify other components
         self.parameter_changed.emit(param_name, reset_value)
+
+        # For root managers (especially GlobalPipelineConfig), ensure cross-window context updates immediately
+        if self._parent_manager is None:
+            self._schedule_cross_window_refresh()
 
     def _get_reset_value(self, param_name: str) -> Any:
         """Get reset value based on editing context.
@@ -2651,7 +2657,9 @@ class ParameterFormManager(QWidget):
 
     def _on_parameter_changed_root(self, param_name: str, value: Any) -> None:
         """Debounce placeholder refreshes originating from this root manager."""
-        if getattr(self, '_in_reset', False) or param_name == 'enabled':
+        if (getattr(self, '_in_reset', False) or
+                getattr(self, '_block_cross_window_updates', False) or
+                param_name == 'enabled'):
             return
         if self._pending_debounced_exclude_param is None:
             self._pending_debounced_exclude_param = param_name
@@ -2665,7 +2673,9 @@ class ParameterFormManager(QWidget):
 
     def _on_parameter_changed_nested(self, param_name: str, value: Any) -> None:
         """Bubble refresh requests from nested managers up to the root with debounce."""
-        if getattr(self, '_in_reset', False) or param_name == 'enabled':
+        if (getattr(self, '_in_reset', False) or
+                getattr(self, '_block_cross_window_updates', False) or
+                param_name == 'enabled'):
             return
         root = self
         while root._parent_manager is not None:

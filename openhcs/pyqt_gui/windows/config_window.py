@@ -7,6 +7,7 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 
 import logging
 import dataclasses
+import copy
 from typing import Type, Any, Callable, Optional
 
 from PyQt6.QtWidgets import (
@@ -25,6 +26,7 @@ from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
 from openhcs.core.config import GlobalPipelineConfig
+from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 # ❌ REMOVED: require_config_context decorator - enhanced decorator events system handles context automatically
 from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
 
@@ -73,9 +75,13 @@ class ConfigWindow(BaseFormDialog):
         self.current_config = current_config
         self.on_save_callback = on_save_callback
         self.scope_id = scope_id  # Store scope_id for passing to form_manager
+        self._global_context_dirty = False
+        self._original_global_config_snapshot = None
 
         # Flag to prevent refresh during save operation
         self._saving = False
+        self._suppress_global_context_sync = False
+        self._needs_global_context_resync = False
 
         # Initialize color scheme and style generator
         self.color_scheme = color_scheme or PyQt6ColorScheme()
@@ -110,6 +116,10 @@ class ConfigWindow(BaseFormDialog):
             context_obj=None,  # Inherit from thread-local GlobalPipelineConfig only
             scope_id=self.scope_id  # Pass scope_id to limit cross-window updates to same orchestrator
         )
+
+        if self.config_class == GlobalPipelineConfig:
+            self._original_global_config_snapshot = copy.deepcopy(current_config)
+            self.form_manager.parameter_changed.connect(self._on_global_config_field_changed)
 
         # No config_editor needed - everything goes through form_manager
         self.config_editor = None
@@ -409,6 +419,10 @@ class ConfigWindow(BaseFormDialog):
                 self._saving = False
                 logger.info(f"🔍 SAVE_CONFIG: Reset _saving=False (id={id(self)})")
 
+            if self.config_class == GlobalPipelineConfig:
+                self._original_global_config_snapshot = copy.deepcopy(new_config)
+                self._global_context_dirty = False
+
             if close_window:
                 self.accept()
 
@@ -417,51 +431,6 @@ class ConfigWindow(BaseFormDialog):
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Save Error", f"Failed to save configuration:\n{e}")
     
-
-    def _patch_lazy_constructors(self):
-        """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
-        from contextlib import contextmanager
-        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-        from openhcs.config_framework.lazy_factory import _lazy_type_registry
-        import dataclasses
-
-        @contextmanager
-        def patch_context():
-            original_constructors = {}
-
-            # FIXED: Dynamically discover all lazy types from registry instead of hardcoding
-            # This ensures we patch ALL lazy types, including future additions
-            for lazy_type in _lazy_type_registry.keys():
-                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
-                    # Store original constructor
-                    original_constructors[lazy_type] = lazy_type.__init__
-
-                    # Create patched constructor that uses raw values
-                    def create_patched_init(original_init, dataclass_type):
-                        def patched_init(self, **kwargs):
-                            # Use raw value approach instead of calling original constructor
-                            # This prevents lazy resolution during code execution
-                            for field in dataclasses.fields(dataclass_type):
-                                value = kwargs.get(field.name, None)
-                                object.__setattr__(self, field.name, value)
-
-                            # Initialize any required lazy dataclass attributes
-                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
-                                object.__setattr__(self, '_is_lazy_dataclass', True)
-
-                        return patched_init
-
-                    # Apply the patch
-                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
-
-            try:
-                yield
-            finally:
-                # Restore original constructors
-                for lazy_type, original_init in original_constructors.items():
-                    lazy_type.__init__ = original_init
-
-        return patch_context()
 
     def _view_code(self):
         """Open code editor to view/edit the configuration as Python code."""
@@ -506,12 +475,16 @@ class ConfigWindow(BaseFormDialog):
         try:
             # CRITICAL: Parse the code to extract explicitly specified fields
             # This prevents overwriting None values for unspecified fields
-            explicitly_set_fields = self._extract_explicitly_set_fields(edited_code)
+            explicitly_set_fields = CodeEditorFormUpdater.extract_explicitly_set_fields(
+                edited_code,
+                class_name=self.config_class.__name__,
+                variable_name='config'
+            )
 
             namespace = {}
 
             # CRITICAL FIX: Use lazy constructor patching
-            with self._patch_lazy_constructors():
+            with CodeEditorFormUpdater.patch_lazy_constructors():
                 exec(edited_code, namespace)
 
             new_config = namespace.get('config')
@@ -529,17 +502,31 @@ class ConfigWindow(BaseFormDialog):
             from openhcs.config_framework.global_config import set_global_config_for_editing
             from openhcs.core.config import GlobalPipelineConfig
 
-            if self.config_class == GlobalPipelineConfig:
-                # For GlobalPipelineConfig: Update thread-local context
-                # This ensures all lazy resolution uses the new config
-                set_global_config_for_editing(GlobalPipelineConfig, new_config)
-                logger.debug("Updated thread-local GlobalPipelineConfig context")
-            # For PipelineConfig: No context update needed here
-            # The orchestrator.apply_pipeline_config() happens in the save callback
-            # Code edits just update the form, actual application happens on Save
+            # Temporarily suppress per-field sync during code-mode bulk update
+            suppress_context = (self.config_class == GlobalPipelineConfig)
+            if suppress_context:
+                self._suppress_global_context_sync = True
+                self._needs_global_context_resync = False
 
-            # Update form values from the new config without rebuilding
-            self._update_form_from_config(new_config, explicitly_set_fields)
+            try:
+                if self.config_class == GlobalPipelineConfig:
+                    # For GlobalPipelineConfig: Update thread-local context immediately
+                    set_global_config_for_editing(GlobalPipelineConfig, new_config)
+                    logger.debug("Updated thread-local GlobalPipelineConfig context")
+                    self._global_context_dirty = True
+                # For PipelineConfig: No context update needed here
+                # The orchestrator.apply_pipeline_config() happens in the save callback
+                # Code edits just update the form, actual application happens on Save
+
+                # Update form values from the new config without rebuilding
+                self._update_form_from_config(new_config, explicitly_set_fields)
+
+                if suppress_context:
+                    self._sync_global_context_with_current_values()
+            finally:
+                if suppress_context:
+                    self._suppress_global_context_sync = False
+                    self._needs_global_context_resync = False
 
             logger.info("Updated config from edited code")
 
@@ -548,111 +535,61 @@ class ConfigWindow(BaseFormDialog):
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Code Edit Error", f"Failed to apply edited code:\n{e}")
 
-    def _extract_explicitly_set_fields(self, code: str) -> set:
-        """
-        Parse code to extract which fields were explicitly set.
+    def _on_global_config_field_changed(self, param_name: str, value: Any):
+        """Keep thread-local global config context in sync with live edits."""
+        if self._saving:
+            return
+        if self._suppress_global_context_sync:
+            self._needs_global_context_resync = True
+            return
+        self._sync_global_context_with_current_values(param_name)
 
-        Returns a set of field names that appear in the config constructor call.
-        For nested fields, uses dot notation like 'zarr_config.chunk_size'.
-        """
-        import re
-
-        # Find the config = ClassName(...) pattern
-        # Match the class name and capture everything inside parentheses
-        pattern = rf'config\s*=\s*{self.config_class.__name__}\s*\((.*?)\)\s*$'
-        match = re.search(pattern, code, re.DOTALL | re.MULTILINE)
-
-        if not match:
-            return set()
-
-        constructor_args = match.group(1)
-
-        # Extract field names (simple pattern: field_name=...)
-        # This handles both simple fields and nested dataclass fields
-        field_pattern = r'(\w+)\s*='
-        fields_found = set(re.findall(field_pattern, constructor_args))
-
-        logger.debug(f"Explicitly set fields from code: {fields_found}")
-        return fields_found
+    def _sync_global_context_with_current_values(self, source_param: str = None):
+        """Rebuild global context from current form values once."""
+        if self.config_class != GlobalPipelineConfig:
+            return
+        try:
+            current_values = self.form_manager.get_current_values()
+            updated_config = self.config_class(**current_values)
+            self.current_config = updated_config
+            from openhcs.config_framework.global_config import set_global_config_for_editing
+            set_global_config_for_editing(self.config_class, updated_config)
+            self._global_context_dirty = True
+            ParameterFormManager.trigger_global_cross_window_refresh()
+            if source_param:
+                logger.debug("Synchronized GlobalPipelineConfig context after change (%s)", source_param)
+        except Exception as exc:
+            logger.warning("Failed to sync global context%s: %s",
+                           f' ({source_param})' if source_param else '', exc)
 
     def _update_form_from_config(self, new_config, explicitly_set_fields: set):
-        """Update form values from new config without rebuilding the entire form."""
-        from dataclasses import fields, is_dataclass
-
-        # OPTIMIZATION: Block cross-window updates during bulk update
-        # This prevents expensive refreshes for each field update
+        """Update form values from new config using the shared updater."""
         self.form_manager._block_cross_window_updates = True
         try:
-            # CRITICAL: Only update fields that were explicitly set in the code
-            # This preserves None values for fields not mentioned in the code
-            for field in fields(new_config):
-                if field.name in explicitly_set_fields:
-                    new_value = getattr(new_config, field.name)
-                    if field.name in self.form_manager.parameters:
-                        # For nested dataclasses, we need to recursively update nested fields
-                        if is_dataclass(new_value) and not isinstance(new_value, type):
-                            self._update_nested_dataclass(field.name, new_value)
-                        else:
-                            self.form_manager.update_parameter(field.name, new_value)
+            CodeEditorFormUpdater.update_form_from_instance(
+                self.form_manager,
+                new_config,
+                explicitly_set_fields,
+                broadcast_callback=self._broadcast_config_changed
+            )
         finally:
             self.form_manager._block_cross_window_updates = False
 
-        # CRITICAL: Refresh placeholders with live context AND emit signal for cross-window updates
-        # Code editor saves should trigger cross-window refreshes just like form edits
-        self.form_manager._refresh_with_live_context()
-        # CRITICAL: Emit context_refreshed signal to notify other open windows
-        # This ensures Step editors, PipelineConfig editors, etc. see the code editor changes
-        self.form_manager.context_refreshed.emit(self.form_manager.object_instance, self.form_manager.context_obj)
-
-        # CRITICAL: Broadcast to global event bus for ALL windows to receive
-        # This is the OpenHCS "set and forget" pattern - one broadcast reaches everyone
-        self._broadcast_config_changed(new_config)
-
-        # CRITICAL: Trigger global cross-window refresh for ALL open windows
-        # This ensures any window with placeholders (configs, steps, etc.) refreshes
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
         ParameterFormManager.trigger_global_cross_window_refresh()
-
-    def _update_nested_dataclass(self, field_name: str, new_value):
-        """Recursively update a nested dataclass field and all its children."""
-        from dataclasses import fields, is_dataclass
-
-        # Update the parent field first
-        self.form_manager.update_parameter(field_name, new_value)
-
-        # Get the nested manager for this field
-        nested_manager = self.form_manager.nested_managers.get(field_name)
-        if nested_manager:
-            # Nested manager exists - update each field in the nested manager
-            for field in fields(new_value):
-                nested_field_value = getattr(new_value, field.name)
-                if field.name in nested_manager.parameters:
-                    # Recursively handle nested dataclasses
-                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
-                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
-                    else:
-                        nested_manager.update_parameter(field.name, nested_field_value)
-        # If nested manager doesn't exist (field was None before), the update_parameter call above
-        # will trigger the form to rebuild with the nested manager when needed
-
-    def _update_nested_dataclass_in_manager(self, manager, field_name: str, new_value):
-        """Helper to update nested dataclass within a specific manager."""
-        from dataclasses import fields, is_dataclass
-
-        manager.update_parameter(field_name, new_value)
-
-        nested_manager = manager.nested_managers.get(field_name)
-        if nested_manager:
-            for field in fields(new_value):
-                nested_field_value = getattr(new_value, field.name)
-                if field.name in nested_manager.parameters:
-                    if is_dataclass(nested_field_value) and not isinstance(nested_field_value, type):
-                        self._update_nested_dataclass_in_manager(nested_manager, field.name, nested_field_value)
-                    else:
-                        nested_manager.update_parameter(field.name, nested_field_value)
 
     def reject(self):
         """Handle dialog rejection (Cancel button)."""
+        from openhcs.core.config import GlobalPipelineConfig
+        if (self.config_class == GlobalPipelineConfig and
+                getattr(self, '_global_context_dirty', False) and
+                self._original_global_config_snapshot is not None):
+            from openhcs.config_framework.global_config import set_global_config_for_editing
+            set_global_config_for_editing(GlobalPipelineConfig,
+                                          copy.deepcopy(self._original_global_config_snapshot))
+            self._global_context_dirty = False
+            ParameterFormManager.trigger_global_cross_window_refresh()
+            logger.debug("Restored GlobalPipelineConfig context after cancel")
+
         self.config_cancelled.emit()
         super().reject()  # BaseFormDialog handles unregistration
 

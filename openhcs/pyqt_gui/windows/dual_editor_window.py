@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTabWidget, QWidget, QStackedWidget
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from PyQt6.QtGui import QFont
 
 from openhcs.core.steps.function_step import FunctionStep
@@ -218,6 +218,12 @@ class DualEditorWindow(BaseFormDialog):
 
         # Apply centralized styling
         self.setStyleSheet(self.style_generator.generate_config_window_style())
+
+        # Debounce timer for function editor synchronization (batches rapid updates)
+        self._function_sync_timer = QTimer(self)
+        self._function_sync_timer.setSingleShot(True)
+        self._function_sync_timer.timeout.connect(self._flush_function_editor_sync)
+        self._pending_function_editor_sync = False
 
     def _update_window_title(self):
         title = "New Step" if getattr(self, 'is_new', False) else f"Edit Step: {getattr(self.editing_step, 'name', 'Unknown')}"
@@ -454,8 +460,22 @@ class DualEditorWindow(BaseFormDialog):
 
         # Return the step func directly - the function list editor will handle the conversion
         result = self.editing_step.func
-        print(f"🔍 DUAL EDITOR _convert_step_func_to_list: returning {result}")
+        logger.debug(f"🔍 DUAL EDITOR _convert_step_func_to_list: returning {result}")
         return result
+
+    def _schedule_function_editor_sync(self):
+        """Schedule a batched sync of the function editor."""
+        self._pending_function_editor_sync = True
+        if not self._function_sync_timer.isActive():
+            self._function_sync_timer.start(0)
+
+    def _flush_function_editor_sync(self):
+        """Run any pending function editor sync."""
+        if not getattr(self, '_pending_function_editor_sync', False):
+            return
+        self._pending_function_editor_sync = False
+        self._sync_function_editor_from_step()
+        self.detect_changes()
 
     def _sync_function_editor_from_step(self):
         """
@@ -471,11 +491,11 @@ class DualEditorWindow(BaseFormDialog):
 
         If the step structure changes in the future, only this method needs updating.
         """
-        logger.info("🔄 _sync_function_editor_from_step called")
+        logger.debug("🔄 _sync_function_editor_from_step called")
 
         # Guard: Only sync if function editor exists
         if not hasattr(self, 'func_editor') or self.func_editor is None:
-            logger.info("⏭️  Function editor doesn't exist yet, skipping sync")
+            logger.debug("⏭️  Function editor doesn't exist yet, skipping sync")
             return
 
         # CRITICAL: Read from form manager's current values (live context), not from self.editing_step
@@ -509,7 +529,7 @@ class DualEditorWindow(BaseFormDialog):
                         # If group_by is None, this will resolve to pipeline config's value
                         effective_group_by = processing_config.group_by
                         variable_components = processing_config.variable_components or []
-                        logger.info(f"🔍 Live form values (lazy-resolved): group_by={effective_group_by}, variable_components={variable_components}")
+                        logger.debug(f"🔍 Live form values (lazy-resolved): group_by={effective_group_by}, variable_components={variable_components}")
             else:
                 # Fallback: processing_config not in current values (shouldn't happen)
                 logger.warning("⚠️  processing_config not found in current form values, using defaults")
@@ -521,12 +541,12 @@ class DualEditorWindow(BaseFormDialog):
             variable_components = []
 
         # Update function editor with extracted values
-        logger.info(f"📤 Updating function editor: group_by={effective_group_by}, variable_components={variable_components}")
+        logger.debug(f"📤 Updating function editor: group_by={effective_group_by}, variable_components={variable_components}")
         self.func_editor.set_effective_group_by(effective_group_by)
         self.func_editor.current_variable_components = variable_components
         self.func_editor._refresh_component_button()
 
-        logger.info(f"✅ Synced function editor: group_by={effective_group_by}, variable_components={variable_components}")
+        logger.debug(f"✅ Synced function editor: group_by={effective_group_by}, variable_components={variable_components}")
 
 
 
@@ -671,14 +691,12 @@ class DualEditorWindow(BaseFormDialog):
         Handles both top-level parameters (e.g., 'name', 'processing_config') and
         nested parameters from nested forms (e.g., 'group_by' from processing_config form).
         """
-        logger.info(f"🔔 on_form_parameter_changed: param_name={param_name}, value type={type(value).__name__}")
+        logger.debug(f"🔔 on_form_parameter_changed: param_name={param_name}, value type={type(value).__name__}")
 
         # Handle reset_all completion signal
         if param_name == "__reset_all_complete__":
-            logger.info("🔄 Received reset_all_complete signal, syncing function editor")
-            # Sync function editor after reset_all completes
-            self._sync_function_editor_from_step()
-            self.detect_changes()
+            logger.debug("🔄 Received reset_all_complete signal, syncing function editor")
+            self._schedule_function_editor_sync()
             return
 
         # CRITICAL: Check if this is a nested parameter (from a nested form manager)
@@ -688,14 +706,12 @@ class DualEditorWindow(BaseFormDialog):
         NESTED_PARAMS = {'group_by', 'variable_components', 'input_source'}
 
         if param_name in NESTED_PARAMS:
-            logger.info(f"🔍 {param_name} is a nested parameter from processing_config")
             # This is a nested parameter change - the nested form manager already updated
             # the processing_config dataclass, so we just need to sync the function editor
             # The step_editor.form_manager has a nested manager for processing_config that
             # already updated self.editing_step.processing_config.{param_name}
-            logger.info(f"🔄 Calling _sync_function_editor_from_step after nested {param_name} change")
-            self._sync_function_editor_from_step()
-            self.detect_changes()
+            logger.debug(f"🔄 Scheduling function editor sync after nested {param_name} change")
+            self._schedule_function_editor_sync()
             return
 
         # CRITICAL FIX: For function parameters, use fresh imports to avoid unpicklable registry wrappers
@@ -712,38 +728,33 @@ class DualEditorWindow(BaseFormDialog):
         # This preserves lazy resolution for fields that weren't changed
         from dataclasses import is_dataclass, fields
         if is_dataclass(value) and not isinstance(value, type):
-            logger.info(f"📦 {param_name} is a nested dataclass, updating fields individually")
+            logger.debug(f"📦 {param_name} is a nested dataclass, updating fields individually")
             # This is a nested dataclass - update fields individually
             existing_config = getattr(self.editing_step, param_name, None)
             if existing_config is not None and hasattr(existing_config, '_resolve_field_value'):
-                logger.info(f"✅ {param_name} is lazy, preserving lazy resolution")
+                logger.debug(f"✅ {param_name} is lazy, preserving lazy resolution")
                 # Existing config is lazy - update fields individually to preserve lazy resolution
                 for field in fields(value):
                     # Use object.__getattribute__ to get raw value (not lazy-resolved)
                     raw_value = object.__getattribute__(value, field.name)
-                    logger.info(f"  📝 Field {field.name}: raw_value={raw_value} (type={type(raw_value).__name__})")
                     # CRITICAL: Always update the field, even if None
                     # When user resets a field, we MUST update it to None so lazy resolution can inherit from context
                     # When user sets a concrete value, we update it to that value
                     object.__setattr__(existing_config, field.name, raw_value)
-                    logger.info(f"    ✏️  Updated {field.name} to {raw_value}")
-                logger.info(f"✅ Updated lazy {param_name} fields individually to preserve lazy resolution")
+                    logger.debug(f"    ✏️  Updated {field.name} to {raw_value}")
+                logger.debug(f"✅ Updated lazy {param_name} fields individually to preserve lazy resolution")
             else:
-                logger.info(f"⚠️  {param_name} is not lazy or doesn't exist, replacing entire config")
+                logger.debug(f"⚠️  {param_name} is not lazy or doesn't exist, replacing entire config")
                 # Not lazy or doesn't exist - just replace it
                 setattr(self.editing_step, param_name, value)
         else:
-            logger.info(f"📄 {param_name} is not a nested dataclass, setting normally")
+            logger.debug(f"📄 {param_name} is not a nested dataclass, setting normally")
             # Not a nested dataclass - just set it normally
             setattr(self.editing_step, param_name, value)
 
-        # SINGLE SOURCE OF TRUTH: Always sync function editor from step
-        # This handles any parameter that might affect component selection
-        # (group_by, variable_components, processing_config, etc.)
-        logger.info(f"🔄 Calling _sync_function_editor_from_step after {param_name} change")
-        self._sync_function_editor_from_step()
-
-        self.detect_changes()
+        # SINGLE SOURCE OF TRUTH: Always sync function editor from step (batched)
+        logger.debug(f"🔄 Scheduling function editor sync after {param_name} change")
+        self._schedule_function_editor_sync()
     
     def on_tab_changed(self, index: int):
         """Handle tab changes."""
@@ -754,7 +765,7 @@ class DualEditorWindow(BaseFormDialog):
     
     def detect_changes(self):
         """Detect if changes have been made."""
-        current_snapshot = self._serialize_for_change_detection(self.editing_step)
+        current_snapshot = self._serialize_current_form_state()
         baseline_snapshot = getattr(self, '_baseline_snapshot', None)
         has_changes = current_snapshot != baseline_snapshot
 
@@ -894,8 +905,28 @@ class DualEditorWindow(BaseFormDialog):
         for name, param_info in params.items():
             if name in self._CHANGE_DETECTION_EXCLUDE_PARAMS:
                 continue
-            snapshot[name] = self._normalize_value_for_change_detection(param_info.default_value)
+            current_value = getattr(step, name, param_info.default_value)
+            snapshot[name] = self._normalize_value_for_change_detection(current_value)
         return snapshot
+
+    def _serialize_current_form_state(self):
+        """Serialize a snapshot of the step using live form values (including nested dataclasses)."""
+        import copy
+
+        temp_step = copy.deepcopy(self.editing_step)
+
+        for tab_index in range(self.tab_widget.count()):
+            tab_widget = self.tab_widget.widget(tab_index)
+            form_manager = getattr(tab_widget, 'form_manager', None)
+            if not form_manager:
+                continue
+
+            current_values = form_manager.get_current_values()
+            for param_name, value in current_values.items():
+                if hasattr(temp_step, param_name):
+                    setattr(temp_step, param_name, value)
+
+        return self._serialize_for_change_detection(temp_step)
 
     def _normalize_value_for_change_detection(self, value):
         """Normalize complex values into comparison-friendly primitives."""

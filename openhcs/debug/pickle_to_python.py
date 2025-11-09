@@ -12,6 +12,8 @@ from collections import defaultdict
 from enum import Enum
 import dataclasses
 from dataclasses import is_dataclass, fields
+import typing
+from typing import get_origin, get_args
 
 from openhcs.core.steps.function_step import FunctionStep
 
@@ -241,6 +243,40 @@ def _value_to_repr(value, required_imports=None, name_mappings=None):
         return f"[{', '.join(elements)}]"
     return repr(value)
 
+def _resolve_dataclass_class_from_type(field_type):
+    """Resolve actual dataclass class from a typing annotation."""
+    if field_type is None:
+        return None
+
+    origin = get_origin(field_type)
+    if origin is typing.Union:
+        for arg in get_args(field_type):
+            if arg is type(None):
+                continue
+            resolved = _resolve_dataclass_class_from_type(arg)
+            if resolved:
+                return resolved
+        return None
+
+    if isinstance(field_type, type) and dataclasses.is_dataclass(field_type):
+        return field_type
+
+    return None
+
+
+def _create_placeholder_dataclass_instance(dataclass_cls):
+    """Create a dataclass instance with all fields set to None (without calling __init__)."""
+    instance = object.__new__(dataclass_cls)
+    for dc_field in dataclasses.fields(dataclass_cls):
+        object.__setattr__(instance, dc_field.name, None)
+
+    # Preserve lazy dataclass marker when present
+    if hasattr(dataclass_cls, '_is_lazy_dataclass'):
+        object.__setattr__(instance, '_is_lazy_dataclass', True)
+
+    return instance
+
+
 def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, required_imports=None, name_mappings=None):
     """
     Generates a clean, readable Python representation of a dataclass instance,
@@ -271,6 +307,11 @@ def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, re
         # Regular dataclass - use normal constructor
         default_instance = instance.__class__()
 
+    try:
+        type_hints = typing.get_type_hints(instance.__class__)
+    except Exception:
+        type_hints = {}
+
     for field in dataclasses.fields(instance):
         field_name = field.name
 
@@ -284,6 +325,13 @@ def generate_clean_dataclass_repr(instance, indent_level=0, clean_mode=False, re
             # Regular dataclass - use normal getattr
             current_value = getattr(instance, field_name)
             default_value = getattr(default_instance, field_name)
+
+        if (not clean_mode) and current_value is None:
+            # Expand nested dataclass placeholders even when value is None
+            field_type = type_hints.get(field_name, field.type)
+            dataclass_cls = _resolve_dataclass_class_from_type(field_type)
+            if dataclass_cls is not None:
+                current_value = _create_placeholder_dataclass_instance(dataclass_cls)
 
         if clean_mode and current_value == default_value:
             continue
@@ -495,7 +543,7 @@ def generate_readable_function_repr(func_obj, indent=0, clean_mode=False, name_m
         return _value_to_repr(func_obj, required_imports=required_enum_imports, name_mappings=name_mappings)
 
 
-def _format_parameter_value(param_name, value, name_mappings=None):
+def _format_parameter_value(param_name, value, name_mappings=None, include_defaults=False):
     """Format parameter values with lazy dataclass preservation."""
     if isinstance(value, Enum):
         enum_class_name = value.__class__.__name__
@@ -524,14 +572,19 @@ def _format_parameter_value(param_name, value, name_mappings=None):
 
         return f"[{', '.join(formatted_items)}]"
     elif is_dataclass(value) and 'Lazy' in value.__class__.__name__:
-        # Preserve lazy behavior by only including explicitly set fields
         class_name = value.__class__.__name__
-        explicit_args = [
-            f"{f.name}={_format_parameter_value(f.name, object.__getattribute__(value, f.name), name_mappings)}"
-            for f in fields(value)
-            if object.__getattribute__(value, f.name) is not None
-        ]
-        return f"{class_name}({', '.join(explicit_args)})" if explicit_args else f"{class_name}()"
+        if include_defaults:
+            nested_repr = generate_clean_dataclass_repr(value, indent_level=1, clean_mode=False)
+            if nested_repr.strip():
+                return f"{class_name}(\n{nested_repr}\n)"
+            return f"{class_name}()"
+        else:
+            explicit_args = [
+                f"{f.name}={_format_parameter_value(f.name, object.__getattribute__(value, f.name), name_mappings)}"
+                for f in fields(value)
+                if object.__getattribute__(value, f.name) is not None
+            ]
+            return f"{class_name}({', '.join(explicit_args)})" if explicit_args else f"{class_name}()"
     else:
         return repr(value)
 
@@ -609,7 +662,7 @@ def _generate_step_parameters(step, default_step, clean_mode=False, name_mapping
                  [(name, param) for name, param in inspect.signature(AbstractStep.__init__).parameters.items()
                   if name != 'self']
 
-    return [f"{name}={generate_readable_function_repr(getattr(step, name, param.default), 1, clean_mode, name_mappings, required_function_imports, required_enum_imports) if name == 'func' else _format_parameter_value(name, getattr(step, name, param.default), name_mappings)}"
+    return [f"{name}={generate_readable_function_repr(getattr(step, name, param.default), 1, clean_mode, name_mappings, required_function_imports, required_enum_imports) if name == 'func' else _format_parameter_value(name, getattr(step, name, param.default), name_mappings, include_defaults=not clean_mode)}"
             for name, param in signatures
             if not clean_mode or getattr(step, name, param.default) != getattr(default_step, name, param.default)]
 

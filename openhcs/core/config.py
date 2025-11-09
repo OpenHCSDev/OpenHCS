@@ -106,8 +106,6 @@ class GlobalPipelineConfig:
     Root configuration object for an OpenHCS pipeline session.
     This object is intended to be instantiated at application startup and treated as immutable.
     """
-    num_workers: int = 1
-    """Number of worker processes/threads for parallelizable tasks."""
 
     materialization_results_path: Path = field(default=Path("results"), metadata={'ui_hidden': True})
     """
@@ -124,6 +122,9 @@ class GlobalPipelineConfig:
     by the sub_dir field in each step's step_materialization_config.
     """
 
+    num_workers: int = 1
+    """Number of worker processes/threads for parallelizable tasks."""
+    
     microscope: Microscope = field(default=Microscope.AUTO, metadata={'ui_hidden': True})
     """Default microscope type for auto-detection."""
 

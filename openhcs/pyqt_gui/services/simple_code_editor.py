@@ -810,7 +810,8 @@ class QScintillaCodeEditorDialog(QDialog):
                 generate_complete_orchestrator_code,
                 generate_complete_pipeline_steps_code,
                 generate_complete_function_pattern_code,
-                generate_config_code
+                generate_config_code,
+                generate_step_code
             )
 
             # Check what variables exist in the namespace to determine code type
@@ -846,6 +847,13 @@ class QScintillaCodeEditorDialog(QDialog):
                     func_obj=pattern,
                     clean_mode=self.clean_mode
                 )
+            elif 'step' in namespace:
+                step_obj = namespace.get('step')
+
+                new_code = generate_step_code(
+                    step_obj,
+                    clean_mode=self.clean_mode
+                )
             elif 'config' in namespace:
                 # Config code - auto-detect config class from the object
                 config = namespace.get('config')
@@ -860,7 +868,7 @@ class QScintillaCodeEditorDialog(QDialog):
                 # Unsupported code type
                 from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "Clean Mode Toggle",
-                                  "Could not detect code type. Expected one of: plate_paths, pipeline_steps, pattern, or config variable.")
+                                  "Could not detect code type. Expected one of: plate_paths, pipeline_steps, step, pattern, or config variable.")
                 return
 
             # Update editor with new code
