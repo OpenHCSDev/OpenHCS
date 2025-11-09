@@ -141,6 +141,103 @@ Pipeline Code Editing
     for step in pipeline_steps:
         step.variable_components = [VariableComponents.WELL]  # Change all to well-level
 
+Step Code Editing
+-----------------
+
+**When to Use**: Fine-tuning individual step parameters, adjusting processing configurations, or when you need to see all available configuration options for a single step.
+
+**Complete Workflow Example**:
+
+1. **Open Step Editor**: Double-click a step in the Pipeline Editor or Dual Editor
+2. **Generate Code**: Click "Code" button to see the step as Python code
+3. **Edit Parameters**: Modify step parameters, processing config, or other settings
+4. **Apply Changes**: Save to update the step in the editor
+
+**Real Example - Adjusting Processing Configuration**:
+
+.. code-block:: python
+
+    # Original step (from UI)
+    from openhcs.core.steps.function_step import FunctionStep
+    from openhcs.processing.backends.filters.gaussian_filter import gaussian_filter
+    from openhcs.core.config import ProcessingConfig
+    from openhcs.constants.constants import GroupBy, VariableComponents
+
+    step = FunctionStep(
+        func=gaussian_filter(sigma=2.0),
+        name="gaussian_filter",
+        processing_config=ProcessingConfig(
+            group_by=None,  # Inherits from pipeline config
+            variable_components=None  # Inherits from pipeline config
+        )
+    )
+
+    # After editing - explicit configuration
+    step = FunctionStep(
+        func=gaussian_filter(sigma=3.5),
+        name="gaussian_filter",
+        processing_config=ProcessingConfig(
+            group_by=GroupBy.WELL,  # Override pipeline default
+            variable_components=[VariableComponents.CHANNEL, VariableComponents.Z_INDEX]
+        )
+    )
+
+**Benefits**:
+
+- **See All Options**: Non-clean mode shows all available fields, even when None
+- **Explicit Configuration**: Override pipeline defaults for specific steps
+- **Nested Config Editing**: Edit nested dataclass configurations directly
+- **Clean Mode Toggle**: Switch between full and minimal code representations
+
+Clean Mode Toggle
+-----------------
+
+**What is Clean Mode**: Clean mode generates minimal Python code by omitting fields that match their default values. This creates cleaner, more readable code for sharing and version control.
+
+**Toggling Clean Mode**:
+
+When viewing code in the code editor dialog, you can toggle between clean and full modes:
+
+- **Full Mode (default)**: Shows all fields, including None values and nested dataclass structures
+- **Clean Mode**: Shows only explicitly set fields that differ from defaults
+
+**Example Comparison**:
+
+.. code-block:: python
+
+    # Full Mode - shows all fields
+    step = FunctionStep(
+        func=gaussian_filter(sigma=2.0),
+        name="gaussian_filter",
+        processing_config=ProcessingConfig(
+            group_by=None,
+            variable_components=None,
+            input_source=None
+        ),
+        step_materialization_config=StepMaterializationConfig(
+            enabled=None,
+            sub_dir=None
+        )
+    )
+
+    # Clean Mode - only non-default fields
+    step = FunctionStep(
+        func=gaussian_filter(sigma=2.0),
+        name="gaussian_filter"
+    )
+
+**When to Use Each Mode**:
+
+- **Full Mode**: When you want to see all available configuration options
+- **Clean Mode**: When sharing code, committing to version control, or creating templates
+
+**Supported Contexts**:
+
+- Function patterns
+- Pipeline steps
+- Individual steps
+- Configuration objects
+
 Orchestrator Configuration
 -------------------------
 
@@ -433,6 +530,20 @@ If the TUI doesn't update after editing:
 2. **Verify variable names**: Ensure you're using the correct variable name
 3. **Check imports**: Make sure all required imports are present
 4. **Restart if needed**: Close and reopen the TUI widget as a last resort
+
+**GlobalPipelineConfig Context Issues**:
+
+When editing GlobalPipelineConfig, changes are immediately reflected in the thread-local context:
+
+- **Cancel Restoration**: Clicking "Cancel" restores the original config and reverts context changes
+- **Cross-Window Updates**: Changes trigger updates in all open windows (steps, pipelines, etc.)
+- **Context Synchronization**: Form edits and code edits both update the global context
+
+If you see stale values in other windows after editing GlobalPipelineConfig:
+
+1. **Check for errors**: Look for error dialogs indicating failed context updates
+2. **Verify save**: Ensure you clicked "Save" (not just edited and closed)
+3. **Refresh windows**: Close and reopen affected windows if needed
 
 **Performance Issues**:
 

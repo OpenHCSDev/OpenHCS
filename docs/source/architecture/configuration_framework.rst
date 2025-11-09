@@ -172,3 +172,25 @@ The framework is extracted to ``openhcs.config_framework`` for reuse:
   Framework initialization - ``set_base_config_type(GlobalPipelineConfig)``
 
 Backward compatibility shims at old paths (``openhcs.core.lazy_config``, etc.) re-export from framework.
+
+Thread-Local Context Synchronization
+------------------------------------
+
+The configuration framework maintains thread-local context for GlobalPipelineConfig to support lazy placeholder resolution across the application.
+
+**Context Lifecycle**
+
+1. **Initialization**: Context set during GUI startup
+2. **Live Updates**: Context synchronized with form edits in real-time
+3. **Restoration**: Original context restored on cancel
+4. **Cleanup**: Context cleared on window close
+
+**GUI Integration**
+
+The configuration window implements special handling for GlobalPipelineConfig to ensure thread-local context stays synchronized with form edits. Each field change triggers immediate context update, ensuring placeholder values in other windows update immediately.
+
+When users cancel config editing, the original context is restored to prevent context pollution from experimental changes.
+
+**Implementation Details**
+
+See :doc:`code_ui_interconversion` for detailed implementation of context synchronization during code editing.
