@@ -45,14 +45,56 @@ jobs:
             const fs = require('fs');
             const path = require('path');
 
-            // Get all artifacts from the triggering workflow run
+            // Debug: Log the workflow_run context
+            console.log('Event name:', context.eventName);
+            console.log('Workflow run ID:', context.payload.workflow_run?.id || 'N/A');
+            console.log('Workflow run conclusion:', context.payload.workflow_run?.conclusion || 'N/A');
+
+            // Determine the run ID to use
+            let runId;
+            if (context.eventName === 'workflow_run') {
+              runId = context.payload.workflow_run.id;
+              console.log('Using workflow_run trigger, run ID:', runId);
+            } else if (context.eventName === 'workflow_dispatch') {
+              // For manual dispatch, we need to find the most recent integration test run
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'integration-tests.yml',
+                per_page: 1,
+                status: 'completed'
+              });
+              if (runs.data.workflow_runs.length === 0) {
+                throw new Error('No completed integration test runs found');
+              }
+              runId = runs.data.workflow_runs[0].id;
+              console.log('Using workflow_dispatch trigger, found most recent run ID:', runId);
+            } else {
+              throw new Error(`Unsupported event type: ${context.eventName}`);
+            }
+
+            // Get all artifacts from the workflow run
             const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              run_id: context.payload.workflow_run.id,
+              run_id: runId,
             });
 
-            console.log(`Found ${artifacts.data.artifacts.length} artifacts`);
+            console.log(`Found ${artifacts.data.artifacts.length} total artifacts`);
+
+            // Filter for coverage artifacts
+            const coverageArtifacts = artifacts.data.artifacts.filter(a => a.name.startsWith('coverage-'));
+            console.log(`Found ${coverageArtifacts.length} coverage artifacts:`, coverageArtifacts.map(a => a.name));
+
+            if (coverageArtifacts.length === 0) {
+              console.log('No coverage artifacts found. This may be expected if tests were skipped or failed early.');
+              // Create empty directory so subsequent steps don't fail
+              const coverageDir = 'coverage-reports';
+              if (!fs.existsSync(coverageDir)) {
+                fs.mkdirSync(coverageDir, { recursive: true });
+              }
+              return;
+            }
 
             // Create coverage-reports directory
             const coverageDir = 'coverage-reports';
@@ -61,9 +103,8 @@ jobs:
             }
 
             // Download each coverage artifact
-            for (const artifact of artifacts.data.artifacts) {
-              if (artifact.name.startsWith('coverage-')) {
-                console.log(`Downloading artifact: ${artifact.name}`);
+            for (const artifact of coverageArtifacts) {
+              console.log(`Downloading artifact: ${artifact.name}`);
 
                 const download = await github.rest.actions.downloadArtifact({
                   owner: context.repo.owner,
@@ -97,26 +138,42 @@ jobs:
         run: |
           mkdir -p site
 
+          # Check if coverage-reports directory exists and has content
+          if [ ! -d "coverage-reports" ] || [ -z "$(ls -A coverage-reports 2>/dev/null)" ]; then
+            echo "No coverage reports found. Creating empty report."
+            echo "<html><body><h1>No Coverage Data</h1><p>No coverage artifacts were found from the integration tests.</p></body></html>" > site/index.html
+            exit 0
+          fi
+
           # Find all .coverage files
           echo "=== Coverage files found ==="
-          find coverage-reports -name ".coverage*" -type f
+          find coverage-reports -name ".coverage*" -type f || echo "No .coverage files found"
 
           # Rename all .coverage files to have unique names for combining
           # coverage combine expects files named .coverage.*
           cd coverage-reports
+          coverage_count=0
           for dir in */; do
             if [ -f "$dir/.coverage" ]; then
               # Extract job name from directory
               job_name=$(basename "$dir")
               mv "$dir/.coverage" ".coverage.$job_name"
               echo "Renamed $dir/.coverage to .coverage.$job_name"
+              coverage_count=$((coverage_count + 1))
             fi
             if [ -f "$dir/.coverage.wheel" ]; then
               mv "$dir/.coverage.wheel" ".coverage.wheel"
               echo "Found wheel coverage file"
+              coverage_count=$((coverage_count + 1))
             fi
           done
           cd ..
+
+          if [ $coverage_count -eq 0 ]; then
+            echo "No .coverage files found in artifacts. Creating empty report."
+            echo "<html><body><h1>No Coverage Data</h1><p>Coverage artifacts were downloaded but contained no .coverage files.</p></body></html>" > site/index.html
+            exit 0
+          fi
 
           # Combine all .coverage files
           coverage combine coverage-reports/.coverage.* || echo "Coverage combine completed with warnings"
