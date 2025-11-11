@@ -21,6 +21,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
    :hidden:
 
    production_examples
+   custom_functions
    code_ui_editing
    dtype_conversion
    cpu_only_mode
@@ -31,6 +32,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
 
 **Available Guides**:
 
+- :doc:`custom_functions` - Creating custom processing functions in the GUI
 - :doc:`real_time_visualization` - Real-time visualization with napari streaming
 - :doc:`code_ui_editing` - Bidirectional editing between TUI and Python code
 - :doc:`dtype_conversion` - Automatic data type conversion for GPU libraries

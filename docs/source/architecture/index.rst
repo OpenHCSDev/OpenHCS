@@ -18,6 +18,7 @@ Fundamental systems that define OpenHCS architecture.
    plugin_registry_advanced
    function_pattern_system
    function_registry_system
+   custom_function_registration_system
    pipeline_compilation_system
    special_io_system
    roi_system
