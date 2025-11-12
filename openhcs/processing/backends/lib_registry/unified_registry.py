@@ -35,6 +35,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 from openhcs.core.xdg_paths import get_cache_file_path
 from openhcs.core.memory.stack_utils import unstack_slices, stack_slices
 from openhcs.core.auto_register_meta import AutoRegisterMeta, LazyDiscoveryDict
+from openhcs.core.config import LazyDtypeConfig 
 
 logger = logging.getLogger(__name__)
 
@@ -174,19 +175,46 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
         """Discover and return function metadata. Must be implemented by subclasses."""
         pass
 
+    # ===== DECLARATIVE INJECTABLE PARAMETERS =====
+    # Parameters injected into all registered functions
+    # Format: (param_name, default_value, type_annotation)
+    # Use lambda for lazy instantiation to avoid circular imports
+    INJECTABLE_PARAMS = [
+        ('enabled', True, bool),
+        ('dtype_config', lambda: LazyDtypeConfig(), 'LazyDtypeConfig'),
+    ]
+
+    # Parameters injected only into FLEXIBLE contract functions
+    FLEXIBLE_ONLY_PARAMS = [
+        ('slice_by_slice', False, bool),
+    ]
+
     # ===== CONTRACT HANDLING =====
     def apply_contract_wrapper(self, func: Callable, contract: ProcessingContract) -> Callable:
-        """Apply contract wrapper with parameter injection (enabled + slice_by_slice for FLEXIBLE)."""
+        """Apply contract wrapper with parameter injection using declarative INJECTABLE_PARAMS."""
         from functools import wraps
         import inspect
 
         original_sig = inspect.signature(func)
         param_names = {p.name for p in original_sig.parameters.values()}
 
-        # Define injectable parameters: enabled for all, slice_by_slice for FLEXIBLE
-        injectable_params = [('enabled', True, bool)]
+        # Import type annotations (resolve lazy strings)
+        from openhcs.core.config import LazyDtypeConfig
+        type_map = {'LazyDtypeConfig': LazyDtypeConfig}
+
+        # Build injectable params list from declarative constants
+        # Resolve lambda defaults by calling them
+        injectable_params = []
+        for name, default, annotation in self.INJECTABLE_PARAMS:
+            resolved_default = default() if callable(default) else default
+            resolved_annotation = type_map.get(annotation, annotation) if isinstance(annotation, str) else annotation
+            injectable_params.append((name, resolved_default, resolved_annotation))
+
         if contract == ProcessingContract.FLEXIBLE:
-            injectable_params.append(('slice_by_slice', False, bool))
+            for name, default, annotation in self.FLEXIBLE_ONLY_PARAMS:
+                resolved_default = default() if callable(default) else default
+                resolved_annotation = type_map.get(annotation, annotation) if isinstance(annotation, str) else annotation
+                injectable_params.append((name, resolved_default, resolved_annotation))
 
         # Filter out already-existing parameters
         params_to_add = [(name, default, annotation) for name, default, annotation in injectable_params if name not in param_names]

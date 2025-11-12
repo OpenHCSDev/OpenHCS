@@ -72,11 +72,23 @@ class FunctionReference:
 
     This replaces raw function objects in compiled step definitions to ensure
     picklability while allowing workers to resolve functions from their registry.
+
+    Preserves all dunder attributes from the original function so they can be
+    accessed during compilation (e.g., __special_inputs__, __special_outputs__).
     """
     function_name: str
     registry_name: str
     memory_type: str  # The memory type for get_function_by_name() (e.g., "numpy", "pyclesperanto")
     composite_key: str  # The full registry key (e.g., "pyclesperanto:gaussian_blur")
+    preserved_attrs: dict  # All dunder attributes from the original function
+
+    def __getattr__(self, name: str):
+        """Allow access to preserved dunder attributes as if they were on the function."""
+        # Use object.__getattribute__ to avoid infinite recursion
+        preserved = object.__getattribute__(self, 'preserved_attrs')
+        if name in preserved:
+            return preserved[name]
+        raise AttributeError(f"FunctionReference has no attribute '{name}'")
 
     def resolve(self) -> Callable:
         """Resolve this reference to the actual decorated function from registry."""
@@ -125,15 +137,18 @@ def _refresh_function_object(func_value):
                 import logging
                 logger = logging.getLogger(__name__)
                 func_name = getattr(func, '__name__', str(func))
-                logger.info(f"🔧 COMPILE-TIME FILTER: Removing disabled function '{func_name}' from pipeline")
                 return None  # Mark for removal
+
+            # Remove 'enabled' from params since it's compile-time only, not a runtime parameter
+            if isinstance(params, dict) and 'enabled' in params:
+                params = {k: v for k, v in params.items() if k != 'enabled'}
 
             if callable(func):
                 func_ref = _refresh_function_object(func)
-                # Remove 'enabled' from params since it's not a real function parameter
-                if isinstance(params, dict) and 'enabled' in params:
-                    params = {k: v for k, v in params.items() if k != 'enabled'}
                 return (func_ref, params)
+            else:
+                # func is already a FunctionReference or other non-callable
+                return (func, params)
 
         elif isinstance(func_value, list):
             # List of functions → List of FunctionReferences (filter out None)
@@ -156,7 +171,14 @@ def _refresh_function_object(func_value):
 
 
 def _get_function_reference(func):
-    """Convert a function to a picklable FunctionReference."""
+    """Convert a function to a picklable FunctionReference.
+
+    Preserves custom attributes (like __special_inputs__, __special_outputs__)
+    so they can be accessed during compilation without resolving the function.
+
+    Note: These use double underscores which violates Python convention (should be single
+    underscore for private attributes). This is technical debt to be fixed later.
+    """
     try:
         from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 
@@ -167,12 +189,28 @@ def _get_function_reference(func):
         for composite_key, metadata in all_functions.items():
             if (metadata.func.__name__ == func.__name__ and
                 metadata.func.__module__ == func.__module__):
+
+                # Preserve only the specific attributes we need during compilation
+                # This is much faster than iterating through all attributes
+                # Note: __special_* use double underscores which violates Python convention (should be single
+                # underscore for private attributes). This is technical debt to be fixed later.
+                preserved_attrs = {}
+                for attr in ['__special_inputs__', '__special_outputs__', '__materialization_functions__',
+                             'input_memory_type', 'output_memory_type', '__name__', '__module__']:
+                    if hasattr(func, attr):
+                        try:
+                            preserved_attrs[attr] = getattr(func, attr)
+                        except Exception:
+                            # Skip attributes that can't be accessed
+                            pass
+
                 # Create a picklable reference instead of the function object
                 return FunctionReference(
                     function_name=func.__name__,
                     registry_name=metadata.registry.library_name,
                     memory_type=metadata.registry.MEMORY_TYPE,
-                    composite_key=composite_key
+                    composite_key=composite_key,
+                    preserved_attrs=preserved_attrs
                 )
 
     except Exception as e:
@@ -322,24 +360,13 @@ class PipelineCompiler:
         # === FUNCTION OBJECT REFRESH ===
         # CRITICAL FIX: Refresh all function objects to ensure they're picklable
         # This prevents multiprocessing pickling errors by ensuring clean function objects
-        logger.debug("🔧 FUNCTION REFRESH: Refreshing all function objects for picklability...")
         _refresh_function_objects_in_steps(steps_definition)
 
         # === LAZY CONFIG RESOLUTION ===
         # Resolve each step's lazy configs with proper nested context
         # This ensures step-level configs inherit from pipeline-level configs
         # Architecture: GlobalPipelineConfig -> PipelineConfig -> Step (same as UI)
-        logger.info("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs with nested step contexts...")
 
-        # DEBUG: Check what the base global config looks like
-        from openhcs.config_framework.context_manager import get_base_global_config
-        base_global = get_base_global_config()
-        if base_global and hasattr(base_global, 'processing_config'):
-            logger.info(f"🔍 BASE GLOBAL CONFIG: processing_config = {base_global.processing_config}")
-            if base_global.processing_config:
-                logger.info(f"🔍 BASE GLOBAL CONFIG: processing_config.variable_components = {base_global.processing_config.variable_components}")
-        else:
-            logger.info(f"🔍 BASE GLOBAL CONFIG: No processing_config or base_global is None")
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
         from openhcs.config_framework.context_manager import config_context
 
@@ -349,22 +376,7 @@ class PipelineCompiler:
         resolved_steps = []
         for step in steps_definition:
             with config_context(step):  # Step-level context on top of pipeline context
-                # DEBUG: Check what the context looks like before resolution
-                from openhcs.config_framework.context_manager import get_current_temp_global
-                current_ctx = get_current_temp_global()
-                if current_ctx and hasattr(current_ctx, 'processing_config'):
-                    logger.info(f"🔍 CONTEXT CHECK: processing_config.variable_components = {current_ctx.processing_config.variable_components if current_ctx.processing_config else 'None'}")
-                else:
-                    logger.info(f"🔍 CONTEXT CHECK: No context or no processing_config in context")
-
                 resolved_step = resolve_lazy_configurations_for_serialization(step)
-
-                # DEBUG: Check what the resolved step looks like
-                if hasattr(resolved_step, 'processing_config'):
-                    logger.info(f"🔍 RESOLVED CHECK: {resolved_step.name}.processing_config.variable_components = {resolved_step.processing_config.variable_components if resolved_step.processing_config else 'None'}")
-                else:
-                    logger.info(f"🔍 RESOLVED CHECK: {resolved_step.name} has no processing_config")
-
                 resolved_steps.append(resolved_step)
         steps_definition = resolved_steps
 
@@ -871,7 +883,7 @@ class PipelineCompiler:
                 logger.info(f"Global visualizer override: Step '{plan['step_name']}' marked for visualization.")
 
     @staticmethod
-    def resolve_lazy_dataclasses_for_context(context: ProcessingContext, orchestrator) -> None:
+    def resolve_lazy_dataclasses_for_context(context: ProcessingContext, orchestrator, steps_definition: List[AbstractStep]) -> None:
         """
         Resolve all lazy dataclass instances in step plans to their base configurations.
 
@@ -884,12 +896,41 @@ class PipelineCompiler:
         Args:
             context: ProcessingContext to process
             orchestrator: PipelineOrchestrator (unused - kept for API compatibility)
+            steps_definition: List of resolved step objects for step-level context
         """
         from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
+        from openhcs.config_framework.context_manager import config_context
 
-        # Resolve the entire context recursively to catch all lazy dataclass instances
-        # The caller has already set up config_context(), so lazy resolution happens automatically
-        resolved_context_dict = resolve_lazy_configurations_for_serialization(vars(context))
+        # Resolve each step plan with its corresponding step context
+        # This ensures function-level configs can inherit from step-level configs
+        # Hierarchy: Function kwargs -> Step -> Pipeline -> Global
+        for step_index, step in enumerate(steps_definition):
+            if step_index in context.step_plans:
+                # Log dtype_config hierarchy BEFORE resolution
+                logger.info(f"  - Step.dtype_config = {step.dtype_config}")
+
+                with config_context(step):  # Add step context on top of pipeline context
+                    # Resolve this step's plan with full hierarchy
+                    resolved_plan = resolve_lazy_configurations_for_serialization(context.step_plans[step_index])
+                    context.step_plans[step_index] = resolved_plan
+
+                    # Log dtype_config hierarchy AFTER resolution
+
+                    # Debug: Log dtype_config in func kwargs
+                    if "func" in resolved_plan:
+                        func_entry = resolved_plan["func"]
+                        if isinstance(func_entry, tuple) and len(func_entry) == 2:
+                            func, kwargs = func_entry
+                            dtype_cfg = kwargs.get('dtype_config')
+                            logger.info(f"  - Func kwargs dtype_config = {dtype_cfg}")
+                        else:
+                            logger.info(f"  - Func is NOT a tuple (type={type(func_entry).__name__})")
+
+        # Resolve other context attributes (non-step_plans) with pipeline context only
+        resolved_context_dict = resolve_lazy_configurations_for_serialization({
+            k: v for k, v in vars(context).items()
+            if k != 'step_plans' and not k.startswith('_')
+        })
 
         # Update context attributes with resolved values
         for attr_name, resolved_value in resolved_context_dict.items():
@@ -1021,7 +1062,6 @@ class PipelineCompiler:
 
         # === BACKWARDS COMPATIBILITY PREPROCESSING ===
         # Normalize step attributes BEFORE filtering to ensure old pickled steps have 'enabled' attribute
-        logger.debug("🔧 BACKWARDS COMPATIBILITY: Normalizing step attributes before filtering...")
         _normalize_step_attributes(pipeline_definition)
 
         # Filter out disabled steps at compile time (before any compilation phases)
@@ -1030,15 +1070,10 @@ class PipelineCompiler:
         for step in pipeline_definition:
             if step.enabled:
                 enabled_steps.append(step)
-            else:
-                logger.info(f"🔧 COMPILE-TIME FILTER: Removing disabled step '{step.name}' from pipeline")
 
         # Update pipeline_definition in-place to contain only enabled steps
         pipeline_definition.clear()
         pipeline_definition.extend(enabled_steps)
-
-        if original_count != len(pipeline_definition):
-            logger.info(f"🔧 COMPILE-TIME FILTER: Filtered {original_count - len(pipeline_definition)} disabled step(s), {len(pipeline_definition)} step(s) remaining")
 
         if not pipeline_definition:
             logger.warning("All steps were disabled. Pipeline is empty after filtering.")
@@ -1099,12 +1134,10 @@ class PipelineCompiler:
             # === BACKEND COMPATIBILITY VALIDATION ===
             # Validate that configured backend is compatible with microscope
             # For microscopes with only one compatible backend (e.g., OMERO), auto-set it
-            logger.debug("🔧 BACKEND VALIDATION: Validating backend compatibility with microscope...")
             PipelineCompiler.validate_backend_compatibility(orchestrator)
 
             # === GLOBAL AXIS FILTER RESOLUTION ===
             # Resolve axis filters once for all axis values to ensure step-level inheritance works
-            logger.debug("🔧 LAZY CONFIG RESOLUTION: Resolving lazy configs for axis filter resolution...")
             from openhcs.config_framework.lazy_factory import resolve_lazy_configurations_for_serialization
             from openhcs.config_framework.context_manager import config_context
 
@@ -1117,7 +1150,6 @@ class PipelineCompiler:
                         resolved_step = resolve_lazy_configurations_for_serialization(step)
                         resolved_steps_for_filters.append(resolved_step)
 
-            logger.debug("🎯 AXIS FILTER RESOLUTION: Resolving step axis filters...")
             # Create a temporary context to store the global axis filters
             temp_context = orchestrator.create_context("temp")
 
@@ -1130,14 +1162,11 @@ class PipelineCompiler:
 
             # Determine responsible axis value for metadata creation (lexicographically first)
             responsible_axis_value = sorted(axis_values_to_process)[0] if axis_values_to_process else None
-            logger.debug(f"Designated responsible axis value for metadata creation: {responsible_axis_value}")
 
             for axis_id in axis_values_to_process:
-                logger.debug(f"Compiling for axis value: {axis_id}")
 
                 # Determine if this axis value is responsible for metadata creation
                 is_responsible = (axis_id == responsible_axis_value)
-                logger.debug(f"Axis {axis_id} metadata responsibility: {is_responsible}")
 
                 # Create a temporary context to check if sequential mode is enabled
                 temp_context = orchestrator.create_context(axis_id)
@@ -1160,7 +1189,6 @@ class PipelineCompiler:
                 if temp_context.pipeline_sequential_mode and temp_context.pipeline_sequential_combinations:
                     # Compile separate context for each sequential combination
                     combinations = temp_context.pipeline_sequential_combinations
-                    logger.info(f"🔄 COMPILER: Compiling {len(combinations)} sequential contexts for axis {axis_id}")
 
                     for combo_idx, combo in enumerate(combinations):
                         context = orchestrator.create_context(axis_id)
@@ -1170,7 +1198,6 @@ class PipelineCompiler:
                         context.pipeline_sequential_mode = True
                         context.pipeline_sequential_combinations = combinations
                         context.current_sequential_combination = combo
-                        logger.info(f"🔄 COMPILER: Set context.current_sequential_combination = {combo} for axis {axis_id}")
 
                         with config_context(orchestrator.pipeline_config):
                             resolved_steps = PipelineCompiler.initialize_step_plans_for_context(context, pipeline_definition, orchestrator, metadata_writer=is_responsible, plate_path=orchestrator.plate_path)
@@ -1182,13 +1209,12 @@ class PipelineCompiler:
                             if enable_visualizer_override:
                                 PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
 
-                            PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
+                            PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator, resolved_steps)
 
                         context.freeze()
                         # Use composite key: (axis_id, combo_idx)
                         context_key = f"{axis_id}__combo_{combo_idx}"
                         compiled_contexts[context_key] = context
-                        logger.debug(f"Compiled sequential context {combo_idx + 1}/{len(combinations)} for axis {axis_id}")
                 else:
                     # No sequential mode - compile single context as before
                     context = orchestrator.create_context(axis_id)
@@ -1213,11 +1239,10 @@ class PipelineCompiler:
                         if enable_visualizer_override:
                             PipelineCompiler.apply_global_visualizer_override_for_context(context, True)
 
-                        PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator)
+                        PipelineCompiler.resolve_lazy_dataclasses_for_context(context, orchestrator, resolved_steps)
 
                     context.freeze()
                     compiled_contexts[axis_id] = context
-                    logger.debug(f"Compilation finished for axis value: {axis_id}")
 
             # Log path planning summary once per plate
             if compiled_contexts:

@@ -99,6 +99,32 @@ class OpenHCSRegistry(LibraryRegistryBase):
         """OpenHCS is always available."""
         return True
 
+    def _load_or_discover_functions(self) -> Dict[str, FunctionMetadata]:
+        """
+        Load functions from cache or discover them, then add custom functions.
+
+        Custom functions are NOT cached - they're loaded fresh from .py files
+        each time and added to the result here.
+        """
+        # Get module-based functions from cache or discovery
+        functions = super()._load_or_discover_functions()
+
+        # Add custom functions from FUNC_REGISTRY
+        # Custom functions are registered via register_function() when loaded from .py files
+        from openhcs.processing.func_registry import FUNC_REGISTRY
+
+        custom_funcs = FUNC_REGISTRY.get('openhcs', [])
+        for func in custom_funcs:
+            # Check if this function has metadata (custom functions have __function_metadata__)
+            if hasattr(func, '__function_metadata__'):
+                metadata = func.__function_metadata__
+                # Only add if not already in functions (avoid duplicates)
+                if metadata.name not in functions:
+                    functions[metadata.name] = metadata
+                    logger.debug(f"Added custom function '{metadata.name}' to OpenHCS registry")
+
+        return functions
+
     def get_library_object(self):
         """Return OpenHCS processing module."""
         import openhcs.processing
@@ -132,6 +158,11 @@ class OpenHCSRegistry(LibraryRegistryBase):
             module_function_count = 0
 
             for name, func in inspect.getmembers(module, inspect.isfunction):
+                # Only include functions actually defined in this module (not imported)
+                if func.__module__ != module_name:
+                    logger.debug(f"Skipping {name} from {module_name} - defined in {func.__module__}")
+                    continue
+
                 # Look for functions with memory type attributes (added by @numpy, @cupy, etc.)
                 if hasattr(func, 'input_memory_type') and hasattr(func, 'output_memory_type'):
                     input_type = getattr(func, 'input_memory_type')
@@ -184,7 +215,12 @@ class OpenHCSRegistry(LibraryRegistryBase):
 
             logger.debug(f"  📦 {module_name}: Found {module_function_count} OpenHCS functions")
 
-        logger.info(f"✅ OpenHCS Registry: Discovered {len(functions)} total functions")
+        logger.info(f"✅ OpenHCS Registry: Discovered {len(functions)} module-based functions")
+
+        # NOTE: Custom functions are NOT loaded here to avoid circular dependency
+        # They are loaded separately in func_registry.py Phase 4 after all registries are initialized
+        # Custom functions will be registered via register_function() which wraps them with contracts
+
         return functions
 
 
@@ -255,7 +291,7 @@ class OpenHCSRegistry(LibraryRegistryBase):
         """
         Check if a specific backend/memory type is available using the registry system.
 
-        This uses the existing registry system as the source of truth for backend availability,
+        This uses the canonical LIBRARY_REGISTRIES as the source of truth for backend availability,
         avoiding hardcoded checks and ensuring consistency across the system.
 
         Args:
@@ -264,34 +300,25 @@ class OpenHCSRegistry(LibraryRegistryBase):
         Returns:
             True if backend is available, False otherwise
         """
-        # Import registry service to get registry instances
-        from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+        # Import canonical registry dict (auto-discovers on first access)
+        from openhcs.processing.backends.lib_registry.unified_registry import LIBRARY_REGISTRIES
 
         # Special case: numpy is always available (no dedicated registry)
         if memory_type == "numpy":
             return True
 
-        # Get all available registries
+        # Use canonical registry system - LIBRARY_REGISTRIES auto-discovers on access
         try:
-            registry_classes = RegistryService._discover_registries()
+            if memory_type not in LIBRARY_REGISTRIES:
+                logger.debug(f"No registry found for memory type: {memory_type}")
+                return False
 
-            # Find the registry that matches this memory type
-            for registry_class in registry_classes:
-                try:
-                    registry_instance = registry_class()
+            # Get registry class and instantiate it
+            registry_class = LIBRARY_REGISTRIES[memory_type]
+            registry_instance = registry_class()
 
-                    # Check if this registry handles the memory type
-                    if hasattr(registry_instance, 'MEMORY_TYPE') and registry_instance.MEMORY_TYPE == memory_type:
-                        # Use the registry's own availability check as source of truth
-                        return registry_instance.is_library_available()
-
-                except Exception as e:
-                    logger.debug(f"Failed to check registry {registry_class.__name__}: {e}")
-                    continue
-
-            # If no registry found for this memory type, it's not available
-            logger.debug(f"No registry found for memory type: {memory_type}")
-            return False
+            # Use the registry's own availability check as source of truth
+            return registry_instance.is_library_available()
 
         except Exception as e:
             logger.warning(f"Failed to check backend availability for {memory_type}: {e}")

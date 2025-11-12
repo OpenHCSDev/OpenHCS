@@ -82,6 +82,7 @@ class MemoryStorageBackend(StorageBackend):
         # Check if file already exists
         if key in self._memory_store:
             raise FileExistsError(f"Path already exists: {output_path}")
+
         self._memory_store[key] = data
 
         # Save the file

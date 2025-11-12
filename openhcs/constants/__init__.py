@@ -18,7 +18,7 @@ from openhcs.constants.constants import (  # Backend constants; Memory constants
     MEMORY_TYPE_TENSORFLOW, MEMORY_TYPE_TORCH, Microscope, READ_BACKEND,
     REQUIRES_DISK_READ, REQUIRES_DISK_WRITE, SUPPORTED_MEMORY_TYPES,
     VALID_GPU_MEMORY_TYPES, VALID_MEMORY_TYPES, WRITE_BACKEND, Backend,
-    AllComponents, GroupBy, MemoryType, SequentialComponents, VariableComponents, VirtualComponents)
+    AllComponents, GroupBy, MemoryType, SequentialComponents, VariableComponents, VirtualComponents, DtypeConversion)
 
 # Backward compatibility and lazy loading using functional approach
 __getattr__ = lambda name: {
@@ -36,7 +36,7 @@ __all__ = [
     # Memory
     'MemoryType', 'CPU_MEMORY_TYPES', 'GPU_MEMORY_TYPES', 'SUPPORTED_MEMORY_TYPES',
     'MEMORY_TYPE_NUMPY', 'MEMORY_TYPE_CUPY', 'MEMORY_TYPE_TORCH', 'MEMORY_TYPE_TENSORFLOW',
-    'MEMORY_TYPE_JAX', 'VALID_MEMORY_TYPES', 'VALID_GPU_MEMORY_TYPES',
+    'MEMORY_TYPE_JAX', 'VALID_MEMORY_TYPES', 'VALID_GPU_MEMORY_TYPES', 'DtypeConversion',
 
     # I/O
     'DEFAULT_IMAGE_EXTENSION', 'DEFAULT_IMAGE_EXTENSIONS', 'DEFAULT_SITE_PADDING',

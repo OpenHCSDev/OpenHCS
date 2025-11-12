@@ -506,6 +506,9 @@ def stack_equalize_histogram(
     """
     _validate_3d_array(stack)
 
+    # Remember input dtype to preserve it
+    input_dtype = stack.dtype
+
     # Flatten the entire stack to compute the global histogram
     flat_stack = stack.flatten()
 
@@ -515,15 +518,25 @@ def stack_equalize_histogram(
     # Calculate cumulative distribution function (CDF)
     cdf = jnp.cumsum(hist)
 
-    # Normalize the CDF to the range [0, 65535]
+    # Normalize the CDF to the input dtype range
     # Avoid division by zero
     cdf_max = jnp.max(cdf)
-    cdf_normalized = jax.lax.cond(
-        cdf_max > 0,
-        lambda x: 65535.0 * x / cdf_max,
-        lambda x: x,
-        cdf
-    )
+    if jnp.issubdtype(input_dtype, jnp.integer):
+        dtype_info = jnp.iinfo(input_dtype)
+        cdf_normalized = jax.lax.cond(
+            cdf_max > 0,
+            lambda x: float(dtype_info.max) * x / cdf_max,
+            lambda x: x,
+            cdf
+        )
+    else:
+        # For float dtypes, normalize to [0, 1]
+        cdf_normalized = jax.lax.cond(
+            cdf_max > 0,
+            lambda x: x / cdf_max,
+            lambda x: x,
+            cdf
+        )
 
     # Scale input values to bin indices
     bin_width = (range_max - range_min) / bins
@@ -538,8 +551,12 @@ def stack_equalize_histogram(
     # Reshape back to original shape
     equalized_stack = equalized_flat.reshape(stack.shape)
 
-    # Convert to uint16
-    return equalized_stack.astype(jnp.uint16)
+    # Convert back to input dtype
+    if jnp.issubdtype(input_dtype, jnp.integer):
+        dtype_info = jnp.iinfo(input_dtype)
+        return jnp.clip(equalized_stack, dtype_info.min, dtype_info.max).astype(input_dtype)
+    else:
+        return equalized_stack.astype(input_dtype)
 
 @jax_func
 def create_projection(

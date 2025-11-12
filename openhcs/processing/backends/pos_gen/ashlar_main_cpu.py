@@ -279,8 +279,11 @@ class ArrayEdgeAligner:
     """
 
     def __init__(self, image_stack, positions, tile_size, pixel_size=1.0,
-                 max_shift=15, alpha=0.01, max_error=None,
-                 randomize=False, verbose=False):
+                 max_shift=30.0, alpha=0.05, max_error=None,
+                 randomize=False, verbose=False, upsample_factor=50,
+                 permutation_upsample=1, permutation_samples=1000,
+                 min_permutation_samples=10, max_permutation_tries=100,
+                 window_size_factor=0.15):
         """
         Initialize array-based EdgeAligner for pure position calculation.
 
@@ -294,6 +297,12 @@ class ArrayEdgeAligner:
             max_error: Explicit error threshold (None = auto-compute)
             randomize: Use random seed for permutation testing
             verbose: Enable verbose logging
+            upsample_factor: Upsample factor for phase cross correlation (sub-pixel accuracy)
+            permutation_upsample: Upsample factor for permutation testing
+            permutation_samples: Number of random samples for error threshold computation
+            min_permutation_samples: Minimum permutation samples for small datasets
+            max_permutation_tries: Maximum attempts to find non-overlapping strips
+            window_size_factor: Fraction of tile size for maximum window size
         """
         self.image_stack = image_stack
         self.positions = positions.astype(float)
@@ -305,6 +314,12 @@ class ArrayEdgeAligner:
         self.max_error = max_error
         self.randomize = randomize
         self.verbose = verbose
+        self.upsample_factor = upsample_factor
+        self.permutation_upsample = permutation_upsample
+        self.permutation_samples = permutation_samples
+        self.min_permutation_samples = min_permutation_samples
+        self.max_permutation_tries = max_permutation_tries
+        self.window_size_factor = window_size_factor
         self._cache = {}
         self.errors_negative_sampled = np.empty(0)
 
@@ -369,12 +384,12 @@ class ArrayEdgeAligner:
         num_distant_pairs = num_tiles * (num_tiles - 1) // 2 - len(edges)
 
         # Reduce permutation count for small datasets
-        n = 1000 if num_distant_pairs > 8 else (num_distant_pairs + 1) * 10
+        n = self.permutation_samples if num_distant_pairs > 8 else (num_distant_pairs + 1) * self.min_permutation_samples
         pairs = np.empty((n, 2), dtype=int)
         offsets = np.empty((n, 2), dtype=int)
 
         # Generate n random non-overlapping image strips
-        max_tries = 100
+        max_tries = self.max_permutation_tries
         if self.randomize is False:
             random_state = np.random.RandomState(0)
         else:
@@ -417,7 +432,7 @@ class ArrayEdgeAligner:
             #     sys.stdout.flush()
             img1 = self.image_stack[t1][offset1:offset1+w, :]
             img2 = self.image_stack[t2][offset2:offset2+w, :]
-            _, errors[i] = ashlar_register_no_preprocessing(img1, img2, upsample=1)
+            _, errors[i] = ashlar_register_no_preprocessing(img1, img2, upsample=self.permutation_upsample)
         # if self.verbose:
         #     print()
         self.errors_negative_sampled = errors
@@ -452,11 +467,11 @@ class ArrayEdgeAligner:
             # to the tile overlap. Simply using a large overlap in all cases
             # limits the maximum achievable correlation thus increasing the
             # error metric, leading to worse overall results. The window size
-            # starts at the nominal size and doubles until it's at least 10% of
-            # the tile size. If the nominal overlap is already 10% or greater,
-            # we only use that one size.
+            # starts at the nominal size and doubles until it's at least
+            # window_size_factor of the tile size. If the nominal overlap is
+            # already that large or greater, we only use that one size.
             smin = self.intersection(key[0], key[1]).shape
-            smax = np.round(self.tile_size * 0.1)
+            smax = np.round(self.tile_size * self.window_size_factor)
             sizes = [smin]
             while any(sizes[-1] < smax):
                 sizes.append(sizes[-1] * 2)
@@ -492,7 +507,7 @@ class ArrayEdgeAligner:
         sx = 1 if p1[1] >= p2[1] else -1
         sy = 1 if p1[0] >= p2[0] else -1
         padding = its.padding * [sy, sx]
-        shift, error = ashlar_register_no_preprocessing(img1, img2)
+        shift, error = ashlar_register_no_preprocessing(img1, img2, upsample=self.upsample_factor)
         shift += padding
         return shift, error
 
@@ -632,17 +647,18 @@ def ashlar_compute_tile_positions_cpu(
     image_stack: np.ndarray,
     grid_dimensions: Tuple[int, int],
     overlap_ratio: float = 0.1,
-    max_shift: float = 15.0,
-    stitch_alpha: float = 0.01,
+    pixel_size: float = 1.0,
+    max_shift: float = 30.0,
+    stitch_alpha: float = 0.05,
     max_error: float = None,
     randomize: bool = False,
     verbose: bool = False,
-    upsample_factor: int = 10,
+    upsample_factor: int = 50,
     permutation_upsample: int = 1,
     permutation_samples: int = 1000,
     min_permutation_samples: int = 10,
     max_permutation_tries: int = 100,
-    window_size_factor: float = 0.1
+    window_size_factor: float = 0.15
 ) -> Tuple[np.ndarray, List[Tuple[float, float]]]:
     """
     Compute tile positions using the complete Ashlar algorithm - pure position calculation only.
@@ -667,7 +683,15 @@ def ashlar_compute_tile_positions_cpu(
                       - 0.05-0.15 for well-controlled microscopes
                       - 0.15-0.25 for less precise stages
 
-        max_shift: Maximum allowed shift correction in micrometers. Default 15.0. This limits
+        pixel_size: Physical size of one pixel in micrometers (µm/pixel). Default 1.0.
+                   This is used to convert max_shift from micrometers to pixels. For example,
+                   if your microscope has 0.5 µm/pixel resolution and max_shift=30.0 µm,
+                   the actual pixel shift limit will be 30.0/0.5 = 60 pixels. Common values:
+                   - 0.1-0.5 µm/pixel for high-magnification objectives (60x, 100x)
+                   - 0.5-2.0 µm/pixel for medium magnification (20x, 40x)
+                   - 2.0-10.0 µm/pixel for low magnification (4x, 10x)
+
+        max_shift: Maximum allowed shift correction in micrometers. Default 30.0. This limits
                   how far tiles can be moved from their initial grid positions during alignment.
                   Should be set based on your microscope's stage accuracy:
                   - 5-15 μm for high-precision stages
@@ -765,12 +789,18 @@ def ashlar_compute_tile_positions_cpu(
             image_stack=image_stack,
             positions=initial_positions,
             tile_size=tile_size,
-            pixel_size=1.0,  # Assume 1 micrometer per pixel if not specified
+            pixel_size=pixel_size,
             max_shift=max_shift,
             alpha=stitch_alpha,
             max_error=max_error,
             randomize=randomize,
-            verbose=verbose
+            verbose=verbose,
+            upsample_factor=upsample_factor,
+            permutation_upsample=permutation_upsample,
+            permutation_samples=permutation_samples,
+            min_permutation_samples=min_permutation_samples,
+            max_permutation_tries=max_permutation_tries,
+            window_size_factor=window_size_factor
         )
 
         # Run the complete algorithm

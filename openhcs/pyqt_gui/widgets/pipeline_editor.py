@@ -782,57 +782,8 @@ class PipelineEditorWidget(QWidget):
 
     def _patch_lazy_constructors(self):
         """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
-        from contextlib import contextmanager
-        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-        import dataclasses
-        import inspect
-
-        @contextmanager
-        def patch_context():
-            # Store original constructors
-            original_constructors = {}
-
-            # CRITICAL: Automatically discover ALL lazy dataclass types from openhcs.core.config
-            # This prevents hardcoding and ensures all lazy types are patched
-            import openhcs.core.config as config_module
-            lazy_types = []
-            for name, obj in inspect.getmembers(config_module):
-                # Check if it's a class and has lazy resolution
-                if inspect.isclass(obj) and LazyDefaultPlaceholderService.has_lazy_resolution(obj):
-                    lazy_types.append(obj)
-                    logger.debug(f"Discovered lazy type for patching: {name}")
-
-            # Patch all discovered lazy types
-            for lazy_type in lazy_types:
-                # Store original constructor
-                original_constructors[lazy_type] = lazy_type.__init__
-
-                # Create patched constructor that uses raw values
-                def create_patched_init(original_init, dataclass_type):
-                    def patched_init(self, **kwargs):
-                        # Use raw value approach instead of calling original constructor
-                        # This prevents lazy resolution during code execution
-                        for field in dataclasses.fields(dataclass_type):
-                            value = kwargs.get(field.name, None)
-                            object.__setattr__(self, field.name, value)
-
-                        # Initialize any required lazy dataclass attributes
-                        if hasattr(dataclass_type, '_is_lazy_dataclass'):
-                            object.__setattr__(self, '_is_lazy_dataclass', True)
-
-                    return patched_init
-
-                # Apply the patch
-                lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
-
-            try:
-                yield
-            finally:
-                # Restore original constructors
-                for lazy_type, original_init in original_constructors.items():
-                    lazy_type.__init__ = original_init
-
-        return patch_context()
+        from openhcs.introspection import patch_lazy_constructors
+        return patch_lazy_constructors()
 
     def load_pipeline_from_file(self, file_path: Path):
         """

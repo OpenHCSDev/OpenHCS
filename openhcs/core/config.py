@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional, Union, Any, List
 from enum import Enum
 from abc import ABC, abstractmethod
-from openhcs.constants import Microscope, SequentialComponents, VirtualComponents, VariableComponents, GroupBy
+from openhcs.constants import Microscope, SequentialComponents, VirtualComponents, VariableComponents, GroupBy, DtypeConversion
 from openhcs.constants.constants import Backend, get_default_variable_components, get_default_group_by
 from openhcs.constants.input_source import InputSource
 
@@ -282,6 +282,16 @@ class VFSConfig:
 
     materialization_backend: MaterializationBackend = MaterializationBackend.DISK
     """Backend for explicitly materialized outputs (e.g., final results, user-requested saves)."""
+
+
+@global_pipeline_config
+@dataclass(frozen=True)
+class DtypeConfig:
+    """Configuration for dtype conversion behavior in memory type decorators."""
+
+    default_dtype_conversion: DtypeConversion = DtypeConversion.NATIVE_OUTPUT
+    """Default dtype conversion mode for all decorated functions.
+    NATIVE_OUTPUT (no scaling) or PRESERVE_INPUT (scale to input dtype)."""
 
 
 @global_pipeline_config

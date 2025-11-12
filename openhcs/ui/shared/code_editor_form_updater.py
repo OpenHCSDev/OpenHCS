@@ -5,7 +5,6 @@ This module provides utilities for parsing edited code and updating form manager
 with only the explicitly set fields, preserving None values for unspecified fields.
 """
 
-import inspect
 import logging
 import re
 from contextlib import contextmanager
@@ -190,39 +189,9 @@ class CodeEditorFormUpdater:
         Ensures exec()-created instances only set explicitly provided kwargs,
         allowing unspecified fields to remain None.
         """
-        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-        import openhcs.core.config as config_module
-
-        original_constructors = {}
-        lazy_types = []
-
-        for _name, obj in inspect.getmembers(config_module):
-            if inspect.isclass(obj) and LazyDefaultPlaceholderService.has_lazy_resolution(obj):
-                if not is_dataclass(obj):
-                    continue
-                lazy_types.append(obj)
-
-        for lazy_type in lazy_types:
-            original_constructors[lazy_type] = lazy_type.__init__
-
-            def create_patched_init(original_init, dataclass_type):
-                def patched_init(self, **kwargs):
-                    for field in fields(dataclass_type):
-                        value = kwargs.get(field.name, None)
-                        object.__setattr__(self, field.name, value)
-
-                    if hasattr(dataclass_type, '_is_lazy_dataclass'):
-                        object.__setattr__(self, '_is_lazy_dataclass', True)
-
-                return patched_init
-
-            lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
-
-        try:
+        from openhcs.introspection import patch_lazy_constructors as _patch_lazy_constructors
+        with _patch_lazy_constructors():
             yield
-        finally:
-            for lazy_type, original_init in original_constructors.items():
-                lazy_type.__init__ = original_init
 
     @staticmethod
     def _get_raw_field_value(obj: Any, field_name: str):

@@ -244,8 +244,14 @@ class DualEditorWindow(BaseFormDialog):
 
         # Create step parameter editor widget with proper nested context
         # Step must be nested: GlobalPipelineConfig -> PipelineConfig -> Step
-        # CRITICAL: Pass orchestrator's plate_path as scope_id to limit cross-window updates to same orchestrator
-        scope_id = str(self.orchestrator.plate_path) if self.orchestrator else None
+        # CRITICAL: Use hierarchical scope_id to isolate this step editor + its function panes
+        # Format: "plate_path::step_name" to prevent cross-contamination between different step editors
+        step_name = getattr(self.editing_step, 'name', 'unknown_step')
+        if self.orchestrator:
+            scope_id = f"{self.orchestrator.plate_path}::{step_name}"
+        else:
+            scope_id = f"no_orchestrator::{step_name}"
+
         with config_context(self.orchestrator.pipeline_config):  # Pipeline level
             with config_context(self.editing_step):              # Step level
                 self.step_editor = StepParameterEditorWidget(
@@ -272,11 +278,20 @@ class DualEditorWindow(BaseFormDialog):
         initial_functions = self._convert_step_func_to_list()
 
         # Create function list editor widget (mirrors Textual TUI)
-        step_id = getattr(self.editing_step, 'name', 'unknown_step')
+        # CRITICAL: Pass editing_step for context hierarchy (Function → Step → Pipeline → Global)
+        # CRITICAL: Use same hierarchical scope_id as step editor to isolate this step editor + its function panes
+        step_name = getattr(self.editing_step, 'name', 'unknown_step')
+        if self.orchestrator:
+            scope_id = f"{self.orchestrator.plate_path}::{step_name}"
+        else:
+            scope_id = f"no_orchestrator::{step_name}"
+
         self.func_editor = FunctionListEditorWidget(
             initial_functions=initial_functions,
-            step_identifier=step_id,
-            service_adapter=None
+            step_identifier=step_name,
+            service_adapter=None,
+            step_instance=self.editing_step,  # Pass step for lazy resolution context
+            scope_id=scope_id  # Same hierarchical scope_id as step editor
         )
 
         # Store main window reference for orchestrator access (find it through parent chain)
@@ -311,11 +326,22 @@ class DualEditorWindow(BaseFormDialog):
         logger.debug(f"Function pattern changed: {current_pattern}")
 
     def _on_step_context_refreshed(self, object_instance, context_obj):
-        """Handle context refresh from step editor code editor save."""
-        # The step editor already updated self.step and the function list editor
-        # We just need to refresh our own UI and detect changes
+        """Handle context refresh from step editor.
+
+        CRITICAL: This is called when:
+        1. Code editor saves (updates step instance)
+        2. Cross-window refresh (placeholders update due to PipelineConfig/GlobalPipelineConfig changes)
+        3. Reset button clicked (placeholders update to show inherited values)
+
+        We need to refresh the function editor's component button to show the new resolved group_by value.
+        """
+        # Refresh function editor from step context (updates component button with resolved group_by)
+        if hasattr(self, 'func_editor') and self.func_editor is not None:
+            self.func_editor.refresh_from_step_context()
+
+        # Detect changes
         self.detect_changes()
-        logger.debug("Step context refreshed from code editor save")
+        logger.debug("Step context refreshed - updated function editor component button")
 
     def _get_event_bus(self):
         """Get the global event bus from the service adapter.
@@ -498,55 +524,13 @@ class DualEditorWindow(BaseFormDialog):
             logger.debug("⏭️  Function editor doesn't exist yet, skipping sync")
             return
 
-        # CRITICAL: Read from form manager's current values (live context), not from self.editing_step
-        # The form manager updates its self.parameters dict as the user types, but doesn't update
-        # the dataclass instance until save. So we need to read from the form's current state.
-        #
-        # CRITICAL: Also apply lazy resolution to handle None values (inherit from pipeline config)
-        from openhcs.config_framework.context_manager import config_context
+        # CRITICAL: The function editor already has access to step_instance and can resolve
+        # group_by using the same lazy resolution pattern as the function panes.
+        # Just trigger a refresh - the function editor will read from step_instance.processing_config.group_by
+        # with proper context resolution (including live context from other open windows).
+        self.func_editor.refresh_from_step_context()
 
-        try:
-            # Get current values from step editor form (includes nested dataclasses)
-            current_values = self.step_editor.form_manager.get_current_values()
-            processing_config = current_values.get('processing_config')
-
-            if processing_config:
-                # CRITICAL: Apply config_context to enable lazy resolution for None values
-                # When group_by is None, it should inherit from pipeline config
-                # We need to create a temporary step-like object with the live processing_config
-                # so that lazy resolution can work properly
-
-                # Create a simple object that mimics the step's structure for lazy resolution
-                class TempStep:
-                    def __init__(self, processing_config):
-                        self.processing_config = processing_config
-
-                temp_step = TempStep(processing_config)
-
-                with config_context(self.orchestrator.pipeline_config):
-                    with config_context(temp_step):
-                        # Read from the live processing_config with lazy resolution
-                        # If group_by is None, this will resolve to pipeline config's value
-                        effective_group_by = processing_config.group_by
-                        variable_components = processing_config.variable_components or []
-                        logger.debug(f"🔍 Live form values (lazy-resolved): group_by={effective_group_by}, variable_components={variable_components}")
-            else:
-                # Fallback: processing_config not in current values (shouldn't happen)
-                logger.warning("⚠️  processing_config not found in current form values, using defaults")
-                effective_group_by = None
-                variable_components = []
-        except Exception as e:
-            logger.error(f"❌ Failed to read live form values: {e}", exc_info=True)
-            effective_group_by = None
-            variable_components = []
-
-        # Update function editor with extracted values
-        logger.debug(f"📤 Updating function editor: group_by={effective_group_by}, variable_components={variable_components}")
-        self.func_editor.set_effective_group_by(effective_group_by)
-        self.func_editor.current_variable_components = variable_components
-        self.func_editor._refresh_component_button()
-
-        logger.debug(f"✅ Synced function editor: group_by={effective_group_by}, variable_components={variable_components}")
+        logger.debug(f"✅ Triggered function editor refresh from step context")
 
 
 

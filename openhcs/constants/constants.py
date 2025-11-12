@@ -26,6 +26,27 @@ class Microscope(Enum):
     OMERO = "omero"  # Added for OMERO virtual filesystem backend
 
 
+class DtypeConversion(Enum):
+    """Data type conversion modes for all memory type functions."""
+
+    PRESERVE_INPUT = "preserve"     # Keep input dtype with scaling
+    NATIVE_OUTPUT = "native"        # Use framework's native output (default, no scaling)
+    UINT8 = "uint8"                # Force uint8 (0-255 range, napari RGB/masks)
+    UINT16 = "uint16"              # Force uint16 (microscopy standard, labeled masks)
+    FLOAT32 = "float32"            # Force float32 (GPU performance, normalized data)
+
+    @property
+    def numpy_dtype(self):
+        """Get the corresponding numpy dtype."""
+        import numpy as np
+        dtype_map = {
+            self.UINT8: np.uint8,
+            self.UINT16: np.uint16,
+            self.FLOAT32: np.float32,
+        }
+        return dtype_map.get(self, None)
+
+
 class VirtualComponents(Enum):
     """
     Components that don't come from filename parsing but from execution/location context.

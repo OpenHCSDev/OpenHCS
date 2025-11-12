@@ -117,6 +117,11 @@ class CustomFunctionManager:
             if not hasattr(obj, 'input_memory_type'):
                 continue
 
+            # Set module name for custom functions (required for code generation)
+            # Custom functions executed via exec() don't have __module__ set properly
+            if not hasattr(obj, '__module__') or obj.__module__ is None or obj.__module__ == '__main__':
+                obj.__module__ = 'openhcs.processing.custom_functions'
+
             # Validate function
             func_validation: ValidationResult = validate_function(obj)
             if not func_validation.is_valid:
@@ -146,7 +151,7 @@ class CustomFunctionManager:
         # Persist to disk if requested
         if persist:
             for func in registered_functions:
-                self._save_function_code(func.name, code)
+                self._save_function_code(func.__name__, code)
 
         # Clear metadata caches to force refresh
         self._clear_caches()
@@ -267,6 +272,134 @@ class CustomFunctionManager:
 
         return functions
 
+    def get_function_code(self, func_name: str) -> str:
+        """
+        Get source code for a custom function.
+
+        Args:
+            func_name: Name of function
+
+        Returns:
+            Python source code
+
+        Raises:
+            ValueError: If function file not found
+        """
+        file_path: Path = self.storage_dir / f"{func_name}.py"
+
+        if not file_path.exists():
+            raise ValueError(f"Custom function '{func_name}' not found")
+
+        return file_path.read_text(encoding='utf-8')
+
+    def update_custom_function(self, old_name: str, new_code: str) -> str:
+        """
+        Atomically update a custom function.
+
+        Validates new code first. If valid, writes new file with temp name,
+        renames temp to final location, then deletes old file if name changed.
+        If any step fails, old function is preserved.
+
+        Args:
+            old_name: Name of existing function to replace
+            new_code: New Python code
+
+        Returns:
+            Name of the new function (may differ if renamed)
+
+        Raises:
+            ValueError: If old function not found
+            ValidationError: If new code is invalid
+            OSError: If file operations fail
+        """
+        import ast
+        import os
+        import tempfile
+
+        # Verify old function exists
+        old_file_path: Path = self.storage_dir / f"{old_name}.py"
+        if not old_file_path.exists():
+            raise ValueError(f"Custom function '{old_name}' not found")
+
+        # Validate new code FIRST (fail-loud if invalid)
+        validation_result: ValidationResult = validate_code(new_code)
+        if not validation_result.is_valid:
+            error_messages = "\n".join(validation_result.errors)
+            raise ValidationError(f"Code validation failed:\n{error_messages}")
+
+        # Extract new function name
+        tree = ast.parse(new_code)
+        new_name: str = ""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                new_name = node.name
+                break
+
+        if not new_name:
+            raise ValidationError("No function definition found in code")
+
+        # Atomic operation using temp file pattern:
+        # 1. Write new code to temp file
+        # 2. Rename temp to final location (atomic filesystem operation)
+        # 3. Delete old function file (only if name changed and new file exists)
+        # 4. Load and register from the file that now definitely exists
+        # This ensures new function exists before old is deleted
+
+        new_file_path: Path = self.storage_dir / f"{new_name}.py"
+
+        # Write to temp file first
+        temp_fd, temp_path = tempfile.mkstemp(suffix='.py', dir=self.storage_dir)
+        try:
+            with os.fdopen(temp_fd, 'w') as f:
+                f.write(new_code)
+
+            # Rename temp to final location FIRST (atomic FS operation)
+            # After this, new function file definitely exists
+            Path(temp_path).rename(new_file_path)
+
+            # Only THEN delete old function (if name changed)
+            # New function already exists, so this is safe
+            if old_name != new_name and old_file_path.exists():
+                old_file_path.unlink()
+                logger.info(f"Deleted old function file: {old_file_path}")
+
+            # Load from file that now definitely exists
+            # Don't use register_from_code() to avoid double-parsing
+            self._load_function_from_file(new_file_path, new_name)
+
+            return new_name
+
+        except (OSError, FileNotFoundError, ValidationError) as e:
+            # Cleanup temp file on failure (if it still exists)
+            Path(temp_path).unlink(missing_ok=True)
+            raise
+
+    def _load_function_from_file(self, file_path: Path, func_name: str) -> None:
+        """
+        Load a custom function from an existing file without re-parsing code.
+
+        Used by update_custom_function() to avoid double-parsing after file rename.
+
+        Args:
+            file_path: Path to the function file
+            func_name: Name of the function
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            ValidationError: If function can't be loaded
+        """
+        if not file_path.exists():
+            raise FileNotFoundError(f"Function file not found: {file_path}")
+
+        # Read and register the code
+        code: str = file_path.read_text(encoding='utf-8')
+
+        try:
+            self.register_from_code(code, persist=False)  # Already persisted
+            logger.info(f"Loaded function '{func_name}' from {file_path}")
+        except Exception as e:
+            raise ValidationError(f"Failed to load function '{func_name}': {str(e)}")
+
     def _create_execution_namespace(self) -> Dict[str, Any]:
         """
         Create controlled namespace for exec().
@@ -311,8 +444,19 @@ class CustomFunctionManager:
         """
         from openhcs.processing.backends.lib_registry.registry_service import RegistryService
 
+        # Clear RegistryService metadata cache
         RegistryService.clear_metadata_cache()
         logger.debug("Cleared RegistryService metadata cache")
+
+        # Clear OpenHCSRegistry disk cache so it re-discovers custom functions
+        try:
+            from openhcs.processing.backends.lib_registry.openhcs_registry import OpenHCSRegistry
+            registry = OpenHCSRegistry()
+            if registry._cache_path.exists():
+                registry._cache_path.unlink()
+                logger.debug(f"Cleared OpenHCSRegistry disk cache at {registry._cache_path}")
+        except Exception as e:
+            logger.warning(f"Failed to clear OpenHCSRegistry disk cache: {e}")
 
         # Also clear FunctionSelectorDialog cache if it exists
         try:

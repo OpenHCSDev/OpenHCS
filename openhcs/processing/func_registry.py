@@ -33,8 +33,8 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
-# Thread-safe lock for registry access
-_registry_lock = threading.Lock()
+# Thread-safe lock for registry access (reentrant to allow nested acquisition)
+_registry_lock = threading.RLock()
 
 # Import hook system for auto-decorating external libraries
 _original_import = __builtins__['__import__']
@@ -171,52 +171,70 @@ def _auto_initialize_registry() -> None:
 
     This follows the same pattern as storage_registry in openhcs.io.base.
     """
-    global _registry_initialized
+    with _registry_lock:
+        global _registry_initialized
 
-    if _registry_initialized:
-        return
+        if _registry_initialized:
+            return
 
+        try:
+            # Clear and initialize the registry
+            FUNC_REGISTRY.clear()
+
+            # Phase 1: Register all functions from RegistryService (includes OpenHCS and external libraries)
+            from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+            all_functions = RegistryService.get_all_functions_with_metadata()
+
+            # Initialize registry structure based on discovered registries
+            # Handle composite keys from RegistryService (backend:function_name)
+            for composite_key, metadata in all_functions.items():
+                registry_name = metadata.registry.library_name
+                if registry_name not in FUNC_REGISTRY:
+                    FUNC_REGISTRY[registry_name] = []
+
+            # Register all functions
+            for composite_key, metadata in all_functions.items():
+                registry_name = metadata.registry.library_name
+                FUNC_REGISTRY[registry_name].append(metadata.func)
+
+            # Phase 2: Apply CPU-only filtering if enabled
+            if CPU_ONLY_MODE:
+                logger.info("CPU-only mode enabled - filtering to numpy functions only")
+                _apply_cpu_only_filtering()
+
+            total_functions = sum(len(funcs) for funcs in FUNC_REGISTRY.values())
+            logger.info(
+                "Function registry auto-initialized with %d functions across %d registries",
+                total_functions,
+                len(FUNC_REGISTRY)
+            )
+
+            # Mark registry as initialized
+            _registry_initialized = True
+
+            # Create virtual modules for external library functions
+            _create_virtual_modules()
+
+            # Phase 3: Ensure 'openhcs' registry exists for custom functions
+            if 'openhcs' not in FUNC_REGISTRY:
+                FUNC_REGISTRY['openhcs'] = []
+                logger.debug("Created 'openhcs' registry for custom functions")
+
+        except Exception as e:
+            logger.error(f"Failed to auto-initialize function registry: {e}")
+            raise
+
+    # Phase 4: Load custom functions from storage (OUTSIDE the lock)
+    # RLock allows nested acquisition, so register_function() can acquire it again
     try:
-        # Clear and initialize the registry
-        FUNC_REGISTRY.clear()
-
-        # Phase 1: Register all functions from RegistryService (includes OpenHCS and external libraries)
-        from openhcs.processing.backends.lib_registry.registry_service import RegistryService
-        all_functions = RegistryService.get_all_functions_with_metadata()
-
-        # Initialize registry structure based on discovered registries
-        # Handle composite keys from RegistryService (backend:function_name)
-        for composite_key, metadata in all_functions.items():
-            registry_name = metadata.registry.library_name
-            if registry_name not in FUNC_REGISTRY:
-                FUNC_REGISTRY[registry_name] = []
-
-        # Register all functions
-        for composite_key, metadata in all_functions.items():
-            registry_name = metadata.registry.library_name
-            FUNC_REGISTRY[registry_name].append(metadata.func)
-
-        # Phase 2: Apply CPU-only filtering if enabled
-        if CPU_ONLY_MODE:
-            logger.info("CPU-only mode enabled - filtering to numpy functions only")
-            _apply_cpu_only_filtering()
-
-        total_functions = sum(len(funcs) for funcs in FUNC_REGISTRY.values())
-        logger.info(
-            "Function registry auto-initialized with %d functions across %d registries",
-            total_functions,
-            len(FUNC_REGISTRY)
-        )
-
-        # Mark registry as initialized
-        _registry_initialized = True
-
-        # Create virtual modules for external library functions
-        _create_virtual_modules()
-
-    except Exception as e:
-        logger.error(f"Failed to auto-initialize function registry: {e}")
-        raise
+        from openhcs.processing.custom_functions import CustomFunctionManager
+        manager = CustomFunctionManager()
+        custom_count = manager.load_all_custom_functions()
+        if custom_count > 0:
+            logger.info(f"Loaded {custom_count} custom function(s) from storage")
+    except Exception as custom_error:
+        # Don't fail initialization if custom functions fail to load
+        logger.warning(f"Failed to load custom functions: {custom_error}")
 
 
 def initialize_registry() -> None:
@@ -275,6 +293,22 @@ def initialize_registry() -> None:
         # Create virtual modules for external library functions
         _create_virtual_modules()
 
+        # Phase 3: Ensure 'openhcs' registry exists for custom functions
+        if 'openhcs' not in FUNC_REGISTRY:
+            FUNC_REGISTRY['openhcs'] = []
+            logger.debug("Created 'openhcs' registry for custom functions")
+
+    # Phase 4: Load custom functions from storage (OUTSIDE the lock to avoid deadlock)
+    try:
+        from openhcs.processing.custom_functions import CustomFunctionManager
+        manager = CustomFunctionManager()
+        custom_count = manager.load_all_custom_functions()
+        if custom_count > 0:
+            logger.info(f"Loaded {custom_count} custom function(s) from storage")
+    except Exception as custom_error:
+        # Don't fail initialization if custom functions fail to load
+        logger.warning(f"Failed to load custom functions: {custom_error}")
+
 
 def load_prebuilt_registry(registry_data: Dict) -> None:
     """
@@ -297,52 +331,7 @@ def load_prebuilt_registry(registry_data: Dict) -> None:
         logger.info(f"Loaded pre-built registry with {total_functions} functions")
 
 
-def _scan_and_register_functions() -> None:
-    """
-    Scan the processing directory for native OpenHCS functions.
 
-    This function recursively imports all modules in the processing directory
-    and registers functions that have matching input_memory_type and output_memory_type
-    attributes that are in the set of valid memory types.
-
-    This is Phase 1 of initialization - only native OpenHCS functions.
-    External library functions are registered in Phase 2.
-    """
-    from openhcs import processing
-
-    processing_path = os.path.dirname(processing.__file__)
-    processing_package = "openhcs.processing"
-
-    logger.info("Phase 1: Scanning for native OpenHCS functions in %s", processing_path)
-
-    # Walk through all modules in the processing package
-    for _, module_name, is_pkg in pkgutil.walk_packages([processing_path], f"{processing_package}."):
-        try:
-            # Import the module
-            logger.debug(f"Scanning module: {module_name}")
-            module = importlib.import_module(module_name)
-
-            # Skip packages (we'll process their modules separately)
-            if is_pkg:
-                logger.debug(f"Skipping package: {module_name}")
-                continue
-
-            # Find all functions in the module
-            function_count = 0
-            for name, obj in inspect.getmembers(module, inspect.isfunction):
-                # Check if the function has the required attributes
-                if hasattr(obj, "input_memory_type") and hasattr(obj, "output_memory_type"):
-                    input_type = getattr(obj, "input_memory_type")
-                    output_type = getattr(obj, "output_memory_type")
-
-                    # Register if input and output types are valid (OpenHCS functions can have mixed types)
-                    if input_type in VALID_MEMORY_TYPES and output_type in VALID_MEMORY_TYPES:
-                        _register_function(obj, "openhcs")
-                        function_count += 1
-
-            logger.debug(f"Module {module_name}: found {function_count} registerable functions")
-        except Exception as e:
-            logger.warning("Error importing module %s: %s", module_name, e)
 
 
 def _apply_unified_decoration(original_func, func_name, memory_type, create_wrapper=True):
@@ -450,8 +439,81 @@ def register_function(func: Callable, backend: str = None, **kwargs) -> None:
         if registry_name not in FUNC_REGISTRY:
             raise ValueError(f"Invalid registry name: {registry_name}")
 
-        # Register the function
-        _register_function(func, registry_name)
+        # Skip if function is already registered
+        if func in FUNC_REGISTRY[registry_name]:
+            logger.debug(
+                "Function '%s' already registered for registry '%s'",
+                func.__name__, registry_name
+            )
+            return
+
+        # Wrap custom functions with contract wrapper to add 'enabled' parameter
+        # (OpenHCS backend functions are already wrapped during discovery)
+        wrapped_func = func
+        if registry_name == 'openhcs' and hasattr(func, '__module__') and func.__module__ == 'openhcs.processing.custom_functions':
+            try:
+                from openhcs.processing.backends.lib_registry.unified_registry import ProcessingContract, FunctionMetadata
+                from openhcs.processing.backends.lib_registry.openhcs_registry import OpenHCSRegistry
+
+                # Assign default contract for custom functions (FLEXIBLE)
+                contract = ProcessingContract.FLEXIBLE
+                func.__processing_contract__ = contract
+
+                # Apply contract wrapper (adds enabled + slice_by_slice)
+                registry = OpenHCSRegistry()
+                wrapped_func = registry.apply_contract_wrapper(func, contract)
+
+                # Store metadata on the wrapped function so OpenHCSRegistry can find it
+                # Custom functions are NOT saved to the OpenHCS registry cache - they're
+                # loaded fresh from .py files each time and discovered via FUNC_REGISTRY
+                doc = func.__doc__ or ""
+                metadata = FunctionMetadata(
+                    name=func.__name__,
+                    func=wrapped_func,
+                    contract=contract,
+                    registry=registry,
+                    module=func.__module__,
+                    doc=doc,
+                    tags=["openhcs", "custom"],
+                    original_name=func.__name__
+                )
+                # Store metadata as an attribute so OpenHCSRegistry can retrieve it
+                wrapped_func.__function_metadata__ = metadata
+
+                # Clear RegistryService cache to force re-discovery with new custom function
+                from openhcs.processing.backends.lib_registry.registry_service import RegistryService
+                RegistryService.clear_metadata_cache()
+
+                logger.debug(f"Applied contract wrapper to custom function '{func.__name__}'")
+            except Exception as e:
+                logger.warning(f"Failed to apply contract wrapper to custom function '{func.__name__}': {e}")
+                wrapped_func = func  # Fall back to unwrapped function
+
+        # Add wrapped function to registry
+        FUNC_REGISTRY[registry_name].append(wrapped_func)
+
+        # Add registry_name attribute for easier inspection
+        setattr(wrapped_func, "registry", registry_name)
+
+        # If this is a custom function (openhcs registry with openhcs.processing.custom_functions module),
+        # add it to the openhcs.processing.custom_functions module for imports
+        if registry_name == 'openhcs' and hasattr(func, '__module__') and func.__module__ == 'openhcs.processing.custom_functions':
+            try:
+                # Always import the module to ensure it's in sys.modules
+                import openhcs.processing.custom_functions
+
+                # Add wrapped function to the module (not the original)
+                setattr(openhcs.processing.custom_functions, func.__name__, wrapped_func)
+                logger.debug(f"Added custom function '{func.__name__}' to openhcs.processing.custom_functions module")
+            except Exception as e:
+                logger.warning(f"Failed to add custom function to module: {e}")
+
+        logger.debug(
+            "Registered function '%s' in registry '%s' (input=%s output=%s)",
+            func.__name__, registry_name,
+            getattr(wrapped_func, 'input_memory_type', '<unknown>'),
+            getattr(wrapped_func, 'output_memory_type', '<unknown>')
+        )
 
 
 def _apply_cpu_only_filtering() -> None:
@@ -470,36 +532,7 @@ def _apply_cpu_only_filtering() -> None:
             del FUNC_REGISTRY[registry_name]
 
 
-def _register_function(func: Callable, registry_name: str) -> None:
-    """
-    Register a function for a specific registry.
 
-    This is an internal function used during automatic scanning and manual registration.
-
-    Args:
-        func: The function to register
-        registry_name: The registry name (e.g., "openhcs", "skimage", "pyclesperanto")
-    """
-    # Skip if function is already registered
-    if func in FUNC_REGISTRY[registry_name]:
-        logger.debug(
-            "Function '%s' already registered for registry '%s'",
-            func.__name__, registry_name
-        )
-        return
-
-    # Add function to registry
-    FUNC_REGISTRY[registry_name].append(func)
-
-    # Add registry_name attribute for easier inspection
-    setattr(func, "registry", registry_name)
-
-    logger.debug(
-        "Registered function '%s' in registry '%s' (input=%s output=%s)",
-        func.__name__, registry_name,
-        getattr(func, 'input_memory_type', '<unknown>'),
-        getattr(func, 'output_memory_type', '<unknown>')
-    )
 
 
 def get_functions_by_memory_type(memory_type: str) -> List[Callable]:

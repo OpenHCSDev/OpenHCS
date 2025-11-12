@@ -15,12 +15,28 @@ from openhcs.core.utils import optional_import
 
 
 # Scaling ranges for integer dtypes (shared across all memory types)
-_SCALING_RANGES = {
+_DTYPE_MAX_VALUES = {
     'uint8': 255.0,
     'uint16': 65535.0,
     'uint32': 4294967295.0,
-    'int16': (65535.0, 32768.0),  # (scale, offset)
-    'int32': (4294967295.0, 2147483648.0),
+    'int8': 127.0,
+    'int16': 32767.0,
+    'int32': 2147483647.0,
+    'float16': 1.0,
+    'float32': 1.0,
+    'float64': 1.0,
+}
+
+_DTYPE_MIN_VALUES = {
+    'uint8': 0.0,
+    'uint16': 0.0,
+    'uint32': 0.0,
+    'int8': -128.0,
+    'int16': -32768.0,
+    'int32': -2147483648.0,
+    'float16': 0.0,
+    'float32': 0.0,
+    'float64': 0.0,
 }
 
 
@@ -61,40 +77,40 @@ def _scale_generic(result, target_dtype, mem_type: MemoryType):
     if 'extra_import' in ops:
         jnp = optional_import(ops['extra_import'])  # noqa: F841 (used in eval)
 
-    # Check if conversion needed (float → int)
-    result_is_float = eval(ops['check_float'])
-    target_is_int = eval(ops['check_int'])
+    # Get dtype names
+    result_dtype_name = result.dtype.name if hasattr(result.dtype, 'name') else str(result.dtype).split('.')[-1]
+    target_dtype_name = target_dtype.__name__ if hasattr(target_dtype, '__name__') else str(target_dtype).split('.')[-1]
 
-    if not (result_is_float and target_is_int):
-        # Direct conversion
+    # Check if we need dtype-to-dtype scaling
+    # Only scale when converting between different numeric ranges
+    if result_dtype_name == target_dtype_name:
+        return result
+
+    # Get dtype ranges
+    input_min = _DTYPE_MIN_VALUES.get(result_dtype_name)
+    input_max = _DTYPE_MAX_VALUES.get(result_dtype_name)
+    target_min = _DTYPE_MIN_VALUES.get(target_dtype_name)
+    target_max = _DTYPE_MAX_VALUES.get(target_dtype_name)
+
+    # If we don't have range info for either dtype, just do direct conversion
+    if input_max is None or target_max is None:
         return eval(ops['astype'])
 
-    # Get min/max
-    result_min = eval(ops['min'])  # noqa: F841 (used in eval)
-    result_max = eval(ops['max'])  # noqa: F841 (used in eval)
+    # Dtype-to-dtype scaling: scale based on dtype ranges, not data ranges
+    # Formula: output = (input - input_min) * (target_max - target_min) / (input_max - input_min) + target_min
+    # This preserves the relative position in the dtype range
 
-    if result_max <= result_min:
-        # Constant image
-        return eval(ops['astype'])
+    input_range = input_max - input_min
+    target_range = target_max - target_min
+    scale_factor = target_range / input_range
 
-    # Normalize to [0, 1]
-    normalized = (result - result_min) / (result_max - result_min)  # noqa: F841 (used in eval)
-
-    # Scale to target range
-    dtype_name = target_dtype.__name__ if hasattr(target_dtype, '__name__') else str(target_dtype).split('.')[-1]
-
-    if dtype_name in _SCALING_RANGES:
-        range_info = _SCALING_RANGES[dtype_name]
-        if isinstance(range_info, tuple):
-            scale_val, offset_val = range_info
-            result = normalized * scale_val - offset_val  # noqa: F841 (used in eval)
-        else:
-            result = normalized * range_info  # noqa: F841 (used in eval)
-    else:
-        result = normalized  # noqa: F841 (used in eval)
+    # Scale from input dtype range to target dtype range
+    scaled = (result - input_min) * scale_factor + target_min  # noqa: F841 (used in eval)
 
     # Convert dtype
-    return eval(ops['astype'])
+    result = scaled  # noqa: F841 (used in eval)
+    converted = eval(ops['astype'])
+    return converted
 
 
 def _scale_pyclesperanto(result, target_dtype):
@@ -103,39 +119,36 @@ def _scale_pyclesperanto(result, target_dtype):
     if cle is None or not hasattr(result, 'dtype'):
         return result
 
-    # Check if result is floating point and target is integer
-    result_is_float = np.issubdtype(result.dtype, np.floating)
-    target_is_int = target_dtype in [np.uint8, np.uint16, np.uint32, np.int8, np.int16, np.int32]
+    # Get dtype names
+    result_dtype_name = result.dtype.name if hasattr(result.dtype, 'name') else str(result.dtype).split('.')[-1]
+    target_dtype_name = target_dtype.__name__ if hasattr(target_dtype, '__name__') else str(target_dtype).split('.')[-1]
 
-    if not (result_is_float and target_is_int):
-        # Direct conversion
+    # Check if we need dtype-to-dtype scaling
+    if result_dtype_name == target_dtype_name:
+        # Same dtype, no conversion needed
+        return result
+
+    # Get dtype ranges
+    input_min = _DTYPE_MIN_VALUES.get(result_dtype_name)
+    input_max = _DTYPE_MAX_VALUES.get(result_dtype_name)
+    target_min = _DTYPE_MIN_VALUES.get(target_dtype_name)
+    target_max = _DTYPE_MAX_VALUES.get(target_dtype_name)
+
+    # If we don't have range info for either dtype, just do direct conversion
+    if input_max is None or target_max is None:
         return cle.push(cle.pull(result).astype(target_dtype))
 
-    # Get min/max
-    result_min = float(cle.minimum_of_all_pixels(result))
-    result_max = float(cle.maximum_of_all_pixels(result))
+    # Dtype-to-dtype scaling using GPU operations
+    # Formula: output = (input - input_min) * (target_max - target_min) / (input_max - input_min) + target_min
 
-    if result_max <= result_min:
-        # Constant image
-        return cle.push(cle.pull(result).astype(target_dtype))
+    input_range = input_max - input_min
+    target_range = target_max - target_min
+    scale_factor = target_range / input_range
 
-    # Normalize to [0, 1] using GPU operations
-    normalized = cle.subtract_image_from_scalar(result, scalar=result_min)
-    range_val = result_max - result_min
-    normalized = cle.multiply_image_and_scalar(normalized, scalar=1.0/range_val)
-
-    # Scale to target range
-    dtype_name = target_dtype.__name__
-    if dtype_name in _SCALING_RANGES:
-        range_info = _SCALING_RANGES[dtype_name]
-        if isinstance(range_info, tuple):
-            scale_val, offset_val = range_info
-            scaled = cle.multiply_image_and_scalar(normalized, scalar=scale_val)
-            scaled = cle.subtract_image_from_scalar(scaled, scalar=offset_val)
-        else:
-            scaled = cle.multiply_image_and_scalar(normalized, scalar=range_info)
-    else:
-        scaled = normalized
+    # Scale from input dtype range to target dtype range using GPU ops
+    scaled = cle.subtract_image_from_scalar(result, scalar=input_min)
+    scaled = cle.multiply_image_and_scalar(scaled, scalar=scale_factor)
+    scaled = cle.add_image_and_scalar(scaled, scalar=target_min)
 
     # Convert dtype
     return cle.push(cle.pull(scaled).astype(target_dtype))
@@ -151,4 +164,3 @@ _SCALING_FUNCTIONS_GENERATED = {
 
 # Registry mapping memory type names to scaling functions (backward compatibility)
 SCALING_FUNCTIONS = _SCALING_FUNCTIONS_GENERATED
-

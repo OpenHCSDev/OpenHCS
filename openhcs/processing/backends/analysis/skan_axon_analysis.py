@@ -178,20 +178,20 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
     for i, visualization in enumerate(data):
         viz_filename = str(parent_dir / f"{base_path}_slice_{i:03d}.tif")
 
-        # Convert visualization to appropriate dtype for saving (uint16 to match input images)
-        if visualization.dtype != np.uint16:
-            # Normalize to uint16 range if needed
+        # Convert visualization to uint8 for tracing visualizations (standard format)
+        if visualization.dtype != np.uint8:
+            # Normalize to uint8 range if needed
             if visualization.max() <= 1.0:
-                viz_uint16 = (visualization * 65535).astype(np.uint16)
+                viz_uint8 = (visualization * 255).astype(np.uint8)
             else:
-                viz_uint16 = visualization.astype(np.uint16)
+                viz_uint8 = visualization.astype(np.uint8)
         else:
-            viz_uint16 = visualization
+            viz_uint8 = visualization
 
         # Save to all backends
         for backend in backends:
             kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(viz_uint16, viz_filename, backend, **kwargs)
+            filemanager.save(viz_uint8, viz_filename, backend, **kwargs)
 
     # Return summary path
     summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")

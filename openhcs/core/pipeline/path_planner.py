@@ -101,6 +101,10 @@ class PathPlanner:
         if isinstance(step, FunctionStep) and any(k in METADATA_RESOLVERS for k in attrs['inputs']):
             step.func = self._inject_metadata(step.func, attrs['inputs'])
 
+        # Inject resolved injectable params (dtype_config, enabled, etc.) into func kwargs
+        if isinstance(step, FunctionStep):
+            step.func = self._inject_injectable_params(step.func, step)
+
         # Generate funcplan (only if needed)
         funcplan = {}
         if isinstance(step, FunctionStep) and special_outputs:
@@ -312,15 +316,105 @@ class PathPlanner:
                 pattern = self._inject_into_pattern(pattern, key, value)
         return pattern
 
+    def _inject_injectable_params(self, pattern: Any, step) -> Any:
+        """Inject injectable param values into function kwargs.
+
+        Injectable params (dtype_config, enabled, etc.) are added to function signatures
+        by the unified registry. This method injects those params from the step into the
+        func pattern kwargs. The values will be resolved during Phase 5 (lazy resolution).
+
+        Args:
+            pattern: Function pattern (callable, tuple, list, or dict)
+            step: FunctionStep instance with config attributes
+
+        Returns:
+            Modified pattern with param values injected into kwargs
+        """
+        from openhcs.processing.backends.lib_registry.unified_registry import LibraryRegistryBase
+
+        # Get injectable param names from registry (single source of truth)
+        param_names = [param_name for param_name, _, _ in LibraryRegistryBase.INJECTABLE_PARAMS]
+
+        # Build kwargs dict from step attributes (keep lazy configs as-is for Phase 5 resolution)
+        param_kwargs = {}
+        for param_name in param_names:
+            if hasattr(step, param_name):
+                value = getattr(step, param_name)
+                if value is not None:
+                    param_kwargs[param_name] = value
+
+        if not param_kwargs:
+            return pattern
+
+        return self._inject_params_into_pattern(pattern, param_kwargs)
+
     def _inject_into_pattern(self, pattern: Any, key: str, value: Any) -> Any:
-        """Inject value into pattern - handles all cases in 6 lines."""
-        if callable(pattern):
-            return (pattern, {key: value})
+        """Inject value into pattern - only for functions that declare the special input.
+
+        FunctionReference objects preserve __special_inputs__ via __getattr__, so they
+        work the same as regular callables here.
+        """
+        from openhcs.core.pipeline.compiler import FunctionReference
+
+        # Handle FunctionReference and callable objects
+        if isinstance(pattern, FunctionReference) or callable(pattern):
+            # Only inject if THIS specific function needs this metadata
+            if key in getattr(pattern, '__special_inputs__', {}):
+                return (pattern, {key: value})
+            return pattern  # Don't modify if function doesn't need it
+
         if isinstance(pattern, tuple) and len(pattern) == 2:
-            return (pattern[0], {**pattern[1], key: value})
-        if isinstance(pattern, list) and len(pattern) == 1:
-            return [self._inject_into_pattern(pattern[0], key, value)]
+            func, kwargs = pattern
+            # Only inject if THIS specific function needs this metadata
+            if (isinstance(func, FunctionReference) or callable(func)) and key in getattr(func, '__special_inputs__', {}):
+                return (func, {**kwargs, key: value})
+            return pattern  # Don't modify if function doesn't need it
+
+        if isinstance(pattern, list):
+            # Recursively process each element (selective injection per function)
+            return [self._inject_into_pattern(item, key, value) for item in pattern]
+
+        if isinstance(pattern, dict):
+            # Recursively process each value (selective injection per function)
+            return {k: self._inject_into_pattern(v, key, value) for k, v in pattern.items()}
+
         raise ValueError(f"Cannot inject into pattern type: {type(pattern)}")
+
+    def _inject_params_into_pattern(self, pattern: Any, resolved_kwargs: Dict[str, Any]) -> Any:
+        """Inject resolved param values into function pattern kwargs.
+
+        Unlike metadata injection which is selective (only for functions with @special_inputs),
+        injectable param injection is universal - all registered functions accept dtype_config, enabled, etc.
+
+        Args:
+            pattern: Function pattern (callable, tuple, list, or dict)
+            resolved_kwargs: Dict of resolved param values to inject
+
+        Returns:
+            Modified pattern with params injected into kwargs
+        """
+        from openhcs.core.pipeline.compiler import FunctionReference
+
+        # Handle FunctionReference and callable objects
+        if isinstance(pattern, FunctionReference) or callable(pattern):
+            # Always inject params (all registered functions accept them)
+            return (pattern, resolved_kwargs)
+
+        if isinstance(pattern, tuple) and len(pattern) == 2:
+            func, kwargs = pattern
+            # Merge resolved_kwargs with existing kwargs (existing kwargs take precedence)
+            merged_kwargs = {**resolved_kwargs, **kwargs}
+            return (func, merged_kwargs)
+
+        if isinstance(pattern, list):
+            # Recursively process each element
+            return [self._inject_params_into_pattern(item, resolved_kwargs) for item in pattern]
+
+        if isinstance(pattern, dict):
+            # Recursively process each value
+            return {k: self._inject_params_into_pattern(v, resolved_kwargs) for k, v in pattern.items()}
+
+        return pattern
 
     def _normalize_attr(self, attr: Any, target_type: type) -> Any:
         """Normalize step attributes - 5 lines, no duplication."""

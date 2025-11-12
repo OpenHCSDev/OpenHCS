@@ -587,11 +587,16 @@ class ConfigWindow(BaseFormDialog):
             set_global_config_for_editing(GlobalPipelineConfig,
                                           copy.deepcopy(self._original_global_config_snapshot))
             self._global_context_dirty = False
-            ParameterFormManager.trigger_global_cross_window_refresh()
             logger.debug("Restored GlobalPipelineConfig context after cancel")
 
         self.config_cancelled.emit()
         super().reject()  # BaseFormDialog handles unregistration
+
+        # CRITICAL: Trigger global refresh AFTER unregistration so other windows
+        # re-collect live context without this cancelled window's values
+        # This ensures group_by selector and other placeholders sync correctly
+        ParameterFormManager.trigger_global_cross_window_refresh()
+        logger.debug(f"Triggered global refresh after cancelling {self.config_class.__name__} editor")
 
     def _get_form_managers(self):
         """Return list of form managers to unregister (required by BaseFormDialog)."""

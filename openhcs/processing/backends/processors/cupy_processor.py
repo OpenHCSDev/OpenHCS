@@ -557,6 +557,9 @@ def stack_equalize_histogram(
     """
     _validate_3d_array(stack)
 
+    # Remember input dtype to preserve it
+    input_dtype = stack.dtype
+
     # MATCH NUMPY EXACTLY - Flatten the entire stack to compute the global histogram
     flat_stack = stack.flatten()
 
@@ -564,16 +567,25 @@ def stack_equalize_histogram(
     hist, bin_edges = cp.histogram(flat_stack, bins=bins, range=(range_min, range_max))
     cdf = hist.cumsum()
 
-    # Normalize the CDF to the range [0, 65535] - MATCH NUMPY EXACTLY
+    # Normalize the CDF to the input dtype range
     # Avoid division by zero
     if cdf[-1] > 0:
-        cdf = 65535 * cdf / cdf[-1]
+        if cp.issubdtype(input_dtype, cp.integer):
+            dtype_info = cp.iinfo(input_dtype)
+            cdf = dtype_info.max * cdf / cdf[-1]
+        else:
+            # For float dtypes, normalize to [0, 1]
+            cdf = cdf / cdf[-1]
 
     # Use linear interpolation to map input values to equalized values - MATCH NUMPY EXACTLY
     equalized_stack = cp.interp(stack.flatten(), bin_edges[:-1], cdf).reshape(stack.shape)
 
-    # Convert to uint16 - MATCH NUMPY EXACTLY
-    return equalized_stack.astype(cp.uint16)
+    # Convert back to input dtype
+    if cp.issubdtype(input_dtype, cp.integer):
+        dtype_info = cp.iinfo(input_dtype)
+        return cp.clip(equalized_stack, dtype_info.min, dtype_info.max).astype(input_dtype)
+    else:
+        return equalized_stack.astype(input_dtype)
 
 @cupy_func
 def create_projection(

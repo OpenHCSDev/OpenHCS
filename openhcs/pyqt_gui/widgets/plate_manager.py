@@ -717,25 +717,26 @@ class PlateManagerWidget(QWidget):
         # SIMPLIFIED: ConfigWindow now uses the dataclass instance directly for context
         # No need for external context management - the form manager handles it automatically
         # CRITICAL: Pass orchestrator's plate_path as scope_id to limit cross-window updates to same orchestrator
+        # CRITICAL: Do NOT wrap in config_context(orchestrator.pipeline_config) - this creates ambient context
+        # that interferes with placeholder resolution. The form manager builds its own context stack.
         scope_id = str(orchestrator.plate_path) if orchestrator else None
-        with config_context(orchestrator.pipeline_config):
-            config_window = ConfigWindow(
-                config_class,           # config_class
-                current_config,         # current_config
-                on_save_callback,       # on_save_callback
-                self.color_scheme,      # color_scheme
-                self,                   # parent
-                scope_id=scope_id       # Scope to this orchestrator
-            )
+        config_window = ConfigWindow(
+            config_class,           # config_class
+            current_config,         # current_config
+            on_save_callback,       # on_save_callback
+            self.color_scheme,      # color_scheme
+            self,                   # parent
+            scope_id=scope_id       # Scope to this orchestrator
+        )
 
-            # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system
-            # Config windows automatically update their placeholders through cross-window signals
-            # when other windows save changes. No need to rebuild the entire form.
+        # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system
+        # Config windows automatically update their placeholders through cross-window signals
+        # when other windows save changes. No need to rebuild the entire form.
 
-            # Show as non-modal window (like main window configuration)
-            config_window.show()
-            config_window.raise_()
-            config_window.activateWindow()
+        # Show as non-modal window (like main window configuration)
+        config_window.show()
+        config_window.raise_()
+        config_window.activateWindow()
 
     def action_edit_global_config(self):
         """
@@ -1526,51 +1527,8 @@ class PlateManagerWidget(QWidget):
 
     def _patch_lazy_constructors(self):
         """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
-        from contextlib import contextmanager
-        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-        import dataclasses
-
-        @contextmanager
-        def patch_context():
-            # Store original constructors
-            original_constructors = {}
-
-            # Find all lazy dataclass types that need patching
-            from openhcs.core.config import LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig
-            lazy_types = [LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig]
-
-            # Add any other lazy types that might be used
-            for lazy_type in lazy_types:
-                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
-                    # Store original constructor
-                    original_constructors[lazy_type] = lazy_type.__init__
-
-                    # Create patched constructor that uses raw values
-                    def create_patched_init(original_init, dataclass_type):
-                        def patched_init(self, **kwargs):
-                            # Use raw value approach instead of calling original constructor
-                            # This prevents lazy resolution during code execution
-                            for field in dataclasses.fields(dataclass_type):
-                                value = kwargs.get(field.name, None)
-                                object.__setattr__(self, field.name, value)
-
-                            # Initialize any required lazy dataclass attributes
-                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
-                                object.__setattr__(self, '_is_lazy_dataclass', True)
-
-                        return patched_init
-
-                    # Apply the patch
-                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
-
-            try:
-                yield
-            finally:
-                # Restore original constructors
-                for lazy_type, original_init in original_constructors.items():
-                    lazy_type.__init__ = original_init
-
-        return patch_context()
+        from openhcs.introspection import patch_lazy_constructors
+        return patch_lazy_constructors()
 
     def _handle_edited_orchestrator_code(self, edited_code: str):
         """Handle edited orchestrator code and update UI state (same logic as Textual TUI)."""

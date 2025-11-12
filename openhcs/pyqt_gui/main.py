@@ -477,6 +477,22 @@ class OpenHCSMainWindow(QMainWindow):
 
         view_menu.addSeparator()
 
+        # Tools menu
+        tools_menu = menubar.addMenu("&Tools")
+
+        # Custom Functions submenu
+        custom_functions_menu = tools_menu.addMenu("&Custom Functions")
+
+        # Create new custom function action
+        create_function_action = QAction("&Create New Function...", self)
+        create_function_action.triggered.connect(self._on_create_custom_function)
+        custom_functions_menu.addAction(create_function_action)
+
+        # Manage custom functions action
+        manage_functions_action = QAction("&Manage Functions...", self)
+        manage_functions_action.triggered.connect(self._on_manage_custom_functions)
+        custom_functions_menu.addAction(manage_functions_action)
+
         # Help menu
         help_menu = menubar.addMenu("&Help")
 
@@ -911,3 +927,49 @@ class OpenHCSMainWindow(QMainWindow):
         """Handle plate manager progress finished signal."""
         if hasattr(self, '_status_progress_bar'):
             self._status_progress_bar.setVisible(False)
+
+    def _on_create_custom_function(self):
+        """Handle create custom function action."""
+        from openhcs.pyqt_gui.services.simple_code_editor import QScintillaCodeEditorDialog
+        from openhcs.processing.custom_functions.templates import get_default_template
+        from openhcs.processing.custom_functions import CustomFunctionManager
+        from openhcs.processing.custom_functions.validation import ValidationError
+
+        # Get default template (numpy backend)
+        template = get_default_template()
+
+        # Open code editor (LLM assist always available via button)
+        editor = QScintillaCodeEditorDialog(
+            parent=self,
+            initial_content=template,
+            title="Create Custom Function",
+            code_type='function'
+        )
+
+        if editor.exec():
+            # User clicked Save
+            code = editor.get_content()
+            manager = CustomFunctionManager()
+
+            try:
+                functions = manager.register_from_code(code)
+                func_names = ", ".join(f.__name__ for f in functions)
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Function(s) '{func_names}' registered successfully!"
+                )
+            except ValidationError as e:
+                # Validation failed - show specific error
+                QMessageBox.critical(
+                    self,
+                    "Validation Failed",
+                    f"Function code validation failed:\n\n{str(e)}"
+                )
+            # Let other exceptions propagate (fail-loud)
+
+    def _on_manage_custom_functions(self):
+        """Open custom function manager dialog."""
+        from openhcs.pyqt_gui.dialogs.custom_function_manager_dialog import CustomFunctionManagerDialog
+        dialog = CustomFunctionManagerDialog(parent=self)
+        dialog.exec()

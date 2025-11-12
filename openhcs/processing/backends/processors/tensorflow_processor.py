@@ -546,6 +546,9 @@ def stack_equalize_histogram(
     """
     _validate_3d_array(stack)
 
+    # Remember input dtype to preserve it
+    input_dtype = stack.dtype
+
     # TensorFlow doesn't have a direct histogram equalization function
     # We'll implement it manually
 
@@ -564,10 +567,29 @@ def stack_equalize_histogram(
     # Calculate cumulative distribution function (CDF)
     cdf = tf.cumsum(hist)
 
-    # Normalize the CDF to the range [0, 65535]
+    # Normalize the CDF to the input dtype range
     # Avoid division by zero
     if tf.reduce_max(cdf) > 0:
-        cdf = 65535.0 * cdf / tf.cast(cdf[-1], tf.float32)
+        if input_dtype in [tf.uint8, tf.uint16, tf.uint32, tf.int8, tf.int16, tf.int32, tf.int64]:
+            # Get dtype max value
+            if input_dtype == tf.uint8:
+                dtype_max = 255.0
+            elif input_dtype == tf.uint16:
+                dtype_max = 65535.0
+            elif input_dtype == tf.uint32:
+                dtype_max = 4294967295.0
+            elif input_dtype == tf.int8:
+                dtype_max = 127.0
+            elif input_dtype == tf.int16:
+                dtype_max = 32767.0
+            elif input_dtype == tf.int32:
+                dtype_max = 2147483647.0
+            else:  # int64
+                dtype_max = 9223372036854775807.0
+            cdf = dtype_max * cdf / tf.cast(cdf[-1], tf.float32)
+        else:
+            # For float dtypes, normalize to [0, 1]
+            cdf = cdf / tf.cast(cdf[-1], tf.float32)
 
     # We don't need bin width for the lookup table approach
 
@@ -583,8 +605,8 @@ def stack_equalize_histogram(
     # Reshape back to original shape
     equalized_stack = tf.reshape(equalized_flat, stack.shape)
 
-    # Convert to uint16
-    return tf.cast(equalized_stack, tf.uint16)
+    # Convert back to input dtype
+    return tf.cast(equalized_stack, input_dtype)
 
 @tensorflow_func
 def create_projection(

@@ -173,11 +173,24 @@ class _PlaceholderRefreshTask(QRunnable):
         self._live_context_snapshot = live_context_snapshot
         self.signals = _PlaceholderRefreshSignals()
 
+        # CRITICAL: Capture thread-local GlobalPipelineConfig from main thread
+        # Worker threads don't inherit thread-local storage, so we need to capture it here
+        # and restore it in the worker thread before resolving placeholders
+        from openhcs.config_framework.context_manager import get_base_global_config
+        self._global_config_snapshot = get_base_global_config()
+
     def run(self):
         manager = self._manager_ref()
         if manager is None:
             return
         try:
+            # CRITICAL: Restore thread-local GlobalPipelineConfig in worker thread
+            # This ensures placeholder resolution sees the same global config as the main thread
+            if self._global_config_snapshot is not None:
+                from openhcs.config_framework.global_config import set_global_config_for_editing
+                from openhcs.core.config import GlobalPipelineConfig
+                set_global_config_for_editing(GlobalPipelineConfig, self._global_config_snapshot)
+
             placeholder_map = manager._compute_placeholder_map_async(
                 self._parameters_snapshot,
                 self._placeholder_plan,
@@ -266,11 +279,17 @@ class ParameterFormManager(QWidget):
 
         This is called when global config changes (e.g., from plate manager code editor)
         to ensure all open windows refresh their placeholders with the new values.
+
+        CRITICAL: Also emits context_refreshed signal for each manager so that
+        downstream components (like function pattern editor) can refresh their state.
         """
         logger.debug(f"Triggering global cross-window refresh for {len(cls._active_form_managers)} active managers")
         for manager in cls._active_form_managers:
             try:
                 manager._refresh_with_live_context()
+                # CRITICAL: Emit context_refreshed signal so dual editor window can refresh function editor
+                # This ensures group_by selector syncs with GlobalPipelineConfig changes
+                manager.context_refreshed.emit(manager.object_instance, manager.context_obj)
             except Exception as e:
                 logger.warning(f"Failed to refresh manager during global refresh: {e}")
 
@@ -1819,6 +1838,27 @@ class ParameterFormManager(QWidget):
                 reconstructed[field_name] = value
         return reconstructed
 
+    def _create_overlay_instance(self, overlay_type, values_dict):
+        """
+        Create an overlay instance from a type and values dict.
+
+        Handles both dataclasses (instantiate normally) and non-dataclass types
+        like functions (use SimpleNamespace as fallback).
+
+        Args:
+            overlay_type: Type to instantiate (dataclass, function, etc.)
+            values_dict: Dict of parameter values to pass to constructor
+
+        Returns:
+            Instance of overlay_type or SimpleNamespace if type is not instantiable
+        """
+        try:
+            return overlay_type(**values_dict)
+        except TypeError:
+            # Function or other non-instantiable type: use SimpleNamespace
+            from types import SimpleNamespace
+            return SimpleNamespace(**values_dict)
+
     def _build_context_stack(self, overlay, skip_parent_overlay: bool = False, live_context: dict = None, live_context_token: Optional[int] = None):
         """Build nested config_context() calls for placeholder resolution.
 
@@ -1858,9 +1898,38 @@ class ParameterFormManager(QWidget):
             static_defaults = self.global_config_type()
             stack.enter_context(config_context(static_defaults, mask_with_none=True))
         else:
+            # CRITICAL: Always add global context layer, either from live editor or thread-local
+            # This ensures placeholders show correct values even when GlobalPipelineConfig editor is closed
             global_layer = self._get_cached_global_context(live_context_token, live_context)
             if global_layer is not None:
+                # Use live values from open GlobalPipelineConfig editor
                 stack.enter_context(config_context(global_layer))
+            else:
+                # No live editor - use thread-local global config (saved values)
+                from openhcs.config_framework.context_manager import get_base_global_config
+                thread_local_global = get_base_global_config()
+                if thread_local_global is not None:
+                    stack.enter_context(config_context(thread_local_global))
+                else:
+                    logger.warning(f"🔍 No global context available (neither live nor thread-local)")
+
+        # CRITICAL FIX: For function panes with step_instance as context_obj, we need to add PipelineConfig
+        # from live_context as a separate layer BEFORE the step_instance layer.
+        # This ensures the hierarchy: Global -> Pipeline -> Step -> Function
+        # Without this, function panes skip PipelineConfig and go straight from Global to Step.
+        from openhcs.core.config import PipelineConfig
+        if live_context and not isinstance(self.context_obj, PipelineConfig):
+            # Check if we have PipelineConfig in live_context
+            pipeline_config_live = self._find_live_values_for_type(PipelineConfig, live_context)
+            if pipeline_config_live is not None:
+                try:
+                    # Create PipelineConfig instance from live values
+                    import dataclasses
+                    pipeline_config_instance = PipelineConfig(**pipeline_config_live)
+                    stack.enter_context(config_context(pipeline_config_instance))
+                    logger.debug(f"Added PipelineConfig layer from live context for {self.field_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to add PipelineConfig layer from live context: {e}")
 
         # Apply parent context(s) if provided
         if self.context_obj is not None:
@@ -1943,7 +2012,8 @@ class ParameterFormManager(QWidget):
 
                     # Create parent overlay with only user-modified values (excluding current nested config)
                     # For global config editing (root form only), use mask_with_none=True to preserve None overrides
-                    parent_overlay_instance = parent_type(**parent_values_with_excluded)
+                    parent_overlay_instance = self._create_overlay_instance(parent_type, parent_values_with_excluded)
+
                     if is_root_global_config:
                         stack.enter_context(config_context(parent_overlay_instance, mask_with_none=True))
                     else:
@@ -1973,14 +2043,7 @@ class ParameterFormManager(QWidget):
 
                 # For functions and non-dataclass objects: use SimpleNamespace to hold parameters
                 # For dataclasses: instantiate normally
-                try:
-                    overlay_instance = self.dataclass_type(**overlay_with_excluded)
-                except TypeError:
-                    # Function or other non-instantiable type: use SimpleNamespace
-                    from types import SimpleNamespace
-                    # For SimpleNamespace, we don't need excluded params
-                    filtered_overlay = {k: v for k, v in overlay.items() if k not in self.exclude_params}
-                    overlay_instance = SimpleNamespace(**filtered_overlay)
+                overlay_instance = self._create_overlay_instance(self.dataclass_type, overlay_with_excluded)
             else:
                 # Dict but no dataclass_type - use SimpleNamespace
                 from types import SimpleNamespace
@@ -2020,7 +2083,8 @@ class ParameterFormManager(QWidget):
                 return None
 
             global_live_values = self._reconstruct_nested_dataclasses(global_live_values, thread_local_global)
-            return dataclasses.replace(thread_local_global, **global_live_values)
+            merged = dataclasses.replace(thread_local_global, **global_live_values)
+            return merged
         except Exception as e:
             logger.warning(f"Failed to cache global context: {e}")
             return None
@@ -2051,7 +2115,15 @@ class ParameterFormManager(QWidget):
                 return ctx_obj
 
             live_values = self._reconstruct_nested_dataclasses(live_values, ctx_obj)
-            return dataclasses.replace(ctx_obj, **live_values)
+
+            # Try dataclasses.replace first (for dataclasses)
+            # Fall back to creating overlay instance (handles both dataclasses and non-dataclass objects)
+            if dataclasses.is_dataclass(ctx_obj):
+                return dataclasses.replace(ctx_obj, **live_values)
+            else:
+                # For non-dataclass objects (like FunctionStep), use the same helper as overlay creation
+                # This creates a SimpleNamespace with the live values
+                return self._create_overlay_instance(ctx_type, live_values)
         except Exception as e:
             logger.warning(f"Failed to cache parent context for {ctx_obj}: {e}")
             return ctx_obj
@@ -2395,6 +2467,13 @@ class ParameterFormManager(QWidget):
         in_reset = getattr(self, '_in_reset', False)
         block_cross_window = getattr(self, '_block_cross_window_updates', False)
 
+        # Find which nested manager emitted this change (needed for both refresh and signal propagation)
+        emitting_manager_name = None
+        for nested_name, nested_manager in self.nested_managers.items():
+            if param_name in nested_manager.parameters:
+                emitting_manager_name = nested_name
+                break
+
         # CRITICAL OPTIMIZATION: Also check if ANY nested manager is in reset mode
         # When a nested dataclass's "Reset All" button is clicked, the nested manager
         # sets _in_reset=True, but the parent doesn't know about it. We need to skip
@@ -2420,14 +2499,7 @@ class ParameterFormManager(QWidget):
             self._refresh_all_placeholders(live_context=live_context)
 
             # Refresh all nested managers' placeholders (including siblings) with live context
-            # CRITICAL: Find which nested manager emitted this change and skip refreshing it
-            # This prevents the placeholder system from fighting with user interaction
-            emitting_manager_name = None
-            for nested_name, nested_manager in self.nested_managers.items():
-                if param_name in nested_manager.parameters:
-                    emitting_manager_name = nested_name
-                    break
-
+            # emitting_manager_name was already found above
             self._apply_to_nested_managers(
                 lambda name, manager: (
                     manager._refresh_all_placeholders(live_context=live_context)
@@ -2455,18 +2527,46 @@ class ParameterFormManager(QWidget):
         # This ensures the dual editor window can sync the function editor when reset changes group_by
         # The root manager will emit context_value_changed via _emit_cross_window_change
         # IMPORTANT: We DO propagate 'enabled' field changes for cross-window styling updates
-        # 
+        #
         # CRITICAL FIX: When propagating 'enabled' changes from nested forms, set a flag
         # to prevent the parent's _on_enabled_field_changed_universal from incorrectly
         # applying styling changes (the nested form already handled its own styling)
-        if param_name == 'enabled':
-            # Mark that this is a propagated signal, not a direct change to parent's enabled field
-            self._propagating_nested_enabled = True
-        
-        self.parameter_changed.emit(param_name, value)
-        
-        if param_name == 'enabled':
-            self._propagating_nested_enabled = False
+
+        # CRITICAL FIX: When a nested dataclass field changes, emit the PARENT parameter name
+        # with the reconstructed dataclass value, not the nested field name
+        # This ensures function kwargs have dtype_config (dataclass), not default_dtype_conversion (field)
+        if emitting_manager_name:
+            # Get the reconstructed dataclass value from get_current_values
+            nested_values = self.nested_managers[emitting_manager_name].get_current_values()
+            param_type = self.parameter_types.get(emitting_manager_name)
+
+            # Reconstruct dataclass instance
+            from openhcs.ui.shared.parameter_type_utils import ParameterTypeUtils
+            if param_type and ParameterTypeUtils.is_optional_dataclass(param_type):
+                inner_type = ParameterTypeUtils.get_optional_inner_type(param_type)
+                reconstructed_value = inner_type(**nested_values) if nested_values else None
+            elif param_type and hasattr(param_type, '__dataclass_fields__'):
+                reconstructed_value = param_type(**nested_values) if nested_values else None
+            else:
+                reconstructed_value = nested_values
+
+            # Emit parent parameter name with reconstructed dataclass
+            if param_name == 'enabled':
+                self._propagating_nested_enabled = True
+
+            self.parameter_changed.emit(emitting_manager_name, reconstructed_value)
+
+            if param_name == 'enabled':
+                self._propagating_nested_enabled = False
+        else:
+            # Not from a nested manager, emit as-is
+            if param_name == 'enabled':
+                self._propagating_nested_enabled = True
+
+            self.parameter_changed.emit(param_name, value)
+
+            if param_name == 'enabled':
+                self._propagating_nested_enabled = False
 
     def _refresh_with_live_context(self, live_context: Any = None, exclude_param: str = None) -> None:
         """Refresh placeholders using live context from other open windows."""
@@ -2948,9 +3048,9 @@ class ParameterFormManager(QWidget):
         """Determine if a context change from another window affects this form.
 
         Hierarchical rules:
-        - GlobalPipelineConfig changes affect: PipelineConfig, Steps
-        - PipelineConfig changes affect: Steps in that pipeline
-        - Step changes affect: nothing (leaf node)
+        - GlobalPipelineConfig changes affect: PipelineConfig, Steps, Functions
+        - PipelineConfig changes affect: Steps in that pipeline, Functions in those steps
+        - Step changes affect: Functions in that step
 
         Args:
             editing_object: The object being edited in the other window
@@ -2960,17 +3060,23 @@ class ParameterFormManager(QWidget):
             True if this form should refresh placeholders due to the change
         """
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+        from openhcs.core.steps.abstract import AbstractStep
 
         # If other window is editing GlobalPipelineConfig, everyone is affected
         if isinstance(editing_object, GlobalPipelineConfig):
             return True
 
         # If other window is editing PipelineConfig, check if we're a step in that pipeline
-        if isinstance(editing_object, PipelineConfig):
+        if PipelineConfig and isinstance(editing_object, PipelineConfig):
             # We're affected if our context_obj is the same PipelineConfig instance
             return self.context_obj is editing_object
 
-        # Step changes don't affect other windows (leaf node)
+        # If other window is editing a Step, check if we're a function in that step
+        if isinstance(editing_object, AbstractStep):
+            # We're affected if our context_obj is the same Step instance
+            return self.context_obj is editing_object
+
+        # Other changes don't affect this window
         return False
 
     def _schedule_cross_window_refresh(self, emit_signal: bool = True):
@@ -3027,6 +3133,42 @@ class ParameterFormManager(QWidget):
 
         return None
 
+    def _is_scope_visible(self, other_scope_id: Optional[str], my_scope_id: Optional[str]) -> bool:
+        """Check if other_scope_id is visible from my_scope_id using hierarchical matching.
+
+        Rules:
+        - None (global scope) is visible to everyone
+        - Parent scopes are visible to child scopes (e.g., "plate1" visible to "plate1::step1")
+        - Sibling scopes are NOT visible to each other (e.g., "plate1::step1" NOT visible to "plate1::step2")
+        - Exact matches are visible
+
+        Args:
+            other_scope_id: The scope_id of the other manager
+            my_scope_id: The scope_id of this manager
+
+        Returns:
+            True if other_scope_id is visible from my_scope_id
+        """
+        # Global scope (None) is visible to everyone
+        if other_scope_id is None:
+            return True
+
+        # If I'm global scope (None), I can only see other global scopes
+        if my_scope_id is None:
+            return other_scope_id is None
+
+        # Exact match
+        if other_scope_id == my_scope_id:
+            return True
+
+        # Check if other_scope_id is a parent scope (prefix match with :: separator)
+        # e.g., "plate1" is parent of "plate1::step1"
+        if my_scope_id.startswith(other_scope_id + "::"):
+            return True
+
+        # Not visible (sibling or unrelated scope)
+        return False
+
     def _collect_live_context_from_other_windows(self) -> LiveContextSnapshot:
         """Collect live values from other open form managers for context resolution.
 
@@ -3058,9 +3200,13 @@ class ParameterFormManager(QWidget):
             if manager is self:
                 continue
 
-            # CRITICAL: Only collect from managers in the same scope OR from global scope (None)
-            if manager.scope_id is not None and self.scope_id is not None and manager.scope_id != self.scope_id:
-                continue  # Different orchestrator - skip
+            # CRITICAL: Only collect from managers in the same scope hierarchy OR from global scope (None)
+            # Hierarchical scope matching:
+            # - None (global) is visible to everyone
+            # - "plate1" is visible to "plate1::step1" (parent scope)
+            # - "plate1::step1" is NOT visible to "plate1::step2" (sibling scope)
+            if not self._is_scope_visible(manager.scope_id, self.scope_id):
+                continue  # Different scope - skip
 
             # CRITICAL: Get only user-modified (concrete, non-None) values
             live_values = manager.get_user_modified_values()

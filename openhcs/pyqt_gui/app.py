@@ -76,6 +76,7 @@ class OpenHCSPyQtApp(QApplication):
 
         # Start async function registry initialization in background thread
         # This creates virtual modules (openhcs.cucim, openhcs.pyclesperanto, etc.)
+        # Custom functions are automatically loaded as part of initialize_registry()
         def init_function_registry_background():
             from openhcs.processing.func_registry import initialize_registry
             initialize_registry()

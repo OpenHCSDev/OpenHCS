@@ -1298,14 +1298,20 @@ def _create_segmentation_visualization(
     cell_areas: List[float] = None,
     binary_mask: np.ndarray = None
 ) -> np.ndarray:
-    """Create segmentation visualization using actual binary mask if available."""
+    """Create labeled segmentation mask from binary mask or positions.
 
-    # If we have the actual binary mask from detection, use it directly
+    Returns a labeled mask where each connected region has a unique integer ID.
+    This is required for ROI extraction in materialization.
+    """
+
+    # If we have the actual binary mask from detection, convert to labeled mask
     if binary_mask is not None:
-        # Convert boolean mask to uint16 to match input image dtype
-        # Use max intensity for detected cells, 0 for background
-        max_intensity = image.max() if image.max() > 0 else 65535
-        return (binary_mask * max_intensity).astype(image.dtype)
+        # Convert binary mask to labeled mask (each connected component gets unique ID)
+        from skimage.measure import label
+        labeled_mask = label(binary_mask.astype(np.uint8))
+        # Use uint16 to support up to 65535 labels without MemoryError
+        # (int32 causes MemoryError in regionprops, uint8 overflows at >255 labels)
+        return labeled_mask.astype(np.uint16)
 
     # Fallback to original circular marker approach for blob methods
     visualization = image.copy()

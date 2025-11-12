@@ -121,17 +121,8 @@ def percentile_normalize_core(
     clipped = clip_func(stack, p_low, p_high)
     normalized = (clipped - p_low) * (target_max - target_min) / (p_high - p_low) + target_min
     
-    # Handle dtype conversion
-    if preserve_dtype:
-        return normalized.astype(stack.dtype)
-    else:
-        # Legacy behavior: convert to uint16-equivalent for the backend
-        if hasattr(stack, 'dtype'):
-            # For NumPy/CuPy arrays
-            return normalized.astype(np.uint16 if 'numpy' in str(type(stack)) else stack.dtype)
-        else:
-            # For other backends, preserve original type
-            return normalized.astype(type(stack))
+    # Always preserve input dtype
+    return normalized.astype(stack.dtype)
 
 
 def slice_percentile_normalize_core(
@@ -182,9 +173,5 @@ def slice_percentile_normalize_core(
         normalized = (clipped - p_low) * (target_max - target_min) / (p_high - p_low) + target_min
         result[z] = normalized
     
-    # Handle dtype conversion
-    if preserve_dtype:
-        return result.astype(image.dtype)
-    else:
-        # Legacy behavior: convert to uint16-equivalent
-        return result.astype(np.uint16 if hasattr(result, 'astype') else type(result))
+    # Always preserve input dtype
+    return result.astype(image.dtype)
