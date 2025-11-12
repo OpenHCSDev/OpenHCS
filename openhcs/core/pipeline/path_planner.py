@@ -23,15 +23,21 @@ logger = logging.getLogger(__name__)
 # ===== PATTERN NORMALIZATION (ONE place) =====
 
 def normalize_pattern(pattern: Any) -> Iterator[Tuple[Callable, str, int]]:
-    """Extract enabled functions from any pattern."""
-    for func, key, pos in iter_pattern_items(pattern):
+    """Extract enabled functions from any pattern.
+
+    Renumbers positions after filtering out disabled functions to ensure
+    funcplan keys match runtime execution positions.
+    """
+    new_pos = 0
+    for func, key, original_pos in iter_pattern_items(pattern):
         # Skip disabled functions
         if isinstance(func, tuple) and len(func) == 2 and isinstance(func[1], dict):
             if func[1].get('enabled', True) is False:
                 continue
-        # Extract callable and yield
+        # Extract callable and yield with renumbered position
         if core := get_core_callable(func):
-            yield (core, key, pos)
+            yield (core, key, new_pos)
+            new_pos += 1
 
 
 def extract_attributes(pattern: Any) -> Dict[str, Any]:

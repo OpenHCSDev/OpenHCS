@@ -439,73 +439,54 @@ def _execute_function_core(
 
     raw_function_output = func_callable(main_data_arg, **final_kwargs)
 
-    # 🔍 DEBUG: Log output dimensions and type details
-    output_shape = getattr(raw_function_output, 'shape', 'no shape attr')
-    output_type = type(raw_function_output).__name__
-    output_dtype = getattr(raw_function_output, 'dtype', 'no dtype')
-
-    main_output_data = raw_function_output
-
-    # 🔍 DEBUG: Log special output plan status
-
-    # Only log special outputs if there are any (avoid spamming empty dict logs)
-    if special_outputs_plan:
-        num_special_outputs = len(special_outputs_plan)
-
-        if not isinstance(raw_function_output, tuple) or len(raw_function_output) != (1 + num_special_outputs):
-            logger.error(f"🔍 SPECIAL OUTPUT ERROR: Function '{getattr(func_callable, '__name__', 'unknown')}' special output mismatch")
-            logger.error(f"🔍 SPECIAL OUTPUT ERROR: Expected tuple of {1 + num_special_outputs} values")
-            logger.error(f"🔍 SPECIAL OUTPUT ERROR: Got {type(raw_function_output)} with {len(raw_function_output) if isinstance(raw_function_output, tuple) else 'N/A'} values")
-            raise ValueError(
-                f"Function '{getattr(func_callable, '__name__', 'unknown')}' was expected to return a tuple of "
-                f"{1 + num_special_outputs} values (main_output + {num_special_outputs} special) "
-                f"based on 'special_outputs' in step plan, but returned {len(raw_function_output) if isinstance(raw_function_output, tuple) else type(raw_function_output)} values."
-            )
+    # Check if function returned a tuple (indicates @special_outputs decorator)
+    # Functions with @special_outputs ALWAYS return tuples: (main_output, special_output_1, ...)
+    # We ALWAYS extract the main output from the tuple, regardless of funcplan
+    # The funcplan only controls which special outputs to SAVE, not which to extract
+    if isinstance(raw_function_output, tuple):
+        # Function returned a tuple - extract main output (first element)
         main_output_data = raw_function_output[0]
         returned_special_values_tuple = raw_function_output[1:]
 
-        # 🔍 DEBUG: Log what we extracted
+        # Only SAVE special outputs if they're in the funcplan
+        # (funcplan controls what to save, not what to extract)
+        if special_outputs_plan:
+            # Iterate through special_outputs_plan (which must be ordered by compiler)
+            # and match with positionally returned special values.
+            for i, (output_key, vfs_path_info) in enumerate(special_outputs_plan.items()):
+                logger.info(f"Saving special output '{output_key}' to VFS path '{vfs_path_info}' (memory backend)")
+                if i < len(returned_special_values_tuple):
+                    value_to_save = returned_special_values_tuple[i]
+                    # Extract path string from the path info dictionary
+                    # Current format: {"path": "/path/to/file.pkl"}
+                    if isinstance(vfs_path_info, dict) and 'path' in vfs_path_info:
+                        vfs_path = vfs_path_info['path']
+                    else:
+                        vfs_path = vfs_path_info  # Fallback if it's already a string
 
-        # Iterate through special_outputs_plan (which must be ordered by compiler)
-        # and match with positionally returned special values.
-        for i, (output_key, vfs_path_info) in enumerate(special_outputs_plan.items()):
-            logger.info(f"Saving special output '{output_key}' to VFS path '{vfs_path_info}' (memory backend)")
-            if i < len(returned_special_values_tuple):
-                value_to_save = returned_special_values_tuple[i]
-                # Extract path string from the path info dictionary
-                # Current format: {"path": "/path/to/file.pkl"}
-                if isinstance(vfs_path_info, dict) and 'path' in vfs_path_info:
-                    vfs_path = vfs_path_info['path']
+                    # DEBUG: List what's currently in VFS before saving
+                    from openhcs.io.base import storage_registry as global_storage_registry
+                    global_memory_backend = global_storage_registry[Backend.MEMORY.value]
+                    global_existing_keys = list(global_memory_backend._memory_store.keys())
+
+                    # Check filemanager's memory backend
+                    filemanager_memory_backend = context.filemanager._get_backend(Backend.MEMORY.value)
+                    filemanager_existing_keys = list(filemanager_memory_backend._memory_store.keys())
+
+                    if vfs_path in filemanager_existing_keys:
+                        logger.warning(f"🔍 VFS_DEBUG: WARNING - '{vfs_path}' ALREADY EXISTS in FILEMANAGER memory backend!")
+
+                    # Ensure directory exists for memory backend
+                    parent_dir = str(Path(vfs_path).parent)
+                    context.filemanager.ensure_directory(parent_dir, Backend.MEMORY.value)
+                    context.filemanager.save(value_to_save, vfs_path, Backend.MEMORY.value)
                 else:
-                    vfs_path = vfs_path_info  # Fallback if it's already a string
-               # # Add axis_id prefix to filename for memory backend to avoid thread collisions
-               # from pathlib import Path
-               # vfs_path_obj = Path(vfs_path)
-               # prefixed_filename = f"{axis_id}_{vfs_path_obj.name}"
-               # prefixed_vfs_path = str(vfs_path_obj.parent / prefixed_filename)
-
-
-                # DEBUG: List what's currently in VFS before saving
-                from openhcs.io.base import storage_registry as global_storage_registry
-                global_memory_backend = global_storage_registry[Backend.MEMORY.value]
-                global_existing_keys = list(global_memory_backend._memory_store.keys())
-
-                # Check filemanager's memory backend
-                filemanager_memory_backend = context.filemanager._get_backend(Backend.MEMORY.value)
-                filemanager_existing_keys = list(filemanager_memory_backend._memory_store.keys())
-
-                if vfs_path in filemanager_existing_keys:
-                    logger.warning(f"🔍 VFS_DEBUG: WARNING - '{vfs_path}' ALREADY EXISTS in FILEMANAGER memory backend!")
-
-                # Ensure directory exists for memory backend
-                parent_dir = str(Path(vfs_path).parent)
-                context.filemanager.ensure_directory(parent_dir, Backend.MEMORY.value)
-                context.filemanager.save(value_to_save, vfs_path, Backend.MEMORY.value)
-            else:
-                # This indicates a mismatch that should ideally be caught by schema/validation
-                logger.error(f"Mismatch: {num_special_outputs} special outputs planned, but fewer values returned by function for key '{output_key}'.")
-                # Or, if partial returns are allowed, this might be a warning. For now, error.
-                raise ValueError(f"Function did not return enough values for all planned special outputs. Missing value for '{output_key}'.")
+                    # This indicates a mismatch that should ideally be caught by schema/validation
+                    logger.error(f"Mismatch: special_outputs_plan wants to save '{output_key}', but function only returned {len(returned_special_values_tuple)} special values.")
+                    raise ValueError(f"Function did not return enough values for all planned special outputs. Missing value for '{output_key}'.")
+    else:
+        # Function did not return a tuple - use output directly
+        main_output_data = raw_function_output
 
     return main_output_data
 
@@ -562,7 +543,6 @@ def _execute_chain_core(
 
         # Construct execution key: function_name_dict_key_chain_position
         execution_key = f"{func_name}_{dict_key}_{i}"
-
 
         if execution_key in funcplan:
             outputs_to_save = funcplan[execution_key]

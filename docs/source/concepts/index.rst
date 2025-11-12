@@ -41,6 +41,7 @@ Understanding what functions are available and how data is stored.
 
    function_library
    storage_system
+   dtype_config_system
 
 Practical Guidance
 ==================

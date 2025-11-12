@@ -22,6 +22,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
 
    production_examples
    custom_functions
+   custom_function_management
    code_ui_editing
    dtype_conversion
    cpu_only_mode
@@ -29,10 +30,12 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
    experimental_layouts
    real_time_visualization
    log_viewer
+   llm_pipeline_generation
 
 **Available Guides**:
 
 - :doc:`custom_functions` - Creating custom processing functions in the GUI
+- :doc:`custom_function_management` - End-to-end custom function management flow
 - :doc:`real_time_visualization` - Real-time visualization with napari streaming
 - :doc:`code_ui_editing` - Bidirectional editing between TUI and Python code
 - :doc:`dtype_conversion` - Automatic data type conversion for GPU libraries
@@ -40,6 +43,7 @@ The user guide is currently being rewritten to reflect the latest OpenHCS archit
 - :doc:`analysis_consolidation` - Automatic analysis result consolidation
 - :doc:`experimental_layouts` - Excel-based experimental design and well-to-condition mapping
 - :doc:`log_viewer` - Advanced log viewing with async loading and server discovery
+- :doc:`llm_pipeline_generation` - LLM-assisted pipeline generation with Ollama
 
 **Environment Configuration**:
 
