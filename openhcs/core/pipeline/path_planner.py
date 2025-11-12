@@ -27,8 +27,13 @@ def normalize_pattern(pattern: Any) -> Iterator[Tuple[Callable, str, int]]:
 
     Renumbers positions after filtering out disabled functions to ensure
     funcplan keys match runtime execution positions.
+
+    For dict patterns, position counters are tracked per dict key.
+    For list/single patterns, position counter is global.
     """
-    new_pos = 0
+    # Track position counters per dict key (for dict patterns) or globally (for list/single patterns)
+    position_counters = {}
+
     for func, key, original_pos in iter_pattern_items(pattern):
         # Skip disabled functions
         if isinstance(func, tuple) and len(func) == 2 and isinstance(func[1], dict):
@@ -36,8 +41,12 @@ def normalize_pattern(pattern: Any) -> Iterator[Tuple[Callable, str, int]]:
                 continue
         # Extract callable and yield with renumbered position
         if core := get_core_callable(func):
-            yield (core, key, new_pos)
-            new_pos += 1
+            # Get or initialize position counter for this dict key
+            if key not in position_counters:
+                position_counters[key] = 0
+
+            yield (core, key, position_counters[key])
+            position_counters[key] += 1
 
 
 def extract_attributes(pattern: Any) -> Dict[str, Any]:

@@ -757,25 +757,25 @@ def _get_skan_version():
 
 def _skeleton_to_rois_fast(skeleton_stack: np.ndarray) -> List[Dict[str, Any]]:
     """
-    FAST conversion of skeleton to ROI points for visualization.
-    
-    Converts skeleton pixels to individual point ROIs (one ROI per skeleton branch).
-    Each ROI contains multiple PointShape objects representing the skeleton pixels.
-    Perfect for visualization as Napari points layer.
-    
+    FAST conversion of skeleton to ROI polylines for visualization.
+
+    Converts skeleton pixels to polyline ROIs (one ROI per skeleton branch).
+    Uses regionprops for efficient coordinate extraction instead of argwhere.
+
     Args:
         skeleton_stack: Binary skeleton array (Z, Y, X) or (Y, X)
-        
+
     Returns:
-        List of ROI objects with PointShape for skeleton visualization
+        List of ROI objects with PolygonShape for skeleton visualization
     """
     from scipy import ndimage
-    from openhcs.core.roi import ROI, PointShape
-    
+    from skimage.measure import regionprops
+    from openhcs.core.roi import ROI, PolygonShape
+
     rois = []
-    
+
     logger.info(f"🔍 SKELETON_TO_ROIS_FAST: Input skeleton_stack shape: {skeleton_stack.shape}, dtype: {skeleton_stack.dtype}")
-    
+
     # Handle 2D skeleton (single image) - reshape to 3D with Z=1
     if skeleton_stack.ndim == 2:
         logger.info(f"🔍 SKELETON_TO_ROIS_FAST: Reshaping single 2D skeleton {skeleton_stack.shape} to 3D")
@@ -783,65 +783,53 @@ def _skeleton_to_rois_fast(skeleton_stack: np.ndarray) -> List[Dict[str, Any]]:
     elif skeleton_stack.ndim != 3:
         logger.error(f"🔍 SKELETON_TO_ROIS_FAST: Expected 2D or 3D skeleton, got {skeleton_stack.ndim}D")
         return []
-    
+
     # Process each Z slice
     for z_idx in range(skeleton_stack.shape[0]):
         skeleton_slice = skeleton_stack[z_idx]
-        
+
         if not skeleton_slice.any():
             continue  # Skip empty slices
-        
+
         # Label connected components using full connectivity (diagonal connections count)
         # This helps connect skeleton fragments that are close together
         structure = np.ones((3, 3), dtype=int)  # 8-connectivity (includes diagonals)
         labeled_skeleton, num_features = ndimage.label(skeleton_slice, structure=structure)
-        
+
         logger.info(f"🔍 SKELETON_TO_ROIS_FAST: Z={z_idx}, found {num_features} skeleton components")
-        
-        # Limit processing if there are too many components (performance safeguard)
-        if num_features > 1000:
-            logger.warning(f"🔍 SKELETON_TO_ROIS_FAST: {num_features} components is too many, creating single aggregate ROI")
-            # Create a single ROI with all skeleton pixels as points
-            skeleton_coords = np.argwhere(skeleton_slice > 0)
-            if len(skeleton_coords) > 0:
-                # Create one PointShape per pixel
-                point_shapes = [PointShape(y=float(coord[0]), x=float(coord[1])) 
-                               for coord in skeleton_coords]
-                
-                metadata = {
-                    'label': f'Skeleton_Z{z_idx:03d}_AllBranches',
-                    'position': z_idx,
-                    'num_components': num_features,
-                    'num_pixels': len(skeleton_coords)
-                }
-                
-                roi = ROI(shapes=point_shapes, metadata=metadata)
-                rois.append(roi)
-            continue
-        
-        # Extract each component as an ROI with PointShape objects
-        for label_id in range(1, num_features + 1):
-            # Get coordinates (returns (y, x) pairs)
-            coords = np.argwhere(labeled_skeleton == label_id)
-            
-            if len(coords) < 1:
-                continue  # Skip empty components
-            
-            # Create one PointShape per pixel in this skeleton branch
-            point_shapes = [PointShape(y=float(coord[0]), x=float(coord[1])) 
-                           for coord in coords]
-            
+
+        # Use regionprops to efficiently extract coordinates for all components at once
+        # This is MUCH faster than calling np.argwhere for each label
+        regions = regionprops(labeled_skeleton)
+
+        # Extract each component as an ROI with PolygonShape (polyline)
+        for region in regions:
+            # Get coordinates directly from region.coords (already in (y, x) format)
+            coords = region.coords  # Nx2 array of (y, x) coordinates
+
+            if len(coords) < 2:
+                continue  # Skip single-pixel components (need at least 2 points for polyline)
+
+            # For skeleton visualization, we want a polyline (open path), not a closed polygon
+            # But PolygonShape requires at least 3 points, so we duplicate the last point if needed
+            if len(coords) == 2:
+                coords = np.vstack([coords, coords[-1]])  # Duplicate last point to make 3 points
+
+            # Create PolygonShape with skeleton coordinates (will be rendered as polyline)
+            polygon_shape = PolygonShape(coordinates=coords.astype(float))
+
             # Create ROI with metadata
             metadata = {
-                'label': f'Skeleton_Z{z_idx:03d}_Branch{label_id:03d}',
+                'label': f'Skeleton_Z{z_idx:03d}_Branch{region.label:03d}',
                 'position': z_idx,
-                'num_pixels': len(coords)
+                'num_pixels': len(coords),
+                'area': float(region.area),
+                'centroid': tuple(float(c) for c in region.centroid)
             }
-            
-            roi = ROI(shapes=point_shapes, metadata=metadata)
-            
+
+            roi = ROI(shapes=[polygon_shape], metadata=metadata)
             rois.append(roi)
-    
+
     logger.info(f"Converted skeleton to {len(rois)} ROIs across {skeleton_stack.shape[0]} slices")
     return rois
 

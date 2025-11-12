@@ -818,98 +818,90 @@ class ImageBrowserWidget(QWidget):
             with open(metadata_path) as f:
                 metadata = json.load(f)
 
-            # Find the main subdirectory's results_dir field
-            results_dir = None
+            # Collect ALL results directories from ALL subdirectories
+            results_dirs = []
             if metadata and 'subdirectories' in metadata:
-                # First try to find the subdirectory marked as main
                 for subdir_name, subdir_metadata in metadata['subdirectories'].items():
-                    if subdir_metadata.get('main') and 'results_dir' in subdir_metadata and subdir_metadata['results_dir']:
-                        # Build full path: plate_path / results_dir
-                        results_dir = plate_path / subdir_metadata['results_dir']
-                        logger.info(f"IMAGE BROWSER RESULTS: Found results_dir in main subdirectory '{subdir_name}': {subdir_metadata['results_dir']}")
-                        break
+                    if 'results_dir' in subdir_metadata and subdir_metadata['results_dir']:
+                        results_dir_path = plate_path / subdir_metadata['results_dir']
+                        results_dirs.append((subdir_name, results_dir_path))
+                        logger.info(f"IMAGE BROWSER RESULTS: Found results_dir for subdirectory '{subdir_name}': {subdir_metadata['results_dir']}")
 
-                # Fallback: if no main subdirectory, use first subdirectory with results_dir
-                if not results_dir:
-                    for subdir_name, subdir_metadata in metadata['subdirectories'].items():
-                        if 'results_dir' in subdir_metadata and subdir_metadata['results_dir']:
-                            results_dir = plate_path / subdir_metadata['results_dir']
-                            logger.info(f"IMAGE BROWSER RESULTS: Found results_dir in subdirectory '{subdir_name}': {subdir_metadata['results_dir']}")
-                            break
-
-            if not results_dir:
-                logger.warning("IMAGE BROWSER RESULTS: No results_dir found in metadata")
+            if not results_dirs:
+                logger.warning("IMAGE BROWSER RESULTS: No results_dir found in any subdirectory")
                 return
 
-            logger.info(f"IMAGE BROWSER RESULTS: plate_path = {plate_path}")
-            logger.info(f"IMAGE BROWSER RESULTS: Resolved results directory = {results_dir}")
-
-            if not results_dir.exists():
-                logger.warning(f"IMAGE BROWSER RESULTS: Results directory does not exist: {results_dir}")
-                return
+            logger.info(f"IMAGE BROWSER RESULTS: Scanning {len(results_dirs)} results directories")
 
             # Get parser from orchestrator for filename parsing
             handler = self.orchestrator.microscope_handler
 
-            # Scan for ROI JSON files and CSV files
-            logger.info(f"IMAGE BROWSER RESULTS: Scanning directory recursively...")
+            # Scan all results directories
             file_count = 0
-            for file_path in results_dir.rglob('*'):
-                if file_path.is_file():
-                    file_count += 1
-                    suffix = file_path.suffix.lower()
-                    logger.debug(f"IMAGE BROWSER RESULTS: Found file: {file_path.name} (suffix={suffix})")
+            for subdir_name, results_dir in results_dirs:
+                if not results_dir.exists():
+                    logger.warning(f"IMAGE BROWSER RESULTS: Results directory does not exist: {results_dir}")
+                    continue
 
-                    # Determine file type using FileFormat registry
-                    from openhcs.constants.constants import FileFormat
+                logger.info(f"IMAGE BROWSER RESULTS: Scanning results directory for '{subdir_name}': {results_dir}")
 
-                    file_type = None
-                    if file_path.name.endswith('.roi.zip'):
-                        file_type = 'ROI'
-                        logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as ROI: {file_path.name}")
-                    elif suffix in FileFormat.CSV.value:
-                        file_type = 'CSV'
-                        logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as CSV: {file_path.name}")
-                    elif suffix in FileFormat.JSON.value:
-                        file_type = 'JSON'
-                        logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as JSON: {file_path.name}")
-                    else:
-                        logger.debug(f"IMAGE BROWSER RESULTS: ✗ Filtered out: {file_path.name} (suffix={suffix})")
+                # Scan for ROI JSON files and CSV files
+                for file_path in results_dir.rglob('*'):
+                    if file_path.is_file():
+                        file_count += 1
+                        suffix = file_path.suffix.lower()
+                        logger.debug(f"IMAGE BROWSER RESULTS: Found file: {file_path.name} (suffix={suffix})")
 
-                    if file_type:
-                        # Get relative path from plate_path (not results_dir) to include subdirectory
-                        rel_path = file_path.relative_to(plate_path)
+                        # Determine file type using FileFormat registry
+                        from openhcs.constants.constants import FileFormat
 
-                        # Get file size
-                        size_bytes = file_path.stat().st_size
-                        if size_bytes < 1024:
-                            size_str = f"{size_bytes} B"
-                        elif size_bytes < 1024 * 1024:
-                            size_str = f"{size_bytes / 1024:.1f} KB"
+                        file_type = None
+                        if file_path.name.endswith('.roi.zip'):
+                            file_type = 'ROI'
+                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as ROI: {file_path.name}")
+                        elif suffix in FileFormat.CSV.value:
+                            file_type = 'CSV'
+                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as CSV: {file_path.name}")
+                        elif suffix in FileFormat.JSON.value:
+                            file_type = 'JSON'
+                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Matched as JSON: {file_path.name}")
                         else:
-                            size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+                            logger.debug(f"IMAGE BROWSER RESULTS: ✗ Filtered out: {file_path.name} (suffix={suffix})")
 
-                        # Parse ONLY the filename (not the full path) to extract metadata
-                        parsed = handler.parser.parse_filename(file_path.name)
+                        if file_type:
+                            # Get relative path from plate_path (not results_dir) to include subdirectory
+                            rel_path = file_path.relative_to(plate_path)
 
-                        # Build file info with parsed metadata (no full_path in metadata dict)
-                        file_info = {
-                            'filename': str(rel_path),
-                            'type': file_type,
-                            'size': size_str,
-                        }
+                            # Get file size
+                            size_bytes = file_path.stat().st_size
+                            if size_bytes < 1024:
+                                size_str = f"{size_bytes} B"
+                            elif size_bytes < 1024 * 1024:
+                                size_str = f"{size_bytes / 1024:.1f} KB"
+                            else:
+                                size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
 
-                        # Add parsed metadata components if parsing succeeded
-                        if parsed:
-                            file_info.update(parsed)
-                            logger.info(f"IMAGE BROWSER RESULTS: ✓ Parsed result: {file_path.name} -> {parsed}")
-                            logger.info(f"IMAGE BROWSER RESULTS:   Full file_info: {file_info}")
-                        else:
-                            logger.warning(f"IMAGE BROWSER RESULTS: ✗ Could not parse filename: {file_path.name}")
+                            # Parse ONLY the filename (not the full path) to extract metadata
+                            parsed = handler.parser.parse_filename(file_path.name)
 
-                        # Store file info and full path separately
-                        self.all_results[str(rel_path)] = file_info
-                        self.result_full_paths[str(rel_path)] = file_path
+                            # Build file info with parsed metadata (no full_path in metadata dict)
+                            file_info = {
+                                'filename': str(rel_path),
+                                'type': file_type,
+                                'size': size_str,
+                            }
+
+                            # Add parsed metadata components if parsing succeeded
+                            if parsed:
+                                file_info.update(parsed)
+                                logger.info(f"IMAGE BROWSER RESULTS: ✓ Parsed result: {file_path.name} -> {parsed}")
+                                logger.info(f"IMAGE BROWSER RESULTS:   Full file_info: {file_info}")
+                            else:
+                                logger.warning(f"IMAGE BROWSER RESULTS: ✗ Could not parse filename: {file_path.name}")
+
+                            # Store file info and full path separately
+                            self.all_results[str(rel_path)] = file_info
+                            self.result_full_paths[str(rel_path)] = file_path
 
             logger.info(f"IMAGE BROWSER RESULTS: Scanned {file_count} total files, matched {len(self.all_results)} result files")
 
