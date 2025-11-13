@@ -23,7 +23,7 @@ from skimage.feature import blob_log, blob_dog, blob_doh, peak_local_max
 from skimage.filters import threshold_otsu, threshold_li, gaussian, median
 from skimage.segmentation import watershed, clear_border
 from skimage.morphology import remove_small_objects, disk
-from skimage.measure import label, regionprops
+from skimage.measure import label, regionprops, regionprops_table
 
 # OpenHCS imports
 from openhcs.core.memory.decorators import numpy as numpy_func
@@ -948,25 +948,35 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
 
     # First pass: get connected components to check eccentricity
     initial_labels = label(binary)
-    initial_regions = regionprops(initial_labels)
+    num_objects = initial_labels.max()
 
-    max_eccentricity = params["watershed_max_eccentricity"]
+    # Fast path for dense cultures: skip eccentricity check if >500 objects
+    # For dense cultures, shape-aware processing is too slow and most cells are round anyway
+    if num_objects > 500:
+        logger.info(f"Dense culture detected ({num_objects} objects), using fast watershed without shape analysis")
+        round_mask = binary
+        elongated_labels = np.zeros_like(initial_labels)
+        next_elongated_label = 1
+    else:
+        # Sparse culture: use shape-aware watershed
+        initial_regions = regionprops(initial_labels)
+        max_eccentricity = params["watershed_max_eccentricity"]
 
-    # Separate round objects (need watershed) from elongated objects (keep as-is)
-    round_mask = np.zeros_like(binary, dtype=bool)
-    elongated_labels = np.zeros_like(initial_labels)
-    next_elongated_label = 1
+        # Separate round objects (need watershed) from elongated objects (keep as-is)
+        round_mask = np.zeros_like(binary, dtype=bool)
+        elongated_labels = np.zeros_like(initial_labels)
+        next_elongated_label = 1
 
-    for region in initial_regions:
-        # Eccentricity: 0 = perfect circle, 1 = line segment
-        # Only apply watershed to round objects
-        if region.eccentricity < max_eccentricity:
-            # Round object - add to mask for watershed processing
-            round_mask[initial_labels == region.label] = True
-        else:
-            # Elongated object - keep as single cell
-            elongated_labels[initial_labels == region.label] = next_elongated_label
-            next_elongated_label += 1
+        for region in initial_regions:
+            # Eccentricity: 0 = perfect circle, 1 = line segment
+            # Only apply watershed to round objects
+            if region.eccentricity < max_eccentricity:
+                # Round object - add to mask for watershed processing
+                round_mask[initial_labels == region.label] = True
+            else:
+                # Elongated object - keep as single cell
+                elongated_labels[initial_labels == region.label] = next_elongated_label
+                next_elongated_label += 1
 
     # Apply watershed only to round objects
     if np.any(round_mask):
@@ -1014,7 +1024,13 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
         combined_labels = elongated_labels
 
     # Extract region properties from combined labels
-    regions = regionprops(combined_labels, intensity_image=image)
+    # For dense cultures, regionprops is extremely slow because it calculates
+    # many properties we don't need. Use regionprops_table for better performance.
+    props = regionprops_table(
+        combined_labels,
+        intensity_image=image,
+        properties=('label', 'centroid', 'area', 'mean_intensity')
+    )
 
     positions = []
     areas = []
@@ -1022,16 +1038,18 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
     confidences = []
     valid_labels = []
 
-    for region in regions:
+    for i in range(len(props['label'])):
+        area = props['area'][i]
         # Filter by area
-        if params["min_cell_area"] <= region.area <= params["max_cell_area"]:
-            y, x = region.centroid
-            positions.append((float(x), float(y)))
-            areas.append(float(region.area))
-            intensities.append(float(region.mean_intensity))
-            confidence = min(1.0, region.area / params["max_cell_area"])
+        if params["min_cell_area"] <= area <= params["max_cell_area"]:
+            x = float(props['centroid-1'][i])  # centroid-1 is x (column)
+            y = float(props['centroid-0'][i])  # centroid-0 is y (row)
+            positions.append((x, y))
+            areas.append(float(area))
+            intensities.append(float(props['mean_intensity'][i]))
+            confidence = min(1.0, area / params["max_cell_area"])
             confidences.append(confidence)
-            valid_labels.append(region.label)
+            valid_labels.append(props['label'][i])
 
     # Create filtered labeled mask
     filtered_labeled_mask = np.where(np.isin(combined_labels, valid_labels), combined_labels, 0)
@@ -1061,7 +1079,13 @@ def _detect_cells_threshold(image: np.ndarray, slice_idx: int, params: Dict[str,
 
     # Label connected components
     labels = label(binary)
-    regions = regionprops(labels, intensity_image=image)
+
+    # Use regionprops_table for better performance with dense cultures
+    props = regionprops_table(
+        labels,
+        intensity_image=image,
+        properties=('label', 'centroid', 'area', 'mean_intensity')
+    )
 
     positions = []
     areas = []
@@ -1069,21 +1093,22 @@ def _detect_cells_threshold(image: np.ndarray, slice_idx: int, params: Dict[str,
     confidences = []
     valid_labels = []  # Track which labels pass the size filter
 
-    for region in regions:
+    for i in range(len(props['label'])):
+        area = props['area'][i]
         # Filter by area
-        if params["min_cell_area"] <= region.area <= params["max_cell_area"]:
-            y, x = region.centroid
-            positions.append((float(x), float(y)))
-
-            areas.append(float(region.area))
-            intensities.append(float(region.mean_intensity))
+        if params["min_cell_area"] <= area <= params["max_cell_area"]:
+            x = float(props['centroid-1'][i])  # centroid-1 is x (column)
+            y = float(props['centroid-0'][i])  # centroid-0 is y (row)
+            positions.append((x, y))
+            areas.append(float(area))
+            intensities.append(float(props['mean_intensity'][i]))
 
             # Use intensity as confidence measure
-            confidence = float(region.mean_intensity / image.max())
+            confidence = float(props['mean_intensity'][i] / image.max())
             confidences.append(confidence)
 
             # Track this label as valid
-            valid_labels.append(region.label)
+            valid_labels.append(props['label'][i])
 
     # Create filtered labeled mask with only cells that passed size filter
     # Keep the connected component labels instead of converting to binary
