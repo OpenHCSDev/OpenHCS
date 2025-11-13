@@ -301,6 +301,7 @@ def skan_axon_skeletonize_and_analyze(
     threshold_value: Optional[float] = None,
     min_object_size: int = 100,
     min_branch_length: float = 0.0,
+    filter_edge: Optional[str] = None,  # Filter objects not touching this edge: 'left', 'right', 'top', 'bottom', None
     return_skeleton_visualizations: bool = False,
     skeleton_visualization_mode: OutputMode = OutputMode.SKELETON_OVERLAY,
     analysis_dimension: AnalysisDimension = AnalysisDimension.THREE_D,
@@ -318,6 +319,7 @@ def skan_axon_skeletonize_and_analyze(
         threshold_value: Manual threshold value (if threshold_method=MANUAL)
         min_object_size: Minimum object size for noise removal (voxels)
         min_branch_length: Minimum branch length threshold (micrometers)
+        filter_edge: Keep only objects touching this edge ('left', 'right', 'top', 'bottom', or None for no filtering)
         return_skeleton_visualizations: Whether to generate skeleton visualizations as special output
         skeleton_visualization_mode: Type of visualization (SKELETON, SKELETON_OVERLAY, ORIGINAL, COMPOSITE)
         analysis_dimension: Analysis mode (TWO_D or THREE_D)
@@ -347,7 +349,11 @@ def skan_axon_skeletonize_and_analyze(
     # Step 2: Noise removal
     if min_object_size > 0:
         binary_stack = _remove_small_objects(binary_stack, min_object_size)
-    
+
+    # Step 2.5: Edge filtering (keep only objects touching specified edge)
+    if filter_edge is not None:
+        binary_stack = _filter_by_edge(binary_stack, filter_edge)
+
     # Step 3: Skeletonization
     skeleton_stack = _skeletonize_3d(binary_stack)
     
@@ -466,6 +472,71 @@ def _skeletonize_3d(binary_stack):
                 f"(reduction: {reduction_ratio:.3f})")
 
     return skeleton_stack
+
+
+def _filter_by_edge(binary_stack: np.ndarray, edge: str) -> np.ndarray:
+    """
+    Keep only objects that touch the specified edge of the image.
+
+    Removes artifacts and objects that don't originate from the specified edge.
+    Useful for filtering out debris while keeping neurites/axons that enter from one side.
+
+    Args:
+        binary_stack: 3D binary mask (Z, Y, X)
+        edge: Which edge to filter by ('left', 'right', 'top', 'bottom')
+
+    Returns:
+        Filtered binary mask with only objects touching the specified edge
+    """
+    from skimage.measure import label
+
+    valid_edges = {'left', 'right', 'top', 'bottom'}
+    if edge.lower() not in valid_edges:
+        raise ValueError(f"Invalid edge '{edge}'. Must be one of: {valid_edges}")
+
+    edge = edge.lower()
+
+    # Process each Z slice independently
+    filtered_stack = np.zeros_like(binary_stack)
+
+    for z in range(binary_stack.shape[0]):
+        slice_binary = binary_stack[z]
+
+        if not slice_binary.any():
+            continue
+
+        # Label connected components
+        labeled = label(slice_binary)
+
+        # Get labels that touch the specified edge
+        edge_labels = set()
+
+        if edge == 'left':
+            # First column (x=0)
+            edge_labels.update(labeled[:, 0])
+        elif edge == 'right':
+            # Last column (x=-1)
+            edge_labels.update(labeled[:, -1])
+        elif edge == 'top':
+            # First row (y=0)
+            edge_labels.update(labeled[0, :])
+        elif edge == 'bottom':
+            # Last row (y=-1)
+            edge_labels.update(labeled[-1, :])
+
+        # Remove background label (0)
+        edge_labels.discard(0)
+
+        # Keep only objects that touch the edge
+        if edge_labels:
+            mask = np.isin(labeled, list(edge_labels))
+            filtered_stack[z] = mask
+
+    objects_before = np.unique(label(binary_stack))[1:]  # Exclude background
+    objects_after = np.unique(label(filtered_stack))[1:]
+    logger.info(f"Edge filtering ({edge}): {len(objects_before)} → {len(objects_after)} objects")
+
+    return filtered_stack
 
 
 def _create_empty_branch_dataframe(include_2d_columns: bool = False):
