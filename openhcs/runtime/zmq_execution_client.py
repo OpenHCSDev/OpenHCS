@@ -267,6 +267,7 @@ class ZMQExecutionClient(ZMQClient):
     def _spawn_server_process(self):
         from pathlib import Path
         import time
+        import os
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file_path = log_dir / f"openhcs_zmq_server_port_{self.port}_{int(time.time() * 1000000)}.log"
@@ -275,7 +276,13 @@ class ZMQExecutionClient(ZMQClient):
             cmd.append('--persistent')
         cmd.extend(['--log-file-path', str(log_file_path)])
         cmd.extend(['--transport-mode', self.transport_mode.value])
-        return subprocess.Popen(cmd, stdout=open(log_file_path, 'w'), stderr=subprocess.STDOUT, start_new_session=self.persistent)
+
+        # Inherit parent process environment to ensure CUDA libraries are accessible
+        # This fixes the issue where subprocess can't find libcublas.so.12 and other CUDA libs
+        env = os.environ.copy()
+
+        return subprocess.Popen(cmd, stdout=open(log_file_path, 'w'), stderr=subprocess.STDOUT,
+                               start_new_session=self.persistent, env=env)
 
     def disconnect(self):
         self._stop_progress_listener()
