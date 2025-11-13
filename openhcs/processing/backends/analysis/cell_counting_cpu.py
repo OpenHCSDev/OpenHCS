@@ -978,8 +978,9 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
             # Track this label as valid
             valid_labels.append(region.label)
 
-    # Create filtered binary mask with only cells that passed size filter
-    filtered_binary_mask = np.isin(labels, valid_labels)
+    # Create filtered labeled mask with only cells that passed size filter
+    # Keep the watershed labels instead of converting to binary
+    filtered_labeled_mask = np.where(np.isin(labels, valid_labels), labels, 0)
 
     return CellCountResult(
         slice_index=slice_idx,
@@ -990,7 +991,7 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
         cell_intensities=intensities,
         detection_confidence=confidences,
         parameters_used=params,
-        binary_mask=filtered_binary_mask  # Only cells that passed all filters
+        binary_mask=filtered_labeled_mask  # Labeled mask with only cells that passed all filters
     )
 
 
@@ -1030,8 +1031,9 @@ def _detect_cells_threshold(image: np.ndarray, slice_idx: int, params: Dict[str,
             # Track this label as valid
             valid_labels.append(region.label)
 
-    # Create filtered binary mask with only cells that passed size filter
-    filtered_binary_mask = np.isin(labels, valid_labels)
+    # Create filtered labeled mask with only cells that passed size filter
+    # Keep the connected component labels instead of converting to binary
+    filtered_labeled_mask = np.where(np.isin(labels, valid_labels), labels, 0)
 
     return CellCountResult(
         slice_index=slice_idx,
@@ -1042,7 +1044,7 @@ def _detect_cells_threshold(image: np.ndarray, slice_idx: int, params: Dict[str,
         cell_intensities=intensities,
         detection_confidence=confidences,
         parameters_used=params,
-        binary_mask=filtered_binary_mask  # Only cells that passed all filters
+        binary_mask=filtered_labeled_mask  # Labeled mask with only cells that passed all filters
     )
 
 
@@ -1304,14 +1306,12 @@ def _create_segmentation_visualization(
     This is required for ROI extraction in materialization.
     """
 
-    # If we have the actual binary mask from detection, convert to labeled mask
+    # If we have a labeled mask from detection (watershed/threshold), use it directly
+    # After the fix, binary_mask is actually a labeled mask for these methods
     if binary_mask is not None:
-        # Convert binary mask to labeled mask (each connected component gets unique ID)
-        from skimage.measure import label
-        labeled_mask = label(binary_mask.astype(np.uint8))
-        # Use uint16 to support up to 65535 labels without MemoryError
-        # (int32 causes MemoryError in regionprops, uint8 overflows at >255 labels)
-        return labeled_mask.astype(np.uint16)
+        # The mask is already labeled with unique IDs for each cell
+        # Just ensure it's uint16 to support up to 65535 labels
+        return binary_mask.astype(np.uint16)
 
     # Fallback to original circular marker approach for blob methods
     visualization = image.copy()
