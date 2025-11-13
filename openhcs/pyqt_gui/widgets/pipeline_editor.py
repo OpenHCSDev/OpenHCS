@@ -990,7 +990,6 @@ class PipelineEditorWidget(QWidget):
             live_context_dict = {}
             step_scope = f"{plate_scope}::{step.name}"
 
-            logger.info(f"🔍 COLLECTING LIVE CONTEXT: plate_scope={plate_scope}, step='{step.name}', step_scope={step_scope}")
             for manager in ParameterFormManager._active_form_managers:
                 # Include managers from:
                 # 1. Global scope (None)
@@ -1002,8 +1001,6 @@ class PipelineEditorWidget(QWidget):
                     manager.scope_id == step_scope  # Exact step match
                 )
 
-                logger.info(f"🔍   Manager: scope_id={manager.scope_id}, type={type(manager.object_instance).__name__}, is_visible={is_visible}")
-
                 if is_visible:
                     # CRITICAL: Get ALL current values (including None from resets), not just user-modified
                     # When user resets a field to None, it's removed from user_modified_values,
@@ -1011,7 +1008,6 @@ class PipelineEditorWidget(QWidget):
                     live_values = manager.get_current_values()
                     obj_type = type(manager.object_instance)
                     live_context_dict[obj_type] = live_values
-                    logger.info(f"🔍     → Added to live_context_dict: {obj_type.__name__} with {len(live_values)} values")
 
             # Build context stack: GlobalPipelineConfig → PipelineConfig → Step
             # Use live values if available, otherwise use stored values
@@ -1035,16 +1031,13 @@ class PipelineEditorWidget(QWidget):
             # it's guaranteed to be for THIS step
             step_type = type(step)
             step_live_values = live_context_dict.get(step_type)
-            logger.info(f"🔍 Step '{step.name}': step_type={step_type.__name__}, has_live_values={step_live_values is not None}, live_context_dict keys={list(live_context_dict.keys())}")
 
             step_to_use = step
             if step_live_values:
                 step_to_use = self._merge_live_values(step, step_live_values)
                 context_objects.append(step_to_use)
-                logger.info(f"🔍 Using live step values for '{step.name}', merged {len(step_live_values)} fields")
             else:
                 context_objects.append(step)
-                logger.info(f"🔍 Using stored step for '{step.name}' (no live editor open)")
 
             # CRITICAL: Get config from the merged step (step_to_use), not the original step!
             # This ensures we're resolving the config object that has live values merged in
@@ -1057,10 +1050,8 @@ class PipelineEditorWidget(QWidget):
 
             if config_attr_name:
                 config_to_resolve = getattr(step_to_use, config_attr_name, config)
-                logger.info(f"🔍 Resolving config from {'merged' if step_live_values else 'original'} step: {config_attr_name}")
             else:
                 config_to_resolve = config
-                logger.info(f"🔍 Could not identify config attribute, using original config")
 
             # Build nested context stack and resolve
             def resolve_with_contexts(contexts, index=0):
@@ -1140,9 +1131,6 @@ class PipelineEditorWidget(QWidget):
 
         Reacts to any config change that could affect resolved values through the context hierarchy.
         """
-        editing_type = type(editing_object).__name__ if editing_object is not None else "None"
-        logger.info(f"🔔 Pipeline editor: Received context_value_changed signal: field_path='{field_path}', new_value={new_value}, editing_type={editing_type}")
-        logger.info(f"✅ Pipeline editor: Refreshing preview labels")
         self.update_step_list()
 
     def _on_cross_window_context_refreshed(self, editing_object: object, context_object: object):
@@ -1150,17 +1138,12 @@ class PipelineEditorWidget(QWidget):
 
         Reacts to any context refresh that could affect resolved values.
         """
-        editing_type = type(editing_object).__name__ if editing_object is not None else "None"
-        context_type = type(context_object).__name__ if context_object is not None else "None"
-        logger.info(f"🔄 Pipeline editor: Context refreshed (editing_object={editing_type}, context_object={context_type}), refreshing preview labels")
         self.update_step_list()
     
     # ========== UI Helper Methods ==========
     
     def update_step_list(self):
         """Update the step list widget using selection preservation mixin."""
-        logger.info(f"🔍 UPDATE_STEP_LIST CALLED")
-
         def format_step_item(step, step_index):
             """Format step item for display."""
             display_text, step_name = self.format_item_for_display(step)
