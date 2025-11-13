@@ -983,15 +983,23 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
         # Auto-calculate min_distance if None
         min_distance = params["watershed_min_distance"]
         if min_distance is None:
-            # Use round objects only for distance calculation
-            round_regions = [r for r in initial_regions if r.eccentricity < max_eccentricity]
-            if len(round_regions) > 0:
-                areas = [r.area for r in round_regions]
-                median_area = np.median(areas)
-                min_distance = int(np.sqrt(median_area / np.pi) * 1.5)
+            # For dense cultures, we don't have initial_regions, so calculate from binary mask
+            if num_objects > 500:
+                # Fast estimation: use binary mask area
+                total_area = np.sum(round_mask)
+                avg_area = total_area / num_objects if num_objects > 0 else 100
+                min_distance = int(np.sqrt(avg_area / np.pi) * 1.5)
                 min_distance = max(min_distance, 5)
             else:
-                min_distance = 10
+                # Use round objects only for distance calculation
+                round_regions = [r for r in initial_regions if r.eccentricity < max_eccentricity]
+                if len(round_regions) > 0:
+                    areas = [r.area for r in round_regions]
+                    median_area = np.median(areas)
+                    min_distance = int(np.sqrt(median_area / np.pi) * 1.5)
+                    min_distance = max(min_distance, 5)
+                else:
+                    min_distance = 10
 
         # Find local maxima as seeds (only in round objects)
         distance = ndimage.distance_transform_edt(round_mask)
