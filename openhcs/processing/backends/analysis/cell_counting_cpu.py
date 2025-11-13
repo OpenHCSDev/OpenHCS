@@ -292,12 +292,18 @@ def count_cells_single_channel(
 
     logging.info(f"Processing {image_stack.shape[0]} slices with {detection_method.value} method")
 
+    # Create output stack (will be preprocessed if enabled, otherwise original)
+    output_stack = np.zeros_like(image_stack, dtype=np.float64)
+
     for z_idx in range(image_stack.shape[0]):
         slice_img = image_stack[z_idx].astype(np.float64)
 
         # Apply preprocessing if enabled
         if enable_preprocessing:
             slice_img = _preprocess_image(slice_img, gaussian_sigma, median_disk_size)
+
+        # Store preprocessed (or original) slice in output stack
+        output_stack[z_idx] = slice_img
 
         # Detect cells using specified method
         result = _detect_cells_single_method(
@@ -313,9 +319,9 @@ def count_cells_single_channel(
             )
             segmentation_masks.append(segmentation_mask)
 
-    # Always return segmentation masks (empty list if not requested)
+    # Return preprocessed stack if preprocessing was enabled, otherwise original
     # This ensures consistent return signature for special outputs system
-    return image_stack, results, segmentation_masks
+    return output_stack, results, segmentation_masks
 
 
 @numpy_func
