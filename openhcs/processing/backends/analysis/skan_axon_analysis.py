@@ -356,8 +356,8 @@ def skan_axon_skeletonize_and_analyze(
 
     # Step 3: Skeletonization
     skeleton_stack = _skeletonize_3d(binary_stack)
-    
-    # Step 4: Skeleton analysis
+
+    # Step 4: Skeleton analysis (initial pass to identify branches)
     if analysis_dimension == AnalysisDimension.THREE_D:
         branch_data = _analyze_3d_skeleton(skeleton_stack, voxel_spacing)
         analysis_type = "3D volumetric"
@@ -366,11 +366,16 @@ def skan_axon_skeletonize_and_analyze(
         analysis_type = "2D slice-by-slice"
     else:
         raise ValueError(f"Invalid analysis_dimension: {analysis_dimension}")
-    
-    # Step 5: Filter results
-    # DataFrame always has proper schema (even when empty), so we can filter directly
+
+    # Step 5: Prune small branches from skeleton (modifies skeleton geometry)
     if min_branch_length > 0 and len(branch_data) > 0:
-        branch_data = branch_data[branch_data['branch_distance'] >= min_branch_length]
+        skeleton_stack = _prune_skeleton(skeleton_stack, branch_data, min_branch_length, voxel_spacing, analysis_dimension)
+
+        # Re-analyze after pruning to get updated branch data
+        if analysis_dimension == AnalysisDimension.THREE_D:
+            branch_data = _analyze_3d_skeleton(skeleton_stack, voxel_spacing)
+        else:
+            branch_data = _analyze_2d_slices(skeleton_stack, voxel_spacing)
 
     # Step 6: Generate skeleton visualizations if requested
     skeleton_visualizations = []
@@ -472,6 +477,102 @@ def _skeletonize_3d(binary_stack):
                 f"(reduction: {reduction_ratio:.3f})")
 
     return skeleton_stack
+
+
+def _prune_skeleton(skeleton_stack: np.ndarray, branch_data: pd.DataFrame,
+                   min_branch_length: float, voxel_spacing: Tuple[float, float, float],
+                   analysis_dimension: AnalysisDimension) -> np.ndarray:
+    """
+    Remove branches shorter than min_branch_length from the skeleton.
+
+    This actually modifies the skeleton geometry, not just the analysis results.
+
+    Args:
+        skeleton_stack: Binary skeleton mask (Z, Y, X)
+        branch_data: DataFrame from skan analysis
+        min_branch_length: Minimum branch length threshold (micrometers)
+        voxel_spacing: Physical voxel spacing (z, y, x)
+        analysis_dimension: Whether this is 2D or 3D analysis
+
+    Returns:
+        Pruned skeleton mask
+    """
+    from skan import Skeleton
+
+    if not skeleton_stack.any() or len(branch_data) == 0:
+        return skeleton_stack
+
+    # Identify branches to remove (below threshold)
+    short_branches = branch_data[branch_data['branch_distance'] < min_branch_length]
+
+    if len(short_branches) == 0:
+        logger.info(f"No branches below {min_branch_length}µm threshold - no pruning needed")
+        return skeleton_stack
+
+    # Create skeleton object to get pixel indices for each branch
+    if analysis_dimension == AnalysisDimension.THREE_D:
+        skeleton_obj = Skeleton(skeleton_stack, spacing=voxel_spacing)
+
+        # Get coordinates of pixels to remove
+        pruned_skeleton = skeleton_stack.copy()
+
+        for idx, row in short_branches.iterrows():
+            # Get path coordinates for this branch
+            path = skeleton_obj.path_coordinates(idx)
+
+            # Remove these pixels from skeleton
+            if len(path) > 0:
+                coords = np.round(path).astype(int)
+                # Ensure coordinates are within bounds
+                valid_mask = (
+                    (coords[:, 0] >= 0) & (coords[:, 0] < skeleton_stack.shape[0]) &
+                    (coords[:, 1] >= 0) & (coords[:, 1] < skeleton_stack.shape[1]) &
+                    (coords[:, 2] >= 0) & (coords[:, 2] < skeleton_stack.shape[2])
+                )
+                coords = coords[valid_mask]
+
+                if len(coords) > 0:
+                    pruned_skeleton[coords[:, 0], coords[:, 1], coords[:, 2]] = 0
+
+    else:  # 2D analysis - prune each slice independently
+        pruned_skeleton = skeleton_stack.copy()
+
+        for z in range(skeleton_stack.shape[0]):
+            slice_skeleton = skeleton_stack[z]
+
+            if not slice_skeleton.any():
+                continue
+
+            # Get branches for this slice
+            slice_branches = short_branches[short_branches['z_slice'] == z] if 'z_slice' in short_branches.columns else pd.DataFrame()
+
+            if len(slice_branches) == 0:
+                continue
+
+            # Create 2D skeleton object for this slice
+            skeleton_obj_2d = Skeleton(slice_skeleton, spacing=voxel_spacing[1:])
+
+            for idx, row in slice_branches.iterrows():
+                # Get path coordinates for this branch
+                path = skeleton_obj_2d.path_coordinates(idx)
+
+                if len(path) > 0:
+                    coords = np.round(path).astype(int)
+                    # Ensure coordinates are within bounds
+                    valid_mask = (
+                        (coords[:, 0] >= 0) & (coords[:, 0] < slice_skeleton.shape[0]) &
+                        (coords[:, 1] >= 0) & (coords[:, 1] < slice_skeleton.shape[1])
+                    )
+                    coords = coords[valid_mask]
+
+                    if len(coords) > 0:
+                        pruned_skeleton[z, coords[:, 0], coords[:, 1]] = 0
+
+    branches_before = len(branch_data)
+    branches_after = branches_before - len(short_branches)
+    logger.info(f"Pruned {len(short_branches)} branches < {min_branch_length}µm ({branches_before} → {branches_after} branches)")
+
+    return pruned_skeleton
 
 
 def _filter_by_edge(binary_stack: np.ndarray, edge: str) -> np.ndarray:
