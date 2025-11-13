@@ -1008,21 +1008,39 @@ def sobel(image: "cp.ndarray", mask: Optional["cp.ndarray"] = None, *,
         cval: Constant value for 'constant' mode
 
     Returns:
-        Edge-filtered CuPy array (same shape as input)
+        Edge-filtered CuPy array (same shape and dtype as input)
 
     Note:
         This is a manual wrapper around CuCIM's sobel function that provides
         the same functionality as auto-discovered functions but is pickleable
         for subprocess execution.
+
+        CuCIM's sobel normalizes integer inputs to [0, 1] range and returns float64.
+        This wrapper always preserves the input dtype by forcing dtype conversion.
     """
     if cucim_filters is None:
         raise ImportError("CuCIM is required for sobel edge detection but is not available")
 
-    # Let the decorator handle slice processing - just call CuCIM sobel directly
-    return cucim_filters.sobel(
+    # Import here to avoid circular dependency
+    from openhcs.core.memory.decorators import DtypeConversion
+    from openhcs.core.memory.dtype_scaling import SCALING_FUNCTIONS
+    from openhcs.constants.constants import MemoryType
+
+    # Store original dtype
+    original_dtype = image.dtype
+
+    # Call CuCIM sobel
+    result = cucim_filters.sobel(
         image,
         mask=mask,
         axis=axis,
         mode=mode,
         cval=cval
     )
+
+    # Always preserve input dtype (CuCIM normalizes integer inputs to [0, 1])
+    if result.dtype != original_dtype:
+        scale_func = SCALING_FUNCTIONS[MemoryType.CUPY.value]
+        result = scale_func(result, original_dtype)
+
+    return result
