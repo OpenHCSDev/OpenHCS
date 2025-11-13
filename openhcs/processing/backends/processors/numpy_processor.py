@@ -359,6 +359,27 @@ def mean_projection(stack: np.ndarray) -> np.ndarray:
     return projection_2d.reshape(1, projection_2d.shape[0], projection_2d.shape[1])
 
 @numpy_func
+def gaussian_blur(stack: np.ndarray, sigma: float = 1.0) -> np.ndarray:
+    """
+    Apply Gaussian blur to reduce noise in image stack.
+
+    Args:
+        stack: 3D NumPy array of shape (Z, Y, X)
+        sigma: Standard deviation for Gaussian kernel (higher = more blur)
+
+    Returns:
+        Blurred 3D NumPy array of shape (Z, Y, X)
+    """
+    _validate_3d_array(stack)
+
+    # Apply Gaussian blur slice-by-slice
+    blurred = np.zeros_like(stack, dtype=np.float64)
+    for z in range(stack.shape[0]):
+        blurred[z] = filters.gaussian(stack[z], sigma=sigma, preserve_range=True)
+
+    return blurred.astype(stack.dtype)
+
+@numpy_func
 def spatial_bin_2d(
     stack: np.ndarray,
     bin_size: int = 2,
