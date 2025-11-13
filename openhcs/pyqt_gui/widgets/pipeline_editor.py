@@ -467,14 +467,17 @@ class PipelineEditorWidget(QWidget):
             if isinstance(config, WellFilterConfig):
                 resolved_well_filter = self._resolve_config_attr(step, config, 'well_filter')
                 if resolved_well_filter is not None:
-                    # Format well_filter for display
+                    # Format well_filter for display: always show count for lists
                     if isinstance(resolved_well_filter, list):
-                        wf_display = f"{len(resolved_well_filter)}"
+                        wf_display = str(len(resolved_well_filter))
                     elif isinstance(resolved_well_filter, int):
                         wf_display = str(resolved_well_filter)
                     else:
-                        wf_display = str(resolved_well_filter)
-                    indicator_text = f"{indicator}{wf_display}"
+                        # For string patterns or other types, don't show suffix
+                        wf_display = None
+
+                    if wf_display:
+                        indicator_text = f"{indicator}{wf_display}"
 
             config_indicators.append(indicator_text)
 
