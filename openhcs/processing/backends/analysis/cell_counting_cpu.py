@@ -943,12 +943,13 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
             # Calculate median object size
             areas = [r.area for r in temp_regions]
             median_area = np.median(areas)
-            # Set min_distance to ~half the typical object radius
+            # Set min_distance to the typical object radius (full radius, not half)
             # This prevents splitting single objects while allowing separation of touching cells
-            min_distance = int(np.sqrt(median_area / np.pi) * 0.5)
-            min_distance = max(min_distance, 3)  # Minimum of 3 pixels
+            # For elongated objects, use 1.5x radius to be more conservative
+            min_distance = int(np.sqrt(median_area / np.pi) * 1.5)
+            min_distance = max(min_distance, 5)  # Minimum of 5 pixels
         else:
-            min_distance = 5  # Fallback if no objects detected
+            min_distance = 10  # Fallback if no objects detected
 
     # Find local maxima as seeds
     distance = ndimage.distance_transform_edt(binary)
