@@ -561,6 +561,67 @@ class LogFileLoader(QThread):
             self.load_failed.emit(str(e))
 
 
+class LogTailer(QThread):
+    """Background thread for tailing log files without blocking UI."""
+
+    # Signals
+    new_content = pyqtSignal(str, int)  # Emits (new_content, new_file_position)
+    log_rotated = pyqtSignal()  # Emits when log rotation detected
+    error_occurred = pyqtSignal(str)  # Emits error message
+
+    def __init__(self, log_path: Path, initial_position: int = 0):
+        super().__init__()
+        self.log_path = log_path
+        self.file_position = initial_position
+        self._running = False
+
+    def run(self):
+        """Continuously tail log file in background thread."""
+        self._running = True
+
+        while self._running:
+            try:
+                if not self.log_path.exists():
+                    self.msleep(100)
+                    continue
+
+                # Get current file size
+                current_size = self.log_path.stat().st_size
+
+                # Handle log rotation (file size decreased)
+                if current_size < self.file_position:
+                    self.log_rotated.emit()
+                    self.file_position = 0
+
+                # Read new content if file grew
+                if current_size > self.file_position:
+                    with open(self.log_path, 'rb') as f:
+                        f.seek(self.file_position)
+                        new_data = f.read(current_size - self.file_position)
+
+                    # Decode new content
+                    try:
+                        new_content = new_data.decode('utf-8', errors='replace')
+                    except UnicodeDecodeError:
+                        new_content = new_data.decode('latin-1', errors='replace')
+
+                    if new_content:
+                        self.new_content.emit(new_content, current_size)
+                        self.file_position = current_size
+
+            except (OSError, PermissionError) as e:
+                self.error_occurred.emit(str(e))
+            except Exception as e:
+                self.error_occurred.emit(f"Unexpected error: {e}")
+
+            # Sleep for 100ms before next check
+            self.msleep(100)
+
+    def stop(self):
+        """Stop the tailing thread."""
+        self._running = False
+
+
 class LogViewerWindow(QMainWindow):
     """Main log viewer window with dropdown, search, and real-time tailing."""
 
@@ -588,7 +649,8 @@ class LogViewerWindow(QMainWindow):
         self.search_toolbar: QToolBar = None
         self.log_display: QTextEdit = None
         self.file_detector: LogFileDetector = None
-        self.tail_timer: QTimer = None
+        self.tail_timer: QTimer = None  # Deprecated - kept for compatibility
+        self.log_tailer: Optional[LogTailer] = None  # Async log tailer thread
         self.highlighter: LogHighlighter = None
         self.file_loader: Optional[LogFileLoader] = None  # Async file loader
         self.server_scan_timer: QTimer = None  # Periodic ZMQ server scanning
@@ -671,6 +733,8 @@ class LogViewerWindow(QMainWindow):
         self.pause_btn.setCheckable(True)
 
         self.clear_btn = QPushButton("Clear")
+        self.reset_memory_btn = QPushButton("Reset Memory")
+        self.reset_memory_btn.setToolTip("Clear display and reset memory usage (reloads current log from disk)")
         self.bottom_btn = QPushButton("Bottom")
 
         # Process filter checkbox
@@ -680,6 +744,7 @@ class LogViewerWindow(QMainWindow):
         control_layout.addWidget(self.auto_scroll_btn)
         control_layout.addWidget(self.pause_btn)
         control_layout.addWidget(self.clear_btn)
+        control_layout.addWidget(self.reset_memory_btn)
         control_layout.addWidget(self.bottom_btn)
         control_layout.addWidget(self.show_alive_only_cb)
         control_layout.addStretch()  # Push buttons to left
@@ -712,6 +777,7 @@ class LogViewerWindow(QMainWindow):
         self.auto_scroll_btn.toggled.connect(self.toggle_auto_scroll)
         self.pause_btn.toggled.connect(self.toggle_pause_tailing)
         self.clear_btn.clicked.connect(self.clear_log_display)
+        self.reset_memory_btn.clicked.connect(self.reset_memory)
         self.bottom_btn.clicked.connect(self.scroll_to_bottom)
         self.show_alive_only_cb.stateChanged.connect(self.on_filter_changed)
 
@@ -1082,8 +1148,7 @@ class LogViewerWindow(QMainWindow):
         """
         try:
             # Stop current tailing
-            if self.tail_timer and self.tail_timer.isActive():
-                self.tail_timer.stop()
+            self.stop_log_tailing()
 
             # Stop any existing file loader
             if self.file_loader and self.file_loader.isRunning():
@@ -1257,8 +1322,8 @@ class LogViewerWindow(QMainWindow):
     def toggle_pause_tailing(self, paused: bool) -> None:
         """Toggle pause/resume log tailing."""
         self.tailing_paused = paused
-        if paused and self.tail_timer:
-            self.tail_timer.stop()
+        if paused:
+            self.stop_log_tailing()
         elif not paused and self.current_log_path:
             self.start_log_tailing(self.current_log_path)
         logger.debug(f"Log tailing {'paused' if paused else 'resumed'}")
@@ -1267,6 +1332,40 @@ class LogViewerWindow(QMainWindow):
         """Clear current log display content."""
         self.log_display.clear()
         logger.debug("Log display cleared")
+
+    def reset_memory(self) -> None:
+        """
+        Reset memory usage by clearing QTextDocument and reloading current log.
+
+        This completely clears the text buffer and reloads the log file from disk,
+        freeing memory accumulated from long-running log tailing.
+        """
+        if not self.current_log_path:
+            logger.warning("No log file currently loaded - cannot reset memory")
+            return
+
+        logger.info(f"Resetting memory for log: {self.current_log_path}")
+
+        # Stop tailing
+        was_paused = self.tailing_paused
+        self.stop_log_tailing()
+
+        # Clear the document completely (frees memory)
+        self.log_display.clear()
+        self.log_display.document().clear()
+
+        # Reset file position to reload from beginning
+        self.current_file_position = 0
+
+        # Reload the log file
+        self.switch_to_log(self.current_log_path)
+
+        # Restore pause state
+        if was_paused:
+            self.tailing_paused = True
+            self.pause_btn.setChecked(True)
+
+        logger.info("Memory reset complete - log reloaded from disk")
 
     def scroll_to_bottom(self) -> None:
         """Scroll log display to bottom."""
@@ -1278,85 +1377,69 @@ class LogViewerWindow(QMainWindow):
     # Real-time Tailing Methods
     def start_log_tailing(self, log_path: Path) -> None:
         """
-        Start tailing log file with QTimer (100ms interval).
+        Start tailing log file with async background thread (never blocks UI).
 
         Args:
             log_path: Path to log file to tail
         """
-        # Stop any existing timer
-        if self.tail_timer:
-            self.tail_timer.stop()
+        # Stop any existing tailer
+        self.stop_log_tailing()
 
-        # Create new timer
-        self.tail_timer = QTimer()
-        self.tail_timer.timeout.connect(self.read_log_incremental)
-        self.tail_timer.start(100)  # 100ms interval
+        # Create and start async tailer thread
+        self.log_tailer = LogTailer(log_path, self.current_file_position)
+        self.log_tailer.new_content.connect(self._on_new_content)
+        self.log_tailer.log_rotated.connect(self._on_log_rotated)
+        self.log_tailer.error_occurred.connect(self._on_tail_error)
+        self.log_tailer.start()
 
-        logger.debug(f"Started tailing log file: {log_path}")
+        logger.debug(f"Started async tailing for log file: {log_path}")
 
     def stop_log_tailing(self) -> None:
         """Stop current log tailing."""
-        if self.tail_timer:
-            self.tail_timer.stop()
-            self.tail_timer = None
+        if self.log_tailer:
+            self.log_tailer.stop()
+            self.log_tailer.wait(1000)  # Wait up to 1 second for thread to finish
+            self.log_tailer = None
         logger.debug("Stopped log tailing")
 
+    def _on_new_content(self, new_content: str, new_file_position: int) -> None:
+        """Handle new content from async tailer (runs on UI thread via signal)."""
+        # Check if user has scrolled up (disable auto-scroll)
+        scrollbar = self.log_display.verticalScrollBar()
+        was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
+
+        # Append new content
+        cursor = self.log_display.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        cursor.insertText(new_content)
+
+        # Auto-scroll if enabled and user was at bottom
+        if self.auto_scroll_enabled and was_at_bottom:
+            self.scroll_to_bottom()
+
+        # Update file position
+        self.current_file_position = new_file_position
+
+    def _on_log_rotated(self) -> None:
+        """Handle log rotation detected by async tailer."""
+        logger.info(f"Log rotation detected for {self.current_log_path}")
+        self.current_file_position = 0
+        self.log_display.append("\n--- Log rotated ---\n")
+
+    def _on_tail_error(self, error_msg: str) -> None:
+        """Handle errors from async tailer."""
+        logger.warning(f"Tailing error: {error_msg}")
+
+        # Check if file was deleted
+        if self.current_log_path and not self.current_log_path.exists():
+            logger.info(f"Log file deleted: {self.current_log_path}")
+            self.log_display.append(f"\n--- Log file deleted: {self.current_log_path} ---\n")
+            # Try to reconnect after a delay
+            QTimer.singleShot(1000, self._attempt_reconnection)
+
     def read_log_incremental(self) -> None:
-        """Read new content from current log file (track file position)."""
-        if not self.current_log_path or not self.current_log_path.exists():
-            return
-
-        try:
-            # Get current file size
-            current_size = self.current_log_path.stat().st_size
-
-            # Handle log rotation (file size decreased)
-            if current_size < self.current_file_position:
-                logger.info(f"Log rotation detected for {self.current_log_path}")
-                self.current_file_position = 0
-                # Optionally clear display or add rotation marker
-                self.log_display.append("\n--- Log rotated ---\n")
-
-            # Read new content if file grew
-            if current_size > self.current_file_position:
-                with open(self.current_log_path, 'rb') as f:
-                    f.seek(self.current_file_position)
-                    new_data = f.read(current_size - self.current_file_position)
-
-                # Decode new content
-                try:
-                    new_content = new_data.decode('utf-8', errors='replace')
-                except UnicodeDecodeError:
-                    new_content = new_data.decode('latin-1', errors='replace')
-
-                if new_content:
-                    # Check if user has scrolled up (disable auto-scroll)
-                    scrollbar = self.log_display.verticalScrollBar()
-                    was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
-
-                    # Append new content
-                    cursor = self.log_display.textCursor()
-                    cursor.movePosition(cursor.MoveOperation.End)
-                    cursor.insertText(new_content)
-
-                    # Auto-scroll if enabled and user was at bottom
-                    if self.auto_scroll_enabled and was_at_bottom:
-                        self.scroll_to_bottom()
-
-                    # Update file position
-                    self.current_file_position = current_size
-
-        except (OSError, PermissionError) as e:
-            logger.warning(f"Error reading log file {self.current_log_path}: {e}")
-            # Handle file deletion/recreation
-            if not self.current_log_path.exists():
-                logger.info(f"Log file deleted: {self.current_log_path}")
-                self.log_display.append(f"\n--- Log file deleted: {self.current_log_path} ---\n")
-                # Try to reconnect after a delay
-                QTimer.singleShot(1000, self._attempt_reconnection)
-        except Exception as e:
-            logger.error(f"Unexpected error in log tailing: {e}")
-            raise
+        """Deprecated - kept for compatibility. Tailing now handled by LogTailer thread."""
+        pass
 
     def _attempt_reconnection(self) -> None:
         """Attempt to reconnect to log file after deletion."""
@@ -1503,7 +1586,11 @@ class LogViewerWindow(QMainWindow):
     def cleanup(self) -> None:
         """Cleanup all resources and background processes."""
         try:
-            # Stop tailing timer
+            # Stop async log tailer thread
+            if hasattr(self, 'log_tailer') and self.log_tailer:
+                self.stop_log_tailing()
+
+            # Stop tailing timer (deprecated, kept for compatibility)
             if hasattr(self, 'tail_timer') and self.tail_timer and self.tail_timer.isActive():
                 self.tail_timer.stop()
                 self.tail_timer.deleteLater()
@@ -1528,6 +1615,10 @@ class LogViewerWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Handle window close event."""
+        # Stop async tailer
+        if hasattr(self, 'log_tailer') and self.log_tailer:
+            self.stop_log_tailing()
+
         if self.file_detector:
             self.file_detector.stop_watching()
         if self.tail_timer:

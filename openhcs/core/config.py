@@ -353,6 +353,9 @@ class AnalysisConsolidationConfig:
     output_filename: str = "metaxpress_style_summary.csv"
     """Name of the consolidated output file."""
 
+    global_summary_filename: str = "global_metaxpress_summary.csv"
+    """Name of the global consolidated summary file combining all plates."""
+
 
 @global_pipeline_config
 @dataclass(frozen=True)

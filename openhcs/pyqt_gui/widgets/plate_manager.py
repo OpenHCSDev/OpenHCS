@@ -1294,13 +1294,95 @@ class PlateManagerWidget(QWidget):
                 # Count results
                 completed_count = sum(1 for s in self.plate_execution_states.values() if s == "completed")
                 failed_count = sum(1 for s in self.plate_execution_states.values() if s == "failed")
-                self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed")
+
+                # Run global multi-plate consolidation if multiple plates completed successfully
+                if completed_count > 1 and self.global_config.analysis_consolidation_config.enabled:
+                    try:
+                        logger.info(f"Starting global multi-plate consolidation for {completed_count} plates")
+                        self._consolidate_multi_plate_results()
+                        self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed. Global summary created.")
+                    except Exception as consolidation_error:
+                        logger.error(f"Failed to create global summary: {consolidation_error}", exc_info=True)
+                        self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed. Global summary failed.")
+                else:
+                    self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed")
 
                 # Update button states to show "Run" instead of "Stop"
                 self.update_button_states()
 
         except Exception as e:
             logger.error(f"Error handling execution completion: {e}", exc_info=True)
+
+    def _consolidate_multi_plate_results(self):
+        """
+        Consolidate results from multiple completed plates into a global summary.
+
+        This collects MetaXpress summaries from all successfully completed plates
+        and creates a unified global summary file.
+        """
+        from pathlib import Path
+        from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_multi_plate_summaries
+
+        # Collect summary paths from completed plates
+        summary_paths = []
+        plate_names = []
+
+        for plate_path_str, state in self.plate_execution_states.items():
+            if state != "completed":
+                continue
+
+            plate_path = Path(plate_path_str)
+
+            # Build output directory path (same logic as orchestrator)
+            path_config = self.global_config.path_planning_config
+            if path_config.global_output_folder:
+                base = Path(path_config.global_output_folder)
+            else:
+                base = plate_path.parent
+
+            output_plate_root = base / f"{plate_path.name}{path_config.output_dir_suffix}"
+
+            # Get results directory
+            materialization_path = self.global_config.materialization_results_path
+            if Path(materialization_path).is_absolute():
+                results_dir = Path(materialization_path)
+            else:
+                results_dir = output_plate_root / materialization_path
+
+            # Look for MetaXpress summary
+            summary_filename = self.global_config.analysis_consolidation_config.output_filename
+            summary_path = results_dir / summary_filename
+
+            if summary_path.exists():
+                summary_paths.append(str(summary_path))
+                plate_names.append(output_plate_root.name)
+                logger.info(f"Found summary for plate {output_plate_root.name}: {summary_path}")
+            else:
+                logger.warning(f"No summary found for plate {plate_path} at {summary_path}")
+
+        if len(summary_paths) < 2:
+            logger.info(f"Only {len(summary_paths)} summary found, skipping global consolidation")
+            return
+
+        # Determine global output location
+        path_config = self.global_config.path_planning_config
+        if path_config.global_output_folder:
+            global_output_dir = Path(path_config.global_output_folder)
+        else:
+            # Use parent of first plate's output directory
+            global_output_dir = Path(summary_paths[0]).parent.parent.parent
+
+        global_summary_filename = self.global_config.analysis_consolidation_config.global_summary_filename
+        global_summary_path = global_output_dir / global_summary_filename
+
+        # Consolidate all summaries
+        logger.info(f"Consolidating {len(summary_paths)} summaries to {global_summary_path}")
+        consolidate_multi_plate_summaries(
+            summary_paths=summary_paths,
+            output_path=str(global_summary_path),
+            plate_names=plate_names
+        )
+        logger.info(f"✅ Global summary created: {global_summary_path}")
 
     def _on_execution_error(self, error_msg):
         """Handle execution error (called from main thread via signal)."""

@@ -163,11 +163,12 @@ def read_plate_layout(config_path):
                 value = str(row.iloc[1]).lower().strip()  # Value in second column when parameter is in content
             per_well_datapoints = value in ['true', '1', 'yes', 'on', 'enabled']
 
-        #finished reading controls
+        #finished reading controls - Plate Group row
         if sanitize_compare(row.name,'plate group') and ctrl_wells is not None:
             if ctrl_groups is None:
                 ctrl_groups = []
             ctrl_groups += row.dropna().tolist()
+            # Don't reset ctrl_wells yet - Group N row needs it
             continue
 #        if sanitize_compare(row.name,'plate group') and not ctrl_wells is None and not ctrl_groups is None:
 #            ctrl_positions = []
@@ -220,36 +221,46 @@ def read_plate_layout(config_path):
             excluded_wells = None  # Reset to stop processing more plate groups
             continue
 
-        #get replicate for ctrl position
-        if sanitize_compare(row.name,'group n'):
+        #get replicate for ctrl position - Group N row (optional)
+        if sanitize_compare(row.name,'group n') and ctrl_wells is not None:
             if ctrl_positions_replicates is None:
                 ctrl_positions_replicates = []
             if ctrl_wells_aligned is None:
                 ctrl_wells_aligned = []
             ctrl_positions_replicates+=row.dropna().tolist()
             ctrl_wells_aligned += ctrl_wells
+            # Now reset ctrl_wells to prevent catching Exclude Wells' Plate Group row
+            ctrl_wells = None
             continue
 
         #get new condition name
         #finished reading controls and excluded wells
         if sanitize_compare(row_content,'condition') or sanitize_compare(row_name,'condition'):
+            # If Group N was omitted, populate ctrl_wells_aligned from ctrl_wells
+            if ctrl_wells is not None and ctrl_wells_aligned is None:
+                ctrl_wells_aligned = ctrl_wells
+
             # Reset ctrl_wells to prevent it from catching dose-curve "Plate Group" rows
             ctrl_wells = None
-            
+
             # make control well dict
             if ctrl_wells_aligned is not None:
                 ctrl_positions = {"N"+str(i+1):[] for i in range(N)}
-                for i in range(len(ctrl_wells_aligned)):
-                    if ctrl_positions_replicates is not None:
+                if ctrl_positions_replicates is not None:
+                    # Group N specified - assign controls to specific replicates
+                    for i in range(len(ctrl_wells_aligned)):
                         ctrl_positions["N"+str(ctrl_positions_replicates[i])].append((ctrl_wells_aligned[i],ctrl_groups[i]))
-                    else:
-                        ctrl_positions = None
+                else:
+                    # Group N omitted - apply same controls to ALL replicates
+                    for replicate in ctrl_positions.keys():
+                        for i in range(len(ctrl_wells_aligned)):
+                            ctrl_positions[replicate].append((ctrl_wells_aligned[i],ctrl_groups[i]))
             else:
                 # No controls defined in config
                 ctrl_positions = None
 
             # make excluded wells dict (following same pattern as controls)
-            if excluded_wells_aligned is not None:
+            if excluded_wells_aligned is not None and excluded_groups is not None and excluded_positions_replicates is not None:
                 excluded_positions = {"N"+str(i+1):[] for i in range(N)}
 
                 # Filter out non-well entries from excluded_wells_aligned (like "Exclude Wells")
@@ -483,6 +494,12 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
         # Process each plate section
         for section in plate_sections:
             plate_name = section['plate_id']
+            well_header_idx = section['well_header_idx']
+
+            # Extract feature names from THIS plate section's header row
+            header_row = raw_df.iloc[well_header_idx]
+            section_features = [str(col).strip() for col in header_row[1:] if pd.notna(col) and str(col).strip() != '']
+
             # Process data rows for this plate
             for i in range(section['data_start'], section['data_end']):
                 row = raw_df.iloc[i]
@@ -493,10 +510,12 @@ def fill_plates_dict_EDDU_metaxpress(raw_df,plates_dict,features):
                         continue
                     if well_id not in plates_dict[plate_name]:
                         continue
-                    # Map features by position (feature[j] corresponds to column[j+1])
-                    for j, feature in enumerate(features):
+                    # Map features by position using THIS section's feature names
+                    for j, feature in enumerate(section_features):
                         if j + 1 < len(row):  # Make sure we don't go out of bounds
-                            plates_dict[plate_name][well_id][feature] = row.iloc[j + 1]
+                            # Only set if this feature exists in plates_dict (from global features list)
+                            if feature in plates_dict[plate_name][well_id]:
+                                plates_dict[plate_name][well_id][feature] = row.iloc[j + 1]
     else:
         # Original Excel format
         df_col_names = raw_df.set_axis(["Well","Laser Focus"]+features, axis=1)
@@ -823,13 +842,108 @@ def create_table_for_feature_per_well(feature,experiment_dict_values):
     return pd.DataFrame([values], columns=col_names)
 
 
+def create_table_for_feature_per_well_mode(feature, experiment_dict_values):
+    """
+    Create feature table for per-well mode with:
+    - Rows: Doses
+    - Columns: Hierarchical (Condition > Replicate/Well)
+    """
+    conditions = sorted(experiment_dict_values.keys())
+
+    # Collect all doses across all conditions and replicates
+    all_doses = set()
+    for condition in conditions:
+        for replicate in experiment_dict_values[condition].keys():
+            all_doses.update(experiment_dict_values[condition][replicate].keys())
+    doses = sorted(all_doses)
+
+    # Build hierarchical column structure: (condition, replicate_well)
+    col_tuples = []
+    data_matrix = []
+
+    for dose in doses:
+        row_data = []
+        for condition in conditions:
+            for replicate in sorted(experiment_dict_values[condition].keys()):
+                if dose in experiment_dict_values[condition][replicate]:
+                    feature_data = experiment_dict_values[condition][replicate][dose][feature]
+                    if isinstance(feature_data, dict):
+                        # Per-well mode: add each well as a separate column
+                        for well_id in sorted(feature_data.keys()):
+                            if dose == doses[0]:  # Only add column headers once
+                                col_tuples.append((condition, f"{replicate}_{well_id}"))
+                            row_data.append(feature_data[well_id])
+                    else:
+                        # Averaged mode fallback
+                        if dose == doses[0]:
+                            col_tuples.append((condition, replicate))
+                        row_data.append(feature_data)
+                else:
+                    # Dose not available for this condition/replicate
+                    if dose == doses[0]:
+                        col_tuples.append((condition, replicate))
+                    row_data.append(None)
+        data_matrix.append(row_data)
+
+    # Create DataFrame with hierarchical columns
+    if col_tuples:
+        multi_index = pd.MultiIndex.from_tuples(col_tuples)
+        df = pd.DataFrame(data_matrix, columns=multi_index, index=doses)
+    else:
+        df = pd.DataFrame()
+
+    return df
+
+
 
 def create_all_feature_tables(experiment_dict_values,features,per_well_datapoints=False):
     """Create feature tables. Both modes now use the same function since data is in dict format."""
     feature_tables={feature:None for feature in features}
     for feature in features:
-        feature_tables[feature]=create_table_for_feature(feature,experiment_dict_values)
+        if per_well_datapoints:
+            feature_tables[feature]=create_table_for_feature_per_well_mode(feature,experiment_dict_values)
+        else:
+            feature_tables[feature]=create_table_for_feature(feature,experiment_dict_values)
     return feature_tables
+
+def filter_feature_tables_by_plot_config(feature_tables, config_file):
+    """
+    Filter feature tables to only include metrics listed in plot_config sheet.
+
+    Args:
+        feature_tables: Dict of feature name -> DataFrame
+        config_file: Path to config.xlsx with plot_config sheet
+
+    Returns:
+        Filtered dict with only metrics from plot_config
+    """
+    try:
+        # Read plot_config sheet
+        plot_config_df = pd.read_excel(config_file, sheet_name='plot_config', header=None)
+
+        # Get metric names from first column (skip header if present)
+        metrics_to_plot = set()
+        for value in plot_config_df[0].dropna():
+            # Skip header row if it says "Metric" or similar
+            if isinstance(value, str) and value.lower() not in ['metric', 'metrics', 'name']:
+                metrics_to_plot.add(value)
+
+        if not metrics_to_plot:
+            # No plot_config or empty, return all features
+            return feature_tables
+
+        # Filter feature tables
+        filtered_tables = {k: v for k, v in feature_tables.items() if k in metrics_to_plot}
+
+        print(f"Filtered to {len(filtered_tables)} metrics from plot_config (out of {len(feature_tables)} total)")
+        return filtered_tables
+
+    except Exception as e:
+        # If plot_config doesn't exist or error reading it, return all features
+        print(f"Could not read plot_config sheet: {e}")
+        print("Including all metrics in compiled results")
+        return feature_tables
+
 
 def feature_tables_to_excel(feature_tables,outpath):
     def remove_inval_chars(name):
@@ -908,80 +1022,169 @@ def make_experiment_dict_values(plates,experiment_dict_locations,features,plate_
     return experiment_dict_values
 
 def average_wells(locations,replicate,feature,plates,plate_groups):
-    """Return dict with averaged value to match per-well format."""
-    if len(locations) == 0:
-        return {"averaged": 0.0}
+    """Return dict with averaged value to match per-well format.
 
-    average=0
+    Gracefully handles missing wells - only averages wells that exist in the data.
+    Returns None if no valid wells are found.
+    """
+    if len(locations) == 0:
+        return {"averaged": None}
+
+    values = []
     for location in locations:
-        average+=location_to_value(location,replicate,feature,plates,plate_groups)
-    averaged_value = average/float(len(locations))
+        value = location_to_value(location,replicate,feature,plates,plate_groups)
+        if value is not None:  # Skip missing wells
+            values.append(value)
+
+    if len(values) == 0:
+        return {"averaged": None}  # No valid wells found
+
+    averaged_value = sum(values) / float(len(values))
     # Return as dictionary to match per-well format
     return {"averaged": averaged_value}
 
 def individual_wells(locations,replicate,feature,plates,plate_groups):
-    """Return dict of individual well values instead of averaging."""
+    """Return dict of individual well values instead of averaging.
+
+    Gracefully handles missing wells - only includes wells that exist in the data.
+    """
     well_values = {}
     for location in locations:
-        well, plate_group = location
-        plate_name = str(plate_groups[replicate][str(plate_group)])
-        value = plates[plate_name][well][feature]
-        # Create unique well identifier including plate group
-        well_id = f"{well}_P{plate_group}"
-        try:
-            well_values[well_id] = float(value) if value is not None else 0.0
-        except (ValueError, TypeError):
-            well_values[well_id] = 0.0
+        value = location_to_value(location, replicate, feature, plates, plate_groups)
+        if value is not None:  # Skip missing wells
+            well, plate_group = location
+            # Create unique well identifier including plate group
+            well_id = f"{well}_P{plate_group}"
+            well_values[well_id] = value
     return well_values
 
 def location_to_value(location,replicate,feature,plates,plate_groups):
     well, plate_group = location
     plate_name = str(plate_groups[replicate][str(plate_group)])  # Ensure string conversion
+
+    # Check if plate exists
+    if plate_name not in plates or plate_name == 'nan':
+        return None  # Plate doesn't exist
+
+    # Check if well exists in plate
+    if well not in plates[plate_name]:
+        return None  # Well doesn't exist in this plate
+
     value = plates[plate_name][well][feature]
     # Convert to float for numerical operations
     try:
         return float(value)
     except (ValueError, TypeError):
-        return 0.0  # Default for non-numeric values
+        return None  # Non-numeric or missing values
 
 def normalize_experiment(experiment_dict_values,ctrl_positions,features,plates,plate_groups):
     experiment_dict_values_normalized=copy.deepcopy(experiment_dict_values)
 
-    # In per-well mode, use the original replicate (N1) for control positions
-    # since all per-well replicates (N1, N2, N3...) come from the same original biological replicate
-    original_replicate = list(ctrl_positions.keys())[0] if ctrl_positions else None
+    # Calculate per-replicate control averages for each feature
+    # This is used to normalize treatment conditions to their own replicate's control
+    per_replicate_ctrl_avg = {}
+    if ctrl_positions:
+        for feature in features:
+            per_replicate_ctrl_avg[feature] = {}
+            for replicate, ctrl_wells in ctrl_positions.items():
+                if ctrl_wells:
+                    ctrl_values = []
+                    for location in ctrl_wells:
+                        value = location_to_value(location, replicate, feature, plates, plate_groups)
+                        if value is not None:
+                            ctrl_values.append(value)
+                    if ctrl_values:
+                        per_replicate_ctrl_avg[feature][replicate] = sum(ctrl_values) / len(ctrl_values)
+                    else:
+                        per_replicate_ctrl_avg[feature][replicate] = None
+                else:
+                    per_replicate_ctrl_avg[feature][replicate] = None
 
-    for condition,replicates in experiment_dict_values.items():
-        for replicate, doses in replicates.items():
-            # Use original replicate for control positions (handles per-well mode)
-            ctrl_replicate = replicate if replicate in ctrl_positions else original_replicate
-            if ctrl_replicate and ctrl_replicate in ctrl_positions:
-                ctrl_positions_replicate = ctrl_positions[ctrl_replicate]
-                feature_control_vals={feature:average_wells(ctrl_positions_replicate,ctrl_replicate,feature,plates,plate_groups) for feature in features}
+    # Identify which conditions are controls (DMSO_Control, etc.)
+    # These will be normalized to the average across all replicates
+    # All other conditions are treatments and normalize to their own replicate's control
+    control_conditions = set()
+    if ctrl_positions:
+        # Assume any condition with "Control" in the name is a control condition
+        for condition in experiment_dict_values.keys():
+            if 'Control' in condition or 'control' in condition:
+                control_conditions.add(condition)
 
-                for dose,values in doses.items():
-                    feature_value_dict = {}
-                    for feature in features:
-                        ctrl_dict = feature_control_vals[feature]
-                        ctrl_value = ctrl_dict["averaged"] if isinstance(ctrl_dict, dict) else ctrl_dict
-                        if ctrl_value == 0:
-                            ctrl_value = 1
+    for condition, replicates in experiment_dict_values.items():
+        # Get all doses for this condition (assumes all replicates have same doses)
+        first_replicate = list(replicates.keys())[0]
+        doses = list(replicates[first_replicate].keys())
 
-                        condition_value_dict = experiment_dict_values[condition][replicate][dose][feature]
-                        if isinstance(condition_value_dict, dict):
-                            # Handle dictionary format (both averaged and per-well)
-                            normalized_dict = {}
-                            for key, value in condition_value_dict.items():
-                                normalized_dict[key] = value / ctrl_value
-                            feature_value_dict[feature] = normalized_dict
-                        else:
-                            # Fallback for old format
-                            feature_value_dict[feature] = condition_value_dict / ctrl_value
+        is_control_condition = condition in control_conditions
 
-                    experiment_dict_values_normalized[condition][replicate][dose] = feature_value_dict
-            else:
-                # No normalization if no control positions available
-                experiment_dict_values_normalized[condition][replicate] = experiment_dict_values[condition][replicate]
+        for dose in doses:
+            for feature in features:
+                if is_control_condition:
+                    # For control conditions: normalize to average across all replicates
+                    raw_values = []
+                    for replicate in replicates.keys():
+                        if dose in replicates[replicate]:
+                            value_dict = experiment_dict_values[condition][replicate][dose][feature]
+                            if isinstance(value_dict, dict):
+                                # Check if this is averaged mode or per-well mode
+                                if 'averaged' in value_dict:
+                                    raw_value = value_dict['averaged']
+                                    if raw_value is not None:
+                                        raw_values.append(raw_value)
+                                else:
+                                    # Per-well mode: collect all individual well values
+                                    for well_value in value_dict.values():
+                                        if well_value is not None:
+                                            raw_values.append(well_value)
+                            else:
+                                raw_value = value_dict
+                                if raw_value is not None:
+                                    raw_values.append(raw_value)
+
+                    # Calculate average across replicates
+                    if raw_values:
+                        avg_raw_value = sum(raw_values) / len(raw_values)
+                    else:
+                        avg_raw_value = None
+
+                    # Normalize each replicate to this average
+                    for replicate in replicates.keys():
+                        if dose in replicates[replicate]:
+                            condition_value_dict = experiment_dict_values[condition][replicate][dose][feature]
+                            if isinstance(condition_value_dict, dict):
+                                normalized_dict = {}
+                                for key, value in condition_value_dict.items():
+                                    if avg_raw_value is None or avg_raw_value == 0 or value is None:
+                                        normalized_dict[key] = None
+                                    else:
+                                        normalized_dict[key] = value / avg_raw_value
+                                experiment_dict_values_normalized[condition][replicate][dose][feature] = normalized_dict
+                            else:
+                                if avg_raw_value is None or avg_raw_value == 0 or condition_value_dict is None:
+                                    experiment_dict_values_normalized[condition][replicate][dose][feature] = None
+                                else:
+                                    experiment_dict_values_normalized[condition][replicate][dose][feature] = condition_value_dict / avg_raw_value
+                else:
+                    # For treatment conditions: normalize to own replicate's control
+                    for replicate in replicates.keys():
+                        if dose in replicates[replicate]:
+                            # Get this replicate's control average
+                            ctrl_avg = per_replicate_ctrl_avg.get(feature, {}).get(replicate, None)
+
+                            condition_value_dict = experiment_dict_values[condition][replicate][dose][feature]
+                            if isinstance(condition_value_dict, dict):
+                                normalized_dict = {}
+                                for key, value in condition_value_dict.items():
+                                    if ctrl_avg is None or ctrl_avg == 0 or value is None:
+                                        normalized_dict[key] = None
+                                    else:
+                                        normalized_dict[key] = value / ctrl_avg
+                                experiment_dict_values_normalized[condition][replicate][dose][feature] = normalized_dict
+                            else:
+                                if ctrl_avg is None or ctrl_avg == 0 or condition_value_dict is None:
+                                    experiment_dict_values_normalized[condition][replicate][dose][feature] = None
+                                else:
+                                    experiment_dict_values_normalized[condition][replicate][dose][feature] = condition_value_dict / ctrl_avg
 
     return experiment_dict_values_normalized
 
@@ -998,12 +1201,17 @@ def write_values_heat_map(plates_dict,features,outpath):
                     row=[]
                     for c in range(12):
                         well=chr(r)+str(c+1).zfill(2)
-                        value = plates_dict[plate][well][feature]
-                        # Convert to float to ensure numeric formatting in Excel
-                        try:
-                            value = float(value) if value is not None else None
-                        except (ValueError, TypeError):
-                            pass  # Keep original value if conversion fails
+                        # Check if well exists (may be excluded)
+                        if well in plates_dict[plate]:
+                            value = plates_dict[plate][well][feature]
+                            # Convert to float to ensure numeric formatting in Excel
+                            try:
+                                value = float(value) if value is not None else None
+                            except (ValueError, TypeError):
+                                pass  # Keep original value if conversion fails
+                        else:
+                            # Well is excluded or doesn't exist
+                            value = None
                         row.append(value)
                     sheet_rows.append(row)
             sheet_rows.append([""])
@@ -1093,30 +1301,98 @@ def run_experimental_analysis(
                                     filtered_wells.append(well_tuple)
                             experiment_dict_locations[condition][replicate][dose] = filtered_wells
 
-    # Create experiment data structure
-    experiment_dict_values_raw = make_experiment_dict_values(plates_dict, experiment_dict_locations, features, plate_groups, per_well_datapoints)
+            # Filter control positions to exclude excluded wells
+            if ctrl_positions is not None:
+                for replicate in ctrl_positions:
+                    if replicate in excluded_positions:
+                        excluded_wells_for_replicate = [well for well, plate_group in excluded_positions[replicate]]
+                        excluded_set = set(str(well).upper() for well in excluded_wells_for_replicate)
 
-    # Generate raw (non-normalized) results
-    feature_tables_raw = create_all_feature_tables(experiment_dict_values_raw, features, per_well_datapoints)
-    raw_results_path = compiled_results_path.replace('.xlsx', '_raw.xlsx')
-    feature_tables_to_excel(feature_tables_raw, raw_results_path)
+                        # Filter control wells
+                        filtered_ctrl_wells = []
+                        for well_tuple in ctrl_positions[replicate]:
+                            well_id = str(well_tuple[0]).upper()
+                            if well_id not in excluded_set:
+                                filtered_ctrl_wells.append(well_tuple)
+                        ctrl_positions[replicate] = filtered_ctrl_wells
+
+    # Create experiment data structure - ALWAYS generate both per-N and per-well versions
+    # Filter features based on plot_config BEFORE creating tables
+    try:
+        plot_config_df = pd.read_excel(config_file, sheet_name='plot_config', header=0)  # Use header=0 to skip first row
+        metrics_to_plot = set()
+        for value in plot_config_df['Column Name'].dropna():
+            if isinstance(value, str):
+                metrics_to_plot.add(value)
+
+        if metrics_to_plot:
+            # Filter features list to only include metrics from plot_config
+            original_count = len(features)
+            features = [f for f in features if f in metrics_to_plot]
+            print(f"Filtered to {len(features)} metrics from plot_config (out of {original_count} total)")
+    except Exception as e:
+        print(f"Could not read plot_config sheet: {e}")
+        print("Including all metrics in compiled results")
+
+    # Per-N (averaged replicates)
+    experiment_dict_values_raw_per_n = make_experiment_dict_values(plates_dict, experiment_dict_locations, features, plate_groups, per_well_datapoints=False)
+    # Per-well (individual datapoints)
+    experiment_dict_values_raw_per_well = make_experiment_dict_values(plates_dict, experiment_dict_locations, features, plate_groups, per_well_datapoints=True)
+
+    # Generate raw (non-normalized) results for both modes
+    feature_tables_raw_per_n = create_all_feature_tables(experiment_dict_values_raw_per_n, features, per_well_datapoints=False)
+    feature_tables_raw_per_well = create_all_feature_tables(experiment_dict_values_raw_per_well, features, per_well_datapoints=True)
+
+    # Create raw file paths by replacing 'normalized' with 'raw' in the base path
+    raw_results_path_per_n = compiled_results_path.replace('_normalized.xlsx', '_raw.xlsx')
+    raw_results_path_per_well = compiled_results_path.replace('_normalized.xlsx', '_raw_per_well.xlsx')
+
+    feature_tables_to_excel(feature_tables_raw_per_n, raw_results_path_per_n)
+    feature_tables_to_excel(feature_tables_raw_per_well, raw_results_path_per_well)
 
     # Apply normalization if controls are defined
     if ctrl_positions is not None:
-        experiment_dict_values_normalized = normalize_experiment(experiment_dict_values_raw, ctrl_positions, features, plates_dict, plate_groups)
-        # Generate normalized results
-        feature_tables_normalized = create_all_feature_tables(experiment_dict_values_normalized, features, per_well_datapoints)
-        feature_tables_to_excel(feature_tables_normalized, compiled_results_path)
-        # Return normalized for backward compatibility
-        experiment_dict_values = experiment_dict_values_normalized
-        feature_tables = feature_tables_normalized
+        # Normalize both versions
+        experiment_dict_values_normalized_per_n = normalize_experiment(experiment_dict_values_raw_per_n, ctrl_positions, features, plates_dict, plate_groups)
+        experiment_dict_values_normalized_per_well = normalize_experiment(experiment_dict_values_raw_per_well, ctrl_positions, features, plates_dict, plate_groups)
+
+        # Generate normalized results for both modes (features already filtered above)
+        feature_tables_normalized_per_n = create_all_feature_tables(experiment_dict_values_normalized_per_n, features, per_well_datapoints=False)
+        feature_tables_normalized_per_well = create_all_feature_tables(experiment_dict_values_normalized_per_well, features, per_well_datapoints=True)
+
+        normalized_results_path_per_n = compiled_results_path
+        normalized_results_path_per_well = compiled_results_path.replace('.xlsx', '_per_well.xlsx')
+
+        feature_tables_to_excel(feature_tables_normalized_per_n, normalized_results_path_per_n)
+        feature_tables_to_excel(feature_tables_normalized_per_well, normalized_results_path_per_well)
+
+        # Return normalized per-N for backward compatibility
+        experiment_dict_values = experiment_dict_values_normalized_per_n
+        feature_tables = feature_tables_normalized_per_n
     else:
         # No normalization, use raw results
-        experiment_dict_values = experiment_dict_values_raw
-        feature_tables = feature_tables_raw
+        experiment_dict_values = experiment_dict_values_raw_per_n
+        feature_tables = feature_tables_raw_per_n
+
+    # Remove excluded wells from plates_dict before generating heatmaps
+    if excluded_positions is not None:
+        plates_dict_for_heatmap = copy.deepcopy(plates_dict)
+        for replicate, excluded_wells_list in excluded_positions.items():
+            # Map replicate name (N1, N2, N3) to plate ID using plate_groups
+            if replicate in plate_groups:
+                for well, well_plate_group in excluded_wells_list:
+                    # Get the plate ID for this replicate and plate group
+                    plate_id = plate_groups[replicate].get(str(well_plate_group))
+                    if plate_id is not None and not pd.isna(plate_id):
+                        plate_id = str(int(plate_id)) if isinstance(plate_id, (int, float)) else str(plate_id)
+                        if plate_id in plates_dict_for_heatmap:
+                            if well in plates_dict_for_heatmap[plate_id]:
+                                del plates_dict_for_heatmap[plate_id][well]
+    else:
+        plates_dict_for_heatmap = plates_dict
 
     # Generate heatmaps
-    write_values_heat_map(plates_dict, features, heatmap_path)
+    write_values_heat_map(plates_dict_for_heatmap, features, heatmap_path)
 
     return experiment_dict_values, feature_tables
 
