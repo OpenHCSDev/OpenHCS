@@ -185,19 +185,28 @@ def extract_rois_from_labeled_mask(
                 # Create binary mask for this label (only in cropped region)
                 binary_mask = (cropped_mask == region.label).astype(np.uint8)
 
-                # Find contours in cropped region
-                contours = measure.find_contours(binary_mask, level=0.5)
+                # Pad mask to keep contours closed when the object touches the crop edge
+                padded_mask = np.pad(
+                    binary_mask,
+                    pad_width=1,
+                    mode='constant',
+                    constant_values=0
+                )
+
+                # Find contours in cropped region (with padding)
+                contours = measure.find_contours(padded_mask, level=0.5)
 
                 # Offset coordinates back to full image space
                 offset_y = slice_y.start
                 offset_x = slice_x.start
+                padding_offset = np.array([offset_y, offset_x]) - 1  # remove padding shift
 
                 # Convert contours to polygon shapes
                 for contour in contours:
                     if len(contour) >= 3:  # Valid polygon
                         # Offset contour coordinates to full image space
                         # Contour is in (y, x) format
-                        contour_full = contour + np.array([offset_y, offset_x])
+                        contour_full = contour + padding_offset
                         shapes.append(PolygonShape(coordinates=contour_full))
         else:
             # Use binary mask
@@ -373,4 +382,3 @@ def load_rois_from_zip(zip_path: Path) -> List[ROI]:
 
     logger.info(f"Loaded {len(rois)} ROIs from {zip_path}")
     return rois
-
