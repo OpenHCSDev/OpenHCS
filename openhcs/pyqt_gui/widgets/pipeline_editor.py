@@ -990,8 +990,8 @@ class PipelineEditorWidget(QWidget):
 
         orchestrator = self._get_current_orchestrator()
         if not orchestrator:
-            raw_value = object.__getattribute__(config, 'enabled')
-            return raw_value if raw_value is not None else False
+            # No orchestrator - return None to show placeholder instead of raising error
+            return None
 
         try:
             # Collect live context DIRECTLY from all managers in this scope hierarchy
@@ -1157,6 +1157,16 @@ class PipelineEditorWidget(QWidget):
     
     def update_step_list(self):
         """Update the step list widget using selection preservation mixin."""
+        # If no orchestrator, show placeholder
+        orchestrator = self._get_current_orchestrator()
+        if not orchestrator:
+            self.step_list.clear()
+            placeholder_item = QListWidgetItem("No plate selected - select a plate to view pipeline")
+            placeholder_item.setData(Qt.ItemDataRole.UserRole, None)
+            self.step_list.addItem(placeholder_item)
+            self.update_button_states()
+            return
+
         def format_step_item(step, step_index):
             """Format step item for display."""
             display_text, step_name = self.format_item_for_display(step)
