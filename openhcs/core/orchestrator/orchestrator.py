@@ -1251,7 +1251,7 @@ class PipelineOrchestrator(ContextProvider):
                     results_dir = None
                     for axis_id, context in compiled_contexts.items():
                         # Check if context has step plans with special outputs
-                        for step_plan in context.step_plans:
+                        for step_plan in context.step_plans.values():
                             special_outputs = step_plan.get('special_outputs', {})
                             if special_outputs:
                                 # Extract results directory from first special output path
