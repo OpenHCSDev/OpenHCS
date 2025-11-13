@@ -445,20 +445,38 @@ class PipelineEditorWidget(QWidget):
         # Optional configurations preview - use lazy resolution system for enabled fields
         # CRITICAL: Must resolve through context hierarchy (Global -> Pipeline -> Step)
         # to match the same resolution that step editor placeholders use
+        from openhcs.core.config import WellFilterConfig
+        import dataclasses
+
         config_indicators = []
         for config_attr, indicator in self.STEP_CONFIG_INDICATORS.items():
-            if hasattr(step, config_attr):
-                config = getattr(step, config_attr, None)
-                if config:
-                    # Check if config has 'enabled' field - if so, resolve it through context
-                    if hasattr(config, 'enabled'):
-                        # Resolve enabled value through lazy resolution system
-                        resolved_enabled = self._resolve_config_enabled(step, config)
-                        if resolved_enabled:
-                            config_indicators.append(indicator)
+            config = getattr(step, config_attr, None)
+            if config is None:
+                continue
+
+            # Check if config has 'enabled' field via dataclass introspection
+            has_enabled = dataclasses.is_dataclass(config) and 'enabled' in {f.name for f in dataclasses.fields(config)}
+
+            if has_enabled:
+                resolved_enabled = self._resolve_config_attr(step, config, 'enabled')
+                if not resolved_enabled:
+                    continue
+
+            # Build indicator text with well_filter suffix if applicable
+            indicator_text = indicator
+            if isinstance(config, WellFilterConfig):
+                resolved_well_filter = self._resolve_config_attr(step, config, 'well_filter')
+                if resolved_well_filter is not None:
+                    # Format well_filter for display
+                    if isinstance(resolved_well_filter, list):
+                        wf_display = f"{len(resolved_well_filter)}"
+                    elif isinstance(resolved_well_filter, int):
+                        wf_display = str(resolved_well_filter)
                     else:
-                        # No enabled field - just check existence (e.g., step_well_filter_config)
-                        config_indicators.append(indicator)
+                        wf_display = str(resolved_well_filter)
+                    indicator_text = f"{indicator}{wf_display}"
+
+            config_indicators.append(indicator_text)
 
         if config_indicators:
             preview_parts.append(f"configs=[{','.join(config_indicators)}]")
@@ -929,9 +947,9 @@ class PipelineEditorWidget(QWidget):
             else:
                 logger.debug(f"No orchestrator found for config refresh: {plate_path}")
 
-    def _resolve_config_enabled(self, step: FunctionStep, config: object) -> bool:
+    def _resolve_config_attr(self, step: FunctionStep, config: object, attr_name: str) -> object:
         """
-        Resolve config.enabled through lazy resolution system using LIVE context.
+        Resolve any config attribute through lazy resolution system using LIVE context.
 
         CRITICAL: Uses ParameterFormManager._collect_live_context_from_other_windows() mechanism
         to collect live values from all open windows, then builds context stack the same way
@@ -940,9 +958,10 @@ class PipelineEditorWidget(QWidget):
         Args:
             step: FunctionStep containing the config
             config: Config dataclass instance (e.g., LazyNapariStreamingConfig)
+            attr_name: Name of the attribute to resolve (e.g., 'enabled', 'well_filter')
 
         Returns:
-            Resolved boolean value for config.enabled (True/False)
+            Resolved attribute value (type depends on attribute)
         """
         from openhcs.config_framework.context_manager import config_context
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
@@ -1023,10 +1042,11 @@ class PipelineEditorWidget(QWidget):
 
             # CRITICAL: Get config from the merged step (step_to_use), not the original step!
             # This ensures we're resolving the config object that has live values merged in
+            # Use introspection to find which attribute holds this config
             config_attr_name = None
-            for attr in ['napari_streaming_config', 'fiji_streaming_config', 'step_materialization_config']:
-                if getattr(step, attr, None) is config:
-                    config_attr_name = attr
+            for attr_name in self.STEP_CONFIG_INDICATORS.keys():
+                if getattr(step, attr_name, None) is config:
+                    config_attr_name = attr_name
                     break
 
             if config_attr_name:
@@ -1039,24 +1059,20 @@ class PipelineEditorWidget(QWidget):
             # Build nested context stack and resolve
             def resolve_with_contexts(contexts, index=0):
                 if index >= len(contexts):
-                    raw_value = object.__getattribute__(config_to_resolve, 'enabled')
-                    logger.info(f"🔍 FINAL RESOLVE for {type(config_to_resolve).__name__}.enabled: raw_value={raw_value}, accessing via lazy resolution...")
-                    resolved = config_to_resolve.enabled
-                    logger.info(f"🔍 FINAL RESOLVE for {type(config_to_resolve).__name__}.enabled: resolved={resolved}")
-                    return resolved
+                    return getattr(config_to_resolve, attr_name)
                 with config_context(contexts[index]):
                     return resolve_with_contexts(contexts, index + 1)
 
             resolved_value = resolve_with_contexts(context_objects)
-            logger.info(f"🔍 RETURNING resolved_value={resolved_value} for step '{step.name}' config {type(config_to_resolve).__name__}")
-            return resolved_value if resolved_value is not None else False
+            return resolved_value
 
         except Exception as e:
             import traceback
-            logger.warning(f"Failed to resolve config.enabled for {type(config).__name__}: {e}")
+            logger.warning(f"Failed to resolve config.{attr_name} for {type(config).__name__}: {e}")
             logger.warning(f"Traceback: {traceback.format_exc()}")
-            raw_value = object.__getattribute__(config, 'enabled')
-            return raw_value if raw_value is not None else False
+            # Fallback to raw value
+            raw_value = object.__getattribute__(config, attr_name)
+            return raw_value
 
     def _merge_live_values(self, base_obj: object, live_values: dict | None) -> object:
         """
