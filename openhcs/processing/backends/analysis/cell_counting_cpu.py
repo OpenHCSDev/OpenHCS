@@ -224,7 +224,7 @@ def count_cells_single_channel(
     overlap: float = 0.5,                                         # Maximum overlap between blobs (0.0-1.0)
     # Watershed parameters
     watershed_footprint_size: int = 3,                            # Local maxima footprint size
-    watershed_min_distance: Union[int, str] = "auto",             # Minimum distance between peaks (int or "auto")
+    watershed_min_distance: Optional[int] = None,                 # Minimum distance between peaks (None = auto-calculate)
     watershed_threshold_method: ThresholdMethod = ThresholdMethod.OTSU,  # UI will show threshold methods
     # Preprocessing parameters
     enable_preprocessing: bool = True,
@@ -932,9 +932,9 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
     if params["remove_border_cells"]:
         binary = clear_border(binary)
 
-    # Auto-calculate min_distance if set to "auto"
+    # Auto-calculate min_distance if None
     min_distance = params["watershed_min_distance"]
-    if min_distance == "auto":
+    if min_distance is None:
         # First pass: estimate object sizes using connected components
         temp_labels = label(binary)
         temp_regions = regionprops(temp_labels)
