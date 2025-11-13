@@ -963,24 +963,27 @@ class PipelineEditorWidget(QWidget):
             plate_scope = self.current_plate
 
             live_context_dict = {}
+            step_scope = f"{plate_scope}::{step.name}"
 
-            logger.info(f"🔍 COLLECTING LIVE CONTEXT: plate_scope={plate_scope}, step='{step.name}'")
+            logger.info(f"🔍 COLLECTING LIVE CONTEXT: plate_scope={plate_scope}, step='{step.name}', step_scope={step_scope}")
             for manager in ParameterFormManager._active_form_managers:
                 # Include managers from:
                 # 1. Global scope (None)
                 # 2. Exact plate scope match
-                # 3. Child scopes (e.g., "plate::step" when plate_scope is "plate")
+                # 3. Exact step scope match (for THIS specific step)
                 is_visible = (
                     manager.scope_id is None or  # Global scope
-                    manager.scope_id == plate_scope or  # Exact match
-                    (manager.scope_id and manager.scope_id.startswith(plate_scope + "::"))  # Child scope
+                    manager.scope_id == plate_scope or  # Exact plate match
+                    manager.scope_id == step_scope  # Exact step match
                 )
 
                 logger.info(f"🔍   Manager: scope_id={manager.scope_id}, type={type(manager.object_instance).__name__}, is_visible={is_visible}")
 
                 if is_visible:
-                    # Get user-modified values (concrete, non-None values only)
-                    live_values = manager.get_user_modified_values()
+                    # CRITICAL: Get ALL current values (including None from resets), not just user-modified
+                    # When user resets a field to None, it's removed from user_modified_values,
+                    # but we need to see that None to properly resolve the preview label
+                    live_values = manager.get_current_values()
                     obj_type = type(manager.object_instance)
                     live_context_dict[obj_type] = live_values
                     logger.info(f"🔍     → Added to live_context_dict: {obj_type.__name__} with {len(live_values)} values")
@@ -988,64 +991,65 @@ class PipelineEditorWidget(QWidget):
             # Build context stack: GlobalPipelineConfig → PipelineConfig → Step
             # Use live values if available, otherwise use stored values
 
-            # 1. GlobalPipelineConfig (from thread-local or live context)
+            # Build context objects with live values merged in
+            # Generic pattern: for each type in live_context_dict, merge live values into base object
+            from types import SimpleNamespace
+
+            context_objects = []
+
+            # 1. GlobalPipelineConfig
             global_config = get_current_global_config(GlobalPipelineConfig)
-            if GlobalPipelineConfig in live_context_dict:
-                global_live_values = live_context_dict[GlobalPipelineConfig]
-                # Reconstruct nested dataclasses
-                global_live_values = self._reconstruct_nested_for_context(global_live_values, global_config)
-                if dataclasses.is_dataclass(global_config):
-                    global_config = dataclasses.replace(global_config, **global_live_values)
-                else:
-                    from types import SimpleNamespace
-                    global_config = SimpleNamespace(**{**vars(global_config), **global_live_values})
+            context_objects.append(self._merge_live_values(global_config, live_context_dict.get(GlobalPipelineConfig)))
 
-            # 2. PipelineConfig (from orchestrator or live context)
+            # 2. PipelineConfig
             pipeline_config = orchestrator.pipeline_config
-            if PipelineConfig in live_context_dict:
-                pipeline_live_values = live_context_dict[PipelineConfig]
-                # Reconstruct nested dataclasses
-                pipeline_live_values = self._reconstruct_nested_for_context(pipeline_live_values, pipeline_config)
-                if dataclasses.is_dataclass(pipeline_config):
-                    pipeline_config = dataclasses.replace(pipeline_config, **pipeline_live_values)
-                else:
-                    from types import SimpleNamespace
-                    pipeline_config = SimpleNamespace(**{**vars(pipeline_config), **pipeline_live_values})
+            context_objects.append(self._merge_live_values(pipeline_config, live_context_dict.get(PipelineConfig)))
 
-            # 3. FunctionStep (from stored step or live context)
-            # CRITICAL: Check if there's a step editor open for THIS SPECIFIC step (by object identity)
-            # Match by finding the DualEditorWindow that has this step as its original_step_reference
+            # 3. Step (if a step editor is open for THIS specific step)
+            # We matched by scope_id above, so if there's a FunctionStep in live_context_dict,
+            # it's guaranteed to be for THIS step
+            step_type = type(step)
+            step_live_values = live_context_dict.get(step_type)
+            logger.info(f"🔍 Step '{step.name}': step_type={step_type.__name__}, has_live_values={step_live_values is not None}, live_context_dict keys={list(live_context_dict.keys())}")
+
             step_to_use = step
+            if step_live_values:
+                step_to_use = self._merge_live_values(step, step_live_values)
+                context_objects.append(step_to_use)
+                logger.info(f"🔍 Using live step values for '{step.name}', merged {len(step_live_values)} fields")
+            else:
+                context_objects.append(step)
+                logger.info(f"🔍 Using stored step for '{step.name}' (no live editor open)")
 
-            # Find the manager for THIS specific step object
-            for manager in ParameterFormManager._active_form_managers:
-                if (manager.scope_id and manager.scope_id.startswith(plate_scope + "::") and
-                    type(manager.object_instance).__name__ == 'FunctionStep'):
-                    # Walk up parent chain to find DualEditorWindow
-                    parent = manager.parent()
-                    while parent is not None:
-                        if parent.__class__.__name__ == 'DualEditorWindow':
-                            # Check if this window is editing THIS specific step
-                            if hasattr(parent, 'original_step_reference') and parent.original_step_reference is step:
-                                # Found the step editor for THIS step!
-                                step_live_values = manager.get_user_modified_values()
-                                logger.info(f"🔍 Found step editor for step '{step.name}' with {len(step_live_values)} live values")
-                                # Reconstruct nested dataclasses
-                                step_live_values = self._reconstruct_nested_for_context(step_live_values, step)
-                                # FunctionStep is NOT a dataclass - use SimpleNamespace pattern
-                                from types import SimpleNamespace
-                                step_to_use = SimpleNamespace(**{**vars(step), **step_live_values})
-                                break
-                        parent = parent.parent() if hasattr(parent, 'parent') else None
-                    if step_to_use is not step:
-                        break  # Found it, exit outer loop
+            # CRITICAL: Get config from the merged step (step_to_use), not the original step!
+            # This ensures we're resolving the config object that has live values merged in
+            config_attr_name = None
+            for attr in ['napari_streaming_config', 'fiji_streaming_config', 'step_materialization_config']:
+                if getattr(step, attr, None) is config:
+                    config_attr_name = attr
+                    break
 
-            # Build context stack and resolve
-            with config_context(global_config):
-                with config_context(pipeline_config):
-                    with config_context(step_to_use):
-                        resolved_value = config.enabled
-                        return resolved_value if resolved_value is not None else False
+            if config_attr_name:
+                config_to_resolve = getattr(step_to_use, config_attr_name, config)
+                logger.info(f"🔍 Resolving config from {'merged' if step_live_values else 'original'} step: {config_attr_name}")
+            else:
+                config_to_resolve = config
+                logger.info(f"🔍 Could not identify config attribute, using original config")
+
+            # Build nested context stack and resolve
+            def resolve_with_contexts(contexts, index=0):
+                if index >= len(contexts):
+                    raw_value = object.__getattribute__(config_to_resolve, 'enabled')
+                    logger.info(f"🔍 FINAL RESOLVE for {type(config_to_resolve).__name__}.enabled: raw_value={raw_value}, accessing via lazy resolution...")
+                    resolved = config_to_resolve.enabled
+                    logger.info(f"🔍 FINAL RESOLVE for {type(config_to_resolve).__name__}.enabled: resolved={resolved}")
+                    return resolved
+                with config_context(contexts[index]):
+                    return resolve_with_contexts(contexts, index + 1)
+
+            resolved_value = resolve_with_contexts(context_objects)
+            logger.info(f"🔍 RETURNING resolved_value={resolved_value} for step '{step.name}' config {type(config_to_resolve).__name__}")
+            return resolved_value if resolved_value is not None else False
 
         except Exception as e:
             import traceback
@@ -1053,6 +1057,31 @@ class PipelineEditorWidget(QWidget):
             logger.warning(f"Traceback: {traceback.format_exc()}")
             raw_value = object.__getattribute__(config, 'enabled')
             return raw_value if raw_value is not None else False
+
+    def _merge_live_values(self, base_obj: object, live_values: dict | None) -> object:
+        """
+        Generic helper to merge live values into a base object.
+
+        Args:
+            base_obj: Base object (dataclass or regular object)
+            live_values: Live values dict from form manager (or None)
+
+        Returns:
+            New object with live values merged in (or original if no live values)
+        """
+        if not live_values:
+            return base_obj
+
+        # Reconstruct nested dataclasses
+        live_values = self._reconstruct_nested_for_context(live_values, base_obj)
+
+        # Merge into base object
+        import dataclasses
+        if dataclasses.is_dataclass(base_obj):
+            return dataclasses.replace(base_obj, **live_values)
+        else:
+            from types import SimpleNamespace
+            return SimpleNamespace(**{**vars(base_obj), **live_values})
 
     def _reconstruct_nested_for_context(self, live_values: dict, base_instance) -> dict:
         """Reconstruct nested dataclasses from (type, dict) tuples to instances.
@@ -1089,6 +1118,9 @@ class PipelineEditorWidget(QWidget):
 
         Reacts to any config change that could affect resolved values through the context hierarchy.
         """
+        editing_type = type(editing_object).__name__ if editing_object is not None else "None"
+        logger.info(f"🔔 Pipeline editor: Received context_value_changed signal: field_path='{field_path}', new_value={new_value}, editing_type={editing_type}")
+
         # Refresh on any change to streaming_defaults or step config indicators
         should_refresh = (
             'streaming_defaults' in field_path or

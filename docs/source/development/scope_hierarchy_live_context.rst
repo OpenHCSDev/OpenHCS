@@ -313,3 +313,79 @@ Symptom: Cross-Orchestrator Bleed-Through
 
 **Fix**: Use unique object IDs for each orchestrator scope
 
+
+Pipeline Editor Preview Labels
+===============================
+
+The pipeline editor displays real-time preview labels (MAT, NAP, FIJI, FILT) that show which configurations are enabled for each step. These labels must update immediately when fields are changed in the step editor, including when fields are reset to None.
+
+Critical Implementation Details
+--------------------------------
+
+**Problem**: Preview labels were not updating when resetting fields that had concrete saved values.
+
+**Root Cause**: The pipeline editor was resolving config objects from the original saved step instead of from the merged step with live values.
+
+When a step is saved with a concrete value (e.g., ``napari_streaming_config.enabled=True``), and then reset to None in the step editor:
+
+1. The live form manager has ``enabled=None`` in its current values
+2. The pipeline editor collects live context and merges it into a new step object
+3. **BUG**: The config object being resolved was from the ORIGINAL saved step, not the merged step
+4. Result: Lazy resolution sees the saved concrete value instead of the live None value
+
+**Solution**: Resolve config from merged step, not original step
+
+.. code-block:: python
+
+    # WRONG: Resolve from original step's config
+    config = getattr(step, 'napari_streaming_config')  # Has saved enabled=True
+    # ... merge live values into step ...
+    resolved = config.enabled  # Still resolves to True!
+
+    # CORRECT: Resolve from merged step's config
+    step_to_use = merge_live_values(step, live_values)  # Has enabled=None
+    config = getattr(step_to_use, 'napari_streaming_config')  # Has live enabled=None
+    resolved = config.enabled  # Correctly resolves to None, walks up context
+
+**Implementation** (``openhcs/pyqt_gui/widgets/pipeline_editor.py``):
+
+.. code-block:: python
+
+    # Build merged step with live values
+    step_to_use = step
+    if step_live_values:
+        step_to_use = self._merge_live_values(step, step_live_values)
+
+    # CRITICAL: Get config from merged step, not original step!
+    config_to_resolve = getattr(step_to_use, config_attr_name, config)
+
+    # Now resolve through context stack
+    with config_context(global_config):
+        with config_context(pipeline_config):
+            with config_context(step_to_use):
+                resolved_value = config_to_resolve.enabled
+
+This ensures that when a field is reset to None in the step editor, the pipeline editor sees the None value and correctly resolves it through the context hierarchy (GlobalPipelineConfig → PipelineConfig → Step).
+
+Scope Matching for Step Editors
+--------------------------------
+
+The pipeline editor must match step editors by scope_id to collect the correct live values:
+
+.. code-block:: python
+
+    # Build step-specific scope
+    step_scope = f"{plate_path}::{step.name}"
+
+    # Only collect live context from:
+    # 1. Global scope (None)
+    # 2. Exact plate scope match
+    # 3. Exact step scope match (for THIS specific step)
+    is_visible = (
+        manager.scope_id is None or
+        manager.scope_id == plate_scope or
+        manager.scope_id == step_scope
+    )
+
+This prevents collecting live values from other step editors in the same plate, ensuring each step's preview labels only reflect its own editor's state.
+
