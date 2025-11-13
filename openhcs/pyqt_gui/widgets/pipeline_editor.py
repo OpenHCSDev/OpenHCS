@@ -1044,9 +1044,9 @@ class PipelineEditorWidget(QWidget):
             # This ensures we're resolving the config object that has live values merged in
             # Use introspection to find which attribute holds this config
             config_attr_name = None
-            for attr_name in self.STEP_CONFIG_INDICATORS.keys():
-                if getattr(step, attr_name, None) is config:
-                    config_attr_name = attr_name
+            for step_attr in self.STEP_CONFIG_INDICATORS.keys():
+                if getattr(step, step_attr, None) is config:
+                    config_attr_name = step_attr
                     break
 
             if config_attr_name:
