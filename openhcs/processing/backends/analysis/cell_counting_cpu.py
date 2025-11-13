@@ -226,6 +226,7 @@ def count_cells_single_channel(
     watershed_footprint_size: int = 3,                            # Local maxima footprint size
     watershed_min_distance: Optional[int] = None,                 # Minimum distance between peaks (None = auto-calculate)
     watershed_threshold_method: ThresholdMethod = ThresholdMethod.OTSU,  # UI will show threshold methods
+    watershed_max_eccentricity: float = 0.95,                     # Max eccentricity to apply watershed (0=circle, 1=line)
     # Preprocessing parameters
     enable_preprocessing: bool = True,
     gaussian_sigma: float = 1.0,                                  # Gaussian blur sigma
@@ -281,6 +282,7 @@ def count_cells_single_channel(
         "watershed_footprint_size": watershed_footprint_size,
         "watershed_min_distance": watershed_min_distance,
         "watershed_threshold_method": watershed_threshold_method.value,
+        "watershed_max_eccentricity": watershed_max_eccentricity,
         "gaussian_sigma": gaussian_sigma,
         "median_disk_size": median_disk_size,
         "min_cell_area": min_cell_area,
@@ -712,10 +714,12 @@ def _preprocess_image(image: np.ndarray, gaussian_sigma: float, median_disk_size
     """Apply preprocessing to enhance cell detection."""
     # Gaussian blur to reduce noise
     if gaussian_sigma > 0:
+        logger.info(f"Applying Gaussian blur with sigma={gaussian_sigma}")
         image = gaussian(image, sigma=gaussian_sigma, preserve_range=True)
 
     # Median filter to remove salt-and-pepper noise
     if median_disk_size > 0:
+        logger.info(f"Applying median filter with disk size={median_disk_size}")
         image = median(image, disk(median_disk_size))
 
     return image
@@ -915,7 +919,11 @@ def _filter_by_area(
 
 
 def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str, Any]) -> CellCountResult:
-    """Detect cells using watershed segmentation."""
+    """Detect cells using shape-aware watershed segmentation.
+
+    Only applies watershed splitting to round objects (low eccentricity).
+    Elongated objects (high eccentricity) are kept as single cells.
+    """
     # Determine threshold
     if params["watershed_threshold_method"] == "otsu":
         threshold_val = threshold_otsu(image)
@@ -932,74 +940,95 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
     if params["remove_border_cells"]:
         binary = clear_border(binary)
 
-    # Auto-calculate min_distance if None
-    min_distance = params["watershed_min_distance"]
-    if min_distance is None:
-        # First pass: estimate object sizes using connected components
-        temp_labels = label(binary)
-        temp_regions = regionprops(temp_labels)
+    # First pass: get connected components to check eccentricity
+    initial_labels = label(binary)
+    initial_regions = regionprops(initial_labels)
 
-        if len(temp_regions) > 0:
-            # Calculate median object size
-            areas = [r.area for r in temp_regions]
-            median_area = np.median(areas)
-            # Set min_distance to the typical object radius (full radius, not half)
-            # This prevents splitting single objects while allowing separation of touching cells
-            # For elongated objects, use 1.5x radius to be more conservative
-            min_distance = int(np.sqrt(median_area / np.pi) * 1.5)
-            min_distance = max(min_distance, 5)  # Minimum of 5 pixels
+    max_eccentricity = params["watershed_max_eccentricity"]
+
+    # Separate round objects (need watershed) from elongated objects (keep as-is)
+    round_mask = np.zeros_like(binary, dtype=bool)
+    elongated_labels = np.zeros_like(initial_labels)
+    next_elongated_label = 1
+
+    for region in initial_regions:
+        # Eccentricity: 0 = perfect circle, 1 = line segment
+        # Only apply watershed to round objects
+        if region.eccentricity < max_eccentricity:
+            # Round object - add to mask for watershed processing
+            round_mask[initial_labels == region.label] = True
         else:
-            min_distance = 10  # Fallback if no objects detected
+            # Elongated object - keep as single cell
+            elongated_labels[initial_labels == region.label] = next_elongated_label
+            next_elongated_label += 1
 
-    # Find local maxima as seeds
-    distance = ndimage.distance_transform_edt(binary)
-    local_maxima = peak_local_max(
-        distance,
-        min_distance=min_distance,
-        footprint=np.ones((params["watershed_footprint_size"], params["watershed_footprint_size"]))
-    )
+    # Apply watershed only to round objects
+    if np.any(round_mask):
+        # Auto-calculate min_distance if None
+        min_distance = params["watershed_min_distance"]
+        if min_distance is None:
+            # Use round objects only for distance calculation
+            round_regions = [r for r in initial_regions if r.eccentricity < max_eccentricity]
+            if len(round_regions) > 0:
+                areas = [r.area for r in round_regions]
+                median_area = np.median(areas)
+                min_distance = int(np.sqrt(median_area / np.pi) * 1.5)
+                min_distance = max(min_distance, 5)
+            else:
+                min_distance = 10
 
-    # Convert coordinates to binary mask
-    local_maxima_mask = np.zeros_like(distance, dtype=bool)
-    if len(local_maxima) > 0:
-        local_maxima_mask[local_maxima[:, 0], local_maxima[:, 1]] = True
+        # Find local maxima as seeds (only in round objects)
+        distance = ndimage.distance_transform_edt(round_mask)
+        local_maxima = peak_local_max(
+            distance,
+            min_distance=min_distance,
+            footprint=np.ones((params["watershed_footprint_size"], params["watershed_footprint_size"]))
+        )
 
-    # Create markers for watershed
-    # Convert boolean mask to integer labels for connected components
-    markers = label(local_maxima_mask.astype(np.uint8))
+        # Create markers for watershed
+        local_maxima_mask = np.zeros_like(distance, dtype=bool)
+        if len(local_maxima) > 0:
+            local_maxima_mask[local_maxima[:, 0], local_maxima[:, 1]] = True
 
-    # Apply watershed
-    labels = watershed(-distance, markers, mask=binary)
+        markers = label(local_maxima_mask.astype(np.uint8))
 
-    # Extract region properties
-    regions = regionprops(labels, intensity_image=image)
+        # Apply watershed to round objects only
+        watershed_labels = watershed(-distance, markers, mask=round_mask)
+
+        # Offset watershed labels to not conflict with elongated labels
+        if next_elongated_label > 1:
+            watershed_labels = np.where(watershed_labels > 0,
+                                       watershed_labels + next_elongated_label - 1,
+                                       0)
+
+        # Combine watershed results with elongated objects
+        combined_labels = np.where(elongated_labels > 0, elongated_labels, watershed_labels)
+    else:
+        # No round objects, just use elongated labels
+        combined_labels = elongated_labels
+
+    # Extract region properties from combined labels
+    regions = regionprops(combined_labels, intensity_image=image)
 
     positions = []
     areas = []
     intensities = []
     confidences = []
-    valid_labels = []  # Track which labels pass the size filter
+    valid_labels = []
 
     for region in regions:
         # Filter by area
         if params["min_cell_area"] <= region.area <= params["max_cell_area"]:
-            # Centroid (note: regionprops returns (row, col) = (y, x))
             y, x = region.centroid
             positions.append((float(x), float(y)))
-
             areas.append(float(region.area))
             intensities.append(float(region.mean_intensity))
-
-            # Use area as confidence measure (normalized)
             confidence = min(1.0, region.area / params["max_cell_area"])
             confidences.append(confidence)
-
-            # Track this label as valid
             valid_labels.append(region.label)
 
-    # Create filtered labeled mask with only cells that passed size filter
-    # Keep the watershed labels instead of converting to binary
-    filtered_labeled_mask = np.where(np.isin(labels, valid_labels), labels, 0)
+    # Create filtered labeled mask
+    filtered_labeled_mask = np.where(np.isin(combined_labels, valid_labels), combined_labels, 0)
 
     return CellCountResult(
         slice_index=slice_idx,
@@ -1010,7 +1039,7 @@ def _detect_cells_watershed(image: np.ndarray, slice_idx: int, params: Dict[str,
         cell_intensities=intensities,
         detection_confidence=confidences,
         parameters_used=params,
-        binary_mask=filtered_labeled_mask  # Labeled mask with only cells that passed all filters
+        binary_mask=filtered_labeled_mask
     )
 
 
