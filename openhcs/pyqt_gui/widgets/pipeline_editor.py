@@ -467,10 +467,20 @@ class PipelineEditorWidget(QWidget):
             if isinstance(config, WellFilterConfig):
                 resolved_well_filter = self._resolve_config_attr(step, config, 'well_filter')
                 if resolved_well_filter is not None:
-                    # Parse and format well_filter for display
-                    wf_display = self._format_well_filter_for_display(resolved_well_filter)
-                    if wf_display:
-                        indicator_text = f"{indicator}{wf_display}"
+                    # Format well_filter for display
+                    if isinstance(resolved_well_filter, list):
+                        wf_display = str(len(resolved_well_filter))
+                    elif isinstance(resolved_well_filter, int):
+                        wf_display = str(resolved_well_filter)
+                    else:
+                        wf_display = str(resolved_well_filter)
+
+                    # Add +/- prefix for INCLUDE/EXCLUDE mode
+                    from openhcs.core.config import WellFilterMode
+                    resolved_mode = self._resolve_config_attr(step, config, 'well_filter_mode')
+                    mode_prefix = '-' if resolved_mode == WellFilterMode.EXCLUDE else '+'
+
+                    indicator_text = f"{indicator}{mode_prefix}{wf_display}"
 
             config_indicators.append(indicator_text)
 
@@ -1069,54 +1079,6 @@ class PipelineEditorWidget(QWidget):
             # Fallback to raw value
             raw_value = object.__getattribute__(config, attr_name)
             return raw_value
-
-    def _format_well_filter_for_display(self, well_filter: object) -> str | None:
-        """
-        Format well_filter value for display in config indicators.
-
-        Handles parsing string list literals (e.g., "['A1', 'A2']") using the same
-        ast.literal_eval() approach as WellFilterProcessor.resolve_compilation_filter().
-
-        Args:
-            well_filter: Raw well_filter value (list, int, str, or None)
-
-        Returns:
-            Formatted string for display, or None if no suffix should be shown
-        """
-        if well_filter is None:
-            return None
-
-        # If it's already a list, show count
-        if isinstance(well_filter, list):
-            return str(len(well_filter))
-
-        # If it's an int, show value
-        if isinstance(well_filter, int):
-            return str(well_filter)
-
-        # If it's a string, try to parse as list literal (same as WellFilterProcessor)
-        if isinstance(well_filter, str):
-            stripped = well_filter.strip()
-
-            # Check if it's a numeric string
-            if stripped.isdigit():
-                return stripped
-
-            # Check if it's a Python list literal
-            if stripped.startswith('[') and stripped.endswith(']'):
-                import ast
-                try:
-                    parsed = ast.literal_eval(stripped)
-                    if isinstance(parsed, list):
-                        return str(len(parsed))
-                except (ValueError, SyntaxError):
-                    # Not a valid list literal, fall through
-                    pass
-
-            # For other string patterns (e.g., 'A*', 'row:A'), don't show suffix
-            return None
-
-        return None
 
     def _merge_live_values(self, base_obj: object, live_values: dict | None) -> object:
         """
