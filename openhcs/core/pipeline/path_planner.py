@@ -5,7 +5,7 @@ This version ACTUALLY eliminates duplication instead of adding abstraction theat
 """
 
 import logging
-from dataclasses import dataclass
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
@@ -50,13 +50,30 @@ def normalize_pattern(pattern: Any) -> Iterator[Tuple[Callable, str, int]]:
 
 
 def extract_attributes(pattern: Any) -> Dict[str, Any]:
-    """Extract all function attributes in one pass - 10 lines."""
-    outputs, inputs, mat_funcs = set(), {}, {}
-    for func, _, _ in normalize_pattern(pattern):
-        outputs.update(getattr(func, '__special_outputs__', set()))
+    """Extract special I/O metadata and track per-group ownership."""
+    output_names: Set[str] = set()
+    output_groups: Dict[str, Set[Optional[str]]] = defaultdict(set)
+    inputs, mat_funcs = {}, {}
+
+    for func, group_key, _ in normalize_pattern(pattern):
+        normalized_key = None if group_key == "default" else group_key
+
+        func_outputs = getattr(func, '__special_outputs__', set())
+        output_names.update(func_outputs)
+        for output in func_outputs:
+            output_groups[output].add(normalized_key)
+
         inputs.update(getattr(func, '__special_inputs__', {}))
         mat_funcs.update(getattr(func, '__materialization_functions__', {}))
-    return {'outputs': outputs, 'inputs': inputs, 'mat_funcs': mat_funcs}
+
+    return {
+        'outputs': {
+            'names': output_names,
+            'groups': output_groups
+        },
+        'inputs': inputs,
+        'mat_funcs': mat_funcs
+    }
 
 
 # ===== PATH PLANNING (NO duplication) =====
@@ -101,24 +118,42 @@ class PathPlanner:
         input_dir = self._get_dir(step, i, pipeline, 'input')
         output_dir = self._get_dir(step, i, pipeline, 'output', input_dir)
 
-        # Extract function data if FunctionStep
-        attrs = extract_attributes(step.func) if isinstance(step, FunctionStep) else {
-            'outputs': self._normalize_attr(getattr(step, 'special_outputs', set()), set),
-            'inputs': self._normalize_attr(getattr(step, 'special_inputs', {}), dict),
-            'mat_funcs': {}
-        }
+        # Prepare function data if FunctionStep
+        if isinstance(step, FunctionStep):
+            step.func = self._inject_injectable_params(step.func, step)
+            step.func = self._strip_disabled_functions(step.func)
+            attrs = extract_attributes(step.func if step.func else [])
+        else:
+            raw_outputs = self._normalize_attr(getattr(step, 'special_outputs', set()), set)
+            default_groups = defaultdict(set)
+            for name in raw_outputs:
+                default_groups[name].add(None)
+            attrs = {
+                'outputs': {
+                    'names': raw_outputs,
+                    'groups': default_groups
+                },
+                'inputs': self._normalize_attr(getattr(step, 'special_inputs', {}), dict),
+                'mat_funcs': {}
+            }
 
         # Process special I/O with unified logic
-        special_outputs = self._process_special(attrs['outputs'], attrs['mat_funcs'], 'output', sid)
-        special_inputs = self._process_special(attrs['inputs'], attrs['outputs'], 'input', sid)
+        special_outputs = self._process_special(
+            attrs['outputs']['names'],
+            attrs['mat_funcs'],
+            'output',
+            sid,
+            attrs['outputs'].get('groups')
+        )
+        special_inputs = self._process_special(attrs['inputs'], attrs['outputs']['names'], 'input', sid)
 
-        # Handle metadata injection
+        # Handle metadata injection after stripping disabled functions
         if isinstance(step, FunctionStep) and any(k in METADATA_RESOLVERS for k in attrs['inputs']):
             step.func = self._inject_metadata(step.func, attrs['inputs'])
 
-        # Inject resolved injectable params (dtype_config, enabled, etc.) into func kwargs
-        if isinstance(step, FunctionStep):
-            step.func = self._inject_injectable_params(step.func, step)
+        # Ensure step plan references the normalized function pattern
+        self.plans.setdefault(sid, {})
+        self.plans[sid]['func'] = step.func
 
         # Generate funcplan (only if needed)
         funcplan = {}
@@ -295,7 +330,7 @@ class PathPlanner:
             return self._build_output_path(config)
         return None
 
-    def _process_special(self, items: Any, extra: Any, io_type: str, sid: str) -> Dict:
+    def _process_special(self, items: Any, extra: Any, io_type: str, sid: str, output_groups: Optional[Dict[str, Set[Optional[str]]]] = None) -> Dict:
         """Unified special I/O processing - no duplication."""
         result = {}
 
@@ -306,9 +341,11 @@ class PathPlanner:
                 # produce the same special output (e.g., two crop_device steps both producing match_results)
                 filename = PipelinePathPlanner._build_axis_filename(self.ctx.axis_id, key, step_index=sid)
                 path = results_path / filename
+                groups = output_groups.get(key, {None}) if output_groups else {None}
                 result[key] = {
                     'path': str(path),
-                    'materialization_function': extra.get(key)  # extra is mat_funcs
+                    'materialization_function': extra.get(key),  # extra is mat_funcs
+                    'group_keys': sorted(groups)
                 }
                 self.declared[key] = str(path)
 
@@ -428,6 +465,31 @@ class PathPlanner:
         if isinstance(pattern, dict):
             # Recursively process each value
             return {k: self._inject_params_into_pattern(v, resolved_kwargs) for k, v in pattern.items()}
+
+        return pattern
+
+    def _strip_disabled_functions(self, pattern: Any) -> Any:
+        """
+        Remove disabled functions (enabled=False) from any pattern structure.
+
+        Ensures downstream planning (special outputs, funcplan, materialization)
+        never sees disabled functions.
+        """
+        if isinstance(pattern, tuple) and len(pattern) == 2 and isinstance(pattern[1], dict):
+            if pattern[1].get('enabled', True) is False:
+                return None
+            return pattern
+
+        if isinstance(pattern, list):
+            stripped = [self._strip_disabled_functions(item) for item in pattern]
+            return [item for item in stripped if item not in (None, [], {})]
+
+        if isinstance(pattern, dict):
+            stripped = {k: self._strip_disabled_functions(v) for k, v in pattern.items()}
+            return {
+                k: v for k, v in stripped.items()
+                if v not in (None, [], {})
+            }
 
         return pattern
 

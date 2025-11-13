@@ -1386,9 +1386,6 @@ class FunctionStep(AbstractStep):
         filemanager._materialization_context = {'images_dir': images_dir}
 
         # Get dict pattern info
-        step_func = step_plan['func']
-        dict_keys = list(step_func.keys()) if isinstance(step_func, dict) else []
-
         # Materialize each special output
         for output_key, output_info in special_outputs.items():
             mat_func = output_info.get('materialization_function')
@@ -1398,16 +1395,20 @@ class FunctionStep(AbstractStep):
             memory_path = output_info['path']
             step_index = step_plan['pipeline_position']
 
-            # For dict patterns, materialize each channel separately
-            channels_to_process = dict_keys if dict_keys else [None]
+            # For dict patterns, materialize only the channels that produced this output
+            channels_to_process = output_info.get('group_keys') or [None]
 
             for dict_key in channels_to_process:
                 # Build channel-specific memory path if needed
-                if dict_key:
+                if dict_key is not None:
                     from openhcs.core.pipeline.path_planner import PipelinePathPlanner
                     channel_path = PipelinePathPlanner.build_dict_pattern_path(memory_path, dict_key)
                 else:
                     channel_path = memory_path
+
+                if not filemanager.exists(channel_path, Backend.MEMORY.value):
+                    logger.info(f"Skipping special output '{output_key}' for group '{dict_key}' - no data saved at {channel_path}")
+                    continue
 
                 # Load data
                 filemanager.ensure_directory(Path(channel_path).parent, Backend.MEMORY.value)

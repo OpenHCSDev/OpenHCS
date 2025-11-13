@@ -260,19 +260,16 @@ def prepare_patterns_and_functions(patterns, processing_funcs, component='defaul
 
         # Extract function and args
         logger.debug(f"Processing func_item for '{comp_value}': {type(func_item)}")
-        if isinstance(func_item, list):
-            # List of functions or function tuples
-            logger.debug(f"func_item is a list with {len(func_item)} items")
-            component_to_funcs[comp_value] = func_item
-            # For lists, we'll extract args during processing
-            component_to_args[comp_value] = {}
-        else:
-            # Single function or function tuple
-            logger.debug(f"Calling extract_func_and_args with: {type(func_item)}")
+        if not isinstance(func_item, list):
+            # Normalize single function to list so execution always uses chain logic
+            logger.debug(f"Normalizing single function for '{comp_value}' into list")
             func, args = extract_func_and_args(func_item)
-            component_to_funcs[comp_value] = func
-            component_to_args[comp_value] = args
+            func_item = [(func, args)]
+
+        # List of functions or function tuples (already normalized)
+        logger.debug(f"func_item is a list with {len(func_item)} items")
+        component_to_funcs[comp_value] = func_item
+        component_to_args[comp_value] = {}
 
     return grouped_patterns, component_to_funcs, component_to_args
-
 
