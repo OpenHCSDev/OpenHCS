@@ -94,7 +94,7 @@ def _create_direct_bool_widget(current_value: Any = None):
     return widget
 
 
-def convert_widget_value_to_type(value: Any, param_type: Type) -> Any:
+def convert_widget_value_to_type(value: Any, param_type: Type, param_name: str = None) -> Any:
     """
     PyQt-specific type conversions for widget values.
 
@@ -104,6 +104,7 @@ def convert_widget_value_to_type(value: Any, param_type: Type) -> Any:
     Args:
         value: The raw value from the widget
         param_type: The target parameter type
+        param_name: Optional parameter name for field-specific handling
 
     Returns:
         The converted value ready for the service layer
@@ -143,6 +144,25 @@ def convert_widget_value_to_type(value: Any, param_type: Type) -> Any:
                 return parsed
     except Exception:
         pass
+
+    # Special handling for well_filter field (Union[List[str], str, int])
+    # Parse string list literals and numeric strings to proper types
+    if param_name == 'well_filter' and isinstance(value, str):
+        import ast
+        stripped = value.strip()
+
+        # Try parsing as list literal
+        if stripped.startswith('[') and stripped.endswith(']'):
+            try:
+                parsed = ast.literal_eval(stripped)
+                if isinstance(parsed, list):
+                    return parsed
+            except (ValueError, SyntaxError):
+                pass  # Fall through to return original string
+
+        # Try parsing as numeric string
+        if stripped.isdigit():
+            return int(stripped)
 
     return value
 

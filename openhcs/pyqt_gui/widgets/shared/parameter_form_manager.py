@@ -1389,8 +1389,8 @@ class ParameterFormManager(QWidget):
 
         param_type = self.parameter_types.get(param_name, type(value))
 
-        # PyQt-specific type conversions first
-        converted_value = convert_widget_value_to_type(value, param_type)
+        # PyQt-specific type conversions first (pass param_name for field-specific handling)
+        converted_value = convert_widget_value_to_type(value, param_type, param_name)
 
         # Then apply service layer conversion (enums, basic types, Union handling, etc.)
         converted_value = self.service.convert_value_to_type(converted_value, param_type, param_name, self.dataclass_type)
