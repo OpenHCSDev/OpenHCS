@@ -416,6 +416,52 @@ Execution-Specific Implementation
   - Progress callback support
   - Automatic cleanup
 
+Troubleshooting
+---------------
+
+Server Hangs After Successful Executions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Symptom**: ZMQ execution server randomly refuses to start new workers after successfully executing a few run requests. The server appears to hang and requires killing and restarting.
+
+**Root Cause**: ZMQ REP (request-reply) sockets enforce a strict state machine: **recv → send → recv → send**. If ``recv()`` succeeds but ``send()`` doesn't happen (due to an exception during message processing), the socket enters an invalid state and refuses all future ``recv()`` calls.
+
+**Why It Appears Random**: The hanging only occurs when an exception is raised during message processing (malformed messages, race conditions, resource exhaustion, etc.), making it appear random.
+
+**Fix**: As of commit ``21178fb4``, all ZMQ REP socket handlers ensure that once ``recv()`` succeeds, a response is **always** sent, even if it's an error response. This maintains the socket state machine invariant.
+
+**Implementation Pattern**:
+
+.. code-block:: python
+
+   # Step 1: Try to receive (handle recv failures separately)
+   try:
+       message = socket.recv(zmq.NOBLOCK)
+   except zmq.Again:
+       return  # No message - this is fine
+
+   # Step 2: We received a message, so we MUST send a response
+   try:
+       response = process_message(message)
+   except Exception as e:
+       # Send error response to maintain socket state
+       logger.error(f"Error processing message: {e}", exc_info=True)
+       response = {'status': 'error', 'message': str(e)}
+
+   # Step 3: ALWAYS send response
+   try:
+       socket.send(pickle.dumps(response))
+   except Exception as e:
+       logger.error(f"Failed to send response: {e}", exc_info=True)
+
+**Affected Components**:
+
+- ``openhcs/runtime/zmq_base.py`` - Base server message processing
+- ``openhcs/runtime/fiji_viewer_server.py`` - Fiji image message processing
+- ``openhcs/runtime/execution_server.py`` - Legacy execution server
+
+**Prevention**: All new ZMQ REP socket handlers must follow this three-step pattern to prevent state machine violations.
+
 See Also
 --------
 
