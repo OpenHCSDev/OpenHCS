@@ -406,16 +406,29 @@ class PipelineEditorWidget(QWidget):
         func = getattr(step, 'func', None)
         if func:
             if isinstance(func, list) and func:
-                if len(func) == 1:
-                    func_name = getattr(func[0], '__name__', str(func[0]))
-                    preview_parts.append(f"func={func_name}")
-                else:
-                    preview_parts.append(f"func=[{len(func)} functions]")
+                # Count enabled functions (filter out None/disabled)
+                enabled_funcs = [f for f in func if f is not None]
+                preview_parts.append(f"func=[{len(enabled_funcs)} functions]")
             elif callable(func):
                 func_name = getattr(func, '__name__', str(func))
                 preview_parts.append(f"func={func_name}")
             elif isinstance(func, dict):
-                preview_parts.append(f"func={{dict with {len(func)} keys}}")
+                # Show dict keys with metadata names (like groupby selector)
+                orchestrator = self._get_current_orchestrator()
+                group_by = getattr(step.processing_config, 'group_by', None) if hasattr(step, 'processing_config') else None
+
+                dict_items = []
+                for key in sorted(func.keys()):
+                    if orchestrator and group_by:
+                        metadata_name = orchestrator.metadata_cache.get_component_metadata(group_by, key)
+                        if metadata_name:
+                            dict_items.append(f"{key}|{metadata_name}")
+                        else:
+                            dict_items.append(key)
+                    else:
+                        dict_items.append(key)
+
+                preview_parts.append(f"func={{{', '.join(dict_items)}}}")
 
         # Variable components preview
         var_components = getattr(step, 'variable_components', None)
