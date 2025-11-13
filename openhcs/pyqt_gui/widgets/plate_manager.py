@@ -638,32 +638,16 @@ class PlateManagerWidget(QWidget):
         # The config window should work with the current orchestrator context
         # Reset behavior will be handled differently to avoid corrupting step editor context
 
-        # CRITICAL FIX: Create PipelineConfig that preserves user-set values but shows placeholders for inherited fields
-        # The orchestrator's pipeline_config has concrete values filled in from global config inheritance,
-        # but we need to distinguish between user-set values (keep concrete) and inherited values (show as placeholders)
+        # SIMPLIFIED: Just use the orchestrator's pipeline_config directly
+        # ParameterFormManager will use object.__getattribute__ to get raw field values
+        # Raw None = inherited (shows placeholder), Raw concrete = user-set (shows value)
+        # This is the same pattern as pickle_to_python code generation
         from openhcs.config_framework.lazy_factory import create_dataclass_for_editing
-        from dataclasses import fields
 
-        # CRITICAL FIX: Create config for editing that preserves user values while showing placeholders for inherited fields
         if representative_orchestrator.pipeline_config is not None:
-            # Orchestrator has existing config - preserve explicitly set fields, reset others to None for placeholders
-            existing_config = representative_orchestrator.pipeline_config
-            explicitly_set_fields = getattr(existing_config, '_explicitly_set_fields', set())
-
-            # Create field values: keep explicitly set values, use None for inherited fields
-            field_values = {}
-            for field in fields(PipelineConfig):
-                if field.name in explicitly_set_fields:
-                    # User explicitly set this field - preserve the concrete value
-                    field_values[field.name] = object.__getattribute__(existing_config, field.name)
-                else:
-                    # Field was inherited from global config - use None to show placeholder
-                    field_values[field.name] = None
-
-            # Create config with preserved user values and None for inherited fields
-            current_plate_config = PipelineConfig(**field_values)
-            # Preserve the explicitly set fields tracking (bypass frozen restriction)
-            object.__setattr__(current_plate_config, '_explicitly_set_fields', explicitly_set_fields.copy())
+            # Orchestrator has existing config - use it directly
+            # ParameterFormManager will inspect raw values to distinguish None (inherited) from concrete (user-set)
+            current_plate_config = representative_orchestrator.pipeline_config
         else:
             # No existing config - create fresh config with all None values (all show as placeholders)
             current_plate_config = create_dataclass_for_editing(PipelineConfig, self.global_config)
@@ -1579,6 +1563,11 @@ class PlateManagerWidget(QWidget):
                 if 'per_plate_configs' in namespace:
                     # New per-plate config system
                     per_plate_configs = namespace['per_plate_configs']
+
+                    # SIMPLIFIED: No need to track _explicitly_set_fields
+                    # The patched constructors already preserve None vs concrete distinction in raw field values
+                    # ParameterFormManager will use object.__getattribute__ to inspect raw values
+                    # Raw None = inherited, Raw concrete = user-set (same pattern as pickle_to_python)
 
                     # CRITICAL FIX: Match string keys to actual plate path objects
                     # The keys in per_plate_configs are strings, but orchestrators dict uses Path/str objects

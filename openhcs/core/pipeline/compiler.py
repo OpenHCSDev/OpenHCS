@@ -143,6 +143,10 @@ def _refresh_function_object(func_value):
             if isinstance(params, dict) and 'enabled' in params:
                 params = {k: v for k, v in params.items() if k != 'enabled'}
 
+            # Remove dtype_config after it's been resolved into the funcplan/step context
+            if isinstance(params, dict) and 'dtype_config' in params:
+                params = {k: v for k, v in params.items() if k != 'dtype_config'}
+
             if callable(func):
                 func_ref = _refresh_function_object(func)
                 return (func_ref, params)

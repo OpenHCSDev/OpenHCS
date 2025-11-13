@@ -151,6 +151,7 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
         """
         self.library_name = library_name
         self._cache_path = get_cache_file_path(f"{library_name}_function_metadata.json")
+        self._library_warmed = False
 
 
 
@@ -387,9 +388,33 @@ class LibraryRegistryBase(ABC, metaclass=AutoRegisterMeta):
         result_2d = func(image, *args, **kwargs)
         return stack_slices([result_2d], memory_type, 0)
 
+    # ===== LIBRARY WARM-UP HOOK =====
+    def _warmup_library(self) -> None:
+        """
+        Optional hook for registries that need to pre-initialize their library.
+
+        Subclasses can override to run lightweight imports or self-tests that
+        ensure required shared libraries are available before discovery begins.
+        """
+        return
+
+    def _ensure_library_warmed(self) -> None:
+        """Ensure library warm-up hook is invoked exactly once."""
+        if self._library_warmed:
+            return
+
+        try:
+            self._warmup_library()
+        except Exception as exc:
+            logger.warning(f"{self.library_name} warm-up failed: {exc}")
+            raise
+
+        self._library_warmed = True
+
     # ===== CACHING METHODS =====
     def _load_or_discover_functions(self) -> Dict[str, FunctionMetadata]:
         """Load functions from cache or discover them if cache is invalid."""
+        self._ensure_library_warmed()
         logger.info(f"🔄 _load_or_discover_functions called for {self.library_name}")
 
         cached_functions = self._load_from_cache()

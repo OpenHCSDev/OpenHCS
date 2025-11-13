@@ -128,7 +128,7 @@ class AbstractStep(abc.ABC, ContextProvider):
         #step_materialization_config: Optional['LazyStepMaterializationConfig'] = None,
         #napari_streaming_config: Optional['LazyNapariStreamingConfig'] = None,
         #fiji_streaming_config: Optional['LazyFijiStreamingConfig'] = None,
-        step_materialization_config: 'LazyStepMaterializationConfig' = None,
+        step_materialization_config: 'LazyStepMaterializationConfig' = LazyStepMaterializationConfig(),
         streaming_defaults: 'LazyStreamingDefaults' = LazyStreamingDefaults(),
         napari_streaming_config: 'LazyNapariStreamingConfig' = LazyNapariStreamingConfig(),
         fiji_streaming_config: 'LazyFijiStreamingConfig' = LazyFijiStreamingConfig(),

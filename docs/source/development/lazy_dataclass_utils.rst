@@ -141,34 +141,36 @@ Patched Constructor Behavior
 Integration with Code Editors
 ==============================
 
-Code Editor Form Updater
--------------------------
+Code Editor Form Updater (SIMPLIFIED 2024)
+-------------------------------------------
 
-The code editor form updater uses patched constructors to preserve None values:
+The code editor form updater uses patched constructors to preserve None values. **Raw field values (via ``object.__getattribute__``) are the source of truth**:
 
 .. code-block:: python
 
     from openhcs.introspection.lazy_dataclass_utils import patch_lazy_constructors
-    
+
     class CodeEditorFormUpdater:
         def execute_code_and_update_form(self, code_text):
             """Execute user code and update form with results."""
-            
+
             # Execute with patched constructors
             with patch_lazy_constructors():
                 namespace = {}
                 exec(code_text, namespace)
-                
+
                 # Extract dataclass instance
                 config_instance = namespace.get('config')
-            
-            # Update form with preserved None values
+
+            # Update ALL fields - form manager inspects raw values automatically
             self.form_manager.update_from_object(config_instance)
 
-**Why this matters**: Form manager can distinguish between:
+**Key Insight**: No need to track which fields were explicitly set or parse code with regex. The patched constructor already preserves the None vs concrete distinction in raw field values:
 
-- **None**: Field inherits from parent config (show placeholder)
-- **Concrete value**: Field explicitly set (show actual value)
+- **Raw None** (via ``object.__getattribute__``): Field inherits from parent config (show placeholder)
+- **Raw concrete value**: Field explicitly set (show actual value)
+
+This is the same pattern used in ``pickle_to_python`` code generation.
 
 Shared Constructor Patching
 ----------------------------
@@ -233,10 +235,14 @@ Form Manager Integration
     # Code editor creates instance with patched constructors
     with patch_lazy_constructors():
         config = LazyProcessingConfig(group_by=None)
-    
-    # Form manager sees None and shows placeholder
+
+    # Form manager inspects raw field values using object.__getattribute__
+    # Raw None → shows placeholder, Raw concrete → shows actual value
     form_manager.update_from_object(config)
     # group_by field shows: "Pipeline default: GroupBy.WELL"
+
+    # No need to track _explicitly_set_fields or parse code with regex
+    # The raw field values ARE the source of truth
 
 Implementation Notes
 ====================
