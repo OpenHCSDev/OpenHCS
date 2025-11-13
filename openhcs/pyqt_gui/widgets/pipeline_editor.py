@@ -1142,18 +1142,8 @@ class PipelineEditorWidget(QWidget):
         """
         editing_type = type(editing_object).__name__ if editing_object is not None else "None"
         logger.info(f"🔔 Pipeline editor: Received context_value_changed signal: field_path='{field_path}', new_value={new_value}, editing_type={editing_type}")
-
-        # Refresh on any change to streaming_defaults or step config indicators
-        should_refresh = (
-            'streaming_defaults' in field_path or
-            any(config_attr in field_path for config_attr in self.STEP_CONFIG_INDICATORS.keys())
-        )
-
-        if should_refresh:
-            logger.info(f"✅ Pipeline editor: Value changed in {field_path}, refreshing preview labels")
-            self.update_step_list()
-        else:
-            logger.info(f"❌ Pipeline editor: Ignoring value change in {field_path} (not a config indicator)")
+        logger.info(f"✅ Pipeline editor: Refreshing preview labels")
+        self.update_step_list()
 
     def _on_cross_window_context_refreshed(self, editing_object: object, context_object: object):
         """Handle cascading placeholder refreshes from upstream windows.
