@@ -39,6 +39,39 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 logger = logging.getLogger(__name__)
 
 
+class ReorderablePlateListWidget(QListWidget):
+    """
+    Custom QListWidget that properly handles drag and drop reordering for plates.
+    Emits a signal when items are moved so the parent can update the data model.
+    """
+
+    items_reordered = pyqtSignal(int, int)  # from_index, to_index
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+
+    def dropEvent(self, event):
+        """Handle drop events and emit reorder signal."""
+        # Get the item being dropped and its original position
+        source_item = self.currentItem()
+        if not source_item:
+            super().dropEvent(event)
+            return
+
+        source_index = self.row(source_item)
+
+        # Let the default drop behavior happen first
+        super().dropEvent(event)
+
+        # Find the new position of the item
+        target_index = self.row(source_item)
+
+        # Only emit signal if position actually changed
+        if source_index != target_index:
+            self.items_reordered.emit(source_index, target_index)
+
+
 class PlateManagerWidget(QWidget):
     """
     PyQt6 Plate Manager Widget.
@@ -230,7 +263,7 @@ class PlateManagerWidget(QWidget):
         layout.addWidget(splitter)
         
         # Plate list
-        self.plate_list = QListWidget()
+        self.plate_list = ReorderablePlateListWidget()
         self.plate_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         # Apply explicit styling to plate list for consistent background
         self.plate_list.setStyleSheet(f"""
@@ -336,6 +369,9 @@ class PlateManagerWidget(QWidget):
         # Plate list selection
         self.plate_list.itemSelectionChanged.connect(self.on_selection_changed)
         self.plate_list.itemDoubleClicked.connect(self.on_item_double_clicked)
+
+        # Plate list reordering
+        self.plate_list.items_reordered.connect(self.on_plates_reordered)
         
         # Internal signals
         self.status_message.connect(self.update_status)
@@ -2013,6 +2049,31 @@ class PlateManagerWidget(QWidget):
         )
 
         self.update_button_states()
+
+    def on_plates_reordered(self, from_index: int, to_index: int):
+        """
+        Handle plate reordering from drag and drop.
+
+        Args:
+            from_index: Original position of the moved plate
+            to_index: New position of the moved plate
+        """
+        # Update the underlying plates list to match the visual order
+        current_plates = list(self.plates)
+
+        # Move the plate in the data model
+        plate = current_plates.pop(from_index)
+        current_plates.insert(to_index, plate)
+
+        # Update plates list
+        self.plates = current_plates
+
+        # Update status message
+        plate_name = plate['name']
+        direction = "up" if to_index < from_index else "down"
+        self.status_message.emit(f"Moved plate '{plate_name}' {direction}")
+
+        logger.debug(f"Reordered plate '{plate_name}' from index {from_index} to {to_index}")
 
 
 

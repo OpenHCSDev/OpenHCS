@@ -133,11 +133,20 @@ class ReorderableListWidget(QListWidget):
 class PipelineEditorWidget(QWidget):
     """
     PyQt6 Pipeline Editor Widget.
-    
+
     Manages pipeline steps with add, edit, delete, load, save functionality.
     Preserves all business logic from Textual version with clean PyQt6 UI.
     """
-    
+
+    # Config attribute name to display abbreviation mapping
+    # Maps step config attribute names to their preview text indicators
+    STEP_CONFIG_INDICATORS = {
+        'step_materialization_config': 'MAT',
+        'napari_streaming_config': 'NAP',
+        'fiji_streaming_config': 'FIJI',
+        'step_well_filter_config': 'FILT',
+    }
+
     # Signals
     pipeline_changed = pyqtSignal(list)  # List[FunctionStep]
     step_selected = pyqtSignal(object)  # FunctionStep
@@ -331,6 +340,15 @@ class PipelineEditorWidget(QWidget):
         # Internal signals
         self.status_message.connect(self.update_status)
         self.pipeline_changed.connect(self.on_pipeline_changed)
+
+        # CRITICAL: Register as external listener for cross-window refresh signals
+        # This makes preview labels reactive to live context changes
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        ParameterFormManager.register_external_listener(
+            self,
+            self._on_cross_window_context_changed,
+            self._on_cross_window_context_refreshed
+        )
     
     def handle_button_action(self, action: str):
         """
@@ -424,16 +442,23 @@ class PipelineEditorWidget(QWidget):
             if source_name != 'PREVIOUS_STEP':  # Only show if not default
                 preview_parts.append(f"input={source_name}")
 
-        # Optional configurations preview
+        # Optional configurations preview - use lazy resolution system for enabled fields
+        # CRITICAL: Must resolve through context hierarchy (Global -> Pipeline -> Step)
+        # to match the same resolution that step editor placeholders use
         config_indicators = []
-        if hasattr(step, 'step_materialization_config') and step.step_materialization_config:
-            config_indicators.append("MAT")
-        if hasattr(step, 'napari_streaming_config') and step.napari_streaming_config:
-            config_indicators.append("NAP")
-        if hasattr(step, 'fiji_streaming_config') and step.fiji_streaming_config:
-            config_indicators.append("FIJI")
-        if hasattr(step, 'step_well_filter_config') and step.step_well_filter_config:
-            config_indicators.append("FILT")
+        for config_attr, indicator in self.STEP_CONFIG_INDICATORS.items():
+            if hasattr(step, config_attr):
+                config = getattr(step, config_attr, None)
+                if config:
+                    # Check if config has 'enabled' field - if so, resolve it through context
+                    if hasattr(config, 'enabled'):
+                        # Resolve enabled value through lazy resolution system
+                        resolved_enabled = self._resolve_config_enabled(step, config)
+                        if resolved_enabled:
+                            config_indicators.append(indicator)
+                    else:
+                        # No enabled field - just check existence (e.g., step_well_filter_config)
+                        config_indicators.append(indicator)
 
         if config_indicators:
             preview_parts.append(f"configs=[{','.join(config_indicators)}]")
@@ -496,20 +521,34 @@ class PipelineEditorWidget(QWidget):
         else:
             tooltip_lines.append("Input Source: None")
 
-        # Additional configurations with details
+        # Additional configurations with details - generic introspection-based approach
         config_details = []
-        if hasattr(step, 'step_materialization_config') and step.step_materialization_config:
-            config_details.append("• Materialization Config: Enabled")
-        if hasattr(step, 'napari_streaming_config') and step.napari_streaming_config:
-            napari_config = step.napari_streaming_config
-            port = getattr(napari_config, 'port', 'default')
-            config_details.append(f"• Napari Streaming: Port {port}")
-        if hasattr(step, 'fiji_streaming_config') and step.fiji_streaming_config:
-            config_details.append("• Fiji Streaming: Enabled")
-        if hasattr(step, 'step_well_filter_config') and step.step_well_filter_config:
-            well_config = step.step_well_filter_config
-            well_filter = getattr(well_config, 'well_filter', 'default')
-            config_details.append(f"• Well Filter: {well_filter}")
+
+        # Helper to format config details based on type
+        def format_config_detail(config_attr: str, config) -> str:
+            """Format config detail string based on config type."""
+            if config_attr == 'step_materialization_config':
+                return "• Materialization Config: Enabled"
+            elif config_attr == 'napari_streaming_config':
+                port = getattr(config, 'port', 'default')
+                return f"• Napari Streaming: Port {port}"
+            elif config_attr == 'fiji_streaming_config':
+                return "• Fiji Streaming: Enabled"
+            elif config_attr == 'step_well_filter_config':
+                well_filter = getattr(config, 'well_filter', 'default')
+                return f"• Well Filter: {well_filter}"
+            else:
+                # Generic fallback for unknown config types
+                return f"• {config_attr.replace('_', ' ').title()}: Enabled"
+
+        for config_attr in self.STEP_CONFIG_INDICATORS.keys():
+            if hasattr(step, config_attr):
+                config = getattr(step, config_attr, None)
+                if config:
+                    # Check if config has 'enabled' field - if so, check it; otherwise just check existence
+                    should_show = config.enabled if hasattr(config, 'enabled') else True
+                    if should_show:
+                        config_details.append(format_config_detail(config_attr, config))
 
         if config_details:
             tooltip_lines.append("")  # Empty line separator
@@ -889,11 +928,195 @@ class PipelineEditorWidget(QWidget):
                 logger.debug(f"Step forms will now resolve against updated orchestrator config for: {plate_path}")
             else:
                 logger.debug(f"No orchestrator found for config refresh: {plate_path}")
+
+    def _resolve_config_enabled(self, step: FunctionStep, config: object) -> bool:
+        """
+        Resolve config.enabled through lazy resolution system using LIVE context.
+
+        CRITICAL: Uses ParameterFormManager._collect_live_context_from_other_windows() mechanism
+        to collect live values from all open windows, then builds context stack the same way
+        step editor does for placeholder resolution.
+
+        Args:
+            step: FunctionStep containing the config
+            config: Config dataclass instance (e.g., LazyNapariStreamingConfig)
+
+        Returns:
+            Resolved boolean value for config.enabled (True/False)
+        """
+        from openhcs.config_framework.context_manager import config_context
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
+        from openhcs.config_framework.global_config import get_current_global_config
+        import dataclasses
+
+        orchestrator = self._get_current_orchestrator()
+        if not orchestrator:
+            raw_value = object.__getattribute__(config, 'enabled')
+            return raw_value if raw_value is not None else False
+
+        try:
+            # Collect live context DIRECTLY from all managers in this scope hierarchy
+            # CRITICAL: We can't use manager._collect_live_context_from_other_windows() because
+            # that skips managers of the same type, but we NEED the PipelineConfig manager's values!
+            # CRITICAL: Use hierarchical scope matching - include child scopes like "plate::step"
+            plate_scope = self.current_plate
+
+            live_context_dict = {}
+
+            logger.info(f"🔍 COLLECTING LIVE CONTEXT: plate_scope={plate_scope}, step='{step.name}'")
+            for manager in ParameterFormManager._active_form_managers:
+                # Include managers from:
+                # 1. Global scope (None)
+                # 2. Exact plate scope match
+                # 3. Child scopes (e.g., "plate::step" when plate_scope is "plate")
+                is_visible = (
+                    manager.scope_id is None or  # Global scope
+                    manager.scope_id == plate_scope or  # Exact match
+                    (manager.scope_id and manager.scope_id.startswith(plate_scope + "::"))  # Child scope
+                )
+
+                logger.info(f"🔍   Manager: scope_id={manager.scope_id}, type={type(manager.object_instance).__name__}, is_visible={is_visible}")
+
+                if is_visible:
+                    # Get user-modified values (concrete, non-None values only)
+                    live_values = manager.get_user_modified_values()
+                    obj_type = type(manager.object_instance)
+                    live_context_dict[obj_type] = live_values
+                    logger.info(f"🔍     → Added to live_context_dict: {obj_type.__name__} with {len(live_values)} values")
+
+            # Build context stack: GlobalPipelineConfig → PipelineConfig → Step
+            # Use live values if available, otherwise use stored values
+
+            # 1. GlobalPipelineConfig (from thread-local or live context)
+            global_config = get_current_global_config(GlobalPipelineConfig)
+            if GlobalPipelineConfig in live_context_dict:
+                global_live_values = live_context_dict[GlobalPipelineConfig]
+                # Reconstruct nested dataclasses
+                global_live_values = self._reconstruct_nested_for_context(global_live_values, global_config)
+                if dataclasses.is_dataclass(global_config):
+                    global_config = dataclasses.replace(global_config, **global_live_values)
+                else:
+                    from types import SimpleNamespace
+                    global_config = SimpleNamespace(**{**vars(global_config), **global_live_values})
+
+            # 2. PipelineConfig (from orchestrator or live context)
+            pipeline_config = orchestrator.pipeline_config
+            if PipelineConfig in live_context_dict:
+                pipeline_live_values = live_context_dict[PipelineConfig]
+                # Reconstruct nested dataclasses
+                pipeline_live_values = self._reconstruct_nested_for_context(pipeline_live_values, pipeline_config)
+                if dataclasses.is_dataclass(pipeline_config):
+                    pipeline_config = dataclasses.replace(pipeline_config, **pipeline_live_values)
+                else:
+                    from types import SimpleNamespace
+                    pipeline_config = SimpleNamespace(**{**vars(pipeline_config), **pipeline_live_values})
+
+            # 3. FunctionStep (from stored step or live context)
+            # CRITICAL: Check if there's a step editor open for THIS SPECIFIC step (by object identity)
+            # Match by finding the DualEditorWindow that has this step as its original_step_reference
+            step_to_use = step
+
+            # Find the manager for THIS specific step object
+            for manager in ParameterFormManager._active_form_managers:
+                if (manager.scope_id and manager.scope_id.startswith(plate_scope + "::") and
+                    type(manager.object_instance).__name__ == 'FunctionStep'):
+                    # Walk up parent chain to find DualEditorWindow
+                    parent = manager.parent()
+                    while parent is not None:
+                        if parent.__class__.__name__ == 'DualEditorWindow':
+                            # Check if this window is editing THIS specific step
+                            if hasattr(parent, 'original_step_reference') and parent.original_step_reference is step:
+                                # Found the step editor for THIS step!
+                                step_live_values = manager.get_user_modified_values()
+                                logger.info(f"🔍 Found step editor for step '{step.name}' with {len(step_live_values)} live values")
+                                # Reconstruct nested dataclasses
+                                step_live_values = self._reconstruct_nested_for_context(step_live_values, step)
+                                # FunctionStep is NOT a dataclass - use SimpleNamespace pattern
+                                from types import SimpleNamespace
+                                step_to_use = SimpleNamespace(**{**vars(step), **step_live_values})
+                                break
+                        parent = parent.parent() if hasattr(parent, 'parent') else None
+                    if step_to_use is not step:
+                        break  # Found it, exit outer loop
+
+            # Build context stack and resolve
+            with config_context(global_config):
+                with config_context(pipeline_config):
+                    with config_context(step_to_use):
+                        resolved_value = config.enabled
+                        return resolved_value if resolved_value is not None else False
+
+        except Exception as e:
+            import traceback
+            logger.warning(f"Failed to resolve config.enabled for {type(config).__name__}: {e}")
+            logger.warning(f"Traceback: {traceback.format_exc()}")
+            raw_value = object.__getattribute__(config, 'enabled')
+            return raw_value if raw_value is not None else False
+
+    def _reconstruct_nested_for_context(self, live_values: dict, base_instance) -> dict:
+        """Reconstruct nested dataclasses from (type, dict) tuples to instances.
+
+        This is a simplified version of ParameterFormManager._reconstruct_nested_dataclasses()
+        for use in pipeline editor context resolution.
+        """
+        import dataclasses
+        from dataclasses import is_dataclass
+
+        reconstructed = {}
+        for field_name, value in live_values.items():
+            if isinstance(value, tuple) and len(value) == 2:
+                dataclass_type, field_dict = value
+                if is_dataclass(dataclass_type):
+                    # Merge into base instance's nested dataclass
+                    if base_instance and hasattr(base_instance, field_name):
+                        base_nested = getattr(base_instance, field_name)
+                        if base_nested is not None and is_dataclass(base_nested):
+                            reconstructed[field_name] = dataclasses.replace(base_nested, **field_dict)
+                        else:
+                            reconstructed[field_name] = dataclass_type(**field_dict)
+                    else:
+                        reconstructed[field_name] = dataclass_type(**field_dict)
+                else:
+                    reconstructed[field_name] = value
+            else:
+                reconstructed[field_name] = value
+        return reconstructed
+
+    def _on_cross_window_context_changed(self, field_path: str, new_value: object,
+                                         editing_object: object, context_object: object):
+        """Handle cross-window context changes to update preview labels.
+
+        Reacts to any config change that could affect resolved values through the context hierarchy.
+        """
+        # Refresh on any change to streaming_defaults or step config indicators
+        should_refresh = (
+            'streaming_defaults' in field_path or
+            any(config_attr in field_path for config_attr in self.STEP_CONFIG_INDICATORS.keys())
+        )
+
+        if should_refresh:
+            logger.info(f"✅ Pipeline editor: Value changed in {field_path}, refreshing preview labels")
+            self.update_step_list()
+        else:
+            logger.info(f"❌ Pipeline editor: Ignoring value change in {field_path} (not a config indicator)")
+
+    def _on_cross_window_context_refreshed(self, editing_object: object, context_object: object):
+        """Handle cascading placeholder refreshes from upstream windows.
+
+        Reacts to any context refresh that could affect resolved values.
+        """
+        editing_type = type(editing_object).__name__ if editing_object is not None else "None"
+        context_type = type(context_object).__name__ if context_object is not None else "None"
+        logger.info(f"🔄 Pipeline editor: Context refreshed (editing_object={editing_type}, context_object={context_type}), refreshing preview labels")
+        self.update_step_list()
     
     # ========== UI Helper Methods ==========
     
     def update_step_list(self):
         """Update the step list widget using selection preservation mixin."""
+        logger.info(f"🔍 UPDATE_STEP_LIST CALLED")
+
         def format_step_item(step, step_index):
             """Format step item for display."""
             display_text, step_name = self.format_item_for_display(step)
@@ -1107,5 +1330,15 @@ class PipelineEditorWidget(QWidget):
         if hasattr(self, 'form_manager') and self.form_manager:
             self.form_manager.refresh_placeholder_text()
             logger.info("Refreshed pipeline config placeholders after global config change")
+
+    def closeEvent(self, event):
+        """Handle widget close event to disconnect signals and prevent memory leaks."""
+        # Unregister from cross-window refresh signals
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        ParameterFormManager.unregister_external_listener(self)
+        logger.debug("Pipeline editor: Unregistered from cross-window refresh signals")
+
+        # Call parent closeEvent
+        super().closeEvent(event)
 
 

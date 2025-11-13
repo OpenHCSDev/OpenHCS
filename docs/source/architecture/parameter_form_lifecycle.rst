@@ -96,6 +96,79 @@ Cross-Window Debounce
 ~~~~~~~~~~~~~~~~~~~~~
 :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._schedule_cross_window_refresh` debounces placeholder refreshes with :pyattr:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.CROSS_WINDOW_REFRESH_DELAY_MS` (currently 60 ms). Multiple rapid edits are coalesced into a single refresh burst without sacrificing the “live preview” feel.
 
+External Listener Pattern
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Some UI components need to react to configuration changes but are not themselves form managers (e.g., the pipeline editor's preview labels showing "MAT", "NAP", "FIJI" indicators). The external listener pattern allows these components to register for cross-window notifications without participating in the full form manager lifecycle.
+
+**Registration**
+
+External listeners register via the class method :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.register_external_listener`:
+
+.. code-block:: python
+
+    # pipeline_editor.py
+    ParameterFormManager.register_external_listener(
+        self,
+        self._on_cross_window_context_changed,
+        self._on_cross_window_context_refreshed
+    )
+
+The registration stores a tuple ``(listener, value_changed_handler, refresh_handler)`` in the class-level ``_external_listeners`` list. Unlike form managers, external listeners:
+
+- Do not participate in the mesh signal topology (no bidirectional connections)
+- Do not emit signals themselves
+- Receive notifications via direct method calls, not Qt signals
+- Are not scoped (they receive all notifications regardless of ``scope_id``)
+
+**Notification Points**
+
+External listeners are notified at three critical points:
+
+1. **Global refresh** (:py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.trigger_global_cross_window_refresh`): Called when global config changes or when all managers are unregistered (e.g., after cancel). Notifies all external listeners with ``refresh_handler(None, None)``.
+
+2. **Reset operations** (:py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.reset_all_parameters`): Called when a form is reset (either root or nested manager). Notifies external listeners with ``refresh_handler(object_instance, context_obj)`` via :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._notify_external_listeners_refreshed`.
+
+3. **Dialog cancel** (``reject()`` in :py:class:`~openhcs.pyqt_gui.windows.base_form_dialog.BaseFormDialog` subclasses): Called when a dialog is cancelled (Cancel button or Escape key). Must call :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.trigger_global_cross_window_refresh` AFTER unregistration to ensure external listeners receive the refresh notification.
+
+**Critical Implementation Requirements**
+
+For external listeners to work correctly:
+
+1. Cancel operations (``reject()``) must call :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager.trigger_global_cross_window_refresh` AFTER ``super().reject()`` to ensure external listeners are notified after the window is unregistered.
+
+2. Reset operations must call :py:meth:`~openhcs.pyqt_gui.widgets.shared.parameter_form_manager.ParameterFormManager._notify_external_listeners_refreshed` for both root and nested managers to ensure external listeners update immediately.
+
+3. External listeners must implement both ``value_changed_handler(field_path, new_value, editing_object, context_object)`` and ``refresh_handler(editing_object, context_object)`` to handle both incremental changes and full refreshes.
+
+**Example: Pipeline Editor Preview Labels**
+
+The pipeline editor uses external listeners to update preview labels (MAT, NAP, FIJI) when configuration changes occur in other windows:
+
+.. code-block:: python
+
+    # openhcs/pyqt_gui/widgets/pipeline_editor.py
+    def setup_connections(self):
+        """Setup signal connections."""
+        # Register as external listener for cross-window updates
+        ParameterFormManager.register_external_listener(
+            self,
+            self._on_cross_window_context_changed,
+            self._on_cross_window_context_refreshed
+        )
+
+    def _on_cross_window_context_refreshed(self, editing_object, context_object):
+        """Handle cross-window context refresh (e.g., after cancel or reset)."""
+        logger.info(f"🔄 Pipeline editor: Context refreshed, refreshing preview labels")
+        self._update_step_list()  # Refresh all preview labels
+
+    def closeEvent(self, event):
+        """Handle widget close event."""
+        # Unregister external listener
+        ParameterFormManager.unregister_external_listener(self)
+        super().closeEvent(event)
+
+This pattern ensures that preview labels stay synchronized with configuration changes across all open windows, including when dialogs are cancelled or reset.
+
 Dialog Lifecycle Management
 ----------------------------
 Proper dialog cleanup is critical to prevent ghost form managers that cause infinite refresh loops and runaway CPU usage.

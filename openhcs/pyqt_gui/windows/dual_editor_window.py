@@ -967,6 +967,11 @@ class DualEditorWindow(BaseFormDialog):
 
     def cancel_edit(self):
         """Cancel editing and close dialog."""
+        # Just call reject() - it handles everything including the confirmation dialog
+        self.reject()
+
+    def reject(self):
+        """Handle dialog rejection (Cancel button or Escape key)."""
         if self.has_changes:
             from PyQt6.QtWidgets import QMessageBox
             reply = QMessageBox.question(
@@ -981,8 +986,15 @@ class DualEditorWindow(BaseFormDialog):
                 return
 
         self.step_cancelled.emit()
-        self.reject()  # BaseFormDialog handles unregistration
-        logger.debug("Step editing cancelled")
+        logger.info("🔍 DualEditorWindow: About to call super().reject()")
+        super().reject()  # BaseFormDialog handles unregistration
+
+        # CRITICAL: Trigger global refresh AFTER unregistration so other windows
+        # re-collect live context without this cancelled window's values
+        logger.info("🔍 DualEditorWindow: About to trigger global refresh")
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        ParameterFormManager.trigger_global_cross_window_refresh()
+        logger.info("🔍 DualEditorWindow: Triggered global refresh after cancel")
 
     def closeEvent(self, event):
         """Handle dialog close event."""

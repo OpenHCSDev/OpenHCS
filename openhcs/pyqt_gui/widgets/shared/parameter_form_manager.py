@@ -243,6 +243,11 @@ class ParameterFormManager(QWidget):
     # CRITICAL: This is scoped per orchestrator/plate using scope_id to prevent cross-contamination
     _active_form_managers = []
 
+    # Class-level registry of external listeners (e.g., PipelineEditorWidget)
+    # These are objects that want to receive cross-window signals but aren't ParameterFormManager instances
+    # Format: [(listener_object, value_changed_handler, refresh_handler), ...]
+    _external_listeners = []
+
     # Class constants for UI preferences (moved from constructor parameters)
     DEFAULT_USE_SCROLL_AREA = False
     DEFAULT_PLACEHOLDER_PREFIX = "Default"
@@ -274,6 +279,44 @@ class ParameterFormManager(QWidget):
         return cls.ASYNC_WIDGET_CREATION and param_count > cls.ASYNC_THRESHOLD
 
     @classmethod
+    def register_external_listener(cls, listener: object,
+                                   value_changed_handler,
+                                   refresh_handler):
+        """Register an external listener for cross-window signals.
+
+        External listeners are objects (like PipelineEditorWidget) that want to receive
+        cross-window signals but aren't ParameterFormManager instances.
+
+        Args:
+            listener: The listener object (for identification)
+            value_changed_handler: Handler for context_value_changed signal
+            refresh_handler: Handler for context_refreshed signal
+        """
+        # Add to registry
+        cls._external_listeners.append((listener, value_changed_handler, refresh_handler))
+
+        # Connect all existing managers to this listener
+        for manager in cls._active_form_managers:
+            manager.context_value_changed.connect(value_changed_handler)
+            manager.context_refreshed.connect(refresh_handler)
+
+        logger.debug(f"Registered external listener: {listener.__class__.__name__}")
+
+    @classmethod
+    def unregister_external_listener(cls, listener: object):
+        """Unregister an external listener.
+
+        Args:
+            listener: The listener object to unregister
+        """
+        # Find and remove from registry
+        cls._external_listeners = [
+            (l, vh, rh) for l, vh, rh in cls._external_listeners if l is not listener
+        ]
+
+        logger.debug(f"Unregistered external listener: {listener.__class__.__name__}")
+
+    @classmethod
     def trigger_global_cross_window_refresh(cls):
         """Trigger cross-window refresh for all active form managers.
 
@@ -282,6 +325,9 @@ class ParameterFormManager(QWidget):
 
         CRITICAL: Also emits context_refreshed signal for each manager so that
         downstream components (like function pattern editor) can refresh their state.
+
+        CRITICAL: Also notifies external listeners (like PipelineEditor) directly,
+        especially important when all managers are unregistered (e.g., after cancel).
         """
         logger.debug(f"Triggering global cross-window refresh for {len(cls._active_form_managers)} active managers")
         for manager in cls._active_form_managers:
@@ -292,6 +338,32 @@ class ParameterFormManager(QWidget):
                 manager.context_refreshed.emit(manager.object_instance, manager.context_obj)
             except Exception as e:
                 logger.warning(f"Failed to refresh manager during global refresh: {e}")
+
+        # CRITICAL: Notify external listeners directly (e.g., PipelineEditor)
+        # This is especially important when all managers are unregistered (e.g., after cancel)
+        # and there are no managers left to emit signals
+        logger.debug(f"Notifying {len(cls._external_listeners)} external listeners")
+        for listener, value_changed_handler, refresh_handler in cls._external_listeners:
+            try:
+                # Call refresh handler with None for both editing_object and context_object
+                # since this is a global refresh not tied to a specific object
+                refresh_handler(None, None)
+            except Exception as e:
+                logger.warning(f"Failed to notify external listener {listener.__class__.__name__}: {e}")
+
+    def _notify_external_listeners_refreshed(self):
+        """Notify external listeners that context has been refreshed.
+
+        This is called when a manager emits context_refreshed signal but external
+        listeners also need to be notified directly (e.g., after reset).
+        """
+        logger.info(f"🔍 _notify_external_listeners_refreshed called from {self.field_id}, notifying {len(self._external_listeners)} listeners")
+        for listener, value_changed_handler, refresh_handler in self._external_listeners:
+            try:
+                logger.info(f"🔍   Calling refresh_handler for {listener.__class__.__name__}")
+                refresh_handler(self.object_instance, self.context_obj)
+            except Exception as e:
+                logger.warning(f"Failed to notify external listener {listener.__class__.__name__}: {e}")
 
     def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None, read_only: bool = False, scope_id: Optional[str] = None, color_scheme=None):
         """
@@ -489,6 +561,11 @@ class ParameterFormManager(QWidget):
                     # Connect existing instances to this instance
                     existing_manager.context_value_changed.connect(self._on_cross_window_context_changed)
                     existing_manager.context_refreshed.connect(self._on_cross_window_context_refreshed)
+
+                # Connect this instance to all external listeners
+                for listener, value_changed_handler, refresh_handler in self._external_listeners:
+                    self.context_value_changed.connect(value_changed_handler)
+                    self.context_refreshed.connect(refresh_handler)
 
                 # Add this instance to the registry
                 self._active_form_managers.append(self)
@@ -1477,6 +1554,7 @@ class ParameterFormManager(QWidget):
         """Reset all parameters - just call reset_parameter for each parameter."""
         from openhcs.utils.performance_monitor import timer
 
+        logger.info(f"🔍 reset_all_parameters CALLED for {self.field_id}, parent={self._parent_manager.field_id if self._parent_manager else 'None'}")
         with timer(f"reset_all_parameters ({self.field_id})", threshold_ms=50.0):
             # OPTIMIZATION: Set flag to prevent per-parameter refreshes
             # This makes reset_all much faster by batching all refreshes to the end
@@ -1502,6 +1580,7 @@ class ParameterFormManager(QWidget):
             # Reset should show inherited values from parent contexts, including unsaved changes
             # CRITICAL: Nested managers must trigger refresh on ROOT manager to collect live context
             if self._parent_manager is None:
+                logger.info(f"🔍 reset_all_parameters: ROOT manager {self.field_id}, refreshing and notifying external listeners")
                 self._refresh_with_live_context()
                 # CRITICAL: Also refresh enabled styling for nested managers after reset
                 # This ensures optional dataclass fields respect None/not-None and enabled=True/False states
@@ -1511,16 +1590,23 @@ class ParameterFormManager(QWidget):
                 # This tells other open windows to refresh their placeholders with the reset values
                 # Example: Reset PipelineConfig → Step editors refresh to show reset inherited values
                 self.context_refreshed.emit(self.object_instance, self.context_obj)
+                # CRITICAL: Also notify external listeners directly (e.g., PipelineEditor)
+                self._notify_external_listeners_refreshed()
             else:
                 # Nested manager: trigger refresh on root manager
+                logger.info(f"🔍 reset_all_parameters: NESTED manager {self.field_id}, finding root and notifying external listeners")
                 root = self._parent_manager
                 while root._parent_manager is not None:
                     root = root._parent_manager
+                logger.info(f"🔍 reset_all_parameters: Found root manager {root.field_id}")
                 root._refresh_with_live_context()
                 # CRITICAL: Also refresh enabled styling for root's nested managers
                 root._apply_to_nested_managers(lambda name, manager: manager._refresh_enabled_styling())
                 # CRITICAL: Emit from root manager to trigger cross-window updates
                 root.context_refreshed.emit(root.object_instance, root.context_obj)
+                # CRITICAL: Also notify external listeners directly (e.g., PipelineEditor)
+                logger.info(f"🔍 reset_all_parameters: About to call root._notify_external_listeners_refreshed()")
+                root._notify_external_listeners_refreshed()
 
 
 
@@ -1585,12 +1671,16 @@ class ParameterFormManager(QWidget):
             # CRITICAL: Nested managers must trigger refresh on ROOT manager to collect live context
             if self._parent_manager is None:
                 self._refresh_with_live_context()
+                # CRITICAL: Also notify external listeners directly (e.g., PipelineEditor)
+                self._notify_external_listeners_refreshed()
             else:
                 # Nested manager: trigger refresh on root manager
                 root = self._parent_manager
                 while root._parent_manager is not None:
                     root = root._parent_manager
                 root._refresh_with_live_context()
+                # CRITICAL: Also notify external listeners directly (e.g., PipelineEditor)
+                root._notify_external_listeners_refreshed()
         finally:
             self._in_reset = False
 
@@ -2811,14 +2901,50 @@ class ParameterFormManager(QWidget):
             self._parameter_change_timer.start(self.PARAMETER_CHANGE_DEBOUNCE_MS)
 
     def _on_parameter_changed_nested(self, param_name: str, value: Any) -> None:
-        """Bubble refresh requests from nested managers up to the root with debounce."""
+        """Bubble refresh requests from nested managers up to the root with debounce.
+
+        CRITICAL: ALL changes must emit cross-window signals so other windows can react in real time.
+        'enabled' changes skip placeholder refreshes to avoid infinite loops.
+        """
         if (getattr(self, '_in_reset', False) or
-                getattr(self, '_block_cross_window_updates', False) or
-                param_name == 'enabled'):
+                getattr(self, '_block_cross_window_updates', False)):
             return
+
+        # Find root manager
         root = self
         while root._parent_manager is not None:
             root = root._parent_manager
+
+        # Build full field path by walking up the parent chain
+        # Use the parent's nested_managers dict to find the actual parameter name
+        path_parts = [param_name]
+        current = self
+        while current._parent_manager is not None:
+            # Find this manager's parameter name in the parent's nested_managers dict
+            parent_param_name = None
+            for pname, manager in current._parent_manager.nested_managers.items():
+                if manager is current:
+                    parent_param_name = pname
+                    break
+
+            if parent_param_name:
+                path_parts.insert(0, parent_param_name)
+
+            current = current._parent_manager
+
+        # Prepend root field_id
+        path_parts.insert(0, root.field_id)
+        field_path = '.'.join(path_parts)
+
+        # ALWAYS emit cross-window signal for real-time updates
+        root.context_value_changed.emit(field_path, value,
+                                       self.object_instance, self.context_obj)
+
+        # For 'enabled' changes: skip placeholder refresh to avoid infinite loops
+        if param_name == 'enabled':
+            return
+
+        # For other changes: also trigger placeholder refresh
         root._on_parameter_changed_root(param_name, value)
 
     def _run_debounced_placeholder_refresh(self) -> None:
