@@ -929,9 +929,21 @@ def _get_skan_version():
 
 
 def _skeleton_mask_to_rois(skeleton_stack: np.ndarray) -> List[ROI]:
-    """Convert a binary skeleton mask into ROI objects via the shared ROI extractor."""
-    from scipy import ndimage
-    from openhcs.core.roi import extract_rois_from_labeled_mask
+    """
+    Convert a binary skeleton mask into ROI objects using skan branch paths.
+
+    Uses skan's Skeleton object to extract actual branch paths, creating one ROI
+    per continuous skeleton segment. This preserves skeleton connectivity and
+    creates proper polyline ROIs instead of fragmenting the skeleton.
+
+    Args:
+        skeleton_stack: Binary skeleton mask (Z, Y, X)
+
+    Returns:
+        List of ROI objects, one per skeleton branch
+    """
+    from skan import Skeleton
+    from openhcs.core.roi import PolygonShape, ROI
 
     rois: List[ROI] = []
 
@@ -941,26 +953,58 @@ def _skeleton_mask_to_rois(skeleton_stack: np.ndarray) -> List[ROI]:
         logger.error(f"🔍 SKELETON_TO_ROIS: Expected 2D/3D skeleton, got {skeleton_stack.ndim}D")
         return rois
 
-    structure = np.ones((3, 3), dtype=int)
+    # Check if skeleton is empty
+    if not skeleton_stack.any():
+        logger.info("🔍 SKELETON_TO_ROIS: Empty skeleton mask, no ROIs to extract")
+        return rois
 
+    # Process each Z-slice independently to create 2D ROIs
     for z_idx, skeleton_slice in enumerate(skeleton_stack):
         if not skeleton_slice.any():
             continue
 
-        labeled_slice, num_features = ndimage.label(skeleton_slice, structure=structure)
-        if num_features == 0:
+        try:
+            # Create skan Skeleton object for this slice
+            skeleton_obj = Skeleton(skeleton_slice)
+
+            # Get number of branches (paths) in this skeleton
+            num_branches = skeleton_obj.n_paths
+
+            if num_branches == 0:
+                logger.debug(f"🔍 SKELETON_TO_ROIS: No branches found in Z-slice {z_idx}")
+                continue
+
+            # Extract each branch as a separate ROI
+            for branch_idx in range(num_branches):
+                # Get the pixel coordinates for this branch path
+                # path_coordinates returns (N, 2) array of (row, col) = (y, x) coordinates
+                path_coords = skeleton_obj.path_coordinates(branch_idx)
+
+                if len(path_coords) < 2:
+                    # Skip degenerate paths (single pixel or empty)
+                    logger.debug(f"🔍 SKELETON_TO_ROIS: Skipping degenerate path {branch_idx} in Z-slice {z_idx} (length={len(path_coords)})")
+                    continue
+
+                # Create polygon shape from path coordinates
+                # skan returns (row, col) which is (y, x) - exactly what PolygonShape expects
+                shape = PolygonShape(coordinates=path_coords)
+
+                # Create ROI with metadata
+                metadata = {
+                    'position': z_idx,
+                    'label': f'Skeleton_Z{z_idx:03d}_Branch{branch_idx:03d}',
+                    'branch_index': branch_idx,
+                    'path_length': len(path_coords)
+                }
+
+                roi = ROI(shapes=[shape], metadata=metadata)
+                rois.append(roi)
+
+            logger.debug(f"🔍 SKELETON_TO_ROIS: Extracted {num_branches} branch ROIs from Z-slice {z_idx}")
+
+        except Exception as e:
+            logger.warning(f"🔍 SKELETON_TO_ROIS: Failed to extract ROIs from Z-slice {z_idx}: {e}")
             continue
 
-        slice_rois = extract_rois_from_labeled_mask(
-            labeled_slice.astype(np.int32),
-            min_area=1,
-            extract_contours=True
-        )
-
-        for roi_idx, roi in enumerate(slice_rois, start=1):
-            roi.metadata['position'] = z_idx
-            roi.metadata['label'] = roi.metadata.get('label', f'Skeleton_Z{z_idx:03d}_{roi_idx:03d}')
-
-        rois.extend(slice_rois)
-
+    logger.info(f"🔍 SKELETON_TO_ROIS: Extracted {len(rois)} total branch ROIs from skeleton")
     return rois
