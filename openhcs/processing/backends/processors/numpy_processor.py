@@ -359,6 +359,27 @@ def mean_projection(stack: np.ndarray) -> np.ndarray:
     return projection_2d.reshape(1, projection_2d.shape[0], projection_2d.shape[1])
 
 @numpy_func
+def gaussian_blur(stack: np.ndarray, sigma: float = 1.0) -> np.ndarray:
+    """
+    Apply Gaussian blur to reduce noise in image stack.
+
+    Args:
+        stack: 3D NumPy array of shape (Z, Y, X)
+        sigma: Standard deviation for Gaussian kernel (higher = more blur)
+
+    Returns:
+        Blurred 3D NumPy array of shape (Z, Y, X)
+    """
+    _validate_3d_array(stack)
+
+    # Apply Gaussian blur slice-by-slice
+    blurred = np.zeros_like(stack, dtype=np.float64)
+    for z in range(stack.shape[0]):
+        blurred[z] = filters.gaussian(stack[z], sigma=sigma, preserve_range=True)
+
+    return blurred.astype(stack.dtype)
+
+@numpy_func
 def spatial_bin_2d(
     stack: np.ndarray,
     bin_size: int = 2,
@@ -495,6 +516,9 @@ def stack_equalize_histogram(
     """
     _validate_3d_array(stack)
 
+    # Remember input dtype to preserve it
+    input_dtype = stack.dtype
+
     # Flatten the entire stack to compute the global histogram
     flat_stack = stack.flatten()
 
@@ -502,16 +526,25 @@ def stack_equalize_histogram(
     hist, bin_edges = np.histogram(flat_stack, bins=bins, range=(range_min, range_max))
     cdf = hist.cumsum()
 
-    # Normalize the CDF to the range [0, 65535]
+    # Normalize the CDF to the input dtype range
     # Avoid division by zero
     if cdf[-1] > 0:
-        cdf = 65535 * cdf / cdf[-1]
+        if np.issubdtype(input_dtype, np.integer):
+            dtype_info = np.iinfo(input_dtype)
+            cdf = dtype_info.max * cdf / cdf[-1]
+        else:
+            # For float dtypes, normalize to [0, 1]
+            cdf = cdf / cdf[-1]
 
     # Use linear interpolation to map input values to equalized values
     equalized_stack = np.interp(stack.flatten(), bin_edges[:-1], cdf).reshape(stack.shape)
 
-    # Convert to uint16
-    return equalized_stack.astype(np.uint16)
+    # Convert back to input dtype
+    if np.issubdtype(input_dtype, np.integer):
+        dtype_info = np.iinfo(input_dtype)
+        return np.clip(equalized_stack, dtype_info.min, dtype_info.max).astype(input_dtype)
+    else:
+        return equalized_stack.astype(input_dtype)
 
 @numpy_func
 def create_projection(stack: np.ndarray, method: str = "max_projection") -> np.ndarray:

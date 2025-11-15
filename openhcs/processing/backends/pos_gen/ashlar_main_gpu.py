@@ -317,11 +317,11 @@ class ArrayEdgeAlignerGPU:
     """
 
     def __init__(self, image_stack, positions, tile_size, pixel_size=1.0,
-                 max_shift=15, alpha=0.01, max_error=None,
-                 randomize=False, verbose=False, upsample_factor=10,
+                 max_shift=30.0, alpha=0.05, max_error=None,
+                 randomize=False, verbose=False, upsample_factor=50,
                  permutation_upsample=1, permutation_samples=1000,
                  min_permutation_samples=10, max_permutation_tries=100,
-                 window_size_factor=0.1):
+                 window_size_factor=0.15):
         """
         Initialize array-based EdgeAligner for position calculation on GPU.
 
@@ -802,17 +802,18 @@ def ashlar_compute_tile_positions_gpu(
     image_stack,
     grid_dimensions: Tuple[int, int],
     overlap_ratio: float = 0.1,
-    max_shift: float = 15.0,
-    stitch_alpha: float = 0.01,
+    pixel_size: float = 1.0,
+    max_shift: float = 30.0,
+    stitch_alpha: float = 0.05,
     max_error: float = None,
     randomize: bool = False,
     verbose: bool = False,
-    upsample_factor: int = 10,
+    upsample_factor: int = 50,
     permutation_upsample: int = 1,
     permutation_samples: int = 1000,
     min_permutation_samples: int = 10,
     max_permutation_tries: int = 100,
-    window_size_factor: float = 0.1
+    window_size_factor: float = 0.15
 ) -> Tuple[np.ndarray, List[Tuple[float, float]]]:
     """
     Compute tile positions using the Ashlar algorithm on GPU - matches CPU version.
@@ -836,7 +837,15 @@ def ashlar_compute_tile_positions_gpu(
                       - 0.05-0.15 for well-controlled microscopes
                       - 0.15-0.25 for less precise stages
 
-        max_shift: Maximum allowed shift correction in micrometers. Default 15.0. This limits
+        pixel_size: Physical size of one pixel in micrometers (µm/pixel). Default 1.0.
+                   This is used to convert max_shift from micrometers to pixels. For example,
+                   if your microscope has 0.5 µm/pixel resolution and max_shift=30.0 µm,
+                   the actual pixel shift limit will be 30.0/0.5 = 60 pixels. Common values:
+                   - 0.1-0.5 µm/pixel for high-magnification objectives (60x, 100x)
+                   - 0.5-2.0 µm/pixel for medium magnification (20x, 40x)
+                   - 2.0-10.0 µm/pixel for low magnification (4x, 10x)
+
+        max_shift: Maximum allowed shift correction in micrometers. Default 30.0. This limits
                   how far tiles can be moved from their initial grid positions during alignment.
                   Should be set based on your microscope's stage accuracy:
                   - 5-15 μm for high-precision stages
@@ -946,7 +955,7 @@ def ashlar_compute_tile_positions_gpu(
             image_stack=image_stack_gpu,
             positions=initial_positions,
             tile_size=tile_size,
-            pixel_size=1.0,  # Assume 1 micrometer per pixel if not specified
+            pixel_size=pixel_size,
             max_shift=max_shift,
             alpha=stitch_alpha,
             max_error=max_error,

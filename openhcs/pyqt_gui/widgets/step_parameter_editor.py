@@ -559,12 +559,9 @@ class StepParameterEditorWidget(QWidget):
     def _handle_edited_step_code(self, edited_code: str) -> None:
         """Handle the edited step code from code editor."""
         try:
-            explicitly_set_fields = CodeEditorFormUpdater.extract_explicitly_set_fields(
-                edited_code,
-                class_name='FunctionStep',
-                variable_name='step'
-            )
-
+            # SIMPLIFIED: Just exec with patched constructors
+            # The patched constructors preserve None vs concrete distinction in raw field values
+            # No need to parse code - just inspect raw values after exec
             namespace = {}
             with CodeEditorFormUpdater.patch_lazy_constructors():
                 exec(edited_code, namespace)
@@ -582,7 +579,6 @@ class StepParameterEditorWidget(QWidget):
                 CodeEditorFormUpdater.update_form_from_instance(
                     self.form_manager,
                     new_step,
-                    explicitly_set_fields,
                     broadcast_callback=None
                 )
             finally:

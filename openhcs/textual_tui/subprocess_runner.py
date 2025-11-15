@@ -609,8 +609,76 @@ def main():
                 log_file_base=log_file_base,
                 effective_config=effective_config
             )
-        
+
         logger.info("🔥 SUBPROCESS: All plates completed successfully")
+
+        # Run global multi-plate consolidation if enabled and multiple plates were processed
+        if len(plate_paths) > 1 and global_config.analysis_consolidation_config.enabled:
+            try:
+                logger.info("🔥 SUBPROCESS: Starting global multi-plate consolidation")
+
+                from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_multi_plate_summaries
+                from pathlib import Path
+
+                # Collect individual MetaXpress summaries from each plate
+                summary_paths = []
+                plate_names = []
+
+                for plate_path in plate_paths:
+                    # Build results directory path using same logic as orchestrator
+                    plate_path_obj = Path(plate_path)
+                    path_config = global_config.path_planning_config
+
+                    # Determine output plate root
+                    if path_config.global_output_folder:
+                        base = Path(path_config.global_output_folder)
+                    else:
+                        base = plate_path_obj.parent
+
+                    output_plate_root = base / f"{plate_path_obj.name}{path_config.output_dir_suffix}"
+
+                    # Get results directory
+                    materialization_path = global_config.materialization_results_path
+                    if Path(materialization_path).is_absolute():
+                        results_dir = Path(materialization_path)
+                    else:
+                        results_dir = output_plate_root / materialization_path
+
+                    # Look for MetaXpress summary in results directory
+                    summary_filename = global_config.analysis_consolidation_config.output_filename
+                    summary_path = results_dir / summary_filename
+
+                    if summary_path.exists():
+                        summary_paths.append(str(summary_path))
+                        plate_names.append(output_plate_root.name)
+                        logger.info(f"Found summary for plate {output_plate_root.name}: {summary_path}")
+                    else:
+                        logger.warning(f"No summary found for plate {plate_path} at {summary_path}")
+
+                if len(summary_paths) > 1:
+                    # Determine global output location
+                    if path_config.global_output_folder:
+                        global_output_dir = Path(path_config.global_output_folder)
+                    else:
+                        # Use parent of first plate's output directory
+                        global_output_dir = Path(summary_paths[0]).parent.parent.parent
+
+                    global_summary_filename = global_config.analysis_consolidation_config.global_summary_filename
+                    global_summary_path = global_output_dir / global_summary_filename
+
+                    # Consolidate all summaries
+                    logger.info(f"Consolidating {len(summary_paths)} summaries to {global_summary_path}")
+                    consolidate_multi_plate_summaries(
+                        summary_paths=summary_paths,
+                        output_path=str(global_summary_path),
+                        plate_names=plate_names
+                    )
+                    logger.info("✅ GLOBAL CONSOLIDATION: Completed successfully")
+                else:
+                    logger.info(f"⏭️ GLOBAL CONSOLIDATION: Only {len(summary_paths)} summary found, skipping")
+
+            except Exception as e:
+                logger.error(f"❌ GLOBAL CONSOLIDATION: Failed: {e}", exc_info=True)
         
     except Exception as e:
         logger.error(f"🔥 SUBPROCESS: Fatal error: {e}", exc_info=True)

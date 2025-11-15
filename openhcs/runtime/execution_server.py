@@ -107,18 +107,34 @@ class OpenHCSExecutionServer:
     def run(self):
         """Main server loop."""
         while self.running:
+            # CRITICAL: ZMQ REP sockets require strict recv->send->recv->send alternation
+            # If recv() succeeds but send() doesn't happen, the socket enters an invalid
+            # state and refuses all future recv() calls, causing the server to hang.
+
+            # Step 1: Try to receive a message (blocking)
             try:
                 message = self.zmq_socket.recv_json()
-                response = self._handle_request(message)
-                self.zmq_socket.send_json(response)
             except KeyboardInterrupt:
                 break
             except Exception as e:
-                logger.error(f"Error in main loop: {e}", exc_info=True)
-                try:
-                    self.zmq_socket.send_json({'status': 'error', 'message': str(e)})
-                except:
-                    pass
+                # recv failed - no message received, so no need to send response
+                logger.error(f"Error receiving message: {e}", exc_info=True)
+                continue
+
+            # Step 2: We received a message, so we MUST send a response
+            try:
+                response = self._handle_request(message)
+            except Exception as e:
+                # ANY error during processing - send error response to maintain socket state
+                logger.error(f"Error handling request: {e}", exc_info=True)
+                response = {'status': 'error', 'message': str(e)}
+
+            # Step 3: ALWAYS send response (even if it's an error response)
+            try:
+                self.zmq_socket.send_json(response)
+            except Exception as e:
+                # If send fails, the socket is likely broken - log and continue
+                logger.error(f"Failed to send response: {e}", exc_info=True)
 
     def _handle_request(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """Route request to appropriate handler."""

@@ -39,6 +39,39 @@ from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 logger = logging.getLogger(__name__)
 
 
+class ReorderablePlateListWidget(QListWidget):
+    """
+    Custom QListWidget that properly handles drag and drop reordering for plates.
+    Emits a signal when items are moved so the parent can update the data model.
+    """
+
+    items_reordered = pyqtSignal(int, int)  # from_index, to_index
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+
+    def dropEvent(self, event):
+        """Handle drop events and emit reorder signal."""
+        # Get the item being dropped and its original position
+        source_item = self.currentItem()
+        if not source_item:
+            super().dropEvent(event)
+            return
+
+        source_index = self.row(source_item)
+
+        # Let the default drop behavior happen first
+        super().dropEvent(event)
+
+        # Find the new position of the item
+        target_index = self.row(source_item)
+
+        # Only emit signal if position actually changed
+        if source_index != target_index:
+            self.items_reordered.emit(source_index, target_index)
+
+
 class PlateManagerWidget(QWidget):
     """
     PyQt6 Plate Manager Widget.
@@ -230,7 +263,7 @@ class PlateManagerWidget(QWidget):
         layout.addWidget(splitter)
         
         # Plate list
-        self.plate_list = QListWidget()
+        self.plate_list = ReorderablePlateListWidget()
         self.plate_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         # Apply explicit styling to plate list for consistent background
         self.plate_list.setStyleSheet(f"""
@@ -336,6 +369,9 @@ class PlateManagerWidget(QWidget):
         # Plate list selection
         self.plate_list.itemSelectionChanged.connect(self.on_selection_changed)
         self.plate_list.itemDoubleClicked.connect(self.on_item_double_clicked)
+
+        # Plate list reordering
+        self.plate_list.items_reordered.connect(self.on_plates_reordered)
         
         # Internal signals
         self.status_message.connect(self.update_status)
@@ -638,32 +674,16 @@ class PlateManagerWidget(QWidget):
         # The config window should work with the current orchestrator context
         # Reset behavior will be handled differently to avoid corrupting step editor context
 
-        # CRITICAL FIX: Create PipelineConfig that preserves user-set values but shows placeholders for inherited fields
-        # The orchestrator's pipeline_config has concrete values filled in from global config inheritance,
-        # but we need to distinguish between user-set values (keep concrete) and inherited values (show as placeholders)
+        # SIMPLIFIED: Just use the orchestrator's pipeline_config directly
+        # ParameterFormManager will use object.__getattribute__ to get raw field values
+        # Raw None = inherited (shows placeholder), Raw concrete = user-set (shows value)
+        # This is the same pattern as pickle_to_python code generation
         from openhcs.config_framework.lazy_factory import create_dataclass_for_editing
-        from dataclasses import fields
 
-        # CRITICAL FIX: Create config for editing that preserves user values while showing placeholders for inherited fields
         if representative_orchestrator.pipeline_config is not None:
-            # Orchestrator has existing config - preserve explicitly set fields, reset others to None for placeholders
-            existing_config = representative_orchestrator.pipeline_config
-            explicitly_set_fields = getattr(existing_config, '_explicitly_set_fields', set())
-
-            # Create field values: keep explicitly set values, use None for inherited fields
-            field_values = {}
-            for field in fields(PipelineConfig):
-                if field.name in explicitly_set_fields:
-                    # User explicitly set this field - preserve the concrete value
-                    field_values[field.name] = object.__getattribute__(existing_config, field.name)
-                else:
-                    # Field was inherited from global config - use None to show placeholder
-                    field_values[field.name] = None
-
-            # Create config with preserved user values and None for inherited fields
-            current_plate_config = PipelineConfig(**field_values)
-            # Preserve the explicitly set fields tracking (bypass frozen restriction)
-            object.__setattr__(current_plate_config, '_explicitly_set_fields', explicitly_set_fields.copy())
+            # Orchestrator has existing config - use it directly
+            # ParameterFormManager will inspect raw values to distinguish None (inherited) from concrete (user-set)
+            current_plate_config = representative_orchestrator.pipeline_config
         else:
             # No existing config - create fresh config with all None values (all show as placeholders)
             current_plate_config = create_dataclass_for_editing(PipelineConfig, self.global_config)
@@ -717,25 +737,26 @@ class PlateManagerWidget(QWidget):
         # SIMPLIFIED: ConfigWindow now uses the dataclass instance directly for context
         # No need for external context management - the form manager handles it automatically
         # CRITICAL: Pass orchestrator's plate_path as scope_id to limit cross-window updates to same orchestrator
+        # CRITICAL: Do NOT wrap in config_context(orchestrator.pipeline_config) - this creates ambient context
+        # that interferes with placeholder resolution. The form manager builds its own context stack.
         scope_id = str(orchestrator.plate_path) if orchestrator else None
-        with config_context(orchestrator.pipeline_config):
-            config_window = ConfigWindow(
-                config_class,           # config_class
-                current_config,         # current_config
-                on_save_callback,       # on_save_callback
-                self.color_scheme,      # color_scheme
-                self,                   # parent
-                scope_id=scope_id       # Scope to this orchestrator
-            )
+        config_window = ConfigWindow(
+            config_class,           # config_class
+            current_config,         # current_config
+            on_save_callback,       # on_save_callback
+            self.color_scheme,      # color_scheme
+            self,                   # parent
+            scope_id=scope_id       # Scope to this orchestrator
+        )
 
-            # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system
-            # Config windows automatically update their placeholders through cross-window signals
-            # when other windows save changes. No need to rebuild the entire form.
+        # REMOVED: refresh_config signal connection - now obsolete with live placeholder context system
+        # Config windows automatically update their placeholders through cross-window signals
+        # when other windows save changes. No need to rebuild the entire form.
 
-            # Show as non-modal window (like main window configuration)
-            config_window.show()
-            config_window.raise_()
-            config_window.activateWindow()
+        # Show as non-modal window (like main window configuration)
+        config_window.show()
+        config_window.raise_()
+        config_window.activateWindow()
 
     def action_edit_global_config(self):
         """
@@ -1273,13 +1294,95 @@ class PlateManagerWidget(QWidget):
                 # Count results
                 completed_count = sum(1 for s in self.plate_execution_states.values() if s == "completed")
                 failed_count = sum(1 for s in self.plate_execution_states.values() if s == "failed")
-                self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed")
+
+                # Run global multi-plate consolidation if multiple plates completed successfully
+                if completed_count > 1 and self.global_config.analysis_consolidation_config.enabled:
+                    try:
+                        logger.info(f"Starting global multi-plate consolidation for {completed_count} plates")
+                        self._consolidate_multi_plate_results()
+                        self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed. Global summary created.")
+                    except Exception as consolidation_error:
+                        logger.error(f"Failed to create global summary: {consolidation_error}", exc_info=True)
+                        self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed. Global summary failed.")
+                else:
+                    self.status_message.emit(f"All done: {completed_count} completed, {failed_count} failed")
 
                 # Update button states to show "Run" instead of "Stop"
                 self.update_button_states()
 
         except Exception as e:
             logger.error(f"Error handling execution completion: {e}", exc_info=True)
+
+    def _consolidate_multi_plate_results(self):
+        """
+        Consolidate results from multiple completed plates into a global summary.
+
+        This collects MetaXpress summaries from all successfully completed plates
+        and creates a unified global summary file.
+        """
+        from pathlib import Path
+        from openhcs.processing.backends.analysis.consolidate_analysis_results import consolidate_multi_plate_summaries
+
+        # Collect summary paths from completed plates
+        summary_paths = []
+        plate_names = []
+
+        for plate_path_str, state in self.plate_execution_states.items():
+            if state != "completed":
+                continue
+
+            plate_path = Path(plate_path_str)
+
+            # Build output directory path (same logic as orchestrator)
+            path_config = self.global_config.path_planning_config
+            if path_config.global_output_folder:
+                base = Path(path_config.global_output_folder)
+            else:
+                base = plate_path.parent
+
+            output_plate_root = base / f"{plate_path.name}{path_config.output_dir_suffix}"
+
+            # Get results directory
+            materialization_path = self.global_config.materialization_results_path
+            if Path(materialization_path).is_absolute():
+                results_dir = Path(materialization_path)
+            else:
+                results_dir = output_plate_root / materialization_path
+
+            # Look for MetaXpress summary
+            summary_filename = self.global_config.analysis_consolidation_config.output_filename
+            summary_path = results_dir / summary_filename
+
+            if summary_path.exists():
+                summary_paths.append(str(summary_path))
+                plate_names.append(output_plate_root.name)
+                logger.info(f"Found summary for plate {output_plate_root.name}: {summary_path}")
+            else:
+                logger.warning(f"No summary found for plate {plate_path} at {summary_path}")
+
+        if len(summary_paths) < 2:
+            logger.info(f"Only {len(summary_paths)} summary found, skipping global consolidation")
+            return
+
+        # Determine global output location
+        path_config = self.global_config.path_planning_config
+        if path_config.global_output_folder:
+            global_output_dir = Path(path_config.global_output_folder)
+        else:
+            # Use parent of first plate's output directory
+            global_output_dir = Path(summary_paths[0]).parent.parent.parent
+
+        global_summary_filename = self.global_config.analysis_consolidation_config.global_summary_filename
+        global_summary_path = global_output_dir / global_summary_filename
+
+        # Consolidate all summaries
+        logger.info(f"Consolidating {len(summary_paths)} summaries to {global_summary_path}")
+        consolidate_multi_plate_summaries(
+            summary_paths=summary_paths,
+            output_path=str(global_summary_path),
+            plate_names=plate_names
+        )
+        logger.info(f"✅ Global summary created: {global_summary_path}")
 
     def _on_execution_error(self, error_msg):
         """Handle execution error (called from main thread via signal)."""
@@ -1526,51 +1629,8 @@ class PlateManagerWidget(QWidget):
 
     def _patch_lazy_constructors(self):
         """Context manager that patches lazy dataclass constructors to preserve None vs concrete distinction."""
-        from contextlib import contextmanager
-        from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
-        import dataclasses
-
-        @contextmanager
-        def patch_context():
-            # Store original constructors
-            original_constructors = {}
-
-            # Find all lazy dataclass types that need patching
-            from openhcs.core.config import LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig
-            lazy_types = [LazyZarrConfig, LazyStepMaterializationConfig, LazyWellFilterConfig]
-
-            # Add any other lazy types that might be used
-            for lazy_type in lazy_types:
-                if LazyDefaultPlaceholderService.has_lazy_resolution(lazy_type):
-                    # Store original constructor
-                    original_constructors[lazy_type] = lazy_type.__init__
-
-                    # Create patched constructor that uses raw values
-                    def create_patched_init(original_init, dataclass_type):
-                        def patched_init(self, **kwargs):
-                            # Use raw value approach instead of calling original constructor
-                            # This prevents lazy resolution during code execution
-                            for field in dataclasses.fields(dataclass_type):
-                                value = kwargs.get(field.name, None)
-                                object.__setattr__(self, field.name, value)
-
-                            # Initialize any required lazy dataclass attributes
-                            if hasattr(dataclass_type, '_is_lazy_dataclass'):
-                                object.__setattr__(self, '_is_lazy_dataclass', True)
-
-                        return patched_init
-
-                    # Apply the patch
-                    lazy_type.__init__ = create_patched_init(original_constructors[lazy_type], lazy_type)
-
-            try:
-                yield
-            finally:
-                # Restore original constructors
-                for lazy_type, original_init in original_constructors.items():
-                    lazy_type.__init__ = original_init
-
-        return patch_context()
+        from openhcs.introspection import patch_lazy_constructors
+        return patch_lazy_constructors()
 
     def _handle_edited_orchestrator_code(self, edited_code: str):
         """Handle edited orchestrator code and update UI state (same logic as Textual TUI)."""
@@ -1621,6 +1681,11 @@ class PlateManagerWidget(QWidget):
                 if 'per_plate_configs' in namespace:
                     # New per-plate config system
                     per_plate_configs = namespace['per_plate_configs']
+
+                    # SIMPLIFIED: No need to track _explicitly_set_fields
+                    # The patched constructors already preserve None vs concrete distinction in raw field values
+                    # ParameterFormManager will use object.__getattribute__ to inspect raw values
+                    # Raw None = inherited, Raw concrete = user-set (same pattern as pickle_to_python)
 
                     # CRITICAL FIX: Match string keys to actual plate path objects
                     # The keys in per_plate_configs are strings, but orchestrators dict uses Path/str objects
@@ -2066,6 +2131,31 @@ class PlateManagerWidget(QWidget):
         )
 
         self.update_button_states()
+
+    def on_plates_reordered(self, from_index: int, to_index: int):
+        """
+        Handle plate reordering from drag and drop.
+
+        Args:
+            from_index: Original position of the moved plate
+            to_index: New position of the moved plate
+        """
+        # Update the underlying plates list to match the visual order
+        current_plates = list(self.plates)
+
+        # Move the plate in the data model
+        plate = current_plates.pop(from_index)
+        current_plates.insert(to_index, plate)
+
+        # Update plates list
+        self.plates = current_plates
+
+        # Update status message
+        plate_name = plate['name']
+        direction = "up" if to_index < from_index else "down"
+        self.status_message.emit(f"Moved plate '{plate_name}' {direction}")
+
+        logger.debug(f"Reordered plate '{plate_name}' from index {from_index} to {to_index}")
 
 
 

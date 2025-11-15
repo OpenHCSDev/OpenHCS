@@ -31,6 +31,10 @@ Practical guides for specific development tasks.
    placeholder_inheritance_debugging
    parameter_analysis_audit
    unified_parameter_analyzer_migration
+   placeholder_refresh_threading
+   scope_hierarchy_live_context
+   lazy_dataclass_utils
+   pyclesperanto_simple_implementation
 
 Testing and CI
 ==============

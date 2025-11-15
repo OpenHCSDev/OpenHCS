@@ -67,6 +67,61 @@ ROIs are extracted from labeled segmentation masks using scikit-image:
 4. Extract shapes (polygon contours or binary masks)
 5. Create immutable ROI objects
 
+Skeleton ROI Extraction
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Skeleton masks require specialized extraction to preserve branch topology and connectivity. The standard ``extract_rois_from_labeled_mask()`` approach fragments skeletons at junctions, losing connectivity information.
+
+**Problem with Standard Extraction**:
+
+Using ``scipy.ndimage.label()`` treats skeletons as binary masks:
+
+- Fragments branches at junction points
+- Loses connectivity and topology information
+- Creates disconnected regions instead of continuous paths
+- Cannot distinguish individual branches
+
+**Solution: skan Branch Path Extraction**:
+
+Use ``skan.Skeleton`` to extract actual branch paths:
+
+.. code-block:: python
+
+    from skan import Skeleton
+    from openhcs.core.roi import PolygonShape, ROI
+
+    # Create skan Skeleton object
+    skeleton_obj = Skeleton(skeleton_mask)
+
+    # Extract each branch as a separate ROI
+    for branch_idx in range(skeleton_obj.n_paths):
+        # Get pixel coordinates for this branch path
+        # Returns (N, 2) array of (row, col) = (y, x) coordinates
+        path_coords = skeleton_obj.path_coordinates(branch_idx)
+
+        # Create polygon shape from path coordinates
+        shape = PolygonShape(coordinates=path_coords)
+
+        # Create ROI with metadata
+        metadata = {
+            'position': z_idx,
+            'label': f'Skeleton_Z{z_idx:03d}_Branch{branch_idx:03d}',
+            'branch_index': branch_idx,
+            'path_length': len(path_coords)
+        }
+
+        roi = ROI(shapes=[shape], metadata=metadata)
+
+**Benefits**:
+
+- Preserves skeleton topology and connectivity
+- One ROI per continuous branch (not per connected component)
+- Compatible with skan's graph-based skeleton analysis
+- Enables visual validation of skeleton analysis results
+- Proper polyline ROIs that represent skeleton structure
+
+**Implementation**: ``openhcs/processing/backends/analysis/skan_axon_analysis.py::_skeleton_mask_to_rois()``
+
 Multi-Backend Materialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

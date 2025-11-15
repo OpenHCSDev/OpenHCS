@@ -549,6 +549,9 @@ def stack_equalize_histogram(
     """
     _validate_3d_array(stack)
 
+    # Remember input dtype to preserve it
+    input_dtype = stack.dtype
+
     # PyTorch doesn't have a direct histogram equalization function
     # We'll implement it manually using torch.histc for the histogram
 
@@ -573,10 +576,15 @@ def stack_equalize_histogram(
     # Calculate cumulative distribution function (CDF)
     cdf = torch.cumsum(hist, dim=0)
 
-    # Normalize the CDF to the range [0, 65535]
+    # Normalize the CDF to the input dtype range
     # Avoid division by zero
     if cdf[-1] > 0:
-        cdf = 65535 * cdf / cdf[-1]
+        if input_dtype in [torch.uint8, torch.uint16, torch.uint32, torch.int8, torch.int16, torch.int32, torch.int64]:
+            dtype_info = torch.iinfo(input_dtype)
+            cdf = dtype_info.max * cdf / cdf[-1]
+        else:
+            # For float dtypes, normalize to [0, 1]
+            cdf = cdf / cdf[-1]
 
     # PyTorch doesn't have a direct equivalent to numpy's interp
     # We'll use a lookup table approach
@@ -593,8 +601,12 @@ def stack_equalize_histogram(
     # Reshape back to original shape
     equalized_stack = equalized_flat.reshape(stack.shape)
 
-    # Convert to uint16
-    return equalized_stack.to(torch.uint16)
+    # Convert back to input dtype
+    if input_dtype in [torch.uint8, torch.uint16, torch.uint32, torch.int8, torch.int16, torch.int32, torch.int64]:
+        dtype_info = torch.iinfo(input_dtype)
+        return torch.clamp(equalized_stack, dtype_info.min, dtype_info.max).to(input_dtype)
+    else:
+        return equalized_stack.to(input_dtype)
 
 @torch_func
 def create_projection(

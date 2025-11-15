@@ -63,14 +63,83 @@ def _do_cross_window_refresh(self, emit_signal=True):
 
 `_refresh_all_placeholders()` rebuilds the context stack, asks `ParameterFormService` to resolve placeholders, and then triggers callbacks that drive enabled/disabled styling so UI dimming follows inherited booleans.
 
+## External Listener Pattern
+
+Some UI components need to react to configuration changes but are not themselves form managers (e.g., the pipeline editor's preview labels showing "MAT", "NAP", "FIJI" indicators). The external listener pattern allows these components to register for cross-window notifications without participating in the full form manager lifecycle.
+
+### Registration
+
+External listeners register via the class method `ParameterFormManager.register_external_listener()`:
+
+```python
+# pipeline_editor.py
+ParameterFormManager.register_external_listener(
+    self,
+    self._on_cross_window_context_changed,
+    self._on_cross_window_context_refreshed
+)
+```
+
+The registration stores a tuple `(listener, value_changed_handler, refresh_handler)` in the class-level `_external_listeners` list. Unlike form managers, external listeners:
+
+- Do not participate in the mesh signal topology (no bidirectional connections)
+- Do not emit signals themselves
+- Receive notifications via direct method calls, not Qt signals
+- Are not scoped (they receive all notifications regardless of `scope_id`)
+
+### Notification Points
+
+External listeners are notified at three critical points:
+
+1. **Global refresh** (`trigger_global_cross_window_refresh()`): Called when global config changes or when all managers are unregistered (e.g., after cancel). Notifies all external listeners with `refresh_handler(None, None)`.
+
+2. **Reset operations** (`reset_all_parameters()`): After resetting parameters, both root and nested managers call `_notify_external_listeners_refreshed()` to notify external listeners with `refresh_handler(self.object_instance, self.context_obj)`.
+
+3. **Individual parameter changes**: External listeners can optionally be notified on every parameter change, though this is rarely needed.
+
+### Use Case: Pipeline Editor Preview Labels
+
+The pipeline editor displays config indicators (MAT, NAP, FIJI, FILT) next to each step. These labels must update in real-time when:
+
+- A step editor changes a config's `enabled` field
+- The PipelineConfig editor changes a config's `enabled` field
+- A user clicks Reset in any config editor
+- A user cancels a config editor (labels must revert to stored values)
+
+The pipeline editor registers as an external listener and implements `_on_cross_window_context_refreshed()` to rebuild preview labels by:
+
+1. Collecting live context from all open windows via `_collect_live_context_from_other_windows()`
+2. Building a context stack (GlobalPipelineConfig → PipelineConfig → Step)
+3. Resolving each config's `enabled` field through lazy resolution
+4. Updating the label text based on the resolved values
+
+This ensures preview labels always reflect the current effective state, including unsaved changes in open windows.
+
 ## Cleanup and Failure Modes
 
 When a window closes, `unregister_from_cross_window_updates()` disconnects all peer signal connections before removing the manager from `_active_form_managers`. Remaining windows immediately call `_refresh_with_live_context()` to fall back to saved values instead of stale live ones. Skipping this cleanup previously led to runaway placeholder refreshes because destroyed windows still responded to signals.
 
-Two additional safeguards keep state consistent:
+### Cancel and Reset Refresh Behavior
+
+Two special cases require explicit external listener notification:
+
+1. **Cancel**: When a user cancels a config editor (via Cancel button or Escape key), the window's `reject()` method:
+   - Calls `super().reject()` to unregister all form managers
+   - Calls `trigger_global_cross_window_refresh()` to notify remaining windows and external listeners
+   - This ensures preview labels and placeholders revert to stored values, not the cancelled live values
+
+2. **Reset**: When a user clicks Reset (either for the whole window or for a nested dataclass):
+   - The manager calls `reset_all_parameters()` which resets all fields to their signature defaults
+   - After resetting, the manager calls `_notify_external_listeners_refreshed()` to notify external listeners
+   - This ensures preview labels update to reflect the reset values immediately
+
+Without these explicit notifications, external listeners would continue showing stale values until the next parameter change.
+
+Three additional safeguards keep state consistent:
 
 - `_block_cross_window_updates` gates `_emit_cross_window_change()` during bulk operations such as “Reset All” so intermediate states are not broadcast.
 - `_initial_load_complete` ensures nested managers do not push placeholder overlays until widget construction finishes; otherwise optional dataclasses could resolve against incomplete context.
+- External listeners are notified directly (not via signals) to ensure they receive updates even when all managers are unregistered.
 
 ## Re-implementation Checklist
 
@@ -81,5 +150,8 @@ When refactoring, keep these invariants:
 3. Context stacking order (global → parent → parent overlay → current overlay) cannot change without breaking inheritance semantics.
 4. Debounced refresh plus `context_refreshed` propagation prevents ping-pong; any new implementation needs equivalent cycle control.
 5. Windows must unregister before destruction so future refreshes do not access deleted widgets.
+6. External listeners must be notified on cancel, reset, and global refresh operations to ensure non-form-manager UI components stay synchronized.
+7. Cancel operations (`reject()`) must call `trigger_global_cross_window_refresh()` AFTER unregistration to ensure external listeners receive the refresh notification.
+8. Reset operations (`reset_all_parameters()`) must call `_notify_external_listeners_refreshed()` for both root and nested managers to ensure external listeners update immediately.
 
 These behaviors, not the current method layout, define the “contract” that downstream refactors must satisfy to preserve multi-window live sync.

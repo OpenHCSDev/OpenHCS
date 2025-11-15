@@ -141,6 +141,64 @@ def convert_summary_well_ids(csv_path: Path) -> Path:
     return converted_path
 
 
+def convert_config_well_ids(config_path: Path) -> Path:
+    """
+    Convert Opera Phenix well IDs in config.xlsx to standard format.
+
+    Converts well IDs in:
+    - Controls row
+    - Exclude Wells row
+
+    Creates a new file with _converted suffix.
+
+    Args:
+        config_path: Path to config.xlsx
+
+    Returns:
+        Path to converted config file
+    """
+    import openpyxl
+
+    # Load workbook
+    wb = openpyxl.load_workbook(config_path)
+
+    # Check if conversion is needed
+    needs_conversion = False
+
+    # Check drug_curve_map sheet for Opera Phenix format wells
+    if 'drug_curve_map' in wb.sheetnames:
+        ws = wb['drug_curve_map']
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.value and isinstance(cell.value, str):
+                    if re.match(r'[Rr]\d+[Cc]\d+', cell.value):
+                        needs_conversion = True
+                        break
+            if needs_conversion:
+                break
+
+    if not needs_conversion:
+        return config_path
+
+    print(f"Converting Opera Phenix well IDs in config.xlsx...")
+
+    # Convert drug_curve_map sheet
+    if 'drug_curve_map' in wb.sheetnames:
+        ws = wb['drug_curve_map']
+        for row in ws.iter_rows():
+            for cell in row:
+                if cell.value and isinstance(cell.value, str):
+                    if re.match(r'[Rr]\d+[Cc]\d+', cell.value):
+                        cell.value = convert_opera_phenix_to_standard_well_id(cell.value)
+
+    # Save to new file
+    converted_path = config_path.parent / f"{config_path.stem}_converted{config_path.suffix}"
+    wb.save(converted_path)
+
+    print(f"  Saved converted config: {converted_path.name}")
+    return converted_path
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -183,6 +241,7 @@ def main():
 
     # Convert Opera Phenix well IDs if needed
     converted_results_file = convert_summary_well_ids(results_file)
+    converted_config_file = convert_config_well_ids(config_file)
 
     # Import and run analysis
     try:
@@ -191,7 +250,7 @@ def main():
         print("\nRunning experimental analysis...")
         run_experimental_analysis(
             results_path=str(converted_results_file),
-            config_file=str(config_file),
+            config_file=str(converted_config_file),
             compiled_results_path=str(compiled_results),
             heatmap_path=str(heatmaps)
         )

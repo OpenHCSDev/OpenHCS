@@ -267,6 +267,8 @@ class ZMQExecutionClient(ZMQClient):
     def _spawn_server_process(self):
         from pathlib import Path
         import time
+        import os
+        import glob
         log_dir = Path.home() / ".local" / "share" / "openhcs" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file_path = log_dir / f"openhcs_zmq_server_port_{self.port}_{int(time.time() * 1000000)}.log"
@@ -275,7 +277,23 @@ class ZMQExecutionClient(ZMQClient):
             cmd.append('--persistent')
         cmd.extend(['--log-file-path', str(log_file_path)])
         cmd.extend(['--transport-mode', self.transport_mode.value])
-        return subprocess.Popen(cmd, stdout=open(log_file_path, 'w'), stderr=subprocess.STDOUT, start_new_session=self.persistent)
+
+        # Inherit parent process environment and add CUDA library paths
+        env = os.environ.copy()
+
+        # Add nvidia CUDA libraries from venv to LD_LIBRARY_PATH
+        # These are bundled with cupy/cucim and need to be findable by the subprocess
+        site_packages = Path(sys.executable).parent.parent / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+        nvidia_lib_pattern = str(site_packages / "nvidia" / "*" / "lib")
+        venv_nvidia_libs = [p for p in glob.glob(nvidia_lib_pattern) if os.path.isdir(p)]
+
+        if venv_nvidia_libs:
+            existing_ld_path = env.get('LD_LIBRARY_PATH', '')
+            nvidia_paths = ':'.join(venv_nvidia_libs)
+            env['LD_LIBRARY_PATH'] = f"{nvidia_paths}:{existing_ld_path}" if existing_ld_path else nvidia_paths
+
+        return subprocess.Popen(cmd, stdout=open(log_file_path, 'w'), stderr=subprocess.STDOUT,
+                               start_new_session=self.persistent, env=env)
 
     def disconnect(self):
         self._stop_progress_listener()
@@ -290,4 +308,3 @@ class ZMQExecutionClient(ZMQClient):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.disconnect()
-

@@ -21,16 +21,21 @@ def iter_pattern_items(pattern: Any) -> Iterator[Tuple[Any, str, int]]:
         yield (pattern, "default", 0)
 
 
-def get_core_callable(func_pattern: Any) -> Optional[Callable[..., Any]]:
+def get_core_callable(func_pattern: Any) -> Any:  # Returns Callable or FunctionReference
     """Extract the first effective Python callable from a func_pattern.
-    
+
     Handles: direct callable, (callable, kwargs) tuple, list (chain), dict pattern.
+
+    NOTE: FunctionReference objects are returned as-is (not resolved) because they
+    expose all needed attributes via __getattr__. Resolution happens in worker process.
+
+    Returns either a Callable or FunctionReference (which acts like a callable via __getattr__).
     """
-    # Check for FunctionReference first
+    # Check for FunctionReference first - return as-is, don't resolve!
     try:
         from openhcs.core.pipeline.compiler import FunctionReference
         if isinstance(func_pattern, FunctionReference):
-            return func_pattern.resolve()
+            return func_pattern  # Return FunctionReference, don't resolve
     except ImportError:
         pass
 
@@ -41,7 +46,7 @@ def get_core_callable(func_pattern: Any) -> Optional[Callable[..., Any]]:
         try:
             from openhcs.core.pipeline.compiler import FunctionReference
             if isinstance(first_element, FunctionReference):
-                return first_element.resolve()
+                return first_element  # Return FunctionReference, don't resolve
         except ImportError:
             pass
         if callable(first_element) and not isinstance(first_element, type):
@@ -121,10 +126,9 @@ def prepare_patterns_and_functions(patterns, processing_funcs, component='defaul
     logger.debug(f"🔍 PATTERN DEBUG: processing_funcs keys: {list(processing_funcs.keys()) if isinstance(processing_funcs, dict) else 'Not a dict'}")
     logger.debug(f"🔍 PATTERN DEBUG: component: {component}")
 
-    # CRITICAL: Resolve any FunctionReference objects to actual functions
-    # This ensures worker processes get properly decorated functions from their registry
-    processing_funcs = _resolve_function_references(processing_funcs)
-    logger.debug("🔧 FUNCTION RESOLUTION: Resolved FunctionReference objects in processing_funcs")
+    # DO NOT resolve FunctionReference objects here!
+    # They must remain as FunctionReference for picklability.
+    # Resolution happens in the worker process during execution.
 
     # Ensure patterns are in a dictionary format
     # If already a dict, use as is; otherwise wrap the list in a dictionary
@@ -177,12 +181,30 @@ def prepare_patterns_and_functions(patterns, processing_funcs, component='defaul
 
     # Helper function to extract function and args from a function item
     def extract_func_and_args(func_item):
-        if isinstance(func_item, tuple) and len(func_item) == 2 and callable(func_item[0]):
-            # It's a (function, kwargs) tuple
-            return func_item[0], func_item[1]
-        if callable(func_item):
-            # It's just a function, use default args
+        # Check for FunctionReference
+        try:
+            from openhcs.core.pipeline.compiler import FunctionReference
+            is_func_ref = isinstance(func_item, FunctionReference)
+        except ImportError:
+            is_func_ref = False
+
+        if isinstance(func_item, tuple) and len(func_item) == 2:
+            first_elem = func_item[0]
+            # Check if first element is FunctionReference or callable
+            try:
+                from openhcs.core.pipeline.compiler import FunctionReference
+                is_first_func_ref = isinstance(first_elem, FunctionReference)
+            except ImportError:
+                is_first_func_ref = False
+
+            if is_first_func_ref or callable(first_elem):
+                # It's a (function/FunctionReference, kwargs) tuple
+                return first_elem, func_item[1]
+
+        if is_func_ref or callable(func_item):
+            # It's just a function/FunctionReference, use default args
             return func_item, {}
+
         if isinstance(func_item, dict):
             # It's a dictionary pattern - this should be handled at a higher level
             # This indicates a logic error where the entire dict was passed instead of individual components
@@ -238,19 +260,16 @@ def prepare_patterns_and_functions(patterns, processing_funcs, component='defaul
 
         # Extract function and args
         logger.debug(f"Processing func_item for '{comp_value}': {type(func_item)}")
-        if isinstance(func_item, list):
-            # List of functions or function tuples
-            logger.debug(f"func_item is a list with {len(func_item)} items")
-            component_to_funcs[comp_value] = func_item
-            # For lists, we'll extract args during processing
-            component_to_args[comp_value] = {}
-        else:
-            # Single function or function tuple
-            logger.debug(f"Calling extract_func_and_args with: {type(func_item)}")
+        if not isinstance(func_item, list):
+            # Normalize single function to list so execution always uses chain logic
+            logger.debug(f"Normalizing single function for '{comp_value}' into list")
             func, args = extract_func_and_args(func_item)
-            component_to_funcs[comp_value] = func
-            component_to_args[comp_value] = args
+            func_item = [(func, args)]
+
+        # List of functions or function tuples (already normalized)
+        logger.debug(f"func_item is a list with {len(func_item)} items")
+        component_to_funcs[comp_value] = func_item
+        component_to_args[comp_value] = {}
 
     return grouped_patterns, component_to_funcs, component_to_args
-
 

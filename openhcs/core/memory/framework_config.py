@@ -63,32 +63,46 @@ def _pyclesperanto_move_to_device(data: Any, device_id: int, mod: Any, memory_ty
 
 
 def _pyclesperanto_stack_slices(slices: list, memory_type: str, gpu_id: int, mod: Any) -> Any:
-    """Stack slices using pyclesperanto's concatenate_along_z."""
+    """Stack slices using pyclesperanto's concatenate_along_z (pairwise concatenation)."""
     from openhcs.core.memory.converters import convert_memory, detect_memory_type
-    
+
     converted_slices = []
     conversion_count = 0
-    
+
     for slice_data in slices:
         source_type = detect_memory_type(slice_data)
-        
+
         if source_type != memory_type:
             conversion_count += 1
-        
+
         if source_type == memory_type:
             converted_slices.append(slice_data)
         else:
             converted = convert_memory(slice_data, source_type, memory_type, gpu_id)
             converted_slices.append(converted)
-    
+
     # Log batch conversion
     if conversion_count > 0:
         logger.debug(
             f"🔄 MEMORY CONVERSION: Converted {conversion_count}/{len(slices)} slices "
             f"to {memory_type} for pyclesperanto stacking"
         )
-    
-    return mod.concatenate_along_z(converted_slices)
+
+    # Handle single slice case - must return 3D array with shape (1, Y, X)
+    if len(converted_slices) == 1:
+        slice_2d = converted_slices[0]
+        # Reshape 2D slice to 3D with shape (1, Y, X)
+        result = mod.create((1, slice_2d.shape[0], slice_2d.shape[1]), dtype=slice_2d.dtype)
+        result[0] = slice_2d
+        return result
+
+    # Pyclesperanto's concatenate_along_z takes two arguments (pairwise concatenation)
+    # Start with first slice and concatenate remaining slices one by one
+    result = converted_slices[0]
+    for i in range(1, len(converted_slices)):
+        result = mod.concatenate_along_z(result, converted_slices[i])
+
+    return result
 
 
 def _jax_assign_slice(result: Any, index: int, slice_data: Any) -> Any:

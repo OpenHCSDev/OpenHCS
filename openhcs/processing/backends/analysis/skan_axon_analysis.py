@@ -17,6 +17,7 @@ import logging
 # OpenHCS imports
 from openhcs.core.memory.decorators import numpy as numpy_func
 from openhcs.core.pipeline.function_contracts import special_outputs
+from openhcs.core.roi import ROI
 
 logger = logging.getLogger(__name__)
 
@@ -178,20 +179,20 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
     for i, visualization in enumerate(data):
         viz_filename = str(parent_dir / f"{base_path}_slice_{i:03d}.tif")
 
-        # Convert visualization to appropriate dtype for saving (uint16 to match input images)
-        if visualization.dtype != np.uint16:
-            # Normalize to uint16 range if needed
+        # Convert visualization to uint8 for tracing visualizations (standard format)
+        if visualization.dtype != np.uint8:
+            # Normalize to uint8 range if needed
             if visualization.max() <= 1.0:
-                viz_uint16 = (visualization * 65535).astype(np.uint16)
+                viz_uint8 = (visualization * 255).astype(np.uint8)
             else:
-                viz_uint16 = visualization.astype(np.uint16)
+                viz_uint8 = visualization.astype(np.uint8)
         else:
-            viz_uint16 = visualization
+            viz_uint8 = visualization
 
         # Save to all backends
         for backend in backends:
             kwargs = backend_kwargs.get(backend, {})
-            filemanager.save(viz_uint16, viz_filename, backend, **kwargs)
+            filemanager.save(viz_uint8, viz_filename, backend, **kwargs)
 
     # Return summary path
     summary_path = str(parent_dir / f"{base_path}_skeleton_summary.txt")
@@ -256,9 +257,9 @@ def materialize_skeleton_rois(skeleton_mask, path: str, filemanager, backends, b
             filemanager.save(summary_content, summary_path, backend)
         return summary_path
     
-    # Convert skeleton mask to polyline ROIs (FAST: skip coordinate ordering)
-    skeleton_rois = _skeleton_to_rois_fast(skeleton_mask)
-    logger.info(f"🔬 SKELETON_ROI_MATERIALIZE: Converted skeleton mask to {len(skeleton_rois)} polyline ROIs")
+    # Convert skeleton mask to ROIs using the shared ROI extraction pipeline
+    skeleton_rois = _skeleton_mask_to_rois(skeleton_mask)
+    logger.info(f"🔬 SKELETON_ROI_MATERIALIZE: Converted skeleton mask to {len(skeleton_rois)} ROIs via ROI system")
     
     # Generate ROI file path - use same convention as cell counting
     # This preserves the full path structure including well/site/channel information
@@ -300,6 +301,7 @@ def skan_axon_skeletonize_and_analyze(
     threshold_value: Optional[float] = None,
     min_object_size: int = 100,
     min_branch_length: float = 0.0,
+    filter_edge: Optional[str] = None,  # Filter objects not touching this edge: 'left', 'right', 'top', 'bottom', None
     return_skeleton_visualizations: bool = False,
     skeleton_visualization_mode: OutputMode = OutputMode.SKELETON_OVERLAY,
     analysis_dimension: AnalysisDimension = AnalysisDimension.THREE_D,
@@ -317,6 +319,7 @@ def skan_axon_skeletonize_and_analyze(
         threshold_value: Manual threshold value (if threshold_method=MANUAL)
         min_object_size: Minimum object size for noise removal (voxels)
         min_branch_length: Minimum branch length threshold (micrometers)
+        filter_edge: Keep only objects touching this edge ('left', 'right', 'top', 'bottom', or None for no filtering)
         return_skeleton_visualizations: Whether to generate skeleton visualizations as special output
         skeleton_visualization_mode: Type of visualization (SKELETON, SKELETON_OVERLAY, ORIGINAL, COMPOSITE)
         analysis_dimension: Analysis mode (TWO_D or THREE_D)
@@ -346,11 +349,15 @@ def skan_axon_skeletonize_and_analyze(
     # Step 2: Noise removal
     if min_object_size > 0:
         binary_stack = _remove_small_objects(binary_stack, min_object_size)
-    
+
+    # Step 2.5: Edge filtering (keep only objects touching specified edge)
+    if filter_edge is not None:
+        binary_stack = _filter_by_edge(binary_stack, filter_edge)
+
     # Step 3: Skeletonization
     skeleton_stack = _skeletonize_3d(binary_stack)
-    
-    # Step 4: Skeleton analysis
+
+    # Step 4: Skeleton analysis (initial pass to identify branches)
     if analysis_dimension == AnalysisDimension.THREE_D:
         branch_data = _analyze_3d_skeleton(skeleton_stack, voxel_spacing)
         analysis_type = "3D volumetric"
@@ -359,11 +366,16 @@ def skan_axon_skeletonize_and_analyze(
         analysis_type = "2D slice-by-slice"
     else:
         raise ValueError(f"Invalid analysis_dimension: {analysis_dimension}")
-    
-    # Step 5: Filter results
-    # DataFrame always has proper schema (even when empty), so we can filter directly
+
+    # Step 5: Prune small branches from skeleton (modifies skeleton geometry)
     if min_branch_length > 0 and len(branch_data) > 0:
-        branch_data = branch_data[branch_data['branch_distance'] >= min_branch_length]
+        skeleton_stack = _prune_skeleton(skeleton_stack, branch_data, min_branch_length, voxel_spacing, analysis_dimension)
+
+        # Re-analyze after pruning to get updated branch data
+        if analysis_dimension == AnalysisDimension.THREE_D:
+            branch_data = _analyze_3d_skeleton(skeleton_stack, voxel_spacing)
+        else:
+            branch_data = _analyze_2d_slices(skeleton_stack, voxel_spacing)
 
     # Step 6: Generate skeleton visualizations if requested
     skeleton_visualizations = []
@@ -465,6 +477,167 @@ def _skeletonize_3d(binary_stack):
                 f"(reduction: {reduction_ratio:.3f})")
 
     return skeleton_stack
+
+
+def _prune_skeleton(skeleton_stack: np.ndarray, branch_data: pd.DataFrame,
+                   min_branch_length: float, voxel_spacing: Tuple[float, float, float],
+                   analysis_dimension: AnalysisDimension) -> np.ndarray:
+    """
+    Remove branches shorter than min_branch_length from the skeleton.
+
+    This actually modifies the skeleton geometry, not just the analysis results.
+
+    Args:
+        skeleton_stack: Binary skeleton mask (Z, Y, X)
+        branch_data: DataFrame from skan analysis
+        min_branch_length: Minimum branch length threshold (micrometers)
+        voxel_spacing: Physical voxel spacing (z, y, x)
+        analysis_dimension: Whether this is 2D or 3D analysis
+
+    Returns:
+        Pruned skeleton mask
+    """
+    from skan import Skeleton
+
+    if not skeleton_stack.any() or len(branch_data) == 0:
+        return skeleton_stack
+
+    # Identify branches to remove (below threshold)
+    short_branches = branch_data[branch_data['branch_distance'] < min_branch_length]
+
+    if len(short_branches) == 0:
+        logger.info(f"No branches below {min_branch_length}µm threshold - no pruning needed")
+        return skeleton_stack
+
+    # Create skeleton object to get pixel indices for each branch
+    if analysis_dimension == AnalysisDimension.THREE_D:
+        skeleton_obj = Skeleton(skeleton_stack, spacing=voxel_spacing)
+
+        # Get coordinates of pixels to remove
+        pruned_skeleton = skeleton_stack.copy()
+
+        for idx, row in short_branches.iterrows():
+            # Get path coordinates for this branch
+            path = skeleton_obj.path_coordinates(idx)
+
+            # Remove these pixels from skeleton
+            if len(path) > 0:
+                coords = np.round(path).astype(int)
+                # Ensure coordinates are within bounds
+                valid_mask = (
+                    (coords[:, 0] >= 0) & (coords[:, 0] < skeleton_stack.shape[0]) &
+                    (coords[:, 1] >= 0) & (coords[:, 1] < skeleton_stack.shape[1]) &
+                    (coords[:, 2] >= 0) & (coords[:, 2] < skeleton_stack.shape[2])
+                )
+                coords = coords[valid_mask]
+
+                if len(coords) > 0:
+                    pruned_skeleton[coords[:, 0], coords[:, 1], coords[:, 2]] = 0
+
+    else:  # 2D analysis - prune each slice independently
+        pruned_skeleton = skeleton_stack.copy()
+
+        for z in range(skeleton_stack.shape[0]):
+            slice_skeleton = skeleton_stack[z]
+
+            if not slice_skeleton.any():
+                continue
+
+            # Get branches for this slice
+            slice_branches = short_branches[short_branches['z_slice'] == z] if 'z_slice' in short_branches.columns else pd.DataFrame()
+
+            if len(slice_branches) == 0:
+                continue
+
+            # Create 2D skeleton object for this slice
+            skeleton_obj_2d = Skeleton(slice_skeleton, spacing=voxel_spacing[1:])
+
+            for idx, row in slice_branches.iterrows():
+                # Get path coordinates for this branch
+                path = skeleton_obj_2d.path_coordinates(idx)
+
+                if len(path) > 0:
+                    coords = np.round(path).astype(int)
+                    # Ensure coordinates are within bounds
+                    valid_mask = (
+                        (coords[:, 0] >= 0) & (coords[:, 0] < slice_skeleton.shape[0]) &
+                        (coords[:, 1] >= 0) & (coords[:, 1] < slice_skeleton.shape[1])
+                    )
+                    coords = coords[valid_mask]
+
+                    if len(coords) > 0:
+                        pruned_skeleton[z, coords[:, 0], coords[:, 1]] = 0
+
+    branches_before = len(branch_data)
+    branches_after = branches_before - len(short_branches)
+    logger.info(f"Pruned {len(short_branches)} branches < {min_branch_length}µm ({branches_before} → {branches_after} branches)")
+
+    return pruned_skeleton
+
+
+def _filter_by_edge(binary_stack: np.ndarray, edge: str) -> np.ndarray:
+    """
+    Keep only objects that touch the specified edge of the image.
+
+    Removes artifacts and objects that don't originate from the specified edge.
+    Useful for filtering out debris while keeping neurites/axons that enter from one side.
+
+    Args:
+        binary_stack: 3D binary mask (Z, Y, X)
+        edge: Which edge to filter by ('left', 'right', 'top', 'bottom')
+
+    Returns:
+        Filtered binary mask with only objects touching the specified edge
+    """
+    from skimage.measure import label
+
+    valid_edges = {'left', 'right', 'top', 'bottom'}
+    if edge.lower() not in valid_edges:
+        raise ValueError(f"Invalid edge '{edge}'. Must be one of: {valid_edges}")
+
+    edge = edge.lower()
+
+    # Process each Z slice independently
+    filtered_stack = np.zeros_like(binary_stack)
+
+    for z in range(binary_stack.shape[0]):
+        slice_binary = binary_stack[z]
+
+        if not slice_binary.any():
+            continue
+
+        # Label connected components
+        labeled = label(slice_binary)
+
+        # Get labels that touch the specified edge
+        edge_labels = set()
+
+        if edge == 'left':
+            # First column (x=0)
+            edge_labels.update(labeled[:, 0])
+        elif edge == 'right':
+            # Last column (x=-1)
+            edge_labels.update(labeled[:, -1])
+        elif edge == 'top':
+            # First row (y=0)
+            edge_labels.update(labeled[0, :])
+        elif edge == 'bottom':
+            # Last row (y=-1)
+            edge_labels.update(labeled[-1, :])
+
+        # Remove background label (0)
+        edge_labels.discard(0)
+
+        # Keep only objects that touch the edge
+        if edge_labels:
+            mask = np.isin(labeled, list(edge_labels))
+            filtered_stack[z] = mask
+
+    objects_before = np.unique(label(binary_stack))[1:]  # Exclude background
+    objects_after = np.unique(label(filtered_stack))[1:]
+    logger.info(f"Edge filtering ({edge}): {len(objects_before)} → {len(objects_after)} objects")
+
+    return filtered_stack
 
 
 def _create_empty_branch_dataframe(include_2d_columns: bool = False):
@@ -755,230 +928,83 @@ def _get_skan_version():
         return "unknown"
 
 
-def _skeleton_to_rois_fast(skeleton_stack: np.ndarray) -> List[Dict[str, Any]]:
+def _skeleton_mask_to_rois(skeleton_stack: np.ndarray) -> List[ROI]:
     """
-    FAST conversion of skeleton to ROI points for visualization.
-    
-    Converts skeleton pixels to individual point ROIs (one ROI per skeleton branch).
-    Each ROI contains multiple PointShape objects representing the skeleton pixels.
-    Perfect for visualization as Napari points layer.
-    
-    Args:
-        skeleton_stack: Binary skeleton array (Z, Y, X) or (Y, X)
-        
-    Returns:
-        List of ROI objects with PointShape for skeleton visualization
-    """
-    from scipy import ndimage
-    from openhcs.core.roi import ROI, PointShape
-    
-    rois = []
-    
-    logger.info(f"🔍 SKELETON_TO_ROIS_FAST: Input skeleton_stack shape: {skeleton_stack.shape}, dtype: {skeleton_stack.dtype}")
-    
-    # Handle 2D skeleton (single image) - reshape to 3D with Z=1
-    if skeleton_stack.ndim == 2:
-        logger.info(f"🔍 SKELETON_TO_ROIS_FAST: Reshaping single 2D skeleton {skeleton_stack.shape} to 3D")
-        skeleton_stack = skeleton_stack[np.newaxis, :, :]  # (Y, X) -> (1, Y, X)
-    elif skeleton_stack.ndim != 3:
-        logger.error(f"🔍 SKELETON_TO_ROIS_FAST: Expected 2D or 3D skeleton, got {skeleton_stack.ndim}D")
-        return []
-    
-    # Process each Z slice
-    for z_idx in range(skeleton_stack.shape[0]):
-        skeleton_slice = skeleton_stack[z_idx]
-        
-        if not skeleton_slice.any():
-            continue  # Skip empty slices
-        
-        # Label connected components using full connectivity (diagonal connections count)
-        # This helps connect skeleton fragments that are close together
-        structure = np.ones((3, 3), dtype=int)  # 8-connectivity (includes diagonals)
-        labeled_skeleton, num_features = ndimage.label(skeleton_slice, structure=structure)
-        
-        logger.info(f"🔍 SKELETON_TO_ROIS_FAST: Z={z_idx}, found {num_features} skeleton components")
-        
-        # Limit processing if there are too many components (performance safeguard)
-        if num_features > 1000:
-            logger.warning(f"🔍 SKELETON_TO_ROIS_FAST: {num_features} components is too many, creating single aggregate ROI")
-            # Create a single ROI with all skeleton pixels as points
-            skeleton_coords = np.argwhere(skeleton_slice > 0)
-            if len(skeleton_coords) > 0:
-                # Create one PointShape per pixel
-                point_shapes = [PointShape(y=float(coord[0]), x=float(coord[1])) 
-                               for coord in skeleton_coords]
-                
-                metadata = {
-                    'label': f'Skeleton_Z{z_idx:03d}_AllBranches',
-                    'position': z_idx,
-                    'num_components': num_features,
-                    'num_pixels': len(skeleton_coords)
-                }
-                
-                roi = ROI(shapes=point_shapes, metadata=metadata)
-                rois.append(roi)
-            continue
-        
-        # Extract each component as an ROI with PointShape objects
-        for label_id in range(1, num_features + 1):
-            # Get coordinates (returns (y, x) pairs)
-            coords = np.argwhere(labeled_skeleton == label_id)
-            
-            if len(coords) < 1:
-                continue  # Skip empty components
-            
-            # Create one PointShape per pixel in this skeleton branch
-            point_shapes = [PointShape(y=float(coord[0]), x=float(coord[1])) 
-                           for coord in coords]
-            
-            # Create ROI with metadata
-            metadata = {
-                'label': f'Skeleton_Z{z_idx:03d}_Branch{label_id:03d}',
-                'position': z_idx,
-                'num_pixels': len(coords)
-            }
-            
-            roi = ROI(shapes=point_shapes, metadata=metadata)
-            
-            rois.append(roi)
-    
-    logger.info(f"Converted skeleton to {len(rois)} ROIs across {skeleton_stack.shape[0]} slices")
-    return rois
+    Convert a binary skeleton mask into ROI objects using skan branch paths.
 
+    Uses skan's Skeleton object to extract actual branch paths, creating one ROI
+    per continuous skeleton segment. This preserves skeleton connectivity and
+    creates proper polyline ROIs instead of fragmenting the skeleton.
 
-def _skeleton_to_rois(skeleton_stack: np.ndarray) -> List[Dict[str, Any]]:
-    """
-    Convert skeleton pixels to ROI polylines for visualization in Napari/Fiji.
-    
-    Extracts connected skeleton paths and converts them to polyline ROIs.
-    Each skeleton branch becomes a separate polyline ROI.
-    
     Args:
-        skeleton_stack: Binary skeleton array (Z, Y, X) with skeleton pixels
-        
+        skeleton_stack: Binary skeleton mask (Z, Y, X)
+
     Returns:
-        List of ROI dictionaries compatible with openhcs.core.roi format
+        List of ROI objects, one per skeleton branch
     """
-    from scipy import ndimage
-    from skimage import morphology
-    
-    rois = []
-    roi_id = 1
-    
-    logger.info(f"🔍 SKELETON_TO_ROIS: Input skeleton_stack shape: {skeleton_stack.shape}, dtype: {skeleton_stack.dtype}")
-    
-    # Handle 2D skeleton (single image) - reshape to 3D with Z=1
-    # A single 2D image (Y, X) becomes (1, Y, X) for processing
+    from skan import Skeleton
+    from openhcs.core.roi import PolygonShape, ROI
+
+    rois: List[ROI] = []
+
     if skeleton_stack.ndim == 2:
-        logger.info(f"🔍 SKELETON_TO_ROIS: Reshaping single 2D skeleton {skeleton_stack.shape} to 3D (1, Y, X)")
-        skeleton_stack = skeleton_stack[np.newaxis, :, :]  # Add Z dimension at start: (Y, X) -> (1, Y, X)
-        logger.info(f"🔍 SKELETON_TO_ROIS: Reshaped to 3D: {skeleton_stack.shape}")
+        skeleton_stack = skeleton_stack[np.newaxis, :, :]
     elif skeleton_stack.ndim != 3:
-        logger.error(f"🔍 SKELETON_TO_ROIS: Expected 2D or 3D skeleton, got {skeleton_stack.ndim}D")
-        return []
-    
-    # Process each Z slice independently
-    for z_idx in range(skeleton_stack.shape[0]):
-        skeleton_slice = skeleton_stack[z_idx]
-        
-        # Ensure skeleton_slice is 2D
-        if skeleton_slice.ndim == 1:
-            # If skeleton got squeezed to 1D, skip it (this shouldn't happen)
-            logger.warning(f"Skipping slice {z_idx}: skeleton_slice is 1D with shape {skeleton_slice.shape}")
-            continue
-        elif skeleton_slice.ndim > 2:
-            logger.warning(f"Skipping slice {z_idx}: skeleton_slice has {skeleton_slice.ndim} dimensions")
-            continue
-        
+        logger.error(f"🔍 SKELETON_TO_ROIS: Expected 2D/3D skeleton, got {skeleton_stack.ndim}D")
+        return rois
+
+    # Check if skeleton is empty
+    if not skeleton_stack.any():
+        logger.info("🔍 SKELETON_TO_ROIS: Empty skeleton mask, no ROIs to extract")
+        return rois
+
+    # Process each Z-slice independently to create 2D ROIs
+    for z_idx, skeleton_slice in enumerate(skeleton_stack):
         if not skeleton_slice.any():
-            continue  # Skip empty slices
-        
-        # Debug: Check skeleton slice shape
-        if z_idx < 5 or skeleton_slice.ndim != 2:  # Log first 5 slices or any problem slices
-            logger.debug(f"🔍 SKELETON_TO_ROIS: Z={z_idx}, skeleton_slice.shape={skeleton_slice.shape}, ndim={skeleton_slice.ndim}")
-        
-        # Label connected components in skeleton
-        labeled_skeleton, num_features = ndimage.label(skeleton_slice)
-        
-        # Extract each connected component as a separate ROI
-        for label_id in range(1, num_features + 1):
-            # Get coordinates of this skeleton component
-            coords = np.argwhere(labeled_skeleton == label_id)
-            
-            if len(coords) < 2:
-                continue  # Skip single-pixel skeletons
-            
-            # Validate coords shape before processing
-            if coords.ndim != 2 or coords.shape[1] != 2:
-                logger.warning(f"Skipping skeleton component {label_id} in slice {z_idx}: "
-                             f"coords has unexpected shape {coords.shape}, expected (n, 2). "
-                             f"labeled_skeleton.shape={labeled_skeleton.shape}, skeleton_slice.shape={skeleton_slice.shape}")
+            continue
+
+        try:
+            # Create skan Skeleton object for this slice
+            skeleton_obj = Skeleton(skeleton_slice)
+
+            # Get number of branches (paths) in this skeleton
+            num_branches = skeleton_obj.n_paths
+
+            if num_branches == 0:
+                logger.debug(f"🔍 SKELETON_TO_ROIS: No branches found in Z-slice {z_idx}")
                 continue
-            
-            # Sort coordinates to create a path (simple nearest-neighbor ordering)
-            # For complex skeletons, this creates an approximate path
-            ordered_coords = _order_skeleton_coords(coords)
-            
-            # Create polyline ROI in ImageJ format
-            # Coordinates are (x, y) in ImageJ, but numpy gives (y, x)
-            x_coords = ordered_coords[:, 1].tolist()  # Column indices = X
-            y_coords = ordered_coords[:, 0].tolist()  # Row indices = Y
-            
-            roi = {
-                'type': 'polyline',
-                'coordinates': list(zip(x_coords, y_coords)),
-                'name': f'Skeleton_Z{z_idx:03d}_Branch{label_id:03d}',
-                'position': z_idx,  # Z-position
-                'stroke_color': '#00FF00',  # Green for skeletons
-                'stroke_width': 1
-            }
-            
-            rois.append(roi)
-            roi_id += 1
-    
-    logger.info(f"Converted skeleton to {len(rois)} polyline ROIs across {skeleton_stack.shape[0]} slices")
+
+            # Extract each branch as a separate ROI
+            for branch_idx in range(num_branches):
+                # Get the pixel coordinates for this branch path
+                # path_coordinates returns (N, 2) array of (row, col) = (y, x) coordinates
+                path_coords = skeleton_obj.path_coordinates(branch_idx)
+
+                if len(path_coords) < 2:
+                    # Skip degenerate paths (single pixel or empty)
+                    logger.debug(f"🔍 SKELETON_TO_ROIS: Skipping degenerate path {branch_idx} in Z-slice {z_idx} (length={len(path_coords)})")
+                    continue
+
+                # Create polygon shape from path coordinates
+                # skan returns (row, col) which is (y, x) - exactly what PolygonShape expects
+                shape = PolygonShape(coordinates=path_coords)
+
+                # Create ROI with metadata
+                metadata = {
+                    'position': z_idx,
+                    'label': f'Skeleton_Z{z_idx:03d}_Branch{branch_idx:03d}',
+                    'branch_index': branch_idx,
+                    'path_length': len(path_coords)
+                }
+
+                roi = ROI(shapes=[shape], metadata=metadata)
+                rois.append(roi)
+
+            logger.debug(f"🔍 SKELETON_TO_ROIS: Extracted {num_branches} branch ROIs from Z-slice {z_idx}")
+
+        except Exception as e:
+            logger.warning(f"🔍 SKELETON_TO_ROIS: Failed to extract ROIs from Z-slice {z_idx}: {e}")
+            continue
+
+    logger.info(f"🔍 SKELETON_TO_ROIS: Extracted {len(rois)} total branch ROIs from skeleton")
     return rois
-
-
-def _order_skeleton_coords(coords: np.ndarray) -> np.ndarray:
-    """
-    Order skeleton coordinates to form a connected path.
-    
-    Uses a simple nearest-neighbor approach to connect skeleton pixels.
-    For branched skeletons, this creates an approximate path traversal.
-    
-    Args:
-        coords: Array of (y, x) coordinates with shape (n, 2)
-        
-    Returns:
-        Ordered array of coordinates forming a path with shape (n, 2)
-    """
-    # Validate input shape
-    if coords.ndim != 2 or coords.shape[1] != 2:
-        raise ValueError(f"Expected coords with shape (n, 2), got {coords.shape}")
-    
-    if len(coords) <= 2:
-        # For 1 or 2 points, no ordering needed - return as-is
-        return coords
-    
-    # Start with first point
-    ordered = [coords[0]]
-    remaining = list(coords[1:])
-    
-    while remaining:
-        # Find nearest unvisited point to current endpoint
-        current = ordered[-1]
-        distances = np.sum((np.array(remaining) - current) ** 2, axis=1)
-        nearest_idx = np.argmin(distances)
-        
-        ordered.append(remaining[nearest_idx])
-        remaining.pop(nearest_idx)
-    
-    # Convert back to array, ensuring proper shape (n, 2)
-    result = np.array(ordered)
-    
-    # Double-check output shape
-    if result.ndim != 2 or result.shape[1] != 2:
-        raise ValueError(f"Output array has unexpected shape {result.shape}, expected (n, 2)")
-    
-    return result

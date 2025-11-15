@@ -7,6 +7,7 @@ Pure Python reflection and introspection utilities for analyzing:
 - Parameter information extraction
 - Docstring parsing
 - Type hint resolution
+- Lazy dataclass discovery and patching
 
 This package is framework-agnostic and has minimal dependencies on OpenHCS-specific
 code (only lazy imports for config type resolution). It can be used by:
@@ -18,6 +19,7 @@ code (only lazy imports for config type resolution). It can be used by:
 Key Components:
 - SignatureAnalyzer: Extract parameter info from functions/dataclasses
 - UnifiedParameterAnalyzer: Unified interface for all parameter sources
+- Lazy dataclass utilities: Discovery and patching for lazy dataclasses
 """
 
 from openhcs.introspection.signature_analyzer import (
@@ -30,6 +32,10 @@ from openhcs.introspection.unified_parameter_analyzer import (
     UnifiedParameterAnalyzer,
     UnifiedParameterInfo,
 )
+from openhcs.introspection.lazy_dataclass_utils import (
+    discover_lazy_dataclass_types,
+    patch_lazy_constructors,
+)
 
 __all__ = [
     # Signature analysis
@@ -40,5 +46,8 @@ __all__ = [
     # Unified analysis
     'UnifiedParameterAnalyzer',
     'UnifiedParameterInfo',
+    # Lazy dataclass utilities
+    'discover_lazy_dataclass_types',
+    'patch_lazy_constructors',
 ]
 

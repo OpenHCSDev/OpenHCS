@@ -425,6 +425,20 @@ class ConfigWindow(BaseFormDialog):
 
             if close_window:
                 self.accept()
+            else:
+                # CRITICAL: If keeping window open after save, update the form manager's object_instance
+                # and refresh placeholders to reflect the new saved values
+                self.form_manager.object_instance = new_config
+
+                # Increment token to invalidate caches
+                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                ParameterFormManager._live_context_token_counter += 1
+
+                # Refresh this window's placeholders with new saved values as base
+                self.form_manager._refresh_with_live_context()
+
+                # Emit context_refreshed to notify other windows
+                self.form_manager.context_refreshed.emit(new_config, self.form_manager.context_obj)
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")
@@ -473,17 +487,11 @@ class ConfigWindow(BaseFormDialog):
     def _handle_edited_config_code(self, edited_code: str):
         """Handle edited configuration code from the code editor."""
         try:
-            # CRITICAL: Parse the code to extract explicitly specified fields
-            # This prevents overwriting None values for unspecified fields
-            explicitly_set_fields = CodeEditorFormUpdater.extract_explicitly_set_fields(
-                edited_code,
-                class_name=self.config_class.__name__,
-                variable_name='config'
-            )
-
+            # SIMPLIFIED: Just exec with patched constructors
+            # The patched constructors preserve None vs concrete distinction in raw field values
+            # No need to parse code - just inspect raw values after exec
             namespace = {}
 
-            # CRITICAL FIX: Use lazy constructor patching
             with CodeEditorFormUpdater.patch_lazy_constructors():
                 exec(edited_code, namespace)
 
@@ -519,7 +527,7 @@ class ConfigWindow(BaseFormDialog):
                 # Code edits just update the form, actual application happens on Save
 
                 # Update form values from the new config without rebuilding
-                self._update_form_from_config(new_config, explicitly_set_fields)
+                self._update_form_from_config(new_config)
 
                 if suppress_context:
                     self._sync_global_context_with_current_values()
@@ -562,14 +570,13 @@ class ConfigWindow(BaseFormDialog):
             logger.warning("Failed to sync global context%s: %s",
                            f' ({source_param})' if source_param else '', exc)
 
-    def _update_form_from_config(self, new_config, explicitly_set_fields: set):
+    def _update_form_from_config(self, new_config):
         """Update form values from new config using the shared updater."""
         self.form_manager._block_cross_window_updates = True
         try:
             CodeEditorFormUpdater.update_form_from_instance(
                 self.form_manager,
                 new_config,
-                explicitly_set_fields,
                 broadcast_callback=self._broadcast_config_changed
             )
         finally:
@@ -587,11 +594,16 @@ class ConfigWindow(BaseFormDialog):
             set_global_config_for_editing(GlobalPipelineConfig,
                                           copy.deepcopy(self._original_global_config_snapshot))
             self._global_context_dirty = False
-            ParameterFormManager.trigger_global_cross_window_refresh()
             logger.debug("Restored GlobalPipelineConfig context after cancel")
 
         self.config_cancelled.emit()
         super().reject()  # BaseFormDialog handles unregistration
+
+        # CRITICAL: Trigger global refresh AFTER unregistration so other windows
+        # re-collect live context without this cancelled window's values
+        # This ensures group_by selector and other placeholders sync correctly
+        ParameterFormManager.trigger_global_cross_window_refresh()
+        logger.debug(f"Triggered global refresh after cancelling {self.config_class.__name__} editor")
 
     def _get_form_managers(self):
         """Return list of form managers to unregister (required by BaseFormDialog)."""

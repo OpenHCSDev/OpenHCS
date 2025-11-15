@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Optional, Union, Any, List
 from enum import Enum
 from abc import ABC, abstractmethod
-from openhcs.constants import Microscope, SequentialComponents, VirtualComponents, VariableComponents, GroupBy
-from openhcs.constants.constants import Backend, get_default_variable_components, get_default_group_by
+from openhcs.constants import Microscope, SequentialComponents, VirtualComponents, VariableComponents, GroupBy, DtypeConversion
+from openhcs.constants.constants import Backend, LiteralDtype, get_default_variable_components, get_default_group_by
 from openhcs.constants.input_source import InputSource
 
 # Import decorator for automatic decorator creation
@@ -167,6 +167,11 @@ class NapariVariableSizeHandling(Enum):
     PAD_TO_MAX = "pad_to_max"  # Pad smaller images to match largest (enables stacking)
 
 
+# Visualization dtype normalization (alias to LiteralDtype - no duplication)
+VisualizationDtype = LiteralDtype
+VisualizationDtype.__doc__ = """Dtype normalization for visualization streaming (Napari/Fiji stacking)."""
+
+
 # Create NapariDisplayConfig using factory
 # Note: Uses lazy colormap enum to avoid importing napari at module level
 # Note: component_order is automatically derived from VirtualComponents + AllComponents
@@ -175,6 +180,7 @@ NapariDisplayConfig = create_napari_display_config(
     colormap_enum=NapariColormap,
     dimension_mode_enum=NapariDimensionMode,
     variable_size_handling_enum=NapariVariableSizeHandling,
+    visualization_dtype_enum=VisualizationDtype,
     virtual_components=VirtualComponents,
     component_order=_build_component_order(),  # Auto-generated from VirtualComponents
     virtual_component_defaults={
@@ -286,6 +292,16 @@ class VFSConfig:
 
 @global_pipeline_config
 @dataclass(frozen=True)
+class DtypeConfig:
+    """Configuration for dtype conversion behavior in memory type decorators."""
+
+    default_dtype_conversion: DtypeConversion = DtypeConversion.NATIVE_OUTPUT
+    """Default dtype conversion mode for all decorated functions.
+    NATIVE_OUTPUT (no scaling) or PRESERVE_INPUT (scale to input dtype)."""
+
+
+@global_pipeline_config
+@dataclass(frozen=True)
 class ProcessingConfig:
     """Configuration for step processing behavior including variable components, grouping, and input source."""
 
@@ -336,6 +352,9 @@ class AnalysisConsolidationConfig:
 
     output_filename: str = "metaxpress_style_summary.csv"
     """Name of the consolidated output file."""
+
+    global_summary_filename: str = "global_metaxpress_summary.csv"
+    """Name of the global consolidated summary file combining all plates."""
 
 
 @global_pipeline_config

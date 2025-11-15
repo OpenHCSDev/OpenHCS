@@ -1723,20 +1723,34 @@ def _fiji_viewer_server_process(port: int, viewer_title: str, display_config, lo
             if server._ready:
                 # REP socket is synchronous - process one message at a time
                 # Worker blocks until we send reply, ensuring no shared memory race conditions
+
+                # CRITICAL: ZMQ REP sockets require strict recv->send->recv->send alternation
+                # If recv() succeeds but send() doesn't happen, the socket enters an invalid
+                # state and refuses all future recv() calls, causing the server to hang.
+
+                # Step 1: Try to receive a message (non-blocking)
                 try:
                     message = server.data_socket.recv(zmq.NOBLOCK)
-
-                    # Process the message and get acknowledgment
-                    ack_response = server.process_image_message(message)
-
-                    # Send acknowledgment back to worker (REP socket requires reply)
-                    # Worker will only close shared memory after receiving this
-                    server.data_socket.send_json(ack_response)
-                    logger.info(f"🔬 FIJI SERVER: Sent ack to worker: {ack_response['status']}")
-
                 except zmq.Again:
-                    # No messages available
+                    # No messages available - this is normal
                     pass
+                else:
+                    # Step 2: We received a message, so we MUST send a response
+                    try:
+                        # Process the message and get acknowledgment
+                        ack_response = server.process_image_message(message)
+                    except Exception as e:
+                        # ANY error during processing - send error response to maintain socket state
+                        logger.error(f"🔬 FIJI SERVER: Error processing image message: {e}", exc_info=True)
+                        ack_response = {'status': 'error', 'message': str(e)}
+
+                    # Step 3: ALWAYS send response (even if it's an error response)
+                    try:
+                        server.data_socket.send_json(ack_response)
+                        logger.info(f"🔬 FIJI SERVER: Sent ack to worker: {ack_response['status']}")
+                    except Exception as e:
+                        # If send fails, the socket is likely broken - log and continue
+                        logger.error(f"🔬 FIJI SERVER: Failed to send ack on data socket: {e}", exc_info=True)
 
             time.sleep(0.001)  # 1ms sleep - faster polling for multiprocessing
         

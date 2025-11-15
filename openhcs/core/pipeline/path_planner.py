@@ -5,7 +5,7 @@ This version ACTUALLY eliminates duplication instead of adding abstraction theat
 """
 
 import logging
-from dataclasses import dataclass
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
@@ -23,25 +23,57 @@ logger = logging.getLogger(__name__)
 # ===== PATTERN NORMALIZATION (ONE place) =====
 
 def normalize_pattern(pattern: Any) -> Iterator[Tuple[Callable, str, int]]:
-    """Extract enabled functions from any pattern."""
-    for func, key, pos in iter_pattern_items(pattern):
+    """Extract enabled functions from any pattern.
+
+    Renumbers positions after filtering out disabled functions to ensure
+    funcplan keys match runtime execution positions.
+
+    For dict patterns, position counters are tracked per dict key.
+    For list/single patterns, position counter is global.
+    """
+    # Track position counters per dict key (for dict patterns) or globally (for list/single patterns)
+    position_counters = {}
+
+    for func, key, original_pos in iter_pattern_items(pattern):
         # Skip disabled functions
         if isinstance(func, tuple) and len(func) == 2 and isinstance(func[1], dict):
             if func[1].get('enabled', True) is False:
                 continue
-        # Extract callable and yield
+        # Extract callable and yield with renumbered position
         if core := get_core_callable(func):
-            yield (core, key, pos)
+            # Get or initialize position counter for this dict key
+            if key not in position_counters:
+                position_counters[key] = 0
+
+            yield (core, key, position_counters[key])
+            position_counters[key] += 1
 
 
 def extract_attributes(pattern: Any) -> Dict[str, Any]:
-    """Extract all function attributes in one pass - 10 lines."""
-    outputs, inputs, mat_funcs = set(), {}, {}
-    for func, _, _ in normalize_pattern(pattern):
-        outputs.update(getattr(func, '__special_outputs__', set()))
+    """Extract special I/O metadata and track per-group ownership."""
+    output_names: Set[str] = set()
+    output_groups: Dict[str, Set[Optional[str]]] = defaultdict(set)
+    inputs, mat_funcs = {}, {}
+
+    for func, group_key, _ in normalize_pattern(pattern):
+        normalized_key = None if group_key == "default" else group_key
+
+        func_outputs = getattr(func, '__special_outputs__', set())
+        output_names.update(func_outputs)
+        for output in func_outputs:
+            output_groups[output].add(normalized_key)
+
         inputs.update(getattr(func, '__special_inputs__', {}))
         mat_funcs.update(getattr(func, '__materialization_functions__', {}))
-    return {'outputs': outputs, 'inputs': inputs, 'mat_funcs': mat_funcs}
+
+    return {
+        'outputs': {
+            'names': output_names,
+            'groups': output_groups
+        },
+        'inputs': inputs,
+        'mat_funcs': mat_funcs
+    }
 
 
 # ===== PATH PLANNING (NO duplication) =====
@@ -86,20 +118,42 @@ class PathPlanner:
         input_dir = self._get_dir(step, i, pipeline, 'input')
         output_dir = self._get_dir(step, i, pipeline, 'output', input_dir)
 
-        # Extract function data if FunctionStep
-        attrs = extract_attributes(step.func) if isinstance(step, FunctionStep) else {
-            'outputs': self._normalize_attr(getattr(step, 'special_outputs', set()), set),
-            'inputs': self._normalize_attr(getattr(step, 'special_inputs', {}), dict),
-            'mat_funcs': {}
-        }
+        # Prepare function data if FunctionStep
+        if isinstance(step, FunctionStep):
+            step.func = self._inject_injectable_params(step.func, step)
+            step.func = self._strip_disabled_functions(step.func)
+            attrs = extract_attributes(step.func if step.func else [])
+        else:
+            raw_outputs = self._normalize_attr(getattr(step, 'special_outputs', set()), set)
+            default_groups = defaultdict(set)
+            for name in raw_outputs:
+                default_groups[name].add(None)
+            attrs = {
+                'outputs': {
+                    'names': raw_outputs,
+                    'groups': default_groups
+                },
+                'inputs': self._normalize_attr(getattr(step, 'special_inputs', {}), dict),
+                'mat_funcs': {}
+            }
 
         # Process special I/O with unified logic
-        special_outputs = self._process_special(attrs['outputs'], attrs['mat_funcs'], 'output', sid)
-        special_inputs = self._process_special(attrs['inputs'], attrs['outputs'], 'input', sid)
+        special_outputs = self._process_special(
+            attrs['outputs']['names'],
+            attrs['mat_funcs'],
+            'output',
+            sid,
+            attrs['outputs'].get('groups')
+        )
+        special_inputs = self._process_special(attrs['inputs'], attrs['outputs']['names'], 'input', sid)
 
-        # Handle metadata injection
+        # Handle metadata injection after stripping disabled functions
         if isinstance(step, FunctionStep) and any(k in METADATA_RESOLVERS for k in attrs['inputs']):
             step.func = self._inject_metadata(step.func, attrs['inputs'])
+
+        # Ensure step plan references the normalized function pattern
+        self.plans.setdefault(sid, {})
+        self.plans[sid]['func'] = step.func
 
         # Generate funcplan (only if needed)
         funcplan = {}
@@ -276,7 +330,7 @@ class PathPlanner:
             return self._build_output_path(config)
         return None
 
-    def _process_special(self, items: Any, extra: Any, io_type: str, sid: str) -> Dict:
+    def _process_special(self, items: Any, extra: Any, io_type: str, sid: str, output_groups: Optional[Dict[str, Set[Optional[str]]]] = None) -> Dict:
         """Unified special I/O processing - no duplication."""
         result = {}
 
@@ -287,9 +341,11 @@ class PathPlanner:
                 # produce the same special output (e.g., two crop_device steps both producing match_results)
                 filename = PipelinePathPlanner._build_axis_filename(self.ctx.axis_id, key, step_index=sid)
                 path = results_path / filename
+                groups = output_groups.get(key, {None}) if output_groups else {None}
                 result[key] = {
                     'path': str(path),
-                    'materialization_function': extra.get(key)  # extra is mat_funcs
+                    'materialization_function': extra.get(key),  # extra is mat_funcs
+                    'group_keys': sorted(groups)
                 }
                 self.declared[key] = str(path)
 
@@ -312,15 +368,130 @@ class PathPlanner:
                 pattern = self._inject_into_pattern(pattern, key, value)
         return pattern
 
+    def _inject_injectable_params(self, pattern: Any, step) -> Any:
+        """Inject injectable param values into function kwargs.
+
+        Injectable params (dtype_config, enabled, etc.) are added to function signatures
+        by the unified registry. This method injects those params from the step into the
+        func pattern kwargs. The values will be resolved during Phase 5 (lazy resolution).
+
+        Args:
+            pattern: Function pattern (callable, tuple, list, or dict)
+            step: FunctionStep instance with config attributes
+
+        Returns:
+            Modified pattern with param values injected into kwargs
+        """
+        from openhcs.processing.backends.lib_registry.unified_registry import LibraryRegistryBase
+
+        # Get injectable param names from registry (single source of truth)
+        param_names = [param_name for param_name, _, _ in LibraryRegistryBase.INJECTABLE_PARAMS]
+
+        # Build kwargs dict from step attributes (keep lazy configs as-is for Phase 5 resolution)
+        param_kwargs = {}
+        for param_name in param_names:
+            if hasattr(step, param_name):
+                value = getattr(step, param_name)
+                if value is not None:
+                    param_kwargs[param_name] = value
+
+        if not param_kwargs:
+            return pattern
+
+        return self._inject_params_into_pattern(pattern, param_kwargs)
+
     def _inject_into_pattern(self, pattern: Any, key: str, value: Any) -> Any:
-        """Inject value into pattern - handles all cases in 6 lines."""
-        if callable(pattern):
-            return (pattern, {key: value})
+        """Inject value into pattern - only for functions that declare the special input.
+
+        FunctionReference objects preserve __special_inputs__ via __getattr__, so they
+        work the same as regular callables here.
+        """
+        from openhcs.core.pipeline.compiler import FunctionReference
+
+        # Handle FunctionReference and callable objects
+        if isinstance(pattern, FunctionReference) or callable(pattern):
+            # Only inject if THIS specific function needs this metadata
+            if key in getattr(pattern, '__special_inputs__', {}):
+                return (pattern, {key: value})
+            return pattern  # Don't modify if function doesn't need it
+
         if isinstance(pattern, tuple) and len(pattern) == 2:
-            return (pattern[0], {**pattern[1], key: value})
-        if isinstance(pattern, list) and len(pattern) == 1:
-            return [self._inject_into_pattern(pattern[0], key, value)]
+            func, kwargs = pattern
+            # Only inject if THIS specific function needs this metadata
+            if (isinstance(func, FunctionReference) or callable(func)) and key in getattr(func, '__special_inputs__', {}):
+                return (func, {**kwargs, key: value})
+            return pattern  # Don't modify if function doesn't need it
+
+        if isinstance(pattern, list):
+            # Recursively process each element (selective injection per function)
+            return [self._inject_into_pattern(item, key, value) for item in pattern]
+
+        if isinstance(pattern, dict):
+            # Recursively process each value (selective injection per function)
+            return {k: self._inject_into_pattern(v, key, value) for k, v in pattern.items()}
+
         raise ValueError(f"Cannot inject into pattern type: {type(pattern)}")
+
+    def _inject_params_into_pattern(self, pattern: Any, resolved_kwargs: Dict[str, Any]) -> Any:
+        """Inject resolved param values into function pattern kwargs.
+
+        Unlike metadata injection which is selective (only for functions with @special_inputs),
+        injectable param injection is universal - all registered functions accept dtype_config, enabled, etc.
+
+        Args:
+            pattern: Function pattern (callable, tuple, list, or dict)
+            resolved_kwargs: Dict of resolved param values to inject
+
+        Returns:
+            Modified pattern with params injected into kwargs
+        """
+        from openhcs.core.pipeline.compiler import FunctionReference
+
+        # Handle FunctionReference and callable objects
+        if isinstance(pattern, FunctionReference) or callable(pattern):
+            # Always inject params (all registered functions accept them)
+            return (pattern, resolved_kwargs)
+
+        if isinstance(pattern, tuple) and len(pattern) == 2:
+            func, kwargs = pattern
+            # Merge resolved_kwargs with existing kwargs (existing kwargs take precedence)
+            merged_kwargs = {**resolved_kwargs, **kwargs}
+            return (func, merged_kwargs)
+
+        if isinstance(pattern, list):
+            # Recursively process each element
+            return [self._inject_params_into_pattern(item, resolved_kwargs) for item in pattern]
+
+        if isinstance(pattern, dict):
+            # Recursively process each value
+            return {k: self._inject_params_into_pattern(v, resolved_kwargs) for k, v in pattern.items()}
+
+        return pattern
+
+    def _strip_disabled_functions(self, pattern: Any) -> Any:
+        """
+        Remove disabled functions (enabled=False) from any pattern structure.
+
+        Ensures downstream planning (special outputs, funcplan, materialization)
+        never sees disabled functions.
+        """
+        if isinstance(pattern, tuple) and len(pattern) == 2 and isinstance(pattern[1], dict):
+            if pattern[1].get('enabled', True) is False:
+                return None
+            return pattern
+
+        if isinstance(pattern, list):
+            stripped = [self._strip_disabled_functions(item) for item in pattern]
+            return [item for item in stripped if item not in (None, [], {})]
+
+        if isinstance(pattern, dict):
+            stripped = {k: self._strip_disabled_functions(v) for k, v in pattern.items()}
+            return {
+                k: v for k, v in stripped.items()
+                if v not in (None, [], {})
+            }
+
+        return pattern
 
     def _normalize_attr(self, attr: Any, target_type: type) -> Any:
         """Normalize step attributes - 5 lines, no duplication."""

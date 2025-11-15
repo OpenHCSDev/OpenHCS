@@ -362,6 +362,9 @@ def assemble_stack_cupy(
     num_tiles, tile_h, tile_w = image_tiles.shape
     first_tile_shape = (tile_h, tile_w) # Used for blend mask, assumes all tiles same H, W
 
+    # Remember input dtype to preserve it in output
+    input_dtype = image_tiles.dtype
+
     # Note: Convert tiles to float32 one at a time to save memory
     # (removed bulk conversion to avoid doubling memory usage)
 
@@ -513,8 +516,13 @@ def assemble_stack_cupy(
     epsilon = 1e-7 # To avoid division by zero
     stitched_image_float = composite_accum / (weight_accum + epsilon)
 
-    # Clip to 0-65535 and cast to uint16
-    stitched_image_uint16 = cp.clip(stitched_image_float, 0, 65535).astype(cp.uint16)
+    # Convert back to input dtype, preserving the dtype
+    if cp.issubdtype(input_dtype, cp.integer):
+        dtype_info = cp.iinfo(input_dtype)
+        stitched_output = cp.clip(stitched_image_float, dtype_info.min, dtype_info.max).astype(input_dtype)
+    else:
+        # For float dtypes, just convert directly
+        stitched_output = stitched_image_float.astype(input_dtype)
 
     # Return as a 3D array with a single Z-slice
-    return stitched_image_uint16.reshape(1, canvas_height.item(), canvas_width.item()) # .item() to convert 0-dim cupy array to scalar
+    return stitched_output.reshape(1, canvas_height.item(), canvas_width.item()) # .item() to convert 0-dim cupy array to scalar

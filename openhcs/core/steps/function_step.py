@@ -244,7 +244,6 @@ def _bulk_preload_step_images(
     import time
     start_time = time.time()
 
-    logger.debug(f"🔄 BULK PRELOAD: Loading images from {read_backend} to memory for well {axis_id}")
 
     # Get file paths based on mode
     if patterns_to_preload is not None:
@@ -276,16 +275,13 @@ def _bulk_preload_step_images(
     for file_path in full_file_paths:
         if filemanager.exists(file_path, Backend.MEMORY.value):
             filemanager.delete(file_path, Backend.MEMORY.value)
-            logger.debug(f"🔄 BULK PRELOAD: Deleted existing file {file_path} before bulk preload")
 
     filemanager.save_batch(raw_images, full_file_paths, Backend.MEMORY.value)
-    logger.info(f"🔄 BULK PRELOAD: Saved {len(full_file_paths)} files to memory for well {axis_id}")
 
     # Clean up source references - keep only memory backend references
     del raw_images
 
     load_time = time.time() - start_time
-    logger.debug(f"🔄 BULK PRELOAD: Completed in {load_time:.2f}s - {len(full_file_paths)} images now in memory")
 
 def _bulk_writeout_step_images(
     step_output_dir: Path,
@@ -306,7 +302,6 @@ def _bulk_writeout_step_images(
     import time
     start_time = time.time()
 
-    logger.debug(f"🔄 BULK WRITEOUT: Writing images from memory to {write_backend} for well {axis_id}")
 
     # Create specialized path getter and get memory paths for this well
     get_paths_for_axis = create_image_path_getter(axis_id, filemanager, microscope_handler)
@@ -325,7 +320,6 @@ def _bulk_writeout_step_images(
 #        file_paths.append(str(target_path))
 
     file_paths = memory_file_paths
-    logger.debug(f"🔄 BULK WRITEOUT: Found {len(file_paths)} image files in memory to write")
 
     # Load all data from memory backend
     memory_data = filemanager.load_batch(file_paths, Backend.MEMORY.value)
@@ -351,7 +345,6 @@ def _bulk_writeout_step_images(
         filemanager.save_batch(memory_data, file_paths, write_backend)
 
     write_time = time.time() - start_time
-    logger.debug(f"🔄 BULK WRITEOUT: Completed in {write_time:.2f}s - {len(memory_data)} images written to {write_backend}")
 
 def _calculate_zarr_dimensions(file_paths: List[Union[str, Path]], microscope_handler) -> tuple[int, int, int]:
     """
@@ -409,20 +402,18 @@ def _execute_function_core(
     """
     final_kwargs = base_kwargs.copy()
 
+    # Log dtype_config in kwargs
     if special_inputs_plan:
         logger.info(f"�� SPECIAL_INPUTS_DEBUG : special_inputs_plan = {special_inputs_plan}")
         for arg_name, path_info in special_inputs_plan.items():
-            logger.info(f"🔍 SPECIAL_INPUTS_DEBUG: Processing arg_name='{arg_name}', path_info={path_info} (type: {type(path_info)})")
 
 
             # Extract path string from the path info dictionary
             # Current format: {"path": "/path/to/file.pkl", "source_step_id": "step_123"}
             if isinstance(path_info, dict) and 'path' in path_info:
                 special_path_value = path_info['path']
-                logger.info(f"🔍 SPECIAL_INPUTS_DEBUG: Extracted path from dict: '{special_path_value}' (type: {type(special_path_value)})")
             else:
                 special_path_value = path_info  # Fallback if it's already a string
-                logger.info(f"🔍 SPECIAL_INPUTS_DEBUG: Using path_info directly: '{special_path_value}' (type: {type(special_path_value)})")
 
             logger.info(f"Loading special input '{arg_name}' from path '{special_path_value}' (memory backend)")
             try:
@@ -440,115 +431,62 @@ def _execute_function_core(
     # 🔍 DEBUG: Log input dimensions
     input_shape = getattr(main_data_arg, 'shape', 'no shape attr')
     input_type = type(main_data_arg).__name__
-    logger.debug(f"🔍 FUNCTION INPUT: {func_callable.__name__} - shape: {input_shape}, type: {input_type}")
 
     # ⚡ INFO: Terse function execution log for user feedback
     logger.info(f"⚡ Executing: {func_callable.__name__}")
 
     # 🔍 DEBUG: Log function attributes before execution
-    logger.debug(f"🔍 FUNCTION ATTRS: {func_callable.__name__} - special_outputs: {getattr(func_callable, '__special_outputs__', 'None')}")
-    logger.debug(f"🔍 FUNCTION ATTRS: {func_callable.__name__} - input_memory_type: {getattr(func_callable, 'input_memory_type', 'None')}")
-    logger.debug(f"🔍 FUNCTION ATTRS: {func_callable.__name__} - output_memory_type: {getattr(func_callable, 'output_memory_type', 'None')}")
 
     raw_function_output = func_callable(main_data_arg, **final_kwargs)
 
-    # 🔍 DEBUG: Log output dimensions and type details
-    output_shape = getattr(raw_function_output, 'shape', 'no shape attr')
-    output_type = type(raw_function_output).__name__
-    logger.debug(f"🔍 FUNCTION OUTPUT: {func_callable.__name__} - shape: {output_shape}, type: {output_type}")
-
-    # 🔍 DEBUG: If it's a tuple, log details about each element
+    # Check if function returned a tuple (indicates @special_outputs decorator)
+    # Functions with @special_outputs ALWAYS return tuples: (main_output, special_output_1, ...)
+    # We ALWAYS extract the main output from the tuple, regardless of funcplan
+    # The funcplan only controls which special outputs to SAVE, not which to extract
     if isinstance(raw_function_output, tuple):
-        logger.debug(f"🔍 FUNCTION OUTPUT: {func_callable.__name__} - tuple length: {len(raw_function_output)}")
-        for i, element in enumerate(raw_function_output):
-            elem_shape = getattr(element, 'shape', 'no shape attr')
-            elem_type = type(element).__name__
-            logger.debug(f"🔍 FUNCTION OUTPUT: {func_callable.__name__} - element[{i}]: shape={elem_shape}, type={elem_type}")
-    else:
-        logger.debug(f"🔍 FUNCTION OUTPUT: {func_callable.__name__} - not a tuple, single return value")
-
-    main_output_data = raw_function_output
-
-    # 🔍 DEBUG: Log special output plan status
-    logger.debug(f"🔍 SPECIAL OUTPUT PLAN: {special_outputs_plan}")
-    logger.debug(f"🔍 SPECIAL OUTPUT PLAN: Is empty? {not special_outputs_plan}")
-    logger.debug(f"🔍 SPECIAL OUTPUT PLAN: Length: {len(special_outputs_plan) if special_outputs_plan else 0}")
-
-    # Only log special outputs if there are any (avoid spamming empty dict logs)
-    if special_outputs_plan:
-        logger.debug(f"🔍 SPECIAL OUTPUT: {special_outputs_plan}")
-    if special_outputs_plan:
-        num_special_outputs = len(special_outputs_plan)
-        logger.debug(f"🔍 SPECIAL OUTPUT PROCESSING: Expected {num_special_outputs} special outputs")
-        logger.debug(f"🔍 SPECIAL OUTPUT PROCESSING: Function returned type: {type(raw_function_output)}")
-        logger.debug(f"🔍 SPECIAL OUTPUT PROCESSING: Function returned tuple length: {len(raw_function_output) if isinstance(raw_function_output, tuple) else 'not tuple'}")
-
-        if not isinstance(raw_function_output, tuple) or len(raw_function_output) != (1 + num_special_outputs):
-            logger.error(f"🔍 SPECIAL OUTPUT ERROR: Function '{getattr(func_callable, '__name__', 'unknown')}' special output mismatch")
-            logger.error(f"🔍 SPECIAL OUTPUT ERROR: Expected tuple of {1 + num_special_outputs} values")
-            logger.error(f"🔍 SPECIAL OUTPUT ERROR: Got {type(raw_function_output)} with {len(raw_function_output) if isinstance(raw_function_output, tuple) else 'N/A'} values")
-            raise ValueError(
-                f"Function '{getattr(func_callable, '__name__', 'unknown')}' was expected to return a tuple of "
-                f"{1 + num_special_outputs} values (main_output + {num_special_outputs} special) "
-                f"based on 'special_outputs' in step plan, but returned {len(raw_function_output) if isinstance(raw_function_output, tuple) else type(raw_function_output)} values."
-            )
+        # Function returned a tuple - extract main output (first element)
         main_output_data = raw_function_output[0]
         returned_special_values_tuple = raw_function_output[1:]
 
-        # 🔍 DEBUG: Log what we extracted
-        logger.debug(f"🔍 SPECIAL OUTPUT PROCESSING: Extracted main_output_data type: {type(main_output_data)}")
-        logger.debug(f"🔍 SPECIAL OUTPUT PROCESSING: Extracted main_output_data shape: {getattr(main_output_data, 'shape', 'no shape')}")
-        logger.debug(f"🔍 SPECIAL OUTPUT PROCESSING: Extracted {len(returned_special_values_tuple)} special values")
+        # Only SAVE special outputs if they're in the funcplan
+        # (funcplan controls what to save, not what to extract)
+        if special_outputs_plan:
+            # Iterate through special_outputs_plan (which must be ordered by compiler)
+            # and match with positionally returned special values.
+            for i, (output_key, vfs_path_info) in enumerate(special_outputs_plan.items()):
+                logger.info(f"Saving special output '{output_key}' to VFS path '{vfs_path_info}' (memory backend)")
+                if i < len(returned_special_values_tuple):
+                    value_to_save = returned_special_values_tuple[i]
+                    # Extract path string from the path info dictionary
+                    # Current format: {"path": "/path/to/file.pkl"}
+                    if isinstance(vfs_path_info, dict) and 'path' in vfs_path_info:
+                        vfs_path = vfs_path_info['path']
+                    else:
+                        vfs_path = vfs_path_info  # Fallback if it's already a string
 
-        # Iterate through special_outputs_plan (which must be ordered by compiler)
-        # and match with positionally returned special values.
-        for i, (output_key, vfs_path_info) in enumerate(special_outputs_plan.items()):
-            logger.info(f"Saving special output '{output_key}' to VFS path '{vfs_path_info}' (memory backend)")
-            if i < len(returned_special_values_tuple):
-                value_to_save = returned_special_values_tuple[i]
-                # Extract path string from the path info dictionary
-                # Current format: {"path": "/path/to/file.pkl"}
-                if isinstance(vfs_path_info, dict) and 'path' in vfs_path_info:
-                    vfs_path = vfs_path_info['path']
+                    # DEBUG: List what's currently in VFS before saving
+                    from openhcs.io.base import storage_registry as global_storage_registry
+                    global_memory_backend = global_storage_registry[Backend.MEMORY.value]
+                    global_existing_keys = list(global_memory_backend._memory_store.keys())
+
+                    # Check filemanager's memory backend
+                    filemanager_memory_backend = context.filemanager._get_backend(Backend.MEMORY.value)
+                    filemanager_existing_keys = list(filemanager_memory_backend._memory_store.keys())
+
+                    if vfs_path in filemanager_existing_keys:
+                        logger.warning(f"🔍 VFS_DEBUG: WARNING - '{vfs_path}' ALREADY EXISTS in FILEMANAGER memory backend!")
+
+                    # Ensure directory exists for memory backend
+                    parent_dir = str(Path(vfs_path).parent)
+                    context.filemanager.ensure_directory(parent_dir, Backend.MEMORY.value)
+                    context.filemanager.save(value_to_save, vfs_path, Backend.MEMORY.value)
                 else:
-                    vfs_path = vfs_path_info  # Fallback if it's already a string
-               # # Add axis_id prefix to filename for memory backend to avoid thread collisions
-               # from pathlib import Path
-               # vfs_path_obj = Path(vfs_path)
-               # prefixed_filename = f"{axis_id}_{vfs_path_obj.name}"
-               # prefixed_vfs_path = str(vfs_path_obj.parent / prefixed_filename)
-
-                logger.info(f"🔍 SPECIAL_SAVE: Saving '{output_key}' to '{vfs_path}' (memory backend)")
-
-                # DEBUG: List what's currently in VFS before saving
-                from openhcs.io.base import storage_registry as global_storage_registry
-                global_memory_backend = global_storage_registry[Backend.MEMORY.value]
-                global_existing_keys = list(global_memory_backend._memory_store.keys())
-                logger.info(f"🔍 VFS_DEBUG: GLOBAL memory backend has {len(global_existing_keys)} entries before save")
-                logger.info(f"🔍 VFS_DEBUG: GLOBAL memory backend ID: {id(global_memory_backend)}")
-                logger.info(f"🔍 VFS_DEBUG: GLOBAL first 10 keys: {global_existing_keys[:10]}")
-
-                # Check filemanager's memory backend
-                filemanager_memory_backend = context.filemanager._get_backend(Backend.MEMORY.value)
-                filemanager_existing_keys = list(filemanager_memory_backend._memory_store.keys())
-                logger.info(f"🔍 VFS_DEBUG: FILEMANAGER memory backend has {len(filemanager_existing_keys)} entries before save")
-                logger.info(f"🔍 VFS_DEBUG: FILEMANAGER memory backend ID: {id(filemanager_memory_backend)}")
-                logger.info(f"🔍 VFS_DEBUG: FILEMANAGER first 10 keys: {filemanager_existing_keys[:10]}")
-
-                if vfs_path in filemanager_existing_keys:
-                    logger.warning(f"🔍 VFS_DEBUG: WARNING - '{vfs_path}' ALREADY EXISTS in FILEMANAGER memory backend!")
-
-                # Ensure directory exists for memory backend
-                parent_dir = str(Path(vfs_path).parent)
-                context.filemanager.ensure_directory(parent_dir, Backend.MEMORY.value)
-                context.filemanager.save(value_to_save, vfs_path, Backend.MEMORY.value)
-                logger.info(f"🔍 SPECIAL_SAVE: Successfully saved '{output_key}' to memory")
-                logger.info(f"🔍 SPECIAL_SAVE: Successfully saved '{output_key}' to memory")
-            else:
-                # This indicates a mismatch that should ideally be caught by schema/validation
-                logger.error(f"Mismatch: {num_special_outputs} special outputs planned, but fewer values returned by function for key '{output_key}'.")
-                # Or, if partial returns are allowed, this might be a warning. For now, error.
-                raise ValueError(f"Function did not return enough values for all planned special outputs. Missing value for '{output_key}'.")
+                    # This indicates a mismatch that should ideally be caught by schema/validation
+                    logger.error(f"Mismatch: special_outputs_plan wants to save '{output_key}', but function only returned {len(returned_special_values_tuple)} special values.")
+                    raise ValueError(f"Function did not return enough values for all planned special outputs. Missing value for '{output_key}'.")
+    else:
+        # Function did not return a tuple - use output directly
+        main_output_data = raw_function_output
 
     return main_output_data
 
@@ -572,8 +510,19 @@ def _execute_chain_core(
         base_kwargs_for_item: Dict[str, Any] = {}
         is_last_in_chain = (i == len(func_chain) - 1)
 
-        if isinstance(func_item, tuple) and len(func_item) == 2 and callable(func_item[0]):
-            actual_callable, base_kwargs_for_item = func_item
+        # Resolve FunctionReference objects to actual functions in worker process
+        from openhcs.core.pipeline.compiler import FunctionReference
+        if isinstance(func_item, FunctionReference):
+            actual_callable = func_item.resolve()
+        elif isinstance(func_item, tuple) and len(func_item) == 2:
+            func_or_ref, kwargs = func_item
+            if isinstance(func_or_ref, FunctionReference):
+                actual_callable = func_or_ref.resolve()
+            elif callable(func_or_ref):
+                actual_callable = func_or_ref
+            else:
+                raise TypeError(f"Invalid function in tuple: {func_or_ref}")
+            base_kwargs_for_item = kwargs
         elif callable(func_item):
             actual_callable = func_item
         else:
@@ -595,21 +544,14 @@ def _execute_chain_core(
         # Construct execution key: function_name_dict_key_chain_position
         execution_key = f"{func_name}_{dict_key}_{i}"
 
-        logger.info(f"🔍 FUNCPLAN DEBUG: execution_key = {execution_key}")
-        logger.info(f"🔍 FUNCPLAN DEBUG: funcplan keys = {list(funcplan.keys()) if funcplan else 'EMPTY'}")
-        logger.info(f"🔍 FUNCPLAN DEBUG: step_special_outputs_plan = {step_special_outputs_plan}")
-
         if execution_key in funcplan:
             outputs_to_save = funcplan[execution_key]
             outputs_plan_for_this_call = _filter_special_outputs_for_function(
                 outputs_to_save, step_special_outputs_plan, dict_key
             )
-            logger.info(f"🔍 FUNCPLAN: {execution_key} -> {outputs_to_save}")
-            logger.info(f"🔍 FUNCPLAN: outputs_plan_for_this_call = {outputs_plan_for_this_call}")
         else:
             # Fallback: no funcplan entry, save nothing
             outputs_plan_for_this_call = {}
-            logger.info(f"🔍 FUNCPLAN: No entry for {execution_key}, saving nothing")
 
         current_stack = _execute_function_core(
             func_callable=actual_callable,
@@ -688,10 +630,8 @@ def _process_single_pattern_group(
             )
 
         # 🔍 DEBUG: Log stacking operation
-        logger.debug(f"🔍 STACKING: {len(raw_slices)} slices → memory_type: {input_memory_type_from_plan}")
         if raw_slices:
             slice_shapes = [getattr(s, 'shape', 'no shape') for s in raw_slices[:3]]  # First 3 shapes
-            logger.debug(f"🔍 STACKING: Sample slice shapes: {slice_shapes}")
 
         main_data_stack = stack_slices(
             slices=raw_slices, memory_type=input_memory_type_from_plan, gpu_id=device_id
@@ -700,9 +640,7 @@ def _process_single_pattern_group(
         # 🔍 DEBUG: Log stacked result
         stack_shape = getattr(main_data_stack, 'shape', 'no shape')
         stack_type = type(main_data_stack).__name__
-        logger.debug(f"🔍 STACKED RESULT: shape: {stack_shape}, type: {stack_type}")
 
-        logger.info(f"🔍 special_outputs_map: {special_outputs_map}")
 
         final_base_kwargs = base_func_args.copy()
 
@@ -714,33 +652,42 @@ def _process_single_pattern_group(
         else:
             dict_key_for_funcplan = "default"  # Use default for list/single patterns
 
+        # Resolve FunctionReference if needed
+        from openhcs.core.pipeline.compiler import FunctionReference
+        if isinstance(executable_func_or_chain, FunctionReference):
+            executable_func_or_chain = executable_func_or_chain.resolve()
+        elif isinstance(executable_func_or_chain, tuple) and len(executable_func_or_chain) == 2:
+            func_or_ref, kwargs = executable_func_or_chain
+            if isinstance(func_or_ref, FunctionReference):
+                executable_func_or_chain = (func_or_ref.resolve(), kwargs)
+
         if isinstance(executable_func_or_chain, list):
             processed_stack = _execute_chain_core(
                 main_data_stack, executable_func_or_chain, context,
                 special_inputs_map, special_outputs_map, axis_id,
                 device_id, input_memory_type_from_plan, step_index, dict_key_for_funcplan
             )
-        elif callable(executable_func_or_chain):
+        elif callable(executable_func_or_chain) or (isinstance(executable_func_or_chain, tuple) and len(executable_func_or_chain) == 2):
+            # Handle both direct callable and (callable, kwargs) tuple
+            if isinstance(executable_func_or_chain, tuple):
+                actual_func, _ = executable_func_or_chain
+            else:
+                actual_func = executable_func_or_chain
+
             # For single functions, apply funcplan filtering like in chain execution
             funcplan = context.step_plans[step_index].get("funcplan", {})
-            func_name = getattr(executable_func_or_chain, '__name__', 'unknown')
+            func_name = getattr(actual_func, '__name__', 'unknown')
             execution_key = f"{func_name}_{dict_key_for_funcplan}_0"  # Position 0 for single functions
 
-            logger.info(f"🔍 SINGLE FUNC FUNCPLAN DEBUG: execution_key = {execution_key}")
-            logger.info(f"🔍 SINGLE FUNC FUNCPLAN DEBUG: funcplan keys = {list(funcplan.keys()) if funcplan else 'EMPTY'}")
-            logger.info(f"🔍 SINGLE FUNC FUNCPLAN DEBUG: special_outputs_map = {special_outputs_map}")
 
             if execution_key in funcplan:
                 outputs_to_save = funcplan[execution_key]
                 filtered_special_outputs_map = _filter_special_outputs_for_function(
                     outputs_to_save, special_outputs_map, dict_key_for_funcplan
                 )
-                logger.info(f"🔍 SINGLE FUNC FUNCPLAN: {execution_key} -> {outputs_to_save}")
-                logger.info(f"🔍 SINGLE FUNC FUNCPLAN: filtered_special_outputs_map = {filtered_special_outputs_map}")
             else:
                 # Fallback: no funcplan entry, save nothing
                 filtered_special_outputs_map = {}
-                logger.info(f"🔍 SINGLE FUNC FUNCPLAN: No entry for {execution_key}, saving nothing")
 
             processed_stack = _execute_function_core(
                 executable_func_or_chain, main_data_stack, final_base_kwargs, context,
@@ -753,16 +700,8 @@ def _process_single_pattern_group(
         input_shape = getattr(main_data_stack, 'shape', 'unknown')
         output_shape = getattr(processed_stack, 'shape', 'unknown')
         processed_type = type(processed_stack).__name__
-        logger.debug(f"🔍 PROCESSING RESULT: input: {input_shape} → output: {output_shape}, type: {processed_type}")
 
         # 🔍 DEBUG: Additional validation logging
-        logger.debug(f"🔍 VALIDATION: processed_stack type: {type(processed_stack)}")
-        logger.debug(f"🔍 VALIDATION: processed_stack has shape attr: {hasattr(processed_stack, 'shape')}")
-        logger.debug(f"🔍 VALIDATION: processed_stack has ndim attr: {hasattr(processed_stack, 'ndim')}")
-        if hasattr(processed_stack, 'ndim'):
-            logger.debug(f"🔍 VALIDATION: processed_stack ndim: {processed_stack.ndim}")
-        if hasattr(processed_stack, 'shape'):
-            logger.debug(f"🔍 VALIDATION: processed_stack shape: {processed_stack.shape}")
 
         if not _is_3d(processed_stack):
             logger.error("🔍 VALIDATION ERROR: processed_stack is not 3D")
@@ -774,7 +713,6 @@ def _process_single_pattern_group(
             raise ValueError(f"Main processing must result in a 3D array, got {getattr(processed_stack, 'shape', 'unknown')}")
 
         # 🔍 DEBUG: Log unstacking operation
-        logger.debug(f"🔍 UNSTACKING: shape: {output_shape} → memory_type: {output_memory_type_from_plan}")
 
 
 
@@ -785,7 +723,9 @@ def _process_single_pattern_group(
         # 🔍 DEBUG: Log unstacked result
         if output_slices:
             unstacked_shapes = [getattr(s, 'shape', 'no shape') for s in output_slices[:3]]  # First 3 shapes
-            logger.debug(f"🔍 UNSTACKED RESULT: {len(output_slices)} slices, sample shapes: {unstacked_shapes}")
+            # Log values of first slice
+            if len(output_slices) > 0 and hasattr(output_slices[0], 'min'):
+                first_slice = output_slices[0]
 
         # Handle cases where function returns fewer images than inputs (e.g., z-stack flattening, channel compositing)
         # In such cases, we save only the returned images using the first N input filenames
@@ -826,11 +766,7 @@ def _process_single_pattern_group(
             # Ensure directory exists
             context.filemanager.ensure_directory(str(step_output_dir), Backend.MEMORY.value)
 
-                          # Only pass zarr_config to zarr backend - fail loud for invalid parameters
-                    #if write_backend == Backend.ZARR.value:
-          # Batch save
-           # context.filemanager.save_batch(output_data, output_paths_batch, write_backend, zarr_config=zarr_config)
-           #         else:
+            # Batch save
             context.filemanager.save_batch(output_data, output_paths_batch, Backend.MEMORY.value)
 
         except Exception as e:
@@ -928,15 +864,7 @@ class FunctionStep(AbstractStep):
             )
 
             # Debug: Log discovered patterns
-            logger.info(f"🔍 PATTERN DISCOVERY: Step {step_index} ({step_name}) discovered patterns for well {axis_id}")
-            logger.info(f"🔍 PATTERN DISCOVERY: step_input_dir={step_input_dir}, read_backend={read_backend}")
-            if axis_id in patterns_by_well:
-                if isinstance(patterns_by_well[axis_id], dict):
-                    for comp_val, pattern_list in patterns_by_well[axis_id].items():
-                        logger.info(f"🔍 PATTERN DISCOVERY: Component '{comp_val}' has {len(pattern_list)} patterns: {pattern_list}")
-                else:
-                    logger.info(f"🔍 PATTERN DISCOVERY: Found {len(patterns_by_well[axis_id])} ungrouped patterns: {patterns_by_well[axis_id]}")
-            else:
+            if axis_id not in patterns_by_well:
                 logger.warning(f"🔍 PATTERN DISCOVERY: No patterns found for well {axis_id}!")
 
 
@@ -1033,8 +961,6 @@ class FunctionStep(AbstractStep):
                 seq_component = seq_config.sequential_components[0].value
                 target_value = context.current_sequential_combination[0]
 
-                logger.info(f"🔄 SEQUENTIAL: Filtering patterns by {seq_component}={target_value}")
-                logger.info(f"🔄 SEQUENTIAL: Before filtering: {len(patterns_by_well[axis_id]) if isinstance(patterns_by_well[axis_id], list) else sum(len(v) for v in patterns_by_well[axis_id].values())} patterns")
 
                 # Filter patterns by sequential component
                 patterns_by_well[axis_id] = _filter_patterns_by_component(
@@ -1045,27 +971,11 @@ class FunctionStep(AbstractStep):
                 )
 
                 filtered_count = len(patterns_by_well[axis_id]) if isinstance(patterns_by_well[axis_id], list) else sum(len(v) for v in patterns_by_well[axis_id].values())
-                logger.info(f"🔄 SEQUENTIAL: After filtering: {filtered_count} patterns remain")
 
             # Now group patterns by group_by component (if set)
             grouped_patterns, comp_to_funcs, comp_to_base_args = prepare_patterns_and_functions(
                 patterns_by_well[axis_id], func_from_plan, component=group_by.value if group_by else None
             )
-
-            logger.info(f"🔍 DICT_PATTERN: grouped_patterns keys: {list(grouped_patterns.keys())}")
-            logger.info(f"🔍 DICT_PATTERN: comp_to_funcs keys: {list(comp_to_funcs.keys())}")
-            logger.info(f"🔍 DICT_PATTERN: func_from_plan type: {type(func_from_plan)}")
-            if isinstance(func_from_plan, dict):
-                logger.info(f"🔍 DICT_PATTERN: func_from_plan keys: {list(func_from_plan.keys())}")
-
-            # DEBUG: Log VFS state at the start of step processing
-            from openhcs.io.base import storage_registry
-            memory_backend = storage_registry[Backend.MEMORY.value]
-            existing_keys = list(memory_backend._memory_store.keys())
-            logger.info(f"🔍 VFS_START: Memory backend has {len(existing_keys)} entries at START of step '{step_name}' for well {axis_id}")
-            # Filter to show only files in results directory
-            results_keys = [k for k in existing_keys if 'results/' in k]
-            logger.info(f"🔍 VFS_START: Results directory has {len(results_keys)} entries: {results_keys}")
 
             # Sequential filtering now happens BEFORE prepare_patterns_and_functions() above
             # This ensures it works correctly when sequential_components != group_by
@@ -1107,7 +1017,6 @@ class FunctionStep(AbstractStep):
                 exec_func_or_chain = comp_to_funcs[comp_val]
                 base_kwargs = comp_to_base_args[comp_val]
 
-                logger.info(f"🔍 DICT_PATTERN: Processing component '{comp_val}' with {len(current_pattern_list)} patterns")
 
                 # Process all patterns for this component value
                 for pattern_item in current_pattern_list:
@@ -1182,9 +1091,6 @@ class FunctionStep(AbstractStep):
                 if "materialized_output_dir" in step_plan:
                     materialized_output_dir = step_plan["materialized_output_dir"]
                     streaming_paths = _generate_materialized_paths(memory_paths, step_output_dir, Path(materialized_output_dir))
-                    logger.info(f"🔍 STREAMING: Materialized step - loading from memory, streaming with materialized paths")
-                    logger.info(f"🔍 STREAMING: First memory path: {memory_paths[0] if memory_paths else 'NONE'}")
-                    logger.info(f"🔍 STREAMING: First streaming path: {streaming_paths[0] if streaming_paths else 'NONE'}")
                 else:
                     streaming_paths = memory_paths
 
@@ -1248,8 +1154,6 @@ class FunctionStep(AbstractStep):
 
             #  SPECIAL DATA MATERIALIZATION
             special_outputs = step_plan.get('special_outputs', {})
-            logger.debug(f"🔍 MATERIALIZATION: special_outputs from step_plan: {special_outputs}")
-            logger.debug(f"🔍 MATERIALIZATION: special_outputs is empty? {not special_outputs}")
             if special_outputs:
                 logger.info(f"🔬 MATERIALIZATION: Starting materialization for {len(special_outputs)} special outputs")
                 # Special outputs ALWAYS use the main materialization backend (disk/zarr),
@@ -1259,13 +1163,8 @@ class FunctionStep(AbstractStep):
                 from openhcs.core.pipeline.materialization_flag_planner import MaterializationFlagPlanner
                 vfs_config = context.get_vfs_config()
                 materialization_backend = MaterializationFlagPlanner._resolve_materialization_backend(context, vfs_config)
-                logger.debug(f"🔍 MATERIALIZATION: Using materialization backend '{materialization_backend}' for special outputs (step write backend is '{actual_write_backend}')")
                 self._materialize_special_outputs(filemanager, step_plan, special_outputs, materialization_backend, context)
                 logger.info("🔬 MATERIALIZATION: Completed materialization")
-            else:
-                logger.debug("🔍 MATERIALIZATION: No special outputs to materialize")
-
-
 
         except Exception as e:
             import traceback
@@ -1464,7 +1363,6 @@ class FunctionStep(AbstractStep):
         backend_class = STORAGE_BACKENDS.get(backend.lower())
         if backend_class and not backend_class.supports_arbitrary_files:
             backend = Backend.DISK.value
-            logger.debug(f"🔍 MATERIALIZATION: Backend {backend} doesn't support arbitrary files, using disk for special outputs")
         
         backends = [backend]
         backend_kwargs = {backend: {}}
@@ -1488,9 +1386,6 @@ class FunctionStep(AbstractStep):
         filemanager._materialization_context = {'images_dir': images_dir}
 
         # Get dict pattern info
-        step_func = step_plan['func']
-        dict_keys = list(step_func.keys()) if isinstance(step_func, dict) else []
-
         # Materialize each special output
         for output_key, output_info in special_outputs.items():
             mat_func = output_info.get('materialization_function')
@@ -1500,16 +1395,20 @@ class FunctionStep(AbstractStep):
             memory_path = output_info['path']
             step_index = step_plan['pipeline_position']
 
-            # For dict patterns, materialize each channel separately
-            channels_to_process = dict_keys if dict_keys else [None]
+            # For dict patterns, materialize only the channels that produced this output
+            channels_to_process = output_info.get('group_keys') or [None]
 
             for dict_key in channels_to_process:
                 # Build channel-specific memory path if needed
-                if dict_key:
+                if dict_key is not None:
                     from openhcs.core.pipeline.path_planner import PipelinePathPlanner
                     channel_path = PipelinePathPlanner.build_dict_pattern_path(memory_path, dict_key)
                 else:
                     channel_path = memory_path
+
+                if not filemanager.exists(channel_path, Backend.MEMORY.value):
+                    logger.info(f"Skipping special output '{output_key}' for group '{dict_key}' - no data saved at {channel_path}")
+                    continue
 
                 # Load data
                 filemanager.ensure_directory(Path(channel_path).parent, Backend.MEMORY.value)
