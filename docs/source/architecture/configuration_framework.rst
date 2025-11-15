@@ -194,3 +194,93 @@ When users cancel config editing, the original context is restored to prevent co
 **Implementation Details**
 
 See :doc:`code_ui_interconversion` for detailed implementation of context synchronization during code editing.
+
+Token-Based Caching Infrastructure
+-----------------------------------
+
+The configuration framework includes reusable caching abstractions that eliminate redundant context resolution operations, particularly in GUI scenarios where the same values are resolved repeatedly.
+
+**Core Abstractions**
+
+**TokenCache<T>**
+  Generic multi-key cache with automatic invalidation when a token changes. Useful when caching multiple related values that should all invalidate together.
+
+  .. code-block:: python
+
+     from openhcs.config_framework import TokenCache, CacheKey
+
+     # Create cache with token provider
+     cache = TokenCache(lambda: global_token_counter)
+
+     # Get or compute value
+     value = cache.get_or_compute(
+         key=CacheKey.from_args('scope', 'param_name'),
+         compute_fn=lambda: expensive_computation()
+     )
+
+     # Cache automatically invalidates when token changes
+
+**SingleValueTokenCache<T>**
+  Simplified variant for caching a single value. More efficient when you only need one cached value per token.
+
+  .. code-block:: python
+
+     from openhcs.config_framework import SingleValueTokenCache
+
+     cache = SingleValueTokenCache(lambda: global_token_counter)
+     value = cache.get_or_compute(lambda: expensive_computation())
+
+**LiveContextResolver**
+  Pure service for resolving config attributes through context hierarchies with caching. Completely UI-agnostic - works with any dataclasses and context stacks.
+
+  .. code-block:: python
+
+     from openhcs.config_framework import LiveContextResolver
+
+     resolver = LiveContextResolver()
+
+     # Resolve attribute through context stack
+     resolved_value = resolver.resolve_config_attr(
+         config_obj=step_config,
+         attr_name='enabled',
+         context_stack=[global_config, pipeline_config, step],
+         live_context={PipelineConfig: {'num_workers': 4}},
+         cache_token=current_token
+     )
+
+**Architecture Principles**
+
+1. **Token-based invalidation**: O(1) cache invalidation across all caches by incrementing a single counter
+2. **Separation of concerns**: Caching logic is independent of domain concepts (steps, pipelines, etc.)
+3. **Caller responsibility**: UI layer provides live context and token; service layer handles resolution
+4. **Incremental updates**: Only changed values trigger token increment, enabling fine-grained cache control
+
+**Performance Impact**
+
+Token-based caching eliminates redundant operations:
+
+- **Context stack building**: Avoided when token unchanged (was happening 20+ times per UI refresh)
+- **Placeholder text resolution**: Cached expensive string formatting operations
+- **Entire refresh operations**: Skipped when inputs haven't changed
+
+Measured improvements: 60ms → 1ms for pipeline editor preview updates.
+
+**When to Use**
+
+Use ``TokenCache`` when:
+
+- Multiple related values need synchronized invalidation
+- Cache keys have multiple components (scope, parameter name, etc.)
+- You need explicit cache key management
+
+Use ``SingleValueTokenCache`` when:
+
+- Only one value needs caching per token
+- Simpler API is preferred
+- Cache key is implicit (always the same computation)
+
+Use ``LiveContextResolver`` when:
+
+- Resolving config attributes through context hierarchies
+- Need to merge live values from multiple sources
+- Want to cache resolution results automatically
