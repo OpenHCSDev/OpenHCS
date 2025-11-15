@@ -152,6 +152,178 @@ Live Context Collection
 4. Next ``collect_live_context()`` call recomputes snapshot
 5. Subsequent calls with same token return cached snapshot
 
+Async Operations in GUI
+----------------------
+
+Heavy operations (file I/O, network requests, blocking waits) must run in background threads to prevent UI freezes.
+
+**Problem**
+
+Blocking operations on the UI thread cause:
+
+- Frozen interface (no repaints, no event processing)
+- Unresponsive buttons and menus
+- Poor user experience (appears crashed)
+- Cannot cancel long-running operations
+
+**Solution: Background Workers**
+
+Move heavy operations to daemon threads:
+
+.. code-block:: python
+
+   import threading
+
+   def on_user_action(self):
+       """UI thread: Lightweight checks only."""
+       # Check preconditions (cheap)
+       if not self.is_valid():
+           return
+
+       # Spawn background worker
+       threading.Thread(
+           target=self._heavy_operation_async,
+           args=(param1, param2),
+           daemon=True
+       ).start()
+
+   def _heavy_operation_async(self, param1, param2):
+       """Background thread: Heavy operations."""
+       try:
+           # Load from disk (blocking I/O)
+           data = load_from_file(path)
+
+           # Wait for external service (blocking)
+           if not service.wait_for_ready(timeout=15.0):
+               raise RuntimeError("Service not ready")
+
+           # Process data (CPU-intensive)
+           result = process_data(data)
+
+           # Update UI via signal (thread-safe)
+           self._status_update_signal.emit(f"Completed: {result}")
+
+       except Exception as e:
+           # Show error dialog on UI thread
+           QTimer.singleShot(0, lambda: QMessageBox.warning(
+               self, "Error", str(e)
+           ))
+
+**Thread-Safe UI Updates**
+
+Never call UI methods directly from background threads. Use Qt signals or QTimer:
+
+.. code-block:: python
+
+   class MyWidget(QWidget):
+       # Define signal for cross-thread communication
+       _status_update_signal = pyqtSignal(str)
+
+       def __init__(self):
+           super().__init__()
+           # Connect signal to UI update method
+           self._status_update_signal.connect(self._update_status_label)
+
+       def _update_status_label(self, text: str):
+           """UI thread: Safe to update widgets."""
+           self.status_label.setText(text)
+
+       def _background_worker(self):
+           """Background thread: Emit signal instead of direct update."""
+           # ❌ WRONG: self.status_label.setText("Loading...")
+           # ✅ CORRECT: Emit signal
+           self._status_update_signal.emit("Loading...")
+
+**QTimer for One-Shot UI Operations**
+
+Use ``QTimer.singleShot()`` to schedule UI operations from background threads:
+
+.. code-block:: python
+
+   def _background_worker(self):
+       """Background thread."""
+       try:
+           result = expensive_operation()
+       except Exception as e:
+           # Schedule dialog on UI thread
+           QTimer.singleShot(0, lambda: QMessageBox.warning(
+               self, "Error", f"Operation failed: {e}"
+           ))
+           return
+
+       # Schedule success dialog on UI thread
+       QTimer.singleShot(0, lambda: QMessageBox.information(
+           self, "Success", f"Result: {result}"
+       ))
+
+**Daemon Threads**
+
+Always use ``daemon=True`` for background workers:
+
+- Daemon threads automatically terminate when app exits
+- Non-daemon threads prevent app from closing
+- User doesn't have to wait for background operations to finish
+
+**Example: Async ROI Streaming**
+
+From ``image_browser.py``:
+
+.. code-block:: python
+
+   def _stream_roi_file(self, roi_zip_path: Path):
+       """UI thread: Lightweight checks only."""
+       # Check which viewers are enabled (cheap)
+       napari_enabled = self.napari_enable_checkbox.isChecked()
+       fiji_enabled = self.fiji_enable_checkbox.isChecked()
+
+       if not napari_enabled and not fiji_enabled:
+           QMessageBox.information(self, "No Viewers", "Enable at least one viewer")
+           return
+
+       # Resolve configs on UI thread (cheap)
+       napari_config = self._resolve_napari_config()
+       fiji_config = self._resolve_fiji_config()
+
+       # Spawn background workers
+       if napari_enabled:
+           threading.Thread(
+               target=self._stream_single_roi_async,
+               args=(napari_viewer, roi_zip_path, napari_config),
+               daemon=True
+           ).start()
+
+       if fiji_enabled:
+           threading.Thread(
+               target=self._stream_single_roi_async,
+               args=(fiji_viewer, roi_zip_path, fiji_config),
+               daemon=True
+           ).start()
+
+   def _stream_single_roi_async(self, viewer, roi_zip_path, config):
+       """Background thread: Heavy operations."""
+       try:
+           # Load ROIs from disk (blocking I/O)
+           self._status_update_signal.emit(f"Loading {roi_zip_path.name}...")
+           rois = load_rois_from_zip(roi_zip_path)
+
+           # Wait for viewer (blocking, up to 15s)
+           if not viewer.wait_for_ready(timeout=15.0):
+               raise RuntimeError("Viewer not ready")
+
+           # Stream to viewer (blocking I/O)
+           self._status_update_signal.emit(f"Streaming to viewer...")
+           filemanager.save(rois, roi_zip_path, backend, **metadata)
+
+           # Success message on UI thread
+           msg = f"Streamed {len(rois)} ROIs"
+           self._status_update_signal.emit(msg)
+
+       except Exception as e:
+           # Error dialog on UI thread
+           QTimer.singleShot(0, lambda: QMessageBox.warning(
+               self, "Error", str(e)
+           ))
+
 Best Practices
 -------------
 
@@ -172,6 +344,24 @@ Use full refresh when:
 - Scope mapping is invalid or stale
 - Incremental update complexity outweighs benefits
 
+**When to Use Background Threads**
+
+Use background threads when:
+
+- Operation blocks for >100ms
+- File I/O or network requests
+- Waiting for external services
+- CPU-intensive processing
+
+**Threading Safety Checklist**
+
+1. ✅ Use ``daemon=True`` for all background threads
+2. ✅ Never call UI methods from background threads
+3. ✅ Use Qt signals for cross-thread communication
+4. ✅ Use ``QTimer.singleShot()`` for one-shot UI operations
+5. ✅ Handle exceptions in background threads
+6. ✅ Show errors via dialogs on UI thread
+
 **Optimization Checklist**
 
 1. ✅ Collect live context ONCE per refresh cycle
@@ -180,4 +370,5 @@ Use full refresh when:
 4. ✅ Batch multiple changes before processing
 5. ✅ Use scope filtering to limit context collection
 6. ✅ Implement incremental updates for large lists
+7. ✅ Move blocking operations to background threads
 
