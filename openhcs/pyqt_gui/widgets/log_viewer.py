@@ -12,11 +12,16 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
-    QTextEdit, QToolBar, QLineEdit, QCheckBox, QPushButton, QDialog
+    QListView, QToolBar, QLineEdit, QCheckBox, QPushButton, QDialog,
+    QStyledItemDelegate, QAbstractItemView, QApplication, QStyleOptionViewItem,
+    QStyle,
 )
 from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument
-from PyQt6.QtCore import QObject, QTimer, QFileSystemWatcher, pyqtSignal, pyqtSlot, Qt, QRegularExpression, QThread
-from PyQt6.QtGui import QTextCharFormat, QColor, QAction, QFont, QTextCursor
+from PyQt6.QtCore import (
+    QObject, QTimer, QFileSystemWatcher, pyqtSignal, pyqtSlot,
+    Qt, QRegularExpression, QThread, QAbstractListModel, QModelIndex, QSize,
+)
+from PyQt6.QtGui import QTextCharFormat, QColor, QAction, QFont, QTextCursor, QPalette, QAbstractTextDocumentLayout
 
 from openhcs.io.filemanager import FileManager
 from openhcs.core.log_utils import LogFileInfo
@@ -139,27 +144,194 @@ class LogColorScheme:
         )
 
     def to_qcolor(self, color_tuple: Tuple[int, int, int]) -> QColor:
-        """
-        Convert RGB tuple to QColor object.
+        """Convert RGB tuple to QColor object.
 
         Args:
             color_tuple: RGB color tuple (r, g, b)
 
         Returns:
-            QColor: Qt color object
+            QColor: Corresponding QColor instance.
         """
-        return QColor(*color_tuple)
+        r, g, b = color_tuple
+        return QColor(r, g, b)
+
+class LogListModel(QAbstractListModel):
+    """Lightweight list model storing log lines in a bounded ring buffer.
+
+    The model is pure data; rendering and highlighting are handled by a
+    delegate on top of this model.
+    """
+
+    MAX_LINES = 100_000
+
+    def __init__(self, parent: Optional[QObject] = None):
+        super().__init__(parent)
+        self._lines: List[str] = []
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # type: ignore[override]
+        if parent.isValid():
+            return 0
+        return len(self._lines)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole):  # type: ignore[override]
+        if not index.isValid():
+            return None
+        row = index.row()
+        if row < 0 or row >= len(self._lines):
+            return None
+        if role == Qt.ItemDataRole.DisplayRole:
+            return self._lines[row]
+        return None
+
+    def clear(self) -> None:
+        """Clear all stored lines."""
+        if not self._lines:
+            return
+        self.beginResetModel()
+        self._lines.clear()
+        self.endResetModel()
+
+    def append_lines(self, lines: List[str]) -> None:
+        """Append new lines, enforcing the MAX_LINES ring buffer constraint."""
+        if not lines:
+            return
+
+        new_total = len(self._lines) + len(lines)
+        if new_total > self.MAX_LINES:
+            remove_count = new_total - self.MAX_LINES
+            if remove_count >= len(self._lines):
+                # Replace entire buffer with newest lines only.
+                self.beginResetModel()
+                self._lines = lines[-self.MAX_LINES :]
+                self.endResetModel()
+                return
+
+            # Drop oldest lines.
+            self.beginRemoveRows(QModelIndex(), 0, remove_count - 1)
+            del self._lines[:remove_count]
+            self.endRemoveRows()
+
+        start_row = len(self._lines)
+        end_row = start_row + len(lines) - 1
+        self.beginInsertRows(QModelIndex(), start_row, end_row)
+        self._lines.extend(lines)
+        self.endInsertRows()
+
+    def iter_lines(self) -> List[str]:
+        """Expose lines for read-only access (e.g., search)."""
+        return self._lines
+
+
+class LogItemDelegate(QStyledItemDelegate):
+    """Delegate responsible for per-line coloring, regex-based syntax, and search highlighting.
+
+    We avoid document-wide highlighting and instead reuse the existing
+    LogHighlighter rules on a per-line QTextDocument that is only used
+    for visible rows. This keeps work bounded by visible rows and line
+    length, independent of total log size.
+    """
+
+    def __init__(
+        self,
+        color_scheme: Optional[LogColorScheme] = None,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._color_scheme = color_scheme or LogColorScheme.create_dark_theme()
+        self._search_text: str = ""
+        self._case_sensitive: bool = False
+
+        # Per-delegate QTextDocument + LogHighlighter used only for the
+        # currently painted line. This gives us rich, non-blocking
+        # syntax highlighting with the existing regex rules.
+        self._doc = QTextDocument(self)
+        self._highlighter = LogHighlighter(self._doc, self._color_scheme)
+
+    def set_search_state(self, text: str, case_sensitive: bool) -> None:
+        """Update search text used for line-level search highlighting."""
+        self._search_text = text or ""
+        self._case_sensitive = case_sensitive
+
+    def paint(self, painter, option, index):  # type: ignore[override]
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        text = opt.text
+
+        # Apply search highlight as a background brush if the current line matches.
+        if self._search_text:
+            haystack = text if self._case_sensitive else text.lower()
+            needle = self._search_text if self._case_sensitive else self._search_text.lower()
+            if needle and needle in haystack:
+                highlight_color = QColor(255, 255, 0, 60)
+                opt.backgroundBrush = highlight_color
+
+        # Draw the item background/selection/borders without any text.
+        style = opt.widget.style() if opt.widget is not None else QApplication.style()
+        original_text = opt.text
+        opt.text = ""
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+        opt.text = original_text
+
+        # Update the per-line document and reuse the existing regex-based
+        # LogHighlighter rules on just this one line.
+        self._doc.setDefaultFont(opt.font)
+        self._doc.setPlainText(text)
+        self._doc.setTextWidth(opt.rect.width())
+
+        context = QAbstractTextDocumentLayout.PaintContext()
+        context.palette = opt.palette
+
+        painter.save()
+        painter.translate(opt.rect.topLeft())
+        painter.setClipRect(0, 0, opt.rect.width(), opt.rect.height())
+        self._doc.documentLayout().draw(painter, context)
+        painter.restore()
+
+    def sizeHint(self, option, index):  # type: ignore[override]
+        """Return height large enough to show wrapped text for this row.
+
+        We compute the document layout for the current line using the
+        available viewport width so that long log lines wrap instead of
+        being clipped or forcing a horizontal scrollbar.
+        """
+        text = index.data(Qt.DisplayRole)
+        if text is None:
+            return super().sizeHint(option, index)
+
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        self._doc.setDefaultFont(opt.font)
+        self._doc.setPlainText(str(text))
+
+        # Determine available width for wrapping. Prefer the parent
+        # QListView viewport width when possible so row heights respond
+        # to window resizing.
+        width = opt.rect.width()
+        parent = self.parent()
+        if width <= 0 and isinstance(parent, QListView) and parent.viewport() is not None:
+            width = parent.viewport().width()
+        if width <= 0:
+            width = 800  # conservative fallback, not critical for layout
+
+        self._doc.setTextWidth(width)
+        doc_size = self._doc.size()
+        height = int(doc_size.height())
+
+        # Add a small vertical padding so text is not flush with borders.
+        return QSize(width, height + 4)
 
 
 class LogFileDetector(QObject):
     """
     Detects new log files in directory using efficient file monitoring.
-    
+
     Uses QFileSystemWatcher to monitor directory changes and set operations
     for efficient new file detection. Handles base_log_path as file prefix
     and watches the parent directory.
     """
-    
+
     # Signals
     new_log_detected = pyqtSignal(object)  # LogFileInfo object
     _server_scan_complete = pyqtSignal(list)  # List of LogFileInfo from server scan
@@ -167,7 +339,7 @@ class LogFileDetector(QObject):
     def __init__(self, base_log_path: Optional[str] = None):
         """
         Initialize LogFileDetector.
-        
+
         Args:
             base_log_path: Base path for subprocess log files (file prefix, not directory)
         """
@@ -177,23 +349,23 @@ class LogFileDetector(QObject):
         self._watcher = QFileSystemWatcher()
         self._watcher.directoryChanged.connect(self._on_directory_changed)
         self._watching_directory: Optional[Path] = None
-        
+
         logger.debug(f"LogFileDetector initialized with base_log_path: {base_log_path}")
 
     def start_watching(self, directory: Path) -> None:
         """
         Start watching directory for new log files.
-        
+
         Args:
             directory: Directory to watch for new log files
         """
         if not directory.exists():
             logger.warning(f"Cannot watch non-existent directory: {directory}")
             return
-            
+
         # Stop any existing watching
         self.stop_watching()
-        
+
         # Add directory to watcher
         success = self._watcher.addPath(str(directory))
         if success:
@@ -216,10 +388,10 @@ class LogFileDetector(QObject):
     def scan_directory(self, directory: Path) -> Set[Path]:
         """
         Scan directory for .log files.
-        
+
         Args:
             directory: Directory to scan
-            
+
         Returns:
             Set[Path]: Set of Path objects for .log files found
         """
@@ -234,17 +406,17 @@ class LogFileDetector(QObject):
     def detect_new_files(self, current_files: Set[Path]) -> Set[Path]:
         """
         Use set.difference() to find new files efficiently.
-        
+
         Args:
             current_files: Current set of files in directory
-            
+
         Returns:
             Set[Path]: Set of newly discovered files
         """
         new_files = current_files.difference(self._previous_files)
         if new_files:
             logger.debug(f"Detected {len(new_files)} new files: {[f.name for f in new_files]}")
-        
+
         # Update previous files set
         self._previous_files = current_files
         return new_files
@@ -254,19 +426,19 @@ class LogFileDetector(QObject):
     def _on_directory_changed(self, directory_path: str) -> None:
         """
         Handle QFileSystemWatcher directory change signal.
-        
+
         Args:
             directory_path: Path of directory that changed
         """
         directory = Path(directory_path)
         logger.debug(f"Directory changed: {directory}")
-        
+
         # Scan directory for current files
         current_files = self.scan_directory(directory)
-        
+
         # Detect new files
         new_files = self.detect_new_files(current_files)
-        
+
         # Process new files
         for file_path in new_files:
             if file_path.exists() and is_openhcs_log_file(file_path):
@@ -639,19 +811,24 @@ class LogViewerWindow(QMainWindow):
         self.current_file_position: int = 0
         self.auto_scroll_enabled: bool = True
         self.tailing_paused: bool = False
+        self._pending_partial_line: str = ""
 
         # Search state
         self.current_search_text: str = ""
-        self.search_highlights: List[QTextCursor] = []
+        self._search_case_sensitive: bool = False
+        self._search_matches: List[int] = []
+        self._search_match_cursor: int = -1
 
         # Components
         self.log_selector: QComboBox = None
         self.search_toolbar: QToolBar = None
-        self.log_display: QTextEdit = None
+        self.log_view: QListView = None
+        self.log_model: Optional[LogListModel] = None
+        self.log_delegate: Optional[LogItemDelegate] = None
         self.file_detector: LogFileDetector = None
         self.tail_timer: QTimer = None  # Deprecated - kept for compatibility
         self.log_tailer: Optional[LogTailer] = None  # Async log tailer thread
-        self.highlighter: LogHighlighter = None
+        self.highlighter: Optional[LogHighlighter] = None
         self.file_loader: Optional[LogFileLoader] = None  # Async file loader
         self.server_scan_timer: QTimer = None  # Periodic ZMQ server scanning
         self._pending_log_to_load: Optional[Path] = None  # Log to load when window is shown
@@ -716,11 +893,23 @@ class LogViewerWindow(QMainWindow):
 
         main_layout.addWidget(self.search_toolbar)
 
-        # Log display area
-        self.log_display = QTextEdit()
-        self.log_display.setReadOnly(True)
-        self.log_display.setFont(QFont("Consolas", 10))  # Monospace font for logs
-        main_layout.addWidget(self.log_display)
+        # Log display area (virtualized)
+        self.log_model = LogListModel(self)
+        self.log_view = QListView()
+        self.log_view.setModel(self.log_model)
+        # Enable per-row word wrapping and variable item heights so long
+        # log lines are fully visible instead of clipped or forcing
+        # horizontal scrolling.
+        self.log_view.setUniformItemSizes(False)
+        self.log_view.setWordWrap(True)
+        self.log_view.setResizeMode(QListView.ResizeMode.Adjust)
+        self.log_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.log_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.log_view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.log_view.setFont(QFont("Consolas", 10))  # Monospace font for logs
+        self.log_delegate = LogItemDelegate(LogColorScheme.create_dark_theme(), self.log_view)
+        self.log_view.setItemDelegate(self.log_delegate)
+        main_layout.addWidget(self.log_view)
 
         # Control buttons layout
         control_layout = QHBoxLayout()
@@ -750,9 +939,6 @@ class LogViewerWindow(QMainWindow):
         control_layout.addStretch()  # Push buttons to left
 
         main_layout.addLayout(control_layout)
-
-        # Setup syntax highlighting
-        self.highlighter = LogHighlighter(self.log_display.document())
 
         # Setup window-local Ctrl+F shortcut
         search_action = QAction("Search", self)
@@ -1140,8 +1326,7 @@ class LogViewerWindow(QMainWindow):
                 self.switch_to_log(log_info.path)
 
     def switch_to_log(self, log_path: Path) -> None:
-        """
-        Switch log display to show specified log file.
+        """Switch log display to show specified log file.
 
         Args:
             log_path: Path to log file to display
@@ -1154,19 +1339,25 @@ class LogViewerWindow(QMainWindow):
             if self.file_loader and self.file_loader.isRunning():
                 self.file_loader.wait()
 
+            # Reset streaming state
+            self._pending_partial_line = ""
+            self.current_file_position = 0
+
             # Validate file exists
             if not log_path.exists():
-                self.log_display.setText(f"Log file not found: {log_path}")
+                self.clear_log_display()
+                self.log_model.append_lines([f"Log file not found: {log_path}"])
                 return
 
             # Store path for later use
             self.current_log_path = log_path
 
             # ALWAYS use async loading to prevent UI blocking
-            # QSyntaxHighlighter is already lazy - it only highlights visible blocks
             file_size = log_path.stat().st_size
             logger.debug(f"Loading log file ({file_size} bytes) asynchronously")
-            self.log_display.setText(f"Loading log file ({file_size // 1024} KB)...")
+
+            self.clear_log_display()
+            self.log_model.append_lines([f"Loading log file ({file_size // 1024} KB)..."])
 
             # Create and start async loader
             self.file_loader = LogFileLoader(log_path)
@@ -1181,11 +1372,14 @@ class LogViewerWindow(QMainWindow):
     def _on_file_loaded(self, content: str) -> None:
         """Handle file content loaded (either sync or async)."""
         try:
-            # Set content - QSyntaxHighlighter only processes visible blocks automatically
-            self.log_display.setText(content)
+            self._pending_partial_line = ""
+            self.clear_log_display()
+
+            lines = content.splitlines()
+            self.log_model.append_lines(lines)
 
             # Update file position
-            self.current_file_position = len(content.encode('utf-8'))
+            self.current_file_position = len(content.encode("utf-8"))
 
             # Start tailing if not paused
             if not self.tailing_paused and self.current_log_path:
@@ -1202,7 +1396,8 @@ class LogViewerWindow(QMainWindow):
 
     def _on_file_load_failed(self, error_msg: str) -> None:
         """Handle file load failure."""
-        self.log_display.setText(f"Failed to load log file: {error_msg}")
+        self.clear_log_display()
+        self.log_model.append_lines([f"Failed to load log file: {error_msg}"])
         logger.error(f"Failed to load log file: {error_msg}")
 
     # Search Functionality Methods
@@ -1219,99 +1414,84 @@ class LogViewerWindow(QMainWindow):
             self.search_input.selectAll()
 
     def perform_search(self) -> None:
-        """Search in log display using QTextEdit.find()."""
+        """Search forwards in the current log using the model/view backend."""
+        self._advance_search(step=1)
+
+    def _advance_search(self, step: int) -> None:
+        """Advance search cursor in the given direction.
+
+        Args:
+            step: +1 for next, -1 for previous
+        """
         search_text = self.search_input.text()
         if not search_text:
             self.clear_search_highlights()
             return
 
-        # Clear previous highlights if search text changed
-        if search_text != self.current_search_text:
-            self.clear_search_highlights()
+        case_sensitive = self.case_sensitive_cb.isChecked()
+
+        # Rebuild match list if query or case sensitivity changed.
+        if (
+            search_text != self.current_search_text
+            or case_sensitive != self._search_case_sensitive
+        ):
             self.current_search_text = search_text
-            self.highlight_all_matches(search_text)
+            self._search_case_sensitive = case_sensitive
+            self._search_matches = []
 
-        # Find next occurrence
-        flags = QTextDocument.FindFlag(0)
-        if self.case_sensitive_cb.isChecked():
-            flags |= QTextDocument.FindFlag.FindCaseSensitively
+            lines = self.log_model.iter_lines()
+            if case_sensitive:
+                for row, line in enumerate(lines):
+                    if search_text in line:
+                        self._search_matches.append(row)
+            else:
+                needle = search_text.lower()
+                for row, line in enumerate(lines):
+                    if needle in line.lower():
+                        self._search_matches.append(row)
 
-        found = self.log_display.find(search_text, flags)
-        if not found:
-            # Try from beginning
-            cursor = self.log_display.textCursor()
-            cursor.movePosition(cursor.MoveOperation.Start)
-            self.log_display.setTextCursor(cursor)
-            self.log_display.find(search_text, flags)
+            # Reset cursor for new search set.
+            self._search_match_cursor = -1
 
-    def highlight_all_matches(self, search_text: str) -> None:
-        """
-        Highlight all matches of search text in the document.
+            # Update delegate highlighting state.
+            if self.log_delegate is not None:
+                self.log_delegate.set_search_state(self.current_search_text, self._search_case_sensitive)
+            if self.log_view is not None:
+                self.log_view.viewport().update()
 
-        Args:
-            search_text: Text to search and highlight
-        """
-        if not search_text:
+        if not self._search_matches:
             return
 
-        # Create highlight format
-        highlight_format = QTextCharFormat()
-        highlight_format.setBackground(QColor(255, 255, 0, 100))  # Yellow with transparency
+        # Step through matches with wrap-around.
+        if self._search_match_cursor == -1:
+            self._search_match_cursor = 0 if step >= 0 else len(self._search_matches) - 1
+        else:
+            self._search_match_cursor = (self._search_match_cursor + step) % len(self._search_matches)
 
-        # Search through entire document
-        document = self.log_display.document()
-        cursor = QTextCursor(document)
-
-        flags = QTextDocument.FindFlag(0)
-        if self.case_sensitive_cb.isChecked():
-            flags |= QTextDocument.FindFlag.FindCaseSensitively
-
-        self.search_highlights.clear()
-
-        while True:
-            cursor = document.find(search_text, cursor, flags)
-            if cursor.isNull():
-                break
-
-            # Apply highlight
-            cursor.mergeCharFormat(highlight_format)
-            self.search_highlights.append(cursor)
-
-        logger.debug(f"Highlighted {len(self.search_highlights)} search matches")
+        target_row = self._search_matches[self._search_match_cursor]
+        index = self.log_model.index(target_row, 0)
+        self.log_view.setCurrentIndex(index)
+        self.log_view.scrollTo(index, QAbstractItemView.ScrollHint.PositionAtCenter)
 
     def clear_search_highlights(self) -> None:
-        """Clear all search highlights from the document."""
-        # Reset format for all highlighted text
-        for cursor in self.search_highlights:
-            if not cursor.isNull():
-                # Reset to default format
-                default_format = QTextCharFormat()
-                cursor.setCharFormat(default_format)
-
-        self.search_highlights.clear()
+        """Clear search state and delegate highlights."""
         self.current_search_text = ""
+        self._search_case_sensitive = False
+        self._search_matches = []
+        self._search_match_cursor = -1
+
+        if self.log_delegate is not None:
+            self.log_delegate.set_search_state("", False)
+        if self.log_view is not None:
+            self.log_view.viewport().update()
 
     def find_next(self) -> None:
         """Find next search result."""
-        self.perform_search()
+        self._advance_search(step=1)
 
     def find_previous(self) -> None:
         """Find previous search result."""
-        search_text = self.search_input.text()
-        if not search_text:
-            return
-
-        flags = QTextDocument.FindFlag.FindBackward
-        if self.case_sensitive_cb.isChecked():
-            flags |= QTextDocument.FindFlag.FindCaseSensitively
-
-        found = self.log_display.find(search_text, flags)
-        if not found:
-            # Try from end
-            cursor = self.log_display.textCursor()
-            cursor.movePosition(cursor.MoveOperation.End)
-            self.log_display.setTextCursor(cursor)
-            self.log_display.find(search_text, flags)
+        self._advance_search(step=-1)
 
     # Control Button Methods
     def toggle_auto_scroll(self, enabled: bool) -> None:
@@ -1330,12 +1510,13 @@ class LogViewerWindow(QMainWindow):
 
     def clear_log_display(self) -> None:
         """Clear current log display content."""
-        self.log_display.clear()
+        self._pending_partial_line = ""
+        self.log_model.clear()
         logger.debug("Log display cleared")
 
     def reset_memory(self) -> None:
         """
-        Reset memory usage by clearing QTextDocument and reloading current log.
+        Reset memory usage by clearing the in-memory log model and reloading current log.
 
         This completely clears the text buffer and reloads the log file from disk,
         freeing memory accumulated from long-running log tailing.
@@ -1350,9 +1531,8 @@ class LogViewerWindow(QMainWindow):
         was_paused = self.tailing_paused
         self.stop_log_tailing()
 
-        # Clear the document completely (frees memory)
-        self.log_display.clear()
-        self.log_display.document().clear()
+        # Clear the model completely (frees memory)
+        self.clear_log_display()
 
         # Reset file position to reload from beginning
         self.current_file_position = 0
@@ -1368,9 +1548,8 @@ class LogViewerWindow(QMainWindow):
         logger.info("Memory reset complete - log reloaded from disk")
 
     def scroll_to_bottom(self) -> None:
-        """Scroll log display to bottom."""
-        scrollbar = self.log_display.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        """Scroll log view to bottom."""
+        self.log_view.scrollToBottom()
 
 
 
@@ -1405,13 +1584,23 @@ class LogViewerWindow(QMainWindow):
     def _on_new_content(self, new_content: str, new_file_position: int) -> None:
         """Handle new content from async tailer (runs on UI thread via signal)."""
         # Check if user has scrolled up (disable auto-scroll)
-        scrollbar = self.log_display.verticalScrollBar()
+        scrollbar = self.log_view.verticalScrollBar()
         was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
 
-        # Append new content
-        cursor = self.log_display.textCursor()
-        cursor.movePosition(cursor.MoveOperation.End)
-        cursor.insertText(new_content)
+        # Merge with any pending partial line and split into full lines.
+        chunk = f"{self._pending_partial_line}{new_content}"
+        if not chunk:
+            return
+
+        lines = chunk.splitlines()
+        if not chunk.endswith(("\n", "\r")):
+            # Last line is incomplete; keep it for the next chunk.
+            self._pending_partial_line = lines.pop() if lines else chunk
+        else:
+            self._pending_partial_line = ""
+
+        if lines:
+            self.log_model.append_lines(lines)
 
         # Auto-scroll if enabled and user was at bottom
         if self.auto_scroll_enabled and was_at_bottom:
@@ -1424,7 +1613,8 @@ class LogViewerWindow(QMainWindow):
         """Handle log rotation detected by async tailer."""
         logger.info(f"Log rotation detected for {self.current_log_path}")
         self.current_file_position = 0
-        self.log_display.append("\n--- Log rotated ---\n")
+        self._pending_partial_line = ""
+        self.log_model.append_lines(["", "--- Log rotated ---", ""])
 
     def _on_tail_error(self, error_msg: str) -> None:
         """Handle errors from async tailer."""
@@ -1433,7 +1623,11 @@ class LogViewerWindow(QMainWindow):
         # Check if file was deleted
         if self.current_log_path and not self.current_log_path.exists():
             logger.info(f"Log file deleted: {self.current_log_path}")
-            self.log_display.append(f"\n--- Log file deleted: {self.current_log_path} ---\n")
+            self.log_model.append_lines([
+                "",
+                f"--- Log file deleted: {self.current_log_path} ---",
+                "",
+            ])
             # Try to reconnect after a delay
             QTimer.singleShot(1000, self._attempt_reconnection)
 
@@ -1446,7 +1640,12 @@ class LogViewerWindow(QMainWindow):
         if self.current_log_path and self.current_log_path.exists():
             logger.info(f"Log file recreated, reconnecting: {self.current_log_path}")
             self.current_file_position = 0
-            self.log_display.append(f"\n--- Reconnected to: {self.current_log_path} ---\n")
+            self._pending_partial_line = ""
+            self.log_model.append_lines([
+                "",
+                f"--- Reconnected to: {self.current_log_path} ---",
+                "",
+            ])
             # File will be read on next timer tick
 
     # External Integration Methods
