@@ -43,12 +43,9 @@ class CrossWindowPreviewMixin:
             return
 
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
-        logger.info(f"🔍 Scope extracted: {scope_id}, in map: {scope_id in self._preview_scope_map if scope_id else False}")
-        logger.info(f"🔍 Scope map keys: {list(self._preview_scope_map.keys())}")
 
         # Special markers for config changes that affect all steps
         if scope_id in ("PIPELINE_CONFIG_CHANGE", "GLOBAL_CONFIG_CHANGE"):
-            logger.info(f"🔍 Config change detected: {scope_id} - refreshing all steps")
             # Refresh ALL steps (add all indices to pending updates)
             all_indices = [idx for idx in self._preview_scope_map.values() if isinstance(idx, int)]
             for idx in all_indices:
@@ -56,11 +53,9 @@ class CrossWindowPreviewMixin:
             self._process_pending_preview_updates()
         elif scope_id and scope_id in self._preview_scope_map:
             item_key = self._preview_scope_map[scope_id]
-            logger.info(f"🔍 Incremental refresh for item_key={item_key}")
             self._pending_preview_keys.add(item_key)
             self._process_pending_preview_updates()
         else:
-            logger.info(f"🔍 Full refresh triggered (scope not in map)")
             self._handle_full_preview_refresh()
 
     # --- Hooks for subclasses --------------------------------------------------

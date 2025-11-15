@@ -425,6 +425,20 @@ class ConfigWindow(BaseFormDialog):
 
             if close_window:
                 self.accept()
+            else:
+                # CRITICAL: If keeping window open after save, update the form manager's object_instance
+                # and refresh placeholders to reflect the new saved values
+                self.form_manager.object_instance = new_config
+
+                # Increment token to invalidate caches
+                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                ParameterFormManager._live_context_token_counter += 1
+
+                # Refresh this window's placeholders with new saved values as base
+                self.form_manager._refresh_with_live_context()
+
+                # Emit context_refreshed to notify other windows
+                self.form_manager.context_refreshed.emit(new_config, self.form_manager.context_obj)
 
         except Exception as e:
             logger.error(f"Failed to save configuration: {e}")

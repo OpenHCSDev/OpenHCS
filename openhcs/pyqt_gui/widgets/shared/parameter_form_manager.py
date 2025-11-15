@@ -528,12 +528,15 @@ class ParameterFormManager(QWidget):
             self._cached_global_context_instance = None
             self._cached_parent_contexts: Dict[int, Tuple[int, Any]] = {}
 
-            # Placeholder text cache (token-based invalidation)
-            from openhcs.config_framework import TokenCache, CacheKey, SingleValueTokenCache
-            self._placeholder_text_cache = TokenCache(lambda: type(self)._live_context_token_counter)
+            # Placeholder text cache (value-based, not token-based)
+            # Key: (param_name, hash of live context values) -> placeholder text
+            # This prevents unnecessary re-resolution when unrelated configs change
+            # No size limit needed - cache naturally stays small (< 20 params × few context states)
+            self._placeholder_text_cache: Dict[Tuple, str] = {}
 
-            # Cache for entire _refresh_all_placeholders operation
+            # Cache for entire _refresh_all_placeholders operation (token-based)
             # Key: (exclude_param, live_context_token) -> prevents redundant refreshes
+            from openhcs.config_framework import TokenCache
             self._placeholder_refresh_cache = TokenCache(lambda: type(self)._live_context_token_counter)
 
             # Initialize service layer first (needed for parameter extraction)
@@ -1691,6 +1694,10 @@ class ParameterFormManager(QWidget):
                 self._in_reset = False
                 self._block_cross_window_updates = False
 
+            # CRITICAL: Increment global token after reset to invalidate caches
+            # Reset changes values, so other windows need to know their cached context is stale
+            type(self)._live_context_token_counter += 1
+
             # OPTIMIZATION: Single placeholder refresh at the end instead of per-parameter
             # This is much faster than refreshing after each reset
             # CRITICAL: Use _refresh_with_live_context() to collect live values from other open windows
@@ -1779,6 +1786,10 @@ class ParameterFormManager(QWidget):
         self._in_reset = True
         try:
             self._reset_parameter_impl(param_name)
+
+            # CRITICAL: Increment global token after reset to invalidate caches
+            # Reset changes values, so other windows need to know their cached context is stale
+            type(self)._live_context_token_counter += 1
 
             # CRITICAL: Manually refresh placeholders BEFORE clearing _in_reset
             # This ensures queued parameter_changed signals don't trigger automatic refresh
@@ -1973,6 +1984,10 @@ class ParameterFormManager(QWidget):
         by only returning fields where the raw value is not None.
 
         For nested dataclasses, only include them if they have user-modified fields inside.
+
+        CRITICAL: Includes fields that were explicitly reset to None (tracked in reset_fields).
+        This ensures cross-window updates see reset operations and can override saved concrete values.
+        The None values will be used in dataclasses.replace() to override saved values.
         """
         if not hasattr(self.config, '_resolve_field_value'):
             return self.get_current_values()
@@ -1980,9 +1995,13 @@ class ParameterFormManager(QWidget):
         user_modified = {}
         current_values = self.get_current_values()
 
-        # Only include fields where the raw value is not None
+        # Include fields where the raw value is not None OR the field was explicitly reset
         for field_name, value in current_values.items():
-            if value is not None:
+            # CRITICAL: Include None values if they were explicitly reset
+            # This allows other windows to see that the field was reset and should override saved values
+            is_explicitly_reset = field_name in self.reset_fields
+
+            if value is not None or is_explicitly_reset:
                 # CRITICAL: For nested dataclasses, we need to extract only user-modified fields
                 # by checking the raw values (using object.__getattribute__ to avoid resolution)
                 from dataclasses import is_dataclass, fields as dataclass_fields
@@ -2001,7 +2020,7 @@ class ParameterFormManager(QWidget):
                         # We'll need to reconstruct it when applying to context
                         user_modified[field_name] = (type(value), nested_user_modified)
                 else:
-                    # Non-dataclass field, include if not None
+                    # Non-dataclass field, include if not None OR explicitly reset
                     user_modified[field_name] = value
 
         return user_modified
@@ -2793,10 +2812,13 @@ class ParameterFormManager(QWidget):
             live_context: Optional dict mapping object instances to their live values from other open windows
             exclude_param: Optional parameter name to exclude from refresh (e.g., the param that just changed)
         """
-        # Extract token from live_context for cache key
-        token, _ = self._unwrap_live_context(live_context)
+        # Extract token and live context values
+        token, live_context_values = self._unwrap_live_context(live_context)
 
-        # Use cache to skip redundant refreshes with same token and exclude_param
+        # CRITICAL: Use token-based cache key, not value-based
+        # The token increments whenever ANY value changes, which is correct behavior
+        # The individual placeholder text cache is value-based to prevent redundant resolution
+        # But the refresh operation itself should run when the token changes
         from openhcs.config_framework import CacheKey
         cache_key = CacheKey.from_args(exclude_param, token)
 
@@ -2836,19 +2858,12 @@ class ParameterFormManager(QWidget):
                             continue
 
                         with monitor.measure():
-                            # Use token cache for placeholder text resolution
-                            text_cache_key = CacheKey.from_args(param_name)
-
-                            def compute_placeholder(pname=param_name):
-                                """Compute placeholder text for this parameter."""
-                                return self.service.get_placeholder_text(pname, self.dataclass_type)
-
-                            placeholder_text = self._placeholder_text_cache.get_or_compute(
-                                text_cache_key,
-                                compute_placeholder
-                            )
+                            # CRITICAL: Resolve placeholder text and let widget signature check skip redundant updates
+                            # The widget already checks if placeholder text changed - no need for complex caching
+                            placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                             if placeholder_text:
                                 from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
+                                # Widget signature check will skip update if placeholder text hasn't changed
                                 PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
             return True  # Return sentinel value to indicate refresh was performed
@@ -2860,6 +2875,169 @@ class ParameterFormManager(QWidget):
         """Run placeholder refresh synchronously on the UI thread."""
         self._refresh_all_placeholders(live_context=live_context, exclude_param=exclude_param)
         self._after_placeholder_text_applied(live_context)
+
+    def _refresh_specific_placeholder(self, field_name: str = None, live_context: dict = None) -> None:
+        """Refresh placeholder for a specific field, or all fields if field_name is None.
+
+        For nested config changes, refreshes all fields that inherit from the changed config type.
+
+        Args:
+            field_name: Name of the specific field to refresh. If None, refresh all placeholders.
+            live_context: Optional dict mapping object instances to their live values from other open windows
+        """
+        if field_name is None:
+            # No specific field - refresh all placeholders
+            self._refresh_all_placeholders(live_context=live_context)
+            return
+
+        # Check if this exact field exists
+        if field_name in self._placeholder_candidates:
+            self._refresh_single_field_placeholder(field_name, live_context)
+            return
+
+        # Field doesn't exist with exact name - find fields that inherit from the same base type
+        # Example: PipelineConfig.well_filter_config changes → refresh Step.step_well_filter_config
+        # Both inherit from WellFilterConfig, so changes in one affect the other
+        fields_to_refresh = self._find_fields_inheriting_from_changed_field(field_name, live_context)
+
+        if not fields_to_refresh:
+            # No matching fields - nothing to refresh
+            return
+
+        # Refresh only the matching fields
+        for matching_field in fields_to_refresh:
+            self._refresh_single_field_placeholder(matching_field, live_context)
+
+    def _refresh_specific_placeholder_from_path(self, parent_field_name: str = None, remaining_path: str = None, live_context: dict = None) -> None:
+        """Refresh placeholder for nested manager based on parent field name and remaining path.
+
+        This is called on nested managers during cross-window updates to extract the relevant field name.
+
+        Example:
+            Parent manager has field "well_filter_config" (nested dataclass)
+            Remaining path is "well_filter" (field inside the nested dataclass)
+            → This nested manager should refresh its "well_filter" field
+
+        Args:
+            parent_field_name: Name of the field in the parent manager that contains this nested manager
+            remaining_path: Remaining path after the parent field (e.g., "well_filter" or "sub_config.field")
+            live_context: Optional dict mapping object instances to their live values from other open windows
+        """
+        # If this nested manager corresponds to the parent field, use the remaining path
+        # Otherwise, skip (this nested manager is not affected)
+        if remaining_path:
+            # Extract the first component of the remaining path
+            # Example: "well_filter" → "well_filter"
+            # Example: "sub_config.field" → "sub_config"
+            field_name = remaining_path.split('.')[0] if remaining_path else None
+            self._refresh_specific_placeholder(field_name, live_context)
+        else:
+            # No remaining path - the parent field itself changed (e.g., entire config replaced)
+            # Refresh all placeholders in this nested manager
+            self._refresh_all_placeholders(live_context=live_context)
+
+    def _find_fields_inheriting_from_changed_field(self, changed_field_name: str, live_context: dict = None) -> list:
+        """Find fields in this form that inherit from the same base type as the changed field.
+
+        Example: PipelineConfig.well_filter_config (WellFilterConfig) changes
+                 → Find Step.step_well_filter_config (StepWellFilterConfig inherits from WellFilterConfig)
+
+        Args:
+            changed_field_name: Name of the field that changed in another window
+            live_context: Live context to find the changed field's type
+
+        Returns:
+            List of field names in this form that should be refreshed
+        """
+        from dataclasses import fields as dataclass_fields, is_dataclass
+
+        if not self.dataclass_type or not is_dataclass(self.dataclass_type):
+            return []
+
+        # Get the type of the changed field from live context
+        # We need to check what type the changed field is in the other window
+        changed_field_type = None
+
+        # Try to get the changed field type from live context values
+        token, live_context_values = self._unwrap_live_context(live_context)
+        if live_context_values:
+            for ctx_type, ctx_values in live_context_values.items():
+                if changed_field_name in ctx_values:
+                    # Found the changed field - get its type from the context type's fields
+                    if is_dataclass(ctx_type):
+                        for field in dataclass_fields(ctx_type):
+                            if field.name == changed_field_name:
+                                changed_field_type = field.type
+                                break
+                    break
+
+        if not changed_field_type:
+            # Couldn't determine the changed field type - skip
+            return []
+
+        # Find fields in this form that have the same type or inherit from the same base
+        matching_fields = []
+        for field in dataclass_fields(self.dataclass_type):
+            if field.name not in self._placeholder_candidates:
+                continue
+
+            # Check if this field's type matches or inherits from the changed field's type
+            field_type = field.type
+
+            # Handle Optional types and get the actual type
+            from typing import get_origin, get_args
+            if get_origin(field_type) is type(None) or str(field_type).startswith('Optional'):
+                args = get_args(field_type)
+                if args:
+                    field_type = args[0]
+
+            # Check if types match or share a common base
+            try:
+                # Same type
+                if field_type == changed_field_type:
+                    matching_fields.append(field.name)
+                    continue
+
+                # Check if both are classes and share inheritance
+                if isinstance(field_type, type) and isinstance(changed_field_type, type):
+                    # Check if field_type inherits from changed_field_type
+                    if issubclass(field_type, changed_field_type):
+                        matching_fields.append(field.name)
+                        continue
+                    # Check if changed_field_type inherits from field_type
+                    if issubclass(changed_field_type, field_type):
+                        matching_fields.append(field.name)
+                        continue
+            except TypeError:
+                # issubclass failed - types aren't compatible
+                continue
+
+        return matching_fields
+
+    def _refresh_single_field_placeholder(self, field_name: str, live_context: dict = None) -> None:
+        """Refresh placeholder for a single specific field.
+
+        Args:
+            field_name: Name of the field to refresh
+            live_context: Optional dict mapping object instances to their live values
+        """
+        widget = self.widgets.get(field_name)
+        if not widget:
+            return
+
+        widget_in_placeholder_state = widget.property("is_placeholder_state")
+        current_value = self.parameters.get(field_name)
+        if current_value is not None and not widget_in_placeholder_state:
+            return
+
+        # Build context stack and resolve placeholder
+        token, live_context_values = self._unwrap_live_context(live_context)
+        overlay = self.parameters
+        with self._build_context_stack(overlay, live_context=live_context_values, live_context_token=token):
+            placeholder_text = self.service.get_placeholder_text(field_name, self.dataclass_type)
+            if placeholder_text:
+                from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
+                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
 
     def _after_placeholder_text_applied(self, live_context: Any) -> None:
         """Apply nested refreshes and styling once placeholders have been updated."""
@@ -3233,7 +3411,6 @@ class ParameterFormManager(QWidget):
 
         # Invalidate live context cache by incrementing token
         type(self)._live_context_token_counter += 1
-        logger.info(f"🔢 Token incremented to {type(self)._live_context_token_counter} by {self.field_id}.{param_name}")
 
         field_path = f"{self.field_id}.{param_name}"
         self.context_value_changed.emit(field_path, value,
@@ -3268,7 +3445,6 @@ class ParameterFormManager(QWidget):
 
                 # Invalidate live context caches so external listeners drop stale data
                 type(self)._live_context_token_counter += 1
-                logger.info(f"🔢 Token incremented to {type(self)._live_context_token_counter} by window close ({self.field_id})")
 
                 # CRITICAL: Trigger refresh in all remaining windows
                 # They were using this window's live values, now they need to revert to saved values
@@ -3313,14 +3489,21 @@ class ParameterFormManager(QWidget):
         """
         # Don't refresh if this is the window that made the change
         if editing_object is self.object_instance:
+            logger.info(f"[{self.field_id}] Skipping cross-window update - same instance")
             return
 
         # Check if the change affects this form based on context hierarchy
         if not self._is_affected_by_context_change(editing_object, context_object):
+            logger.info(f"[{self.field_id}] Skipping cross-window update - not affected by {type(editing_object).__name__}")
             return
 
-        # Debounce the refresh to avoid excessive updates
-        self._schedule_cross_window_refresh()
+        logger.info(f"[{self.field_id}] ✅ Cross-window update: {field_path} = {new_value} (from {type(editing_object).__name__})")
+
+        # Pass the full field_path so nested managers can extract their relevant part
+        # Example: "PipelineConfig.well_filter_config.well_filter"
+        #   → Root manager extracts "well_filter_config"
+        #   → Nested manager extracts "well_filter"
+        self._schedule_cross_window_refresh(changed_field_path=field_path)
 
     def _on_cross_window_context_refreshed(self, editing_object: object, context_object: object):
         """Handle cascading placeholder refreshes from upstream windows.
@@ -3356,6 +3539,11 @@ class ParameterFormManager(QWidget):
         - PipelineConfig changes affect: Steps in that pipeline, Functions in those steps
         - Step changes affect: Functions in that step
 
+        MRO inheritance rules:
+        - Config changes only affect configs that inherit from the changed type
+        - Example: StepWellFilterConfig changes affect StreamingDefaults (inherits from it)
+        - Example: StepWellFilterConfig changes DON'T affect ZarrConfig (unrelated)
+
         Args:
             editing_object: The object being edited in the other window
             context_object: The context object used by the other window
@@ -3366,30 +3554,59 @@ class ParameterFormManager(QWidget):
         from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
         from openhcs.core.steps.abstract import AbstractStep
 
-        # If other window is editing GlobalPipelineConfig, everyone is affected
+        # If other window is editing GlobalPipelineConfig, check if we use GlobalPipelineConfig as context
         if isinstance(editing_object, GlobalPipelineConfig):
-            return True
+            # We're affected if our context_obj is GlobalPipelineConfig OR if we're editing GlobalPipelineConfig
+            # OR if we have no context (we use global context from thread-local)
+            is_affected = (
+                isinstance(self.context_obj, GlobalPipelineConfig) or
+                isinstance(self.object_instance, GlobalPipelineConfig) or
+                self.context_obj is None  # No context means we use global context
+            )
+            logger.info(f"[{self.field_id}] GlobalPipelineConfig change: context_obj={type(self.context_obj).__name__ if self.context_obj else 'None'}, affected={is_affected}")
+            return is_affected
 
         # If other window is editing PipelineConfig, check if we're a step in that pipeline
         if PipelineConfig and isinstance(editing_object, PipelineConfig):
-            # We're affected if our context_obj is the same PipelineConfig instance
-            return self.context_obj is editing_object
+            # We're affected if our context_obj is a PipelineConfig (same type, scope matching handled elsewhere)
+            # Don't use instance identity check - the editing window has a different instance than our saved context
+            is_affected = isinstance(self.context_obj, PipelineConfig)
+            logger.info(f"[{self.field_id}] PipelineConfig change: context_obj={type(self.context_obj).__name__ if self.context_obj else 'None'}, affected={is_affected}")
+            return is_affected
 
         # If other window is editing a Step, check if we're a function in that step
         if isinstance(editing_object, AbstractStep):
             # We're affected if our context_obj is the same Step instance
-            return self.context_obj is editing_object
+            is_affected = self.context_obj is editing_object
+            logger.info(f"[{self.field_id}] Step change: affected={is_affected}")
+            return is_affected
 
+        # CRITICAL: Check MRO inheritance for nested config changes
+        # If the editing_object is a config instance, only refresh if this config inherits from it
+        if self.dataclass_type:
+            editing_type = type(editing_object)
+            # Check if this config type inherits from the changed config type
+            # Use try/except because issubclass requires both args to be classes
+            try:
+                if issubclass(self.dataclass_type, editing_type):
+                    logger.info(f"[{self.field_id}] Affected by MRO inheritance: {self.dataclass_type.__name__} inherits from {editing_type.__name__}")
+                    return True
+            except TypeError:
+                pass
+
+        logger.info(f"[{self.field_id}] NOT affected by {type(editing_object).__name__} change")
         # Other changes don't affect this window
         return False
 
-    def _schedule_cross_window_refresh(self, emit_signal: bool = True):
+    def _schedule_cross_window_refresh(self, emit_signal: bool = True, changed_field_path: str = None):
         """Schedule a debounced placeholder refresh for cross-window updates.
 
         Args:
             emit_signal: Whether to emit context_refreshed signal after refresh.
                         Set to False when refresh is triggered by another window's
                         context_refreshed to prevent infinite ping-pong loops.
+            changed_field_path: Optional full path of the field that changed (e.g., "PipelineConfig.well_filter_config.well_filter").
+                               Used to extract the relevant field name for this manager and nested managers.
         """
         from PyQt6.QtCore import QTimer
 
@@ -3400,7 +3617,9 @@ class ParameterFormManager(QWidget):
         # Schedule new refresh after configured delay (debounce)
         self._cross_window_refresh_timer = QTimer()
         self._cross_window_refresh_timer.setSingleShot(True)
-        self._cross_window_refresh_timer.timeout.connect(lambda: self._do_cross_window_refresh(emit_signal=emit_signal))
+        self._cross_window_refresh_timer.timeout.connect(
+            lambda: self._do_cross_window_refresh(emit_signal=emit_signal, changed_field_path=changed_field_path)
+        )
         delay = max(0, self.CROSS_WINDOW_REFRESH_DELAY_MS)
         self._cross_window_refresh_timer.start(delay)
 
@@ -3541,20 +3760,52 @@ class ParameterFormManager(QWidget):
         token = type(self)._live_context_token_counter
         return LiveContextSnapshot(token=token, values=live_context)
 
-    def _do_cross_window_refresh(self, emit_signal: bool = True):
+    def _do_cross_window_refresh(self, emit_signal: bool = True, changed_field_path: str = None):
         """Actually perform the cross-window placeholder refresh using live values from other windows.
 
         Args:
             emit_signal: Whether to emit context_refreshed signal after refresh.
                         Set to False when refresh is triggered by another window's
                         context_refreshed to prevent infinite ping-pong loops.
+            changed_field_path: Optional full path of the field that changed (e.g., "PipelineConfig.well_filter_config.well_filter").
+                               Used to extract the relevant field name for this manager and nested managers.
         """
         # Collect live context values from other open windows
         live_context = self._collect_live_context_from_other_windows()
 
-        # Refresh placeholders for this form and all nested forms using live context
-        self._refresh_all_placeholders(live_context=live_context)
-        self._apply_to_nested_managers(lambda name, manager: manager._refresh_all_placeholders(live_context=live_context))
+        # Extract the relevant field name for this manager level
+        # Example: "PipelineConfig.well_filter_config.well_filter" → extract "well_filter_config" for root, "well_filter" for nested
+        changed_field_name = None
+        if changed_field_path:
+            # Split path and get the first component after the type name
+            # Format: "TypeName.field1.field2.field3" → ["TypeName", "field1", "field2", "field3"]
+            path_parts = changed_field_path.split('.')
+            if len(path_parts) > 1:
+                # For root manager: use the first field name (e.g., "well_filter_config")
+                changed_field_name = path_parts[1]
+
+        # Refresh placeholders for this form using live context
+        # CRITICAL: Only refresh the specific field that changed (if provided)
+        # This dramatically reduces refresh time by skipping unaffected fields
+        self._refresh_specific_placeholder(changed_field_name, live_context=live_context)
+
+        # Refresh nested managers with the remaining path
+        # Example: "PipelineConfig.well_filter_config.well_filter" → nested manager gets "well_filter_config.well_filter"
+        nested_field_path = None
+        if changed_field_path and changed_field_name:
+            # Remove the type name and first field from path
+            # "PipelineConfig.well_filter_config.well_filter" → "well_filter_config.well_filter"
+            path_parts = changed_field_path.split('.')
+            if len(path_parts) > 2:
+                nested_field_path = '.'.join(path_parts[2:])
+
+        self._apply_to_nested_managers(
+            lambda name, manager: manager._refresh_specific_placeholder_from_path(
+                parent_field_name=changed_field_name,
+                remaining_path=nested_field_path,
+                live_context=live_context
+            )
+        )
 
         # CRITICAL: Also refresh enabled styling for all nested managers
         # This ensures that when 'enabled' field changes in another window, styling updates here

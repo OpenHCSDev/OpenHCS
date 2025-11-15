@@ -1240,9 +1240,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 return
             live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
 
-        logger.info(f"🔍 _refresh_step_items_by_index: indices={list(indices)}, token={live_context_snapshot.token}")
-        logger.info(f"🔍 Live context types: {list(live_context_snapshot.values.keys())}")
-
         for step_index in sorted(set(indices)):
             if step_index < 0 or step_index >= len(self.pipeline_steps):
                 continue
@@ -1252,7 +1249,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             step = self.pipeline_steps[step_index]
             old_text = item.text()
             display_text, _ = self.format_item_for_display(step, live_context_snapshot)
-            logger.info(f"🔍 Step {step_index}: old='{old_text}' new='{display_text}' changed={old_text != display_text}")
             if item.text() != display_text:
                 item.setText(display_text)
             item.setData(Qt.ItemDataRole.UserRole, step_index)
@@ -1265,7 +1261,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         Reacts to any config change that could affect resolved values through the context hierarchy.
         """
-        logger.info(f"🔔 Pipeline editor received cross-window change: field_path={field_path}, editing_object={type(editing_object).__name__}")
         self.handle_cross_window_preview_change(field_path, new_value, editing_object, context_object)
     
     # ========== UI Helper Methods ==========
@@ -1273,8 +1268,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
     def update_step_list(self):
         """Update the step list widget using selection preservation mixin."""
         with timer("Pipeline editor: update_step_list()", threshold_ms=1.0):
-            logger.info("🔄 Pipeline editor: update_step_list() called")
-
             # If no orchestrator, show placeholder
             orchestrator = self._get_current_orchestrator()
             if not orchestrator:
@@ -1292,7 +1285,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
             with timer("  collect_live_context", threshold_ms=1.0):
                 live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
-            logger.info(f"🔄 Pipeline editor: collected live context (token={live_context_snapshot.token})")
 
             self.set_preview_scope_mapping(self._build_scope_index_map())
 

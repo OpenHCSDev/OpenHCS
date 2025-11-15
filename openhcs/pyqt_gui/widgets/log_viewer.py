@@ -229,7 +229,13 @@ class LogItemDelegate(QStyledItemDelegate):
     LogHighlighter rules on a per-line QTextDocument that is only used
     for visible rows. This keeps work bounded by visible rows and line
     length, independent of total log size.
+
+    Performance optimization: Cache highlighted QTextDocuments to avoid
+    re-running expensive regex highlighting on every paint event.
     """
+
+    # Cache configuration
+    MAX_CACHE_SIZE = 10000  # Maximum number of unique lines to cache
 
     def __init__(
         self,
@@ -247,10 +253,57 @@ class LogItemDelegate(QStyledItemDelegate):
         self._doc = QTextDocument(self)
         self._highlighter = LogHighlighter(self._doc, self._color_scheme)
 
+        # Cache: maps (text, font_family, font_size) -> QTextDocument
+        # This prevents re-running expensive regex highlighting on every paint
+        self._document_cache: Dict[Tuple[str, str, int], QTextDocument] = {}
+        self._cache_access_order: List[Tuple[str, str, int]] = []  # LRU tracking
+
     def set_search_state(self, text: str, case_sensitive: bool) -> None:
         """Update search text used for line-level search highlighting."""
         self._search_text = text or ""
         self._case_sensitive = case_sensitive
+
+    def _get_or_create_document(self, text: str, font: QFont) -> QTextDocument:
+        """
+        Get cached QTextDocument for this text, or create and cache a new one.
+
+        This dramatically improves paint performance by avoiding re-running
+        expensive regex highlighting on every paint event.
+
+        Args:
+            text: The log line text
+            font: The font to use for rendering
+
+        Returns:
+            QTextDocument: Cached or newly created document with highlighting applied
+        """
+        # Create cache key from text and font properties
+        cache_key = (text, font.family(), font.pointSize())
+
+        # Check cache first
+        if cache_key in self._document_cache:
+            # Move to end of access order (LRU)
+            self._cache_access_order.remove(cache_key)
+            self._cache_access_order.append(cache_key)
+            return self._document_cache[cache_key]
+
+        # Not in cache - create new document with highlighting
+        doc = QTextDocument(self)
+        highlighter = LogHighlighter(doc, self._color_scheme)
+        doc.setDefaultFont(font)
+        doc.setPlainText(text)
+
+        # Add to cache
+        self._document_cache[cache_key] = doc
+        self._cache_access_order.append(cache_key)
+
+        # Enforce cache size limit (LRU eviction)
+        if len(self._document_cache) > self.MAX_CACHE_SIZE:
+            # Remove oldest entry
+            oldest_key = self._cache_access_order.pop(0)
+            del self._document_cache[oldest_key]
+
+        return doc
 
     def paint(self, painter, option, index):  # type: ignore[override]
         opt = QStyleOptionViewItem(option)
@@ -273,11 +326,10 @@ class LogItemDelegate(QStyledItemDelegate):
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
         opt.text = original_text
 
-        # Update the per-line document and reuse the existing regex-based
-        # LogHighlighter rules on just this one line.
-        self._doc.setDefaultFont(opt.font)
-        self._doc.setPlainText(text)
-        self._doc.setTextWidth(opt.rect.width())
+        # Get cached document (or create if not cached)
+        # This avoids re-running expensive regex highlighting on every paint
+        doc = self._get_or_create_document(text, opt.font)
+        doc.setTextWidth(opt.rect.width())
 
         context = QAbstractTextDocumentLayout.PaintContext()
         context.palette = opt.palette
@@ -285,7 +337,7 @@ class LogItemDelegate(QStyledItemDelegate):
         painter.save()
         painter.translate(opt.rect.topLeft())
         painter.setClipRect(0, 0, opt.rect.width(), opt.rect.height())
-        self._doc.documentLayout().draw(painter, context)
+        doc.documentLayout().draw(painter, context)
         painter.restore()
 
     def sizeHint(self, option, index):  # type: ignore[override]
@@ -294,6 +346,8 @@ class LogItemDelegate(QStyledItemDelegate):
         We compute the document layout for the current line using the
         available viewport width so that long log lines wrap instead of
         being clipped or forcing a horizontal scrollbar.
+
+        Uses cached document for performance.
         """
         text = index.data(Qt.DisplayRole)
         if text is None:
@@ -302,8 +356,8 @@ class LogItemDelegate(QStyledItemDelegate):
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
 
-        self._doc.setDefaultFont(opt.font)
-        self._doc.setPlainText(str(text))
+        # Use cached document for size calculation too
+        doc = self._get_or_create_document(str(text), opt.font)
 
         # Determine available width for wrapping. Prefer the parent
         # QListView viewport width when possible so row heights respond
@@ -315,12 +369,18 @@ class LogItemDelegate(QStyledItemDelegate):
         if width <= 0:
             width = 800  # conservative fallback, not critical for layout
 
-        self._doc.setTextWidth(width)
-        doc_size = self._doc.size()
+        doc.setTextWidth(width)
+        doc_size = doc.size()
         height = int(doc_size.height())
 
         # Add a small vertical padding so text is not flush with borders.
         return QSize(width, height + 4)
+
+    def clear_cache(self) -> None:
+        """Clear the document cache. Call this when resetting the log viewer."""
+        self._document_cache.clear()
+        self._cache_access_order.clear()
+        logger.debug("LogItemDelegate cache cleared")
 
 
 class LogFileDetector(QObject):
@@ -1533,6 +1593,10 @@ class LogViewerWindow(QMainWindow):
 
         # Clear the model completely (frees memory)
         self.clear_log_display()
+
+        # Clear the delegate's document cache (frees cached QTextDocuments)
+        if self.log_delegate is not None:
+            self.log_delegate.clear_cache()
 
         # Reset file position to reload from beginning
         self.current_file_position = 0

@@ -129,15 +129,31 @@ class LiveContextResolver:
         return resolve_in_context(merged_contexts)
 
     def _merge_live_values(self, base_obj: object, live_values: Optional[Dict[str, Any]]) -> object:
-        """Merge live values into base object."""
+        """Merge live values into base object.
+
+        CRITICAL: Filters out None values before merging. None in live context means
+        "don't override, let MRO resolve it", not "override with None".
+        This allows reset fields to properly inherit from parent context via MRO.
+        """
         if live_values is None or not is_dataclass(base_obj):
             return base_obj
 
         # Reconstruct nested dataclasses recursively
         reconstructed_values = self.reconstruct_live_values(live_values)
 
-        # Merge into base object
-        return dataclass_replace(base_obj, **reconstructed_values)  # type: ignore[arg-type]
+        # CRITICAL: Filter out None values - they should not override base values
+        # None means "inherit from parent context via MRO", not "set to None"
+        filtered_values = {
+            field_name: field_value
+            for field_name, field_value in reconstructed_values.items()
+            if field_value is not None
+        }
+
+        # Merge into base object (only non-None values)
+        if filtered_values:
+            return dataclass_replace(base_obj, **filtered_values)  # type: ignore[arg-type]
+        else:
+            return base_obj
 
     def _reconstruct_value(self, value: Any) -> Any:
         """
