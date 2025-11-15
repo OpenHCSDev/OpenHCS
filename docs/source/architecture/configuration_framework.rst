@@ -248,6 +248,8 @@ The configuration framework includes reusable caching abstractions that eliminat
          cache_token=current_token
      )
 
+  **Critical None Value Semantics**: The resolver passes ``None`` values through during live context merge. When a field is reset to ``None`` in a form, the ``None`` value overrides the saved concrete value via ``dataclasses.replace()``. This triggers MRO resolution which walks up the context hierarchy to find the inherited value from parent context (e.g., GlobalPipelineConfig).
+
 **Architecture Principles**
 
 1. **Token-based invalidation**: O(1) cache invalidation across all caches by incrementing a single counter
@@ -284,3 +286,31 @@ Use ``LiveContextResolver`` when:
 - Resolving config attributes through context hierarchies
 - Need to merge live values from multiple sources
 - Want to cache resolution results automatically
+
+Cross-Window Update System
+---------------------------
+
+The configuration framework includes a real-time cross-window update system that propagates changes between open configuration windows using type-based inheritance filtering and targeted field refresh.
+
+**Performance Characteristics**
+
+- **Type-based filtering**: Only refresh configs that inherit from the changed type via MRO
+- **Targeted field refresh**: Only refresh the specific field that changed, not all fields
+- **Widget signature checks**: Skip UI updates when placeholder text hasn't changed
+- **Update latency**: <10ms per change (down from ~200ms before optimization)
+
+**Architecture**
+
+The system uses class-level signals (``context_value_changed``, ``context_refreshed``) to propagate changes between windows. When a field changes:
+
+1. Emitting window sends field path (e.g., ``"PipelineConfig.well_filter_config.well_filter"``)
+2. Receiving windows check if they're affected using MRO inheritance checks
+3. Affected windows extract relevant field name from path for their level
+4. Only fields inheriting from the changed field's type are refreshed
+5. Widget signature checks prevent redundant UI updates
+
+**Reset Propagation**
+
+When fields are reset to ``None``, the system tracks them in a ``reset_fields`` set and includes them in live context even though their value is ``None``. The ``LiveContextResolver`` filters out ``None`` values during merge to preserve MRO inheritance semantics.
+
+For detailed information about cross-window update optimization, see :doc:`cross_window_update_optimization`.

@@ -14,12 +14,13 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
     QListView, QToolBar, QLineEdit, QCheckBox, QPushButton, QDialog,
     QStyledItemDelegate, QAbstractItemView, QApplication, QStyleOptionViewItem,
-    QStyle,
+    QStyle, QPlainTextEdit,
 )
 from PyQt6.QtGui import QSyntaxHighlighter, QTextDocument
 from PyQt6.QtCore import (
     QObject, QTimer, QFileSystemWatcher, pyqtSignal, pyqtSlot,
     Qt, QRegularExpression, QThread, QAbstractListModel, QModelIndex, QSize,
+    QThreadPool, QRunnable, QPoint, QPointF,
 )
 from PyQt6.QtGui import QTextCharFormat, QColor, QAction, QFont, QTextCursor, QPalette, QAbstractTextDocumentLayout
 
@@ -222,6 +223,301 @@ class LogListModel(QAbstractListModel):
         return self._lines
 
 
+@dataclass
+class HighlightedSegment:
+    """A segment of text with formatting information."""
+    start: int
+    length: int
+    color: Tuple[int, int, int]
+    bold: bool = False
+    italic: bool = False
+
+
+class SelectableDocument(QTextDocument):
+    """
+    QTextDocument wrapper that manages text cursor and selection state.
+
+    Enables text selection within QListView delegate items by tracking cursor position
+    and applying visual selection highlighting using QTextCharFormat.
+
+    Based on Qt Forum solution for interactive elements in delegates.
+    """
+
+    def __init__(self, parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self.setDocumentMargin(0)
+        self._text_cursor = QTextCursor(self)
+        self._selected_word_on_double_click = QTextCursor(self)
+
+    def selectionStart(self) -> int:
+        """Get the start position of the current selection."""
+        return self._text_cursor.selectionStart()
+
+    def selectionEnd(self) -> int:
+        """Get the end position of the current selection."""
+        return self._text_cursor.selectionEnd()
+
+    def setCursorPosition(self, pos: int, mode: QTextCursor.MoveMode = QTextCursor.MoveMode.MoveAnchor) -> None:
+        """
+        Set cursor position and update selection highlighting.
+
+        Args:
+            pos: Character position in document
+            mode: MoveAnchor (clear selection) or KeepAnchor (extend selection)
+        """
+        # Clear previous selection highlighting
+        if self._text_cursor.hasSelection():
+            self._clearSelection()
+
+        # Update cursor position
+        self._text_cursor.setPosition(pos, mode)
+
+        # Apply selection highlighting if we have a selection
+        if self._text_cursor.hasSelection():
+            self._highlightSelection()
+
+    def moveCursorPosition(
+        self,
+        op: QTextCursor.MoveOperation,
+        mode: QTextCursor.MoveMode = QTextCursor.MoveMode.MoveAnchor,
+        n: int = 1
+    ) -> bool:
+        """
+        Move cursor by operation and update highlighting.
+
+        Args:
+            op: Move operation (e.g., StartOfWord, EndOfWord)
+            mode: MoveAnchor or KeepAnchor
+            n: Number of times to repeat operation
+
+        Returns:
+            True if move was successful
+        """
+        # Clear previous selection highlighting
+        if self._text_cursor.hasSelection():
+            self._clearSelection()
+
+        # Move cursor
+        result = self._text_cursor.movePosition(op, mode, n)
+
+        # Apply selection highlighting if we have a selection
+        if self._text_cursor.hasSelection():
+            self._highlightSelection()
+
+        return result
+
+    def select(self, selection: QTextCursor.SelectionType) -> None:
+        """
+        Select text by type (word, line, etc.) and update highlighting.
+
+        Args:
+            selection: Type of selection (WordUnderCursor, LineUnderCursor, Document)
+        """
+        # Clear previous selection highlighting
+        if self._text_cursor.hasSelection():
+            self._clearSelection()
+
+        # Select text
+        self._text_cursor.select(selection)
+
+        # Store the word selection for word-wise extension during drag
+        self._selected_word_on_double_click = QTextCursor(self._text_cursor)
+
+        # Apply selection highlighting
+        if self._text_cursor.hasSelection():
+            self._highlightSelection()
+
+    def extendWordwiseSelection(self, newPos: int) -> None:
+        """
+        Extend selection to word boundaries when dragging after double-click.
+
+        This implements the behavior where double-clicking selects a word, then
+        dragging extends the selection by whole words rather than characters.
+
+        Args:
+            newPos: New cursor position from mouse drag
+        """
+        # Clear previous selection highlighting
+        if self._text_cursor.hasSelection():
+            self._clearSelection()
+
+        tempCursor = QTextCursor(self._text_cursor)
+        tempCursor.setPosition(newPos, QTextCursor.MoveMode.KeepAnchor)
+
+        # Move to start of word at new position
+        if not tempCursor.movePosition(QTextCursor.MoveOperation.StartOfWord):
+            return
+        wordStartPos = tempCursor.position()
+
+        # Move to end of word at new position
+        if not tempCursor.movePosition(QTextCursor.MoveOperation.EndOfWord):
+            return
+        wordEndPos = tempCursor.position()
+
+        # Extend selection to word boundary based on drag direction
+        if newPos < self._selected_word_on_double_click.position():
+            # Dragging left - extend to start of word
+            self._text_cursor.setPosition(self._text_cursor.selectionEnd())
+            self._text_cursor.setPosition(wordStartPos, QTextCursor.MoveMode.KeepAnchor)
+        else:
+            # Dragging right - extend to end of word
+            self._text_cursor.setPosition(self._text_cursor.selectionStart())
+            self._text_cursor.setPosition(wordEndPos, QTextCursor.MoveMode.KeepAnchor)
+
+        # Apply selection highlighting
+        if self._text_cursor.hasSelection():
+            self._highlightSelection()
+
+    def selectedText(self) -> str:
+        """Get the currently selected text."""
+        return self._text_cursor.selectedText()
+
+    def _clearSelection(self) -> None:
+        """
+        Remove selection highlighting from the previously selected region.
+
+        This preserves the underlying syntax highlighting by only clearing
+        the background color that was added for selection.
+        """
+        if not self._text_cursor.hasSelection():
+            return
+
+        # Create a cursor for the selected region
+        clearCursor = QTextCursor(self._text_cursor)
+
+        # Create format that only clears background (preserves foreground/syntax colors)
+        clearFormat = QTextCharFormat()
+        clearFormat.setBackground(QColor(0, 0, 0, 0))  # Transparent background
+
+        # Apply to selected region
+        clearCursor.setCharFormat(clearFormat)
+
+    def _highlightSelection(self) -> None:
+        """
+        Apply visual selection highlighting using system palette colors.
+
+        This only modifies the background color, preserving the syntax highlighting
+        foreground colors.
+        """
+        if not self._text_cursor.hasSelection():
+            return
+
+        # Create a cursor for the selected region
+        highlightCursor = QTextCursor(self._text_cursor)
+
+        # Create format that only sets background (preserves foreground/syntax colors)
+        selectFormat = QTextCharFormat()
+        selectFormat.setBackground(QApplication.palette().highlight().color())
+        # Don't set foreground - preserve syntax highlighting colors
+
+        # Apply to selected region
+        highlightCursor.setCharFormat(selectFormat)
+
+
+class HighlightSignals(QObject):
+    """Signals for background highlighting worker."""
+    finished = pyqtSignal(object, object)  # (cache_key, List[HighlightedSegment])
+
+
+class HighlightWorker(QRunnable):
+    """Background worker that does expensive regex parsing to extract formatting info.
+
+    This runs all the expensive regex matching in a background thread and returns
+    just the formatting information (which segments should be what color).
+    The main thread then applies this to a QTextDocument.
+    """
+
+    def __init__(self, text: str, cache_key: Tuple[str, str, int],
+                 color_scheme: LogColorScheme, signals: HighlightSignals):
+        super().__init__()
+        self.text = text
+        self.cache_key = cache_key
+        self.color_scheme = color_scheme
+        self.signals = signals
+
+    def run(self):
+        """Parse text and extract formatting information in background thread."""
+        segments = self._parse_log_line(self.text)
+        self.signals.finished.emit(self.cache_key, segments)
+
+    def _parse_log_line(self, text: str) -> List[HighlightedSegment]:
+        """
+        Parse a log line and return formatting segments.
+
+        This duplicates the regex logic from LogHighlighter but returns
+        structured data instead of applying to QTextDocument.
+        """
+        segments = []
+        cs = self.color_scheme
+
+        # Timestamp pattern (start of line)
+        import re
+        timestamp_pattern = r'^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3}'
+        match = re.match(timestamp_pattern, text)
+        if match:
+            segments.append(HighlightedSegment(
+                start=match.start(),
+                length=match.end() - match.start(),
+                color=cs.timestamp_color
+            ))
+
+        # Log level (ERROR, WARNING, INFO, DEBUG)
+        level_pattern = r'\b(ERROR|WARNING|INFO|DEBUG|CRITICAL)\b'
+        for match in re.finditer(level_pattern, text):
+            level = match.group(1)
+            if level == 'ERROR' or level == 'CRITICAL':
+                color = cs.log_error_color
+            elif level == 'WARNING':
+                color = cs.log_warning_color
+            else:
+                color = cs.log_info_color
+
+            segments.append(HighlightedSegment(
+                start=match.start(),
+                length=match.end() - match.start(),
+                color=color,
+                bold=True
+            ))
+
+        # Logger name pattern (between timestamp and level)
+        logger_pattern = r' - ([\w\.]+) - '
+        for match in re.finditer(logger_pattern, text):
+            segments.append(HighlightedSegment(
+                start=match.start(1),
+                length=match.end(1) - match.start(1),
+                color=cs.logger_name_color
+            ))
+
+        # File paths
+        path_pattern = r'(?:/[\w\-\.]+)+\.py'
+        for match in re.finditer(path_pattern, text):
+            segments.append(HighlightedSegment(
+                start=match.start(),
+                length=match.end() - match.start(),
+                color=cs.file_path_color
+            ))
+
+        # Python strings
+        string_pattern = r'["\'](?:[^"\'\\]|\\.)*["\']'
+        for match in re.finditer(string_pattern, text):
+            segments.append(HighlightedSegment(
+                start=match.start(),
+                length=match.end() - match.start(),
+                color=cs.python_string_color
+            ))
+
+        # Numbers
+        number_pattern = r'\b\d+(?:\.\d+)?\b'
+        for match in re.finditer(number_pattern, text):
+            segments.append(HighlightedSegment(
+                start=match.start(),
+                length=match.end() - match.start(),
+                color=cs.python_number_color
+            ))
+
+        return segments
+
+
 class LogItemDelegate(QStyledItemDelegate):
     """Delegate responsible for per-line coloring, regex-based syntax, and search highlighting.
 
@@ -230,8 +526,10 @@ class LogItemDelegate(QStyledItemDelegate):
     for visible rows. This keeps work bounded by visible rows and line
     length, independent of total log size.
 
-    Performance optimization: Cache highlighted QTextDocuments to avoid
-    re-running expensive regex highlighting on every paint event.
+    Performance optimization:
+    1. Cache highlighted QTextDocuments to avoid re-running expensive regex highlighting
+    2. Perform highlighting in background thread pool to never block UI
+    3. Paint with plain text if highlighting not ready yet (progressive enhancement)
     """
 
     # Cache configuration
@@ -247,63 +545,159 @@ class LogItemDelegate(QStyledItemDelegate):
         self._search_text: str = ""
         self._case_sensitive: bool = False
 
-        # Per-delegate QTextDocument + LogHighlighter used only for the
-        # currently painted line. This gives us rich, non-blocking
-        # syntax highlighting with the existing regex rules.
-        self._doc = QTextDocument(self)
-        self._highlighter = LogHighlighter(self._doc, self._color_scheme)
+        # Thread pool for background highlighting
+        self._thread_pool = QThreadPool.globalInstance()
 
-        # Cache: maps (text, font_family, font_size) -> QTextDocument
-        # This prevents re-running expensive regex highlighting on every paint
-        self._document_cache: Dict[Tuple[str, str, int], QTextDocument] = {}
+        # Signals for background workers
+        self._highlight_signals = HighlightSignals()
+        self._highlight_signals.finished.connect(self._on_highlighting_finished)
+
+        # Cache: maps (text, font_family, font_size) -> List[HighlightedSegment]
+        # Stores the parsed formatting information from background thread
+        self._segment_cache: Dict[Tuple[str, str, int], List[HighlightedSegment]] = {}
         self._cache_access_order: List[Tuple[str, str, int]] = []  # LRU tracking
+
+        # Track which lines are being highlighted in background
+        self._pending_highlights: Set[Tuple[str, str, int]] = set()
+
+        # Text selection state - support multi-line selection
+        self._interactive_documents: Dict[int, SelectableDocument] = {}  # Map row -> document with selection
 
     def set_search_state(self, text: str, case_sensitive: bool) -> None:
         """Update search text used for line-level search highlighting."""
         self._search_text = text or ""
         self._case_sensitive = case_sensitive
 
-    def _get_or_create_document(self, text: str, font: QFont) -> QTextDocument:
-        """
-        Get cached QTextDocument for this text, or create and cache a new one.
+    def hasInteractiveDocument(self, row: int) -> bool:
+        """Check if a row has an interactive document with selection."""
+        return row in self._interactive_documents
 
-        This dramatically improves paint performance by avoiding re-running
-        expensive regex highlighting on every paint event.
+    def getInteractiveDocument(self, row: int) -> Optional[SelectableDocument]:
+        """Get the interactive document for a specific row."""
+        return self._interactive_documents.get(row)
+
+    def setInteractiveDocument(self, row: int, doc: SelectableDocument) -> None:
+        """Set the interactive document for a specific row."""
+        self._interactive_documents[row] = doc
+
+    def clearInteractiveDocuments(self) -> None:
+        """Clear all interactive documents."""
+        self._interactive_documents.clear()
+
+    def createInteractiveDocument(self, text: str, font: QFont) -> SelectableDocument:
+        """
+        Create a SelectableDocument with syntax highlighting applied.
+
+        This is used by LogListView when creating a new interactive document
+        for text selection. It applies the same syntax highlighting as normal
+        rendering.
 
         Args:
             text: The log line text
             font: The font to use for rendering
 
         Returns:
-            QTextDocument: Cached or newly created document with highlighting applied
+            SelectableDocument with syntax highlighting applied
+        """
+        # Create the selectable document
+        doc = SelectableDocument()
+        doc.setDefaultFont(font)
+        doc.setPlainText(text)
+
+        # Try to get cached formatting segments
+        segments = self._get_or_request_segments(text, font)
+
+        if segments is not None:
+            # Apply syntax highlighting
+            self._apply_segments_to_document(doc, segments)
+
+        return doc
+
+    def _on_highlighting_finished(self, cache_key: Tuple[str, str, int],
+                                   segments: List[HighlightedSegment]) -> None:
+        """
+        Cache formatting segments when background parsing completes.
+
+        Args:
+            cache_key: Cache key for this line
+            segments: List of formatting segments from background thread
+        """
+        # Remove from pending set
+        self._pending_highlights.discard(cache_key)
+
+        # Add to cache
+        self._segment_cache[cache_key] = segments
+        self._cache_access_order.append(cache_key)
+
+        # Enforce cache size limit (LRU eviction)
+        if len(self._segment_cache) > self.MAX_CACHE_SIZE:
+            oldest_key = self._cache_access_order.pop(0)
+            del self._segment_cache[oldest_key]
+
+        # Trigger repaint for this line
+        if self.parent() and isinstance(self.parent(), QListView):
+            self.parent().viewport().update()
+
+    def _get_or_request_segments(self, text: str, font: QFont) -> Optional[List[HighlightedSegment]]:
+        """
+        Get cached formatting segments or start async parsing.
+
+        This dramatically improves paint performance by:
+        1. Running expensive regex parsing in background thread (never blocks UI)
+        2. Caching the results for instant reuse
+        3. Returning None if not ready (caller paints plain text as fallback)
+
+        Args:
+            text: The log line text
+            font: The font to use for rendering
+
+        Returns:
+            List[HighlightedSegment] if cached/ready, None if still parsing in background
         """
         # Create cache key from text and font properties
         cache_key = (text, font.family(), font.pointSize())
 
         # Check cache first
-        if cache_key in self._document_cache:
+        if cache_key in self._segment_cache:
             # Move to end of access order (LRU)
             self._cache_access_order.remove(cache_key)
             self._cache_access_order.append(cache_key)
-            return self._document_cache[cache_key]
+            return self._segment_cache[cache_key]
 
-        # Not in cache - create new document with highlighting
-        doc = QTextDocument(self)
-        highlighter = LogHighlighter(doc, self._color_scheme)
-        doc.setDefaultFont(font)
-        doc.setPlainText(text)
+        # Not in cache - start async parsing if not already pending
+        if cache_key not in self._pending_highlights:
+            self._pending_highlights.add(cache_key)
+            worker = HighlightWorker(text, cache_key, self._color_scheme, self._highlight_signals)
+            self._thread_pool.start(worker)
 
-        # Add to cache
-        self._document_cache[cache_key] = doc
-        self._cache_access_order.append(cache_key)
+        # Return None - caller will paint plain text until parsing completes
+        return None
 
-        # Enforce cache size limit (LRU eviction)
-        if len(self._document_cache) > self.MAX_CACHE_SIZE:
-            # Remove oldest entry
-            oldest_key = self._cache_access_order.pop(0)
-            del self._document_cache[oldest_key]
+    def _apply_segments_to_document(self, doc: QTextDocument, segments: List[HighlightedSegment]) -> None:
+        """
+        Apply formatting segments to a QTextDocument (on main thread).
 
-        return doc
+        Args:
+            doc: Document to format
+            segments: Formatting segments from background parsing
+        """
+        cursor = QTextCursor(doc)
+
+        for segment in segments:
+            # Select the segment
+            cursor.setPosition(segment.start)
+            cursor.setPosition(segment.start + segment.length, QTextCursor.MoveMode.KeepAnchor)
+
+            # Create format
+            fmt = QTextCharFormat()
+            fmt.setForeground(QColor(*segment.color))
+            if segment.bold:
+                fmt.setFontWeight(QFont.Weight.Bold)
+            if segment.italic:
+                fmt.setFontItalic(True)
+
+            # Apply format
+            cursor.setCharFormat(fmt)
 
     def paint(self, painter, option, index):  # type: ignore[override]
         opt = QStyleOptionViewItem(option)
@@ -326,11 +720,39 @@ class LogItemDelegate(QStyledItemDelegate):
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
         opt.text = original_text
 
-        # Get cached document (or create if not cached)
-        # This avoids re-running expensive regex highlighting on every paint
-        doc = self._get_or_create_document(text, opt.font)
-        doc.setTextWidth(opt.rect.width())
+        # Check if this row has an interactive document with text selection
+        row = index.row()
+        if self.hasInteractiveDocument(row):
+            # Use the interactive document which has selection state
+            doc = self.getInteractiveDocument(row)
+            if doc is not None:
+                doc.setTextWidth(opt.rect.width())
+            else:
+                # Fallback to normal rendering
+                segments = self._get_or_request_segments(text, opt.font)
+                doc = QTextDocument()
+                doc.setDefaultFont(opt.font)
+                doc.setPlainText(text)
+                doc.setTextWidth(opt.rect.width())
+                if segments is not None:
+                    self._apply_segments_to_document(doc, segments)
+        else:
+            # Normal rendering: create temporary document with syntax highlighting
+            # Try to get cached formatting segments (async, may return None)
+            segments = self._get_or_request_segments(text, opt.font)
 
+            # Create document on main thread (fast, just allocation)
+            doc = QTextDocument()
+            doc.setDefaultFont(opt.font)
+            doc.setPlainText(text)
+            doc.setTextWidth(opt.rect.width())
+
+            if segments is not None:
+                # Formatting ready - apply it (fast, just setting char formats)
+                self._apply_segments_to_document(doc, segments)
+            # else: No formatting yet, paint plain text (still readable while parsing)
+
+        # Paint the document
         context = QAbstractTextDocumentLayout.PaintContext()
         context.palette = opt.palette
 
@@ -346,8 +768,6 @@ class LogItemDelegate(QStyledItemDelegate):
         We compute the document layout for the current line using the
         available viewport width so that long log lines wrap instead of
         being clipped or forcing a horizontal scrollbar.
-
-        Uses cached document for performance.
         """
         text = index.data(Qt.DisplayRole)
         if text is None:
@@ -355,9 +775,6 @@ class LogItemDelegate(QStyledItemDelegate):
 
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
-
-        # Use cached document for size calculation too
-        doc = self._get_or_create_document(str(text), opt.font)
 
         # Determine available width for wrapping. Prefer the parent
         # QListView viewport width when possible so row heights respond
@@ -369,6 +786,10 @@ class LogItemDelegate(QStyledItemDelegate):
         if width <= 0:
             width = 800  # conservative fallback, not critical for layout
 
+        # Create simple document for size calculation (formatting doesn't affect size)
+        doc = QTextDocument()
+        doc.setDefaultFont(opt.font)
+        doc.setPlainText(str(text))
         doc.setTextWidth(width)
         doc_size = doc.size()
         height = int(doc_size.height())
@@ -377,10 +798,401 @@ class LogItemDelegate(QStyledItemDelegate):
         return QSize(width, height + 4)
 
     def clear_cache(self) -> None:
-        """Clear the document cache. Call this when resetting the log viewer."""
-        self._document_cache.clear()
+        """Clear the segment cache. Call this when resetting the log viewer."""
+        self._segment_cache.clear()
         self._cache_access_order.clear()
+        self._pending_highlights.clear()
         logger.debug("LogItemDelegate cache cleared")
+
+
+class LogListView(QListView):
+    """
+    Custom QListView that enables text selection within and across items.
+
+    Handles mouse events to track cursor position in QTextDocument and manage
+    text selection state. Supports single-line and multi-line selection.
+    Works in conjunction with LogItemDelegate to paint selection highlighting.
+
+    Based on Qt Forum solution for interactive elements in delegates.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+
+        # State for tracking text selection
+        self._selection_start_index = QModelIndex()  # Row where selection started
+        self._selection_end_index = QModelIndex()  # Row where selection ends
+        self._selection_start_pos = 0  # Character position where selection started
+        self._selection_end_pos = 0  # Character position where selection ends
+        self._is_selecting = False  # Whether we're currently selecting
+        self._word_selection = False  # Whether in word-wise selection mode (double-click)
+
+        # Auto-scroll when dragging selection past edges
+        self._auto_scroll_timer = QTimer()
+        self._auto_scroll_timer.timeout.connect(self._auto_scroll_during_selection)
+        self._auto_scroll_distance = 0  # Distance from edge in pixels (negative = up, positive = down)
+        self._last_mouse_pos = QPoint()  # Track mouse position for auto-scroll
+
+        # Enable mouse tracking for cursor changes
+        self.setMouseTracking(True)
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        """Handle mouse press to start text selection."""
+        mousePos = event.pos()
+        clickedIndex = self.indexAt(mousePos)
+
+        if not clickedIndex.isValid():
+            event.accept()
+            return
+
+        # Clear any previous selection
+        self._clearSelection()
+
+        # Get text for this row
+        text = clickedIndex.data(Qt.ItemDataRole.DisplayRole)
+        if text is None:
+            event.accept()
+            return
+
+        # Calculate character position at mouse click
+        itemRect = self.visualRect(clickedIndex)
+        relativePos = mousePos - itemRect.topLeft()
+        relativePosF = QPointF(relativePos)
+
+        # Create temporary document to calculate cursor position
+        tempDoc = QTextDocument()
+        tempDoc.setDefaultFont(self.font())
+        tempDoc.setPlainText(str(text))
+        tempDoc.setTextWidth(itemRect.width())
+        charPos = tempDoc.documentLayout().hitTest(relativePosF, Qt.HitTestAccuracy.FuzzyHit)
+
+        # Start selection
+        self._selection_start_index = clickedIndex
+        self._selection_end_index = clickedIndex
+        self._selection_start_pos = charPos
+        self._selection_end_pos = charPos
+        self._is_selecting = True
+        self._word_selection = False
+
+        # Update display
+        self._updateSelection()
+
+        # Don't call super() - we don't want QListView's row selection behavior
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        """Handle mouse move to update cursor icon and extend selection."""
+        mousePos = event.pos()
+        self._last_mouse_pos = mousePos
+
+        # Update cursor icon based on whether we're over a valid item
+        if self.indexAt(mousePos).isValid():
+            if not QApplication.overrideCursor() or QApplication.overrideCursor().shape() != Qt.CursorShape.IBeamCursor:
+                QApplication.setOverrideCursor(Qt.CursorShape.IBeamCursor)
+        else:
+            QApplication.restoreOverrideCursor()
+
+        # If left button is pressed and we're selecting, update selection
+        if self._is_selecting and (event.buttons() & Qt.MouseButton.LeftButton):
+            # Check if mouse is past viewport edges for auto-scrolling
+            viewport_rect = self.viewport().rect()
+            scroll_margin = 50  # Pixels from edge to start scrolling
+
+            if mousePos.y() < 0:
+                # Mouse is above viewport - calculate distance from top
+                # Distance is negative (how far above), speed increases with distance
+                self._auto_scroll_distance = mousePos.y()  # Negative value
+                if not self._auto_scroll_timer.isActive():
+                    self._auto_scroll_timer.start(50)  # Scroll every 50ms
+            elif mousePos.y() > viewport_rect.height():
+                # Mouse is below viewport - calculate distance from bottom
+                # Distance is positive (how far below), speed increases with distance
+                self._auto_scroll_distance = mousePos.y() - viewport_rect.height()  # Positive value
+                if not self._auto_scroll_timer.isActive():
+                    self._auto_scroll_timer.start(50)
+            elif mousePos.y() < scroll_margin:
+                # Mouse is near top edge but still inside - slow scroll up
+                # Map 0-50px to 0-1.0 factor
+                factor = 1.0 - (mousePos.y() / scroll_margin)
+                self._auto_scroll_distance = -scroll_margin * factor
+                if not self._auto_scroll_timer.isActive():
+                    self._auto_scroll_timer.start(50)
+            elif mousePos.y() > viewport_rect.height() - scroll_margin:
+                # Mouse is near bottom edge but still inside - slow scroll down
+                # Map (height-50)-height to 0-1.0 factor
+                distance_from_bottom = viewport_rect.height() - mousePos.y()
+                factor = 1.0 - (distance_from_bottom / scroll_margin)
+                self._auto_scroll_distance = scroll_margin * factor
+                if not self._auto_scroll_timer.isActive():
+                    self._auto_scroll_timer.start(50)
+            else:
+                # Mouse is within safe zone - stop auto-scrolling
+                self._auto_scroll_timer.stop()
+                self._auto_scroll_distance = 0
+
+            currentIndex = self.indexAt(mousePos)
+
+            if not currentIndex.isValid():
+                # Mouse is outside items but we're still selecting - keep last valid index
+                event.accept()
+                return
+
+            # Get text for current row
+            text = currentIndex.data(Qt.ItemDataRole.DisplayRole)
+            if text is None:
+                event.accept()
+                return
+
+            # Calculate character position at current mouse position
+            itemRect = self.visualRect(currentIndex)
+            relativePos = mousePos - itemRect.topLeft()
+            relativePosF = QPointF(relativePos)
+
+            # Create temporary document to calculate cursor position
+            tempDoc = QTextDocument()
+            tempDoc.setDefaultFont(self.font())
+            tempDoc.setPlainText(str(text))
+            tempDoc.setTextWidth(itemRect.width())
+            charPos = tempDoc.documentLayout().hitTest(relativePosF, Qt.HitTestAccuracy.FuzzyHit)
+
+            # Update selection end
+            self._selection_end_index = currentIndex
+            self._selection_end_pos = charPos
+
+            # Update display
+            self._updateSelection()
+
+            event.accept()
+        else:
+            # Not selecting - stop auto-scroll
+            self._auto_scroll_timer.stop()
+            self._auto_scroll_distance = 0
+            super().mouseMoveEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # type: ignore[override]
+        """Handle double-click to select word."""
+        # TODO: Implement word selection for multi-line selection
+        # For now, just accept the event
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
+        """Handle mouse release to copy selected text to clipboard."""
+        if self._is_selecting:
+            # Stop auto-scrolling
+            self._auto_scroll_timer.stop()
+            self._auto_scroll_distance = 0
+
+            # Get selected text and copy to clipboard
+            selectedText = self._getSelectedText()
+            if selectedText:
+                QApplication.clipboard().setText(selectedText)
+
+            self._is_selecting = False
+
+        # Don't call super() - we don't want QListView's row selection behavior
+        event.accept()
+
+    def _auto_scroll_during_selection(self) -> None:
+        """Auto-scroll the view when dragging selection past edges.
+
+        Scroll speed is proportional to distance from viewport edge:
+        - Inside viewport near edge (0-50px): Slow scroll (0-100% of base speed)
+        - Outside viewport: Fast scroll (proportional to distance, max 10x base speed)
+        """
+        if not self._is_selecting or self._auto_scroll_distance == 0:
+            return
+
+        scrollbar = self.verticalScrollBar()
+        current_value = scrollbar.value()
+
+        # Base scroll speed in pixels per tick
+        base_speed = 3
+        max_speed_multiplier = 50
+
+        # Calculate scroll speed based on distance from edge
+        if abs(self._auto_scroll_distance) <= 50:
+            # Near edge but inside viewport - proportional slow scroll
+            scroll_pixels = base_speed * (abs(self._auto_scroll_distance) / 50)
+        else:
+            # Outside viewport - faster scroll proportional to distance
+            # Map distance to speed multiplier (50-200px → 1x-10x)
+            distance_outside = abs(self._auto_scroll_distance) - 50
+            multiplier = min(max_speed_multiplier, 1 + (distance_outside / 150) * (max_speed_multiplier - 1))
+            scroll_pixels = base_speed * multiplier
+
+        # Apply direction
+        if self._auto_scroll_distance < 0:
+            # Scroll up
+            new_value = max(0, current_value - int(scroll_pixels))
+            scrollbar.setValue(new_value)
+        else:
+            # Scroll down
+            new_value = min(scrollbar.maximum(), current_value + int(scroll_pixels))
+            scrollbar.setValue(new_value)
+
+        # Update selection with current mouse position
+        if self._last_mouse_pos:
+            currentIndex = self.indexAt(self._last_mouse_pos)
+            if currentIndex.isValid():
+                text = currentIndex.data(Qt.ItemDataRole.DisplayRole)
+                if text is not None:
+                    itemRect = self.visualRect(currentIndex)
+                    relativePos = self._last_mouse_pos - itemRect.topLeft()
+                    relativePosF = QPointF(relativePos)
+
+                    tempDoc = QTextDocument()
+                    tempDoc.setDefaultFont(self.font())
+                    tempDoc.setPlainText(str(text))
+                    tempDoc.setTextWidth(itemRect.width())
+                    charPos = tempDoc.documentLayout().hitTest(relativePosF, Qt.HitTestAccuracy.FuzzyHit)
+
+                    self._selection_end_index = currentIndex
+                    self._selection_end_pos = charPos
+                    self._updateSelection()
+
+    def _clearSelection(self) -> None:
+        """Clear the current selection."""
+        delegate = self.itemDelegate()
+        if isinstance(delegate, LogItemDelegate):
+            # Clear all interactive documents
+            delegate.clearInteractiveDocuments()
+
+        # Repaint previously selected rows
+        if self._selection_start_index.isValid() and self._selection_end_index.isValid():
+            startRow = self._selection_start_index.row()
+            endRow = self._selection_end_index.row()
+            minRow = min(startRow, endRow)
+            maxRow = max(startRow, endRow)
+
+            for row in range(minRow, maxRow + 1):
+                index = self.model().index(row, 0)
+                self.update(index)
+
+        # Reset selection state
+        self._selection_start_index = QModelIndex()
+        self._selection_end_index = QModelIndex()
+        self._selection_start_pos = 0
+        self._selection_end_pos = 0
+        self._is_selecting = False
+
+    def _updateSelection(self) -> None:
+        """Update the visual selection based on current selection state."""
+        if not self._selection_start_index.isValid():
+            return
+
+        delegate = self.itemDelegate()
+        if not isinstance(delegate, LogItemDelegate):
+            return
+
+        # Clear previous interactive documents
+        delegate.clearInteractiveDocuments()
+
+        # Determine selection range (start and end might be in different order)
+        startRow = self._selection_start_index.row()
+        endRow = self._selection_end_index.row()
+
+        # Determine forward or backward selection
+        if startRow < endRow or (startRow == endRow and self._selection_start_pos <= self._selection_end_pos):
+            # Forward selection
+            firstRow = startRow
+            firstPos = self._selection_start_pos
+            lastRow = endRow
+            lastPos = self._selection_end_pos
+        else:
+            # Backward selection
+            firstRow = endRow
+            firstPos = self._selection_end_pos
+            lastRow = startRow
+            lastPos = self._selection_start_pos
+
+        # Create documents for each selected line
+        for row in range(firstRow, lastRow + 1):
+            index = self.model().index(row, 0)
+            text = index.data(Qt.ItemDataRole.DisplayRole)
+            if text is None:
+                continue
+
+            # Create SelectableDocument with syntax highlighting
+            doc = delegate.createInteractiveDocument(str(text), self.font())
+
+            if row == firstRow and row == lastRow:
+                # Single-line selection
+                doc.setCursorPosition(firstPos)
+                doc.setCursorPosition(lastPos, QTextCursor.MoveMode.KeepAnchor)
+            elif row == firstRow:
+                # First line - select from start position to end
+                doc.setCursorPosition(firstPos)
+                doc.setCursorPosition(len(str(text)), QTextCursor.MoveMode.KeepAnchor)
+            elif row == lastRow:
+                # Last line - select from beginning to end position
+                doc.setCursorPosition(0)
+                doc.setCursorPosition(lastPos, QTextCursor.MoveMode.KeepAnchor)
+            else:
+                # Middle lines - select entire line
+                doc.setCursorPosition(0)
+                doc.setCursorPosition(len(str(text)), QTextCursor.MoveMode.KeepAnchor)
+
+            # Store document for this row
+            delegate.setInteractiveDocument(row, doc)
+
+            # Repaint this row
+            self.update(index)
+
+    def _getSelectedText(self) -> str:
+        """Get the currently selected text."""
+        if not self._selection_start_index.isValid():
+            return ""
+
+        startRow = self._selection_start_index.row()
+        endRow = self._selection_end_index.row()
+
+        if startRow == endRow:
+            # Single-line selection
+            text = self._selection_start_index.data(Qt.ItemDataRole.DisplayRole)
+            if text is None:
+                return ""
+
+            minPos = min(self._selection_start_pos, self._selection_end_pos)
+            maxPos = max(self._selection_start_pos, self._selection_end_pos)
+            return str(text)[minPos:maxPos]
+        else:
+            # Multi-line selection
+            minRow = min(startRow, endRow)
+            maxRow = max(startRow, endRow)
+
+            # Determine if we're selecting forward or backward
+            if startRow < endRow or (startRow == endRow and self._selection_start_pos < self._selection_end_pos):
+                # Forward selection
+                firstRow = startRow
+                firstPos = self._selection_start_pos
+                lastRow = endRow
+                lastPos = self._selection_end_pos
+            else:
+                # Backward selection
+                firstRow = endRow
+                firstPos = self._selection_end_pos
+                lastRow = startRow
+                lastPos = self._selection_start_pos
+
+            lines = []
+            for row in range(firstRow, lastRow + 1):
+                index = self.model().index(row, 0)
+                text = index.data(Qt.ItemDataRole.DisplayRole)
+                if text is None:
+                    continue
+
+                textStr = str(text)
+                if row == firstRow:
+                    # First line - take from start position to end
+                    lines.append(textStr[firstPos:])
+                elif row == lastRow:
+                    # Last line - take from beginning to end position
+                    lines.append(textStr[:lastPos])
+                else:
+                    # Middle lines - take entire line
+                    lines.append(textStr)
+
+            return "\n".join(lines)
 
 
 class LogFileDetector(QObject):
@@ -879,6 +1691,14 @@ class LogViewerWindow(QMainWindow):
         self._search_matches: List[int] = []
         self._search_match_cursor: int = -1
 
+        # Update throttling to reduce UI load
+        self._pending_lines: List[str] = []  # Buffer for pending log lines
+        self._update_timer = QTimer()
+        self._update_timer.setSingleShot(True)
+        self._update_timer.timeout.connect(self._flush_pending_lines)
+        self._update_throttle_ms = 50  # Minimum time between UI updates
+        self._last_scroll_state = True  # Track if we were at bottom
+
         # Components
         self.log_selector: QComboBox = None
         self.search_toolbar: QToolBar = None
@@ -953,9 +1773,9 @@ class LogViewerWindow(QMainWindow):
 
         main_layout.addWidget(self.search_toolbar)
 
-        # Log display area (virtualized)
+        # Log display area (virtualized with text selection support)
         self.log_model = LogListModel(self)
-        self.log_view = QListView()
+        self.log_view = LogListView()
         self.log_view.setModel(self.log_model)
         # Enable per-row word wrapping and variable item heights so long
         # log lines are fully visible instead of clipped or forcing
@@ -963,7 +1783,7 @@ class LogViewerWindow(QMainWindow):
         self.log_view.setUniformItemSizes(False)
         self.log_view.setWordWrap(True)
         self.log_view.setResizeMode(QListView.ResizeMode.Adjust)
-        self.log_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.log_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.log_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.log_view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.log_view.setFont(QFont("Consolas", 10))  # Monospace font for logs
@@ -1436,23 +2256,58 @@ class LogViewerWindow(QMainWindow):
             self.clear_log_display()
 
             lines = content.splitlines()
-            self.log_model.append_lines(lines)
 
-            # Update file position
+            # Update file position immediately
             self.current_file_position = len(content.encode("utf-8"))
 
-            # Start tailing if not paused
-            if not self.tailing_paused and self.current_log_path:
-                self.start_log_tailing(self.current_log_path)
-
-            # Scroll to bottom if auto-scroll enabled
-            if self.auto_scroll_enabled:
-                self.scroll_to_bottom()
-
-            logger.info(f"Loaded log file: {self.current_log_path}")
+            # Batch insert lines to prevent UI freeze
+            # Insert in chunks of 1000 lines with event loop yields
+            self._batch_insert_lines(lines)
 
         except Exception as e:
             logger.error(f"Error displaying loaded content: {e}")
+
+    def _batch_insert_lines(self, lines: List[str], chunk_size: int = 1000) -> None:
+        """
+        Insert lines in batches to prevent UI freeze.
+
+        Yields control back to the event loop between batches so the UI
+        stays responsive even when loading large log files.
+
+        Args:
+            lines: All lines to insert
+            chunk_size: Number of lines to insert per batch
+        """
+        if not lines:
+            # No lines to insert - finish up
+            self._finish_batch_insert()
+            return
+
+        # Take next chunk
+        chunk = lines[:chunk_size]
+        remaining = lines[chunk_size:]
+
+        # Insert this chunk
+        self.log_model.append_lines(chunk)
+
+        if remaining:
+            # Schedule next batch on event loop (yields to UI)
+            QTimer.singleShot(0, lambda: self._batch_insert_lines(remaining, chunk_size))
+        else:
+            # All done - finish up
+            self._finish_batch_insert()
+
+    def _finish_batch_insert(self) -> None:
+        """Called after all batches are inserted."""
+        # Start tailing if not paused
+        if not self.tailing_paused and self.current_log_path:
+            self.start_log_tailing(self.current_log_path)
+
+        # Scroll to bottom if auto-scroll enabled
+        if self.auto_scroll_enabled:
+            self.scroll_to_bottom()
+
+        logger.info(f"Loaded log file: {self.current_log_path}")
 
     def _on_file_load_failed(self, error_msg: str) -> None:
         """Handle file load failure."""
@@ -1647,9 +2502,16 @@ class LogViewerWindow(QMainWindow):
 
     def _on_new_content(self, new_content: str, new_file_position: int) -> None:
         """Handle new content from async tailer (runs on UI thread via signal)."""
+        # Defer updates if window is minimized or hidden to reduce UI load
+        if self.isMinimized() or not self.isVisible():
+            # Just update file position, skip rendering
+            self.current_file_position = new_file_position
+            return
+
         # Check if user has scrolled up (disable auto-scroll)
         scrollbar = self.log_view.verticalScrollBar()
         was_at_bottom = scrollbar.value() >= scrollbar.maximum() - 10
+        self._last_scroll_state = was_at_bottom
 
         # Merge with any pending partial line and split into full lines.
         chunk = f"{self._pending_partial_line}{new_content}"
@@ -1664,14 +2526,64 @@ class LogViewerWindow(QMainWindow):
             self._pending_partial_line = ""
 
         if lines:
+            # Add to pending buffer
+            self._pending_lines.extend(lines)
+
+            # Start throttle timer if not already running
+            if not self._update_timer.isActive():
+                self._update_timer.start(self._update_throttle_ms)
+
+        # Update file position
+        self.current_file_position = new_file_position
+
+    def _flush_pending_lines(self) -> None:
+        """Flush pending lines to the UI (called by throttle timer)."""
+        if not self._pending_lines:
+            return
+
+        lines = self._pending_lines
+        self._pending_lines = []
+
+        # For tailing, batch if we have a large burst (>500 lines)
+        if len(lines) > 500:
+            self._batch_insert_lines_for_tailing(lines, self._last_scroll_state)
+        else:
+            # Small batch - insert directly
             self.log_model.append_lines(lines)
+
+            # Auto-scroll if enabled and user was at bottom
+            if self.auto_scroll_enabled and self._last_scroll_state:
+                self.scroll_to_bottom()
+
+    def _batch_insert_lines_for_tailing(self, lines: List[str], was_at_bottom: bool, chunk_size: int = 500) -> None:
+        """
+        Batch insert lines during tailing to prevent UI freeze on large bursts.
+
+        Similar to _batch_insert_lines but preserves scroll position for tailing.
+
+        Args:
+            lines: Lines to insert
+            was_at_bottom: Whether user was scrolled to bottom before insert
+            chunk_size: Number of lines per batch
+        """
+        if not lines:
+            return
+
+        # Take next chunk
+        chunk = lines[:chunk_size]
+        remaining = lines[chunk_size:]
+
+        # Insert this chunk
+        self.log_model.append_lines(chunk)
 
         # Auto-scroll if enabled and user was at bottom
         if self.auto_scroll_enabled and was_at_bottom:
             self.scroll_to_bottom()
 
-        # Update file position
-        self.current_file_position = new_file_position
+        if remaining:
+            # Schedule next batch on event loop (yields to UI)
+            QTimer.singleShot(0, lambda: self._batch_insert_lines_for_tailing(remaining, was_at_bottom, chunk_size))
+
 
     def _on_log_rotated(self) -> None:
         """Handle log rotation detected by async tailer."""

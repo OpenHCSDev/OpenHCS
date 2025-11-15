@@ -2806,12 +2806,27 @@ class ParameterFormManager(QWidget):
             # Refresh parent form's placeholders with live context
             self._refresh_all_placeholders(live_context=live_context)
 
-            # Refresh all nested managers' placeholders (including siblings) with live context
-            # emitting_manager_name was already found above
+            # Refresh only sibling nested managers that could be affected by this change
+            # A sibling is affected if its object instance inherits from the emitting manager's type
+            # Example: NapariStreamingConfig inherits from WellFilterConfig, so it's affected
+            #          VFSConfig doesn't inherit from WellFilterConfig, so it's not affected
+            emitting_manager = self.nested_managers.get(emitting_manager_name) if emitting_manager_name else None
+            emitting_type = emitting_manager.dataclass_type if emitting_manager else None
+
+            def should_refresh_sibling(name: str, manager) -> bool:
+                """Check if sibling manager should be refreshed based on inheritance."""
+                if name == emitting_manager_name:
+                    return False  # Don't refresh the emitting manager itself
+                if not emitting_type:
+                    return True  # Conservative: refresh if we can't determine
+                # Check if the sibling's object instance inherits from the emitting type
+                return isinstance(manager.object_instance, emitting_type)
+
             self._apply_to_nested_managers(
                 lambda name, manager: (
                     manager._refresh_all_placeholders(live_context=live_context)
-                    if name != emitting_manager_name else None
+                    if should_refresh_sibling(name, manager)
+                    else None
                 )
             )
 
@@ -3573,15 +3588,15 @@ class ParameterFormManager(QWidget):
         """
         # Don't refresh if this is the window that made the change
         if editing_object is self.object_instance:
-            logger.info(f"[{self.field_id}] Skipping cross-window update - same instance")
+            logger.debug(f"[{self.field_id}] Skipping cross-window update - same instance")
             return
 
         # Check if the change affects this form based on context hierarchy
         if not self._is_affected_by_context_change(editing_object, context_object):
-            logger.info(f"[{self.field_id}] Skipping cross-window update - not affected by {type(editing_object).__name__}")
+            logger.debug(f"[{self.field_id}] Skipping cross-window update - not affected by {type(editing_object).__name__}")
             return
 
-        logger.info(f"[{self.field_id}] ✅ Cross-window update: {field_path} = {new_value} (from {type(editing_object).__name__})")
+        logger.debug(f"[{self.field_id}] ✅ Cross-window update: {field_path} = {new_value} (from {type(editing_object).__name__})")
 
         # Pass the full field_path so nested managers can extract their relevant part
         # Example: "PipelineConfig.well_filter_config.well_filter"
@@ -3647,7 +3662,7 @@ class ParameterFormManager(QWidget):
                 isinstance(self.object_instance, GlobalPipelineConfig) or
                 self.context_obj is None  # No context means we use global context
             )
-            logger.info(f"[{self.field_id}] GlobalPipelineConfig change: context_obj={type(self.context_obj).__name__ if self.context_obj else 'None'}, affected={is_affected}")
+            logger.debug(f"[{self.field_id}] GlobalPipelineConfig change: context_obj={type(self.context_obj).__name__ if self.context_obj else 'None'}, affected={is_affected}")
             return is_affected
 
         # If other window is editing PipelineConfig, check if we're a step in that pipeline
@@ -3662,7 +3677,7 @@ class ParameterFormManager(QWidget):
         if isinstance(editing_object, AbstractStep):
             # We're affected if our context_obj is the same Step instance
             is_affected = self.context_obj is editing_object
-            logger.info(f"[{self.field_id}] Step change: affected={is_affected}")
+            logger.debug(f"[{self.field_id}] Step change: affected={is_affected}")
             return is_affected
 
         # CRITICAL: Check MRO inheritance for nested config changes
