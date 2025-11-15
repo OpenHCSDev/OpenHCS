@@ -7,7 +7,8 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 
 import logging
 import inspect
-from typing import List, Dict, Optional, Callable, Tuple
+import copy
+from typing import List, Dict, Optional, Callable, Tuple, Any, Iterable
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -15,7 +16,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QLabel, QSplitter, QStyledItemDelegate, QStyle,
     QStyleOptionViewItem, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPainter, QColor, QPen, QFontMetrics
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
@@ -24,11 +25,14 @@ from openhcs.io.filemanager import FileManager
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.pyqt_gui.widgets.mixins import (
     preserve_selection_during_update,
-    handle_selection_change_with_prevention
+    handle_selection_change_with_prevention,
+    CrossWindowPreviewMixin,
 )
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
+from openhcs.config_framework import LiveContextResolver
+from openhcs.utils.performance_monitor import timer
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +134,7 @@ class ReorderableListWidget(QListWidget):
             self.items_reordered.emit(source_index, target_index)
 
 
-class PipelineEditorWidget(QWidget):
+class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
     """
     PyQt6 Pipeline Editor Widget.
 
@@ -145,6 +149,18 @@ class PipelineEditorWidget(QWidget):
         'napari_streaming_config': 'NAP',
         'fiji_streaming_config': 'FIJI',
         'step_well_filter_config': 'FILT',
+    }
+
+    STEP_SCOPE_ATTR = "_pipeline_scope_token"
+    STEP_PREVIEW_FIELDS = {
+        'func',
+        'variable_components',
+        'group_by',
+        'processing_config',
+        'step_materialization_config',
+        'step_well_filter_config',
+        'napari_streaming_config',
+        'fiji_streaming_config',
     }
 
     # Signals
@@ -192,12 +208,20 @@ class PipelineEditorWidget(QWidget):
         
         # Reference to plate manager (set externally)
         self.plate_manager = None
-        
+
+        # Live context resolver for config attribute resolution
+        self._live_context_resolver = LiveContextResolver()
+        self._preview_step_cache: Dict[int, FunctionStep] = {}
+        self._preview_step_cache_token: Optional[int] = None
+        self._next_scope_token = 0
+
+        self._init_cross_window_preview_mixin()
+
         # Setup UI
         self.setup_ui()
         self.setup_connections()
         self.update_button_states()
-        
+
         logger.debug("Pipeline editor widget initialized")
 
     # ========== UI Setup ==========
@@ -343,11 +367,12 @@ class PipelineEditorWidget(QWidget):
 
         # CRITICAL: Register as external listener for cross-window refresh signals
         # This makes preview labels reactive to live context changes
+        # Only listen to value changes, not placeholder refreshes (avoid double updates)
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
         ParameterFormManager.register_external_listener(
             self,
             self._on_cross_window_context_changed,
-            self._on_cross_window_context_refreshed
+            None  # Don't listen to placeholder refreshes - only actual value changes
         )
     
     def handle_button_action(self, action: str):
@@ -387,23 +412,25 @@ class PipelineEditorWidget(QWidget):
     
     # ========== Business Logic Methods (Extracted from Textual) ==========
     
-    def format_item_for_display(self, step: FunctionStep) -> Tuple[str, str]:
+    def format_item_for_display(self, step: FunctionStep, live_context_snapshot=None) -> Tuple[str, str]:
         """
         Format step for display in the list with constructor value preview.
 
         Args:
             step: FunctionStep to format
+            live_context_snapshot: Optional pre-collected LiveContextSnapshot (for performance)
 
         Returns:
             Tuple of (display_text, step_name)
         """
-        step_name = getattr(step, 'name', 'Unknown Step')
+        step_for_display = self._get_step_preview_instance(step, live_context_snapshot)
+        step_name = getattr(step_for_display, 'name', 'Unknown Step')
 
         # Build preview of key constructor values
         preview_parts = []
 
         # Function preview
-        func = getattr(step, 'func', None)
+        func = getattr(step_for_display, 'func', None)
         if func:
             if isinstance(func, list) and func:
                 # Count enabled functions (filter out None/disabled)
@@ -415,7 +442,7 @@ class PipelineEditorWidget(QWidget):
             elif isinstance(func, dict):
                 # Show dict keys with metadata names (like groupby selector)
                 orchestrator = self._get_current_orchestrator()
-                group_by = getattr(step.processing_config, 'group_by', None) if hasattr(step, 'processing_config') else None
+                group_by = getattr(step_for_display.processing_config, 'group_by', None) if hasattr(step_for_display, 'processing_config') else None
 
                 dict_items = []
                 for key in sorted(func.keys()):
@@ -431,7 +458,7 @@ class PipelineEditorWidget(QWidget):
                 preview_parts.append(f"func={{{', '.join(dict_items)}}}")
 
         # Variable components preview
-        var_components = getattr(step, 'variable_components', None)
+        var_components = getattr(step_for_display, 'variable_components', None)
         if var_components:
             if len(var_components) == 1:
                 comp_name = getattr(var_components[0], 'name', str(var_components[0]))
@@ -443,13 +470,13 @@ class PipelineEditorWidget(QWidget):
                 preview_parts.append(f"components=[{', '.join(comp_names)}]")
 
         # Group by preview
-        group_by = getattr(step, 'group_by', None)
+        group_by = getattr(step_for_display, 'group_by', None)
         if group_by and group_by.value is not None:  # Check for GroupBy.NONE
             group_name = getattr(group_by, 'name', str(group_by))
             preview_parts.append(f"group_by={group_name}")
 
         # Input source preview (access from processing_config)
-        input_source = getattr(step.processing_config, 'input_source', None) if hasattr(step, 'processing_config') else None
+        input_source = getattr(step_for_display.processing_config, 'input_source', None) if hasattr(step_for_display, 'processing_config') else None
         if input_source:
             source_name = getattr(input_source, 'name', str(input_source))
             if source_name != 'PREVIOUS_STEP':  # Only show if not default
@@ -463,7 +490,7 @@ class PipelineEditorWidget(QWidget):
 
         config_indicators = []
         for config_attr, indicator in self.STEP_CONFIG_INDICATORS.items():
-            config = getattr(step, config_attr, None)
+            config = getattr(step_for_display, config_attr, None)
             if config is None:
                 continue
 
@@ -471,14 +498,14 @@ class PipelineEditorWidget(QWidget):
             has_enabled = dataclasses.is_dataclass(config) and 'enabled' in {f.name for f in dataclasses.fields(config)}
 
             if has_enabled:
-                resolved_enabled = self._resolve_config_attr(step, config, 'enabled')
+                resolved_enabled = self._resolve_config_attr(step_for_display, config, 'enabled', live_context_snapshot)
                 if not resolved_enabled:
                     continue
 
             # Build indicator text with well_filter suffix if applicable
             indicator_text = indicator
             if isinstance(config, WellFilterConfig):
-                resolved_well_filter = self._resolve_config_attr(step, config, 'well_filter')
+                resolved_well_filter = self._resolve_config_attr(step_for_display, config, 'well_filter', live_context_snapshot)
                 if resolved_well_filter is not None:
                     # Format well_filter for display
                     if isinstance(resolved_well_filter, list):
@@ -490,7 +517,7 @@ class PipelineEditorWidget(QWidget):
 
                     # Add +/- prefix for INCLUDE/EXCLUDE mode
                     from openhcs.core.config import WellFilterMode
-                    resolved_mode = self._resolve_config_attr(step, config, 'well_filter_mode')
+                    resolved_mode = self._resolve_config_attr(step_for_display, config, 'well_filter_mode', live_context_snapshot)
                     mode_prefix = '-' if resolved_mode == WellFilterMode.EXCLUDE else '+'
 
                     indicator_text = f"{indicator}{mode_prefix}{wf_display}"
@@ -608,6 +635,7 @@ class PipelineEditorWidget(QWidget):
             func=[],  # Start with empty function list
             name=step_name
         )
+        self._ensure_step_scope_token(new_step)
 
 
 
@@ -616,6 +644,7 @@ class PipelineEditorWidget(QWidget):
             # Check if step already exists in pipeline (for Shift+Click saves)
             if edited_step not in self.pipeline_steps:
                 self.pipeline_steps.append(edited_step)
+                self._ensure_step_scope_token(edited_step)
                 self.status_message.emit(f"Added new step: {edited_step.name}")
             else:
                 # Step already exists, just update the display
@@ -671,6 +700,7 @@ class PipelineEditorWidget(QWidget):
         new_steps = [step for i, step in enumerate(self.pipeline_steps) if i not in indices_to_remove]
 
         self.pipeline_steps = new_steps
+        self._normalize_step_scope_tokens()
         self.update_step_list()
         self.pipeline_changed.emit(self.pipeline_steps)
 
@@ -694,6 +724,7 @@ class PipelineEditorWidget(QWidget):
             # Find and replace the step in the pipeline
             for i, step in enumerate(self.pipeline_steps):
                 if step is step_to_edit:
+                    self._transfer_scope_token(step_to_edit, edited_step)
                     self.pipeline_steps[i] = edited_step
                     break
 
@@ -751,6 +782,7 @@ class PipelineEditorWidget(QWidget):
                 new_pipeline_steps = namespace['pipeline_steps']
                 # Update the pipeline with new steps
                 self.pipeline_steps = new_pipeline_steps
+                self._normalize_step_scope_tokens()
                 self.update_step_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Auto-loaded {len(new_pipeline_steps)} steps from basic_pipeline.py")
@@ -836,6 +868,7 @@ class PipelineEditorWidget(QWidget):
                 new_pipeline_steps = namespace['pipeline_steps']
                 # Update the pipeline with new steps
                 self.pipeline_steps = new_pipeline_steps
+                self._normalize_step_scope_tokens()
                 self.update_step_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Pipeline updated with {len(new_pipeline_steps)} steps")
@@ -876,6 +909,7 @@ class PipelineEditorWidget(QWidget):
 
             if steps is not None:
                 self.pipeline_steps = steps
+                self._normalize_step_scope_tokens()
                 self.update_step_list()
                 self.pipeline_changed.emit(self.pipeline_steps)
                 self.status_message.emit(f"Loaded {len(steps)} steps from {file_path.name}")
@@ -930,6 +964,8 @@ class PipelineEditorWidget(QWidget):
         else:
             self.pipeline_steps = []
 
+        self._normalize_step_scope_tokens()
+
         self.update_step_list()
         self.update_button_states()
         logger.debug(f"Current plate changed: {plate_path}")
@@ -966,114 +1002,51 @@ class PipelineEditorWidget(QWidget):
             else:
                 logger.debug(f"No orchestrator found for config refresh: {plate_path}")
 
-    def _resolve_config_attr(self, step: FunctionStep, config: object, attr_name: str) -> object:
+    def _resolve_config_attr(self, step: FunctionStep, config: object, attr_name: str,
+                             live_context_snapshot=None) -> object:
         """
         Resolve any config attribute through lazy resolution system using LIVE context.
 
-        CRITICAL: Uses ParameterFormManager._collect_live_context_from_other_windows() mechanism
-        to collect live values from all open windows, then builds context stack the same way
-        step editor does for placeholder resolution.
+        Uses LiveContextResolver service from configuration framework for cached resolution.
 
         Args:
             step: FunctionStep containing the config
             config: Config dataclass instance (e.g., LazyNapariStreamingConfig)
             attr_name: Name of the attribute to resolve (e.g., 'enabled', 'well_filter')
+            live_context_snapshot: Optional pre-collected LiveContextSnapshot (for performance)
 
         Returns:
             Resolved attribute value (type depends on attribute)
         """
-        from openhcs.config_framework.context_manager import config_context
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
+        from openhcs.core.config import GlobalPipelineConfig
         from openhcs.config_framework.global_config import get_current_global_config
-        import dataclasses
 
         orchestrator = self._get_current_orchestrator()
         if not orchestrator:
-            # No orchestrator - return None to show placeholder instead of raising error
             return None
 
         try:
-            # Collect live context DIRECTLY from all managers in this scope hierarchy
-            # CRITICAL: We can't use manager._collect_live_context_from_other_windows() because
-            # that skips managers of the same type, but we NEED the PipelineConfig manager's values!
-            # CRITICAL: Use hierarchical scope matching - include child scopes like "plate::step"
-            plate_scope = self.current_plate
-
-            live_context_dict = {}
-            step_scope = f"{plate_scope}::{step.name}"
-
-            for manager in ParameterFormManager._active_form_managers:
-                # Include managers from:
-                # 1. Global scope (None)
-                # 2. Exact plate scope match
-                # 3. Exact step scope match (for THIS specific step)
-                is_visible = (
-                    manager.scope_id is None or  # Global scope
-                    manager.scope_id == plate_scope or  # Exact plate match
-                    manager.scope_id == step_scope  # Exact step match
-                )
-
-                if is_visible:
-                    # CRITICAL: Get ALL current values (including None from resets), not just user-modified
-                    # When user resets a field to None, it's removed from user_modified_values,
-                    # but we need to see that None to properly resolve the preview label
-                    live_values = manager.get_current_values()
-                    obj_type = type(manager.object_instance)
-                    live_context_dict[obj_type] = live_values
+            # Collect live context if not provided (for backwards compatibility)
+            if live_context_snapshot is None:
+                live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
 
             # Build context stack: GlobalPipelineConfig → PipelineConfig → Step
-            # Use live values if available, otherwise use stored values
+            context_stack = [
+                get_current_global_config(GlobalPipelineConfig),
+                orchestrator.pipeline_config,
+                step
+            ]
 
-            # Build context objects with live values merged in
-            # Generic pattern: for each type in live_context_dict, merge live values into base object
-            from types import SimpleNamespace
+            # Resolve using service
+            resolved_value = self._live_context_resolver.resolve_config_attr(
+                config_obj=config,
+                attr_name=attr_name,
+                context_stack=context_stack,
+                live_context=live_context_snapshot.values,
+                cache_token=live_context_snapshot.token
+            )
 
-            context_objects = []
-
-            # 1. GlobalPipelineConfig
-            global_config = get_current_global_config(GlobalPipelineConfig)
-            context_objects.append(self._merge_live_values(global_config, live_context_dict.get(GlobalPipelineConfig)))
-
-            # 2. PipelineConfig
-            pipeline_config = orchestrator.pipeline_config
-            context_objects.append(self._merge_live_values(pipeline_config, live_context_dict.get(PipelineConfig)))
-
-            # 3. Step (if a step editor is open for THIS specific step)
-            # We matched by scope_id above, so if there's a FunctionStep in live_context_dict,
-            # it's guaranteed to be for THIS step
-            step_type = type(step)
-            step_live_values = live_context_dict.get(step_type)
-
-            step_to_use = step
-            if step_live_values:
-                step_to_use = self._merge_live_values(step, step_live_values)
-                context_objects.append(step_to_use)
-            else:
-                context_objects.append(step)
-
-            # CRITICAL: Get config from the merged step (step_to_use), not the original step!
-            # This ensures we're resolving the config object that has live values merged in
-            # Use introspection to find which attribute holds this config
-            config_attr_name = None
-            for step_attr in self.STEP_CONFIG_INDICATORS.keys():
-                if getattr(step, step_attr, None) is config:
-                    config_attr_name = step_attr
-                    break
-
-            if config_attr_name:
-                config_to_resolve = getattr(step_to_use, config_attr_name, config)
-            else:
-                config_to_resolve = config
-
-            # Build nested context stack and resolve
-            def resolve_with_contexts(contexts, index=0):
-                if index >= len(contexts):
-                    return getattr(config_to_resolve, attr_name)
-                with config_context(contexts[index]):
-                    return resolve_with_contexts(contexts, index + 1)
-
-            resolved_value = resolve_with_contexts(context_objects)
             return resolved_value
 
         except Exception as e:
@@ -1084,59 +1057,203 @@ class PipelineEditorWidget(QWidget):
             raw_value = object.__getattribute__(config, attr_name)
             return raw_value
 
-    def _merge_live_values(self, base_obj: object, live_values: dict | None) -> object:
-        """
-        Generic helper to merge live values into a base object.
+    def _build_step_scope_id(self, step: FunctionStep) -> Optional[str]:
+        """Return the hierarchical scope id for a step editor instance."""
+        token = self._ensure_step_scope_token(step)
+        plate_scope = self.current_plate or "no_plate"
+        return f"{plate_scope}::{token}"
 
-        Args:
-            base_obj: Base object (dataclass or regular object)
-            live_values: Live values dict from form manager (or None)
+    def _ensure_step_scope_token(self, step: FunctionStep) -> str:
+        token = getattr(step, self.STEP_SCOPE_ATTR, None)
+        if not token:
+            token = f"step_{self._next_scope_token}"
+            self._next_scope_token += 1
+            setattr(step, self.STEP_SCOPE_ATTR, token)
+        return token
 
-        Returns:
-            New object with live values merged in (or original if no live values)
-        """
+    def _transfer_scope_token(self, source_step: FunctionStep, target_step: FunctionStep) -> None:
+        token = getattr(source_step, self.STEP_SCOPE_ATTR, None)
+        if token:
+            setattr(target_step, self.STEP_SCOPE_ATTR, token)
+
+    def _normalize_step_scope_tokens(self) -> None:
+        for step in self.pipeline_steps:
+            self._ensure_step_scope_token(step)
+
+    def _merge_step_with_live_values(self, step: FunctionStep, live_values: Dict[str, Any]) -> FunctionStep:
+        """Create a copy of the step with live overrides applied."""
         if not live_values:
-            return base_obj
+            return step
 
-        # Reconstruct nested dataclasses
-        live_values = self._reconstruct_nested_for_context(live_values, base_obj)
+        try:
+            step_clone = copy.deepcopy(step)
+        except Exception:
+            step_clone = copy.copy(step)
 
-        # Merge into base object
-        import dataclasses
-        if dataclasses.is_dataclass(base_obj):
-            return dataclasses.replace(base_obj, **live_values)
-        else:
-            from types import SimpleNamespace
-            return SimpleNamespace(**{**vars(base_obj), **live_values})
+        reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
+        for field_name, value in reconstructed_values.items():
+            setattr(step_clone, field_name, value)
 
-    def _reconstruct_nested_for_context(self, live_values: dict, base_instance) -> dict:
-        """Reconstruct nested dataclasses from (type, dict) tuples to instances.
+        return step_clone
 
-        This is a simplified version of ParameterFormManager._reconstruct_nested_dataclasses()
-        for use in pipeline editor context resolution.
-        """
-        import dataclasses
-        from dataclasses import is_dataclass
+    def _get_step_preview_instance(self, step: FunctionStep, live_context_snapshot) -> FunctionStep:
+        """Return a step instance that includes any live overrides for previews."""
+        if live_context_snapshot is None:
+            return step
 
-        reconstructed = {}
-        for field_name, value in live_values.items():
-            if isinstance(value, tuple) and len(value) == 2:
-                dataclass_type, field_dict = value
-                if is_dataclass(dataclass_type):
-                    # Merge into base instance's nested dataclass
-                    if base_instance and hasattr(base_instance, field_name):
-                        base_nested = getattr(base_instance, field_name)
-                        if base_nested is not None and is_dataclass(base_nested):
-                            reconstructed[field_name] = dataclasses.replace(base_nested, **field_dict)
-                        else:
-                            reconstructed[field_name] = dataclass_type(**field_dict)
-                    else:
-                        reconstructed[field_name] = dataclass_type(**field_dict)
-                else:
-                    reconstructed[field_name] = value
-            else:
-                reconstructed[field_name] = value
-        return reconstructed
+        token = getattr(live_context_snapshot, 'token', None)
+        if token is None:
+            return step
+
+        if self._preview_step_cache_token != token:
+            self._preview_step_cache.clear()
+            self._preview_step_cache_token = token
+
+        cache_key = id(step)
+        cached_step = self._preview_step_cache.get(cache_key)
+        if cached_step is not None:
+            return cached_step
+
+        scope_id = self._build_step_scope_id(step)
+        if not scope_id:
+            self._preview_step_cache[cache_key] = step
+            return step
+
+        scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
+        scope_entries = scoped_values.get(scope_id)
+        if not scope_entries:
+            self._preview_step_cache[cache_key] = step
+            return step
+
+        step_live_values = scope_entries.get(type(step))
+        if not step_live_values:
+            self._preview_step_cache[cache_key] = step
+            return step
+
+        merged_step = self._merge_step_with_live_values(step, step_live_values)
+        self._preview_step_cache[cache_key] = merged_step
+        return merged_step
+
+    def _build_scope_index_map(self) -> Dict[str, int]:
+        scope_map: Dict[str, int] = {}
+        for idx, step in enumerate(self.pipeline_steps):
+            scope_id = self._build_step_scope_id(step)
+            if scope_id:
+                scope_map[scope_id] = idx
+        return scope_map
+
+    # --- CrossWindowPreviewMixin hooks -------------------------------------------------
+
+    def _should_process_preview_field(
+        self,
+        field_path: Optional[str],
+        new_value: object,
+        editing_object: object,
+        context_object: object,
+    ) -> bool:
+        if not field_path:
+            return True
+
+        parts = field_path.split('.', 1)
+        root = parts[0]
+
+        # Check for both lowercase and class name versions
+        # field_id can be 'step', 'pipeline_config', 'global_config' (lowercase)
+        # OR 'PipelineConfig', 'GlobalPipelineConfig' (class names)
+        if root not in {'step', 'pipeline_config', 'global_config', 'PipelineConfig', 'GlobalPipelineConfig'}:
+            return False
+
+        # Pipeline/global config changes affect all previews
+        if root in {'pipeline_config', 'global_config', 'PipelineConfig', 'GlobalPipelineConfig'}:
+            return True
+
+        # Step-level changes: only process if field affects preview
+        if len(parts) == 1:
+            return False
+
+        param_path = parts[1]
+        top_level = param_path.split('.', 1)[0]
+        if top_level in self.STEP_PREVIEW_FIELDS:
+            return True
+
+        if top_level == 'processing_config':
+            nested = param_path.split('.', 2)
+            if len(nested) >= 2 and nested[1] in {'group_by', 'variable_components', 'input_source'}:
+                return True
+
+        return False
+
+    def _extract_scope_id_for_preview(self, editing_object: object, context_object: object) -> Optional[str]:
+        from openhcs.core.steps.function_step import FunctionStep
+        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
+
+        # Step-level changes: return step-specific scope
+        if isinstance(editing_object, FunctionStep):
+            token = getattr(editing_object, self.STEP_SCOPE_ATTR, None)
+            if token:
+                plate_scope = self.current_plate or "no_plate"
+                return f"{plate_scope}::{token}"
+
+        # Pipeline config changes: return plate scope (affects all steps in this plate)
+        elif isinstance(editing_object, PipelineConfig):
+            # Return special marker to indicate "all steps in this plate"
+            return "PIPELINE_CONFIG_CHANGE"
+
+        # Global config changes: return special marker to indicate "all steps everywhere"
+        elif isinstance(editing_object, GlobalPipelineConfig):
+            return "GLOBAL_CONFIG_CHANGE"
+
+        return None
+
+    def _process_pending_preview_updates(self) -> None:
+        if not self._pending_preview_keys:
+            return
+
+        if not self.current_plate:
+            self._pending_preview_keys.clear()
+            return
+
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+        indices = sorted(
+            idx for idx in self._pending_preview_keys if isinstance(idx, int)
+        )
+        self._pending_preview_keys.clear()
+        self._refresh_step_items_by_index(indices, live_context_snapshot)
+
+    def _handle_full_preview_refresh(self) -> None:
+        self.update_step_list()
+
+    def _refresh_step_items_by_index(self, indices: Iterable[int], live_context_snapshot=None) -> None:
+        if not indices:
+            return
+
+        if live_context_snapshot is None:
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+            if not self.current_plate:
+                return
+            live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+
+        logger.info(f"🔍 _refresh_step_items_by_index: indices={list(indices)}, token={live_context_snapshot.token}")
+        logger.info(f"🔍 Live context types: {list(live_context_snapshot.values.keys())}")
+
+        for step_index in sorted(set(indices)):
+            if step_index < 0 or step_index >= len(self.pipeline_steps):
+                continue
+            item = self.step_list.item(step_index)
+            if item is None:
+                continue
+            step = self.pipeline_steps[step_index]
+            old_text = item.text()
+            display_text, _ = self.format_item_for_display(step, live_context_snapshot)
+            logger.info(f"🔍 Step {step_index}: old='{old_text}' new='{display_text}' changed={old_text != display_text}")
+            if item.text() != display_text:
+                item.setText(display_text)
+            item.setData(Qt.ItemDataRole.UserRole, step_index)
+            item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
+            item.setToolTip(self._create_step_tooltip(step))
 
     def _on_cross_window_context_changed(self, field_path: str, new_value: object,
                                          editing_object: object, context_object: object):
@@ -1144,45 +1261,69 @@ class PipelineEditorWidget(QWidget):
 
         Reacts to any config change that could affect resolved values through the context hierarchy.
         """
-        self.update_step_list()
-
-    def _on_cross_window_context_refreshed(self, editing_object: object, context_object: object):
-        """Handle cascading placeholder refreshes from upstream windows.
-
-        Reacts to any context refresh that could affect resolved values.
-        """
-        self.update_step_list()
+        logger.info(f"🔔 Pipeline editor received cross-window change: field_path={field_path}, editing_object={type(editing_object).__name__}")
+        self.handle_cross_window_preview_change(field_path, new_value, editing_object, context_object)
     
     # ========== UI Helper Methods ==========
     
     def update_step_list(self):
         """Update the step list widget using selection preservation mixin."""
-        # If no orchestrator, show placeholder
-        orchestrator = self._get_current_orchestrator()
-        if not orchestrator:
-            self.step_list.clear()
-            placeholder_item = QListWidgetItem("No plate selected - select a plate to view pipeline")
-            placeholder_item.setData(Qt.ItemDataRole.UserRole, None)
-            self.step_list.addItem(placeholder_item)
-            self.update_button_states()
-            return
+        with timer("Pipeline editor: update_step_list()", threshold_ms=1.0):
+            logger.info("🔄 Pipeline editor: update_step_list() called")
 
-        def format_step_item(step, step_index):
-            """Format step item for display."""
-            display_text, step_name = self.format_item_for_display(step)
-            return display_text, step_index  # Store index instead of step object
+            # If no orchestrator, show placeholder
+            orchestrator = self._get_current_orchestrator()
+            if not orchestrator:
+                self.step_list.clear()
+                placeholder_item = QListWidgetItem("No plate selected - select a plate to view pipeline")
+                placeholder_item.setData(Qt.ItemDataRole.UserRole, None)
+                self.step_list.addItem(placeholder_item)
+                self.set_preview_scope_mapping({})
+                self.update_button_states()
+                return
+
+            self._normalize_step_scope_tokens()
+
+            # OPTIMIZATION: Collect live context ONCE for all steps (instead of 20+ times)
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            with timer("  collect_live_context", threshold_ms=1.0):
+                live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+            logger.info(f"🔄 Pipeline editor: collected live context (token={live_context_snapshot.token})")
+
+            self.set_preview_scope_mapping(self._build_scope_index_map())
 
         def update_func():
-            """Update function that clears and rebuilds the list."""
-            self.step_list.clear()
+            """Update function that updates existing items or rebuilds if structure changed."""
+            # OPTIMIZATION: If list structure hasn't changed, just update text in place
+            # This avoids expensive widget destruction/creation
+            current_count = self.step_list.count()
+            expected_count = len(self.pipeline_steps)
 
-            for step_index, step in enumerate(self.pipeline_steps):
-                display_text, index_data = format_step_item(step, step_index)
-                item = QListWidgetItem(display_text)
-                item.setData(Qt.ItemDataRole.UserRole, index_data)  # Store index, not step
-                item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)  # Store disabled status for strikethrough
-                item.setToolTip(self._create_step_tooltip(step))
-                self.step_list.addItem(item)
+            if current_count == expected_count and current_count > 0:
+                # Structure unchanged - just update text on existing items
+                for step_index, step in enumerate(self.pipeline_steps):
+                    item = self.step_list.item(step_index)
+                    if item is None:
+                        continue
+                    display_text, _ = self.format_item_for_display(step, live_context_snapshot)
+
+                    if item.text() != display_text:
+                        item.setText(display_text)
+
+                    item.setData(Qt.ItemDataRole.UserRole, step_index)
+                    item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
+                    item.setToolTip(self._create_step_tooltip(step))
+            else:
+                # Structure changed - rebuild entire list
+                self.step_list.clear()
+
+                for step_index, step in enumerate(self.pipeline_steps):
+                    display_text, _ = self.format_item_for_display(step, live_context_snapshot)
+                    item = QListWidgetItem(display_text)
+                    item.setData(Qt.ItemDataRole.UserRole, step_index)
+                    item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
+                    item.setToolTip(self._create_step_tooltip(step))
+                    self.step_list.addItem(item)
 
         # Use utility to preserve selection during update
         preserve_selection_during_update(
@@ -1279,9 +1420,13 @@ class PipelineEditorWidget(QWidget):
 
         # Update pipeline steps
         self.pipeline_steps = current_steps
+        self._normalize_step_scope_tokens()
 
         # Emit pipeline changed signal to notify other components
         self.pipeline_changed.emit(self.pipeline_steps)
+
+        # Refresh UI to update scope mapping and preview labels
+        self.update_step_list()
 
         # Update status message
         step_name = getattr(step, 'name', 'Unknown Step')
@@ -1390,5 +1535,3 @@ class PipelineEditorWidget(QWidget):
 
         # Call parent closeEvent
         super().closeEvent(event)
-
-
