@@ -131,9 +131,14 @@ class LiveContextResolver:
     def _merge_live_values(self, base_obj: object, live_values: Optional[Dict[str, Any]]) -> object:
         """Merge live values into base object.
 
-        CRITICAL: Filters out None values before merging. None in live context means
-        "don't override, let MRO resolve it", not "override with None".
-        This allows reset fields to properly inherit from parent context via MRO.
+        CRITICAL: Passes None values through to dataclasses.replace(). When a field is reset
+        to None in a form, the None value should override the saved concrete value in the
+        base object. This allows the lazy resolution system to walk up the MRO to find the
+        inherited value from parent context.
+
+        Example: PipelineConfig form resets well_filter_config.enabled to None
+        → dataclasses.replace(saved_pipeline_config, well_filter_config=LazyWellFilterConfig(enabled=None))
+        → When resolving enabled, the None triggers MRO walk to GlobalPipelineConfig
         """
         if live_values is None or not is_dataclass(base_obj):
             return base_obj
@@ -141,17 +146,9 @@ class LiveContextResolver:
         # Reconstruct nested dataclasses recursively
         reconstructed_values = self.reconstruct_live_values(live_values)
 
-        # CRITICAL: Filter out None values - they should not override base values
-        # None means "inherit from parent context via MRO", not "set to None"
-        filtered_values = {
-            field_name: field_value
-            for field_name, field_value in reconstructed_values.items()
-            if field_value is not None
-        }
-
-        # Merge into base object (only non-None values)
-        if filtered_values:
-            return dataclass_replace(base_obj, **filtered_values)  # type: ignore[arg-type]
+        # Merge into base object (including None values to override saved concrete values)
+        if reconstructed_values:
+            return dataclass_replace(base_obj, **reconstructed_values)  # type: ignore[arg-type]
         else:
             return base_obj
 

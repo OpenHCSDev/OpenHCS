@@ -148,7 +148,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         'step_materialization_config': 'MAT',
         'napari_streaming_config': 'NAP',
         'fiji_streaming_config': 'FIJI',
-        'step_well_filter_config': 'FILT',
+        # REMOVED: 'step_well_filter_config': 'FILT' - redundant since filtering is shown in active configs
     }
 
     STEP_SCOPE_ATTR = "_pipeline_scope_token"
@@ -158,7 +158,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         'group_by',
         'processing_config',
         'step_materialization_config',
-        'step_well_filter_config',
+        'step_well_filter_config',  # Still track for preview updates, just don't show FILT label
         'napari_streaming_config',
         'fiji_streaming_config',
     }

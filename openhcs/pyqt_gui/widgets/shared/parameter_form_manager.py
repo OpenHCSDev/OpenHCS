@@ -263,8 +263,12 @@ class ParameterFormManager(QWidget):
     INITIAL_SYNC_WIDGETS = 10  # Number of widgets to create synchronously for fast initial render
     ASYNC_PLACEHOLDER_REFRESH = True  # Resolve placeholders off the UI thread when possible
     _placeholder_thread_pool = QThreadPool.globalInstance()
-    PARAMETER_CHANGE_DEBOUNCE_MS = 0
-    CROSS_WINDOW_REFRESH_DELAY_MS = 0
+
+    # Trailing debounce delays (ms) - timer restarts on each change, only executes after changes stop
+    # This prevents expensive placeholder refreshes on every keystroke during rapid typing
+    PARAMETER_CHANGE_DEBOUNCE_MS = 100  # Debounce for same-window placeholder refreshes
+    CROSS_WINDOW_REFRESH_DELAY_MS = 100  # Debounce for cross-window placeholder refreshes
+
     _live_context_token_counter = 0
 
     # Class-level token cache for live context collection
@@ -1698,6 +1702,48 @@ class ParameterFormManager(QWidget):
             # Reset changes values, so other windows need to know their cached context is stale
             type(self)._live_context_token_counter += 1
 
+            # CRITICAL: Emit cross-window signals for all reset fields
+            # The _block_cross_window_updates flag blocked normal parameter_changed handlers,
+            # so we must emit manually for each field that was reset
+            # This ensures external listeners (like PipelineEditor) see the reset changes
+            if self._parent_manager is None:
+                # Root manager: emit directly for each field
+                for param_name in param_names:
+                    reset_value = self.parameters.get(param_name)
+                    field_path = f"{self.field_id}.{param_name}"
+                    self.context_value_changed.emit(field_path, reset_value,
+                                                   self.object_instance, self.context_obj)
+            else:
+                # Nested manager: build full path and emit from root for each field
+                root = self._parent_manager
+                while root._parent_manager is not None:
+                    root = root._parent_manager
+
+                for param_name in param_names:
+                    reset_value = self.parameters.get(param_name)
+
+                    # Build full field path by walking up the parent chain
+                    path_parts = [param_name]
+                    current = self
+                    while current._parent_manager is not None:
+                        # Find this manager's parameter name in the parent's nested_managers dict
+                        parent_param_name = None
+                        for pname, manager in current._parent_manager.nested_managers.items():
+                            if manager is current:
+                                parent_param_name = pname
+                                break
+                        if parent_param_name:
+                            path_parts.insert(0, parent_param_name)
+                        current = current._parent_manager
+
+                    # Prepend root field_id
+                    path_parts.insert(0, root.field_id)
+                    field_path = '.'.join(path_parts)
+
+                    # Emit from root with root's object instance
+                    root.context_value_changed.emit(field_path, reset_value,
+                                                   root.object_instance, root.context_obj)
+
             # OPTIMIZATION: Single placeholder refresh at the end instead of per-parameter
             # This is much faster than refreshing after each reset
             # CRITICAL: Use _refresh_with_live_context() to collect live values from other open windows
@@ -1790,6 +1836,42 @@ class ParameterFormManager(QWidget):
             # CRITICAL: Increment global token after reset to invalidate caches
             # Reset changes values, so other windows need to know their cached context is stale
             type(self)._live_context_token_counter += 1
+
+            # CRITICAL: Emit cross-window signal for reset
+            # The _in_reset flag blocks normal parameter_changed handlers, so we must emit manually
+            reset_value = self.parameters.get(param_name)
+            if self._parent_manager is None:
+                # Root manager: emit directly
+                field_path = f"{self.field_id}.{param_name}"
+                self.context_value_changed.emit(field_path, reset_value,
+                                               self.object_instance, self.context_obj)
+            else:
+                # Nested manager: build full path and emit from root
+                root = self._parent_manager
+                while root._parent_manager is not None:
+                    root = root._parent_manager
+
+                # Build full field path by walking up the parent chain
+                path_parts = [param_name]
+                current = self
+                while current._parent_manager is not None:
+                    # Find this manager's parameter name in the parent's nested_managers dict
+                    parent_param_name = None
+                    for pname, manager in current._parent_manager.nested_managers.items():
+                        if manager is current:
+                            parent_param_name = pname
+                            break
+                    if parent_param_name:
+                        path_parts.insert(0, parent_param_name)
+                    current = current._parent_manager
+
+                # Prepend root field_id
+                path_parts.insert(0, root.field_id)
+                field_path = '.'.join(path_parts)
+
+                # Emit from root with root's object instance
+                root.context_value_changed.emit(field_path, reset_value,
+                                               root.object_instance, root.context_obj)
 
             # CRITICAL: Manually refresh placeholders BEFORE clearing _in_reset
             # This ensures queued parameter_changed signals don't trigger automatic refresh
@@ -3257,8 +3339,10 @@ class ParameterFormManager(QWidget):
         field_path = '.'.join(path_parts)
 
         # ALWAYS emit cross-window signal for real-time updates
+        # CRITICAL: Use root.object_instance (e.g., PipelineConfig), not self.object_instance (e.g., LazyStepWellFilterConfig)
+        # This ensures type-based filtering works correctly - other windows check if they inherit from PipelineConfig
         root.context_value_changed.emit(field_path, value,
-                                       self.object_instance, self.context_obj)
+                                       root.object_instance, root.context_obj)
 
         # For 'enabled' changes: skip placeholder refresh to avoid infinite loops
         if param_name == 'enabled':
