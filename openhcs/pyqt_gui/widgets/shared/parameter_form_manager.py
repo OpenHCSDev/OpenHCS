@@ -7,7 +7,7 @@ by leveraging the comprehensive shared infrastructure we've built.
 
 import dataclasses
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, Type, Optional, Tuple
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton,
@@ -206,6 +206,7 @@ class _PlaceholderRefreshTask(QRunnable):
 class LiveContextSnapshot:
     token: int
     values: Dict[type, Dict[str, Any]]
+    scoped_values: Dict[str, Dict[type, Dict[str, Any]]] = field(default_factory=dict)
 
 
 class ParameterFormManager(QWidget):
@@ -263,8 +264,11 @@ class ParameterFormManager(QWidget):
     ASYNC_PLACEHOLDER_REFRESH = True  # Resolve placeholders off the UI thread when possible
     _placeholder_thread_pool = QThreadPool.globalInstance()
     PARAMETER_CHANGE_DEBOUNCE_MS = 0
-    CROSS_WINDOW_REFRESH_DELAY_MS = 60
+    CROSS_WINDOW_REFRESH_DELAY_MS = 0
     _live_context_token_counter = 0
+
+    # Class-level token cache for live context collection
+    _live_context_cache: Optional['TokenCache'] = None  # Initialized on first use
 
     @classmethod
     def should_use_async(cls, param_count: int) -> bool:
@@ -279,6 +283,104 @@ class ParameterFormManager(QWidget):
         return cls.ASYNC_WIDGET_CREATION and param_count > cls.ASYNC_THRESHOLD
 
     @classmethod
+    def collect_live_context(cls, scope_filter: Optional[str] = None) -> LiveContextSnapshot:
+        """
+        Collect live context from all active form managers in scope.
+
+        This is a class method that can be called from anywhere (e.g., PipelineEditor)
+        to get the current live context for resolution.
+
+        PERFORMANCE: Caches the snapshot and only invalidates when token changes.
+        The token is incremented whenever any form value changes.
+
+        Args:
+            scope_filter: Optional scope filter (e.g., 'plate_path' or 'x::y::z')
+                         If None, collects from all scopes
+
+        Returns:
+            LiveContextSnapshot with token and values dict
+        """
+        # Initialize cache on first use
+        if cls._live_context_cache is None:
+            from openhcs.config_framework import TokenCache, CacheKey
+            cls._live_context_cache = TokenCache(lambda: cls._live_context_token_counter)
+
+        from openhcs.config_framework import CacheKey
+        cache_key = CacheKey.from_args(scope_filter)
+
+        def compute_live_context() -> LiveContextSnapshot:
+            """Compute live context from all active form managers."""
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"❌ collect_live_context: CACHE MISS (token={cls._live_context_token_counter}, scope={scope_filter})")
+
+            from openhcs.config_framework.lazy_factory import get_base_type_for_lazy
+            from openhcs.core.lazy_placeholder_simplified import LazyDefaultPlaceholderService
+
+            live_context = {}
+            scoped_live_context: Dict[str, Dict[type, Dict[str, Any]]] = {}
+            alias_context = {}
+
+            for manager in cls._active_form_managers:
+                # Apply scope filter if provided
+                if scope_filter is not None and manager.scope_id is not None:
+                    if not cls._is_scope_visible_static(manager.scope_id, scope_filter):
+                        continue
+
+                # Collect values
+                live_values = manager.get_user_modified_values()
+                obj_type = type(manager.object_instance)
+
+                # Map by the actual type
+                live_context[obj_type] = live_values
+
+                # Track scope-specific mappings (for step-level overlays)
+                if manager.scope_id:
+                    scoped_live_context.setdefault(manager.scope_id, {})[obj_type] = live_values
+
+                # Also map by the base/lazy equivalent type for flexible matching
+                base_type = get_base_type_for_lazy(obj_type)
+                if base_type and base_type != obj_type:
+                    alias_context.setdefault(base_type, live_values)
+
+                lazy_type = LazyDefaultPlaceholderService._get_lazy_type_for_base(obj_type)
+                if lazy_type and lazy_type != obj_type:
+                    alias_context.setdefault(lazy_type, live_values)
+
+            # Apply alias mappings only where no direct mapping exists
+            for alias_type, values in alias_context.items():
+                if alias_type not in live_context:
+                    live_context[alias_type] = values
+
+            # Create snapshot with current token (don't increment - that happens on value change)
+            token = cls._live_context_token_counter
+            return LiveContextSnapshot(token=token, values=live_context, scoped_values=scoped_live_context)
+
+        # Use token cache to get or compute
+        snapshot = cls._live_context_cache.get_or_compute(cache_key, compute_live_context)
+
+        import logging
+        logger = logging.getLogger(__name__)
+        if snapshot.token == cls._live_context_token_counter:
+            logger.debug(f"✅ collect_live_context: CACHE HIT (token={cls._live_context_token_counter}, scope={scope_filter})")
+
+        return snapshot
+
+    @staticmethod
+    def _is_scope_visible_static(manager_scope: str, filter_scope: str) -> bool:
+        """
+        Static version of _is_scope_visible for class method use.
+
+        Check if scopes match (prefix matching for hierarchical scopes).
+        Supports generic hierarchical scope strings like 'x::y::z'.
+        """
+        return (
+            manager_scope == filter_scope or
+            manager_scope.startswith(f"{filter_scope}::") or
+            filter_scope.startswith(f"{manager_scope}::")
+        )
+
+    @classmethod
     def register_external_listener(cls, listener: object,
                                    value_changed_handler,
                                    refresh_handler):
@@ -289,16 +391,18 @@ class ParameterFormManager(QWidget):
 
         Args:
             listener: The listener object (for identification)
-            value_changed_handler: Handler for context_value_changed signal
-            refresh_handler: Handler for context_refreshed signal
+            value_changed_handler: Handler for context_value_changed signal (required)
+            refresh_handler: Handler for context_refreshed signal (optional, can be None)
         """
         # Add to registry
         cls._external_listeners.append((listener, value_changed_handler, refresh_handler))
 
         # Connect all existing managers to this listener
         for manager in cls._active_form_managers:
-            manager.context_value_changed.connect(value_changed_handler)
-            manager.context_refreshed.connect(refresh_handler)
+            if value_changed_handler:
+                manager.context_value_changed.connect(value_changed_handler)
+            if refresh_handler:
+                manager.context_refreshed.connect(refresh_handler)
 
         logger.debug(f"Registered external listener: {listener.__class__.__name__}")
 
@@ -344,12 +448,13 @@ class ParameterFormManager(QWidget):
         # and there are no managers left to emit signals
         logger.debug(f"Notifying {len(cls._external_listeners)} external listeners")
         for listener, value_changed_handler, refresh_handler in cls._external_listeners:
-            try:
-                # Call refresh handler with None for both editing_object and context_object
-                # since this is a global refresh not tied to a specific object
-                refresh_handler(None, None)
-            except Exception as e:
-                logger.warning(f"Failed to notify external listener {listener.__class__.__name__}: {e}")
+            if refresh_handler:  # Skip if None
+                try:
+                    # Call refresh handler with None for both editing_object and context_object
+                    # since this is a global refresh not tied to a specific object
+                    refresh_handler(None, None)
+                except Exception as e:
+                    logger.warning(f"Failed to notify external listener {listener.__class__.__name__}: {e}")
 
     def _notify_external_listeners_refreshed(self):
         """Notify external listeners that context has been refreshed.
@@ -359,11 +464,12 @@ class ParameterFormManager(QWidget):
         """
         logger.info(f"🔍 _notify_external_listeners_refreshed called from {self.field_id}, notifying {len(self._external_listeners)} listeners")
         for listener, value_changed_handler, refresh_handler in self._external_listeners:
-            try:
-                logger.info(f"🔍   Calling refresh_handler for {listener.__class__.__name__}")
-                refresh_handler(self.object_instance, self.context_obj)
-            except Exception as e:
-                logger.warning(f"Failed to notify external listener {listener.__class__.__name__}: {e}")
+            if refresh_handler:  # Skip if None
+                try:
+                    logger.info(f"🔍   Calling refresh_handler for {listener.__class__.__name__}")
+                    refresh_handler(self.object_instance, self.context_obj)
+                except Exception as e:
+                    logger.warning(f"Failed to notify external listener {listener.__class__.__name__}: {e}")
 
     def __init__(self, object_instance: Any, field_id: str, parent=None, context_obj=None, exclude_params: Optional[list] = None, initial_values: Optional[Dict[str, Any]] = None, parent_manager=None, read_only: bool = False, scope_id: Optional[str] = None, color_scheme=None):
         """
@@ -421,6 +527,14 @@ class ParameterFormManager(QWidget):
             self._cached_global_context_token = None
             self._cached_global_context_instance = None
             self._cached_parent_contexts: Dict[int, Tuple[int, Any]] = {}
+
+            # Placeholder text cache (token-based invalidation)
+            from openhcs.config_framework import TokenCache, CacheKey, SingleValueTokenCache
+            self._placeholder_text_cache = TokenCache(lambda: type(self)._live_context_token_counter)
+
+            # Cache for entire _refresh_all_placeholders operation
+            # Key: (exclude_param, live_context_token) -> prevents redundant refreshes
+            self._placeholder_refresh_cache = TokenCache(lambda: type(self)._live_context_token_counter)
 
             # Initialize service layer first (needed for parameter extraction)
             with timer("  Service initialization", threshold_ms=1.0):
@@ -484,6 +598,7 @@ class ParameterFormManager(QWidget):
             self.widgets = {}
             self.reset_buttons = {}  # Track reset buttons for API compatibility
             self.nested_managers = {}
+            self._last_emitted_values: Dict[str, Any] = {}
             self.reset_fields = set()  # Track fields that have been explicitly reset to show inheritance
 
             # Track which fields have been explicitly set by users
@@ -564,8 +679,10 @@ class ParameterFormManager(QWidget):
 
                 # Connect this instance to all external listeners
                 for listener, value_changed_handler, refresh_handler in self._external_listeners:
-                    self.context_value_changed.connect(value_changed_handler)
-                    self.context_refreshed.connect(refresh_handler)
+                    if value_changed_handler:
+                        self.context_value_changed.connect(value_changed_handler)
+                    if refresh_handler:
+                        self.context_refreshed.connect(refresh_handler)
 
                 # Add this instance to the registry
                 self._active_form_managers.append(self)
@@ -2676,43 +2793,68 @@ class ParameterFormManager(QWidget):
             live_context: Optional dict mapping object instances to their live values from other open windows
             exclude_param: Optional parameter name to exclude from refresh (e.g., the param that just changed)
         """
-        with timer(f"_refresh_all_placeholders ({self.field_id})", threshold_ms=5.0):
-            # Allow placeholder refresh for nested forms even if they're not detected as lazy dataclasses
-            # The placeholder service will determine if placeholders are available
-            if not self.dataclass_type:
-                return
+        # Extract token from live_context for cache key
+        token, _ = self._unwrap_live_context(live_context)
 
-            # CRITICAL FIX: Use self.parameters instead of get_current_values() for overlay
-            # get_current_values() reads widget values, but widgets don't have placeholder state set yet
-            # during initial refresh, so it reads displayed values instead of None
-            # self.parameters has the correct None values from initialization
-            overlay = self.parameters
+        # Use cache to skip redundant refreshes with same token and exclude_param
+        from openhcs.config_framework import CacheKey
+        cache_key = CacheKey.from_args(exclude_param, token)
 
-            # Build context stack: parent context + overlay (with live context from other windows)
-            candidate_names = set(self._placeholder_candidates)
-            if exclude_param:
-                candidate_names.discard(exclude_param)
-            if not candidate_names:
-                return
+        def perform_refresh():
+            """Actually perform the placeholder refresh."""
+            with timer(f"_refresh_all_placeholders ({self.field_id})", threshold_ms=5.0):
+                # Allow placeholder refresh for nested forms even if they're not detected as lazy dataclasses
+                # The placeholder service will determine if placeholders are available
+                if not self.dataclass_type:
+                    return
 
-            token, live_context_values = self._unwrap_live_context(live_context)
-            with self._build_context_stack(overlay, live_context=live_context_values, live_context_token=token):
-                monitor = get_monitor("Placeholder resolution per field")
-                for param_name in candidate_names:
-                    widget = self.widgets.get(param_name)
-                    if not widget:
-                        continue
+                # CRITICAL FIX: Use self.parameters instead of get_current_values() for overlay
+                # get_current_values() reads widget values, but widgets don't have placeholder state set yet
+                # during initial refresh, so it reads displayed values instead of None
+                # self.parameters has the correct None values from initialization
+                overlay = self.parameters
 
-                    widget_in_placeholder_state = widget.property("is_placeholder_state")
-                    current_value = self.parameters.get(param_name)
-                    if current_value is not None and not widget_in_placeholder_state:
-                        continue
+                # Build context stack: parent context + overlay (with live context from other windows)
+                candidate_names = set(self._placeholder_candidates)
+                if exclude_param:
+                    candidate_names.discard(exclude_param)
+                if not candidate_names:
+                    return
 
-                    with monitor.measure():
-                        placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
-                        if placeholder_text:
-                            from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-                            PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+                token_inner, live_context_values = self._unwrap_live_context(live_context)
+                with self._build_context_stack(overlay, live_context=live_context_values, live_context_token=token_inner):
+                    monitor = get_monitor("Placeholder resolution per field")
+
+                    for param_name in candidate_names:
+                        widget = self.widgets.get(param_name)
+                        if not widget:
+                            continue
+
+                        widget_in_placeholder_state = widget.property("is_placeholder_state")
+                        current_value = self.parameters.get(param_name)
+                        if current_value is not None and not widget_in_placeholder_state:
+                            continue
+
+                        with monitor.measure():
+                            # Use token cache for placeholder text resolution
+                            text_cache_key = CacheKey.from_args(param_name)
+
+                            def compute_placeholder(pname=param_name):
+                                """Compute placeholder text for this parameter."""
+                                return self.service.get_placeholder_text(pname, self.dataclass_type)
+
+                            placeholder_text = self._placeholder_text_cache.get_or_compute(
+                                text_cache_key,
+                                compute_placeholder
+                            )
+                            if placeholder_text:
+                                from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
+                                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+
+            return True  # Return sentinel value to indicate refresh was performed
+
+        # Use cache - if same token and exclude_param, skip the entire refresh
+        self._placeholder_refresh_cache.get_or_compute(cache_key, perform_refresh)
 
     def _perform_placeholder_refresh_sync(self, live_context: Any, exclude_param: Optional[str]) -> None:
         """Run placeholder refresh synchronously on the UI thread."""
@@ -3078,6 +3220,21 @@ class ParameterFormManager(QWidget):
         if getattr(self, '_block_cross_window_updates', False):
             return
 
+        if param_name in self._last_emitted_values:
+            last_value = self._last_emitted_values[param_name]
+            try:
+                if last_value == value:
+                    return
+            except Exception:
+                # If equality check fails, fall back to emitting
+                pass
+
+        self._last_emitted_values[param_name] = value
+
+        # Invalidate live context cache by incrementing token
+        type(self)._live_context_token_counter += 1
+        logger.info(f"🔢 Token incremented to {type(self)._live_context_token_counter} by {self.field_id}.{param_name}")
+
         field_path = f"{self.field_id}.{param_name}"
         self.context_value_changed.emit(field_path, value,
                                        self.object_instance, self.context_obj)
@@ -3109,11 +3266,32 @@ class ParameterFormManager(QWidget):
                 # Remove from registry
                 self._active_form_managers.remove(self)
 
+                # Invalidate live context caches so external listeners drop stale data
+                type(self)._live_context_token_counter += 1
+                logger.info(f"🔢 Token incremented to {type(self)._live_context_token_counter} by window close ({self.field_id})")
+
                 # CRITICAL: Trigger refresh in all remaining windows
                 # They were using this window's live values, now they need to revert to saved values
                 for manager in self._active_form_managers:
                     # Refresh immediately (not deferred) since we're in a controlled close event
                     manager._refresh_with_live_context()
+
+                # CRITICAL: Also notify external listeners (like pipeline editor)
+                # They need to refresh their previews to drop this window's live values
+                # Use special field_path to indicate window closed (triggers full refresh)
+                logger.info(f"🔍 Notifying external listeners of window close: {self.field_id}")
+                for listener, value_changed_handler, refresh_handler in self._external_listeners:
+                    if value_changed_handler:
+                        try:
+                            logger.info(f"🔍   Calling value_changed_handler for {listener.__class__.__name__}")
+                            value_changed_handler(
+                                f"{self.field_id}.__WINDOW_CLOSED__",  # Special marker
+                                None,
+                                self.object_instance,
+                                self.context_obj
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to notify external listener {listener.__class__.__name__}: {e}")
         except (ValueError, AttributeError):
             pass  # Already removed or list doesn't exist
 

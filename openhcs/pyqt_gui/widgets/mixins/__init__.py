@@ -9,9 +9,13 @@ from openhcs.pyqt_gui.widgets.mixins.selection_preservation_mixin import (
     restore_selection_by_id,
     handle_selection_change_with_prevention
 )
+from openhcs.pyqt_gui.widgets.mixins.cross_window_preview_mixin import (
+    CrossWindowPreviewMixin,
+)
 
 __all__ = [
     "preserve_selection_during_update",
     "restore_selection_by_id",
     "handle_selection_change_with_prevention",
+    "CrossWindowPreviewMixin",
 ]
