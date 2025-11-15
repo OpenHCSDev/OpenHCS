@@ -27,29 +27,201 @@ The cross-window preview system uses three components:
 
 **CrossWindowPreviewMixin**
 
-Reusable mixin for widgets that consume cross-window updates:
+Reusable mixin for widgets that consume cross-window updates. The mixin provides:
+
+1. Scope-based routing for targeted updates
+2. Debounced preview updates (100ms trailing debounce)
+3. Incremental updates (only affected items refresh)
+4. **Configurable preview fields** (per-widget control over which fields show previews)
 
 .. code-block:: python
 
    from openhcs.pyqt_gui.widgets.mixins import CrossWindowPreviewMixin
-   
+
    class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
        def __init__(self):
            super().__init__()
            self._init_cross_window_preview_mixin()
-           
+
+           # Configure which fields to show in previews
+           self.enable_preview_for_field(
+               'napari_streaming_config.enabled',
+               lambda v: 'N:✓' if v else 'N:✗'
+           )
+           self.enable_preview_for_field(
+               'fiji_streaming_config.enabled',
+               lambda v: 'F:✓' if v else 'F:✗'
+           )
+           self.enable_preview_for_field(
+               'roi_streaming_config.enabled',
+               lambda v: 'R:✓' if v else 'R:✗'
+           )
+
            # Register as external listener
+           # NOTE: CrossWindowPreviewMixin automatically registers with both handlers
+           # value_changed_handler: Incremental updates when fields change
+           # refresh_handler: Full refresh when reset buttons are clicked
            ParameterFormManager.register_external_listener(
                self,
                value_changed_handler=self._on_cross_window_context_changed,
-               refresh_handler=None  # Optional
+               refresh_handler=None  # Optional (mixin provides default)
            )
-       
-       def _on_cross_window_context_changed(self, field_path, new_value, 
+
+       def _on_cross_window_context_changed(self, field_path, new_value,
                                            editing_object, context_object):
            self.handle_cross_window_preview_change(
                field_path, new_value, editing_object, context_object
            )
+
+**Configurable Preview Fields**
+
+The mixin provides methods to control which configuration fields are shown in preview labels:
+
+.. code-block:: python
+
+   # Enable preview for a field with custom formatter
+   self.enable_preview_for_field(
+       'global_config.num_workers',
+       lambda v: f'Workers: {v}'
+   )
+
+   # Enable preview with default str() formatter
+   self.enable_preview_for_field('pipeline_config.well_filter')
+
+   # Disable preview for a field
+   self.disable_preview_for_field('global_config.num_workers')
+
+   # Check if preview is enabled
+   if self.is_preview_enabled('napari_streaming_config.enabled'):
+       # ...
+
+   # Format a value using registered formatter
+   formatted = self.format_preview_value('napari_streaming_config.enabled', True)
+   # Returns: 'N:✓'
+
+   # Get all enabled preview fields
+   enabled_fields = self.get_enabled_preview_fields()
+   # Returns: {'napari_streaming_config.enabled', 'fiji_streaming_config.enabled', ...}
+
+**Centralized Config Formatters**
+
+For consistency across widgets, use the centralized formatters in ``config_preview_formatters.py``:
+
+.. code-block:: python
+
+   from openhcs.pyqt_gui.widgets.config_preview_formatters import (
+       CONFIG_INDICATORS,
+       format_config_indicator
+   )
+
+   # Use centralized indicators (single source of truth)
+   # CONFIG_INDICATORS = {
+   #     'step_materialization_config': 'MAT',
+   #     'napari_streaming_config': 'NAP',
+   #     'fiji_streaming_config': 'FIJI',
+   # }
+
+   # Format config using centralized formatter
+   indicator = format_config_indicator('napari_streaming_config', config, resolve_attr)
+   # Returns: 'NAP' (if enabled) or None (if disabled)
+
+   # Both PipelineEditor and PlateManager use these formatters
+   # to ensure consistent preview labels (e.g., 'NAP', 'FIJI', 'MAT')
+
+**Enabled Field Checking Rule**
+
+**ARCHITECTURAL RULE**: Any config with an ``enabled: bool`` parameter should only display its preview label if the value resolves to ``True``.
+
+This rule is enforced by the centralized formatters:
+
+.. code-block:: python
+
+   def _check_enabled_field(config: Any, resolve_attr: Optional[Callable] = None) -> bool:
+       """Check if a config object is enabled.
+
+       GENERAL RULE: Any config with an 'enabled: bool' parameter should only show
+       if it resolves to True.
+       """
+       import dataclasses
+
+       # Check if config has 'enabled' field
+       has_enabled = dataclasses.is_dataclass(config) and 'enabled' in {f.name for f in dataclasses.fields(config)}
+
+       if has_enabled:
+           # Resolve enabled field if resolver provided
+           if resolve_attr:
+               enabled = resolve_attr(None, config, 'enabled', None)
+           else:
+               enabled = getattr(config, 'enabled', False)
+
+           return bool(enabled)
+
+       # No enabled field - assume enabled
+       return True
+
+**Examples**:
+
+- ``NapariStreamingConfig(enabled=True)`` → Shows ``'NAP'`` label
+- ``NapariStreamingConfig(enabled=False)`` → Shows nothing (returns ``None``)
+- ``FijiStreamingConfig(enabled=True)`` → Shows ``'FIJI'`` label
+- ``StepMaterializationConfig(enabled=False)`` → Shows nothing (returns ``None``)
+
+This ensures that disabled configs don't clutter the UI with misleading preview labels.
+
+**Reset Button Refresh Behavior**
+
+``CrossWindowPreviewMixin`` automatically responds to reset button clicks via the ``refresh_handler``:
+
+.. code-block:: python
+
+   def _init_cross_window_preview_mixin(self):
+       """Initialize cross-window preview mixin."""
+       # ...
+
+       # CRITICAL: Register as external listener for cross-window refresh signals
+       # This makes preview labels reactive to live context changes
+       # Listen to both value changes AND refresh events (e.g., reset button clicks)
+       from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+       ParameterFormManager.register_external_listener(
+           self,
+           value_changed_handler=self.handle_cross_window_preview_change,
+           refresh_handler=self.handle_cross_window_preview_refresh  # Listen to refresh events
+       )
+
+   def handle_cross_window_preview_refresh(
+       self,
+       editing_object: Any,
+       context_object: Any,
+   ) -> None:
+       """Handle cross-window refresh events (e.g., reset button clicks).
+
+       This is called when a ParameterFormManager emits context_refreshed signal,
+       which happens when:
+       - User clicks Reset button (reset_all_parameters or reset_parameter)
+       - User cancels a config editor window (trigger_global_cross_window_refresh)
+
+       Unlike handle_cross_window_preview_change which does incremental updates,
+       this triggers a full refresh since reset can affect multiple fields.
+       """
+       # Extract scope ID and refresh affected items
+       # Same logic as handle_cross_window_preview_change
+
+**When refresh_handler is called**:
+
+1. **Reset All button**: User clicks "Reset All" in a config window → all preview labels refresh
+2. **Reset Field button**: User clicks reset icon next to a field → affected preview labels refresh
+3. **Cancel button**: User cancels a config editor → preview labels revert to saved values
+
+This ensures that preview labels stay synchronized with the actual config state, even when users reset values to defaults.
+
+**Benefits of Configurable Preview Fields**
+
+- **Per-widget customization**: Each widget (PipelineEditor, PlateManager, etc.) can configure its own preview fields
+- **Declarative API**: Simple, readable configuration in ``__init__``
+- **Type-safe formatters**: Custom lambda functions for formatting values
+- **Graceful fallback**: If formatter fails, falls back to ``str()``
+- **Dynamic control**: Enable/disable fields at runtime based on user preferences or context
+- **Single source of truth**: Centralized formatters ensure consistency across widgets
 
 **Scope IDs**
 

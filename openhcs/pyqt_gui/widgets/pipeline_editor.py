@@ -13,11 +13,10 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QListWidget,
-    QListWidgetItem, QLabel, QSplitter, QStyledItemDelegate, QStyle,
-    QStyleOptionViewItem, QApplication
+    QListWidgetItem, QLabel, QSplitter
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QPainter, QColor, QPen, QFontMetrics
+from PyQt6.QtGui import QFont, QColor
 
 from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
 from openhcs.core.config import GlobalPipelineConfig
@@ -32,106 +31,14 @@ from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
 from openhcs.config_framework import LiveContextResolver
+
+# Import shared list widget components (single source of truth)
+from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
+from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate
+
 from openhcs.utils.performance_monitor import timer
 
 logger = logging.getLogger(__name__)
-
-
-class StepListItemDelegate(QStyledItemDelegate):
-    """Custom delegate to render step name in white and preview text in grey without breaking hover/selection/borders."""
-    def __init__(self, name_color: QColor, preview_color: QColor, selected_text_color: QColor, parent=None):
-        super().__init__(parent)
-        self.name_color = name_color
-        self.preview_color = preview_color
-        self.selected_text_color = selected_text_color
-
-    def paint(self, painter: QPainter, option, index) -> None:
-        # Prepare a copy to let style draw backgrounds, hover, selection, borders, etc.
-        opt = QStyleOptionViewItem(option)
-        self.initStyleOption(opt, index)
-
-        # Capture text and prevent default text draw
-        text = opt.text or ""
-        opt.text = ""
-
-        painter.save()
-        # Let the current style paint the item (background, selection, hover, separators)
-        style = opt.widget.style() if opt.widget else QApplication.style()
-        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
-
-        # Check if item is selected
-        is_selected = opt.state & QStyle.StateFlag.State_Selected
-
-        # Check if step is disabled (stored in UserRole+1)
-        is_disabled = index.data(Qt.ItemDataRole.UserRole + 1) or False
-
-        # Now custom-draw the text with mixed colors
-        rect = opt.rect.adjusted(6, 0, -6, 0)
-
-        # Use strikethrough font for disabled steps
-        font = QFont(opt.font)
-        if is_disabled:
-            font.setStrikeOut(True)
-        painter.setFont(font)
-
-        fm = QFontMetrics(font)
-        baseline_y = rect.y() + (rect.height() + fm.ascent() - fm.descent()) // 2
-
-        sep_idx = text.find("  (")
-        if sep_idx != -1 and text.endswith(")"):
-            name_part = text[:sep_idx]
-            preview_part = text[sep_idx:]
-
-            # Use white for both parts when selected, otherwise use normal colors
-            if is_selected:
-                painter.setPen(QPen(self.selected_text_color))
-                painter.drawText(rect.x(), baseline_y, name_part)
-                name_width = fm.horizontalAdvance(name_part)
-                painter.drawText(rect.x() + name_width, baseline_y, preview_part)
-            else:
-                painter.setPen(QPen(self.name_color))
-                painter.drawText(rect.x(), baseline_y, name_part)
-                name_width = fm.horizontalAdvance(name_part)
-
-                painter.setPen(QPen(self.preview_color))
-                painter.drawText(rect.x() + name_width, baseline_y, preview_part)
-        else:
-            painter.setPen(QPen(self.selected_text_color if is_selected else self.name_color))
-            painter.drawText(rect.x(), baseline_y, text)
-
-        painter.restore()
-
-class ReorderableListWidget(QListWidget):
-    """
-    Custom QListWidget that properly handles drag and drop reordering.
-    Emits a signal when items are moved so the parent can update the data model.
-    """
-
-    items_reordered = pyqtSignal(int, int)  # from_index, to_index
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
-
-    def dropEvent(self, event):
-        """Handle drop events and emit reorder signal."""
-        # Get the item being dropped and its original position
-        source_item = self.currentItem()
-        if not source_item:
-            super().dropEvent(event)
-            return
-
-        source_index = self.row(source_item)
-
-        # Let the default drop behavior happen first
-        super().dropEvent(event)
-
-        # Find the new position of the item
-        target_index = self.row(source_item)
-
-        # Only emit signal if position actually changed
-        if source_index != target_index:
-            self.items_reordered.emit(source_index, target_index)
 
 
 class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
@@ -144,12 +51,9 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
     # Config attribute name to display abbreviation mapping
     # Maps step config attribute names to their preview text indicators
-    STEP_CONFIG_INDICATORS = {
-        'step_materialization_config': 'MAT',
-        'napari_streaming_config': 'NAP',
-        'fiji_streaming_config': 'FIJI',
-        # REMOVED: 'step_well_filter_config': 'FILT' - redundant since filtering is shown in active configs
-    }
+    # MOVED TO: openhcs/pyqt_gui/widgets/config_preview_formatters.py (single source of truth)
+    # Imported at runtime to avoid class-level import issues
+    STEP_CONFIG_INDICATORS = None  # Populated in __init__ from CONFIG_INDICATORS
 
     STEP_SCOPE_ATTR = "_pipeline_scope_token"
     STEP_PREVIEW_FIELDS = {
@@ -217,6 +121,10 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         self._init_cross_window_preview_mixin()
 
+        # Import centralized config indicators (single source of truth)
+        from openhcs.pyqt_gui.widgets.config_preview_formatters import CONFIG_INDICATORS
+        self.STEP_CONFIG_INDICATORS = CONFIG_INDICATORS
+
         # Setup UI
         self.setup_ui()
         self.setup_connections()
@@ -279,12 +187,12 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
             }}
         """)
-        # Set custom delegate to render white name and grey preview
+        # Set custom delegate to render white name and grey preview (shared with PlateManager)
         try:
             name_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_primary))
             preview_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_disabled))
             selected_text_color = QColor("#FFFFFF")  # White text when selected
-            self.step_list.setItemDelegate(StepListItemDelegate(name_color, preview_color, selected_text_color, self.step_list))
+            self.step_list.setItemDelegate(MultilinePreviewItemDelegate(name_color, preview_color, selected_text_color, self.step_list))
         except Exception:
             # Fallback silently if color scheme isn't ready
             pass
@@ -365,15 +273,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self.status_message.connect(self.update_status)
         self.pipeline_changed.connect(self.on_pipeline_changed)
 
-        # CRITICAL: Register as external listener for cross-window refresh signals
-        # This makes preview labels reactive to live context changes
-        # Only listen to value changes, not placeholder refreshes (avoid double updates)
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        ParameterFormManager.register_external_listener(
-            self,
-            self._on_cross_window_context_changed,
-            None  # Don't listen to placeholder refreshes - only actual value changes
-        )
+        # Note: ParameterFormManager registration is handled by CrossWindowPreviewMixin._init_cross_window_preview_mixin()
     
     def handle_button_action(self, action: str):
         """
@@ -485,44 +385,23 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Optional configurations preview - use lazy resolution system for enabled fields
         # CRITICAL: Must resolve through context hierarchy (Global -> Pipeline -> Step)
         # to match the same resolution that step editor placeholders use
-        from openhcs.core.config import WellFilterConfig
-        import dataclasses
+        from openhcs.pyqt_gui.widgets.config_preview_formatters import format_config_indicator
 
         config_indicators = []
-        for config_attr, indicator in self.STEP_CONFIG_INDICATORS.items():
+        for config_attr in self.STEP_CONFIG_INDICATORS.keys():
             config = getattr(step_for_display, config_attr, None)
             if config is None:
                 continue
 
-            # Check if config has 'enabled' field via dataclass introspection
-            has_enabled = dataclasses.is_dataclass(config) and 'enabled' in {f.name for f in dataclasses.fields(config)}
+            # Create resolver function that uses live context
+            def resolve_attr(parent_obj, config_obj, attr_name, context):
+                return self._resolve_config_attr(step_for_display, config_obj, attr_name, live_context_snapshot)
 
-            if has_enabled:
-                resolved_enabled = self._resolve_config_attr(step_for_display, config, 'enabled', live_context_snapshot)
-                if not resolved_enabled:
-                    continue
+            # Use centralized formatter (single source of truth)
+            indicator_text = format_config_indicator(config_attr, config, resolve_attr)
 
-            # Build indicator text with well_filter suffix if applicable
-            indicator_text = indicator
-            if isinstance(config, WellFilterConfig):
-                resolved_well_filter = self._resolve_config_attr(step_for_display, config, 'well_filter', live_context_snapshot)
-                if resolved_well_filter is not None:
-                    # Format well_filter for display
-                    if isinstance(resolved_well_filter, list):
-                        wf_display = str(len(resolved_well_filter))
-                    elif isinstance(resolved_well_filter, int):
-                        wf_display = str(resolved_well_filter)
-                    else:
-                        wf_display = str(resolved_well_filter)
-
-                    # Add +/- prefix for INCLUDE/EXCLUDE mode
-                    from openhcs.core.config import WellFilterMode
-                    resolved_mode = self._resolve_config_attr(step_for_display, config, 'well_filter_mode', live_context_snapshot)
-                    mode_prefix = '-' if resolved_mode == WellFilterMode.EXCLUDE else '+'
-
-                    indicator_text = f"{indicator}{mode_prefix}{wf_display}"
-
-            config_indicators.append(indicator_text)
+            if indicator_text:
+                config_indicators.append(indicator_text)
 
         if config_indicators:
             preview_parts.append(f"configs=[{','.join(config_indicators)}]")
@@ -1255,14 +1134,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
             item.setToolTip(self._create_step_tooltip(step))
 
-    def _on_cross_window_context_changed(self, field_path: str, new_value: object,
-                                         editing_object: object, context_object: object):
-        """Handle cross-window context changes to update preview labels.
-
-        Reacts to any config change that could affect resolved values through the context hierarchy.
-        """
-        self.handle_cross_window_preview_change(field_path, new_value, editing_object, context_object)
-    
     # ========== UI Helper Methods ==========
     
     def update_step_list(self):

@@ -12,7 +12,7 @@ import copy
 import sys
 import subprocess
 import tempfile
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Any
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -21,7 +21,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QApplication, QSizePolicy, QScrollArea
 )
 from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
 
 from openhcs.core.config import GlobalPipelineConfig
 from openhcs.core.config import PipelineConfig
@@ -31,53 +31,29 @@ from openhcs.core.pipeline import Pipeline
 from openhcs.constants.constants import VariableComponents
 from openhcs.pyqt_gui.widgets.mixins import (
     preserve_selection_during_update,
-    handle_selection_change_with_prevention
+    handle_selection_change_with_prevention,
+    CrossWindowPreviewMixin
 )
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
+from openhcs.config_framework import LiveContextResolver
+
+# Import shared list widget components (single source of truth)
+from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
+from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate
 
 logger = logging.getLogger(__name__)
 
 
-class ReorderablePlateListWidget(QListWidget):
-    """
-    Custom QListWidget that properly handles drag and drop reordering for plates.
-    Emits a signal when items are moved so the parent can update the data model.
-    """
-
-    items_reordered = pyqtSignal(int, int)  # from_index, to_index
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setDragDropMode(QListWidget.DragDropMode.InternalMove)
-
-    def dropEvent(self, event):
-        """Handle drop events and emit reorder signal."""
-        # Get the item being dropped and its original position
-        source_item = self.currentItem()
-        if not source_item:
-            super().dropEvent(event)
-            return
-
-        source_index = self.row(source_item)
-
-        # Let the default drop behavior happen first
-        super().dropEvent(event)
-
-        # Find the new position of the item
-        target_index = self.row(source_item)
-
-        # Only emit signal if position actually changed
-        if source_index != target_index:
-            self.items_reordered.emit(source_index, target_index)
-
-
-class PlateManagerWidget(QWidget):
+class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
     """
     PyQt6 Plate Manager Widget.
-    
+
     Manages plate selection, initialization, compilation, and execution.
     Preserves all business logic from Textual version with clean PyQt6 UI.
+
+    Uses CrossWindowPreviewMixin for reactive preview labels showing orchestrator
+    config states (num_workers, well_filter, streaming configs, etc.).
     """
     
     # Signals
@@ -123,6 +99,9 @@ class PlateManagerWidget(QWidget):
         """
         super().__init__(parent)
 
+        # Initialize CrossWindowPreviewMixin
+        self._init_cross_window_preview_mixin()
+
         # Core dependencies
         self.file_manager = file_manager
         self.service_adapter = service_adapter
@@ -135,7 +114,13 @@ class PlateManagerWidget(QWidget):
 
         # Get event bus for cross-window communication
         self.event_bus = service_adapter.get_event_bus() if service_adapter else None
-        
+
+        # Live context resolver for config attribute resolution
+        self._live_context_resolver = LiveContextResolver()
+
+        # Configure preview fields for plate list items
+        self._configure_preview_fields()
+
         # Business logic state (extracted from Textual version)
         self.plates: List[Dict] = []  # List of plate dictionaries
         self.selected_plate_path: str = ""
@@ -206,6 +191,318 @@ class PlateManagerWidget(QWidget):
 
         logger.info("✅ PlateManagerWidget cleanup completed")
 
+    # ========== CrossWindowPreviewMixin Configuration ==========
+
+    def _configure_preview_fields(self):
+        """Configure which config fields show preview labels in plate list.
+
+        Uses centralized formatters from config_preview_formatters module to ensure
+        consistency with PipelineEditor and other widgets.
+        """
+        # Streaming config previews (uses centralized CONFIG_INDICATORS: NAP, FIJI)
+        # Only shown if enabled=True
+        self.enable_preview_for_field('napari_streaming_config', None)
+        self.enable_preview_for_field('fiji_streaming_config', None)
+
+        # Materialization config preview (uses centralized CONFIG_INDICATORS: MAT)
+        # Only shown if enabled=True
+        self.enable_preview_for_field('step_materialization_config', None)
+
+        # FILT should never be shown (per user requirement)
+        # self.enable_preview_for_field('well_filter_config', None)
+
+        # Execution config preview (plate-specific, not in pipeline editor)
+        self.enable_preview_for_field(
+            'num_workers',
+            lambda v: f'W:{v}' if v and v > 1 else None
+        )
+
+        # Sequential processing preview (plate-specific, not in pipeline editor)
+        self.enable_preview_for_field(
+            'sequential_processing_config.sequential_components',
+            lambda v: f'Seq:{",".join(c.value for c in v)}' if v else None
+        )
+
+    # ========== CrossWindowPreviewMixin Hooks ==========
+
+    def _should_process_preview_field(
+        self,
+        field_path: Optional[str],
+        new_value,
+        editing_object,
+        context_object
+    ) -> bool:
+        """Return True if field affects plate preview display."""
+        # Check if field is in our configured preview fields
+        if field_path and self.is_preview_enabled(field_path):
+            return True
+
+        # Also process pipeline/global config changes (affect all plates)
+        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
+        if isinstance(editing_object, (PipelineConfig, GlobalPipelineConfig)):
+            return True
+
+        return False
+
+    def _extract_scope_id_for_preview(
+        self, editing_object, context_object
+    ) -> Optional[str]:
+        """Extract scope ID from editing object."""
+        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
+        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
+
+        # Global config changes affect all plates
+        if isinstance(editing_object, GlobalPipelineConfig):
+            return "GLOBAL_CONFIG_CHANGE"
+
+        # Pipeline config changes - need to find which plate(s) this affects
+        if isinstance(editing_object, PipelineConfig):
+            # Check if this config belongs to a specific orchestrator
+            for plate_path, orchestrator in self.orchestrators.items():
+                if orchestrator.pipeline_config is editing_object:
+                    return str(plate_path)
+            # If not found, affect all plates
+            return "PIPELINE_CONFIG_CHANGE"
+
+        # Orchestrator changes
+        if isinstance(editing_object, PipelineOrchestrator):
+            return str(editing_object.plate_path)
+
+        return None
+
+    def _process_pending_preview_updates(self) -> None:
+        """Apply incremental updates for pending plate keys."""
+        if not self._pending_preview_keys:
+            return
+
+        # Update only the affected plate items
+        for plate_path in self._pending_preview_keys:
+            self._update_single_plate_item(plate_path)
+
+        # Clear pending updates
+        self._pending_preview_keys.clear()
+
+    def _handle_full_preview_refresh(self) -> None:
+        """Fallback when incremental updates not possible."""
+        self.update_plate_list()
+
+    def _update_single_plate_item(self, plate_path: str):
+        """Update a single plate item's preview text without rebuilding the list."""
+        # Find the item in the list
+        for i in range(self.plate_list.count()):
+            item = self.plate_list.item(i)
+            plate_data = item.data(Qt.ItemDataRole.UserRole)
+            if plate_data and plate_data.get('path') == plate_path:
+                # Rebuild just this item's display text
+                plate = plate_data
+                display_text = self._format_plate_item_with_preview(plate)
+                item.setText(display_text)
+                # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
+
+                break
+
+    def _format_plate_item_with_preview(self, plate: Dict) -> str:
+        """Format plate item with status and config preview labels.
+
+        Uses multiline format:
+        Line 1: [status] Plate name
+        Line 2: Plate path
+        Line 3: Config preview labels (if any)
+        """
+        # Determine status prefix
+        status_prefix = ""
+        preview_labels = []
+
+        if plate['path'] in self.orchestrators:
+            orchestrator = self.orchestrators[plate['path']]
+            if orchestrator.state == OrchestratorState.READY:
+                status_prefix = "✓ Init"
+            elif orchestrator.state == OrchestratorState.COMPILED:
+                status_prefix = "✓ Compiled"
+            elif orchestrator.state == OrchestratorState.EXECUTING:
+                # Check actual execution state (queued vs running)
+                exec_state = self.plate_execution_states.get(plate['path'])
+                if exec_state == "queued":
+                    status_prefix = "⏳ Queued"
+                elif exec_state == "running":
+                    status_prefix = "🔄 Running"
+                else:
+                    status_prefix = "🔄 Executing"
+            elif orchestrator.state == OrchestratorState.COMPLETED:
+                status_prefix = "✅ Complete"
+            elif orchestrator.state == OrchestratorState.INIT_FAILED:
+                status_prefix = "❌ Init Failed"
+            elif orchestrator.state == OrchestratorState.COMPILE_FAILED:
+                status_prefix = "❌ Compile Failed"
+            elif orchestrator.state == OrchestratorState.EXEC_FAILED:
+                status_prefix = "❌ Exec Failed"
+
+            # Build config preview labels for line 3
+            preview_labels = self._build_config_preview_labels(orchestrator)
+
+        # Line 1: [status] before plate name (user requirement)
+        if status_prefix:
+            line1 = f"{status_prefix} ▶ {plate['name']}"
+        else:
+            line1 = f"▶ {plate['name']}"
+
+        # Line 2: Plate path on new line (user requirement)
+        line2 = f"  {plate['path']}"
+
+        # Line 3: Config preview labels (if any)
+        if preview_labels:
+            line3 = f"  └─ configs=[{', '.join(preview_labels)}]"
+            return f"{line1}\n{line2}\n{line3}"
+
+        return f"{line1}\n{line2}"
+
+    def _build_config_preview_labels(self, orchestrator: PipelineOrchestrator) -> List[str]:
+        """Build preview labels for orchestrator config.
+
+        Uses centralized formatters from config_preview_formatters module to ensure
+        consistency with PipelineEditor.
+        """
+        from openhcs.pyqt_gui.widgets.config_preview_formatters import format_config_indicator
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        labels = []
+
+        try:
+            # Get the raw pipeline_config (like PipelineEditor gets the raw step)
+            pipeline_config = orchestrator.pipeline_config
+
+            # Collect live context for resolving lazy values (same as PipelineEditor)
+            live_context_snapshot = ParameterFormManager.collect_live_context(
+                scope_filter=orchestrator.plate_path
+            )
+
+            # Get the preview instance with live values merged (uses ABC method)
+            # This implements the pattern from docs/source/development/scope_hierarchy_live_context.rst
+            from openhcs.core.config import PipelineConfig
+            config_for_display = self._get_preview_instance(
+                obj=pipeline_config,
+                live_context_snapshot=live_context_snapshot,
+                scope_id=str(orchestrator.plate_path),  # Scope is just the plate path
+                obj_type=PipelineConfig
+            )
+
+            # Check each enabled preview field
+            for field_path in self.get_enabled_preview_fields():
+                # Navigate to the field value
+                parts = field_path.split('.')
+                value = config_for_display
+
+                for part in parts:
+                    value = getattr(value, part, None)
+                    if value is None:
+                        break
+
+                # Format the value if found
+                if value is not None:
+                    # Use centralized formatter for config objects
+                    if len(parts) == 1 and hasattr(value, '__dataclass_fields__'):
+                        # This is a config object - use centralized formatter with resolver
+                        # Create resolver function that uses live context (same pattern as PipelineEditor)
+                        # CRITICAL: Pass config_for_display (with live values merged) to resolver
+                        def resolve_attr(parent_obj, config_obj, attr_name, context):
+                            return self._resolve_config_attr(config_for_display, config_obj, attr_name, live_context_snapshot)
+
+                        formatted = format_config_indicator(field_path, value, resolve_attr)
+                    else:
+                        # This is a simple value - use registered formatter
+                        formatted = self.format_preview_value(field_path, value)
+
+                    if formatted:  # Only add non-empty formatted values
+                        labels.append(formatted)
+        except Exception as e:
+            import traceback
+            logger.error(f"Error building config preview labels: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+        return labels
+
+    def _merge_with_live_values(self, obj: Any, live_values: Dict[str, Any]) -> Any:
+        """Merge PipelineConfig with live values from ParameterFormManager.
+
+        Implementation of CrossWindowPreviewMixin hook for PlateManager.
+        Uses LiveContextResolver to reconstruct nested dataclass values.
+
+        Args:
+            obj: PipelineConfig instance
+            live_values: Dict of field_name -> value from ParameterFormManager
+
+        Returns:
+            New PipelineConfig with live values merged
+        """
+        import dataclasses
+
+        if not dataclasses.is_dataclass(obj):
+            return obj
+
+        # Reconstruct live values (handles nested dataclasses)
+        reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
+
+        # Create a copy with live values merged
+        merged_values = {}
+        for field in dataclasses.fields(obj):
+            field_name = field.name
+            if field_name in reconstructed_values:
+                # Use live value
+                merged_values[field_name] = reconstructed_values[field_name]
+                logger.info(f"Using live value for {field_name}: {reconstructed_values[field_name]}")
+            else:
+                # Use original value
+                merged_values[field_name] = getattr(obj, field_name)
+
+        # Create new instance with merged values
+        return type(obj)(**merged_values)
+
+    def _resolve_config_attr(self, pipeline_config_for_display, config: object, attr_name: str,
+                             live_context_snapshot=None) -> object:
+        """
+        Resolve any config attribute through lazy resolution system using LIVE context.
+
+        Uses LiveContextResolver service from configuration framework for cached resolution.
+
+        Args:
+            pipeline_config_for_display: PipelineConfig with live values merged (same as step_for_display in PipelineEditor)
+            config: Config dataclass instance (e.g., NapariStreamingConfig)
+            attr_name: Name of the attribute to resolve (e.g., 'enabled', 'well_filter')
+            live_context_snapshot: Optional pre-collected LiveContextSnapshot (for performance)
+
+        Returns:
+            Resolved attribute value (type depends on attribute)
+        """
+        from openhcs.config_framework.global_config import get_current_global_config
+
+        try:
+            # Build context stack: GlobalPipelineConfig → PipelineConfig (with live values merged)
+            # CRITICAL: Use pipeline_config_for_display (with live values merged), not raw pipeline_config
+            # This matches PipelineEditor pattern where context_stack includes step_for_display
+            context_stack = [
+                get_current_global_config(GlobalPipelineConfig),
+                pipeline_config_for_display
+            ]
+
+            # Resolve using service
+            resolved_value = self._live_context_resolver.resolve_config_attr(
+                config_obj=config,
+                attr_name=attr_name,
+                context_stack=context_stack,
+                live_context=live_context_snapshot.values if live_context_snapshot else {},
+                cache_token=live_context_snapshot.token if live_context_snapshot else 0
+            )
+
+            return resolved_value
+
+        except Exception as e:
+            import traceback
+            logger.warning(f"Failed to resolve config.{attr_name} for {type(config).__name__}: {e}")
+            logger.warning(f"Traceback: {traceback.format_exc()}")
+            # Fallback to raw value
+            raw_value = object.__getattribute__(config, attr_name)
+            return raw_value
+
     # ========== UI Setup ==========
 
     def setup_ui(self):
@@ -262,9 +559,13 @@ class PlateManagerWidget(QWidget):
         splitter = QSplitter(Qt.Orientation.Vertical)
         layout.addWidget(splitter)
         
-        # Plate list
-        self.plate_list = ReorderablePlateListWidget()
-        self.plate_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        # Plate list (uses shared reorderable list widget)
+        self.plate_list = ReorderableListWidget()
+
+        # Enable horizontal scrolling for long plate paths
+        self.plate_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.plate_list.setHorizontalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+
         # Apply explicit styling to plate list for consistent background
         self.plate_list.setStyleSheet(f"""
             QListWidget {{
@@ -287,6 +588,17 @@ class PlateManagerWidget(QWidget):
                 background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
             }}
         """)
+
+        # Set custom delegate to render multiline items with grey preview text (shared with PipelineEditor)
+        try:
+            name_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_primary))
+            preview_color = QColor(self.color_scheme.to_hex(self.color_scheme.text_disabled))
+            selected_text_color = QColor("#FFFFFF")  # White text when selected
+            self.plate_list.setItemDelegate(MultilinePreviewItemDelegate(name_color, preview_color, selected_text_color, self.plate_list))
+        except Exception:
+            # Fallback silently if color scheme isn't ready
+            pass
+
         # Apply centralized styling to main widget
         self.setStyleSheet(self.style_generator.generate_plate_manager_style())
         splitter.addWidget(self.plate_list)
@@ -372,7 +684,7 @@ class PlateManagerWidget(QWidget):
 
         # Plate list reordering
         self.plate_list.items_reordered.connect(self.on_plates_reordered)
-        
+
         # Internal signals
         self.status_message.connect(self.update_status)
         self.orchestrator_state_changed.connect(self.on_orchestrator_state_changed)
@@ -391,6 +703,8 @@ class PlateManagerWidget(QWidget):
         self._execution_complete_signal.connect(self._on_execution_complete)
         self._execution_error_signal.connect(self._on_execution_error)
         self._execution_status_changed_signal.connect(self._on_execution_status_changed)
+
+        # Note: ParameterFormManager registration is handled by CrossWindowPreviewMixin._init_cross_window_preview_mixin()
     
     def handle_button_action(self, action: str):
         """
@@ -1867,56 +2181,32 @@ class PlateManagerWidget(QWidget):
     
     def update_plate_list(self):
         """Update the plate list widget using selection preservation mixin."""
-        def format_plate_item(plate):
-            """Format plate item for display."""
-            display_text = f"{plate['name']} ({plate['path']})"
-
-            # Add status indicators
-            status_indicators = []
-            if plate['path'] in self.orchestrators:
-                orchestrator = self.orchestrators[plate['path']]
-                if orchestrator.state == OrchestratorState.READY:
-                    status_indicators.append("✓ Init")
-                elif orchestrator.state == OrchestratorState.COMPILED:
-                    status_indicators.append("✓ Compiled")
-                elif orchestrator.state == OrchestratorState.EXECUTING:
-                    # Check actual execution state (queued vs running)
-                    exec_state = self.plate_execution_states.get(plate['path'])
-                    if exec_state == "queued":
-                        status_indicators.append("⏳ Queued")
-                    elif exec_state == "running":
-                        status_indicators.append("🔄 Running")
-                    else:
-                        status_indicators.append("🔄 Executing")  # Fallback
-                elif orchestrator.state == OrchestratorState.COMPLETED:
-                    status_indicators.append("✅ Complete")
-                elif orchestrator.state == OrchestratorState.INIT_FAILED:
-                    status_indicators.append("🚫 Init Failed")
-                elif orchestrator.state == OrchestratorState.COMPILE_FAILED:
-                    status_indicators.append("❌ Compile Failed")
-                elif orchestrator.state == OrchestratorState.EXEC_FAILED:
-                    status_indicators.append("❌ Exec Failed")
-
-            if status_indicators:
-                display_text = f"[{', '.join(status_indicators)}] {display_text}"
-
-            return display_text, plate
-
         def update_func():
             """Update function that clears and rebuilds the list."""
             self.plate_list.clear()
 
+            # Build scope map for incremental updates
+            scope_map = {}
+
             for plate in self.plates:
-                display_text, plate_data = format_plate_item(plate)
+                # Use new preview formatting method
+                display_text = self._format_plate_item_with_preview(plate)
                 item = QListWidgetItem(display_text)
-                item.setData(Qt.ItemDataRole.UserRole, plate_data)
+                item.setData(Qt.ItemDataRole.UserRole, plate)
 
                 # Add tooltip
                 if plate['path'] in self.orchestrators:
                     orchestrator = self.orchestrators[plate['path']]
                     item.setToolTip(f"Status: {orchestrator.state.value}")
 
+                    # Register scope for incremental updates
+                    scope_map[str(plate['path'])] = plate['path']
+
                 self.plate_list.addItem(item)
+                # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
+
+            # Update scope mapping for CrossWindowPreviewMixin
+            self.set_preview_scope_mapping(scope_map)
 
             # Auto-select first plate if no selection and plates exist
             if self.plates and not self.selected_plate_path:

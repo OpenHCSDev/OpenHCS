@@ -8,7 +8,8 @@ by leveraging the comprehensive shared infrastructure we've built.
 import dataclasses
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Type, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, Type, Optional, Tuple, Union
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton,
     QLineEdit, QCheckBox, QComboBox, QGroupBox, QSpinBox, QDoubleSpinBox
@@ -287,7 +288,7 @@ class ParameterFormManager(QWidget):
         return cls.ASYNC_WIDGET_CREATION and param_count > cls.ASYNC_THRESHOLD
 
     @classmethod
-    def collect_live_context(cls, scope_filter: Optional[str] = None) -> LiveContextSnapshot:
+    def collect_live_context(cls, scope_filter: Optional[Union[str, 'Path']] = None) -> LiveContextSnapshot:
         """
         Collect live context from all active form managers in scope.
 
@@ -371,17 +372,24 @@ class ParameterFormManager(QWidget):
         return snapshot
 
     @staticmethod
-    def _is_scope_visible_static(manager_scope: str, filter_scope: str) -> bool:
+    def _is_scope_visible_static(manager_scope: str, filter_scope) -> bool:
         """
         Static version of _is_scope_visible for class method use.
 
         Check if scopes match (prefix matching for hierarchical scopes).
         Supports generic hierarchical scope strings like 'x::y::z'.
+
+        Args:
+            manager_scope: Scope ID from the manager (always str)
+            filter_scope: Scope filter (can be str or Path)
         """
+        # Convert filter_scope to string if it's a Path
+        filter_scope_str = str(filter_scope) if not isinstance(filter_scope, str) else filter_scope
+
         return (
-            manager_scope == filter_scope or
-            manager_scope.startswith(f"{filter_scope}::") or
-            filter_scope.startswith(f"{manager_scope}::")
+            manager_scope == filter_scope_str or
+            manager_scope.startswith(f"{filter_scope_str}::") or
+            filter_scope_str.startswith(f"{manager_scope}::")
         )
 
     @classmethod
