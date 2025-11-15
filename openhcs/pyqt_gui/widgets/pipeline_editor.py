@@ -1154,6 +1154,10 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if not field_path:
             return True
 
+        # Special marker for window close - always process
+        if '__WINDOW_CLOSED__' in field_path:
+            return True
+
         parts = field_path.split('.', 1)
         root = parts[0]
 
