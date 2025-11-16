@@ -50,6 +50,7 @@ class CrossWindowPreviewMixin:
         self._preview_fields: Dict[str, Callable] = {}  # field_path -> formatter function
         self._preview_field_roots: Dict[str, Optional[str]] = {}
         self._preview_field_index: Dict[str, Set[str]] = {self.ROOTLESS_SCOPE: set()}
+        self._preview_field_fallbacks: Dict[str, Callable] = {}
 
         # Scope registration metadata
         self._preview_scope_handlers: list[Dict[str, Any]] = []
@@ -114,6 +115,7 @@ class CrossWindowPreviewMixin:
         formatter: Optional[Callable[[Any], str]] = None,
         *,
         scope_root: Optional[str] = None,
+        fallback_resolver: Optional[Callable[[Any, Dict[str, Any]], Any]] = None,
     ) -> None:
         """Enable preview label for a specific field.
 
@@ -148,6 +150,9 @@ class CrossWindowPreviewMixin:
             self._preview_field_index[index_key] = set()
         self._preview_field_index[index_key].add(field_path)
 
+        if fallback_resolver:
+            self._preview_field_fallbacks[field_path] = fallback_resolver
+
     def disable_preview_for_field(self, field_path: str) -> None:
         """Disable preview label for a specific field.
 
@@ -162,6 +167,8 @@ class CrossWindowPreviewMixin:
             self._preview_field_index[index_key].discard(field_path)
             if not self._preview_field_index[index_key]:
                 del self._preview_field_index[index_key]
+
+        self._preview_field_fallbacks.pop(field_path, None)
 
     def is_preview_enabled(self, field_path: str) -> bool:
         """Check if preview is enabled for a specific field.
@@ -199,6 +206,51 @@ class CrossWindowPreviewMixin:
             Set of field paths that have preview enabled
         """
         return set(self._preview_fields.keys())
+
+    def enable_preview_fields_from_introspection(
+        self,
+        *,
+        base_fields: Iterable[str],
+        nested_configs: Optional[Iterable[Tuple[Optional[str], Type]]] = None,
+        config_attrs: Optional[Iterable[str]] = None,
+        sample_object_factory: Optional[Callable[[], Any]] = None,
+        scope_root: Optional[str] = None,
+    ) -> None:
+        """
+        Enable preview fields discovered via introspection instead of hardcoding paths.
+
+        Args:
+            base_fields: Iterable of explicit field paths to include.
+            nested_configs: Iterable of (prefix, dataclass_type) pairs. Each dataclass'
+                annotated fields will be registered with the optional prefix
+                (e.g., ('processing_config', ProcessingConfig) -> processing_config.foo).
+            config_attrs: Iterable of attribute names to include if present on the sample object.
+            sample_object_factory: Optional callable returning an object used to probe which
+                config attributes actually exist. Attributes missing on the sample object
+                are skipped to avoid registering dead paths.
+            scope_root: Scope root passed through to enable_preview_for_field.
+        """
+        field_paths: Set[str] = set(base_fields or [])
+
+        for prefix, config_cls in nested_configs or []:
+            annotations = getattr(config_cls, '__annotations__', {}) or {}
+            for field_name in annotations.keys():
+                if prefix:
+                    field_paths.add(f"{prefix}.{field_name}")
+                else:
+                    field_paths.add(field_name)
+
+        sample_obj = sample_object_factory() if sample_object_factory else None
+        if sample_obj is not None:
+            for attr in config_attrs or []:
+                if hasattr(sample_obj, attr):
+                    field_paths.add(attr)
+        else:
+            for attr in config_attrs or []:
+                field_paths.add(attr)
+
+        for field_path in sorted(field_paths):
+            self.enable_preview_for_field(field_path, scope_root=scope_root)
 
     # --- Event routing ---------------------------------------------------------
     def handle_cross_window_preview_change(
@@ -471,6 +523,20 @@ class CrossWindowPreviewMixin:
             if field_path == tracked or field_path.startswith(f"{tracked}."):
                 return True
         return False
+
+    def _apply_preview_field_fallback(
+        self,
+        field_path: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        resolver = self._preview_field_fallbacks.get(field_path)
+        if not resolver:
+            return None
+        try:
+            return resolver(self, context or {})
+        except Exception:
+            logger.exception("Preview fallback resolver failed", exc_info=True)
+            return None
 
     def _find_scope_entry_for_object(self, editing_object: Any) -> Optional[Dict[str, Any]]:
         if editing_object is None:

@@ -283,11 +283,10 @@ class LazyDataclassFactory:
                 if field.default is not MISSING:
                     field_def = (field.name, final_field_type, dataclasses.field(default=field.default, metadata=field.metadata))
                 elif field.default_factory is not MISSING:
-                    # CRITICAL: For lazy configs (PipelineConfig), dataclass fields with default_factory
-                    # should become None instead of creating instances
-                    # This enables proper inheritance from GlobalPipelineConfig
                     if is_dataclass(field.type):
-                        field_def = (field.name, final_field_type, dataclasses.field(default=None, metadata=field.metadata))
+                        # Instantiate lazy dataclass instances instead of leaving field as None
+                        # so that consumers can inspect inherited values without materializing overrides.
+                        field_def = (field.name, final_field_type, dataclasses.field(default_factory=field_type, metadata=field.metadata))
                     else:
                         field_def = (field.name, final_field_type, dataclasses.field(default_factory=field.default_factory, metadata=field.metadata))
                 else:
@@ -1129,7 +1128,6 @@ def auto_create_decorator(global_config_class):
     # Lazy global config will be created after field injection
 
     return global_config_class
-
 
 
 

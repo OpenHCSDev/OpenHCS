@@ -8,7 +8,7 @@ Uses hybrid approach: extracted business logic + clean PyQt6 UI.
 import logging
 import inspect
 import copy
-from typing import List, Dict, Optional, Callable, Tuple, Any, Iterable
+from typing import List, Dict, Optional, Callable, Tuple, Any, Iterable, Set
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -35,6 +35,8 @@ from openhcs.config_framework import LiveContextResolver
 # Import shared list widget components (single source of truth)
 from openhcs.pyqt_gui.widgets.shared.reorderable_list_widget import ReorderableListWidget
 from openhcs.pyqt_gui.widgets.shared.list_item_delegate import MultilinePreviewItemDelegate
+from openhcs.pyqt_gui.widgets.config_preview_formatters import CONFIG_INDICATORS
+from openhcs.core.config import ProcessingConfig
 
 from openhcs.utils.performance_monitor import timer
 
@@ -295,22 +297,28 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         )
 
     def _configure_step_preview_fields(self) -> None:
-        """Register which step fields affect list previews."""
-        tracked_fields = [
-            'func',
-            'variable_components',
-            'group_by',
-            'processing_config.group_by',
-            'processing_config.variable_components',
-            'processing_config.input_source',
-            'step_materialization_config',
-            'step_well_filter_config',
-            'napari_streaming_config',
-            'fiji_streaming_config',
-        ]
+        """Register step preview fields using reusable mixin helper."""
+        base_fields = ['func']
+        nested_configs = [('processing_config', ProcessingConfig)]
+        config_attrs = set(CONFIG_INDICATORS.keys()) | {'step_well_filter_config'}
 
-        for field_path in tracked_fields:
-            self.enable_preview_for_field(field_path, scope_root='step')
+        self.enable_preview_fields_from_introspection(
+            base_fields=base_fields,
+            nested_configs=nested_configs,
+            config_attrs=config_attrs,
+            sample_object_factory=self._get_preview_sample_step,
+            scope_root='step',
+        )
+
+    _preview_sample_step = None
+
+    @classmethod
+    def _get_preview_sample_step(cls):
+        """Create a lightweight FunctionStep instance for introspection (cached)."""
+        if cls._preview_sample_step is None:
+            from openhcs.core.steps.function_step import FunctionStep
+            cls._preview_sample_step = FunctionStep(func=lambda *args, **kwargs: None)
+        return cls._preview_sample_step
     
     def handle_button_action(self, action: str):
         """
@@ -362,6 +370,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         """
         step_for_display = self._get_step_preview_instance(step, live_context_snapshot)
         step_name = getattr(step_for_display, 'name', 'Unknown Step')
+        processing_cfg = getattr(step_for_display, 'processing_config', None)
 
         # Build preview of key constructor values
         preview_parts = []
@@ -396,6 +405,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         # Variable components preview
         var_components = getattr(step_for_display, 'variable_components', None)
+        if var_components is None and processing_cfg is not None:
+            var_components = getattr(processing_cfg, 'variable_components', None)
         if var_components:
             if len(var_components) == 1:
                 comp_name = getattr(var_components[0], 'name', str(var_components[0]))
@@ -408,6 +419,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         # Group by preview
         group_by = getattr(step_for_display, 'group_by', None)
+        if (group_by is None or getattr(group_by, 'value', None) is None) and processing_cfg is not None:
+            group_by = getattr(processing_cfg, 'group_by', None)
         if group_by and group_by.value is not None:  # Check for GroupBy.NONE
             group_name = getattr(group_by, 'name', str(group_by))
             preview_parts.append(f"group_by={group_name}")

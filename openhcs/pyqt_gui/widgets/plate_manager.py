@@ -264,6 +264,37 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             scope_root='pipeline_config'
         )
 
+        self.enable_preview_for_field(
+            'vfs_config.materialization_backend',
+            lambda v: f'{v.value.upper()}',
+            scope_root='pipeline_config'
+        )
+
+        # Output directory (shows whenever a custom path is set)
+        self.enable_preview_for_field(
+            'path_planning_config.output_dir_suffix',
+            scope_root='pipeline_config',
+            formatter=lambda p: f'output={p}',
+            fallback_resolver=self._build_effective_config_fallback('path_planning_config.output_dir_suffix')
+        )
+        
+        # Well filter (only show when the list is non-empty)
+        self.enable_preview_for_field(
+            'path_planning_config.well_filter',
+            scope_root='pipeline_config',
+            formatter=lambda wf: f'wf={len(wf)}' if wf else None,
+            fallback_resolver=self._build_effective_config_fallback('path_planning_config.well_filter')
+        )
+        
+        # Subdir (only show when it differs from the default)
+        self.enable_preview_for_field(
+            'path_planning_config.sub_dir',
+            scope_root='pipeline_config',
+            formatter=lambda sub: f'subdir={sub}',
+            fallback_resolver=self._build_effective_config_fallback('path_planning_config.sub_dir')
+        )
+
+
     def _resolve_pipeline_scope_from_config(self, config_obj, context_obj) -> str:
         """Return plate scope for a PipelineConfig instance."""
         for plate_path, orchestrator in self.orchestrators.items():
@@ -389,12 +420,21 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 obj_type=PipelineConfig
             )
 
+            effective_config = orchestrator.get_effective_config()
+
             # Check each enabled preview field
             for field_path in self.get_enabled_preview_fields():
                 value = self._resolve_preview_field_value(
                     pipeline_config_for_display=config_for_display,
                     field_path=field_path,
-                    live_context_snapshot=live_context_snapshot
+                    live_context_snapshot=live_context_snapshot,
+                    fallback_context={
+                        'orchestrator': orchestrator,
+                        'field_path': field_path,
+                        'effective_config': effective_config,
+                        'pipeline_config': config_for_display,
+                        'live_context_snapshot': live_context_snapshot,
+                    }
                 )
 
                 if value is None:
@@ -509,7 +549,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         self,
         pipeline_config_for_display,
         field_path: str,
-        live_context_snapshot=None
+        live_context_snapshot=None,
+        fallback_context: Optional[Dict[str, Any]] = None,
     ):
         """Resolve a preview field path using the live context resolver."""
         parts = field_path.split('.')
@@ -518,7 +559,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         for part in parts:
             if current_obj is None:
-                return None
+                resolved_value = None
+                break
 
             resolved_value = self._resolve_config_attr(
                 pipeline_config_for_display,
@@ -528,7 +570,26 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             )
             current_obj = resolved_value
 
+        if resolved_value is None:
+            return self._apply_preview_field_fallback(field_path, fallback_context)
+
         return resolved_value
+
+    def _build_effective_config_fallback(self, field_path: str) -> Callable:
+        """Return a fallback resolver that reads from effective config when pipeline config is None."""
+        def _resolver(widget, context: Dict[str, Any]):
+            effective_config = context.get('effective_config')
+            if effective_config is None:
+                return None
+
+            value = effective_config
+            for part in field_path.split('.'):
+                value = getattr(value, part, None)
+                if value is None:
+                    return None
+            return value
+
+        return _resolver
 
     # ========== UI Setup ==========
 
@@ -785,14 +846,15 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         from openhcs.config_framework.lazy_factory import ensure_global_config_context
         ensure_global_config_context(GlobalPipelineConfig, new_global_config)
 
-        # Rebuild orchestrator-specific config if it exists
-        if orchestrator.pipeline_config is not None:
-            orchestrator.pipeline_config = rebuild_lazy_config_with_new_global_reference(
-                orchestrator.pipeline_config,
-                new_global_config,
-                GlobalPipelineConfig
-            )
-            logger.info(f"Rebuilt orchestrator-specific config for plate: {orchestrator.plate_path}")
+        # Always ensure orchestrator has a pipeline config hooked to the new global reference
+        from openhcs.core.config import PipelineConfig
+        current_config = orchestrator.pipeline_config or PipelineConfig()
+        orchestrator.pipeline_config = rebuild_lazy_config_with_new_global_reference(
+            current_config,
+            new_global_config,
+            GlobalPipelineConfig
+        )
+        logger.info(f"Rebuilt orchestrator-specific config for plate: {orchestrator.plate_path}")
 
         # Get effective config and emit signal for UI refresh
         effective_config = orchestrator.get_effective_config()
@@ -1015,19 +1077,9 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # The config window should work with the current orchestrator context
         # Reset behavior will be handled differently to avoid corrupting step editor context
 
-        # SIMPLIFIED: Just use the orchestrator's pipeline_config directly
-        # ParameterFormManager will use object.__getattribute__ to get raw field values
-        # Raw None = inherited (shows placeholder), Raw concrete = user-set (shows value)
-        # This is the same pattern as pickle_to_python code generation
-        from openhcs.config_framework.lazy_factory import create_dataclass_for_editing
-
-        if representative_orchestrator.pipeline_config is not None:
-            # Orchestrator has existing config - use it directly
-            # ParameterFormManager will inspect raw values to distinguish None (inherited) from concrete (user-set)
-            current_plate_config = representative_orchestrator.pipeline_config
-        else:
-            # No existing config - create fresh config with all None values (all show as placeholders)
-            current_plate_config = create_dataclass_for_editing(PipelineConfig, self.global_config)
+        # SIMPLIFIED: Always use the orchestrator's PipelineConfig directly.
+        # ParameterFormManager inspects raw values to distinguish inherited vs user-set.
+        current_plate_config = representative_orchestrator.pipeline_config
 
         def handle_config_save(new_config: PipelineConfig) -> None:
             """Apply per-orchestrator configuration without global side effects."""
@@ -1923,8 +1975,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 # Get the actual pipeline config from this plate's orchestrator
                 if plate_path in self.orchestrators:
                     orchestrator = self.orchestrators[plate_path]
-                    if orchestrator.pipeline_config:
-                        per_plate_configs[plate_path] = orchestrator.pipeline_config
+                    per_plate_configs[plate_path] = orchestrator.pipeline_config
 
             # Generate complete orchestrator code using new per_plate_configs parameter
             from openhcs.debug.pickle_to_python import generate_complete_orchestrator_code
