@@ -7,6 +7,7 @@ for native desktop integration.
 """
 
 import logging
+import re
 from typing import Optional, List, Set, Tuple
 from pathlib import Path
 
@@ -47,6 +48,16 @@ from dataclasses import dataclass
 from typing import Dict, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+# Pre-compiled regex patterns for syntax highlighting (HUGE performance boost)
+# These are compiled once at module load and reused for all log lines
+_TIMESTAMP_RE = re.compile(r'^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3}')
+_LOG_LEVEL_RE = re.compile(r'\b(ERROR|WARNING|INFO|DEBUG|CRITICAL)\b')
+_LOGGER_NAME_RE = re.compile(r' - ([\w\.]+) - ')
+_FILE_PATH_RE = re.compile(r'(?:/[\w\-\.]+)+\.py')
+_PYTHON_STRING_RE = re.compile(r'["\'](?:[^"\'\\]|\\.)*["\']')
+_NUMBER_RE = re.compile(r'\b\d+(?:\.\d+)?\b')
 
 
 @dataclass
@@ -452,16 +463,14 @@ class HighlightWorker(QRunnable):
         """
         Parse a log line and return formatting segments.
 
-        This duplicates the regex logic from LogHighlighter but returns
-        structured data instead of applying to QTextDocument.
+        Uses pre-compiled regex patterns for maximum performance.
+        Patterns are compiled once at module load and reused.
         """
         segments = []
         cs = self.color_scheme
 
         # Timestamp pattern (start of line)
-        import re
-        timestamp_pattern = r'^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2},\d{3}'
-        match = re.match(timestamp_pattern, text)
+        match = _TIMESTAMP_RE.match(text)
         if match:
             segments.append(HighlightedSegment(
                 start=match.start(),
@@ -470,8 +479,7 @@ class HighlightWorker(QRunnable):
             ))
 
         # Log level (ERROR, WARNING, INFO, DEBUG)
-        level_pattern = r'\b(ERROR|WARNING|INFO|DEBUG|CRITICAL)\b'
-        for match in re.finditer(level_pattern, text):
+        for match in _LOG_LEVEL_RE.finditer(text):
             level = match.group(1)
             if level == 'ERROR' or level == 'CRITICAL':
                 color = cs.log_error_color
@@ -488,8 +496,7 @@ class HighlightWorker(QRunnable):
             ))
 
         # Logger name pattern (between timestamp and level)
-        logger_pattern = r' - ([\w\.]+) - '
-        for match in re.finditer(logger_pattern, text):
+        for match in _LOGGER_NAME_RE.finditer(text):
             segments.append(HighlightedSegment(
                 start=match.start(1),
                 length=match.end(1) - match.start(1),
@@ -497,8 +504,7 @@ class HighlightWorker(QRunnable):
             ))
 
         # File paths
-        path_pattern = r'(?:/[\w\-\.]+)+\.py'
-        for match in re.finditer(path_pattern, text):
+        for match in _FILE_PATH_RE.finditer(text):
             segments.append(HighlightedSegment(
                 start=match.start(),
                 length=match.end() - match.start(),
@@ -506,8 +512,7 @@ class HighlightWorker(QRunnable):
             ))
 
         # Python strings
-        string_pattern = r'["\'](?:[^"\'\\]|\\.)*["\']'
-        for match in re.finditer(string_pattern, text):
+        for match in _PYTHON_STRING_RE.finditer(text):
             segments.append(HighlightedSegment(
                 start=match.start(),
                 length=match.end() - match.start(),
@@ -515,8 +520,7 @@ class HighlightWorker(QRunnable):
             ))
 
         # Numbers
-        number_pattern = r'\b\d+(?:\.\d+)?\b'
-        for match in re.finditer(number_pattern, text):
+        for match in _NUMBER_RE.finditer(text):
             segments.append(HighlightedSegment(
                 start=match.start(),
                 length=match.end() - match.start(),
