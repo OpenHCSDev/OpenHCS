@@ -22,7 +22,7 @@ from PyQt6.QtCore import (
     Qt, QRegularExpression, QThread, QAbstractListModel, QModelIndex, QSize,
     QThreadPool, QRunnable, QPoint, QPointF,
 )
-from PyQt6.QtGui import QTextCharFormat, QColor, QAction, QFont, QTextCursor, QPalette, QAbstractTextDocumentLayout
+from PyQt6.QtGui import QTextCharFormat, QColor, QAction, QFont, QTextCursor, QPalette, QAbstractTextDocumentLayout, QKeySequence
 
 from openhcs.io.filemanager import FileManager
 from openhcs.core.log_utils import LogFileInfo
@@ -248,6 +248,14 @@ class SelectableDocument(QTextDocument):
         self.setDocumentMargin(0)
         self._text_cursor = QTextCursor(self)
         self._selected_word_on_double_click = QTextCursor(self)
+        self._cached_text_width = -1  # Track last width to avoid unnecessary relayout
+
+    def setTextWidth(self, width: float) -> None:
+        """Override to avoid unnecessary relayout when width hasn't changed."""
+        # Only call parent if width actually changed (prevents position shifting)
+        if int(width) != int(self._cached_text_width):
+            super().setTextWidth(width)
+            self._cached_text_width = width
 
     def selectionStart(self) -> int:
         """Get the start position of the current selection."""
@@ -545,6 +553,9 @@ class LogItemDelegate(QStyledItemDelegate):
         self._search_text: str = ""
         self._case_sensitive: bool = False
 
+        # Pre-computed search match cache: set of row indices that match search
+        self._search_match_rows: Set[int] = set()
+
         # Thread pool for background highlighting
         self._thread_pool = QThreadPool.globalInstance()
 
@@ -563,10 +574,49 @@ class LogItemDelegate(QStyledItemDelegate):
         # Text selection state - support multi-line selection
         self._interactive_documents: Dict[int, SelectableDocument] = {}  # Map row -> document with selection
 
+        # QTextDocument cache: maps (text, font_family, font_size, width) -> QTextDocument
+        # Stores rendered documents to avoid recreation on every paint
+        self._document_cache: Dict[Tuple[str, str, int, int], QTextDocument] = {}
+        self._doc_cache_access_order: List[Tuple[str, str, int, int]] = []
+        self.MAX_DOC_CACHE_SIZE = 500  # Cache fewer documents (they're heavier than segments)
+
+        # sizeHint cache: maps (text, font_family, font_size, width) -> QSize
+        self._size_hint_cache: Dict[Tuple[str, str, int, int], QSize] = {}
+
+        # Debounce timer for viewport updates
+        self._viewport_update_timer = QTimer()
+        self._viewport_update_timer.setSingleShot(True)
+        self._viewport_update_timer.setInterval(16)  # ~60fps
+        self._viewport_update_timer.timeout.connect(self._do_viewport_update)
+        self._viewport_needs_update = False
+
     def set_search_state(self, text: str, case_sensitive: bool) -> None:
         """Update search text used for line-level search highlighting."""
         self._search_text = text or ""
         self._case_sensitive = case_sensitive
+        # Clear search match cache - will be rebuilt on-demand during paint
+        self._search_match_rows.clear()
+
+    def _precompute_search_matches(self, model) -> None:
+        """Pre-compute which rows match the current search query."""
+        self._search_match_rows.clear()
+        if not self._search_text:
+            return
+
+        needle = self._search_text if self._case_sensitive else self._search_text.lower()
+        for row in range(model.rowCount()):
+            index = model.index(row, 0)
+            text = index.data(Qt.DisplayRole)
+            if text:
+                haystack = text if self._case_sensitive else text.lower()
+                if needle in haystack:
+                    self._search_match_rows.add(row)
+
+    def _do_viewport_update(self) -> None:
+        """Perform the actual viewport update (called by debounce timer)."""
+        if self._viewport_needs_update and self.parent() and isinstance(self.parent(), QListView):
+            self.parent().viewport().update()
+            self._viewport_needs_update = False
 
     def hasInteractiveDocument(self, row: int) -> bool:
         """Check if a row has an interactive document with selection."""
@@ -584,7 +634,7 @@ class LogItemDelegate(QStyledItemDelegate):
         """Clear all interactive documents."""
         self._interactive_documents.clear()
 
-    def createInteractiveDocument(self, text: str, font: QFont) -> SelectableDocument:
+    def createInteractiveDocument(self, text: str, font: QFont, width: int = 0) -> SelectableDocument:
         """
         Create a SelectableDocument with syntax highlighting applied.
 
@@ -595,6 +645,7 @@ class LogItemDelegate(QStyledItemDelegate):
         Args:
             text: The log line text
             font: The font to use for rendering
+            width: The width for text wrapping (optional)
 
         Returns:
             SelectableDocument with syntax highlighting applied
@@ -603,6 +654,8 @@ class LogItemDelegate(QStyledItemDelegate):
         doc = SelectableDocument()
         doc.setDefaultFont(font)
         doc.setPlainText(text)
+        if width > 0:
+            doc.setTextWidth(width)
 
         # Try to get cached formatting segments
         segments = self._get_or_request_segments(text, font)
@@ -634,9 +687,20 @@ class LogItemDelegate(QStyledItemDelegate):
             oldest_key = self._cache_access_order.pop(0)
             del self._segment_cache[oldest_key]
 
-        # Trigger repaint for this line
-        if self.parent() and isinstance(self.parent(), QListView):
-            self.parent().viewport().update()
+        # CRITICAL: Invalidate any cached documents for this text+font combo
+        # so they get recreated with the new highlighting
+        text, font_family, font_size = cache_key
+        keys_to_remove = [k for k in self._document_cache.keys()
+                         if k[0] == text and k[1] == font_family and k[2] == font_size]
+        for key in keys_to_remove:
+            del self._document_cache[key]
+            if key in self._doc_cache_access_order:
+                self._doc_cache_access_order.remove(key)
+
+        # Trigger debounced repaint (batches multiple highlight completions)
+        self._viewport_needs_update = True
+        if not self._viewport_update_timer.isActive():
+            self._viewport_update_timer.start()
 
     def _get_or_request_segments(self, text: str, font: QFont) -> Optional[List[HighlightedSegment]]:
         """
@@ -699,58 +763,84 @@ class LogItemDelegate(QStyledItemDelegate):
             # Apply format
             cursor.setCharFormat(fmt)
 
+    def _get_or_create_document(self, text: str, font: QFont, width: int) -> QTextDocument:
+        """
+        Get cached QTextDocument or create a new one with syntax highlighting.
+
+        This avoids recreating QTextDocument objects on every paint event,
+        which is one of the main performance bottlenecks.
+
+        Args:
+            text: The log line text
+            font: The font to use
+            width: The width for text wrapping
+
+        Returns:
+            Cached or newly created QTextDocument
+        """
+        # Create cache key including width (important for proper wrapping)
+        doc_cache_key = (text, font.family(), font.pointSize(), width)
+
+        # Check document cache first
+        if doc_cache_key in self._document_cache:
+            # Move to end of access order (LRU)
+            self._doc_cache_access_order.remove(doc_cache_key)
+            self._doc_cache_access_order.append(doc_cache_key)
+            return self._document_cache[doc_cache_key]
+
+        # Not cached - create new document
+        doc = QTextDocument()
+        doc.setDocumentMargin(0)  # Remove default 4px margin to prevent position shifts
+        doc.setDefaultFont(font)
+        doc.setPlainText(text)
+        doc.setTextWidth(width)
+
+        # Try to apply syntax highlighting if available
+        segments = self._get_or_request_segments(text, font)
+        if segments is not None:
+            self._apply_segments_to_document(doc, segments)
+
+        # Add to cache
+        self._document_cache[doc_cache_key] = doc
+        self._doc_cache_access_order.append(doc_cache_key)
+
+        # Enforce cache size limit (LRU eviction)
+        if len(self._document_cache) > self.MAX_DOC_CACHE_SIZE:
+            oldest_doc_key = self._doc_cache_access_order.pop(0)
+            del self._document_cache[oldest_doc_key]
+
+        return doc
+
     def paint(self, painter, option, index):  # type: ignore[override]
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
 
         text = opt.text
+        row = index.row()
 
-        # Apply search highlight as a background brush if the current line matches.
-        if self._search_text:
-            haystack = text if self._case_sensitive else text.lower()
-            needle = self._search_text if self._case_sensitive else self._search_text.lower()
-            if needle and needle in haystack:
-                highlight_color = QColor(255, 255, 0, 60)
-                opt.backgroundBrush = highlight_color
+        # Draw simple background - skip Qt's drawControl entirely to avoid any focus/hover/selection styling
+        painter.save()
 
-        # Draw the item background/selection/borders without any text.
-        style = opt.widget.style() if opt.widget is not None else QApplication.style()
-        original_text = opt.text
-        opt.text = ""
-        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
-        opt.text = original_text
+        # Apply search highlight background if this row matches
+        if self._search_text and row in self._search_match_rows:
+            painter.fillRect(opt.rect, QColor(255, 255, 0, 60))
+
+        painter.restore()
 
         # Check if this row has an interactive document with text selection
-        row = index.row()
         if self.hasInteractiveDocument(row):
             # Use the interactive document which has selection state
             doc = self.getInteractiveDocument(row)
             if doc is not None:
+                # ALWAYS set width to ensure consistency (prevents position shifting)
+                # The width check is inside setTextWidth to avoid unnecessary relayout
                 doc.setTextWidth(opt.rect.width())
             else:
-                # Fallback to normal rendering
-                segments = self._get_or_request_segments(text, opt.font)
-                doc = QTextDocument()
-                doc.setDefaultFont(opt.font)
-                doc.setPlainText(text)
-                doc.setTextWidth(opt.rect.width())
-                if segments is not None:
-                    self._apply_segments_to_document(doc, segments)
+                # Fallback to cached document rendering
+                doc = self._get_or_create_document(text, opt.font, opt.rect.width())
         else:
-            # Normal rendering: create temporary document with syntax highlighting
-            # Try to get cached formatting segments (async, may return None)
-            segments = self._get_or_request_segments(text, opt.font)
-
-            # Create document on main thread (fast, just allocation)
-            doc = QTextDocument()
-            doc.setDefaultFont(opt.font)
-            doc.setPlainText(text)
-            doc.setTextWidth(opt.rect.width())
-
-            if segments is not None:
-                # Formatting ready - apply it (fast, just setting char formats)
-                self._apply_segments_to_document(doc, segments)
-            # else: No formatting yet, paint plain text (still readable while parsing)
+            # Normal rendering: use cached document (avoids QTextDocument recreation!)
+            doc = self._get_or_create_document(text, opt.font, opt.rect.width())
 
         # Paint the document
         context = QAbstractTextDocumentLayout.PaintContext()
@@ -768,6 +858,9 @@ class LogItemDelegate(QStyledItemDelegate):
         We compute the document layout for the current line using the
         available viewport width so that long log lines wrap instead of
         being clipped or forcing a horizontal scrollbar.
+
+        This method is heavily optimized with caching since Qt calls it
+        frequently during scrolling, resizing, and layout updates.
         """
         text = index.data(Qt.DisplayRole)
         if text is None:
@@ -786,23 +879,35 @@ class LogItemDelegate(QStyledItemDelegate):
         if width <= 0:
             width = 800  # conservative fallback, not critical for layout
 
-        # Create simple document for size calculation (formatting doesn't affect size)
-        doc = QTextDocument()
-        doc.setDefaultFont(opt.font)
-        doc.setPlainText(str(text))
-        doc.setTextWidth(width)
+        # Check sizeHint cache first
+        cache_key = (text, opt.font.family(), opt.font.pointSize(), width)
+        if cache_key in self._size_hint_cache:
+            return self._size_hint_cache[cache_key]
+
+        # Not cached - calculate size
+        # Reuse document from cache if available (avoids recreation)
+        doc = self._get_or_create_document(text, opt.font, width)
         doc_size = doc.size()
         height = int(doc_size.height())
 
         # Add a small vertical padding so text is not flush with borders.
-        return QSize(width, height + 4)
+        size = QSize(width, height + 4)
+
+        # Cache the result
+        self._size_hint_cache[cache_key] = size
+
+        return size
 
     def clear_cache(self) -> None:
-        """Clear the segment cache. Call this when resetting the log viewer."""
+        """Clear all caches. Call this when resetting the log viewer or when search changes."""
         self._segment_cache.clear()
         self._cache_access_order.clear()
         self._pending_highlights.clear()
-        logger.debug("LogItemDelegate cache cleared")
+        self._document_cache.clear()
+        self._doc_cache_access_order.clear()
+        self._size_hint_cache.clear()
+        self._search_match_rows.clear()
+        logger.debug("LogItemDelegate all caches cleared")
 
 
 class LogListView(QListView):
@@ -842,6 +947,8 @@ class LogListView(QListView):
         clickedIndex = self.indexAt(mousePos)
 
         if not clickedIndex.isValid():
+            # Clicked on empty space - clear any selection
+            self._clearSelection()
             event.accept()
             return
 
@@ -1112,8 +1219,12 @@ class LogListView(QListView):
             if text is None:
                 continue
 
-            # Create SelectableDocument with syntax highlighting
-            doc = delegate.createInteractiveDocument(str(text), self.font())
+            # Get the viewport width for proper wrapping
+            itemRect = self.visualRect(index)
+            width = itemRect.width() if itemRect.width() > 0 else self.viewport().width()
+
+            # Create SelectableDocument with syntax highlighting and proper width
+            doc = delegate.createInteractiveDocument(str(text), self.font(), width)
 
             if row == firstRow and row == lastRow:
                 # Single-line selection
@@ -1193,6 +1304,53 @@ class LogListView(QListView):
                     lines.append(textStr)
 
             return "\n".join(lines)
+
+    def selectAllText(self) -> None:
+        """Select all text in all log lines (Ctrl+A handler)."""
+        if self.model() is None or self.model().rowCount() == 0:
+            return
+
+        # Select from first character of first row to last character of last row
+        first_index = self.model().index(0, 0)
+        last_index = self.model().index(self.model().rowCount() - 1, 0)
+
+        last_text = last_index.data(Qt.ItemDataRole.DisplayRole)
+        if last_text is None:
+            return
+
+        self._selection_start_index = first_index
+        self._selection_start_pos = 0
+        self._selection_end_index = last_index
+        self._selection_end_pos = len(str(last_text))
+
+        # Update the selection display
+        self._updateSelection()
+
+    def keyPressEvent(self, event) -> None:  # type: ignore[override]
+        """Handle keyboard events for copy/paste operations."""
+        # Ctrl+C to copy selected text
+        if event.matches(QKeySequence.StandardKey.Copy):
+            selectedText = self._getSelectedText()
+            if selectedText:
+                QApplication.clipboard().setText(selectedText)
+            event.accept()
+            return
+
+        # Pass other events to parent
+        super().keyPressEvent(event)
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        """Handle resize events to invalidate width-dependent caches."""
+        super().resizeEvent(event)
+
+        # Clear width-dependent caches in delegate when viewport width changes
+        delegate = self.itemDelegate()
+        if isinstance(delegate, LogItemDelegate):
+            # Only clear document and sizeHint caches (width-dependent)
+            # Keep segment cache (width-independent) for performance
+            delegate._document_cache.clear()
+            delegate._doc_cache_access_order.clear()
+            delegate._size_hint_cache.clear()
 
 
 class LogFileDetector(QObject):
@@ -1783,8 +1941,9 @@ class LogViewerWindow(QMainWindow):
         self.log_view.setUniformItemSizes(False)
         self.log_view.setWordWrap(True)
         self.log_view.setResizeMode(QListView.ResizeMode.Adjust)
-        self.log_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.log_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        # Disable Qt's native row selection - we use custom text selection instead
+        self.log_view.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.log_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.log_view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.log_view.setFont(QFont("Consolas", 10))  # Monospace font for logs
         self.log_delegate = LogItemDelegate(LogColorScheme.create_dark_theme(), self.log_view)
@@ -1820,11 +1979,16 @@ class LogViewerWindow(QMainWindow):
 
         main_layout.addLayout(control_layout)
 
-        # Setup window-local Ctrl+F shortcut
+        # Setup window-local shortcuts
         search_action = QAction("Search", self)
         search_action.setShortcut("Ctrl+F")
         search_action.triggered.connect(self.toggle_search_toolbar)
         self.addAction(search_action)
+
+        select_all_action = QAction("Select All", self)
+        select_all_action.setShortcut("Ctrl+A")
+        select_all_action.triggered.connect(self.log_view.selectAllText)
+        self.addAction(select_all_action)
 
         logger.debug("LogViewerWindow UI setup complete")
 
@@ -2368,9 +2532,11 @@ class LogViewerWindow(QMainWindow):
             # Reset cursor for new search set.
             self._search_match_cursor = -1
 
-            # Update delegate highlighting state.
+            # Update delegate highlighting state and pre-compute match rows for fast paint
             if self.log_delegate is not None:
                 self.log_delegate.set_search_state(self.current_search_text, self._search_case_sensitive)
+                # Pre-populate search match rows for O(1) lookup during paint
+                self.log_delegate._search_match_rows = set(self._search_matches)
             if self.log_view is not None:
                 self.log_view.viewport().update()
 
