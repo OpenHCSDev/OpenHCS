@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Hashable, Optional, Set, Type
+from typing import Any, Callable, Dict, Hashable, Iterable, Optional, Set, Tuple, Type
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,11 @@ class CrossWindowPreviewMixin:
     # Trailing debounce: timer restarts on each change, only executes after typing stops
     PREVIEW_UPDATE_DEBOUNCE_MS = 100
 
+    # Scope resolver sentinels
+    ALL_ITEMS_SCOPE = "__ALL_ITEMS_SCOPE__"
+    FULL_REFRESH_SCOPE = "__FULL_REFRESH__"
+    ROOTLESS_SCOPE = "__ROOTLESS__"
+
     def _init_cross_window_preview_mixin(self) -> None:
         self._preview_scope_map: Dict[str, Hashable] = {}
         self._pending_preview_keys: Set[Hashable] = set()
@@ -43,6 +48,13 @@ class CrossWindowPreviewMixin:
 
         # Per-widget preview field configuration
         self._preview_fields: Dict[str, Callable] = {}  # field_path -> formatter function
+        self._preview_field_roots: Dict[str, Optional[str]] = {}
+        self._preview_field_index: Dict[str, Set[str]] = {self.ROOTLESS_SCOPE: set()}
+
+        # Scope registration metadata
+        self._preview_scope_handlers: list[Dict[str, Any]] = []
+        self._preview_scope_aliases: Dict[str, str] = {}
+        self._preview_scope_registry: Dict[str, Dict[str, Any]] = {}
 
         # CRITICAL: Register as external listener for cross-window refresh signals
         # This makes preview labels reactive to live context changes
@@ -68,7 +80,41 @@ class CrossWindowPreviewMixin:
             del self._preview_scope_map[scope_id]
 
     # --- Preview field configuration -------------------------------------------
-    def enable_preview_for_field(self, field_path: str, formatter: Optional[Callable[[Any], str]] = None) -> None:
+    def register_preview_scope(
+        self,
+        root_name: str,
+        editing_types: Iterable[Type],
+        scope_resolver: Callable[[Any, Any], Optional[str]],
+        *,
+        aliases: Optional[Iterable[str]] = None,
+        process_all_fields: bool = False,
+    ) -> None:
+        """Register how editing objects map to scope identifiers."""
+        types_tuple: Tuple[Type, ...] = tuple(editing_types)
+        entry = {
+            "root": root_name,
+            "types": types_tuple,
+            "resolver": scope_resolver,
+            "process_all_fields": process_all_fields,
+        }
+        self._preview_scope_handlers.append(entry)
+        self._preview_scope_registry[root_name] = entry
+
+        # Register canonical alias + provided aliases
+        self._preview_scope_aliases[root_name] = root_name
+        self._preview_scope_aliases[root_name.lower()] = root_name
+        if aliases:
+            for alias in aliases:
+                self._preview_scope_aliases[alias] = root_name
+                self._preview_scope_aliases[alias.lower()] = root_name
+
+    def enable_preview_for_field(
+        self,
+        field_path: str,
+        formatter: Optional[Callable[[Any], str]] = None,
+        *,
+        scope_root: Optional[str] = None,
+    ) -> None:
         """Enable preview label for a specific field.
 
         This allows per-widget control over which configuration fields are shown
@@ -94,6 +140,14 @@ class CrossWindowPreviewMixin:
         """
         self._preview_fields[field_path] = formatter or str
 
+        canonical_root = self._canonicalize_root(scope_root) if scope_root else None
+        self._preview_field_roots[field_path] = canonical_root
+
+        index_key = canonical_root or self.ROOTLESS_SCOPE
+        if index_key not in self._preview_field_index:
+            self._preview_field_index[index_key] = set()
+        self._preview_field_index[index_key].add(field_path)
+
     def disable_preview_for_field(self, field_path: str) -> None:
         """Disable preview label for a specific field.
 
@@ -101,6 +155,13 @@ class CrossWindowPreviewMixin:
             field_path: Dot-separated field path to disable
         """
         self._preview_fields.pop(field_path, None)
+
+        root = self._preview_field_roots.pop(field_path, None)
+        index_key = root or self.ROOTLESS_SCOPE
+        if index_key in self._preview_field_index:
+            self._preview_field_index[index_key].discard(field_path)
+            if not self._preview_field_index[index_key]:
+                del self._preview_field_index[index_key]
 
     def is_preview_enabled(self, field_path: str) -> bool:
         """Check if preview is enabled for a specific field.
@@ -163,12 +224,15 @@ class CrossWindowPreviewMixin:
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
 
         # Add affected items to pending set
-        if scope_id in ("PIPELINE_CONFIG_CHANGE", "GLOBAL_CONFIG_CHANGE"):
+        if scope_id == self.ALL_ITEMS_SCOPE:
             # Refresh ALL items (add all item keys to pending updates)
             # Generic: works with any item key type (int for steps, str for plates, etc.)
             all_item_keys = list(self._preview_scope_map.values())
             for item_key in all_item_keys:
                 self._pending_preview_keys.add(item_key)
+        elif scope_id == self.FULL_REFRESH_SCOPE:
+            self._schedule_preview_update(full_refresh=True)
+            return
         elif scope_id and scope_id in self._preview_scope_map:
             item_key = self._preview_scope_map[scope_id]
             self._pending_preview_keys.add(item_key)
@@ -205,12 +269,16 @@ class CrossWindowPreviewMixin:
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
 
         # Add affected items to pending set (same logic as handle_cross_window_preview_change)
-        if scope_id in ("PIPELINE_CONFIG_CHANGE", "GLOBAL_CONFIG_CHANGE"):
+        if scope_id == self.ALL_ITEMS_SCOPE:
             # Refresh ALL items
             all_item_keys = list(self._preview_scope_map.values())
             for item_key in all_item_keys:
                 self._pending_preview_keys.add(item_key)
             logger.info(f"handle_cross_window_preview_refresh: Refreshing ALL items ({len(all_item_keys)} items)")
+        elif scope_id == self.FULL_REFRESH_SCOPE:
+            logger.info("handle_cross_window_preview_refresh: Forcing full refresh via resolver")
+            self._schedule_preview_update(full_refresh=True)
+            return
         elif scope_id and scope_id in self._preview_scope_map:
             item_key = self._preview_scope_map[scope_id]
             self._pending_preview_keys.add(item_key)
@@ -322,13 +390,52 @@ class CrossWindowPreviewMixin:
         context_object: Any,
     ) -> bool:
         """Return True if a cross-window change should trigger a preview update."""
-        raise NotImplementedError
+        if not field_path:
+            return True
+
+        if "__WINDOW_CLOSED__" in field_path:
+            return True
+
+        root_token, attr_path = self._split_field_path(field_path)
+        canonical_root = self._canonicalize_root(root_token)
+
+        if canonical_root is None:
+            return self._matches_rootless_field(field_path)
+
+        scope_entry = self._preview_scope_registry.get(canonical_root)
+        if not scope_entry:
+            return False
+
+        if not attr_path:
+            return True
+
+        tracked_fields = self._preview_field_index.get(canonical_root, set())
+        if not tracked_fields:
+            return scope_entry.get("process_all_fields", False)
+
+        for tracked_field in tracked_fields:
+            if self._attr_path_matches(tracked_field, attr_path):
+                return True
+
+        return scope_entry.get("process_all_fields", False)
 
     def _extract_scope_id_for_preview(
         self, editing_object: Any, context_object: Any
     ) -> Optional[str]:
         """Extract the relevant scope identifier from the editing/context objects."""
-        raise NotImplementedError
+        entry = self._find_scope_entry_for_object(editing_object)
+        if not entry:
+            return None
+
+        resolver = entry.get("resolver")
+        if not resolver:
+            return None
+
+        try:
+            return resolver(editing_object, context_object)
+        except Exception:
+            logger.exception("Preview scope resolver failed", exc_info=True)
+            return None
 
     def _process_pending_preview_updates(self) -> None:
         """Apply incremental updates for all pending preview keys."""
@@ -337,3 +444,41 @@ class CrossWindowPreviewMixin:
     def _handle_full_preview_refresh(self) -> None:
         """Fallback handler when incremental updates are not possible."""
         raise NotImplementedError
+
+    # --- Helper methods -------------------------------------------------------
+    def _canonicalize_root(self, root: Optional[str]) -> Optional[str]:
+        if root is None:
+            return None
+        if root in self._preview_scope_aliases:
+            return self._preview_scope_aliases[root]
+        lowered = root.lower()
+        return self._preview_scope_aliases.get(lowered)
+
+    def _split_field_path(self, field_path: str) -> Tuple[Optional[str], str]:
+        parts = field_path.split(".", 1)
+        if len(parts) == 1:
+            return parts[0], ""
+        return parts[0], parts[1]
+
+    def _attr_path_matches(self, tracked_path: str, attr_path: str) -> bool:
+        if not tracked_path:
+            return True
+        return attr_path == tracked_path or attr_path.startswith(f"{tracked_path}.")
+
+    def _matches_rootless_field(self, field_path: str) -> bool:
+        tracked_fields = self._preview_field_index.get(self.ROOTLESS_SCOPE, set())
+        for tracked in tracked_fields:
+            if field_path == tracked or field_path.startswith(f"{tracked}."):
+                return True
+        return False
+
+    def _find_scope_entry_for_object(self, editing_object: Any) -> Optional[Dict[str, Any]]:
+        if editing_object is None:
+            return None
+
+        for entry in self._preview_scope_handlers:
+            for type_candidate in entry.get("types", ()):
+                if isinstance(editing_object, type_candidate):
+                    return entry
+
+        return None

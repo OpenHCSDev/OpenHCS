@@ -43,34 +43,36 @@ Reusable mixin for widgets that consume cross-window updates. The mixin provides
            super().__init__()
            self._init_cross_window_preview_mixin()
 
+           # Map editing objects to hierarchical scope ids
+           self.register_preview_scope(
+               root_name='step',
+               editing_types=(FunctionStep,),
+               scope_resolver=lambda step, ctx: self._build_step_scope_id(step),
+               aliases=('FunctionStep',),
+           )
+           self.register_preview_scope(
+               root_name='global_config',
+               editing_types=(GlobalPipelineConfig,),
+               scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
+               aliases=('GlobalPipelineConfig',),
+               process_all_fields=True,
+           )
+
            # Configure which fields to show in previews
            self.enable_preview_for_field(
                'napari_streaming_config.enabled',
-               lambda v: 'N:✓' if v else 'N:✗'
+               lambda v: 'N:✓' if v else 'N:✗',
+               scope_root='step'
            )
            self.enable_preview_for_field(
                'fiji_streaming_config.enabled',
-               lambda v: 'F:✓' if v else 'F:✗'
+               lambda v: 'F:✓' if v else 'F:✗',
+               scope_root='step'
            )
            self.enable_preview_for_field(
                'roi_streaming_config.enabled',
-               lambda v: 'R:✓' if v else 'R:✗'
-           )
-
-           # Register as external listener
-           # NOTE: CrossWindowPreviewMixin automatically registers with both handlers
-           # value_changed_handler: Incremental updates when fields change
-           # refresh_handler: Full refresh when reset buttons are clicked
-           ParameterFormManager.register_external_listener(
-               self,
-               value_changed_handler=self._on_cross_window_context_changed,
-               refresh_handler=None  # Optional (mixin provides default)
-           )
-
-       def _on_cross_window_context_changed(self, field_path, new_value,
-                                           editing_object, context_object):
-           self.handle_cross_window_preview_change(
-               field_path, new_value, editing_object, context_object
+               lambda v: 'R:✓' if v else 'R:✗',
+               scope_root='step'
            )
 
 **Configurable Preview Fields**
@@ -82,11 +84,15 @@ The mixin provides methods to control which configuration fields are shown in pr
    # Enable preview for a field with custom formatter
    self.enable_preview_for_field(
        'global_config.num_workers',
-       lambda v: f'Workers: {v}'
+       lambda v: f'Workers: {v}',
+       scope_root='global_config'
    )
 
    # Enable preview with default str() formatter
-   self.enable_preview_for_field('pipeline_config.well_filter')
+   self.enable_preview_for_field(
+       'pipeline_config.well_filter',
+       scope_root='pipeline_config'
+   )
 
    # Disable preview for a field
    self.disable_preview_for_field('global_config.num_workers')
@@ -102,6 +108,34 @@ The mixin provides methods to control which configuration fields are shown in pr
    # Get all enabled preview fields
    enabled_fields = self.get_enabled_preview_fields()
    # Returns: {'napari_streaming_config.enabled', 'fiji_streaming_config.enabled', ...}
+
+**Scope registration**
+
+``register_preview_scope`` wires editing objects to scope ids used for incremental updates:
+
+.. code-block:: python
+
+   self.register_preview_scope(
+       root_name='step',
+       editing_types=(FunctionStep,),
+       scope_resolver=lambda step, ctx: self._build_step_scope_id(step),
+       aliases=('FunctionStep', 'step'),
+   )
+
+   self.register_preview_scope(
+       root_name='global_config',
+       editing_types=(GlobalPipelineConfig,),
+       scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
+       aliases=('global_config', 'GlobalPipelineConfig'),
+       process_all_fields=True,  # Refresh even if field not explicitly registered
+   )
+
+Key details:
+
+- ``aliases`` lets you support both lowercase and class-name prefixes in ``field_path``.
+- ``scope_root`` in ``enable_preview_for_field`` links a field to the corresponding scope registration.
+- ``process_all_fields=True`` tells the mixin to refresh items for any change under that root, even if the field is not explicitly registered (useful for pipeline/global configs that affect everything).
+- ``ALL_ITEMS_SCOPE`` refreshes every registered item; ``FULL_REFRESH_SCOPE`` triggers ``_handle_full_preview_refresh``; ``ROOTLESS_SCOPE`` tracks fields without a declared root.
 
 **Centralized Config Formatters**
 
@@ -253,23 +287,10 @@ Map scope IDs to item keys for incremental updates:
 
 **Implementing Mixin Hooks**
 
-Subclasses must implement four hooks:
+After registering scopes/fields, subclasses still implement the operational hooks:
 
 .. code-block:: python
 
-   def _should_process_preview_field(self, field_path, new_value, 
-                                     editing_object, context_object) -> bool:
-       """Return True if field affects preview display."""
-       # Check if field is in STEP_PREVIEW_FIELDS
-       # Check if field is pipeline/global config (affects all)
-       
-   def _extract_scope_id_for_preview(self, editing_object, 
-                                     context_object) -> Optional[str]:
-       """Extract scope ID from editing object."""
-       # Return step-specific scope for FunctionStep
-       # Return "PIPELINE_CONFIG_CHANGE" for PipelineConfig
-       # Return "GLOBAL_CONFIG_CHANGE" for GlobalPipelineConfig
-       
    def _process_pending_preview_updates(self) -> None:
        """Apply incremental updates for pending keys."""
        # Collect live context ONCE
@@ -278,6 +299,10 @@ Subclasses must implement four hooks:
    def _handle_full_preview_refresh(self) -> None:
        """Fallback when incremental updates not possible."""
        # Call update_step_list() or equivalent
+
+   def _merge_with_live_values(...):
+       """Merge live overrides into objects returned by _get_preview_instance."""
+       # Widget-specific merge logic
 
 **Performance Impact**
 
@@ -722,4 +747,3 @@ When editing ``WellFilterConfig.well_filter`` in ``PipelineConfig``:
 - Before: 3-5 sibling refreshes per keystroke (all siblings)
 - After: 0-2 sibling refreshes per keystroke (only affected siblings)
 - Measured improvement: ~5-10ms per keystroke in complex configs
-

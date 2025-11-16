@@ -118,9 +118,6 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Live context resolver for config attribute resolution
         self._live_context_resolver = LiveContextResolver()
 
-        # Configure preview fields for plate list items
-        self._configure_preview_fields()
-
         # Business logic state (extracted from Textual version)
         self.plates: List[Dict] = []  # List of plate dictionaries
         self.selected_plate_path: str = ""
@@ -137,6 +134,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Track per-plate execution state
         self.plate_execution_ids: Dict[str, str] = {}  # plate_path -> execution_id
         self.plate_execution_states: Dict[str, str] = {}  # plate_path -> "queued" | "running" | "completed" | "failed"
+
+        # Configure preview routing + fields
+        self._register_preview_scopes()
+        self._configure_preview_fields()
         
         # UI components
         self.plate_list: Optional[QListWidget] = None
@@ -193,6 +194,35 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
     # ========== CrossWindowPreviewMixin Configuration ==========
 
+    def _register_preview_scopes(self) -> None:
+        """Configure scope resolvers used by CrossWindowPreviewMixin."""
+        from openhcs.core.config import GlobalPipelineConfig, PipelineConfig
+        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
+
+        self.register_preview_scope(
+            root_name='pipeline_config',
+            editing_types=(PipelineConfig,),
+            scope_resolver=self._resolve_pipeline_scope_from_config,
+            aliases=('PipelineConfig',),
+            process_all_fields=True,
+        )
+
+        self.register_preview_scope(
+            root_name='global_config',
+            editing_types=(GlobalPipelineConfig,),
+            scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
+            aliases=('GlobalPipelineConfig',),
+            process_all_fields=True,
+        )
+
+        self.register_preview_scope(
+            root_name='orchestrator',
+            editing_types=(PipelineOrchestrator,),
+            scope_resolver=lambda obj, ctx: str(getattr(obj, 'plate_path', '')) or self.ALL_ITEMS_SCOPE,
+            aliases=('PipelineOrchestrator',),
+            process_all_fields=True,
+        )
+
     def _configure_preview_fields(self):
         """Configure which config fields show preview labels in plate list.
 
@@ -201,12 +231,21 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         """
         # Streaming config previews (uses centralized CONFIG_INDICATORS: NAP, FIJI)
         # Only shown if enabled=True
-        self.enable_preview_for_field('napari_streaming_config', None)
-        self.enable_preview_for_field('fiji_streaming_config', None)
+        self.enable_preview_for_field(
+            'napari_streaming_config',
+            scope_root='pipeline_config'
+        )
+        self.enable_preview_for_field(
+            'fiji_streaming_config',
+            scope_root='pipeline_config'
+        )
 
         # Materialization config preview (uses centralized CONFIG_INDICATORS: MAT)
         # Only shown if enabled=True
-        self.enable_preview_for_field('step_materialization_config', None)
+        self.enable_preview_for_field(
+            'step_materialization_config',
+            scope_root='pipeline_config'
+        )
 
         # FILT should never be shown (per user requirement)
         # self.enable_preview_for_field('well_filter_config', None)
@@ -214,61 +253,25 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Execution config preview (plate-specific, not in pipeline editor)
         self.enable_preview_for_field(
             'num_workers',
-            lambda v: f'W:{v}' if v and v > 1 else None
+            lambda v: f'W:{v if v is not None else 0}',
+            scope_root='pipeline_config'
         )
 
         # Sequential processing preview (plate-specific, not in pipeline editor)
         self.enable_preview_for_field(
             'sequential_processing_config.sequential_components',
-            lambda v: f'Seq:{",".join(c.value for c in v)}' if v else None
+            lambda v: f'Seq:{",".join(c.value for c in v)}' if v else None,
+            scope_root='pipeline_config'
         )
 
+    def _resolve_pipeline_scope_from_config(self, config_obj, context_obj) -> str:
+        """Return plate scope for a PipelineConfig instance."""
+        for plate_path, orchestrator in self.orchestrators.items():
+            if orchestrator.pipeline_config is config_obj:
+                return str(plate_path)
+        return self.ALL_ITEMS_SCOPE
+
     # ========== CrossWindowPreviewMixin Hooks ==========
-
-    def _should_process_preview_field(
-        self,
-        field_path: Optional[str],
-        new_value,
-        editing_object,
-        context_object
-    ) -> bool:
-        """Return True if field affects plate preview display."""
-        # Check if field is in our configured preview fields
-        if field_path and self.is_preview_enabled(field_path):
-            return True
-
-        # Also process pipeline/global config changes (affect all plates)
-        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
-        if isinstance(editing_object, (PipelineConfig, GlobalPipelineConfig)):
-            return True
-
-        return False
-
-    def _extract_scope_id_for_preview(
-        self, editing_object, context_object
-    ) -> Optional[str]:
-        """Extract scope ID from editing object."""
-        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
-        from openhcs.core.orchestrator.orchestrator import PipelineOrchestrator
-
-        # Global config changes affect all plates
-        if isinstance(editing_object, GlobalPipelineConfig):
-            return "GLOBAL_CONFIG_CHANGE"
-
-        # Pipeline config changes - need to find which plate(s) this affects
-        if isinstance(editing_object, PipelineConfig):
-            # Check if this config belongs to a specific orchestrator
-            for plate_path, orchestrator in self.orchestrators.items():
-                if orchestrator.pipeline_config is editing_object:
-                    return str(plate_path)
-            # If not found, affect all plates
-            return "PIPELINE_CONFIG_CHANGE"
-
-        # Orchestrator changes
-        if isinstance(editing_object, PipelineOrchestrator):
-            return str(editing_object.plate_path)
-
-        return None
 
     def _process_pending_preview_updates(self) -> None:
         """Apply incremental updates for pending plate keys."""
@@ -388,32 +391,31 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
             # Check each enabled preview field
             for field_path in self.get_enabled_preview_fields():
-                # Navigate to the field value
-                parts = field_path.split('.')
-                value = config_for_display
+                value = self._resolve_preview_field_value(
+                    pipeline_config_for_display=config_for_display,
+                    field_path=field_path,
+                    live_context_snapshot=live_context_snapshot
+                )
 
-                for part in parts:
-                    value = getattr(value, part, None)
-                    if value is None:
-                        break
+                if value is None:
+                    continue
 
-                # Format the value if found
-                if value is not None:
-                    # Use centralized formatter for config objects
-                    if len(parts) == 1 and hasattr(value, '__dataclass_fields__'):
-                        # This is a config object - use centralized formatter with resolver
-                        # Create resolver function that uses live context (same pattern as PipelineEditor)
-                        # CRITICAL: Pass config_for_display (with live values merged) to resolver
-                        def resolve_attr(parent_obj, config_obj, attr_name, context):
-                            return self._resolve_config_attr(config_for_display, config_obj, attr_name, live_context_snapshot)
+                if hasattr(value, '__dataclass_fields__'):
+                    # Config object - use centralized formatter with resolver
+                    def resolve_attr(parent_obj, config_obj, attr_name, context):
+                        return self._resolve_config_attr(
+                            config_for_display,
+                            config_obj,
+                            attr_name,
+                            live_context_snapshot
+                        )
 
-                        formatted = format_config_indicator(field_path, value, resolve_attr)
-                    else:
-                        # This is a simple value - use registered formatter
-                        formatted = self.format_preview_value(field_path, value)
+                    formatted = format_config_indicator(field_path, value, resolve_attr)
+                else:
+                    formatted = self.format_preview_value(field_path, value)
 
-                    if formatted:  # Only add non-empty formatted values
-                        labels.append(formatted)
+                if formatted:
+                    labels.append(formatted)
         except Exception as e:
             import traceback
             logger.error(f"Error building config preview labels: {e}")
@@ -502,6 +504,31 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             # Fallback to raw value
             raw_value = object.__getattribute__(config, attr_name)
             return raw_value
+
+    def _resolve_preview_field_value(
+        self,
+        pipeline_config_for_display,
+        field_path: str,
+        live_context_snapshot=None
+    ):
+        """Resolve a preview field path using the live context resolver."""
+        parts = field_path.split('.')
+        current_obj = pipeline_config_for_display
+        resolved_value = None
+
+        for part in parts:
+            if current_obj is None:
+                return None
+
+            resolved_value = self._resolve_config_attr(
+                pipeline_config_for_display,
+                current_obj,
+                part,
+                live_context_snapshot
+            )
+            current_obj = resolved_value
+
+        return resolved_value
 
     # ========== UI Setup ==========
 

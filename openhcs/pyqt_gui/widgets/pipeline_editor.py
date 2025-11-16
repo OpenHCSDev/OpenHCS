@@ -56,17 +56,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
     STEP_CONFIG_INDICATORS = None  # Populated in __init__ from CONFIG_INDICATORS
 
     STEP_SCOPE_ATTR = "_pipeline_scope_token"
-    STEP_PREVIEW_FIELDS = {
-        'func',
-        'variable_components',
-        'group_by',
-        'processing_config',
-        'step_materialization_config',
-        'step_well_filter_config',  # Still track for preview updates, just don't show FILT label
-        'napari_streaming_config',
-        'fiji_streaming_config',
-    }
-
     # Signals
     pipeline_changed = pyqtSignal(list)  # List[FunctionStep]
     step_selected = pyqtSignal(object)  # FunctionStep
@@ -120,6 +109,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self._next_scope_token = 0
 
         self._init_cross_window_preview_mixin()
+        self._register_preview_scopes()
+        self._configure_step_preview_fields()
 
         # Import centralized config indicators (single source of truth)
         from openhcs.pyqt_gui.widgets.config_preview_formatters import CONFIG_INDICATORS
@@ -274,6 +265,52 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self.pipeline_changed.connect(self.on_pipeline_changed)
 
         # Note: ParameterFormManager registration is handled by CrossWindowPreviewMixin._init_cross_window_preview_mixin()
+
+    def _register_preview_scopes(self) -> None:
+        """Configure scope resolvers for cross-window preview updates."""
+        from openhcs.core.steps.function_step import FunctionStep
+        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
+
+        self.register_preview_scope(
+            root_name='step',
+            editing_types=(FunctionStep,),
+            scope_resolver=lambda step, ctx: self._build_step_scope_id(step) or self.ALL_ITEMS_SCOPE,
+            aliases=('FunctionStep', 'step'),
+        )
+
+        self.register_preview_scope(
+            root_name='pipeline_config',
+            editing_types=(PipelineConfig,),
+            scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
+            aliases=('PipelineConfig',),
+            process_all_fields=True,
+        )
+
+        self.register_preview_scope(
+            root_name='global_config',
+            editing_types=(GlobalPipelineConfig,),
+            scope_resolver=lambda obj, ctx: self.ALL_ITEMS_SCOPE,
+            aliases=('GlobalPipelineConfig',),
+            process_all_fields=True,
+        )
+
+    def _configure_step_preview_fields(self) -> None:
+        """Register which step fields affect list previews."""
+        tracked_fields = [
+            'func',
+            'variable_components',
+            'group_by',
+            'processing_config.group_by',
+            'processing_config.variable_components',
+            'processing_config.input_source',
+            'step_materialization_config',
+            'step_well_filter_config',
+            'napari_streaming_config',
+            'fiji_streaming_config',
+        ]
+
+        for field_path in tracked_fields:
+            self.enable_preview_for_field(field_path, scope_root='step')
     
     def handle_button_action(self, action: str):
         """
@@ -1020,73 +1057,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             if scope_id:
                 scope_map[scope_id] = idx
         return scope_map
-
-    # --- CrossWindowPreviewMixin hooks -------------------------------------------------
-
-    def _should_process_preview_field(
-        self,
-        field_path: Optional[str],
-        new_value: object,
-        editing_object: object,
-        context_object: object,
-    ) -> bool:
-        if not field_path:
-            return True
-
-        # Special marker for window close - always process
-        if '__WINDOW_CLOSED__' in field_path:
-            return True
-
-        parts = field_path.split('.', 1)
-        root = parts[0]
-
-        # Check for both lowercase and class name versions
-        # field_id can be 'step', 'pipeline_config', 'global_config' (lowercase)
-        # OR 'PipelineConfig', 'GlobalPipelineConfig' (class names)
-        if root not in {'step', 'pipeline_config', 'global_config', 'PipelineConfig', 'GlobalPipelineConfig'}:
-            return False
-
-        # Pipeline/global config changes affect all previews
-        if root in {'pipeline_config', 'global_config', 'PipelineConfig', 'GlobalPipelineConfig'}:
-            return True
-
-        # Step-level changes: only process if field affects preview
-        if len(parts) == 1:
-            return False
-
-        param_path = parts[1]
-        top_level = param_path.split('.', 1)[0]
-        if top_level in self.STEP_PREVIEW_FIELDS:
-            return True
-
-        if top_level == 'processing_config':
-            nested = param_path.split('.', 2)
-            if len(nested) >= 2 and nested[1] in {'group_by', 'variable_components', 'input_source'}:
-                return True
-
-        return False
-
-    def _extract_scope_id_for_preview(self, editing_object: object, context_object: object) -> Optional[str]:
-        from openhcs.core.steps.function_step import FunctionStep
-        from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
-
-        # Step-level changes: return step-specific scope
-        if isinstance(editing_object, FunctionStep):
-            token = getattr(editing_object, self.STEP_SCOPE_ATTR, None)
-            if token:
-                plate_scope = self.current_plate or "no_plate"
-                return f"{plate_scope}::{token}"
-
-        # Pipeline config changes: return plate scope (affects all steps in this plate)
-        elif isinstance(editing_object, PipelineConfig):
-            # Return special marker to indicate "all steps in this plate"
-            return "PIPELINE_CONFIG_CHANGE"
-
-        # Global config changes: return special marker to indicate "all steps everywhere"
-        elif isinstance(editing_object, GlobalPipelineConfig):
-            return "GLOBAL_CONFIG_CHANGE"
-
-        return None
 
     def _process_pending_preview_updates(self) -> None:
         if not self._pending_preview_keys:
