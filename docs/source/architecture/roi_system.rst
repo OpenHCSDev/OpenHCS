@@ -88,7 +88,7 @@ Use ``skan.Skeleton`` to extract actual branch paths:
 .. code-block:: python
 
     from skan import Skeleton
-    from openhcs.core.roi import PolygonShape, ROI
+    from openhcs.core.roi import PolylineShape, ROI
 
     # Create skan Skeleton object
     skeleton_obj = Skeleton(skeleton_mask)
@@ -99,8 +99,9 @@ Use ``skan.Skeleton`` to extract actual branch paths:
         # Returns (N, 2) array of (row, col) = (y, x) coordinates
         path_coords = skeleton_obj.path_coordinates(branch_idx)
 
-        # Create polygon shape from path coordinates
-        shape = PolygonShape(coordinates=path_coords)
+        # Create polyline shape from path coordinates
+        # PolylineShape is for open paths (not closed polygons)
+        shape = PolylineShape(coordinates=path_coords)
 
         # Create ROI with metadata
         metadata = {

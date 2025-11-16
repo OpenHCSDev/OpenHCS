@@ -990,6 +990,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 plate_path=plate_path,
                 storage_registry=plate_registry
             )
+            saved_config = self.plate_configs.get(str(plate_path))
+            if saved_config:
+                orchestrator.apply_pipeline_config(saved_config)
+
             # Only run heavy initialization in worker thread
             # Need to set up context in worker thread too since initialize() runs there
             def initialize_with_context():
@@ -1091,6 +1095,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 logger.debug(f"🔍 CONFIG SAVE - new_config.{field.name} = {raw_value}")
 
             for orchestrator in selected_orchestrators:
+                plate_key = str(orchestrator.plate_path)
+                self.plate_configs[plate_key] = new_config
                 # Direct synchronous call - no async needed
                 orchestrator.apply_pipeline_config(new_config)
                 # Emit signal for UI components to refresh
@@ -1284,6 +1290,9 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                         plate_path=plate_path,
                         storage_registry=plate_registry
                     )
+                    saved_config = self.plate_configs.get(str(plate_path))
+                    if saved_config:
+                        orchestrator.apply_pipeline_config(saved_config)
                     # Only run heavy initialization in worker thread
                     # Need to set up context in worker thread too since initialize() runs there
                     def initialize_with_context():
@@ -1951,8 +1960,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         selected_items = self.get_selected_plates()
         if not selected_items:
-            self.service_adapter.show_error_dialog("No plates selected for code generation")
-            return
+            if self.plates:
+                logger.info("Code button pressed with no selection, falling back to all plates.")
+                selected_items = list(self.plates)
+            else:
+                logger.info("Code button pressed with no plates configured; generating empty template.")
+                selected_items = []
 
         try:
             # Collect plate paths, pipeline data, and per-plate pipeline configs
@@ -2024,6 +2037,43 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         from openhcs.introspection import patch_lazy_constructors
         return patch_lazy_constructors()
 
+    def _ensure_plate_entries_from_code(self, plate_paths: List[str]) -> None:
+        """Ensure that any plates referenced in orchestrator code exist in the UI list."""
+        if not plate_paths:
+            return
+
+        existing_paths = {str(plate['path']) for plate in self.plates}
+        added_count = 0
+
+        for plate_path in plate_paths:
+            plate_str = str(plate_path)
+            if plate_str in existing_paths:
+                continue
+
+            plate_name = Path(plate_str).name or plate_str
+            self.plates.append({'name': plate_name, 'path': plate_str})
+            existing_paths.add(plate_str)
+            added_count += 1
+            logger.info(f"Added plate '{plate_name}' from orchestrator code")
+
+        if added_count:
+            if self.plate_list:
+                self.update_plate_list()
+            status_message = f"Added {added_count} plate(s) from orchestrator code"
+            self.status_message.emit(status_message)
+            logger.info(status_message)
+
+    def _get_orchestrator_for_path(self, plate_path: str):
+        """Return orchestrator instance for the provided plate path string."""
+        plate_key = str(plate_path)
+        if plate_key in self.orchestrators:
+            return self.orchestrators[plate_key]
+
+        for key, orchestrator in self.orchestrators.items():
+            if str(key) == plate_key:
+                return orchestrator
+        return None
+
     def _handle_edited_orchestrator_code(self, edited_code: str):
         """Handle edited orchestrator code and update UI state (same logic as Textual TUI)."""
         logger.debug("Orchestrator code edited, processing changes...")
@@ -2042,6 +2092,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             if 'plate_paths' in namespace and 'pipeline_data' in namespace:
                 new_plate_paths = namespace['plate_paths']
                 new_pipeline_data = namespace['pipeline_data']
+                self._ensure_plate_entries_from_code(new_plate_paths)
 
                 # Update global config if present
                 if 'global_config' in namespace:
@@ -2079,27 +2130,21 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                     # ParameterFormManager will use object.__getattribute__ to inspect raw values
                     # Raw None = inherited, Raw concrete = user-set (same pattern as pickle_to_python)
 
-                    # CRITICAL FIX: Match string keys to actual plate path objects
-                    # The keys in per_plate_configs are strings, but orchestrators dict uses Path/str objects
                     last_pipeline_config = None  # Track last config for broadcasting
                     for plate_path_str, new_pipeline_config in per_plate_configs.items():
-                        # Find matching orchestrator by comparing string representations
-                        matched_orchestrator = None
-                        for orch_key, orchestrator in self.orchestrators.items():
-                            if str(orch_key) == str(plate_path_str):
-                                matched_orchestrator = orchestrator
-                                matched_key = orch_key
-                                break
+                        plate_key = str(plate_path_str)
+                        self.plate_configs[plate_key] = new_pipeline_config
 
-                        if matched_orchestrator:
-                            matched_orchestrator.apply_pipeline_config(new_pipeline_config)
-                            # Emit signal for UI components to refresh (including config windows)
-                            effective_config = matched_orchestrator.get_effective_config()
-                            self.orchestrator_config_changed.emit(str(matched_key), effective_config)
-                            last_pipeline_config = new_pipeline_config
-                            logger.debug(f"Applied per-plate pipeline config to orchestrator: {matched_key}")
+                        orchestrator = self._get_orchestrator_for_path(plate_key)
+                        if orchestrator:
+                            orchestrator.apply_pipeline_config(new_pipeline_config)
+                            effective_config = orchestrator.get_effective_config()
+                            self.orchestrator_config_changed.emit(str(orchestrator.plate_path), effective_config)
+                            logger.debug(f"Applied per-plate pipeline config to orchestrator: {orchestrator.plate_path}")
                         else:
-                            logger.warning(f"No orchestrator found for plate path: {plate_path_str}")
+                            logger.info(f"Stored pipeline config for {plate_key}; will apply when initialized.")
+
+                        last_pipeline_config = new_pipeline_config
 
                     # CRITICAL: Broadcast PipelineConfig to event bus ONCE after all updates
                     # This ensures ConfigWindow instances showing PipelineConfig will update
@@ -2328,7 +2373,11 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         """Update button enabled/disabled states based on selection."""
         selected_plates = self.get_selected_plates()
         has_selection = len(selected_plates) > 0
-        has_initialized = any(plate['path'] in self.orchestrators for plate in selected_plates)
+        def _plate_is_initialized(plate_dict):
+            orchestrator = self.orchestrators.get(plate_dict['path'])
+            return orchestrator and orchestrator.state != OrchestratorState.CREATED
+
+        has_initialized = any(_plate_is_initialized(plate) for plate in selected_plates)
         has_compiled = any(plate['path'] in self.plate_compiled_data for plate in selected_plates)
         is_running = self.is_any_plate_running()
 
@@ -2337,7 +2386,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         self.buttons["edit_config"].setEnabled(has_initialized and not is_running)
         self.buttons["init_plate"].setEnabled(has_selection and not is_running)
         self.buttons["compile_plate"].setEnabled(has_initialized and not is_running)
-        self.buttons["code_plate"].setEnabled(has_initialized and not is_running)
+        # Code button available even without initialized plates so users can edit templates
+        self.buttons["code_plate"].setEnabled(not is_running)
         self.buttons["view_metadata"].setEnabled(has_initialized and not is_running)
 
         # Run button - enabled if plates are compiled or if currently running (for stop)

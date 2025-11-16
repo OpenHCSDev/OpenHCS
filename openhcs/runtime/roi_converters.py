@@ -22,6 +22,10 @@ class NapariROIConverter:
             np.tile(prepend_dims, (len(shape_dict['coordinates']), 1)),
             np.array(shape_dict['coordinates'])
         ]),
+        'polyline': lambda shape_dict, prepend_dims: np.hstack([
+            np.tile(prepend_dims, (len(shape_dict['coordinates']), 1)),
+            np.array(shape_dict['coordinates'])
+        ]),
         'ellipse': lambda shape_dict, prepend_dims: np.hstack([
             np.tile(prepend_dims, (4, 1)),
             np.array([
@@ -68,14 +72,14 @@ class NapariROIConverter:
     @staticmethod
     def rois_to_shapes(rois: List) -> List[Dict[str, Any]]:
         """Convert ROI objects to Napari shapes data.
-        
+
         Args:
             rois: List of ROI objects
-            
+
         Returns:
             List of shape dicts with 'type', 'coordinates', 'metadata'
         """
-        from openhcs.core.roi import PolygonShape, EllipseShape, PointShape
+        from openhcs.core.roi import PolygonShape, PolylineShape, EllipseShape, PointShape
         
         shapes_data = []
         for roi in rois:
@@ -95,6 +99,13 @@ class NapariROIConverter:
                         # Napari expects (y, x) coordinates - same as OpenHCS
                         shapes_data.append({
                             'type': 'polygon',
+                            'coordinates': shape.coordinates.tolist(),
+                            'metadata': roi.metadata
+                        })
+                    elif isinstance(shape, PolylineShape):
+                        # Napari path format: (y, x) coordinates for open paths
+                        shapes_data.append({
+                            'type': 'path',
                             'coordinates': shape.coordinates.tolist(),
                             'metadata': roi.metadata
                         })
@@ -187,18 +198,18 @@ class FijiROIConverter:
     @staticmethod
     def rois_to_imagej_bytes(rois: List, roi_prefix: str = "") -> List[bytes]:
         """Convert ROI objects to ImageJ ROI bytes.
-        
+
         Args:
             rois: List of ROI objects
             roi_prefix: Prefix for ROI names (e.g., "A01_s001_w1_rois_step7")
-            
+
         Returns:
             List of ROI bytes (not base64 encoded)
         """
-        from openhcs.core.roi import PolygonShape, EllipseShape, PointShape
-        
+        from openhcs.core.roi import PolygonShape, PolylineShape, EllipseShape, PointShape
+
         try:
-            from roifile import ImagejRoi
+            from roifile import ImagejRoi, ROI_TYPE
         except ImportError:
             raise ImportError("roifile library required for ImageJ ROI conversion. Install with: pip install roifile")
         
@@ -210,15 +221,30 @@ class FijiROIConverter:
                     # ImageJ expects (x, y) coordinates, OpenHCS has (y, x)
                     coords_xy = shape.coordinates[:, [1, 0]]  # Swap columns
                     ij_roi = ImagejRoi.frompoints(coords_xy)
-                    
+
                     # Set ROI name with descriptive prefix
                     if 'label' in roi.metadata:
                         ij_roi.name = f"{roi_prefix}_ROI_{roi.metadata['label']}"
                     else:
                         ij_roi.name = f"{roi_prefix}_ROI"
-                    
+
                     roi_bytes_list.append(ij_roi.tobytes())
-                    
+
+                elif isinstance(shape, PolylineShape):
+                    # ImageJ polyline ROI (open path)
+                    # ImageJ expects (x, y) coordinates, OpenHCS has (y, x)
+                    coords_xy = shape.coordinates[:, [1, 0]]  # Swap columns
+                    ij_roi = ImagejRoi.frompoints(coords_xy)
+                    ij_roi.roitype = ROI_TYPE.POLYLINE
+
+                    # Set ROI name with descriptive prefix
+                    if 'label' in roi.metadata:
+                        ij_roi.name = f"{roi_prefix}_ROI_{roi.metadata['label']}"
+                    else:
+                        ij_roi.name = f"{roi_prefix}_ROI"
+
+                    roi_bytes_list.append(ij_roi.tobytes())
+
                 elif isinstance(shape, EllipseShape):
                     # ImageJ ellipse ROI
                     # Convert center (y, x) to (x, y) and radii (ry, rx) to (rx, ry)

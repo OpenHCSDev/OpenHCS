@@ -1149,6 +1149,12 @@ class NapariViewerServer(ZMQServer):
                 coords = np.array(shape_dict["coordinates"])
                 max_y = max(max_y, int(np.max(coords[:, 0])) + 1)
                 max_x = max(max_x, int(np.max(coords[:, 1])) + 1)
+            elif shape_dict["type"] == "path":
+                # Handle path (polyline) type - get bounding box
+                coords = np.array(shape_dict["coordinates"])
+                if len(coords) > 0:
+                    max_y = max(max_y, int(np.max(coords[:, 0])) + 1)
+                    max_x = max(max_x, int(np.max(coords[:, 1])) + 1)
             elif shape_dict["type"] == "points":
                 # Handle points type - get bounding box
                 coords = np.array(shape_dict["coordinates"])
@@ -1198,6 +1204,26 @@ class NapariViewerServer(ZMQServer):
                     full_indices = tuple(indices) + (rr, cc)
                     labels_array[full_indices] = label_id
                     label_id += 1
+
+                elif shape_dict["type"] == "path":
+                    # Draw polyline (skeleton branches)
+                    # Skeleton paths from skan already contain every pixel in the branch,
+                    # so we just set the label at each coordinate directly (no line drawing needed)
+                    coords = np.array(shape_dict["coordinates"])
+                    if len(coords) >= 1:
+                        # Extract row and column indices
+                        rr = coords[:, 0].astype(int)
+                        cc = coords[:, 1].astype(int)
+
+                        # Clip to image bounds
+                        valid = (rr >= 0) & (rr < labels_array.shape[-2]) & \
+                               (cc >= 0) & (cc < labels_array.shape[-1])
+                        rr, cc = rr[valid], cc[valid]
+
+                        # Set label at the correct nD position
+                        full_indices = tuple(indices) + (rr, cc)
+                        labels_array[full_indices] = label_id
+                        label_id += 1
 
         logger.info(
             f"🔬 NAPARI PROCESS: Created labels array with shape {labels_array.shape} and {label_id-1} labels"

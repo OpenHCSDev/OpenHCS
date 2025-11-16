@@ -726,7 +726,7 @@ class DiskStorageBackend(StorageBackend):
         """
         import zipfile
         import numpy as np
-        from openhcs.core.roi import PolygonShape, MaskShape, PointShape, EllipseShape
+        from openhcs.core.roi import PolygonShape, PolylineShape, MaskShape, PointShape, EllipseShape
 
         output_path = Path(output_path)
 
@@ -738,7 +738,7 @@ class DiskStorageBackend(StorageBackend):
             output_path = output_path.with_suffix('.roi.zip')
 
         try:
-            from roifile import ImagejRoi
+            from roifile import ImagejRoi, ROI_TYPE
         except ImportError:
             logger.error("roifile library not available - cannot save ROIs")
             raise ImportError("roifile library required for ROI saving. Install with: pip install roifile")
@@ -755,6 +755,21 @@ class DiskStorageBackend(StorageBackend):
                         ij_roi = ImagejRoi.frompoints(coords_xy)
 
                         # Use incrementing counter for unique filenames (avoid duplicate names from label values)
+                        ij_roi.name = f"ROI_{roi_count + 1}"
+
+                        # Write to zip archive
+                        roi_bytes = ij_roi.tobytes()
+                        zf.writestr(f"{roi_count + 1:04d}.roi", roi_bytes)
+                        roi_count += 1
+
+                    elif isinstance(shape, PolylineShape):
+                        # Convert polyline to ImageJ polyline ROI
+                        # roifile expects (x, y) coordinates, but we have (y, x)
+                        coords_xy = shape.coordinates[:, [1, 0]]  # Swap columns
+                        ij_roi = ImagejRoi.frompoints(coords_xy)
+                        ij_roi.roitype = ROI_TYPE.POLYLINE
+
+                        # Use incrementing counter for unique filenames
                         ij_roi.name = f"ROI_{roi_count + 1}"
 
                         # Write to zip archive

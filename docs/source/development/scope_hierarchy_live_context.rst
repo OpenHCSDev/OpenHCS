@@ -33,74 +33,99 @@ Scope isolation ensures each editor only sees parameters from its own orchestrat
 Solution: Hierarchical Scope IDs
 =================================
 
-Scope IDs create a hierarchy that matches the orchestrator → step → function relationship:
+Scope IDs create a hierarchy that matches the orchestrator → step relationship.
+
+**Current Implementation** (uses ``::`` separator and plate_path):
 
 .. code-block:: python
 
-    # Orchestrator scope (unique per plate/pipeline)
-    orchestrator_scope = f"orchestrator_{id(orchestrator)}"
-    
-    # Step scope (inherits orchestrator scope)
-    step_scope = f"{orchestrator_scope}.step_{step_index}"
-    
-    # Function scope (inherits step scope)
-    function_scope = f"{step_scope}.function"
+    # Orchestrator/Plate scope (unique per plate)
+    plate_scope = str(orchestrator.plate_path)
+    # Example: "/data/plates/plate_001"
+
+    # Step scope (inherits plate scope)
+    step_token = getattr(step, '_pipeline_scope_token', step.name)
+    step_scope = f"{plate_scope}::{step_token}"
+    # Example: "/data/plates/plate_001::step_0"
+
+**Note**: The ``::`` (double colon) separator is used for hierarchical scoping, not ``.`` (period).
 
 Editors with matching scope prefixes share live context. Editors with different scopes are isolated.
 
 Scope Hierarchy Architecture
 =============================
 
-Three-Level Hierarchy
----------------------
-
-.. code-block:: python
-
-    # Level 1: Orchestrator
-    scope_id = "orchestrator_140234567890"
-    # Shared by: All steps and functions in this orchestrator
-    
-    # Level 2: Step
-    scope_id = "orchestrator_140234567890.step_0"
-    # Shared by: Step editor and its function editor
-    
-    # Level 3: Function
-    scope_id = "orchestrator_140234567890.step_0.function"
-    # Shared by: Function editor only
-
-**Key insight**: Step and function editors share the same scope prefix, enabling them to see each other's live parameters while remaining isolated from other orchestrators.
-
-Scope Matching Logic
+Two-Level Hierarchy
 --------------------
 
 .. code-block:: python
 
-    def _collect_live_context_from_other_windows(self):
-        """Collect live parameter values from other windows with matching scope."""
-        live_context = {}
-        
-        for other_manager in ParameterFormManager._active_form_managers:
-            # Skip self
-            if other_manager is self:
-                continue
-            
-            # CRITICAL: Only collect from managers with matching scope prefix
-            if not self._scopes_match(other_manager.scope_id):
-                continue
-            
-            # Collect parameters from matching scope
-            live_context.update(other_manager.get_current_parameters())
-        
-        return live_context
-    
-    def _scopes_match(self, other_scope_id):
-        """Check if scopes share common prefix."""
-        # Same orchestrator: "orchestrator_123" matches "orchestrator_123.step_0"
-        # Different orchestrator: "orchestrator_123" does NOT match "orchestrator_456"
-        return (self.scope_id.startswith(other_scope_id) or 
-                other_scope_id.startswith(self.scope_id))
+    # Level 1: Plate/Orchestrator (uses actual plate_path)
+    scope_id = "/data/plates/plate_001"
+    # Shared by: All config editors for this plate
 
-This ensures step and function editors see each other's parameters (same orchestrator) while remaining isolated from other orchestrators.
+    # Level 2: Step (inherits plate scope with :: separator)
+    scope_id = "/data/plates/plate_001::step_0"
+    # Shared by: Step editor and its function editor for this specific step
+
+**Real Examples from Code**:
+
+.. code-block:: python
+
+    # From dual_editor_window.py:240-245
+    def _build_step_scope_id(self, fallback_name: str) -> str:
+        plate_scope = getattr(self.orchestrator, 'plate_path', 'no_orchestrator')
+        token = getattr(self.editing_step, '_pipeline_scope_token', None)
+        if token:
+            return f"{plate_scope}::{token}"
+        return f"{plate_scope}::{fallback_name}"
+
+    # From plate_manager.py:419, 1141
+    scope_id = str(orchestrator.plate_path)  # Plate-level config editing
+
+**Key insight**: Step and function editors share the same scope prefix (including step token), enabling them to see each other's live parameters while remaining isolated from other orchestrators and other steps.
+
+Scope Matching Logic
+--------------------
+
+**Actual Implementation** (from ``parameter_form_manager.py:375-393``):
+
+.. code-block:: python
+
+    @staticmethod
+    def _is_scope_visible_static(manager_scope: str, filter_scope) -> bool:
+        """
+        Check if scopes match (prefix matching for hierarchical scopes).
+        Supports generic hierarchical scope strings like 'x::y::z'.
+        """
+        # Convert filter_scope to string if it's a Path
+        filter_scope_str = str(filter_scope) if not isinstance(filter_scope, str) else filter_scope
+
+        return (
+            manager_scope == filter_scope_str or
+            manager_scope.startswith(f"{filter_scope_str}::") or
+            filter_scope_str.startswith(f"{manager_scope}::")
+        )
+
+**Examples**:
+
+.. code-block:: python
+
+    # Same plate: plate scope matches step scope (parent-child)
+    _is_scope_visible_static(
+        "/data/plates/plate_001::step_0",     # manager_scope (step)
+        "/data/plates/plate_001"               # filter_scope (plate)
+    )
+    # → True (step scope starts with "plate_scope::")
+
+    # Different plates: no match
+    _is_scope_visible_static(
+        "/data/plates/plate_001::step_0",     # manager_scope
+        "/data/plates/plate_002"               # filter_scope
+    )
+    # → False (different plate prefixes)
+
+This ensures step and function editors see each other's parameters (same plate/step) while remaining isolated from other orchestrators.
 
 Implementation Patterns
 =======================
@@ -108,27 +133,39 @@ Implementation Patterns
 Dual Editor Window
 ------------------
 
-Step and function editors share scope to enable parameter synchronization:
+Step and function editors share scope to enable parameter synchronization.
+
+**Actual Implementation** (from ``dual_editor_window.py:240-267``):
 
 .. code-block:: python
 
-    class DualEditorWindow(QMainWindow):
-        def __init__(self, orchestrator, step_index):
-            # Create orchestrator-specific scope
-            orchestrator_scope = f"orchestrator_{id(orchestrator)}"
-            step_scope = f"{orchestrator_scope}.step_{step_index}"
-            
+    class DualEditorWindow(BaseFormDialog):
+        def _build_step_scope_id(self, fallback_name: str) -> str:
+            plate_scope = getattr(self.orchestrator, 'plate_path', 'no_orchestrator')
+            token = getattr(self.editing_step, '_pipeline_scope_token', None)
+            if token:
+                return f"{plate_scope}::{token}"
+            return f"{plate_scope}::{fallback_name}"
+
+        def create_step_tab(self):
+            step_name = getattr(self.editing_step, 'name', 'unknown_step')
+            scope_id = self._build_step_scope_id(step_name)
+            # Result: "/data/plates/plate_001::step_0"
+
             # Step editor uses step scope
-            self.step_editor = StepParameterEditor(
-                step=step,
-                scope_id=step_scope
+            self.step_editor = StepParameterEditorWidget(
+                self.editing_step,
+                scope_id=scope_id
             )
-            
-            # Function editor uses same step scope (not function scope!)
-            # This enables it to see step parameters for placeholder resolution
-            self.function_editor = FunctionListEditor(
-                step=step,
-                scope_id=step_scope  # Same as step editor
+
+        def create_function_tab(self):
+            step_name = getattr(self.editing_step, 'name', 'unknown_step')
+            scope_id = self._build_step_scope_id(step_name)
+            # Same scope as step editor!
+
+            # Function editor uses same step scope
+            self.func_editor = FunctionListEditorWidget(
+                scope_id=scope_id  # Same as step editor
             )
 
 **Why same scope?** Function editor needs to see step parameters (e.g., ``processing_config.group_by``) for placeholder resolution.
@@ -157,21 +194,35 @@ Function List Editor
 Config Window
 -------------
 
-Config windows use global scope to share context across all orchestrators:
+Config windows use plate-scoped or global scope depending on the config being edited.
+
+**Actual Implementation** (from ``config_window.py:59,77,117`` and ``plate_manager.py:1141-1148``):
 
 .. code-block:: python
 
     class ConfigWindow(BaseFormDialog):
-        def __init__(self, config_class):
-            # Global scope: shared by all config windows
-            scope_id = f"config_{config_class.__name__}"
-            
-            self.form_manager = ParameterFormManager(
-                object_instance=config_instance,
-                scope_id=scope_id
+        def __init__(self, config_class, current_config, ...,
+                     scope_id: Optional[str] = None):
+            # scope_id passed from caller
+            self.scope_id = scope_id
+
+            self.form_manager = ParameterFormManager.from_dataclass_instance(
+                dataclass_instance=current_config,
+                scope_id=self.scope_id  # Plate-scoped or None for global
             )
 
-**Why global scope?** GlobalPipelineConfig changes should be visible to all orchestrators.
+    # From plate_manager.py - creating plate-scoped config window
+    scope_id = str(orchestrator.plate_path) if orchestrator else None
+    config_window = ConfigWindow(
+        config_class,
+        current_config,
+        scope_id=scope_id  # "/data/plates/plate_001" or None
+    )
+
+**Scope Semantics**:
+
+- ``scope_id=None``: Global config (GlobalPipelineConfig) - visible to all orchestrators
+- ``scope_id="/data/plates/plate_001"``: Plate-scoped config (PipelineConfig) - only visible to this plate's editors
 
 Scope Isolation Examples
 =========================
@@ -182,37 +233,39 @@ Isolated Orchestrators
 .. code-block:: python
 
     # Orchestrator A: Plate 1
-    orchestrator_A = PipelineOrchestrator(plate_path="plate1")
-    scope_A = f"orchestrator_{id(orchestrator_A)}"  # "orchestrator_140234567890"
-    
+    orchestrator_A = PipelineOrchestrator(plate_path=Path("/data/plates/plate_001"))
+    scope_A = str(orchestrator_A.plate_path)  # "/data/plates/plate_001"
+
     # Orchestrator B: Plate 2
-    orchestrator_B = PipelineOrchestrator(plate_path="plate2")
-    scope_B = f"orchestrator_{id(orchestrator_B)}"  # "orchestrator_140234568901"
-    
-    # Step editors are isolated
-    step_editor_A = StepParameterEditor(step_A, scope_id=f"{scope_A}.step_0")
-    step_editor_B = StepParameterEditor(step_B, scope_id=f"{scope_B}.step_0")
-    
+    orchestrator_B = PipelineOrchestrator(plate_path=Path("/data/plates/plate_002"))
+    scope_B = str(orchestrator_B.plate_path)  # "/data/plates/plate_002"
+
+    # Step editors are isolated (using actual implementation)
+    step_editor_A = StepParameterEditor(step_A, scope_id=f"{scope_A}::step_0")
+    step_editor_B = StepParameterEditor(step_B, scope_id=f"{scope_B}::step_0")
+    # step_editor_A: "/data/plates/plate_001::step_0"
+    # step_editor_B: "/data/plates/plate_002::step_0"
+
     # step_editor_A does NOT see step_editor_B's parameters
-    # Different scope prefixes: "orchestrator_140234567890" vs "orchestrator_140234568901"
+    # Different scope prefixes: "/data/plates/plate_001" vs "/data/plates/plate_002"
 
 Shared Step/Function Context
 -----------------------------
 
 .. code-block:: python
 
-    # Same orchestrator, same step
-    orchestrator_scope = "orchestrator_140234567890"
-    step_scope = f"{orchestrator_scope}.step_0"
-    
+    # Same plate, same step
+    plate_scope = "/data/plates/plate_001"
+    step_scope = f"{plate_scope}::step_0"  # "/data/plates/plate_001::step_0"
+
     # Step editor
     step_editor = StepParameterEditor(step, scope_id=step_scope)
-    
+
     # Function editor (same scope!)
     function_editor = FunctionListEditor(step, scope_id=step_scope)
-    
+
     # function_editor DOES see step_editor's parameters
-    # Same scope prefix: "orchestrator_140234567890.step_0"
+    # Same scope: "/data/plates/plate_001::step_0"
 
 Cross-Window Synchronization
 =============================
@@ -258,25 +311,35 @@ Implementation Notes
 Key Design Decisions
 ====================
 
-**Why use object ID for orchestrator scope?**
+**Why use plate_path for orchestrator scope instead of object ID?**
 
-Ensures unique scope even if multiple orchestrators process the same plate. Object ID is guaranteed unique per instance.
+- Plate path is semantically meaningful (shows which plate the editor is for)
+- Plate path is stable across sessions (object ID changes each run)
+- Plate path enables future scope persistence/serialization
+- In practice, only one orchestrator per plate is active at a time
+
+**Why use ``::`` separator instead of ``.``?**
+
+- Avoids conflicts with file paths (which use ``.`` for extensions)
+- More visually distinct in logs and debugging
+- Consistent with other path-like separators in the codebase
 
 **Why share scope between step and function editors?**
 
 Function editor needs step parameters for placeholder resolution (e.g., ``group_by`` selector). Sharing scope enables this without manual parameter passing.
 
-**Why not use orchestrator reference directly?**
+**Why use strings for scope IDs?**
 
 Scope IDs are strings, enabling serialization and comparison without object reference issues.
 
 Common Gotchas
 ==============
 
-- **Don't use global scope for orchestrator-specific editors**: Each orchestrator must have unique scope to prevent parameter bleed-through
+- **Don't use global scope (``None``) for plate-specific editors**: Each plate must have unique scope (``plate_path``) to prevent parameter bleed-through
 - **Step and function editors must share scope**: Function editor needs step parameters for placeholder resolution
-- **Scope IDs are immutable**: Don't change scope_id after form manager creation
-- **Scope matching is prefix-based**: "orchestrator_123" matches "orchestrator_123.step_0" but not "orchestrator_1234"
+- **Scope IDs are immutable**: Don't change ``scope_id`` after form manager creation
+- **Scope matching uses ``::`` separator**: ``"/data/plates/plate_001"`` matches ``"/data/plates/plate_001::step_0"`` but not ``"/data/plates/plate_002"``
+- **Separator matters**: Use ``::`` (double colon), not ``.`` (period) or ``:`` (single colon)
 
 Debugging Scope Issues
 ======================
@@ -293,9 +356,9 @@ Symptom: Function Editor Not Syncing
     # Check scope IDs
     logger.debug(f"Step editor scope: {step_editor.form_manager.scope_id}")
     logger.debug(f"Function editor scope: {function_editor.scope_id}")
-    # Should have same prefix
+    # Should be identical (including step token)
 
-**Fix**: Ensure both editors use same scope_id
+**Fix**: Ensure both editors use same ``scope_id`` from ``_build_step_scope_id()``
 
 Symptom: Cross-Orchestrator Bleed-Through
 ------------------------------------------
@@ -306,12 +369,12 @@ Symptom: Cross-Orchestrator Bleed-Through
 
 .. code-block:: python
 
-    # Check orchestrator scopes
+    # Check orchestrator/plate scopes
     logger.debug(f"Orchestrator A scope: {scope_A}")
     logger.debug(f"Orchestrator B scope: {scope_B}")
-    # Should be different
+    # Should have different plate_path prefixes
 
-**Fix**: Use unique object IDs for each orchestrator scope
+**Fix**: Ensure each orchestrator uses unique ``plate_path`` as scope prefix
 
 
 Pipeline Editor Preview Labels

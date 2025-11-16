@@ -212,28 +212,29 @@ def materialize_skeleton_visualizations(data: List[np.ndarray], path: str, filem
 
 def materialize_skeleton_rois(skeleton_mask, path: str, filemanager, backends, backend_kwargs: dict = None) -> str:
     """
-    Materialize skeleton mask to ImageJ-compatible ROI ZIP files.
-    
-    Converts binary skeleton mask to polyline ROIs for visualization in Napari/Fiji.
-    Similar to cell counting's materialize_segmentation_masks.
-    
+    Materialize skeleton mask as label image AND ROI ZIP files.
+
+    Converts binary skeleton mask to:
+    1. Label image where each branch has unique ID (for streaming/visualization)
+    2. Polyline ROIs (for ImageJ/Fiji compatibility)
+
     Args:
         skeleton_mask: Binary skeleton array (Z, Y, X) or list of arrays with skeleton pixels
         path: Base path for output files
         filemanager: FileManager instance
         backends: Backend(s) to save to
         backend_kwargs: Backend-specific kwargs
-        
+
     Returns:
-        str: Path to the saved ROI file
+        str: Path to the saved label image (primary output for streaming)
     """
     # Normalize backends to list
     if isinstance(backends, str):
         backends = [backends]
-    
+
     if backend_kwargs is None:
         backend_kwargs = {}
-    
+
     # Handle data that comes as a list (from multiple items/slices)
     if isinstance(skeleton_mask, list):
         if len(skeleton_mask) == 0:
@@ -243,49 +244,60 @@ def materialize_skeleton_rois(skeleton_mask, path: str, filemanager, backends, b
         else:
             # Stack multiple masks into 3D array
             skeleton_mask = np.stack(skeleton_mask, axis=0)
-    
-    logger.info(f"🔬 SKELETON_ROI_MATERIALIZE: Called with path={path}, mask_shape={skeleton_mask.shape if hasattr(skeleton_mask, 'shape') and skeleton_mask.size > 0 else 'empty'}, backends={backends}")
-    
+
+    logger.info(f"🔬 SKELETON_MATERIALIZE: Called with path={path}, mask_shape={skeleton_mask.shape if hasattr(skeleton_mask, 'shape') and skeleton_mask.size > 0 else 'empty'}, backends={backends}")
+
     # Check if skeleton mask is empty (return_skeleton_mask=False)
     if not hasattr(skeleton_mask, 'size') or skeleton_mask.size == 0:
-        logger.info("🔬 SKELETON_ROI_MATERIALIZE: No skeleton mask to materialize (return_skeleton_mask=False)")
-        # Create empty summary file - use same path convention as cell counting
-        base_path = path.replace('.pkl', '').replace('.roi.zip', '')
+        logger.info("🔬 SKELETON_MATERIALIZE: No skeleton mask to materialize (return_skeleton_mask=False)")
+        # Create empty summary file
+        base_path = path.replace('.pkl', '').replace('.roi.zip', '').replace('.tif', '')
         summary_path = f"{base_path}_skeleton_summary.txt"
         summary_content = "No skeleton mask generated (return_skeleton_mask=False)\n"
         for backend in backends:
             filemanager.save(summary_content, summary_path, backend)
         return summary_path
-    
-    # Convert skeleton mask to ROIs using the shared ROI extraction pipeline
+
+    # Convert skeleton mask to label image (each branch gets unique ID)
+    skeleton_labels = _skeleton_mask_to_labels(skeleton_mask)
+    num_labels = int(skeleton_labels.max())
+    logger.info(f"🔬 SKELETON_MATERIALIZE: Converted skeleton mask to label image with {num_labels} branches")
+
+    # Also convert to ROIs for ImageJ/Fiji compatibility
     skeleton_rois = _skeleton_mask_to_rois(skeleton_mask)
-    logger.info(f"🔬 SKELETON_ROI_MATERIALIZE: Converted skeleton mask to {len(skeleton_rois)} ROIs via ROI system")
-    
-    # Generate ROI file path - use same convention as cell counting
-    # This preserves the full path structure including well/site/channel information
-    base_path = path.replace('.pkl', '').replace('.roi.zip', '')
+    logger.info(f"🔬 SKELETON_MATERIALIZE: Converted skeleton mask to {len(skeleton_rois)} ROIs for ImageJ")
+
+    # Generate output paths
+    base_path = path.replace('.pkl', '').replace('.roi.zip', '').replace('.tif', '')
+    labels_path = f"{base_path}_skeleton_labels.tif"
     roi_path = f"{base_path}_skeleton.roi.zip"
-    
-    # Save ROIs to all backends
+
+    # Save label image (primary output for streaming)
+    for backend in backends:
+        kwargs = backend_kwargs.get(backend, {})
+        filemanager.save(skeleton_labels, labels_path, backend, **kwargs)
+        logger.info(f"🔬 SKELETON_MATERIALIZE: Saved skeleton labels to {labels_path} ({backend})")
+
+    # Save ROIs for ImageJ/Fiji
     if skeleton_rois:
         for backend in backends:
             kwargs = backend_kwargs.get(backend, {})
             filemanager.save(skeleton_rois, roi_path, backend, **kwargs)
-            logger.info(f"🔬 SKELETON_ROI_MATERIALIZE: Saved {len(skeleton_rois)} skeleton ROIs to {roi_path} ({backend})")
-    else:
-        logger.warning(f"🔬 SKELETON_ROI_MATERIALIZE: No ROIs extracted from skeleton mask")
-    
+            logger.info(f"🔬 SKELETON_MATERIALIZE: Saved {len(skeleton_rois)} skeleton ROIs to {roi_path} ({backend})")
+
     # Save summary
     summary_path = f"{base_path}_skeleton_summary.txt"
-    summary_content = f"Skeleton ROIs: {len(skeleton_rois)} polylines\n"
+    summary_content = f"Skeleton branches: {num_labels}\n"
     summary_content += f"Skeleton shape: {skeleton_mask.shape}\n"
+    summary_content += f"Label image: {labels_path}\n"
     if skeleton_rois:
         summary_content += f"ROI file: {roi_path}\n"
-    
+
     for backend in backends:
         filemanager.save(summary_content, summary_path, backend)
-    
-    return roi_path
+
+    # Return label image path (this is what gets streamed)
+    return labels_path
 
 
 @special_outputs(
@@ -928,6 +940,86 @@ def _get_skan_version():
         return "unknown"
 
 
+def _skeleton_mask_to_labels(skeleton_stack: np.ndarray) -> np.ndarray:
+    """
+    Convert a binary skeleton mask into a label mask using skan's branch identification.
+
+    Uses skan.Skeleton.path_label_image() to label each pixel according to which branch
+    it belongs to. This ensures the visualization matches exactly what skan analyzes.
+
+    Args:
+        skeleton_stack: Binary skeleton mask (Z, Y, X)
+
+    Returns:
+        Label mask (Z, Y, X) where each branch has a unique integer label matching skan's analysis
+    """
+    from skan import Skeleton
+
+    if skeleton_stack.ndim == 2:
+        skeleton_stack = skeleton_stack[np.newaxis, :, :]
+        was_2d = True
+    elif skeleton_stack.ndim != 3:
+        logger.error(f"🔍 SKELETON_TO_LABELS: Expected 2D/3D skeleton, got {skeleton_stack.ndim}D")
+        return np.zeros_like(skeleton_stack, dtype=np.uint16)
+    else:
+        was_2d = False
+
+    # Check if skeleton is empty
+    if not skeleton_stack.any():
+        logger.info("🔍 SKELETON_TO_LABELS: Empty skeleton mask, returning zeros")
+        label_stack = np.zeros_like(skeleton_stack, dtype=np.uint16)
+        return label_stack[0] if was_2d else label_stack
+
+    # Create output label array
+    label_stack = np.zeros_like(skeleton_stack, dtype=np.uint16)
+
+    current_label = 1
+
+    # Process each Z-slice independently
+    for z_idx, skeleton_slice in enumerate(skeleton_stack):
+        if not skeleton_slice.any():
+            continue
+
+        try:
+            # Create skan Skeleton object for this slice
+            skeleton_obj = Skeleton(skeleton_slice)
+
+            # Get path label image - this labels ALL skeleton pixels according to branch
+            # This matches exactly what skan analyzes
+            slice_labels = skeleton_obj.path_label_image()
+
+            # Renumber labels to be globally unique across all slices
+            if slice_labels.max() > 0:
+                # Shift labels to avoid conflicts between slices
+                slice_labels_shifted = slice_labels.copy()
+                slice_labels_shifted[slice_labels > 0] += (current_label - 1)
+                label_stack[z_idx] = slice_labels_shifted.astype(np.uint16)
+
+                num_branches = int(slice_labels.max())
+                current_label += num_branches
+
+                # Verify all skeleton pixels are labeled
+                skeleton_pixels = skeleton_slice.sum()
+                labeled_pixels = (slice_labels > 0).sum()
+                if skeleton_pixels != labeled_pixels:
+                    logger.warning(f"🔍 SKELETON_TO_LABELS: Z-slice {z_idx} has {skeleton_pixels} skeleton pixels but only {labeled_pixels} labeled")
+
+                logger.debug(f"🔍 SKELETON_TO_LABELS: Labeled {num_branches} branches in Z-slice {z_idx} ({labeled_pixels} pixels)")
+
+        except Exception as e:
+            logger.warning(f"🔍 SKELETON_TO_LABELS: Failed to label Z-slice {z_idx}: {e}")
+            continue
+
+    total_labels = current_label - 1
+    total_labeled_pixels = (label_stack > 0).sum()
+    total_skeleton_pixels = skeleton_stack.sum()
+
+    logger.info(f"🔍 SKELETON_TO_LABELS: Created label mask with {total_labels} branches using skan's branch identification")
+    logger.info(f"🔍 SKELETON_TO_LABELS: Labeled {total_labeled_pixels}/{total_skeleton_pixels} skeleton pixels")
+
+    return label_stack[0] if was_2d else label_stack
+
+
 def _skeleton_mask_to_rois(skeleton_stack: np.ndarray) -> List[ROI]:
     """
     Convert a binary skeleton mask into ROI objects using skan branch paths.
@@ -943,7 +1035,7 @@ def _skeleton_mask_to_rois(skeleton_stack: np.ndarray) -> List[ROI]:
         List of ROI objects, one per skeleton branch
     """
     from skan import Skeleton
-    from openhcs.core.roi import PolygonShape, ROI
+    from openhcs.core.roi import PolylineShape, ROI
 
     rois: List[ROI] = []
 
@@ -985,9 +1077,9 @@ def _skeleton_mask_to_rois(skeleton_stack: np.ndarray) -> List[ROI]:
                     logger.debug(f"🔍 SKELETON_TO_ROIS: Skipping degenerate path {branch_idx} in Z-slice {z_idx} (length={len(path_coords)})")
                     continue
 
-                # Create polygon shape from path coordinates
-                # skan returns (row, col) which is (y, x) - exactly what PolygonShape expects
-                shape = PolygonShape(coordinates=path_coords)
+                # Create polyline shape from path coordinates
+                # skan returns (row, col) which is (y, x) - exactly what PolylineShape expects
+                shape = PolylineShape(coordinates=path_coords)
 
                 # Create ROI with metadata
                 metadata = {
