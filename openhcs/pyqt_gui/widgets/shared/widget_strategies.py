@@ -495,6 +495,10 @@ def _apply_lineedit_placeholder(widget: Any, text: str) -> None:
     widget.setToolTip(text)
     widget.setProperty("placeholder_signature", signature)
 
+    # Flash widget to indicate update
+    from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
+    flash_widget(widget)
+
 
 def _apply_spinbox_placeholder(widget: Any, text: str) -> None:
     """Apply placeholder to spinbox showing full placeholder text with prefix."""
@@ -512,6 +516,10 @@ def _apply_spinbox_placeholder(widget: Any, text: str) -> None:
         'change value to set your own',
         text  # Keep full text in tooltip
     )
+
+    # Flash widget to indicate update
+    from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
+    flash_widget(widget)
 
 
 def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> None:
@@ -546,6 +554,10 @@ def _apply_checkbox_placeholder(widget: QCheckBox, placeholder_text: str) -> Non
 
         # Trigger repaint to show gray styling
         widget.update()
+
+        # Flash widget to indicate update
+        from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
+        flash_widget(widget)
     except Exception as e:
         widget.setToolTip(placeholder_text)
 
@@ -594,6 +606,10 @@ def _apply_checkbox_group_placeholder(widget: Any, placeholder_text: str) -> Non
         widget.setToolTip(f"{placeholder_text} (click any checkbox to set your own value)")
         widget.setProperty("placeholder_signature", signature)
 
+        # Flash widget to indicate update (note: individual checkboxes already flashed)
+        from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
+        flash_widget(widget)
+
     except Exception as e:
         logger.error(f"❌ Failed to apply checkbox group placeholder: {e}", exc_info=True)
         widget.setToolTip(placeholder_text)
@@ -613,6 +629,10 @@ def _apply_path_widget_placeholder(widget: Any, placeholder_text: str) -> None:
             widget.path_input.setProperty("is_placeholder_state", True)
             widget.path_input.setToolTip(placeholder_text)
             widget.path_input.setProperty("placeholder_signature", signature)
+
+            # Flash the inner QLineEdit to indicate update
+            from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
+            flash_widget(widget.path_input)
         else:
             # Fallback to tooltip if structure is different
             widget.setToolTip(placeholder_text)
@@ -667,6 +687,10 @@ def _apply_combobox_placeholder(widget: QComboBox, placeholder_text: str) -> Non
         widget.setToolTip(f"{placeholder_text} ({PlaceholderConfig.INTERACTION_HINTS['combobox']})")
         widget.setProperty("is_placeholder_state", True)
         widget.setProperty("placeholder_signature", signature)
+
+        # Flash widget to indicate update
+        from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
+        flash_widget(widget)
     except Exception:
         widget.setToolTip(placeholder_text)
 

@@ -9,6 +9,8 @@ import logging
 import inspect
 import copy
 from typing import List, Dict, Optional, Callable, Tuple, Any, Iterable, Set
+from dataclasses import is_dataclass
+import dataclasses
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -123,7 +125,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self.setup_connections()
         self.update_button_states()
 
-        logger.debug("Pipeline editor widget initialized")
+
 
     # ========== UI Setup ==========
 
@@ -171,13 +173,18 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 border: none;
                 border-radius: 3px;
                 margin: 2px;
+                background: transparent;  /* Let delegate draw background */
             }}
             QListWidget::item:selected {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
+                /* Don't override background - let scope colors show through */
+                /* Just add a subtle border to indicate selection */
+                background: transparent;  /* Critical: don't override delegate background */
+                border-left: 3px solid {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
                 color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
             }}
             QListWidget::item:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
+                /* Subtle hover effect that doesn't completely override background */
+                background: transparent;  /* Critical: don't override delegate background */
             }}
         """)
         # Set custom delegate to render white name and grey preview (shared with PlateManager)
@@ -273,10 +280,14 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         from openhcs.core.steps.function_step import FunctionStep
         from openhcs.core.config import PipelineConfig, GlobalPipelineConfig
 
+        def step_scope_resolver(step, ctx):
+            scope_id = self._build_step_scope_id(step)
+            return scope_id or self.ALL_ITEMS_SCOPE
+
         self.register_preview_scope(
             root_name='step',
             editing_types=(FunctionStep,),
-            scope_resolver=lambda step, ctx: self._build_step_scope_id(step) or self.ALL_ITEMS_SCOPE,
+            scope_resolver=step_scope_resolver,
             aliases=('FunctionStep', 'step'),
         )
 
@@ -588,7 +599,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # SIMPLIFIED: Orchestrator context is automatically available through type-based registry
         # No need for explicit context management - dual-axis resolver handles it automatically
         if not orchestrator:
-            logger.info("No orchestrator found for step editor context, This should not happen.")
+            pass  # No orchestrator available
 
         editor = DualEditorWindow(
             step_data=new_step,
@@ -605,7 +616,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # This ensures the step editor's placeholders update when pipeline config is saved
         if self.plate_manager and hasattr(self.plate_manager, 'orchestrator_config_changed'):
             self.plate_manager.orchestrator_config_changed.connect(editor.on_orchestrator_config_changed)
-            logger.debug("Connected orchestrator_config_changed signal to step editor")
 
         editor.show()
         editor.raise_()
@@ -666,13 +676,20 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # No need for explicit context management - dual-axis resolver handles it automatically
         orchestrator = self._get_current_orchestrator()
 
+        # Find step position for scope-based styling
+        try:
+            step_position = self.pipeline_steps.index(step_to_edit)
+        except ValueError:
+            step_position = None
+
         editor = DualEditorWindow(
             step_data=step_to_edit,
             is_new=False,
             on_save_callback=handle_save,
             orchestrator=orchestrator,
             gui_config=self.gui_config,
-            parent=self
+            parent=self,
+            step_position=step_position
         )
         # Set original step for change detection
         editor.set_original_step_for_change_detection()
@@ -681,7 +698,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # This ensures the step editor's placeholders update when pipeline config is saved
         if self.plate_manager and hasattr(self.plate_manager, 'orchestrator_config_changed'):
             self.plate_manager.orchestrator_config_changed.connect(editor.on_orchestrator_config_changed)
-            logger.debug("Connected orchestrator_config_changed signal to step editor")
 
         editor.show()
         editor.raise_()
@@ -726,7 +742,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
     
     def action_code_pipeline(self):
         """Handle Code Pipeline button - edit pipeline as Python code."""
-        logger.debug("Code button pressed - opening code editor")
 
         if not self.current_plate:
             self.service_adapter.show_error_dialog("No plate selected")
@@ -766,7 +781,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
     def _handle_edited_pipeline_code(self, edited_code: str) -> None:
         """Handle the edited pipeline code from code editor."""
-        logger.debug("Pipeline code edited, processing changes...")
         try:
             # Ensure we have a string
             if not isinstance(edited_code, str):
@@ -783,7 +797,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 # If TypeError about unexpected keyword arguments (old-format constructors), retry with migration
                 error_msg = str(e)
                 if "unexpected keyword argument" in error_msg and ("group_by" in error_msg or "variable_components" in error_msg):
-                    logger.info(f"Detected old-format step constructor, retrying with migration patch: {e}")
                     namespace = {}
                     from openhcs.io.pipeline_migration import patch_step_constructors_for_migration
                     with self._patch_lazy_constructors(), patch_step_constructors_for_migration():
@@ -875,7 +888,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             pipeline: Pipeline steps to save
         """
         self.plate_pipelines[plate_path] = pipeline
-        logger.debug(f"Saved pipeline for plate: {plate_path}")
     
     def set_current_plate(self, plate_path: str):
         """
@@ -897,7 +909,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         self.update_step_list()
         self.update_button_states()
-        logger.debug(f"Current plate changed: {plate_path}")
 
     def _broadcast_to_event_bus(self, pipeline_steps: list):
         """Broadcast pipeline changed event to global event bus.
@@ -907,7 +918,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         """
         if self.event_bus:
             self.event_bus.emit_pipeline_changed(pipeline_steps)
-            logger.debug(f"Broadcasted pipeline_changed to event bus ({len(pipeline_steps)} steps)")
 
     def on_orchestrator_config_changed(self, plate_path: str, effective_config):
         """
@@ -919,17 +929,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         """
         # Only refresh if this is for the current plate
         if plate_path == self.current_plate:
-            logger.debug(f"Refreshing placeholders for orchestrator config change: {plate_path}")
-
-            # SIMPLIFIED: Orchestrator context is automatically available through type-based registry
-            # No need for explicit context management - dual-axis resolver handles it automatically
-            orchestrator = self._get_current_orchestrator()
-            if orchestrator:
-                # Trigger refresh of any open configuration windows or step forms
-                # The type-based registry ensures they resolve against the updated orchestrator config
-                logger.debug(f"Step forms will now resolve against updated orchestrator config for: {plate_path}")
-            else:
-                logger.debug(f"No orchestrator found for config refresh: {plate_path}")
+            pass  # Orchestrator config changed for current plate
 
     def _resolve_config_attr(self, step: FunctionStep, config: object, attr_name: str,
                              live_context_snapshot=None) -> object:
@@ -960,10 +960,15 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             if live_context_snapshot is None:
                 live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
 
+            pipeline_config_for_context = self._get_pipeline_config_preview_instance(live_context_snapshot) or orchestrator.pipeline_config
+            global_config_for_context = self._get_global_config_preview_instance(live_context_snapshot)
+            if global_config_for_context is None:
+                global_config_for_context = get_current_global_config(GlobalPipelineConfig)
+
             # Build context stack: GlobalPipelineConfig → PipelineConfig → Step
             context_stack = [
-                get_current_global_config(GlobalPipelineConfig),
-                orchestrator.pipeline_config,
+                global_config_for_context,
+                pipeline_config_for_context,
                 step
             ]
 
@@ -986,11 +991,30 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             raw_value = object.__getattribute__(config, attr_name)
             return raw_value
 
-    def _build_step_scope_id(self, step: FunctionStep) -> Optional[str]:
-        """Return the hierarchical scope id for a step editor instance."""
+    def _build_step_scope_id(self, step: FunctionStep, position: Optional[int] = None) -> Optional[str]:
+        """Return the hierarchical scope id for a step editor instance.
+
+        Args:
+            step: The step to build scope_id for
+            position: Optional position of step in pipeline (for per-orchestrator visual styling)
+                     If None, scope_id will NOT include @position suffix
+
+        Returns:
+            Scope ID in format "plate_path::step_token@position" (if position provided)
+            or "plate_path::step_token" (if position is None)
+
+        Note:
+            - For cross-window updates: use position=None to match DualEditorWindow scope_id
+            - For visual styling: use position=idx to get per-orchestrator colors
+        """
         token = self._ensure_step_scope_token(step)
         plate_scope = self.current_plate or "no_plate"
-        return f"{plate_scope}::{token}"
+
+        # Include position for per-orchestrator visual styling ONLY if explicitly provided
+        if position is not None:
+            return f"{plate_scope}::{token}@{position}"
+        else:
+            return f"{plate_scope}::{token}"
 
     def _ensure_step_scope_token(self, step: FunctionStep) -> str:
         token = getattr(step, self.STEP_SCOPE_ATTR, None)
@@ -1063,10 +1087,149 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self._preview_step_cache[cache_key] = merged_step
         return merged_step
 
+    def _merge_pipeline_config_with_live_values(self, pipeline_config, live_values):
+        """Return pipeline config merged with live overrides."""
+        if not live_values or not dataclasses.is_dataclass(pipeline_config):
+            return pipeline_config
+
+        reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
+        if not reconstructed_values:
+            return pipeline_config
+
+        try:
+            return dataclasses.replace(pipeline_config, **reconstructed_values)
+        except Exception:
+            return pipeline_config
+
+    def _get_pipeline_config_preview_instance(self, live_context_snapshot):
+        """Return pipeline config merged with live overrides for current plate."""
+        orchestrator = self._get_current_orchestrator()
+        if not orchestrator:
+            return None
+
+        pipeline_config = orchestrator.pipeline_config
+        if live_context_snapshot is None or not self.current_plate:
+            return pipeline_config
+
+        scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
+        scope_entries = scoped_values.get(self.current_plate)
+        if not scope_entries:
+            return pipeline_config
+
+        live_values = scope_entries.get(type(pipeline_config))
+        if not live_values:
+            return pipeline_config
+
+        return self._merge_pipeline_config_with_live_values(pipeline_config, live_values)
+
+    def _get_global_config_preview_instance(self, live_context_snapshot):
+        """Return global config merged with live overrides."""
+        from openhcs.core.config import GlobalPipelineConfig
+
+        base_global = self.global_config
+        if live_context_snapshot is None:
+            return base_global
+
+        values = getattr(live_context_snapshot, 'values', {}) or {}
+        live_values = values.get(GlobalPipelineConfig)
+        if not live_values:
+            return base_global
+
+        reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
+        if not reconstructed_values:
+            return base_global
+
+        try:
+            return dataclasses.replace(base_global, **reconstructed_values)
+        except Exception:
+            return base_global
+
+    def _resolve_flash_field_value(
+        self,
+        obj: Any,
+        identifier: str,
+        live_context_snapshot,
+    ) -> Any:
+        from openhcs.core.steps.function_step import FunctionStep
+
+        if isinstance(obj, FunctionStep):
+            return self._resolve_step_flash_field(
+                obj, identifier, live_context_snapshot
+            )
+        return super()._resolve_flash_field_value(obj, identifier, live_context_snapshot)
+
+    def _resolve_step_flash_field(
+        self,
+        step: FunctionStep,
+        identifier: str,
+        live_context_snapshot,
+    ) -> Any:
+        if not identifier:
+            return None
+
+        parts = tuple(part for part in identifier.split(".") if part)
+        if not parts:
+            return None
+
+        root_hint = parts[0]
+        path_parts = parts
+        target = step
+
+        orchestrator = self._get_current_orchestrator()
+        pipeline_config_preview = self._get_pipeline_config_preview_instance(live_context_snapshot)
+        global_config_preview = self._get_global_config_preview_instance(live_context_snapshot)
+
+        if root_hint in ("pipeline_config", "global_config"):
+            path_parts = parts[1:]
+            if not path_parts:
+                return None
+
+            if not self._path_depends_on_context(step, path_parts):
+                return None
+
+            if root_hint == "pipeline_config":
+                target = pipeline_config_preview or (orchestrator.pipeline_config if orchestrator else None)
+            else:
+                target = global_config_preview
+
+        if target is None:
+            return None
+
+        if not path_parts:
+            return target
+
+        for attr_name in path_parts[:-1]:
+            try:
+                target = getattr(target, attr_name)
+            except AttributeError:
+                target = None
+
+            if target is None:
+                return None
+
+        final_attr = path_parts[-1]
+
+        if target is None:
+            return None
+
+        if is_dataclass(target):
+            dataclass_fields = getattr(type(target), "__dataclass_fields__", {})
+            if final_attr in dataclass_fields:
+                try:
+                    return self._resolve_config_attr(
+                        step, target, final_attr, live_context_snapshot
+                    )
+                except Exception:
+                    pass
+
+        return getattr(target, final_attr, None)
+
     def _build_scope_index_map(self) -> Dict[str, int]:
         scope_map: Dict[str, int] = {}
         for idx, step in enumerate(self.pipeline_steps):
-            scope_id = self._build_step_scope_id(step)
+            # Build scope_id WITHOUT @position for cross-window updates
+            # The @position suffix is only for visual styling, not for scope matching
+            scope_id = self._build_step_scope_id(step, position=None)
             if scope_id:
                 scope_map[scope_id] = idx
         return scope_map
@@ -1077,6 +1240,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         if not self.current_plate:
             self._pending_preview_keys.clear()
+            self._pending_label_keys.clear()
+            self._pending_changed_fields.clear()
             return
 
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
@@ -1085,13 +1250,58 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         indices = sorted(
             idx for idx in self._pending_preview_keys if isinstance(idx, int)
         )
+        label_indices = {idx for idx in self._pending_label_keys if isinstance(idx, int)}
+
+        # Copy changed fields before clearing
+        changed_fields = set(self._pending_changed_fields) if self._pending_changed_fields else None
+
+        # Get current live context snapshot
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        live_context_snapshot = ParameterFormManager.collect_live_context()
+
+        # Use last snapshot as "before" for comparison
+        live_context_before = self._last_live_context_snapshot
+
+        # Update last snapshot for next comparison
+        self._last_live_context_snapshot = live_context_snapshot
+
+        # Clear pending updates
         self._pending_preview_keys.clear()
-        self._refresh_step_items_by_index(indices, live_context_snapshot)
+        self._pending_label_keys.clear()
+        self._pending_changed_fields.clear()
+
+        # Refresh with changed fields for flash logic
+        self._refresh_step_items_by_index(
+            indices,
+            live_context_snapshot,
+            changed_fields,
+            live_context_before,
+            label_indices=label_indices,
+        )
 
     def _handle_full_preview_refresh(self) -> None:
         self.update_step_list()
 
-    def _refresh_step_items_by_index(self, indices: Iterable[int], live_context_snapshot=None) -> None:
+
+
+    def _refresh_step_items_by_index(
+        self,
+        indices: Iterable[int],
+        live_context_snapshot=None,
+        changed_fields=None,
+        live_context_before=None,
+        *,
+        label_indices: Optional[Set[int]] = None,
+    ) -> None:
+        """Refresh step items incrementally.
+
+        Args:
+            indices: Step indices to refresh
+            live_context_snapshot: Pre-collected live context (optional)
+            changed_fields: Set of field names that changed (for flash logic)
+            live_context_before: Live context snapshot before changes (for flash logic)
+            label_indices: Optional subset of indices that require label updates
+        """
         if not indices:
             return
 
@@ -1102,6 +1312,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 return
             live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
 
+        label_subset = set(label_indices) if label_indices is not None else None
+
         for step_index in sorted(set(indices)):
             if step_index < 0 or step_index >= len(self.pipeline_steps):
                 continue
@@ -1109,16 +1321,115 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             if item is None:
                 continue
             step = self.pipeline_steps[step_index]
-            old_text = item.text()
-            display_text, _ = self.format_item_for_display(step, live_context_snapshot)
-            if item.text() != display_text:
+            should_update_labels = (
+                label_subset is None or step_index in label_subset
+            )
+
+            if should_update_labels:
+                display_text, _ = self.format_item_for_display(step, live_context_snapshot)
                 item.setText(display_text)
-            item.setData(Qt.ItemDataRole.UserRole, step_index)
-            item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
-            item.setToolTip(self._create_step_tooltip(step))
+                item.setData(Qt.ItemDataRole.UserRole, step_index)
+                item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
+                item.setToolTip(self._create_step_tooltip(step))
+
+                # Reapply scope-based styling (in case colors changed)
+                self._apply_step_item_styling(item)
+
+            # Flash if any resolved value changed
+            if changed_fields and live_context_before:
+                step_before = self._get_step_preview_instance(step, live_context_before)
+                step_after = self._get_step_preview_instance(step, live_context_snapshot)
+
+                if self._check_resolved_value_changed(
+                    step_before,
+                    step_after,
+                    changed_fields,
+                    live_context_before=live_context_before,
+                    live_context_after=live_context_snapshot,
+                ):
+                    self._flash_step_item(step_index)
+
+    def _apply_step_item_styling(self, item: QListWidgetItem) -> None:
+        """Apply scope-based background color and layered borders to step list item.
+
+        Args:
+            item: List item to style
+        """
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+
+        # Get step index from item data
+        step_index = item.data(Qt.ItemDataRole.UserRole)
+        if step_index is None or step_index < 0 or step_index >= len(self.pipeline_steps):
+            return
+
+        # Build scope_id for this step INCLUDING position for per-orchestrator indexing
+        step = self.pipeline_steps[step_index]
+        step_token = getattr(step, '_pipeline_scope_token', f'step_{step_index}')
+        # Format: "plate_path::step_token@position" where position is the step's index in THIS pipeline
+        scope_id = f"{self.current_plate}::{step_token}@{step_index}"
+
+        # Get color scheme for this scope
+        color_scheme = get_scope_color_scheme(scope_id)
+
+        # Apply background color (None = transparent)
+        bg_color = color_scheme.to_qcolor_step_item_bg()
+        if bg_color is not None:
+            item.setBackground(bg_color)
+        else:
+            # Clear background to make it transparent
+            from PyQt6.QtGui import QBrush
+            item.setBackground(QBrush())
+
+        # Store border layers and base color in item data for delegate to use
+        item.setData(Qt.ItemDataRole.UserRole + 3, color_scheme.step_border_layers)
+        item.setData(Qt.ItemDataRole.UserRole + 4, color_scheme.base_color_rgb)
+
+    def _flash_step_item(self, step_index: int) -> None:
+        """Flash step list item to indicate update.
+
+        Args:
+            step_index: Index of step whose item should flash
+        """
+        from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import flash_list_item
+        from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
+
+        if 0 <= step_index < self.step_list.count():
+            # Build scope_id for this step INCLUDING position for per-orchestrator indexing
+            step = self.pipeline_steps[step_index]
+            step_token = getattr(step, '_pipeline_scope_token', f'step_{step_index}')
+            # Format: "plate_path::step_token@position" where position is the step's index in THIS pipeline
+            scope_id = f"{self.current_plate}::{step_token}@{step_index}"
+
+            flash_list_item(
+                self.step_list,
+                step_index,
+                scope_id,
+                ListItemType.STEP
+            )
+
+    def handle_cross_window_preview_change(
+        self,
+        field_path: str,
+        new_value: Any,
+        editing_object: Any,
+        context_object: Any,
+    ) -> None:
+        """Handle cross-window preview change.
+
+        Flash happens in _refresh_step_items_by_index after debouncing,
+        so we delegate all logic to parent implementation.
+
+        Args:
+            field_path: Field path that changed
+            new_value: New value
+            editing_object: Object being edited
+            context_object: Context object
+        """
+        # Call parent implementation (adds to pending updates, schedules debounced refresh with flash)
+        super().handle_cross_window_preview_change(field_path, new_value, editing_object, context_object)
 
     # ========== UI Helper Methods ==========
-    
+
     def update_step_list(self):
         """Update the step list widget using selection preservation mixin."""
         with timer("Pipeline editor: update_step_list()", threshold_ms=1.0):
@@ -1163,8 +1474,15 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                     item.setData(Qt.ItemDataRole.UserRole, step_index)
                     item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
                     item.setToolTip(self._create_step_tooltip(step))
+
+                    # Reapply scope-based styling (in case colors changed)
+                    self._apply_step_item_styling(item)
             else:
                 # Structure changed - rebuild entire list
+                # Clear flash animators before clearing list
+                from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import clear_all_animators
+                clear_all_animators(self.step_list)
+
                 self.step_list.clear()
 
                 for step_index, step in enumerate(self.pipeline_steps):
@@ -1173,6 +1491,10 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                     item.setData(Qt.ItemDataRole.UserRole, step_index)
                     item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
                     item.setToolTip(self._create_step_tooltip(step))
+
+                    # Apply scope-based styling
+                    self._apply_step_item_styling(item)
+
                     self.step_list.addItem(item)
 
         # Use utility to preserve selection during update
@@ -1283,7 +1605,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         direction = "up" if to_index < from_index else "down"
         self.status_message.emit(f"Moved step '{step_name}' {direction}")
 
-        logger.debug(f"Reordered step '{step_name}' from index {from_index} to {to_index}")
+
 
     def on_pipeline_changed(self, steps: List[FunctionStep]):
         """
@@ -1295,8 +1617,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Save pipeline to current plate if one is selected
         if self.current_plate:
             self.save_pipeline_for_plate(self.current_plate, steps)
-        
-        logger.debug(f"Pipeline changed: {len(steps)} steps")
+
 
     def _is_current_plate_initialized(self) -> bool:
         """Check if current plate has an initialized orchestrator (mirrors Textual TUI)."""
@@ -1374,14 +1695,12 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # This ensures pipeline config editor shows updated inherited values
         if hasattr(self, 'form_manager') and self.form_manager:
             self.form_manager.refresh_placeholder_text()
-            logger.info("Refreshed pipeline config placeholders after global config change")
 
     def closeEvent(self, event):
         """Handle widget close event to disconnect signals and prevent memory leaks."""
         # Unregister from cross-window refresh signals
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
         ParameterFormManager.unregister_external_listener(self)
-        logger.debug("Pipeline editor: Unregistered from cross-window refresh signals")
 
         # Call parent closeEvent
         super().closeEvent(event)

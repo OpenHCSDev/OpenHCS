@@ -6,7 +6,7 @@ and other widgets that display items with preview labels.
 """
 
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle
-from PyQt6.QtGui import QPainter, QColor, QFontMetrics
+from PyQt6.QtGui import QPainter, QColor, QFontMetrics, QFont, QPen
 from PyQt6.QtCore import Qt, QRect
 
 
@@ -49,8 +49,70 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         text = opt.text or ""
         opt.text = ""
 
-        # Let the style draw background, selection, hover, borders
+        # CRITICAL: Draw custom background color FIRST (before style draws selection)
+        # This allows scope-based colors to show through
+        background_brush = index.data(Qt.ItemDataRole.BackgroundRole)
+        if background_brush is not None:
+            painter.save()
+            painter.fillRect(option.rect, background_brush)
+            painter.restore()
+
+        # Let the style draw selection indicator, hover, borders (but NOT background)
+        # We skip the background by drawing it ourselves above
         self.parent().style().drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, self.parent())
+
+        # Draw layered step borders if present
+        # Border layers are stored as list of (width, tint_index, pattern) tuples
+        border_layers = index.data(Qt.ItemDataRole.UserRole + 3)
+        base_color_rgb = index.data(Qt.ItemDataRole.UserRole + 4)
+
+        if border_layers and len(border_layers) > 0 and base_color_rgb:
+            painter.save()
+
+            # Tint factors for the 3 tints (MORE DRASTIC)
+            tint_factors = [0.7, 1.0, 1.4]  # Darker, neutral, brighter
+
+            # Draw each border layer from outside to inside
+            # Each border is drawn with its center at 'inset + width/2' from the edge
+            inset = 0
+            for layer_data in border_layers:
+                # Handle both old format (width, tint_index) and new format (width, tint_index, pattern)
+                if len(layer_data) == 3:
+                    width, tint_index, pattern = layer_data
+                else:
+                    width, tint_index = layer_data
+                    pattern = 'solid'
+
+                # Calculate tinted color for this border
+                r, g, b = base_color_rgb
+                tint_factor = tint_factors[tint_index]
+                border_r = min(255, int(r * tint_factor))
+                border_g = min(255, int(g * tint_factor))
+                border_b = min(255, int(b * tint_factor))
+                border_color = QColor(border_r, border_g, border_b).darker(120)
+
+                # Set pen style based on pattern with MORE OBVIOUS spacing
+                pen = QPen(border_color, width)
+                if pattern == 'dashed':
+                    pen.setStyle(Qt.PenStyle.DashLine)
+                    pen.setDashPattern([8, 6])  # Longer dashes, more spacing
+                elif pattern == 'dotted':
+                    pen.setStyle(Qt.PenStyle.DotLine)
+                    pen.setDashPattern([2, 6])  # Small dots, more spacing
+                else:  # solid
+                    pen.setStyle(Qt.PenStyle.SolidLine)
+
+                # Draw this border layer
+                # Position the border so its outer edge is at 'inset' pixels from the rect edge
+                # Since pen draws centered, we offset by width/2
+                border_offset = int(inset + (width / 2.0))
+                painter.setPen(pen)
+                painter.drawRect(option.rect.adjusted(border_offset, border_offset, -border_offset - 1, -border_offset - 1))
+
+                # Move inward for next layer
+                inset += width
+
+            painter.restore()
 
         # Now draw text manually with custom colors
         painter.save()
@@ -62,7 +124,6 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         is_disabled = index.data(Qt.ItemDataRole.UserRole + 1) or False
 
         # Use strikethrough font for disabled items
-        from PyQt6.QtGui import QFont, QFontMetrics
         font = QFont(option.font)
         if is_disabled:
             font.setStrikeOut(True)
@@ -83,8 +144,10 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         x_offset = text_rect.left() + 5  # Left padding
         y_offset = text_rect.top() + fm.ascent() + 3  # Top padding
 
+        underline_first_line = bool(index.data(Qt.ItemDataRole.UserRole + 2))
+
         # Draw each line with appropriate color
-        for line in lines:
+        for line_index, line in enumerate(lines):
             # Determine if this is a preview line (starts with "  └─" or contains "  (")
             is_preview_line = line.strip().startswith('└─')
 
@@ -123,8 +186,27 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
 
                 painter.setPen(color)
 
-                # Draw the line
-                painter.drawText(x_offset, y_offset, line)
+                if line_index == 0 and underline_first_line:
+                    # Underline the plate name portion (text after the last '▶ ')
+                    arrow_idx = line.rfind("▶ ")
+                    if arrow_idx != -1:
+                        prefix = line[:arrow_idx + 2]
+                        name_part = line[arrow_idx + 2:]
+                    else:
+                        prefix = ""
+                        name_part = line
+
+                    painter.drawText(x_offset, y_offset, prefix)
+                    prefix_width = fm.horizontalAdvance(prefix)
+
+                    underline_font = QFont(font)
+                    underline_font.setUnderline(True)
+                    painter.setFont(underline_font)
+                    painter.drawText(x_offset + prefix_width, y_offset, name_part)
+                    painter.setFont(font)
+                else:
+                    # Draw the entire line normally
+                    painter.drawText(x_offset, y_offset, line)
 
             # Move to next line
             y_offset += line_height
@@ -168,4 +250,3 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         total_width = max_width + 20  # 10px padding on each side
 
         return QSize(total_width, total_height)
-

@@ -44,6 +44,9 @@ class CrossWindowPreviewMixin:
     def _init_cross_window_preview_mixin(self) -> None:
         self._preview_scope_map: Dict[str, Hashable] = {}
         self._pending_preview_keys: Set[Hashable] = set()
+        self._pending_label_keys: Set[Hashable] = set()
+        self._pending_changed_fields: Set[str] = set()  # Track which fields changed during debounce
+        self._last_live_context_snapshot = None  # Last LiveContextSnapshot (becomes "before" for next change)
         self._preview_update_timer = None  # QTimer for debouncing preview updates
 
         # Per-widget preview field configuration
@@ -66,6 +69,14 @@ class CrossWindowPreviewMixin:
             value_changed_handler=self.handle_cross_window_preview_change,
             refresh_handler=self.handle_cross_window_preview_refresh  # Listen to refresh events (reset buttons)
         )
+
+        # Capture initial snapshot so first change has a baseline for flash detection
+        try:
+            self._last_live_context_snapshot = ParameterFormManager.collect_live_context()
+        except Exception:
+            self._last_live_context_snapshot = None
+
+
 
     # --- Scope mapping helpers -------------------------------------------------
     def set_preview_scope_mapping(self, scope_map: Dict[str, Hashable]) -> None:
@@ -265,38 +276,50 @@ class CrossWindowPreviewMixin:
         Uses trailing debounce: timer restarts on each change, only executes after
         changes stop for PREVIEW_UPDATE_DEBOUNCE_MS milliseconds.
         """
-        import logging
-        logger = logging.getLogger(__name__)
-
-        if not self._should_process_preview_field(
-            field_path, new_value, editing_object, context_object
-        ):
-            return
-
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
+        target_keys, requires_full_refresh = self._resolve_scope_targets(scope_id)
 
-        # Add affected items to pending set
-        if scope_id == self.ALL_ITEMS_SCOPE:
-            # Refresh ALL items (add all item keys to pending updates)
-            # Generic: works with any item key type (int for steps, str for plates, etc.)
-            all_item_keys = list(self._preview_scope_map.values())
-            for item_key in all_item_keys:
-                self._pending_preview_keys.add(item_key)
-        elif scope_id == self.FULL_REFRESH_SCOPE:
+        # Track which field changed (for flash logic - ALWAYS track, don't filter)
+        if field_path:
+            root_token, attr_path = self._split_field_path(field_path)
+            canonical_root = self._canonicalize_root(root_token) or root_token
+            identifiers: Set[str] = set()
+            if attr_path:
+                identifiers.add(attr_path)
+                if "." in attr_path:
+                    final_part = attr_path.split(".")[-1]
+                    if final_part:
+                        identifiers.add(final_part)
+                if canonical_root:
+                    identifiers.add(f"{canonical_root}.{attr_path}")
+            else:
+                final_part = field_path.split('.')[-1]
+                if final_part:
+                    identifiers.add(final_part)
+                if canonical_root:
+                    identifiers.add(canonical_root)
+
+            for identifier in identifiers:
+                self._pending_changed_fields.add(identifier)
+
+        # Check if this change affects displayed text (for label updates)
+        should_update_labels = self._should_process_preview_field(
+            field_path, new_value, editing_object, context_object
+        )
+
+        if requires_full_refresh:
+            self._pending_preview_keys.clear()
+            self._pending_label_keys.clear()
+            self._pending_changed_fields.clear()
             self._schedule_preview_update(full_refresh=True)
             return
-        elif scope_id and scope_id in self._preview_scope_map:
-            item_key = self._preview_scope_map[scope_id]
-            self._pending_preview_keys.add(item_key)
-        elif scope_id is None:
-            # Unknown scope - trigger full refresh
-            self._schedule_preview_update(full_refresh=True)
-            return
-        else:
-            # Scope not in map - might be a new item or unrelated change
-            return
 
-        # Schedule debounced update (trailing debounce - restarts timer on each change)
+        if target_keys:
+            self._pending_preview_keys.update(target_keys)
+            if should_update_labels:
+                self._pending_label_keys.update(target_keys)
+
+        # Schedule debounced update (always schedule to handle flash, even if no label updates)
         self._schedule_preview_update(full_refresh=False)
 
     def handle_cross_window_preview_refresh(
@@ -319,31 +342,22 @@ class CrossWindowPreviewMixin:
 
         # Extract scope ID to determine which item needs refresh
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
+        target_keys, requires_full_refresh = self._resolve_scope_targets(scope_id)
 
-        # Add affected items to pending set (same logic as handle_cross_window_preview_change)
-        if scope_id == self.ALL_ITEMS_SCOPE:
-            # Refresh ALL items
-            all_item_keys = list(self._preview_scope_map.values())
-            for item_key in all_item_keys:
-                self._pending_preview_keys.add(item_key)
-            logger.info(f"handle_cross_window_preview_refresh: Refreshing ALL items ({len(all_item_keys)} items)")
-        elif scope_id == self.FULL_REFRESH_SCOPE:
-            logger.info("handle_cross_window_preview_refresh: Forcing full refresh via resolver")
+        if requires_full_refresh:
+            self._pending_preview_keys.clear()
+            self._pending_label_keys.clear()
+            self._pending_changed_fields.clear()
             self._schedule_preview_update(full_refresh=True)
             return
-        elif scope_id and scope_id in self._preview_scope_map:
-            item_key = self._preview_scope_map[scope_id]
-            self._pending_preview_keys.add(item_key)
-            logger.info(f"handle_cross_window_preview_refresh: Refreshing item {item_key} for scope {scope_id}")
-        elif scope_id is None:
-            # Unknown scope - trigger full refresh
-            logger.info("handle_cross_window_preview_refresh: Unknown scope, triggering full refresh")
-            self._schedule_preview_update(full_refresh=True)
-            return
-        else:
+
+        if not target_keys:
             # Scope not in map - might be unrelated change
             logger.debug(f"handle_cross_window_preview_refresh: Scope {scope_id} not in map, skipping")
             return
+
+        self._pending_preview_keys.update(target_keys)
+        self._pending_label_keys.update(target_keys)
 
         # Schedule debounced update
         self._schedule_preview_update(full_refresh=False)
@@ -434,6 +448,22 @@ class CrossWindowPreviewMixin:
         raise NotImplementedError("Subclasses must implement _merge_with_live_values")
 
     # --- Hooks for subclasses --------------------------------------------------
+    def _resolve_scope_targets(self, scope_id: Optional[str]) -> Tuple[Optional[Set[Hashable]], bool]:
+        """Map a scope identifier to concrete preview keys.
+
+        Returns:
+            (target_keys, requires_full_refresh)
+        """
+        if scope_id == self.ALL_ITEMS_SCOPE:
+            return set(self._preview_scope_map.values()), False
+        if scope_id == self.FULL_REFRESH_SCOPE:
+            return None, True
+        if scope_id and scope_id in self._preview_scope_map:
+            return {self._preview_scope_map[scope_id]}, False
+        if scope_id is None:
+            return None, True
+        return set(), False
+
     def _should_process_preview_field(
         self,
         field_path: Optional[str],
@@ -488,6 +518,104 @@ class CrossWindowPreviewMixin:
         except Exception:
             logger.exception("Preview scope resolver failed", exc_info=True)
             return None
+
+    def _check_resolved_value_changed(
+        self,
+        obj_before: Any,
+        obj_after: Any,
+        changed_fields: Optional[Set[str]],
+        *,
+        live_context_before=None,
+        live_context_after=None,
+    ) -> bool:
+        """Check if any resolved value changed by comparing resolved objects.
+
+        Args:
+            obj_before: Resolved object before changes
+            obj_after: Resolved object after changes
+            changed_fields: Set of field names that changed
+
+        Returns:
+            True if any resolved value changed
+        """
+        if not changed_fields:
+            return False
+
+        for identifier in changed_fields:
+            if not identifier:
+                continue
+
+            before_value = self._resolve_flash_field_value(
+                obj_before, identifier, live_context_before
+            )
+            after_value = self._resolve_flash_field_value(
+                obj_after, identifier, live_context_after
+            )
+
+            if before_value != after_value:
+                return True
+
+        return False
+
+    def _resolve_flash_field_value(
+        self,
+        obj: Any,
+        identifier: str,
+        live_context_snapshot,
+    ) -> Any:
+        """Resolve a field identifier for flash detection.
+
+        Subclasses can override to provide context-aware resolution.
+        """
+        if obj is None or not identifier:
+            return None
+
+        parts = [part for part in identifier.split(".") if part]
+        if not parts:
+            return obj
+
+        target = obj
+        for part in parts:
+            if target is None:
+                return None
+            if isinstance(target, dict):
+                target = target.get(part)
+                continue
+            try:
+                target = getattr(target, part)
+            except AttributeError:
+                return None
+
+        return target
+
+    def _path_depends_on_context(self, obj: Any, path_parts: Tuple[str, ...]) -> bool:
+        """Return True if obj inherits the value located at path_parts."""
+        if not path_parts:
+            return True
+
+        current = obj
+        for idx, part in enumerate(path_parts):
+            try:
+                value = object.__getattribute__(current, part)
+            except AttributeError:
+                # Attribute missing or resolved lazily elsewhere -> treat as inherited
+                return True
+            except Exception:
+                try:
+                    value = getattr(current, part)
+                except AttributeError:
+                    return True
+
+            if value is None:
+                return True
+
+            if idx == len(path_parts) - 1:
+                # Final attribute exists and has a concrete value -> local override
+                return False
+
+            current = value
+
+        return True
 
     def _process_pending_preview_updates(self) -> None:
         """Apply incremental updates for all pending preview keys."""

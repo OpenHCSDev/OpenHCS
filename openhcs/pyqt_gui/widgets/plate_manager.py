@@ -12,7 +12,8 @@ import copy
 import sys
 import subprocess
 import tempfile
-from typing import List, Dict, Optional, Callable, Any
+from typing import List, Dict, Optional, Callable, Any, Set
+from dataclasses import is_dataclass
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
@@ -309,19 +310,40 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         if not self._pending_preview_keys:
             return
 
-        # Update only the affected plate items
+        # Copy changed fields before clearing
+        changed_fields = set(self._pending_changed_fields) if self._pending_changed_fields else None
+
+        # Get current live context snapshot
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        live_context_snapshot = ParameterFormManager.collect_live_context()
+
+        # Use last snapshot as "before" for comparison
+        live_context_before = self._last_live_context_snapshot
+
+        # Update last snapshot for next comparison
+        self._last_live_context_snapshot = live_context_snapshot
+
+        # Update only the affected plate items (before clearing)
         for plate_path in self._pending_preview_keys:
-            self._update_single_plate_item(plate_path)
+            self._update_single_plate_item(plate_path, changed_fields, live_context_before)
 
         # Clear pending updates
         self._pending_preview_keys.clear()
+        self._pending_label_keys.clear()
+        self._pending_changed_fields.clear()
 
     def _handle_full_preview_refresh(self) -> None:
         """Fallback when incremental updates not possible."""
         self.update_plate_list()
 
-    def _update_single_plate_item(self, plate_path: str):
-        """Update a single plate item's preview text without rebuilding the list."""
+    def _update_single_plate_item(self, plate_path: str, changed_fields: Optional[Set[str]] = None, live_context_before=None):
+        """Update a single plate item's preview text without rebuilding the list.
+
+        Args:
+            plate_path: Path of plate to update
+            changed_fields: Set of field names that changed (for flash logic)
+            live_context_before: Live context snapshot before changes (for flash logic)
+        """
         # Find the item in the list
         for i in range(self.plate_list.count()):
             item = self.plate_list.item(i)
@@ -330,8 +352,37 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 # Rebuild just this item's display text
                 plate = plate_data
                 display_text = self._format_plate_item_with_preview(plate)
+                previous_text = item.text()
                 item.setText(display_text)
                 # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
+
+                # Reapply scope-based styling (in case colors changed)
+                self._apply_orchestrator_item_styling(item, plate)
+
+                flash_needed = False
+                # Flash if any resolved value changed
+                if changed_fields and live_context_before and plate_path in self.orchestrators:
+                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+                    # Get current live context
+                    live_context_after = ParameterFormManager.collect_live_context(scope_filter=plate_path)
+
+                    # Get resolved pipeline config before and after
+                    orchestrator = self.orchestrators[plate_path]
+                    pipeline_config = orchestrator.pipeline_config
+                    if pipeline_config:
+                        config_before = self._get_preview_instance(pipeline_config, live_context_before, plate_path, type(pipeline_config))
+                        config_after = self._get_preview_instance(pipeline_config, live_context_after, plate_path, type(pipeline_config))
+
+                        # Check if resolved values changed using mixin helper
+                        if self._check_resolved_value_changed(
+                            config_before,
+                            config_after,
+                            changed_fields,
+                            live_context_before=live_context_before,
+                            live_context_after=live_context_after,
+                        ):
+                            self._flash_plate_item(plate_path)
 
                 break
 
@@ -463,6 +514,77 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         return labels
 
+    def _apply_orchestrator_item_styling(self, item: QListWidgetItem, plate: Dict) -> None:
+        """Apply scope-based background color and border to orchestrator list item.
+
+        Args:
+            item: List item to style
+            plate: Plate dictionary containing path
+        """
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+
+        # Get scope_id (plate path)
+        scope_id = str(plate['path'])
+
+        # Get color scheme for this scope
+        color_scheme = get_scope_color_scheme(scope_id)
+
+        # Apply background color
+        item.setBackground(color_scheme.to_qcolor_orchestrator_bg())
+
+        # Apply border: single solid border with orchestrator color
+        # Store border data for delegate to render
+        # Format: [(width, tint_index, pattern), ...]
+        border_layers = [(3, 1, 'solid')]  # 3px solid border, tint 1 (neutral)
+        base_color_rgb = color_scheme.orchestrator_item_border_rgb
+
+        item.setData(Qt.ItemDataRole.UserRole + 3, border_layers)
+        item.setData(Qt.ItemDataRole.UserRole + 4, base_color_rgb)
+
+    def _flash_plate_item(self, plate_path: str) -> None:
+        """Flash plate list item to indicate update.
+
+        Args:
+            plate_path: Path of plate whose item should flash
+        """
+        from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import flash_list_item
+        from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
+
+        # Find item row for this plate
+        for row in range(self.plate_list.count()):
+            item = self.plate_list.item(row)
+            plate_data = item.data(Qt.ItemDataRole.UserRole)
+            if plate_data and plate_data.get('path') == plate_path:
+                scope_id = str(plate_path)
+                flash_list_item(
+                    self.plate_list,
+                    row,
+                    scope_id,
+                    ListItemType.ORCHESTRATOR
+                )
+                break
+
+    def handle_cross_window_preview_change(
+        self,
+        field_path: str,
+        new_value: Any,
+        editing_object: Any,
+        context_object: Any,
+    ) -> None:
+        """Handle cross-window preview change.
+
+        Flash happens in _update_single_plate_item after debouncing,
+        so we delegate all logic to parent implementation.
+
+        Args:
+            field_path: Field path that changed
+            new_value: New value
+            editing_object: Object being edited
+            context_object: Context object
+        """
+        # Call parent implementation (adds to pending updates, schedules debounced refresh with flash)
+        super().handle_cross_window_preview_change(field_path, new_value, editing_object, context_object)
+
     def _merge_with_live_values(self, obj: Any, live_values: Dict[str, Any]) -> Any:
         """Merge PipelineConfig with live values from ParameterFormManager.
 
@@ -491,7 +613,6 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             if field_name in reconstructed_values:
                 # Use live value
                 merged_values[field_name] = reconstructed_values[field_name]
-                logger.info(f"Using live value for {field_name}: {reconstructed_values[field_name]}")
             else:
                 # Use original value
                 merged_values[field_name] = getattr(obj, field_name)
@@ -526,6 +647,11 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 pipeline_config_for_display
             ]
 
+            # Skip resolver when dataclass does not actually expose the attribute
+            dataclass_fields = getattr(type(config), "__dataclass_fields__", {})
+            if dataclass_fields and attr_name not in dataclass_fields:
+                return getattr(config, attr_name, None)
+
             # Resolve using service
             resolved_value = self._live_context_resolver.resolve_config_attr(
                 config_obj=config,
@@ -537,13 +663,93 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
             return resolved_value
 
+        except AttributeError as err:
+            logger.debug(
+                "Attribute %s missing on %s during flash resolution: %s",
+                attr_name,
+                type(config).__name__,
+                err,
+            )
+            try:
+                return object.__getattribute__(config, attr_name)
+            except AttributeError:
+                return None
         except Exception as e:
             import traceback
             logger.warning(f"Failed to resolve config.{attr_name} for {type(config).__name__}: {e}")
             logger.warning(f"Traceback: {traceback.format_exc()}")
-            # Fallback to raw value
-            raw_value = object.__getattribute__(config, attr_name)
-            return raw_value
+            try:
+                return object.__getattribute__(config, attr_name)
+            except AttributeError:
+                return None
+
+    def _resolve_flash_field_value(
+        self,
+        obj: Any,
+        identifier: str,
+        live_context_snapshot,
+    ) -> Any:
+        if isinstance(obj, PipelineConfig):
+            return self._resolve_pipeline_config_flash_field(
+                obj, identifier, live_context_snapshot
+            )
+        return super()._resolve_flash_field_value(obj, identifier, live_context_snapshot)
+
+    def _resolve_pipeline_config_flash_field(
+        self,
+        pipeline_config_view,
+        identifier: str,
+        live_context_snapshot,
+    ) -> Any:
+        if pipeline_config_view is None or not identifier:
+            return None
+
+        parts = tuple(part for part in identifier.split(".") if part)
+        if not parts:
+            return pipeline_config_view
+
+        root_hint = parts[0]
+        path_parts = parts
+        requires_context = False
+
+        if root_hint == "global_config":
+            requires_context = True
+            path_parts = parts[1:]
+
+        if not path_parts:
+            return None
+
+        if requires_context and not self._path_depends_on_context(pipeline_config_view, path_parts):
+            return None
+
+        target = pipeline_config_view
+        for attr_name in path_parts[:-1]:
+            try:
+                target = getattr(target, attr_name)
+            except AttributeError:
+                target = None
+            if target is None:
+                return None
+
+        final_attr = path_parts[-1]
+
+        if target is None:
+            return None
+
+        if is_dataclass(target):
+            dataclass_fields = getattr(type(target), "__dataclass_fields__", {})
+            if final_attr in dataclass_fields:
+                try:
+                    return self._resolve_config_attr(
+                        pipeline_config_for_display=pipeline_config_view,
+                        config=target,
+                        attr_name=final_attr,
+                        live_context_snapshot=live_context_snapshot,
+                    )
+                except Exception:
+                    pass
+
+        return getattr(target, final_attr, None)
 
     def _resolve_preview_field_value(
         self,
@@ -667,13 +873,18 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 border: none;
                 border-radius: 3px;
                 margin: 2px;
+                background: transparent;  /* Let delegate draw background */
             }}
             QListWidget::item:selected {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
-                color: {self.color_scheme.to_hex(self.color_scheme.selection_text)};
+                /* Don't override background - let scope colors show through */
+                /* Just add a subtle border to indicate selection */
+                background: transparent;  /* Critical: don't override delegate background */
+                border-left: 3px solid {self.color_scheme.to_hex(self.color_scheme.selection_bg)};
+                color: {self.color_scheme.to_hex(self.color_scheme.text_primary)};
             }}
             QListWidget::item:hover {{
-                background-color: {self.color_scheme.to_hex(self.color_scheme.hover_bg)};
+                /* Subtle hover effect that doesn't completely override background */
+                background: transparent;  /* Critical: don't override delegate background */
             }}
         """)
 
@@ -2306,6 +2517,10 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         """Update the plate list widget using selection preservation mixin."""
         def update_func():
             """Update function that clears and rebuilds the list."""
+            # Clear flash animators before clearing list
+            from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import clear_all_animators
+            clear_all_animators(self.plate_list)
+
             self.plate_list.clear()
 
             # Build scope map for incremental updates
@@ -2316,6 +2531,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 display_text = self._format_plate_item_with_preview(plate)
                 item = QListWidgetItem(display_text)
                 item.setData(Qt.ItemDataRole.UserRole, plate)
+                # Flag for delegate to underline plate names
+                item.setData(Qt.ItemDataRole.UserRole + 2, True)
 
                 # Add tooltip
                 if plate['path'] in self.orchestrators:
@@ -2324,6 +2541,9 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
                     # Register scope for incremental updates
                     scope_map[str(plate['path'])] = plate['path']
+
+                # Apply scope-based styling
+                self._apply_orchestrator_item_styling(item, plate)
 
                 self.plate_list.addItem(item)
                 # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
