@@ -333,7 +333,9 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         self._pending_changed_fields.clear()
 
     def _handle_full_preview_refresh(self) -> None:
-        """Fallback when incremental updates not possible."""
+        """Fallback when incremental updates not possible - NO flash (used for window close/reset)."""
+        # Full refresh does NOT flash - it's just reverting to saved values
+        # Flash only happens in incremental updates where we know what changed
         self.update_plate_list()
 
     def _update_single_plate_item(self, plate_path: str, changed_fields: Optional[Set[str]] = None, live_context_before=None):
@@ -352,37 +354,15 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                 # Rebuild just this item's display text
                 plate = plate_data
                 display_text = self._format_plate_item_with_preview(plate)
-                previous_text = item.text()
-                item.setText(display_text)
-                # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
 
-                # Reapply scope-based styling (in case colors changed)
+                # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
                 self._apply_orchestrator_item_styling(item, plate)
 
-                flash_needed = False
-                # Flash if any resolved value changed
-                if changed_fields and live_context_before and plate_path in self.orchestrators:
-                    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                # ALWAYS flash on incremental update (no filtering for now)
+                self._flash_plate_item(plate_path)
 
-                    # Get current live context
-                    live_context_after = ParameterFormManager.collect_live_context(scope_filter=plate_path)
-
-                    # Get resolved pipeline config before and after
-                    orchestrator = self.orchestrators[plate_path]
-                    pipeline_config = orchestrator.pipeline_config
-                    if pipeline_config:
-                        config_before = self._get_preview_instance(pipeline_config, live_context_before, plate_path, type(pipeline_config))
-                        config_after = self._get_preview_instance(pipeline_config, live_context_after, plate_path, type(pipeline_config))
-
-                        # Check if resolved values changed using mixin helper
-                        if self._check_resolved_value_changed(
-                            config_before,
-                            config_after,
-                            changed_fields,
-                            live_context_before=live_context_before,
-                            live_context_after=live_context_after,
-                        ):
-                            self._flash_plate_item(plate_path)
+                item.setText(display_text)
+                # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
 
                 break
 
@@ -683,73 +663,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             except AttributeError:
                 return None
 
-    def _resolve_flash_field_value(
-        self,
-        obj: Any,
-        identifier: str,
-        live_context_snapshot,
-    ) -> Any:
-        if isinstance(obj, PipelineConfig):
-            return self._resolve_pipeline_config_flash_field(
-                obj, identifier, live_context_snapshot
-            )
-        return super()._resolve_flash_field_value(obj, identifier, live_context_snapshot)
 
-    def _resolve_pipeline_config_flash_field(
-        self,
-        pipeline_config_view,
-        identifier: str,
-        live_context_snapshot,
-    ) -> Any:
-        if pipeline_config_view is None or not identifier:
-            return None
 
-        parts = tuple(part for part in identifier.split(".") if part)
-        if not parts:
-            return pipeline_config_view
-
-        root_hint = parts[0]
-        path_parts = parts
-        requires_context = False
-
-        if root_hint == "global_config":
-            requires_context = True
-            path_parts = parts[1:]
-
-        if not path_parts:
-            return None
-
-        if requires_context and not self._path_depends_on_context(pipeline_config_view, path_parts):
-            return None
-
-        target = pipeline_config_view
-        for attr_name in path_parts[:-1]:
-            try:
-                target = getattr(target, attr_name)
-            except AttributeError:
-                target = None
-            if target is None:
-                return None
-
-        final_attr = path_parts[-1]
-
-        if target is None:
-            return None
-
-        if is_dataclass(target):
-            dataclass_fields = getattr(type(target), "__dataclass_fields__", {})
-            if final_attr in dataclass_fields:
-                try:
-                    return self._resolve_config_attr(
-                        pipeline_config_for_display=pipeline_config_view,
-                        config=target,
-                        attr_name=final_attr,
-                        live_context_snapshot=live_context_snapshot,
-                    )
-                except Exception:
-                    pass
-
-        return getattr(target, final_attr, None)
 
     def _resolve_preview_field_value(
         self,

@@ -380,6 +380,23 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             Tuple of (display_text, step_name)
         """
         step_for_display = self._get_step_preview_instance(step, live_context_snapshot)
+        display_text = self._format_resolved_step_for_display(step_for_display, live_context_snapshot)
+        step_name = getattr(step_for_display, 'name', 'Unknown Step')
+        return display_text, step_name
+
+    def _format_resolved_step_for_display(self, step_for_display: FunctionStep, live_context_snapshot=None) -> str:
+        """
+        Format ALREADY RESOLVED step for display.
+
+        This is the extracted logic that uses an already-resolved step preview instance.
+
+        Args:
+            step_for_display: Already resolved step preview instance
+            live_context_snapshot: Live context snapshot (for config resolution)
+
+        Returns:
+            Display text string
+        """
         step_name = getattr(step_for_display, 'name', 'Unknown Step')
         processing_cfg = getattr(step_for_display, 'processing_config', None)
 
@@ -474,7 +491,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         else:
             display_text = f"▶ {step_name}"
 
-        return display_text, step_name
+        return display_text
 
     def _create_step_tooltip(self, step: FunctionStep) -> str:
         """Create detailed tooltip for a step showing all constructor values."""
@@ -1144,85 +1161,10 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         except Exception:
             return base_global
 
-    def _resolve_flash_field_value(
-        self,
-        obj: Any,
-        identifier: str,
-        live_context_snapshot,
-    ) -> Any:
-        from openhcs.core.steps.function_step import FunctionStep
 
-        if isinstance(obj, FunctionStep):
-            return self._resolve_step_flash_field(
-                obj, identifier, live_context_snapshot
-            )
-        return super()._resolve_flash_field_value(obj, identifier, live_context_snapshot)
 
-    def _resolve_step_flash_field(
-        self,
-        step: FunctionStep,
-        identifier: str,
-        live_context_snapshot,
-    ) -> Any:
-        if not identifier:
-            return None
 
-        parts = tuple(part for part in identifier.split(".") if part)
-        if not parts:
-            return None
 
-        root_hint = parts[0]
-        path_parts = parts
-        target = step
-
-        orchestrator = self._get_current_orchestrator()
-        pipeline_config_preview = self._get_pipeline_config_preview_instance(live_context_snapshot)
-        global_config_preview = self._get_global_config_preview_instance(live_context_snapshot)
-
-        if root_hint in ("pipeline_config", "global_config"):
-            path_parts = parts[1:]
-            if not path_parts:
-                return None
-
-            if not self._path_depends_on_context(step, path_parts):
-                return None
-
-            if root_hint == "pipeline_config":
-                target = pipeline_config_preview or (orchestrator.pipeline_config if orchestrator else None)
-            else:
-                target = global_config_preview
-
-        if target is None:
-            return None
-
-        if not path_parts:
-            return target
-
-        for attr_name in path_parts[:-1]:
-            try:
-                target = getattr(target, attr_name)
-            except AttributeError:
-                target = None
-
-            if target is None:
-                return None
-
-        final_attr = path_parts[-1]
-
-        if target is None:
-            return None
-
-        if is_dataclass(target):
-            dataclass_fields = getattr(type(target), "__dataclass_fields__", {})
-            if final_attr in dataclass_fields:
-                try:
-                    return self._resolve_config_attr(
-                        step, target, final_attr, live_context_snapshot
-                    )
-                except Exception:
-                    pass
-
-        return getattr(target, final_attr, None)
 
     def _build_scope_index_map(self) -> Dict[str, int]:
         scope_map: Dict[str, int] = {}
@@ -1235,7 +1177,10 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         return scope_map
 
     def _process_pending_preview_updates(self) -> None:
+        logger.info(f"🔥 _process_pending_preview_updates called: _pending_preview_keys={self._pending_preview_keys}")
+
         if not self._pending_preview_keys:
+            logger.info(f"🔥 No pending preview keys - returning early")
             return
 
         if not self.current_plate:
@@ -1246,18 +1191,20 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 
+        # Get current live context snapshot WITH scope filter (critical for resolution)
+        if not self.current_plate:
+            return
         live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+
         indices = sorted(
             idx for idx in self._pending_preview_keys if isinstance(idx, int)
         )
         label_indices = {idx for idx in self._pending_label_keys if isinstance(idx, int)}
 
+        logger.info(f"🔥 Computed indices={indices}, label_indices={label_indices}")
+
         # Copy changed fields before clearing
         changed_fields = set(self._pending_changed_fields) if self._pending_changed_fields else None
-
-        # Get current live context snapshot
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        live_context_snapshot = ParameterFormManager.collect_live_context()
 
         # Use last snapshot as "before" for comparison
         live_context_before = self._last_live_context_snapshot
@@ -1265,10 +1212,15 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Update last snapshot for next comparison
         self._last_live_context_snapshot = live_context_snapshot
 
+        # Debug logging
+        logger.info(f"🔍 Pipeline Editor incremental update: indices={indices}, changed_fields={changed_fields}, has_before={live_context_before is not None}")
+
         # Clear pending updates
         self._pending_preview_keys.clear()
         self._pending_label_keys.clear()
         self._pending_changed_fields.clear()
+
+        logger.info(f"🔥 Calling _refresh_step_items_by_index with {len(indices)} indices")
 
         # Refresh with changed fields for flash logic
         self._refresh_step_items_by_index(
@@ -1280,6 +1232,9 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         )
 
     def _handle_full_preview_refresh(self) -> None:
+        """Handle full refresh WITHOUT flash (used for window close/reset events)."""
+        # Full refresh does NOT flash - it's just reverting to saved values
+        # Flash only happens in incremental updates where we know what changed
         self.update_step_list()
 
 
@@ -1325,29 +1280,26 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 label_subset is None or step_index in label_subset
             )
 
+            # Get preview instance (merges step-scoped live values)
+            step_for_display = self._get_step_preview_instance(step, live_context_snapshot)
+
+            # Format display text (this is what actually resolves through hierarchy)
+            display_text = self._format_resolved_step_for_display(step_for_display, live_context_snapshot)
+
+            # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
             if should_update_labels:
-                display_text, _ = self.format_item_for_display(step, live_context_snapshot)
+                self._apply_step_item_styling(item)
+
+            # ALWAYS flash on incremental update (no filtering for now)
+            logger.info(f"✨ FLASHING step {step_index}")
+            self._flash_step_item(step_index)
+
+            # Label update
+            if should_update_labels:
                 item.setText(display_text)
                 item.setData(Qt.ItemDataRole.UserRole, step_index)
                 item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
                 item.setToolTip(self._create_step_tooltip(step))
-
-                # Reapply scope-based styling (in case colors changed)
-                self._apply_step_item_styling(item)
-
-            # Flash if any resolved value changed
-            if changed_fields and live_context_before:
-                step_before = self._get_step_preview_instance(step, live_context_before)
-                step_after = self._get_step_preview_instance(step, live_context_snapshot)
-
-                if self._check_resolved_value_changed(
-                    step_before,
-                    step_after,
-                    changed_fields,
-                    live_context_before=live_context_before,
-                    live_context_after=live_context_snapshot,
-                ):
-                    self._flash_step_item(step_index)
 
     def _apply_step_item_styling(self, item: QListWidgetItem) -> None:
         """Apply scope-based background color and layered borders to step list item.
@@ -1393,6 +1345,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         from openhcs.pyqt_gui.widgets.shared.list_item_flash_animation import flash_list_item
         from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ListItemType
 
+        logger.info(f"🔥 _flash_step_item called for step {step_index}")
+
         if 0 <= step_index < self.step_list.count():
             # Build scope_id for this step INCLUDING position for per-orchestrator indexing
             step = self.pipeline_steps[step_index]
@@ -1400,12 +1354,16 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             # Format: "plate_path::step_token@position" where position is the step's index in THIS pipeline
             scope_id = f"{self.current_plate}::{step_token}@{step_index}"
 
+            logger.info(f"🔥 Calling flash_list_item with scope_id={scope_id}")
+
             flash_list_item(
                 self.step_list,
                 step_index,
                 scope_id,
                 ListItemType.STEP
             )
+        else:
+            logger.warning(f"🔥 Cannot flash step {step_index}: out of range (count={self.step_list.count()})")
 
     def handle_cross_window_preview_change(
         self,

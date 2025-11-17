@@ -6,7 +6,7 @@ and other widgets that display items with preview labels.
 """
 
 from PyQt6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QStyle
-from PyQt6.QtGui import QPainter, QColor, QFontMetrics, QFont, QPen
+from PyQt6.QtGui import QPainter, QColor, QFontMetrics, QFont, QPen, QBrush
 from PyQt6.QtCore import Qt, QRect
 
 
@@ -53,6 +53,11 @@ class MultilinePreviewItemDelegate(QStyledItemDelegate):
         # This allows scope-based colors to show through
         background_brush = index.data(Qt.ItemDataRole.BackgroundRole)
         if background_brush is not None:
+            import logging
+            logger = logging.getLogger(__name__)
+            if isinstance(background_brush, QBrush):
+                color = background_brush.color()
+                logger.info(f"🎨 Painting background: row={index.row()}, color={color.name()}, alpha={color.alpha()}")
             painter.save()
             painter.fillRect(option.rect, background_brush)
             painter.restore()

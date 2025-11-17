@@ -625,11 +625,11 @@ class ConfigWindow(BaseFormDialog):
         self.config_cancelled.emit()
         super().reject()  # BaseFormDialog handles unregistration
 
-        # CRITICAL: Trigger global refresh AFTER unregistration so other windows
-        # re-collect live context without this cancelled window's values
-        # This ensures group_by selector and other placeholders sync correctly
-        ParameterFormManager.trigger_global_cross_window_refresh()
-        logger.debug(f"Triggered global refresh after cancelling {self.config_class.__name__} editor")
+        # NOTE: No need to call trigger_global_cross_window_refresh() here
+        # The parameter form manager unregister already notifies external listeners
+        # via value_changed_handler with __WINDOW_CLOSED__ marker, which triggers
+        # incremental updates that will flash only the affected items
+        logger.debug(f"Cancelled {self.config_class.__name__} editor - incremental updates will handle refresh")
 
     def _get_form_managers(self):
         """Return list of form managers to unregister (required by BaseFormDialog)."""

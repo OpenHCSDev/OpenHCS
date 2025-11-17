@@ -373,8 +373,11 @@ class CrossWindowPreviewMixin:
         """
         from PyQt6.QtCore import QTimer
 
+        logger.info(f"🔥 _schedule_preview_update called: full_refresh={full_refresh}, delay={self.PREVIEW_UPDATE_DEBOUNCE_MS}ms")
+
         # Cancel existing timer if any (trailing debounce - restart on each change)
         if self._preview_update_timer is not None:
+            logger.info(f"🔥 Stopping existing timer")
             self._preview_update_timer.stop()
 
         # Schedule new update after configured delay
@@ -382,12 +385,15 @@ class CrossWindowPreviewMixin:
         self._preview_update_timer.setSingleShot(True)
 
         if full_refresh:
+            logger.info(f"🔥 Connecting to _handle_full_preview_refresh")
             self._preview_update_timer.timeout.connect(self._handle_full_preview_refresh)
         else:
+            logger.info(f"🔥 Connecting to _process_pending_preview_updates")
             self._preview_update_timer.timeout.connect(self._process_pending_preview_updates)
 
         delay = max(0, self.PREVIEW_UPDATE_DEBOUNCE_MS)
         self._preview_update_timer.start(delay)
+        logger.info(f"🔥 Timer started with {delay}ms delay")
 
     # --- Preview instance with live values (shared pattern) -------------------
     def _get_preview_instance(self, obj: Any, live_context_snapshot, scope_id: str, obj_type: Type) -> Any:
@@ -528,12 +534,18 @@ class CrossWindowPreviewMixin:
         live_context_before=None,
         live_context_after=None,
     ) -> bool:
-        """Check if any resolved value changed by comparing resolved objects.
+        """Check if any resolved value changed by comparing resolved values.
+
+        This method walks the object graph and compares values. For dataclass config
+        attributes, subclasses can override _resolve_flash_field_value() to provide
+        context-aware resolution (e.g., through LiveContextResolver).
 
         Args:
-            obj_before: Resolved object before changes
-            obj_after: Resolved object after changes
-            changed_fields: Set of field names that changed
+            obj_before: Preview instance before changes
+            obj_after: Preview instance after changes
+            changed_fields: Set of field identifiers that changed
+            live_context_before: Live context snapshot before changes (for resolution)
+            live_context_after: Live context snapshot after changes (for resolution)
 
         Returns:
             True if any resolved value changed
@@ -545,6 +557,7 @@ class CrossWindowPreviewMixin:
             if not identifier:
                 continue
 
+            # Get resolved values (subclasses can override for context-aware resolution)
             before_value = self._resolve_flash_field_value(
                 obj_before, identifier, live_context_before
             )
@@ -565,12 +578,36 @@ class CrossWindowPreviewMixin:
     ) -> Any:
         """Resolve a field identifier for flash detection.
 
+        Base implementation: simple walk of object graph.
         Subclasses can override to provide context-aware resolution.
+
+        Args:
+            obj: Object to resolve field from (preview instance)
+            identifier: Dot-separated field path
+            live_context_snapshot: Live context snapshot for resolution
+
+        Returns:
+            Resolved field value
         """
-        if obj is None or not identifier:
+        return self._walk_object_path(obj, identifier)
+
+    def _walk_object_path(self, obj: Any, path: str) -> Any:
+        """Walk object graph using dotted path notation.
+
+        Simple getattr walk with no resolution logic. Used for comparing
+        preview instances that are already fully resolved.
+
+        Args:
+            obj: Object to walk (should be a preview instance)
+            path: Dot-separated path (e.g., "processing_config.num_workers")
+
+        Returns:
+            Value at the path, or None if path doesn't exist
+        """
+        if obj is None or not path:
             return None
 
-        parts = [part for part in identifier.split(".") if part]
+        parts = [part for part in path.split(".") if part]
         if not parts:
             return obj
 
@@ -587,35 +624,6 @@ class CrossWindowPreviewMixin:
                 return None
 
         return target
-
-    def _path_depends_on_context(self, obj: Any, path_parts: Tuple[str, ...]) -> bool:
-        """Return True if obj inherits the value located at path_parts."""
-        if not path_parts:
-            return True
-
-        current = obj
-        for idx, part in enumerate(path_parts):
-            try:
-                value = object.__getattribute__(current, part)
-            except AttributeError:
-                # Attribute missing or resolved lazily elsewhere -> treat as inherited
-                return True
-            except Exception:
-                try:
-                    value = getattr(current, part)
-                except AttributeError:
-                    return True
-
-            if value is None:
-                return True
-
-            if idx == len(path_parts) - 1:
-                # Final attribute exists and has a concrete value -> local override
-                return False
-
-            current = value
-
-        return True
 
     def _process_pending_preview_updates(self) -> None:
         """Apply incremental updates for all pending preview keys."""

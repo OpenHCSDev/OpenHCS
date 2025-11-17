@@ -1059,12 +1059,10 @@ class DualEditorWindow(BaseFormDialog):
         logger.info("🔍 DualEditorWindow: About to call super().reject()")
         super().reject()  # BaseFormDialog handles unregistration
 
-        # CRITICAL: Trigger global refresh AFTER unregistration so other windows
-        # re-collect live context without this cancelled window's values
-        logger.info("🔍 DualEditorWindow: About to trigger global refresh")
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        ParameterFormManager.trigger_global_cross_window_refresh()
-        logger.info("🔍 DualEditorWindow: Triggered global refresh after cancel")
+        # NOTE: No need to call trigger_global_cross_window_refresh() here
+        # The parameter form manager unregister already notifies external listeners
+        # via value_changed_handler with __WINDOW_CLOSED__ marker, which triggers
+        # incremental updates that will flash only the affected items
 
     def paintEvent(self, event):
         """Override paintEvent to draw layered borders with patterns."""
