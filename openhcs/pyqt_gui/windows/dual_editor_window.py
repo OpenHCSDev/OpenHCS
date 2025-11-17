@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QWidget, QStackedWidget
 )
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QPainter, QPen, QColor
 
 from openhcs.core.steps.function_step import FunctionStep
 from openhcs.constants.constants import GroupBy
@@ -46,7 +46,7 @@ class DualEditorWindow(BaseFormDialog):
     
     def __init__(self, step_data: Optional[FunctionStep] = None, is_new: bool = False,
                  on_save_callback: Optional[Callable] = None, color_scheme: Optional[PyQt6ColorScheme] = None,
-                 orchestrator=None, gui_config=None, parent=None):
+                 orchestrator=None, gui_config=None, parent=None, step_position: Optional[int] = None):
         """
         Initialize the dual editor window.
 
@@ -74,6 +74,7 @@ class DualEditorWindow(BaseFormDialog):
         self.is_new = is_new
         self.on_save_callback = on_save_callback
         self.orchestrator = orchestrator  # Store orchestrator for context management
+        self.step_position = step_position  # Store step position for scope-based styling
         
         # Pattern management (extracted from Textual version)
         self.pattern_manager = PatternDataManager()
@@ -101,11 +102,14 @@ class DualEditorWindow(BaseFormDialog):
         self.tab_widget: Optional[QTabWidget] = None
         self.parameter_editors: Dict[str, QWidget] = {}  # Map tab titles to editor widgets
         self.class_hierarchy: List = []  # Store inheritance hierarchy info
-        
+
+        # Scope-based border styling
+        self._scope_color_scheme = None  # Will be set in _apply_step_window_styling
+
         # Setup UI
         self.setup_ui()
         self.setup_connections()
-        
+
         logger.debug(f"Dual editor window initialized (new={is_new})")
 
     def set_original_step_for_change_detection(self):
@@ -219,6 +223,9 @@ class DualEditorWindow(BaseFormDialog):
         # Apply centralized styling
         self.setStyleSheet(self.style_generator.generate_config_window_style())
 
+        # Apply scope-based window border styling
+        self._apply_step_window_styling()
+
         # Debounce timer for function editor synchronization (batches rapid updates)
         self._function_sync_timer = QTimer(self)
         self._function_sync_timer.setSingleShot(True)
@@ -230,6 +237,26 @@ class DualEditorWindow(BaseFormDialog):
         self.setWindowTitle(title)
         if hasattr(self, 'header_label'):
             self.header_label.setText(title)
+
+
+
+    def _build_scope_id(self) -> str:
+        """Build scope ID for this editor window."""
+        if not self.orchestrator:
+            return None
+
+        plate_path = getattr(self.orchestrator, 'plate_path', None)
+        if not plate_path:
+            return None
+
+        # Get step token (same as PipelineEditorWidget uses)
+        from openhcs.pyqt_gui.widgets.pipeline_editor import PipelineEditorWidget
+        token = getattr(self.editing_step, PipelineEditorWidget.STEP_SCOPE_ATTR, None)
+        if not token:
+            return None
+
+        # Build scope_id without position (for cross-window updates)
+        return f"{plate_path}::{token}"
 
     def _update_save_button_text(self):
         if hasattr(self, 'save_button'):
@@ -243,7 +270,49 @@ class DualEditorWindow(BaseFormDialog):
         if token:
             return f"{plate_scope}::{token}"
         return f"{plate_scope}::{fallback_name}"
-    
+
+    def _apply_step_window_styling(self) -> None:
+        """Apply scope-based colored border to step editor window."""
+        if not self.orchestrator or not self.editing_step:
+            return
+
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+
+        # Get orchestrator scope (plate_path)
+        plate_path = getattr(self.orchestrator, 'plate_path', None)
+        if not plate_path:
+            return
+
+        # Build step scope_id (plate_path::step_token@position)
+        step_token = getattr(self.editing_step, '_pipeline_scope_token', None)
+        if step_token:
+            # Include position if available for consistent styling with list items
+            if self.step_position is not None:
+                scope_id = f"{plate_path}::{step_token}@{self.step_position}"
+            else:
+                scope_id = f"{plate_path}::{step_token}"
+        else:
+            # Fallback: use step name
+            step_name = getattr(self.editing_step, 'name', 'unknown_step')
+            if self.step_position is not None:
+                scope_id = f"{plate_path}::{step_name}@{self.step_position}"
+            else:
+                scope_id = f"{plate_path}::{step_name}"
+
+        # Get color scheme for this STEP (not orchestrator)
+        self._scope_color_scheme = get_scope_color_scheme(scope_id)
+
+        # Generate border stylesheet (reserves space for border)
+        border_style = self._scope_color_scheme.to_stylesheet_step_window_border()
+
+        # Apply border to window (append to existing stylesheet)
+        current_style = self.styleSheet()
+        new_style = f"{current_style}\nQDialog {{ {border_style} }}"
+        self.setStyleSheet(new_style)
+
+        # Trigger repaint to draw layered borders
+        self.update()
+
     def create_step_tab(self):
         """Create the step settings tab (using dedicated widget)."""
         from openhcs.pyqt_gui.widgets.step_parameter_editor import StepParameterEditorWidget
@@ -996,6 +1065,64 @@ class DualEditorWindow(BaseFormDialog):
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
         ParameterFormManager.trigger_global_cross_window_refresh()
         logger.info("🔍 DualEditorWindow: Triggered global refresh after cancel")
+
+    def paintEvent(self, event):
+        """Override paintEvent to draw layered borders with patterns."""
+        # Call parent paintEvent first
+        super().paintEvent(event)
+
+        # Draw layered borders if we have scope color scheme
+        if not self._scope_color_scheme or not self._scope_color_scheme.step_border_layers:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # More drastic tint factors
+        tint_factors = [0.7, 1.0, 1.4]
+
+        # Draw each border layer from outside to inside
+        rect = self.rect()
+        inset = 0
+
+        for layer_data in self._scope_color_scheme.step_border_layers:
+            # Handle both old format (width, tint_index) and new format (width, tint_index, pattern)
+            if len(layer_data) == 3:
+                width, tint_index, pattern = layer_data
+            else:
+                width, tint_index = layer_data
+                pattern = 'solid'
+
+            # Calculate tinted color for this border
+            r, g, b = self._scope_color_scheme.base_color_rgb
+            tint_factor = tint_factors[tint_index]
+            border_r = min(255, int(r * tint_factor))
+            border_g = min(255, int(g * tint_factor))
+            border_b = min(255, int(b * tint_factor))
+            border_color = QColor(border_r, border_g, border_b).darker(120)
+
+            # Set pen style based on pattern with MORE OBVIOUS spacing
+            pen = QPen(border_color, width)
+            if pattern == 'dashed':
+                pen.setStyle(Qt.PenStyle.DashLine)
+                pen.setDashPattern([8, 6])  # Longer dashes, more spacing
+            elif pattern == 'dotted':
+                pen.setStyle(Qt.PenStyle.DotLine)
+                pen.setDashPattern([2, 6])  # Small dots, more spacing
+            else:  # solid
+                pen.setStyle(Qt.PenStyle.SolidLine)
+
+            # Draw this border layer
+            # Position the border so its outer edge is at 'inset' pixels from the rect edge
+            # Since pen draws centered, we offset by width/2
+            border_offset = int(inset + (width / 2.0))
+            painter.setPen(pen)
+            painter.drawRect(rect.adjusted(border_offset, border_offset, -border_offset - 1, -border_offset - 1))
+
+            # Move inward for next layer
+            inset += width
+
+        painter.end()
 
     def closeEvent(self, event):
         """Handle dialog close event."""

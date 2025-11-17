@@ -229,6 +229,32 @@ class ConfigWindow(BaseFormDialog):
             self.style_generator.generate_tree_widget_style()
         )
 
+        # Apply scope-based window border styling
+        self._apply_config_window_styling()
+
+    def _apply_config_window_styling(self) -> None:
+        """Apply scope-based colored border to config window.
+
+        Pipeline config windows use simple orchestrator border (not layered step borders).
+        The scope_id determines the border color.
+        """
+        if not self.scope_id:
+            return
+
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+
+        # Get color scheme for this scope
+        color_scheme = get_scope_color_scheme(self.scope_id)
+
+        # Use orchestrator border (simple solid border, same as orchestrator list items)
+        r, g, b = color_scheme.orchestrator_item_border_rgb
+        border_style = f"border: 3px solid rgb({r}, {g}, {b});"
+
+        # Apply border to window (append to existing stylesheet)
+        current_style = self.styleSheet()
+        new_style = f"{current_style}\nQDialog {{ {border_style} }}"
+        self.setStyleSheet(new_style)
+
     def _create_inheritance_tree(self) -> QTreeWidget:
         """Create tree widget showing inheritance hierarchy for navigation."""
         tree = self.tree_helper.create_tree_widget()
