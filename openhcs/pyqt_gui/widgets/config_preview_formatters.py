@@ -131,26 +131,174 @@ def format_well_filter_config(config_attr: str, config: Any, resolve_attr: Optio
     return f"{indicator}{mode_prefix}{wf_display}"
 
 
-def format_config_indicator(config_attr: str, config: Any, resolve_attr: Optional[Callable] = None) -> Optional[str]:
+def check_config_has_unsaved_changes(
+    config_attr: str,
+    config: Any,
+    resolve_attr: Optional[Callable],
+    parent_obj: Any,
+    live_context_snapshot: Any,
+    scope_filter: Optional[str] = None
+) -> bool:
+    """Check if a config has unsaved changes by comparing resolved values.
+
+    Compares resolved config fields between:
+    - live_context_snapshot (WITH active form managers = unsaved edits)
+    - saved_context_snapshot (WITHOUT active form managers = saved values)
+
+    Args:
+        config_attr: Config attribute name (e.g., 'napari_streaming_config')
+        config: Config object to check
+        resolve_attr: Function to resolve lazy config attributes
+                     Signature: resolve_attr(parent_obj, config_obj, attr_name, context) -> value
+        parent_obj: Parent object containing the config (step or pipeline config)
+        live_context_snapshot: Current live context snapshot (with form managers)
+        scope_filter: Optional scope filter to use when collecting saved context (e.g., plate_path)
+
+    Returns:
+        True if config has unsaved changes, False otherwise
+    """
+    import dataclasses
+    import logging
+    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+    logger = logging.getLogger(__name__)
+
+    # If no resolver or parent, can't detect changes
+    if not resolve_attr or parent_obj is None or live_context_snapshot is None:
+        return False
+
+    # Get all dataclass fields to compare
+    if not dataclasses.is_dataclass(config):
+        return False
+
+    field_names = [f.name for f in dataclasses.fields(config)]
+    if not field_names:
+        return False
+
+    # Collect saved context snapshot (WITHOUT active form managers)
+    # This is the key: temporarily clear form managers to get saved values
+    # CRITICAL: Must increment token to bypass cache, otherwise we get cached live context
+    # CRITICAL: Must use same scope_filter as live snapshot to get matching scoped values
+    saved_managers = ParameterFormManager._active_form_managers.copy()
+    saved_token = ParameterFormManager._live_context_token_counter
+
+    try:
+        ParameterFormManager._active_form_managers.clear()
+        # Increment token to force cache miss
+        ParameterFormManager._live_context_token_counter += 1
+        saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
+    finally:
+        # Restore active form managers and token
+        ParameterFormManager._active_form_managers[:] = saved_managers
+        ParameterFormManager._live_context_token_counter = saved_token
+
+    # Compare each field in live vs saved context
+    for field_name in field_names:
+        # Resolve in LIVE context (with form managers = unsaved edits)
+        live_value = resolve_attr(parent_obj, config, field_name, live_context_snapshot)
+
+        # Resolve in SAVED context (without form managers = saved values)
+        saved_value = resolve_attr(parent_obj, config, field_name, saved_context_snapshot)
+
+        # Log the comparison with snapshot tokens
+        logger.info(f"🔍 Comparing {config_attr}.{field_name}:")
+        logger.info(f"   live_value={live_value} (snapshot token={live_context_snapshot.token})")
+        logger.info(f"   saved_value={saved_value} (snapshot token={saved_context_snapshot.token})")
+        logger.info(f"   equal={live_value == saved_value}")
+
+        # Compare values
+        if live_value != saved_value:
+            logger.info(f"✅ CHANGE DETECTED in {config_attr}.{field_name}: live={live_value} vs saved={saved_value}")
+            return True
+
+    return False
+
+
+def check_step_has_unsaved_changes(
+    step: Any,
+    config_indicators: dict,
+    resolve_attr: Callable,
+    live_context_snapshot: Any,
+    scope_filter: Optional[str] = None
+) -> bool:
+    """Check if a step has ANY unsaved changes in any of its configs.
+
+    Args:
+        step: FunctionStep to check
+        config_indicators: Dict mapping config attribute names to indicators
+        resolve_attr: Function to resolve lazy config attributes
+        live_context_snapshot: Current live context snapshot
+        scope_filter: Optional scope filter to use when collecting saved context (e.g., plate_path)
+
+    Returns:
+        True if step has any unsaved changes, False otherwise
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    step_name = getattr(step, 'name', 'unknown')
+
+    logger.info(f"🔍 check_step_has_unsaved_changes: Checking step '{step_name}', config_indicators={list(config_indicators.keys())}, scope_filter={scope_filter}")
+
+    # Check each config for unsaved changes
+    for config_attr in config_indicators.keys():
+        config = getattr(step, config_attr, None)
+        logger.info(f"🔍 check_step_has_unsaved_changes: Checking config_attr='{config_attr}', config={config}")
+        if config is None:
+            logger.info(f"🔍 check_step_has_unsaved_changes: config is None, skipping")
+            continue
+
+        has_changes = check_config_has_unsaved_changes(
+            config_attr,
+            config,
+            resolve_attr,
+            step,
+            live_context_snapshot,
+            scope_filter=scope_filter  # Pass scope filter through
+        )
+
+        if has_changes:
+            logger.info(f"✅ UNSAVED CHANGES DETECTED in step '{step_name}' config '{config_attr}'")
+            return True
+
+    logger.info(f"🔍 check_step_has_unsaved_changes: No unsaved changes found for step '{step_name}'")
+    return False
+
+
+def format_config_indicator(
+    config_attr: str,
+    config: Any,
+    resolve_attr: Optional[Callable] = None,
+    parent_obj: Any = None,
+    live_context_snapshot: Any = None
+) -> Optional[str]:
     """Format any config for preview display (dispatcher function).
 
     GENERAL RULE: Any config with an 'enabled: bool' parameter will only show
     if it resolves to True.
 
+    Note: Unsaved changes are now indicated at the step/item level (in the step name),
+    not per-config label. The parent_obj and live_context_snapshot parameters are kept
+    for backward compatibility but are not used here.
+
     Args:
         config_attr: Config attribute name
         config: Config object
         resolve_attr: Optional function to resolve lazy config attributes
+        parent_obj: Optional parent object (kept for backward compatibility)
+        live_context_snapshot: Optional live context snapshot (kept for backward compatibility)
 
     Returns:
-        Formatted indicator string or None if config should not be shown
+        Formatted indicator string or None if config should not be shown.
     """
     from openhcs.core.config import WellFilterConfig
 
     # Dispatch to specific formatter based on config type
     if isinstance(config, WellFilterConfig):
-        return format_well_filter_config(config_attr, config, resolve_attr)
+        result = format_well_filter_config(config_attr, config, resolve_attr)
     else:
         # All other configs use generic formatter (checks enabled field automatically)
-        return format_generic_config(config_attr, config, resolve_attr)
+        result = format_generic_config(config_attr, config, resolve_attr)
+
+    return result
 

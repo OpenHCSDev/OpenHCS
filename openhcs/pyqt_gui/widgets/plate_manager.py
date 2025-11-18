@@ -511,6 +511,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Determine status prefix
         status_prefix = ""
         preview_labels = []
+        has_unsaved_changes = False
 
         if plate['path'] in self.orchestrators:
             orchestrator = self.orchestrators[plate['path']]
@@ -539,11 +540,17 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             # Build config preview labels for line 3
             preview_labels = self._build_config_preview_labels(orchestrator)
 
+            # Check if PipelineConfig has unsaved changes
+            has_unsaved_changes = self._check_pipeline_config_has_unsaved_changes(orchestrator)
+
         # Line 1: [status] before plate name (user requirement)
+        # Add unsaved changes marker to plate name if needed
+        plate_name = f"{plate['name']}†" if has_unsaved_changes else plate['name']
+
         if status_prefix:
-            line1 = f"{status_prefix} ▶ {plate['name']}"
+            line1 = f"{status_prefix} ▶ {plate_name}"
         else:
-            line1 = f"▶ {plate['name']}"
+            line1 = f"▶ {plate_name}"
 
         # Line 2: Plate path on new line (user requirement)
         line2 = f"  {plate['path']}"
@@ -615,7 +622,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
                             live_context_snapshot
                         )
 
-                    formatted = format_config_indicator(field_path, value, resolve_attr)
+                    formatted = format_config_indicator(
+                        field_path,
+                        value,
+                        resolve_attr,
+                        parent_obj=config_for_display,  # Pass pipeline config for context
+                        live_context_snapshot=live_context_snapshot  # Pass snapshot for unsaved change detection
+                    )
                 else:
                     formatted = self.format_preview_value(field_path, value)
 
@@ -627,6 +640,69 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             logger.error(f"Traceback: {traceback.format_exc()}")
 
         return labels
+
+    def _check_pipeline_config_has_unsaved_changes(self, orchestrator) -> bool:
+        """Check if PipelineConfig has any unsaved changes.
+
+        Args:
+            orchestrator: PipelineOrchestrator instance
+
+        Returns:
+            True if PipelineConfig has unsaved changes, False otherwise
+        """
+        from openhcs.pyqt_gui.widgets.config_preview_formatters import check_config_has_unsaved_changes
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.core.config import PipelineConfig
+        import dataclasses
+
+        logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: Checking orchestrator")
+
+        # Get the raw pipeline_config (SAVED values, not merged with live)
+        pipeline_config = orchestrator.pipeline_config
+
+        # Get live context snapshot (scoped to this plate)
+        live_context_snapshot = ParameterFormManager.collect_live_context(
+            scope_filter=orchestrator.plate_path
+        )
+        if live_context_snapshot is None:
+            logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: No live context snapshot")
+            return False
+
+        # Check each config field in PipelineConfig
+        # IMPORTANT: Check the ORIGINAL pipeline_config, not config_for_display!
+        for field in dataclasses.fields(pipeline_config):
+            field_name = field.name
+            config = getattr(pipeline_config, field_name, None)
+
+            # Skip non-dataclass fields
+            if not dataclasses.is_dataclass(config):
+                continue
+
+            # Create resolver for this config
+            def resolve_attr(parent_obj, config_obj, attr_name, context):
+                return self._resolve_config_attr(
+                    pipeline_config,  # Use ORIGINAL config, not merged
+                    config_obj,
+                    attr_name,
+                    context  # Pass the context parameter through
+                )
+
+            # Check if this config has unsaved changes
+            has_changes = check_config_has_unsaved_changes(
+                field_name,
+                config,
+                resolve_attr,
+                pipeline_config,  # Use ORIGINAL config, not merged
+                live_context_snapshot,
+                scope_filter=orchestrator.plate_path  # CRITICAL: Pass scope filter
+            )
+
+            if has_changes:
+                logger.info(f"✅ UNSAVED CHANGES DETECTED in PipelineConfig.{field_name}")
+                return True
+
+        logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: No unsaved changes")
+        return False
 
     def _apply_orchestrator_item_styling(self, item: QListWidgetItem, plate: Dict) -> None:
         """Apply scope-based background color and border to orchestrator list item.
@@ -696,6 +772,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             editing_object: Object being edited
             context_object: Context object
         """
+        logger.info(f"🔔 PlateManager.handle_cross_window_preview_change: field_path={field_path}, editing_object={type(editing_object).__name__ if editing_object else None}")
         # Call parent implementation (adds to pending updates, schedules debounced refresh with flash)
         super().handle_cross_window_preview_change(field_path, new_value, editing_object, context_object)
 
@@ -1085,6 +1162,12 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         Args:
             action: Action identifier
         """
+        # Special handling for compile_plate - check unsaved changes BEFORE async
+        if action == "compile_plate":
+            if not self._check_unsaved_changes_before_compile():
+                self.status_message.emit("Compilation cancelled - unsaved changes")
+                return
+
         # Action mapping (preserved from Textual version)
         action_map = {
             "add_plate": self.action_add_plate,
@@ -1498,8 +1581,56 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             logger.error(f"Failed to save global config to cache: {e}")
             # Don't show error dialog as this is not critical for immediate functionality
 
+    def _check_unsaved_changes_before_compile(self) -> bool:
+        """Check for unsaved changes and show warning dialog if any exist.
+
+        SIMPLE APPROACH: Just check if there are any active form managers.
+        We assume if a form is open, there might be unsaved changes.
+        This is simpler and safer than trying to compare values (which can mess up the token counter).
+
+        Returns:
+            True if user wants to continue with compilation, False to cancel
+        """
+        from PyQt6.QtWidgets import QMessageBox
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        # Check if there are any active form managers (unsaved changes)
+        if not ParameterFormManager._active_form_managers:
+            return True  # No unsaved changes, proceed
+
+        # Build list of editors with unsaved changes
+        editor_descriptions = []
+        for form_manager in ParameterFormManager._active_form_managers:
+            obj_type = type(form_manager.object_instance).__name__
+
+            # Try to get more specific description
+            if hasattr(form_manager.object_instance, 'name'):
+                editor_descriptions.append(f"{obj_type} ({form_manager.object_instance.name})")
+            else:
+                editor_descriptions.append(obj_type)
+
+        # Show warning dialog
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("Unsaved Changes")
+        msg.setText("You have unsaved changes in open editors.")
+        msg.setInformativeText(
+            f"Compilation will use saved values only.\n\n"
+            f"Open editors:\n" + "\n".join(f"  • {desc}" for desc in editor_descriptions) + "\n\n"
+            f"Do you want to continue?"
+        )
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setDefaultButton(QMessageBox.StandardButton.No)
+
+        result = msg.exec()
+        return result == QMessageBox.StandardButton.Yes
+
     async def action_compile_plate(self):
-        """Handle Compile Plate button - compile pipelines for selected plates."""
+        """Handle Compile Plate button - compile pipelines for selected plates.
+
+        Note: Unsaved changes check happens in handle_button_action() BEFORE
+        this async method is called, to avoid threading issues with QMessageBox.
+        """
         selected_items = self.get_selected_plates()
 
         if not selected_items:

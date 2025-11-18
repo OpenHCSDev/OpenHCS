@@ -380,11 +380,11 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             Tuple of (display_text, step_name)
         """
         step_for_display = self._get_step_preview_instance(step, live_context_snapshot)
-        display_text = self._format_resolved_step_for_display(step_for_display, live_context_snapshot)
+        display_text = self._format_resolved_step_for_display(step_for_display, step, live_context_snapshot)
         step_name = getattr(step_for_display, 'name', 'Unknown Step')
         return display_text, step_name
 
-    def _format_resolved_step_for_display(self, step_for_display: FunctionStep, live_context_snapshot=None) -> str:
+    def _format_resolved_step_for_display(self, step_for_display: FunctionStep, original_step: FunctionStep, live_context_snapshot=None) -> str:
         """
         Format ALREADY RESOLVED step for display.
 
@@ -392,6 +392,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         Args:
             step_for_display: Already resolved step preview instance
+            original_step: Original step (with saved values, not merged with live)
             live_context_snapshot: Live context snapshot (for config resolution)
 
         Returns:
@@ -475,8 +476,14 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             def resolve_attr(parent_obj, config_obj, attr_name, context):
                 return self._resolve_config_attr(step_for_display, config_obj, attr_name, live_context_snapshot)
 
-            # Use centralized formatter (single source of truth)
-            indicator_text = format_config_indicator(config_attr, config, resolve_attr)
+            # Use centralized formatter with unsaved change detection
+            indicator_text = format_config_indicator(
+                config_attr,
+                config,
+                resolve_attr,
+                parent_obj=step_for_display,  # Pass step for context
+                live_context_snapshot=live_context_snapshot  # Pass snapshot for unsaved change detection
+            )
 
             if indicator_text:
                 config_indicators.append(indicator_text)
@@ -484,12 +491,37 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if config_indicators:
             preview_parts.append(f"configs=[{','.join(config_indicators)}]")
 
+        # Check if step has any unsaved changes
+        # IMPORTANT: Check the ORIGINAL step, not step_for_display (which has live values merged)
+        from openhcs.pyqt_gui.widgets.config_preview_formatters import check_step_has_unsaved_changes
+
+        logger.info(f"🔍 _format_resolved_step_for_display: About to check unsaved changes for step '{step_name}'")
+        logger.info(f"🔍 _format_resolved_step_for_display: original_step type={type(original_step)}, has step_materialization_config={hasattr(original_step, 'step_materialization_config')}")
+        if hasattr(original_step, 'step_materialization_config'):
+            logger.info(f"🔍 _format_resolved_step_for_display: original_step.step_materialization_config={original_step.step_materialization_config}")
+
+        def resolve_attr(parent_obj, config_obj, attr_name, context):
+            return self._resolve_config_attr(original_step, config_obj, attr_name, context)
+
+        has_unsaved = check_step_has_unsaved_changes(
+            original_step,  # Use ORIGINAL step, not merged
+            self.STEP_CONFIG_INDICATORS,
+            resolve_attr,
+            live_context_snapshot,
+            scope_filter=self.current_plate  # CRITICAL: Pass scope filter
+        )
+
+        logger.info(f"🔍 _format_resolved_step_for_display: has_unsaved={has_unsaved} for step '{step_name}'")
+
+        # Add unsaved changes marker to step name if needed
+        display_step_name = f"{step_name}†" if has_unsaved else step_name
+
         # Build display text
         if preview_parts:
             preview = " | ".join(preview_parts)
-            display_text = f"▶ {step_name}  ({preview})"
+            display_text = f"▶ {display_step_name}  ({preview})"
         else:
-            display_text = f"▶ {step_name}"
+            display_text = f"▶ {display_step_name}"
 
         return display_text
 
@@ -1279,6 +1311,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if not self.current_plate:
             return
         live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+        logger.info(f"🔥 Collected live_context_snapshot with token={live_context_snapshot.token}, active_managers={len(ParameterFormManager._active_form_managers)}")
 
         indices = sorted(
             idx for idx in self._pending_preview_keys if isinstance(idx, int)
@@ -1532,7 +1565,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             step_after = step_after_instances[idx]
 
             # Format display text (this is what actually resolves through hierarchy)
-            display_text = self._format_resolved_step_for_display(step_after, live_context_snapshot)
+            display_text = self._format_resolved_step_for_display(step_after, step, live_context_snapshot)
 
             # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
             if should_update_labels:
@@ -1646,6 +1679,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             editing_object: Object being edited
             context_object: Context object
         """
+        logger.info(f"🔔 PipelineEditor.handle_cross_window_preview_change: field_path={field_path}, editing_object={type(editing_object).__name__ if editing_object else None}")
         # Call parent implementation (adds to pending updates, schedules debounced refresh with flash)
         super().handle_cross_window_preview_change(field_path, new_value, editing_object, context_object)
 
