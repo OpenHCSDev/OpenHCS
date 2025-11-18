@@ -205,9 +205,19 @@ def check_config_has_unsaved_changes(
 
         # CRITICAL: Apply scope filter to prevent cross-plate contamination
         # If scope_filter is provided (e.g., plate path), only check managers in that scope
+        # IMPORTANT: Managers with scope_id=None (global) should affect ALL scopes
         if scope_filter is not None and manager.scope_id is not None:
             if not ParameterFormManager._is_scope_visible_static(manager.scope_id, scope_filter):
+                logger.info(
+                    f"🔍 check_config_has_unsaved_changes: Skipping manager {manager.field_id} "
+                    f"(scope_id={manager.scope_id}) - not visible in scope_filter={scope_filter}"
+                )
                 continue
+
+        logger.info(
+            f"🔍 check_config_has_unsaved_changes: Checking manager {manager.field_id} "
+            f"(scope_id={manager.scope_id}, _last_emitted_values keys={list(manager._last_emitted_values.keys())})"
+        )
 
         # Check each emitted field path
         # field_path format: "GlobalPipelineConfig.step_materialization_config.well_filter"
@@ -224,7 +234,7 @@ def check_config_has_unsaved_changes(
                 config_attr_from_path = path_parts[1]
                 if config_attr_from_path == config_attr:
                     has_form_manager_with_changes = True
-                    logger.debug(
+                    logger.info(
                         f"🔍 check_config_has_unsaved_changes: Found path match for "
                         f"{config_attr} in field path {field_path}"
                     )
@@ -239,7 +249,7 @@ def check_config_has_unsaved_changes(
                 # Example: LazyStepWellFilterConfig inherits from LazyWellFilterConfig
                 if isinstance(config, field_type) or isinstance(field_value, config_type):
                     has_form_manager_with_changes = True
-                    logger.debug(
+                    logger.info(
                         f"🔍 check_config_has_unsaved_changes: Found type match for "
                         f"{config_attr} (config type={config_type.__name__}, "
                         f"emitted field={field_path}, field type={field_type.__name__})"
@@ -250,7 +260,7 @@ def check_config_has_unsaved_changes(
             break
 
     if not has_form_manager_with_changes:
-        logger.debug(
+        logger.info(
             "🔍 check_config_has_unsaved_changes: No form managers with changes for "
             f"{parent_type_name}.{config_attr} (config type={config_type.__name__}) - skipping field resolution"
         )
@@ -434,8 +444,13 @@ def check_step_has_unsaved_changes(
 
             # CRITICAL: Apply plate-level scope filter to prevent cross-plate contamination
             # If scope_filter is provided (e.g., plate path), only check managers in that scope
+            # IMPORTANT: Managers with scope_id=None (global) should affect ALL scopes
             if scope_filter is not None and manager.scope_id is not None:
                 if not ParameterFormManager._is_scope_visible_static(manager.scope_id, scope_filter):
+                    logger.info(
+                        f"🔍 check_step_has_unsaved_changes: Skipping manager {manager.field_id} "
+                        f"(scope_id={manager.scope_id}) - not visible in scope_filter={scope_filter}"
+                    )
                     continue
 
             # If manager has step-specific scope, it must match
