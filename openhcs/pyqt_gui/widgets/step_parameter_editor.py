@@ -20,6 +20,7 @@ from openhcs.introspection.signature_analyzer import SignatureAnalyzer
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
+from openhcs.pyqt_gui.widgets.shared.tree_form_flash_mixin import TreeFormFlashMixin
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.config import PyQtGUIConfig, get_default_pyqt_gui_config
@@ -31,12 +32,14 @@ from openhcs.ui.shared.code_editor_form_updater import CodeEditorFormUpdater
 logger = logging.getLogger(__name__)
 
 
-class StepParameterEditorWidget(QWidget):
+class StepParameterEditorWidget(TreeFormFlashMixin, QWidget):
     """
     Step parameter editor using dynamic form generation.
-    
-    Mirrors Textual TUI implementation - builds forms based on FunctionStep 
+
+    Mirrors Textual TUI implementation - builds forms based on FunctionStep
     constructor signature with nested dataclass support.
+
+    Inherits from TreeFormFlashMixin to provide GroupBox and tree item flash animations.
     """
     
     # Signals
@@ -113,6 +116,10 @@ class StepParameterEditorWidget(QWidget):
             exclude_params=['func'],             # Exclude func - it has its own dedicated tab
             scope_id=self.scope_id               # Pass scope_id to limit cross-window updates to same orchestrator
         )
+
+        # Override the form manager's tree flash notification to flash tree items
+        self.form_manager._notify_tree_flash = self._flash_tree_item
+
         self.hierarchy_tree = None
         self.content_splitter = None
 
@@ -269,6 +276,9 @@ class StepParameterEditorWidget(QWidget):
 
         if first_widget:
             self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
+
+            # Flash the GroupBox to draw attention
+            self._flash_groupbox_for_field(field_name)
             return
 
         from PyQt6.QtWidgets import QGroupBox
@@ -276,10 +286,17 @@ class StepParameterEditorWidget(QWidget):
         while current:
             if isinstance(current, QGroupBox):
                 self.scroll_area.ensureWidgetVisible(current, 50, 50)
+
+                # Flash the GroupBox to draw attention
+                self._flash_groupbox_for_field(field_name)
                 return
             current = current.parentWidget()
 
         logger.warning(f"Could not locate widget for '{field_name}' to scroll into view")
+
+    # _flash_groupbox_for_field() - provided by TreeFormFlashMixin
+    # _flash_tree_item() - provided by TreeFormFlashMixin
+    # _find_tree_item_by_field_name() - provided by TreeFormFlashMixin
 
 
 

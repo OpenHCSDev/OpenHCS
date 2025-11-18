@@ -546,6 +546,11 @@ class ParameterFormManager(QWidget):
             # No size limit needed - cache naturally stays small (< 20 params × few context states)
             self._placeholder_text_cache: Dict[Tuple, str] = {}
 
+            # Last applied placeholder text per parameter (for flash detection)
+            # Key: param_name -> last placeholder text
+            # Used to detect when placeholder values change and trigger flash animations
+            self._last_placeholder_text: Dict[str, str] = {}
+
             # Cache for entire _refresh_all_placeholders operation (token-based)
             # Key: (exclude_param, live_context_token) -> prevents redundant refreshes
             from openhcs.config_framework import TokenCache
@@ -1657,7 +1662,7 @@ class ParameterFormManager(QWidget):
             with self._build_context_stack(overlay):
                 placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                 if placeholder_text:
-                    PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+                    self._apply_placeholder_text_with_flash_detection(param_name, widget, placeholder_text)
         elif value is not None:
             PyQt6WidgetEnhancer._clear_placeholder_state(widget)
 
@@ -2011,8 +2016,7 @@ class ParameterFormManager(QWidget):
                 with self._build_context_stack(overlay, live_context=live_context_values, live_context_token=token):
                     placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                     if placeholder_text:
-                        from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-                        PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+                        self._apply_placeholder_text_with_flash_detection(param_name, widget, placeholder_text)
 
         # Emit parameter change to notify other components
         self.parameter_changed.emit(param_name, reset_value)
@@ -2963,13 +2967,10 @@ class ParameterFormManager(QWidget):
                             continue
 
                         with monitor.measure():
-                            # CRITICAL: Resolve placeholder text and let widget signature check skip redundant updates
-                            # The widget already checks if placeholder text changed - no need for complex caching
+                            # CRITICAL: Resolve placeholder text and detect changes for flash animation
                             placeholder_text = self.service.get_placeholder_text(param_name, self.dataclass_type)
                             if placeholder_text:
-                                from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-                                # Widget signature check will skip update if placeholder text hasn't changed
-                                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+                                self._apply_placeholder_text_with_flash_detection(param_name, widget, placeholder_text)
 
             return True  # Return sentinel value to indicate refresh was performed
 
@@ -3141,8 +3142,7 @@ class ParameterFormManager(QWidget):
         with self._build_context_stack(overlay, live_context=live_context_values, live_context_token=token):
             placeholder_text = self.service.get_placeholder_text(field_name, self.dataclass_type)
             if placeholder_text:
-                from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
-                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+                self._apply_placeholder_text_with_flash_detection(field_name, widget, placeholder_text)
 
     def _after_placeholder_text_applied(self, live_context: Any) -> None:
         """Apply nested refreshes and styling once placeholders have been updated."""
@@ -3240,16 +3240,50 @@ class ParameterFormManager(QWidget):
                     placeholder_map[param_name] = placeholder_text
         return placeholder_map
 
+    def _apply_placeholder_text_with_flash_detection(self, param_name: str, widget: Any, placeholder_text: str) -> None:
+        """Apply placeholder text and detect changes for flash animation.
+
+        This is the SINGLE SOURCE OF TRUTH for applying placeholders with flash detection.
+        All code paths that apply placeholders should use this method.
+
+        Args:
+            param_name: Name of the parameter
+            widget: Widget to apply placeholder to
+            placeholder_text: Placeholder text to apply
+        """
+        from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
+
+        # Check if placeholder text actually changed (compare with last applied value)
+        last_text = self._last_placeholder_text.get(param_name)
+
+        # Apply placeholder text
+        PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+
+        # If placeholder changed, trigger flash
+        if last_text is not None and last_text != placeholder_text:
+            logger.info(f"💥 Placeholder changed for {self.field_id}.{param_name}: '{last_text}' -> '{placeholder_text}'")
+            # If this is a NESTED manager, notify parent to flash the GroupBox
+            if self._parent_manager is not None:
+                logger.info(f"🔥 Nested manager {self.field_id} had placeholder change, notifying parent")
+                self._notify_parent_to_flash_groupbox()
+
+        # Update last applied text
+        self._last_placeholder_text[param_name] = placeholder_text
+
     def _apply_placeholder_map_results(self, placeholder_map: Dict[str, str]) -> None:
-        """Apply resolved placeholder text to widgets on the UI thread."""
+        """Apply resolved placeholder text to widgets on the UI thread.
+
+        Uses _apply_placeholder_text_with_flash_detection for flash detection.
+        """
         if not placeholder_map:
             return
-        from openhcs.pyqt_gui.widgets.shared.widget_strategies import PyQt6WidgetEnhancer
 
         for param_name, placeholder_text in placeholder_map.items():
             widget = self.widgets.get(param_name)
-            if widget and placeholder_text:
-                PyQt6WidgetEnhancer.apply_placeholder_text(widget, placeholder_text)
+            if not widget or not placeholder_text:
+                continue
+
+            self._apply_placeholder_text_with_flash_detection(param_name, widget, placeholder_text)
 
     def _on_placeholder_task_completed(self, generation: int, placeholder_map: Dict[str, str]) -> None:
         """Handle completion of async placeholder refresh."""
@@ -3279,6 +3313,73 @@ class ParameterFormManager(QWidget):
         """Apply operation to all nested managers."""
         for param_name, nested_manager in self.nested_managers.items():
             operation_func(param_name, nested_manager)
+
+    def _notify_parent_to_flash_groupbox(self) -> None:
+        """Notify parent manager to flash this nested config's GroupBox.
+
+        Called by nested managers when their placeholders change.
+        The parent manager finds the GroupBox widget and flashes it.
+        Also notifies the root manager to flash the tree item if applicable.
+        """
+        if not self._parent_manager:
+            return
+
+        # Find which parameter name in the parent corresponds to this nested manager
+        param_name = None
+        for name, manager in self._parent_manager.nested_managers.items():
+            if manager is self:
+                param_name = name
+                break
+
+        if not param_name:
+            logger.warning(f"Could not find param_name for nested manager {self.field_id}")
+            return
+
+        logger.info(f"🔥 Flashing GroupBox for nested config: {param_name}")
+
+        # Get the GroupBox widget from parent
+        group_box = self._parent_manager.widgets.get(param_name)
+
+        if not group_box:
+            logger.warning(f"No GroupBox widget found for {param_name}")
+            return
+
+        # Flash the GroupBox using scope border color
+        from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
+        from openhcs.pyqt_gui.widgets.shared.scope_color_utils import get_scope_color_scheme
+        from PyQt6.QtGui import QColor
+
+        # Get scope color scheme
+        color_scheme = get_scope_color_scheme(self._parent_manager.scope_id)
+
+        # Use orchestrator border color for flash (same as window border)
+        border_rgb = color_scheme.orchestrator_item_border_rgb
+        flash_color = QColor(*border_rgb, 180)  # Border color with high opacity
+
+        # Use global registry to prevent overlapping flashes
+        flash_widget(group_box, flash_color=flash_color)
+        logger.info(f"✅ Flashed GroupBox for {param_name}")
+
+        # Notify root manager to flash tree item (if this is a top-level config in ConfigWindow)
+        logger.info(f"🌲 Checking if should flash tree: parent._parent_manager is None? {self._parent_manager._parent_manager is None}")
+        if self._parent_manager._parent_manager is None:
+            # Parent is root manager - notify it to flash tree
+            logger.info(f"🌲 Notifying root manager to flash tree for {param_name}")
+            self._parent_manager._notify_tree_flash(param_name)
+        else:
+            logger.info(f"🌲 NOT notifying tree flash - parent is not root (parent.field_id={self._parent_manager.field_id})")
+
+    def _notify_tree_flash(self, config_name: str) -> None:
+        """Notify parent window to flash tree item for a config.
+
+        This is called on the ROOT manager when a nested config's placeholder changes.
+        ConfigWindow can override this to implement tree flashing.
+
+        Args:
+            config_name: Name of the config that changed (e.g., 'well_filter_config')
+        """
+        # Default no-op - ConfigWindow will override this
+        pass
 
     def _apply_all_styling_callbacks(self) -> None:
         """Recursively apply all styling callbacks for this manager and all nested managers.
