@@ -79,6 +79,69 @@ class LiveContextResolver:
 
         return resolved_value
 
+    def resolve_all_lazy_attrs(
+        self,
+        obj: object,
+        context_stack: list,
+        live_context: Dict[Type, Dict[str, Any]],
+        cache_token: int
+    ) -> Dict[str, Any]:
+        """
+        Resolve ALL lazy dataclass attributes on an object in one context setup.
+
+        This introspects the object to find all dataclass fields and resolves them
+        all at once, which is much faster than resolving each field individually.
+
+        Works for both dataclass and non-dataclass objects (e.g., FunctionStep).
+        For non-dataclass objects, discovers attributes by introspecting the object.
+
+        Args:
+            obj: Object with lazy dataclass attributes to resolve
+            context_stack: List of context objects (outermost to innermost)
+            live_context: Dict mapping config types to field values
+            cache_token: Current token for cache invalidation
+
+        Returns:
+            Dict mapping attribute names to resolved values
+        """
+        from dataclasses import fields, is_dataclass
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Discover attribute names from the object
+        if is_dataclass(obj):
+            # Dataclass: use fields() to get all field names
+            attr_names = [f.name for f in fields(obj)]
+            logger.info(f"🔍 resolve_all_lazy_attrs: obj is dataclass {type(obj).__name__}, found {len(attr_names)} fields: {attr_names}")
+        else:
+            # Non-dataclass: introspect object to find dataclass attributes
+            # Get all attributes from the object's __dict__ and class
+            attr_names = []
+            for attr_name in dir(obj):
+                if attr_name.startswith('_'):
+                    continue
+                try:
+                    attr_value = getattr(obj, attr_name)
+                    # Check if this attribute is a dataclass (lazy or not)
+                    if is_dataclass(attr_value):
+                        attr_names.append(attr_name)
+                except (AttributeError, TypeError):
+                    continue
+            logger.info(f"🔍 resolve_all_lazy_attrs: obj is non-dataclass {type(obj).__name__}, found {len(attr_names)} dataclass attrs: {attr_names}")
+
+        if not attr_names:
+            logger.info(f"🔍 resolve_all_lazy_attrs: No attributes found for {type(obj).__name__}, returning empty dict")
+            return {}
+
+        # Use existing resolve_all_config_attrs method
+        return self.resolve_all_config_attrs(
+            config_obj=obj,
+            attr_names=attr_names,
+            context_stack=context_stack,
+            live_context=live_context,
+            cache_token=cache_token
+        )
+
     def resolve_all_config_attrs(
         self,
         config_obj: object,

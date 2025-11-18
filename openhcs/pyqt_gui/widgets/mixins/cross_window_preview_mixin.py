@@ -282,18 +282,28 @@ class CrossWindowPreviewMixin:
         if field_path and "__WINDOW_CLOSED__" in field_path:
             logger.info(f"🔍 Window closed: {field_path} - triggering full refresh with flash")
 
-            # CRITICAL: Collect snapshot NOW (before form managers are unregistered)
+            # CRITICAL: Collect "before" snapshot NOW (while form manager is still registered)
             # This snapshot has the edited values that are about to be discarded
             from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
             self._window_close_before_snapshot = ParameterFormManager.collect_live_context()
             logger.info(f"🔍 Collected window_close_before_snapshot: token={self._window_close_before_snapshot.token}")
 
-            # Clear pending state and trigger full refresh
-            # This will cause ALL items to refresh and flash if their resolved values changed
-            self._pending_preview_keys.clear()
-            self._pending_label_keys.clear()
-            self._pending_changed_fields.clear()
-            self._schedule_preview_update(full_refresh=True)
+            # CRITICAL: Defer collection of "after" snapshot until AFTER form manager is unregistered
+            # Use QTimer with 0 delay to execute after current call stack completes
+            # This ensures we capture the state WITHOUT the edited values
+            from PyQt6.QtCore import QTimer
+            def collect_after_snapshot():
+                self._window_close_after_snapshot = ParameterFormManager.collect_live_context()
+                logger.info(f"🔍 Collected window_close_after_snapshot: token={self._window_close_after_snapshot.token}")
+
+                # Clear pending state and trigger full refresh
+                # This will cause ALL items to refresh and flash if their resolved values changed
+                self._pending_preview_keys.clear()
+                self._pending_label_keys.clear()
+                self._pending_changed_fields.clear()
+                self._schedule_preview_update(full_refresh=True)
+
+            QTimer.singleShot(0, collect_after_snapshot)
             return
 
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
@@ -549,62 +559,117 @@ class CrossWindowPreviewMixin:
             logger.exception("Preview scope resolver failed", exc_info=True)
             return None
 
-    def _check_resolved_value_changed(
+    # OLD SEQUENTIAL METHOD REMOVED - Use _check_resolved_values_changed_batch() instead
+    # This ensures all callers are updated to use the faster batch method
+
+    def _check_resolved_values_changed_batch(
         self,
-        obj_before: Any,
-        obj_after: Any,
+        obj_pairs: list[tuple[Any, Any]],
         changed_fields: Optional[Set[str]],
         *,
         live_context_before=None,
         live_context_after=None,
-    ) -> bool:
-        """Check if any resolved value changed by comparing resolved values.
+    ) -> list[bool]:
+        """Check if resolved values changed for multiple objects in one batch.
 
-        This method walks the object graph and compares values. For dataclass config
-        attributes, subclasses can override _resolve_flash_field_value() to provide
-        context-aware resolution (e.g., through LiveContextResolver).
-
-        CRITICAL: For nested dataclass fields (e.g., "well_filter_config.well_filter"),
-        this checks ALL fields on obj that are instances of or subclasses of the changed
-        config type. For example, if "well_filter_config.well_filter" changed, it will
-        check both "well_filter_config.well_filter" AND "step_well_filter_config.well_filter"
-        because StepWellFilterConfig inherits from WellFilterConfig.
+        This is MUCH faster than calling _check_resolved_value_changed() for each object
+        individually because it resolves all attributes in one context setup.
 
         Args:
-            obj_before: Preview instance before changes
-            obj_after: Preview instance after changes
+            obj_pairs: List of (obj_before, obj_after) tuples to check
             changed_fields: Set of field identifiers that changed (None = check all enabled preview fields)
             live_context_before: Live context snapshot before changes (for resolution)
             live_context_after: Live context snapshot after changes (for resolution)
 
         Returns:
-            True if any resolved value changed
+            List of boolean values indicating whether each object pair changed
         """
+        if not obj_pairs:
+            return []
+
         # If changed_fields is None, check ALL enabled preview fields (full refresh case)
         if changed_fields is None:
-            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_value_changed: changed_fields=None, checking ALL enabled preview fields")
+            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: changed_fields=None, checking ALL enabled preview fields")
             changed_fields = self.get_enabled_preview_fields()
             if not changed_fields:
-                logger.info(f"🔍 {self.__class__.__name__}._check_resolved_value_changed: No enabled preview fields, returning False")
-                return False
+                logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: No enabled preview fields, returning all False")
+                return [False] * len(obj_pairs)
         elif not changed_fields:
-            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_value_changed: Empty changed_fields, returning False")
-            return False
+            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Empty changed_fields, returning all False")
+            return [False] * len(obj_pairs)
 
-        logger.info(f"🔍 {self.__class__.__name__}._check_resolved_value_changed: Checking {len(changed_fields)} identifiers: {changed_fields}")
+        logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Checking {len(obj_pairs)} objects with {len(changed_fields)} identifiers")
 
-        # Expand identifiers to include fields that inherit from the changed type
-        expanded_identifiers = self._expand_identifiers_for_inheritance(
-            obj_after, changed_fields, live_context_after
-        )
+        # Use the first object to expand identifiers (they should all be the same type)
+        if obj_pairs:
+            _, first_obj_after = obj_pairs[0]
+            expanded_identifiers = self._expand_identifiers_for_inheritance(
+                first_obj_after, changed_fields, live_context_after
+            )
+        else:
+            expanded_identifiers = changed_fields
 
-        logger.info(f"🔍 _check_resolved_value_changed: Expanded to {len(expanded_identifiers)} identifiers: {expanded_identifiers}")
+        logger.info(f"🔍 _check_resolved_values_changed_batch: Expanded to {len(expanded_identifiers)} identifiers: {expanded_identifiers}")
 
-        for identifier in expanded_identifiers:
+        # Batch resolve all objects
+        results = []
+        for obj_before, obj_after in obj_pairs:
+            # Use batch resolution for this object
+            changed = self._check_single_object_with_batch_resolution(
+                obj_before,
+                obj_after,
+                expanded_identifiers,
+                live_context_before,
+                live_context_after
+            )
+            results.append(changed)
+
+        logger.info(f"🔍 _check_resolved_values_changed_batch: Results: {sum(results)}/{len(results)} changed")
+        return results
+
+    def _check_single_object_with_batch_resolution(
+        self,
+        obj_before: Any,
+        obj_after: Any,
+        identifiers: Set[str],
+        live_context_before,
+        live_context_after
+    ) -> bool:
+        """Check if a single object changed using batch resolution.
+
+        This resolves all identifiers in one context setup instead of individually.
+
+        Args:
+            obj_before: Object before changes
+            obj_after: Object after changes
+            identifiers: Set of field identifiers to check
+            live_context_before: Live context snapshot before changes
+            live_context_after: Live context snapshot after changes
+
+        Returns:
+            True if any identifier changed
+        """
+        # Try to use batch resolution if we have a context stack
+        context_stack_before = self._build_flash_context_stack(obj_before, live_context_before)
+        context_stack_after = self._build_flash_context_stack(obj_after, live_context_after)
+
+        if context_stack_before and context_stack_after:
+            # Use batch resolution
+            return self._check_with_batch_resolution(
+                obj_before,
+                obj_after,
+                identifiers,
+                context_stack_before,
+                context_stack_after,
+                live_context_before,
+                live_context_after
+            )
+
+        # Fallback to sequential resolution
+        for identifier in identifiers:
             if not identifier:
                 continue
 
-            # Get resolved values (subclasses can override for context-aware resolution)
             before_value = self._resolve_flash_field_value(
                 obj_before, identifier, live_context_before
             )
@@ -612,13 +677,117 @@ class CrossWindowPreviewMixin:
                 obj_after, identifier, live_context_after
             )
 
-            logger.info(f"🔍   identifier='{identifier}': before={before_value}, after={after_value}, changed={before_value != after_value}")
-
             if before_value != after_value:
-                logger.info(f"🔍 _check_resolved_value_changed: CHANGED! identifier='{identifier}'")
                 return True
 
-        logger.info("🔍 _check_resolved_value_changed: No changes detected, returning False")
+        return False
+
+    def _check_with_batch_resolution(
+        self,
+        obj_before: Any,
+        obj_after: Any,
+        identifiers: Set[str],
+        context_stack_before: list,
+        context_stack_after: list,
+        live_context_before,
+        live_context_after
+    ) -> bool:
+        """Check if object changed using batch resolution through LiveContextResolver.
+
+        This is MUCH faster than resolving each identifier individually because it:
+        1. Groups identifiers by their parent object (e.g., 'fiji_streaming_config')
+        2. Batch resolves ALL attributes on each parent object at once
+        3. Only walks the object path once per parent object
+
+        Args:
+            obj_before: Object before changes
+            obj_after: Object after changes
+            identifiers: Set of field identifiers to check
+            context_stack_before: Context stack before changes
+            context_stack_after: Context stack after changes
+            live_context_before: Live context snapshot before changes
+            live_context_after: Live context snapshot after changes
+
+        Returns:
+            True if any identifier changed
+        """
+        from openhcs.config_framework import LiveContextResolver
+        from dataclasses import is_dataclass
+
+        # Get or create resolver instance
+        resolver = getattr(self, '_live_context_resolver', None)
+        if resolver is None:
+            resolver = LiveContextResolver()
+            self._live_context_resolver = resolver
+
+        # Get cache tokens
+        token_before = getattr(live_context_before, 'token', 0) if live_context_before else 0
+        token_after = getattr(live_context_after, 'token', 0) if live_context_after else 0
+
+        live_ctx_before = getattr(live_context_before, 'values', {}) if live_context_before else {}
+        live_ctx_after = getattr(live_context_after, 'values', {}) if live_context_after else {}
+
+        # Group identifiers by parent object path
+        # e.g., {'fiji_streaming_config': ['well_filter'], 'napari_streaming_config': ['well_filter']}
+        parent_to_attrs = {}
+        simple_attrs = []
+
+        for identifier in identifiers:
+            if not identifier:
+                continue
+
+            parts = identifier.split('.')
+            if len(parts) == 1:
+                # Simple attribute on root object
+                simple_attrs.append(parts[0])
+            else:
+                # Nested attribute - group by parent path
+                parent_path = '.'.join(parts[:-1])
+                attr_name = parts[-1]
+                if parent_path not in parent_to_attrs:
+                    parent_to_attrs[parent_path] = []
+                parent_to_attrs[parent_path].append(attr_name)
+
+        # Batch resolve simple attributes on root object
+        if simple_attrs:
+            before_attrs = resolver.resolve_all_lazy_attrs(
+                obj_before, context_stack_before, live_ctx_before, token_before
+            )
+            after_attrs = resolver.resolve_all_lazy_attrs(
+                obj_after, context_stack_after, live_ctx_after, token_after
+            )
+
+            for attr_name in simple_attrs:
+                if attr_name in before_attrs and attr_name in after_attrs:
+                    if before_attrs[attr_name] != after_attrs[attr_name]:
+                        return True
+
+        # Batch resolve nested attributes grouped by parent
+        for parent_path, attr_names in parent_to_attrs.items():
+            # Walk to parent object
+            parent_before = obj_before
+            parent_after = obj_after
+
+            for part in parent_path.split('.'):
+                parent_before = getattr(parent_before, part, None) if parent_before else None
+                parent_after = getattr(parent_after, part, None) if parent_after else None
+
+            if parent_before is None or parent_after is None:
+                continue
+
+            # Batch resolve all attributes on this parent object
+            before_attrs = resolver.resolve_all_lazy_attrs(
+                parent_before, context_stack_before, live_ctx_before, token_before
+            )
+            after_attrs = resolver.resolve_all_lazy_attrs(
+                parent_after, context_stack_after, live_ctx_after, token_after
+            )
+
+            for attr_name in attr_names:
+                if attr_name in before_attrs and attr_name in after_attrs:
+                    if before_attrs[attr_name] != after_attrs[attr_name]:
+                        return True
+
         return False
 
     def _expand_identifiers_for_inheritance(
