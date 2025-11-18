@@ -107,7 +107,11 @@ Flash detection compares resolved values (not raw values) using live context sna
 
 **Identifier Expansion for Inheritance**
 
-When checking if resolved values changed, the system expands field identifiers to include fields that inherit from the changed type. For example, if ``well_filter_config.well_filter`` changed, the system checks both ``well_filter_config.well_filter`` AND ``step_well_filter_config.well_filter`` because ``StepWellFilterConfig`` inherits from ``WellFilterConfig``.
+When checking if resolved values changed, the system expands field identifiers to include fields that inherit from the changed type. The expansion handles three formats:
+
+1. **Simple field names** (e.g., ``"well_filter"``): Expands to all dataclass attributes that have this field
+2. **Nested field paths** (e.g., ``"well_filter_config.well_filter"``): Expands to inherited dataclass attributes with the same nested field
+3. **Parent type paths** (e.g., ``"PipelineConfig.well_filter_config"`` or ``"pipeline_config.well_filter_config"``): Expands to all dataclass attributes whose TYPE inherits from the field's type
 
 .. code-block:: python
 
@@ -116,62 +120,160 @@ When checking if resolved values changed, the system expands field identifiers t
    ) -> Set[str]:
        """Expand field identifiers to include fields that inherit from changed types.
 
-       Example: "well_filter_config.well_filter" expands to include
-       "step_well_filter_config.well_filter" if StepWellFilterConfig
-       inherits from WellFilterConfig.
+       Example 1: "well_filter" expands to:
+       - "well_filter_config.well_filter"
+       - "step_well_filter_config.well_filter"
+       - "fiji_streaming_config.well_filter"
+       - etc.
+
+       Example 2: "PipelineConfig.well_filter_config" expands to:
+       - "step_well_filter_config.well_filter"
+       - "step_well_filter_config.well_filter_mode"
+       - "fiji_streaming_config.well_filter"
+       - "fiji_streaming_config.well_filter_mode"
+       - etc. (all nested fields in all dataclasses that inherit from WellFilterConfig)
        """
-       expanded = set(changed_fields)
+       expanded = set()
 
        for identifier in changed_fields:
-           if "." not in identifier:
-               # Simple field - check all dataclass attributes for this field
+           parts = identifier.split(".")
+
+           if len(parts) == 1:
+               # Simple field - expand to all dataclass attributes that have this field
                for attr_name in dir(obj):
                    attr_value = getattr(obj, attr_name, None)
                    if is_dataclass(attr_value) and hasattr(attr_value, identifier):
                        expanded.add(f"{attr_name}.{identifier}")
-           else:
-               # Nested field - check all dataclass attributes for the nested attribute
-               config_field, nested_attr = identifier.split(".", 1)
-               for attr_name in dir(obj):
-                   attr_value = getattr(obj, attr_name, None)
-                   if is_dataclass(attr_value) and hasattr(attr_value, nested_attr):
-                       expanded.add(f"{attr_name}.{nested_attr}")
+
+           elif len(parts) == 2:
+               first_part, second_part = parts
+
+               # Check if first_part is a type name (uppercase) or canonical root (lowercase)
+               is_type_or_root = first_part[0].isupper() or first_part in self._preview_scope_aliases.values()
+
+               if is_type_or_root:
+                   # Parent type format: "PipelineConfig.well_filter_config"
+                   # Find the field's type from live context
+                   field_type = None
+                   field_value = None
+                   if live_context_snapshot:
+                       # Check both global and scoped values
+                       all_values = dict(live_context_snapshot.values)
+                       for scope_dict in live_context_snapshot.scoped_values.values():
+                           all_values.update(scope_dict)
+
+                       for type_key, values_dict in all_values.items():
+                           if second_part in values_dict:
+                               field_value = values_dict[second_part]
+                               if is_dataclass(field_value):
+                                   field_type = type(field_value)
+                                   break
+
+                   # Expand to ALL nested fields in ALL dataclasses that inherit from field_type
+                   if field_type:
+                       nested_field_names = [f.name for f in dataclass_fields(field_value)]
+                       for attr_name in dir(obj):
+                           attr_value = getattr(obj, attr_name, None)
+                           if is_dataclass(attr_value):
+                               attr_type = type(attr_value)
+                               if issubclass(attr_type, field_type) or issubclass(field_type, attr_type):
+                                   for nested_field in nested_field_names:
+                                       expanded.add(f"{attr_name}.{nested_field}")
+               else:
+                   # Nested field format: "well_filter_config.well_filter"
+                   # Expand to all dataclass attributes with the same nested field
+                   config_field, nested_attr = parts
+                   for attr_name in dir(obj):
+                       attr_value = getattr(obj, attr_name, None)
+                       if is_dataclass(attr_value) and hasattr(attr_value, nested_attr):
+                           expanded.add(f"{attr_name}.{nested_attr}")
 
        return expanded
 
-This ensures flash detection works correctly when inherited values change, even if the changed field identifier doesn't exactly match the inheriting field's path.
+This ensures flash detection works correctly when inherited values change, even if the changed field identifier doesn't exactly match the inheriting field's path. The type-based expansion is critical for window close events where the form manager sends parent type paths like ``"PipelineConfig.well_filter_config"``.
 
 **Window Close Snapshot Timing**
 
-When a window closes with unsaved changes, the system must capture the edited values BEFORE the form managers are unregistered. The critical sequence is:
+When a window closes with unsaved changes, the system must capture snapshots both BEFORE and AFTER the form manager is unregistered. The critical sequence is:
 
 1. Window close signal received
-2. **Snapshot collected with edited values** (``_window_close_before_snapshot``)
-3. External listeners notified (can use the snapshot)
-4. Form managers removed from registry
-5. Token counter incremented
-6. Remaining windows refreshed
+2. **Before snapshot collected** (with form manager's edited values)
+3. Form manager removed from registry
+4. Token counter incremented
+5. **After snapshot collected** (without form manager, reverted to saved values)
+6. External listeners notified with both snapshots via ``handle_window_close()``
+7. Remaining windows refreshed
 
 .. code-block:: python
 
    def unregister_from_cross_window_updates(self):
        """Unregister form manager when window closes."""
-       # CRITICAL: Notify external listeners BEFORE removing from registry
-       # They need to collect snapshot with edited values still present
-       for listener, value_changed_handler, _ in self._external_listeners:
-           if value_changed_handler:
-               value_changed_handler(
-                   f"{self.field_id}.__WINDOW_CLOSED__",  # Special marker
-                   None,
-                   self.object_instance,
-                   self.context_obj
-               )
+       # CRITICAL: Capture "before" snapshot BEFORE unregistering
+       # This snapshot has the form manager's live values
+       before_snapshot = type(self).collect_live_context()
 
-       # NOW remove from registry (after listeners collected snapshot)
+       # Remove from registry
        self._active_form_managers.remove(self)
        type(self)._live_context_token_counter += 1
 
-If the notification happened AFTER removing from registry, the snapshot would not include the edited values and flash detection would fail to detect the reversion.
+       # Defer notification until after current call stack completes
+       # This ensures the form manager is fully unregistered
+       def notify_listeners():
+           # Collect "after" snapshot (without form manager)
+           after_snapshot = type(self).collect_live_context()
+
+           # Build set of changed field identifiers
+           changed_fields = {f"{self.field_id}.{param}" for param in self.parameters}
+
+           # Call dedicated handle_window_close() method if available
+           for listener, _, _ in self._external_listeners:
+               if hasattr(listener, 'handle_window_close'):
+                   listener.handle_window_close(
+                       self.object_instance,
+                       self.context_obj,
+                       before_snapshot,  # With edited values
+                       after_snapshot,   # Without edited values
+                       changed_fields
+                   )
+
+       QTimer.singleShot(0, notify_listeners)
+
+**Dedicated Window Close Handler**
+
+The ``handle_window_close()`` method receives snapshots as parameters instead of storing them as listener state. This is architecturally cleaner than setting attributes on listeners:
+
+.. code-block:: python
+
+   def handle_window_close(
+       self,
+       editing_object: Any,
+       context_object: Any,
+       before_snapshot: Any,  # LiveContextSnapshot with form manager
+       after_snapshot: Any,   # LiveContextSnapshot without form manager
+       changed_fields: Set[str],
+   ) -> None:
+       """Handle window close events with dedicated snapshot parameters.
+
+       This is called when a config editor window is closed without saving.
+       Unlike incremental updates, this receives explicit before/after snapshots
+       to compare the unsaved edits against the reverted state.
+       """
+       scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
+       target_keys, _ = self._resolve_scope_targets(scope_id)
+
+       # Add target keys to pending sets
+       self._pending_preview_keys.update(target_keys)
+       self._pending_label_keys.update(target_keys)
+
+       # Window close always triggers full refresh with explicit snapshots
+       self._schedule_preview_update(
+           full_refresh=True,
+           before_snapshot=before_snapshot,
+           after_snapshot=after_snapshot,
+           changed_fields=changed_fields,
+       )
+
+The snapshots are stored temporarily in ``_pending_window_close_*`` attributes for the timer callback to access, then cleared after use. This avoids polluting listener state with event-specific data.
 
 **Context-Aware Resolution**
 

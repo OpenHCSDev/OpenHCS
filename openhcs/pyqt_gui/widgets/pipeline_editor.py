@@ -1464,6 +1464,31 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Batch check which steps should flash
         logger.info(f"🔍 _handle_full_preview_refresh: Checking {len(step_pairs)} step pairs for flash")
         logger.info(f"🔍 _handle_full_preview_refresh: changed_fields={changed_fields}")
+
+        # DEBUG: Check what the orchestrator's saved PipelineConfig has
+        if self.current_plate and hasattr(self, 'plate_manager'):
+            orchestrator = self.plate_manager.orchestrators.get(self.current_plate)
+            if orchestrator:
+                saved_wfc = getattr(orchestrator.pipeline_config, 'well_filter_config', None)
+                logger.info(f"🔍 _handle_full_preview_refresh: Orchestrator's SAVED well_filter_config = {saved_wfc}")
+
+                # Check what's in the live context snapshots
+                if live_context_before:
+                    scoped_before = getattr(live_context_before, 'scoped_values', {})
+                    logger.info(f"🔍 _handle_full_preview_refresh: live_context_before scoped_values has plate scope? {self.current_plate in scoped_before}")
+                    if self.current_plate in scoped_before:
+                        from openhcs.core.config import PipelineConfig
+                        has_pc = PipelineConfig in scoped_before[self.current_plate]
+                        logger.info(f"🔍 _handle_full_preview_refresh: live_context_before scoped_values[plate] has PipelineConfig? {has_pc}")
+
+                if live_context_snapshot:
+                    scoped_after = getattr(live_context_snapshot, 'scoped_values', {})
+                    logger.info(f"🔍 _handle_full_preview_refresh: live_context_after scoped_values has plate scope? {self.current_plate in scoped_after}")
+                    if self.current_plate in scoped_after:
+                        from openhcs.core.config import PipelineConfig
+                        has_pc = PipelineConfig in scoped_after[self.current_plate]
+                        logger.info(f"🔍 _handle_full_preview_refresh: live_context_after scoped_values[plate] has PipelineConfig? {has_pc}")
+
         if step_pairs and step_items:
             step = step_items[0][2]  # Get first step
             scope_id = self._build_step_scope_id(step)

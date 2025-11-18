@@ -3554,21 +3554,9 @@ class ParameterFormManager(QWidget):
                         except (TypeError, RuntimeError):
                             pass  # Signal already disconnected or object destroyed
 
-                # CRITICAL: Notify external listeners BEFORE removing from registry
-                # They need to collect snapshot with edited values still present
-                logger.info(f"🔍 Notifying external listeners of window close: {self.field_id}")
-                for listener, value_changed_handler, refresh_handler in self._external_listeners:
-                    if value_changed_handler:
-                        try:
-                            logger.info(f"🔍   Calling value_changed_handler for {listener.__class__.__name__}")
-                            value_changed_handler(
-                                f"{self.field_id}.__WINDOW_CLOSED__",  # Special marker
-                                None,  # new_value not used for window close
-                                self.object_instance,
-                                self.context_obj
-                            )
-                        except Exception as e:
-                            logger.error(f"Error notifying external listener {listener.__class__.__name__}: {e}", exc_info=True)
+                # CRITICAL: Capture "before" snapshot BEFORE unregistering
+                # This snapshot has the form manager's live values
+                before_snapshot = type(self).collect_live_context()
 
                 # Remove from registry
                 self._active_form_managers.remove(self)
@@ -3580,6 +3568,64 @@ class ParameterFormManager(QWidget):
 
                 # Invalidate live context caches so external listeners drop stale data
                 type(self)._live_context_token_counter += 1
+
+                # CRITICAL: Notify external listeners AFTER removing from registry
+                # Use QTimer to defer notification until after current call stack completes
+                # This ensures the form manager is fully unregistered before listeners process the changes
+                # Send ALL fields as changed so batch update covers any changes
+                from PyQt6.QtCore import QTimer
+
+                # Capture variables in closure
+                field_id = self.field_id
+                param_names = list(self.parameters.keys())
+                object_instance = self.object_instance
+                context_obj = self.context_obj
+                external_listeners = list(self._external_listeners)
+
+                def notify_listeners():
+                    logger.info(f"🔍 Notifying external listeners of window close (AFTER unregister): {field_id}")
+                    # Collect "after" snapshot (without form manager)
+                    logger.info(f"🔍 Active form managers count: {len(ParameterFormManager._active_form_managers)}")
+                    after_snapshot = ParameterFormManager.collect_live_context()
+                    logger.info(f"🔍 Collected after_snapshot: token={after_snapshot.token}")
+                    logger.info(f"🔍 after_snapshot.values keys: {list(after_snapshot.values.keys())}")
+
+                    for listener, value_changed_handler, refresh_handler in external_listeners:
+                        try:
+                            logger.info(f"🔍   Notifying listener {listener.__class__.__name__}")
+
+                            # Build set of changed field identifiers
+                            changed_fields = set()
+                            for param_name in param_names:
+                                field_path = f"{field_id}.{param_name}" if field_id else param_name
+                                changed_fields.add(field_path)
+                                logger.info(f"🔍     Changed field: {field_path}")
+
+                            # CRITICAL: Call dedicated handle_window_close() method if available
+                            # This passes snapshots as parameters instead of storing them as state
+                            if hasattr(listener, 'handle_window_close'):
+                                logger.info(f"🔍     Calling handle_window_close with snapshots: before={before_snapshot.token}, after={after_snapshot.token}")
+                                listener.handle_window_close(
+                                    object_instance,
+                                    context_obj,
+                                    before_snapshot,
+                                    after_snapshot,
+                                    changed_fields
+                                )
+                            elif value_changed_handler:
+                                # Fallback: use old incremental update method
+                                logger.info(f"🔍     Falling back to value_changed_handler (no handle_window_close)")
+                                for field_path in changed_fields:
+                                    value_changed_handler(
+                                        field_path,
+                                        None,  # new_value not used for window close
+                                        object_instance,
+                                        context_obj
+                                    )
+                        except Exception as e:
+                            logger.error(f"Error notifying external listener {listener.__class__.__name__}: {e}", exc_info=True)
+
+                QTimer.singleShot(0, notify_listeners)
 
                 # CRITICAL: Trigger refresh in all remaining windows
                 # They were using this window's live values, now they need to revert to saved values

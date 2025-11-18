@@ -49,6 +49,11 @@ class CrossWindowPreviewMixin:
         self._last_live_context_snapshot = None  # Last LiveContextSnapshot (becomes "before" for next change)
         self._preview_update_timer = None  # QTimer for debouncing preview updates
 
+        # Window close event state (passed as parameters, stored temporarily for timer callback)
+        self._pending_window_close_before_snapshot = None
+        self._pending_window_close_after_snapshot = None
+        self._pending_window_close_changed_fields = None
+
         # Per-widget preview field configuration
         self._preview_fields: Dict[str, Callable] = {}  # field_path -> formatter function
         self._preview_field_roots: Dict[str, Optional[str]] = {}
@@ -276,36 +281,6 @@ class CrossWindowPreviewMixin:
         Uses trailing debounce: timer restarts on each change, only executes after
         changes stop for PREVIEW_UPDATE_DEBOUNCE_MS milliseconds.
         """
-        # CRITICAL: Check for window close marker - trigger full refresh with flash
-        # When a window closes with unsaved changes, all fields that were inheriting
-        # from that window's live values need to revert and flash
-        if field_path and "__WINDOW_CLOSED__" in field_path:
-            logger.info(f"🔍 Window closed: {field_path} - triggering full refresh with flash")
-
-            # CRITICAL: Collect "before" snapshot NOW (while form manager is still registered)
-            # This snapshot has the edited values that are about to be discarded
-            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-            self._window_close_before_snapshot = ParameterFormManager.collect_live_context()
-            logger.info(f"🔍 Collected window_close_before_snapshot: token={self._window_close_before_snapshot.token}")
-
-            # CRITICAL: Defer collection of "after" snapshot until AFTER form manager is unregistered
-            # Use QTimer with 0 delay to execute after current call stack completes
-            # This ensures we capture the state WITHOUT the edited values
-            from PyQt6.QtCore import QTimer
-            def collect_after_snapshot():
-                self._window_close_after_snapshot = ParameterFormManager.collect_live_context()
-                logger.info(f"🔍 Collected window_close_after_snapshot: token={self._window_close_after_snapshot.token}")
-
-                # Clear pending state and trigger full refresh
-                # This will cause ALL items to refresh and flash if their resolved values changed
-                self._pending_preview_keys.clear()
-                self._pending_label_keys.clear()
-                self._pending_changed_fields.clear()
-                self._schedule_preview_update(full_refresh=True)
-
-            QTimer.singleShot(0, collect_after_snapshot)
-            return
-
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
         target_keys, requires_full_refresh = self._resolve_scope_targets(scope_id)
 
@@ -352,6 +327,47 @@ class CrossWindowPreviewMixin:
         # Schedule debounced update (always schedule to handle flash, even if no label updates)
         self._schedule_preview_update(full_refresh=False)
 
+    def handle_window_close(
+        self,
+        editing_object: Any,
+        context_object: Any,
+        before_snapshot: Any,
+        after_snapshot: Any,
+        changed_fields: Set[str],
+    ) -> None:
+        """Handle window close events with dedicated snapshot parameters.
+
+        This is called when a config editor window is closed without saving.
+        Unlike incremental updates, this receives explicit before/after snapshots
+        to compare the unsaved edits against the reverted state.
+
+        Args:
+            editing_object: The object being edited (e.g., PipelineConfig)
+            context_object: The context object for resolution
+            before_snapshot: LiveContextSnapshot with form manager (unsaved edits)
+            after_snapshot: LiveContextSnapshot without form manager (reverted)
+            changed_fields: Set of field identifiers that changed
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        logger.info(f"🔍 {self.__class__.__name__}.handle_window_close: {len(changed_fields)} changed fields")
+
+        scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
+        target_keys, requires_full_refresh = self._resolve_scope_targets(scope_id)
+
+        # Add target keys to pending sets
+        self._pending_preview_keys.update(target_keys)
+        self._pending_label_keys.update(target_keys)
+
+        # Window close always triggers full refresh with explicit snapshots
+        self._schedule_preview_update(
+            full_refresh=True,
+            before_snapshot=before_snapshot,
+            after_snapshot=after_snapshot,
+            changed_fields=changed_fields,
+        )
+
     def handle_cross_window_preview_refresh(
         self,
         editing_object: Any,
@@ -396,7 +412,13 @@ class CrossWindowPreviewMixin:
         # Schedule debounced update
         self._schedule_preview_update(full_refresh=False)
 
-    def _schedule_preview_update(self, full_refresh: bool = False) -> None:
+    def _schedule_preview_update(
+        self,
+        full_refresh: bool = False,
+        before_snapshot: Any = None,
+        after_snapshot: Any = None,
+        changed_fields: Set[str] = None,
+    ) -> None:
         """Schedule a debounced preview update.
 
         Trailing debounce: timer restarts on each call, only executes after
@@ -404,10 +426,20 @@ class CrossWindowPreviewMixin:
 
         Args:
             full_refresh: If True, trigger full refresh instead of incremental
+            before_snapshot: Optional before snapshot for window close events
+            after_snapshot: Optional after snapshot for window close events
+            changed_fields: Optional changed fields for window close events
         """
         from PyQt6.QtCore import QTimer
 
         logger.info(f"🔥 _schedule_preview_update called: full_refresh={full_refresh}, delay={self.PREVIEW_UPDATE_DEBOUNCE_MS}ms")
+
+        # Store window close snapshots if provided (for timer callback)
+        if before_snapshot is not None and after_snapshot is not None:
+            self._pending_window_close_before_snapshot = before_snapshot
+            self._pending_window_close_after_snapshot = after_snapshot
+            self._pending_window_close_changed_fields = changed_fields
+            logger.info(f"🔥 Stored window close snapshots: before={before_snapshot.token}, after={after_snapshot.token}")
 
         # Cancel existing timer if any (trailing debounce - restart on each change)
         if self._preview_update_timer is not None:
@@ -587,6 +619,22 @@ class CrossWindowPreviewMixin:
         if not obj_pairs:
             return []
 
+        # CRITICAL: Use window close snapshots if available (passed via handle_window_close)
+        # This ensures we compare the right snapshots:
+        # before = with form manager (unsaved edits)
+        # after = without form manager (reverted to saved)
+        if self._pending_window_close_before_snapshot is not None and self._pending_window_close_after_snapshot is not None:
+            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Using window_close snapshots: before={self._pending_window_close_before_snapshot.token}, after={self._pending_window_close_after_snapshot.token}")
+            live_context_before = self._pending_window_close_before_snapshot
+            live_context_after = self._pending_window_close_after_snapshot
+            # Use window close changed fields if provided
+            if self._pending_window_close_changed_fields is not None:
+                changed_fields = self._pending_window_close_changed_fields
+            # Clear the snapshots after use
+            self._pending_window_close_before_snapshot = None
+            self._pending_window_close_after_snapshot = None
+            self._pending_window_close_changed_fields = None
+
         # If changed_fields is None, check ALL enabled preview fields (full refresh case)
         if changed_fields is None:
             logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: changed_fields=None, checking ALL enabled preview fields")
@@ -601,10 +649,12 @@ class CrossWindowPreviewMixin:
         logger.info(f"🔍 {self.__class__.__name__}._check_resolved_values_changed_batch: Checking {len(obj_pairs)} objects with {len(changed_fields)} identifiers")
 
         # Use the first object to expand identifiers (they should all be the same type)
+        # CRITICAL: Use live_context_before for expansion because it has the form manager's values
+        # live_context_after might be empty (e.g., window close after unregistering form manager)
         if obj_pairs:
             _, first_obj_after = obj_pairs[0]
             expanded_identifiers = self._expand_identifiers_for_inheritance(
-                first_obj_after, changed_fields, live_context_after
+                first_obj_after, changed_fields, live_context_before
             )
         else:
             expanded_identifiers = changed_fields
@@ -724,8 +774,49 @@ class CrossWindowPreviewMixin:
         token_before = getattr(live_context_before, 'token', 0) if live_context_before else 0
         token_after = getattr(live_context_after, 'token', 0) if live_context_after else 0
 
-        live_ctx_before = getattr(live_context_before, 'values', {}) if live_context_before else {}
-        live_ctx_after = getattr(live_context_after, 'values', {}) if live_context_after else {}
+        # CRITICAL: Use scoped values if available, otherwise fall back to global values
+        # The scoped values are keyed by scope_id (e.g., plate_path), and we need to find
+        # the right scope by checking which scope has values
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Try to find the scope_id from scoped_values
+        scope_id = None
+        if live_context_before:
+            scoped_before = getattr(live_context_before, 'scoped_values', {})
+            if scoped_before:
+                # Use the first scope (should only be one for plate-scoped operations)
+                scope_id = list(scoped_before.keys())[0] if scoped_before else None
+
+        # Extract live context dicts (scoped if available, otherwise global)
+        if scope_id and live_context_before:
+            scoped_before = getattr(live_context_before, 'scoped_values', {})
+            live_ctx_before = scoped_before.get(scope_id, {})
+            logger.info(f"🔍 _check_with_batch_resolution: Using SCOPED values for scope_id={scope_id}")
+        else:
+            live_ctx_before = getattr(live_context_before, 'values', {}) if live_context_before else {}
+            logger.info(f"🔍 _check_with_batch_resolution: Using GLOBAL values (no scope)")
+
+        if scope_id and live_context_after:
+            scoped_after = getattr(live_context_after, 'scoped_values', {})
+            live_ctx_after = scoped_after.get(scope_id, {})
+        else:
+            live_ctx_after = getattr(live_context_after, 'values', {}) if live_context_after else {}
+
+        # DEBUG: Log what's in the live context values
+        logger.info(f"🔍 _check_with_batch_resolution: live_ctx_before types: {list(live_ctx_before.keys())}")
+        logger.info(f"🔍 _check_with_batch_resolution: live_ctx_after types: {list(live_ctx_after.keys())}")
+        from openhcs.core.config import PipelineConfig
+
+        # DEBUG: Log PipelineConfig values if present
+        if PipelineConfig in live_ctx_before:
+            pc_before = live_ctx_before[PipelineConfig]
+            logger.info(f"🔍 _check_with_batch_resolution: live_ctx_before[PipelineConfig]['well_filter_config'] = {pc_before.get('well_filter_config', 'NOT FOUND')}")
+        if PipelineConfig in live_ctx_after:
+            pc_after = live_ctx_after[PipelineConfig]
+            logger.info(f"🔍 _check_with_batch_resolution: live_ctx_after[PipelineConfig]['well_filter_config'] = {pc_after.get('well_filter_config', 'NOT FOUND')}")
+
+
 
         # Group identifiers by parent object path
         # e.g., {'fiji_streaming_config': ['well_filter'], 'napari_streaming_config': ['well_filter']}
@@ -748,22 +839,38 @@ class CrossWindowPreviewMixin:
                     parent_to_attrs[parent_path] = []
                 parent_to_attrs[parent_path].append(attr_name)
 
+        logger.info(f"🔍 _check_with_batch_resolution: simple_attrs={simple_attrs}")
+        logger.info(f"🔍 _check_with_batch_resolution: parent_to_attrs={parent_to_attrs}")
+
         # Batch resolve simple attributes on root object
+        # Use resolve_all_config_attrs() instead of resolve_all_lazy_attrs() to handle
+        # inherited attributes (e.g., well_filter_config inherited from pipeline_config)
         if simple_attrs:
-            before_attrs = resolver.resolve_all_lazy_attrs(
-                obj_before, context_stack_before, live_ctx_before, token_before
+            before_attrs = resolver.resolve_all_config_attrs(
+                obj_before, list(simple_attrs), context_stack_before, live_ctx_before, token_before
             )
-            after_attrs = resolver.resolve_all_lazy_attrs(
-                obj_after, context_stack_after, live_ctx_after, token_after
+            after_attrs = resolver.resolve_all_config_attrs(
+                obj_after, list(simple_attrs), context_stack_after, live_ctx_after, token_after
             )
+
+            # DEBUG: Log resolved values
+            logger.info(f"🔍 _check_with_batch_resolution: Resolved {len(before_attrs)} before attrs, {len(after_attrs)} after attrs")
+            # Only log well_filter_config to reduce noise
+            if 'well_filter_config' in simple_attrs:
+                if 'well_filter_config' in before_attrs:
+                    logger.info(f"🔍 _check_with_batch_resolution: before[well_filter_config] = {before_attrs['well_filter_config']}")
+                if 'well_filter_config' in after_attrs:
+                    logger.info(f"🔍 _check_with_batch_resolution: after[well_filter_config] = {after_attrs['well_filter_config']}")
 
             for attr_name in simple_attrs:
                 if attr_name in before_attrs and attr_name in after_attrs:
                     if before_attrs[attr_name] != after_attrs[attr_name]:
+                        logger.info(f"🔍 _check_with_batch_resolution: CHANGED: {attr_name}")
                         return True
 
         # Batch resolve nested attributes grouped by parent
         for parent_path, attr_names in parent_to_attrs.items():
+            logger.info(f"🔍 _check_with_batch_resolution: Processing parent_path={parent_path}, attr_names={attr_names}")
             # Walk to parent object
             parent_before = obj_before
             parent_after = obj_after
@@ -773,6 +880,7 @@ class CrossWindowPreviewMixin:
                 parent_after = getattr(parent_after, part, None) if parent_after else None
 
             if parent_before is None or parent_after is None:
+                logger.info(f"🔍 _check_with_batch_resolution: Skipping parent_path={parent_path} (parent is None)")
                 continue
 
             # Batch resolve all attributes on this parent object
@@ -783,9 +891,19 @@ class CrossWindowPreviewMixin:
                 parent_after, context_stack_after, live_ctx_after, token_after
             )
 
+            logger.info(f"🔍 _check_with_batch_resolution: Resolved {len(before_attrs)} before attrs, {len(after_attrs)} after attrs for parent_path={parent_path}")
+
+            # Only log well_filter_config to reduce noise
+            if 'well_filter_config' in attr_names:
+                if 'well_filter_config' in before_attrs:
+                    logger.info(f"🔍 _check_with_batch_resolution: parent before[well_filter_config] = {before_attrs['well_filter_config']}")
+                if 'well_filter_config' in after_attrs:
+                    logger.info(f"🔍 _check_with_batch_resolution: parent after[well_filter_config] = {after_attrs['well_filter_config']}")
+
             for attr_name in attr_names:
                 if attr_name in before_attrs and attr_name in after_attrs:
                     if before_attrs[attr_name] != after_attrs[attr_name]:
+                        logger.info(f"🔍 _check_with_batch_resolution: CHANGED (parent): {parent_path}.{attr_name}")
                         return True
 
         return False
@@ -816,9 +934,10 @@ class CrossWindowPreviewMixin:
         """
         from dataclasses import fields as dataclass_fields, is_dataclass
 
-        expanded = set(changed_fields)
+        expanded = set()
 
         logger.info(f"🔍 _expand_identifiers_for_inheritance: obj type={type(obj).__name__}")
+        logger.info(f"🔍 _expand_identifiers_for_inheritance: changed_fields={changed_fields}")
 
         # For each changed field, check if it's a nested dataclass field
         for identifier in changed_fields:
@@ -833,13 +952,15 @@ class CrossWindowPreviewMixin:
                 try:
                     attr_value = getattr(obj, identifier, None)
                     if attr_value is not None and is_dataclass(attr_value):
-                        # This is a whole dataclass - don't expand, just continue
-                        # We'll compare the whole dataclass object in _check_resolved_value_changed
+                        # This is a whole dataclass - keep it as-is
+                        expanded.add(identifier)
                         continue
                 except (AttributeError, Exception):
                     pass
 
                 # Case 2: Check ALL dataclass attributes on obj for this simple field name
+                # This expands simple field names like "well_filter" to "well_filter_config.well_filter"
+                # We do NOT add the simple field name itself to expanded - only the expanded versions
                 for attr_name in dir(obj):
                     if attr_name.startswith('_'):
                         continue
@@ -855,45 +976,152 @@ class CrossWindowPreviewMixin:
                         if expanded_identifier not in expanded:
                             expanded.add(expanded_identifier)
                             logger.info(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' (dataclass has field '{identifier}')")
+
+                # NOTE: We do NOT add the simple field name to expanded if it's not a direct attribute
+                # Simple field names like "well_filter" should only appear as nested fields like "well_filter_config.well_filter"
                 continue
 
-            # Parse identifier: "well_filter_config.well_filter" -> ("well_filter_config", "well_filter")
-            parts = identifier.split(".", 1)
-            if len(parts) != 2:
+            # Parse identifier: could be "well_filter_config.well_filter" or "PipelineConfig.well_filter_config"
+            parts = identifier.split(".")
+
+            # Handle different cases:
+            # 1. "well_filter_config" (1 part) - direct dataclass attribute
+            # 2. "well_filter_config.well_filter" (2 parts) - nested field in dataclass
+            # 3. "PipelineConfig.well_filter_config" (2 parts) - field from parent config type
+            # 4. "pipeline_config.well_filter_config.well_filter" (3 parts) - nested field in parent config
+
+            if len(parts) == 1:
+                # Simple dataclass attribute - already handled above
+                expanded.add(identifier)
                 continue
+            elif len(parts) == 2:
+                # Could be either:
+                # - "well_filter_config.well_filter" (dataclass.field)
+                # - "PipelineConfig.well_filter_config" (ParentType.field)
 
-            config_field_name = parts[0]
-            nested_attr = parts[1]
+                first_part = parts[0]
+                second_part = parts[1]
 
-            # Find ALL attributes on obj that have the nested attribute
-            # This works even if obj doesn't have the config_field_name itself
-            # For example, Step doesn't have "well_filter_config" but has "step_well_filter_config"
-            # which also has a "well_filter" attribute
-            for attr_name in dir(obj):
-                # Skip private/magic attributes
-                if attr_name.startswith('_'):
+                # Check if first_part is a type name (starts with uppercase) or canonical root name
+                # Canonical root names are lowercase versions of type names (e.g., "pipeline_config" for "PipelineConfig")
+                is_type_or_root = first_part[0].isupper() or first_part in self._preview_scope_aliases.values()
+
+                if is_type_or_root:
+                    # This is "ParentType.field" format (e.g., "PipelineConfig.well_filter_config")
+                    # We need to find attributes on obj whose TYPE matches the field type
+                    # For example: PipelineConfig.well_filter_config -> find step_well_filter_config (StepWellFilterConfig inherits from WellFilterConfig)
+
+                    logger.info(f"🔍 Processing ParentType.field format: {identifier}")
+
+                    # Get the type and value of the field from live context
+                    field_type = None
+                    field_value = None
+                    if live_context_snapshot:
+                        live_values = getattr(live_context_snapshot, 'values', {})
+                        scoped_values = getattr(live_context_snapshot, 'scoped_values', {})
+
+                        logger.info(f"🔍   live_values types: {[t.__name__ for t in live_values.keys()]}")
+                        logger.info(f"🔍   scoped_values keys: {list(scoped_values.keys())}")
+
+                        # Check both global and scoped values
+                        all_values = dict(live_values)
+                        for scope_dict in scoped_values.values():
+                            all_values.update(scope_dict)
+
+                        for type_key, values_dict in all_values.items():
+                            if second_part in values_dict:
+                                # Get the type of this field's value
+                                field_value = values_dict[second_part]
+                                logger.info(f"🔍   Found field '{second_part}' in type {type_key.__name__}: {field_value}")
+                                if field_value is not None and is_dataclass(field_value):
+                                    field_type = type(field_value)
+                                    logger.info(f"🔍   field_type = {field_type.__name__}")
+                                    break
+
+                    # Find all dataclass attributes on obj whose TYPE inherits from field_type
+                    # AND expand to include ALL fields inside the dataclass
+                    if field_type:
+                        from dataclasses import fields as dataclass_fields
+
+                        # Get all field names from the dataclass
+                        nested_field_names = []
+                        if field_value is not None:
+                            try:
+                                nested_field_names = [f.name for f in dataclass_fields(field_value)]
+                                logger.info(f"🔍   nested_field_names = {nested_field_names}")
+                            except Exception as e:
+                                logger.info(f"🔍   Failed to get nested fields: {e}")
+
+                        for attr_name in dir(obj):
+                            if attr_name.startswith('_'):
+                                continue
+                            try:
+                                attr_value = getattr(obj, attr_name, None)
+                            except (AttributeError, Exception):
+                                continue
+                            if attr_value is None or not is_dataclass(attr_value):
+                                continue
+
+                            attr_type = type(attr_value)
+                            # Check if attr_type inherits from field_type
+                            try:
+                                if issubclass(attr_type, field_type) or issubclass(field_type, attr_type):
+                                    # Add nested fields (e.g., step_well_filter_config.well_filter)
+                                    # instead of just the dataclass attribute (step_well_filter_config)
+                                    for nested_field in nested_field_names:
+                                        nested_identifier = f"{attr_name}.{nested_field}"
+                                        if nested_identifier not in expanded:
+                                            expanded.add(nested_identifier)
+                                            logger.info(f"🔍 Expanded '{identifier}' to include '{nested_identifier}' ({attr_type.__name__} inherits from {field_type.__name__})")
+                            except TypeError:
+                                # issubclass can raise TypeError if types are not classes
+                                pass
+                    else:
+                        logger.info(f"🔍   field_type is None, skipping expansion")
                     continue
+                else:
+                    # This is "dataclass.field" format (e.g., "well_filter_config.well_filter")
+                    config_field_name = first_part
+                    nested_attr = second_part
 
-                # Get the actual attribute value from obj
-                try:
-                    attr_value = getattr(obj, attr_name, None)
-                except (AttributeError, Exception):
-                    continue
+                    # Try to get the config from obj
+                    config_type = None
+                    try:
+                        config_value = getattr(obj, config_field_name, None)
+                        if config_value is not None and is_dataclass(config_value):
+                            config_type = type(config_value)
+                            # Add the original identifier
+                            expanded.add(identifier)
+                    except (AttributeError, Exception):
+                        pass
 
-                if attr_value is None or not is_dataclass(attr_value):
-                    continue
+                    # Find ALL dataclass attributes on obj that have this nested attribute
+                    # and whose TYPE inherits from config_type (if we know it)
+                    for attr_name in dir(obj):
+                        if attr_name.startswith('_'):
+                            continue
+                        try:
+                            attr_value = getattr(obj, attr_name, None)
+                        except (AttributeError, Exception):
+                            continue
+                        if attr_value is None or not is_dataclass(attr_value):
+                            continue
+                        if not hasattr(attr_value, nested_attr):
+                            continue
 
-                # Check if this attribute has the nested attribute
-                if not hasattr(attr_value, nested_attr):
-                    continue
-
-
-
-                # Add the expanded identifier
-                expanded_identifier = f"{attr_name}.{nested_attr}"
-                if expanded_identifier not in expanded:
-                    expanded.add(expanded_identifier)
-                    logger.info(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' (field has attribute '{nested_attr}' with None value, will inherit)")
+                        attr_type = type(attr_value)
+                        # If we know the config_type, check inheritance; otherwise just check if it has the field
+                        if config_type is None or issubclass(attr_type, config_type) or issubclass(config_type, attr_type):
+                            expanded_identifier = f"{attr_name}.{nested_attr}"
+                            if expanded_identifier not in expanded:
+                                expanded.add(expanded_identifier)
+                                if config_type:
+                                    logger.info(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' ({attr_type.__name__} inherits from {config_type.__name__})")
+                                else:
+                                    logger.info(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' (has field '{nested_attr}')")
+            else:
+                # 3+ parts - just keep the original identifier
+                expanded.add(identifier)
 
         return expanded
 
