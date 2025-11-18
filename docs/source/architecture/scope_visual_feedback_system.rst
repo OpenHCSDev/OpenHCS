@@ -1379,6 +1379,27 @@ The unsaved changes check is performed on every label update (triggered by cross
 2. **Early returns**: The check returns early if no resolver, parent, or live snapshot is provided
 3. **Field-level comparison**: Only compares fields that actually exist in the config dataclass
 4. **Scope filtering**: Only collects context for the relevant scope (plate/step), not all scopes
+5. **Fast path optimization**: Only checks configs that have actually been modified (see below)
+
+**Fast Path Optimization (commit 04a0bfae)**
+
+When a PipelineConfig editor window is open, it creates form managers for ALL nested configs (napari_display_config, fiji_display_config, well_filter_config, etc.). Previously, the unsaved changes check would iterate through all 16+ configs even when only 1 was edited, causing slow reset operations.
+
+The optimization checks if a specific config field is in ``_last_emitted_values`` before performing expensive field resolution:
+
+.. code-block:: python
+
+   # Check if THIS SPECIFIC config field has been emitted
+   if hasattr(manager, '_last_emitted_values') and config_attr in manager._last_emitted_values:
+       has_form_manager_with_changes = True
+       # Proceed with field resolution
+   else:
+       # Skip this config - no changes emitted
+       return False
+
+**Impact**: When you reset ``well_filter``, only ``well_filter_config`` is checked instead of all 16 configs. Reset operations are now as fast as typing in a field (~10-20ms instead of ~500ms).
+
+**Key insight**: ``_last_emitted_values`` is a dict that tracks which config fields have emitted cross-window change signals. Checking if a specific field is in this dict (not just if the dict is non-empty) allows us to skip configs that have form managers but haven't been modified.
 
 **Visual Feedback**
 
