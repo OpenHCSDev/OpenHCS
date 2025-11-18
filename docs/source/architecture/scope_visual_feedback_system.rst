@@ -86,24 +86,125 @@ Flash detection compares resolved values (not raw values) using live context sna
 
    # 1. Capture live context snapshot BEFORE changes
    live_context_before = self._last_live_context_snapshot
-   
+
    # 2. Capture live context snapshot AFTER changes
    live_context_after = self._collect_live_context()
-   
+
    # 3. Get preview instances with merged live values
    step_before = self._get_step_preview_instance(step, live_context_before)
    step_after = self._get_step_preview_instance(step, live_context_after)
-   
+
    # 4. Compare resolved values (not raw values)
    for field_path in changed_fields:
        before_value = getattr(step_before, field_path)
        after_value = getattr(step_after, field_path)
-       
+
        if before_value != after_value:
            # Flash! Resolved value actually changed
            self._flash_step_item(step_index)
 
 **Key insight**: Preview instances are fully resolved via ``dataclasses.replace()`` and lazy resolution, so comparing them compares actual effective values after inheritance.
+
+**Identifier Expansion for Inheritance**
+
+When checking if resolved values changed, the system expands field identifiers to include fields that inherit from the changed type. For example, if ``well_filter_config.well_filter`` changed, the system checks both ``well_filter_config.well_filter`` AND ``step_well_filter_config.well_filter`` because ``StepWellFilterConfig`` inherits from ``WellFilterConfig``.
+
+.. code-block:: python
+
+   def _expand_identifiers_for_inheritance(
+       self, obj, changed_fields, live_context_snapshot
+   ) -> Set[str]:
+       """Expand field identifiers to include fields that inherit from changed types.
+
+       Example: "well_filter_config.well_filter" expands to include
+       "step_well_filter_config.well_filter" if StepWellFilterConfig
+       inherits from WellFilterConfig.
+       """
+       expanded = set(changed_fields)
+
+       for identifier in changed_fields:
+           if "." not in identifier:
+               # Simple field - check all dataclass attributes for this field
+               for attr_name in dir(obj):
+                   attr_value = getattr(obj, attr_name, None)
+                   if is_dataclass(attr_value) and hasattr(attr_value, identifier):
+                       expanded.add(f"{attr_name}.{identifier}")
+           else:
+               # Nested field - check all dataclass attributes for the nested attribute
+               config_field, nested_attr = identifier.split(".", 1)
+               for attr_name in dir(obj):
+                   attr_value = getattr(obj, attr_name, None)
+                   if is_dataclass(attr_value) and hasattr(attr_value, nested_attr):
+                       expanded.add(f"{attr_name}.{nested_attr}")
+
+       return expanded
+
+This ensures flash detection works correctly when inherited values change, even if the changed field identifier doesn't exactly match the inheriting field's path.
+
+**Window Close Snapshot Timing**
+
+When a window closes with unsaved changes, the system must capture the edited values BEFORE the form managers are unregistered. The critical sequence is:
+
+1. Window close signal received
+2. **Snapshot collected with edited values** (``_window_close_before_snapshot``)
+3. External listeners notified (can use the snapshot)
+4. Form managers removed from registry
+5. Token counter incremented
+6. Remaining windows refreshed
+
+.. code-block:: python
+
+   def unregister_from_cross_window_updates(self):
+       """Unregister form manager when window closes."""
+       # CRITICAL: Notify external listeners BEFORE removing from registry
+       # They need to collect snapshot with edited values still present
+       for listener, value_changed_handler, _ in self._external_listeners:
+           if value_changed_handler:
+               value_changed_handler(
+                   f"{self.field_id}.__WINDOW_CLOSED__",  # Special marker
+                   None,
+                   self.object_instance,
+                   self.context_obj
+               )
+
+       # NOW remove from registry (after listeners collected snapshot)
+       self._active_form_managers.remove(self)
+       type(self)._live_context_token_counter += 1
+
+If the notification happened AFTER removing from registry, the snapshot would not include the edited values and flash detection would fail to detect the reversion.
+
+**Context-Aware Resolution**
+
+Flash detection uses ``LiveContextResolver`` to resolve field values through the context hierarchy (GlobalPipelineConfig → PipelineConfig → Step). This ensures flash detection sees the same resolved values that the UI displays.
+
+.. code-block:: python
+
+   def _build_flash_context_stack(self, obj, live_context_snapshot) -> list:
+       """Build context stack for flash resolution.
+
+       For PipelineEditor: GlobalPipelineConfig → PipelineConfig → Step
+       For PlateManager: GlobalPipelineConfig → PipelineConfig
+       """
+       return [
+           get_current_global_config(GlobalPipelineConfig),
+           self._get_pipeline_config_preview_instance(live_context_snapshot),
+           obj  # The step or pipeline config (preview instance)
+       ]
+
+   def _resolve_flash_field_value(self, obj, identifier, live_context_snapshot):
+       """Resolve field value through context stack for flash detection."""
+       context_stack = self._build_flash_context_stack(obj, live_context_snapshot)
+
+       if context_stack:
+           # Use LiveContextResolver for context-aware resolution
+           return self._resolve_through_context_stack(
+               obj, identifier, context_stack, live_context_snapshot
+           )
+       else:
+           # Fallback to simple object graph walk
+           return self._walk_object_path(obj, identifier)
+
+This ensures that flash detection compares the same resolved values that the user sees in the UI, preventing false positives and false negatives.
 
 Color Generation
 ================

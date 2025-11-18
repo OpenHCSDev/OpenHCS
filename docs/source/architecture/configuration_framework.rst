@@ -156,11 +156,21 @@ The framework is extracted to ``openhcs.config_framework`` for reuse:
 **lazy_factory.py**
   Generates lazy dataclasses with ``__getattribute__`` interception
 
+  **Inheritance Preservation**: When creating lazy versions of dataclasses, the factory preserves the inheritance hierarchy by making lazy versions inherit from lazy parents. For example, if ``StepWellFilterConfig`` inherits from ``WellFilterConfig``, then ``LazyStepWellFilterConfig`` inherits from ``LazyWellFilterConfig``. This ensures MRO-based resolution works correctly in the lazy versions.
+
+  **Cached Extracted Configs**: Lazy ``__getattribute__`` retrieves cached extracted configs from ``current_extracted_configs`` ContextVar instead of calling ``extract_all_configs()`` on every attribute access.
+
 **dual_axis_resolver.py**
   Pure MRO-based resolution - no priority functions
 
+  **Lazy/Non-Lazy Type Matching**: When resolving through MRO, the resolver matches both exact types and lazy/non-lazy equivalents. For example, when looking for ``StepWellFilterConfig`` in available configs, it will match both ``StepWellFilterConfig`` and ``LazyStepWellFilterConfig`` instances. This enables resolution to work correctly whether the config instance is lazy or non-lazy.
+
 **context_manager.py**
   Contextvars-based context stacking via ``config_context()``
+
+  **Content-Based Caching**: ``extract_all_configs()`` uses content-based cache keys (not identity-based) to handle frozen dataclasses that are recreated with ``dataclasses.replace()``. Cache key is built from type name and all field values recursively, enabling cache hits even when dataclass instances are recreated with identical content.
+
+  **Extracted Configs Caching**: When setting context via ``config_context()``, extracted configs are computed once and stored in a ``contextvars.ContextVar``. Lazy dataclass ``__getattribute__`` retrieves cached extracted configs instead of re-extracting on every attribute access, reducing ``extract_all_configs()`` calls from thousands per second to once per context setup.
 
 **placeholder.py**
   UI placeholder generation showing inherited values
@@ -239,7 +249,7 @@ The configuration framework includes reusable caching abstractions that eliminat
 
      resolver = LiveContextResolver()
 
-     # Resolve attribute through context stack
+     # Resolve single attribute through context stack
      resolved_value = resolver.resolve_config_attr(
          config_obj=step_config,
          attr_name='enabled',
@@ -248,7 +258,23 @@ The configuration framework includes reusable caching abstractions that eliminat
          cache_token=current_token
      )
 
+     # Batch resolve multiple attributes (O(1) context setup)
+     resolved_values = resolver.resolve_all_config_attrs(
+         config_obj=step_config,
+         attr_names=['enabled', 'well_filter', 'num_workers'],
+         context_stack=[global_config, pipeline_config, step],
+         live_context={PipelineConfig: {'num_workers': 4}},
+         cache_token=current_token
+     )
+     # Returns: {'enabled': True, 'well_filter': 3, 'num_workers': 4}
+
   **Critical None Value Semantics**: The resolver passes ``None`` values through during live context merge. When a field is reset to ``None`` in a form, the ``None`` value overrides the saved concrete value via ``dataclasses.replace()``. This triggers MRO resolution which walks up the context hierarchy to find the inherited value from parent context (e.g., GlobalPipelineConfig).
+
+  **Performance Optimizations**:
+
+  - **Merged context caching**: Caches merged contexts (dataclass instances with live values applied) to avoid recreating them on every attribute access. Cache key is based on context object identities and live context content.
+  - **Batch resolution**: ``resolve_all_config_attrs()`` builds the nested context stack once and resolves all attributes within it, achieving O(1) context setup instead of O(N) for N attributes.
+  - **Content-based cache keys**: Uses hashable representation of live context values (converting lists to tuples, dicts to sorted tuples) to enable caching even when live context dict is recreated.
 
 **Architecture Principles**
 
