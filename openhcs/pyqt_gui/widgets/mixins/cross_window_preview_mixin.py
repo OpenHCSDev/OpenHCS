@@ -462,6 +462,63 @@ class CrossWindowPreviewMixin:
         logger.debug(f"🔥 Timer started with {delay}ms delay")
 
     # --- Preview instance with live values (shared pattern) -------------------
+    def _get_preview_instance_generic(
+        self,
+        obj: Any,
+        obj_type: type,
+        scope_id: Optional[str],
+        live_context_snapshot: Optional[Any],
+        use_global_values: bool = False
+    ) -> Any:
+        """
+        Generic preview instance getter with scoped live values merged.
+
+        This is the SINGLE SOURCE OF TRUTH for extracting and merging live values
+        from LiveContextSnapshot. All preview instance methods use this.
+
+        This implements the pattern from docs/source/development/scope_hierarchy_live_context.rst
+
+        Args:
+            obj: Original object to merge live values into
+            obj_type: Type to look up in scoped_values or values dict
+            scope_id: Scope identifier (e.g., "/path/to/plate::step_0" or "/path/to/plate")
+                     Ignored if use_global_values=True
+            live_context_snapshot: Live context snapshot with scoped values
+            use_global_values: If True, use snapshot.values (for GlobalPipelineConfig)
+                              If False, use snapshot.scoped_values[scope_id] (for scoped objects)
+
+        Returns:
+            Object with live values merged, or original object if no live values
+        """
+        if live_context_snapshot is None:
+            return obj
+
+        token = getattr(live_context_snapshot, 'token', None)
+        if token is None:
+            return obj
+
+        # Extract live values from appropriate location
+        if use_global_values:
+            # For GlobalPipelineConfig: use global values dict
+            values = getattr(live_context_snapshot, 'values', {}) or {}
+            live_values = values.get(obj_type)
+        else:
+            # For scoped objects (PipelineConfig, FunctionStep): use scoped values
+            if scope_id is None:
+                return obj
+            scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
+            scope_entries = scoped_values.get(scope_id)
+            if not scope_entries:
+                return obj
+            live_values = scope_entries.get(obj_type)
+
+        if not live_values:
+            return obj
+
+        # Merge live values into object (subclass implements merge strategy)
+        merged_obj = self._merge_with_live_values(obj, live_values)
+        return merged_obj
+
     def _get_preview_instance(self, obj: Any, live_context_snapshot, scope_id: str, obj_type: Type) -> Any:
         """Get object instance with live values merged (shared pattern for PipelineEditor and PlateManager).
 
@@ -479,29 +536,13 @@ class CrossWindowPreviewMixin:
         Returns:
             Object with live values merged, or original object if no live values
         """
-        if live_context_snapshot is None:
-            return obj
-
-        token = getattr(live_context_snapshot, 'token', None)
-        if token is None:
-            return obj
-
-        # Get scoped values for this scope_id
-        scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
-        scope_entries = scoped_values.get(scope_id)
-        if not scope_entries:
-            logger.debug(f"No scope entries for {scope_id}")
-            return obj
-
-        # Get live values for this object type
-        obj_live_values = scope_entries.get(obj_type)
-        if not obj_live_values:
-            logger.debug(f"No live values for {obj_type.__name__} in scope {scope_id}")
-            return obj
-
-        # Merge live values into object
-        merged_obj = self._merge_with_live_values(obj, obj_live_values)
-        return merged_obj
+        return self._get_preview_instance_generic(
+            obj=obj,
+            obj_type=obj_type,
+            scope_id=scope_id,
+            live_context_snapshot=live_context_snapshot,
+            use_global_values=False
+        )
 
     def _merge_with_live_values(self, obj: Any, live_values: Dict[str, Any]) -> Any:
         """Merge object with live values from ParameterFormManager.

@@ -452,3 +452,206 @@ The pipeline editor must match step editors by scope_id to collect the correct l
 
 This prevents collecting live values from other step editors in the same plate, ensuring each step's preview labels only reflect its own editor's state.
 
+Critical Pattern: Always Use Preview Instances for Resolution
+==============================================================
+
+**CRITICAL RULE**: When resolving config attributes for display (flash detection, unsaved changes, preview labels), you MUST use preview instances with scoped live values merged, not the original objects.
+
+Why This Matters
+-----------------
+
+The live context snapshot contains scoped values in ``scoped_values[scope_id][obj_type]``, but these values are NOT automatically visible during resolution unless you merge them into the object first.
+
+**Common Bug Pattern** (WRONG):
+
+.. code-block:: python
+
+    # WRONG: Use original step directly
+    def _resolve_config_attr(self, step, config, attr_name, live_context_snapshot):
+        context_stack = [global_config, pipeline_config, step]  # Original step!
+
+        # Resolution will NOT see step editor changes because step doesn't have
+        # the live values merged into it yet
+        resolved = resolver.resolve_config_attr(config, attr_name, context_stack)
+
+**Correct Pattern** (RIGHT):
+
+.. code-block:: python
+
+    # CORRECT: Get preview instance with scoped live values merged
+    def _resolve_config_attr(self, step, config, attr_name, live_context_snapshot):
+        # CRITICAL: Merge scoped live values into step BEFORE building context stack
+        step_preview = self._get_step_preview_instance(step, live_context_snapshot)
+
+        context_stack = [global_config, pipeline_config, step_preview]  # Preview instance!
+
+        # Now resolution sees step editor changes
+        resolved = resolver.resolve_config_attr(config, attr_name, context_stack)
+
+Single Source of Truth: _build_context_stack_with_live_values
+--------------------------------------------------------------
+
+To prevent this bug from recurring, use a centralized helper that enforces the pattern:
+
+.. code-block:: python
+
+    def _build_context_stack_with_live_values(
+        self,
+        step: FunctionStep,  # Original step (NOT preview instance)
+        live_context_snapshot: Optional[LiveContextSnapshot]
+    ) -> Optional[list]:
+        """
+        Build context stack for resolution with live values merged.
+
+        CRITICAL: This MUST use preview instances (with scoped live values merged)
+        for all objects in the context stack.
+
+        Pattern:
+        1. Get preview instance for each object (merges scoped live values)
+        2. Build context stack: GlobalPipelineConfig → PipelineConfig → Step
+        3. Pass to LiveContextResolver
+
+        This is the SINGLE SOURCE OF TRUTH for building context stacks.
+        All resolution code (flash detection, unsaved changes, label updates)
+        MUST use this method.
+        """
+        # Get preview instances with scoped live values merged
+        global_config = self._get_global_config_preview_instance(live_context_snapshot)
+        pipeline_config = self._get_pipeline_config_preview_instance(live_context_snapshot)
+        step_preview = self._get_step_preview_instance(step, live_context_snapshot)
+
+        # Build context stack with preview instances
+        return [global_config, pipeline_config, step_preview]
+
+**Usage**:
+
+.. code-block:: python
+
+    # Flash detection
+    def _build_flash_context_stack(self, obj, live_context_snapshot):
+        return self._build_context_stack_with_live_values(obj, live_context_snapshot)
+
+    # Unsaved changes detection
+    def _resolve_config_attr(self, step, config, attr_name, live_context_snapshot):
+        context_stack = self._build_context_stack_with_live_values(step, live_context_snapshot)
+        return resolver.resolve_config_attr(config, attr_name, context_stack, ...)
+
+Generic Helper: _get_preview_instance_generic
+----------------------------------------------
+
+The ``CrossWindowPreviewMixin`` provides a generic helper for extracting and merging live values:
+
+.. code-block:: python
+
+    def _get_preview_instance_generic(
+        self,
+        obj: Any,
+        obj_type: type,
+        scope_id: Optional[str],
+        live_context_snapshot: Optional[LiveContextSnapshot],
+        use_global_values: bool = False
+    ) -> Any:
+        """
+        Generic preview instance getter with scoped live values merged.
+
+        This is the SINGLE SOURCE OF TRUTH for extracting and merging live values
+        from LiveContextSnapshot.
+
+        Args:
+            obj: Original object to merge live values into
+            obj_type: Type to look up in scoped_values or values dict
+            scope_id: Scope identifier (e.g., "/path/to/plate::step_0")
+                     Ignored if use_global_values=True
+            use_global_values: If True, use snapshot.values (for GlobalPipelineConfig)
+                              If False, use snapshot.scoped_values[scope_id]
+
+        Returns:
+            Object with live values merged, or original object if no live values
+        """
+
+**Usage Examples**:
+
+.. code-block:: python
+
+    # For GlobalPipelineConfig (uses global values)
+    global_preview = self._get_preview_instance_generic(
+        obj=self.global_config,
+        obj_type=GlobalPipelineConfig,
+        scope_id=None,
+        live_context_snapshot=snapshot,
+        use_global_values=True  # Use snapshot.values
+    )
+
+    # For PipelineConfig (uses scoped values)
+    pipeline_preview = self._get_preview_instance_generic(
+        obj=orchestrator.pipeline_config,
+        obj_type=PipelineConfig,
+        scope_id=str(plate_path),  # Plate scope
+        live_context_snapshot=snapshot,
+        use_global_values=False  # Use snapshot.scoped_values[plate_path]
+    )
+
+    # For FunctionStep (uses scoped values)
+    step_preview = self._get_preview_instance_generic(
+        obj=step,
+        obj_type=FunctionStep,
+        scope_id=f"{plate_path}::{step_token}",  # Step scope
+        live_context_snapshot=snapshot,
+        use_global_values=False  # Use snapshot.scoped_values[step_scope]
+    )
+
+Implementation Requirements
+---------------------------
+
+Subclasses must implement ``_merge_with_live_values`` to define merge strategy:
+
+.. code-block:: python
+
+    def _merge_with_live_values(self, obj: Any, live_values: Dict[str, Any]) -> Any:
+        """Merge object with live values from ParameterFormManager.
+
+        For dataclasses: Use dataclasses.replace
+        For non-dataclass objects: Use copy + setattr
+        """
+        reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
+
+        if dataclasses.is_dataclass(obj):
+            return dataclasses.replace(obj, **reconstructed_values)
+        else:
+            obj_clone = copy.deepcopy(obj)
+            for field_name, value in reconstructed_values.items():
+                setattr(obj_clone, field_name, value)
+            return obj_clone
+
+Historical Bug: Unsaved Changes Not Detected
+---------------------------------------------
+
+**Symptom**: Unsaved changes indicator (†) not appearing on step names when editing step configs.
+
+**Root Cause**: ``_resolve_config_attr()`` was using the original step instead of a preview instance with scoped live values merged.
+
+**Evidence**:
+
+.. code-block:: python
+
+    # Logs showed scoped values WERE being collected:
+    live_context_snapshot.scoped_values keys: ['/home/ts/test_plate::step_6']
+
+    # But resolution showed None for both live and saved:
+    live=None vs saved=None
+
+    # Because the original step was used, not the preview instance!
+
+**Fix**: Use ``_get_step_preview_instance()`` to merge scoped live values before building context stack.
+
+.. code-block:: python
+
+    # Before (WRONG):
+    context_stack = [global_config, pipeline_config, step]  # Original step
+
+    # After (CORRECT):
+    step_preview = self._get_step_preview_instance(step, live_context_snapshot)
+    context_stack = [global_config, pipeline_config, step_preview]  # Preview instance
+
+**Lesson**: The existing flash detection code was already using this pattern correctly. When implementing new resolution code, always check if similar code exists and follow the same pattern.
+

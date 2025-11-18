@@ -981,19 +981,40 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if plate_path == self.current_plate:
             pass  # Orchestrator config changed for current plate
 
-    def _build_flash_context_stack(self, obj: Any, live_context_snapshot) -> Optional[list]:
-        """Build context stack for flash resolution.
+    def _build_context_stack_with_live_values(
+        self,
+        step: FunctionStep,
+        live_context_snapshot: Optional['LiveContextSnapshot'],
+        step_is_preview: bool = False
+    ) -> Optional[list]:
+        """
+        Build context stack for resolution with live values merged.
 
-        Builds: GlobalPipelineConfig → PipelineConfig → Step
+        CRITICAL: This MUST use preview instances (with scoped live values merged)
+        for all objects in the context stack. Using original objects will cause
+        step editor changes to be invisible during resolution.
+
+        Pattern:
+        1. Get preview instance for each object (merges scoped live values)
+        2. Build context stack: GlobalPipelineConfig → PipelineConfig → Step
+        3. Pass to LiveContextResolver
+
+        This is the SINGLE SOURCE OF TRUTH for building context stacks.
+        All resolution code (flash detection, unsaved changes, label updates)
+        MUST use this method.
+
+        See: docs/source/development/scope_hierarchy_live_context.rst
 
         Args:
-            obj: Step object (preview instance)
-            live_context_snapshot: Live context snapshot
+            step: Step object (original from pipeline_steps OR preview instance)
+            live_context_snapshot: Live context snapshot with scoped values
+            step_is_preview: If True, step is already a preview instance (don't merge again)
+                            If False, step is original (merge scoped live values)
 
         Returns:
-            Context stack for resolution, or None if orchestrator not available
+            Context stack [GlobalPipelineConfig, PipelineConfig, Step] with live values,
+            or None if orchestrator not available
         """
-        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
         from openhcs.core.config import GlobalPipelineConfig
         from openhcs.config_framework.global_config import get_current_global_config
 
@@ -1002,23 +1023,51 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             return None
 
         try:
-            # Collect live context if not provided
-            if live_context_snapshot is None:
-                live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+            # Get preview instances with scoped live values merged
+            pipeline_config = self._get_pipeline_config_preview_instance(live_context_snapshot) or orchestrator.pipeline_config
+            global_config = self._get_global_config_preview_instance(live_context_snapshot)
+            if global_config is None:
+                global_config = get_current_global_config(GlobalPipelineConfig)
 
-            pipeline_config_for_context = self._get_pipeline_config_preview_instance(live_context_snapshot) or orchestrator.pipeline_config
-            global_config_for_context = self._get_global_config_preview_instance(live_context_snapshot)
-            if global_config_for_context is None:
-                global_config_for_context = get_current_global_config(GlobalPipelineConfig)
+            # Get step preview instance (or use as-is if already a preview)
+            if step_is_preview:
+                # Step is already a preview instance (from flash detection caller)
+                step_preview = step
+            else:
+                # Step is original - merge scoped live values
+                step_preview = self._get_step_preview_instance(step, live_context_snapshot)
 
-            # Build context stack: GlobalPipelineConfig → PipelineConfig → Step
-            return [
-                global_config_for_context,
-                pipeline_config_for_context,
-                obj  # The step (preview instance)
-            ]
+            # Build context stack: GlobalPipelineConfig → PipelineConfig → Step (with live values)
+            return [global_config, pipeline_config, step_preview]
+
         except Exception:
             return None
+
+    def _build_flash_context_stack(self, obj: Any, live_context_snapshot) -> Optional[list]:
+        """Build context stack for flash resolution.
+
+        Builds: GlobalPipelineConfig → PipelineConfig → Step
+
+        Args:
+            obj: Step object (PREVIEW INSTANCE with live values already merged)
+            live_context_snapshot: Live context snapshot
+
+        Returns:
+            Context stack for resolution, or None if orchestrator not available
+        """
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        # Collect live context if not provided
+        if live_context_snapshot is None:
+            live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+
+        # Use centralized context stack builder
+        # obj is ALREADY a preview instance (caller created it), so set step_is_preview=True
+        return self._build_context_stack_with_live_values(
+            step=obj,
+            live_context_snapshot=live_context_snapshot,
+            step_is_preview=True  # Don't merge again - already a preview instance
+        )
 
     def _resolve_config_attr(self, step: FunctionStep, config: object, attr_name: str,
                              live_context_snapshot=None) -> object:
@@ -1027,8 +1076,12 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         Uses LiveContextResolver service from configuration framework for cached resolution.
 
+        IMPORTANT: The 'step' parameter is the ORIGINAL step from pipeline_steps.
+        This method internally converts it to a preview instance with live values.
+        Do NOT pass a preview instance as the 'step' parameter.
+
         Args:
-            step: FunctionStep containing the config
+            step: FunctionStep containing the config (original, not preview instance)
             config: Config dataclass instance (e.g., LazyNapariStreamingConfig)
             attr_name: Name of the attribute to resolve (e.g., 'enabled', 'well_filter')
             live_context_snapshot: Optional pre-collected LiveContextSnapshot (for performance)
@@ -1037,33 +1090,16 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             Resolved attribute value (type depends on attribute)
         """
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-        from openhcs.core.config import GlobalPipelineConfig
-        from openhcs.config_framework.global_config import get_current_global_config
-
-        orchestrator = self._get_current_orchestrator()
-        if not orchestrator:
-            return None
 
         try:
             # Collect live context if not provided (for backwards compatibility)
             if live_context_snapshot is None:
                 live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
 
-            pipeline_config_for_context = self._get_pipeline_config_preview_instance(live_context_snapshot) or orchestrator.pipeline_config
-            global_config_for_context = self._get_global_config_preview_instance(live_context_snapshot)
-            if global_config_for_context is None:
-                global_config_for_context = get_current_global_config(GlobalPipelineConfig)
-
-            # CRITICAL: Get step preview instance with scoped live values merged in
-            # This ensures step editor changes are included in resolution
-            step_for_context = self._get_step_preview_instance(step, live_context_snapshot)
-
-            # Build context stack: GlobalPipelineConfig → PipelineConfig → Step (with live values)
-            context_stack = [
-                global_config_for_context,
-                pipeline_config_for_context,
-                step_for_context  # Use merged step, not original
-            ]
+            # Use centralized context stack builder (ensures preview instances are used)
+            context_stack = self._build_context_stack_with_live_values(step, live_context_snapshot)
+            if context_stack is None:
+                return None
 
             # Resolve using service
             resolved_value = self._live_context_resolver.resolve_config_attr(
@@ -1126,21 +1162,45 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         for step in self.pipeline_steps:
             self._ensure_step_scope_token(step)
 
-    def _merge_step_with_live_values(self, step: FunctionStep, live_values: Dict[str, Any]) -> FunctionStep:
-        """Create a copy of the step with live overrides applied."""
+    def _merge_with_live_values(self, obj: Any, live_values: Dict[str, Any]) -> Any:
+        """Merge object with live values from ParameterFormManager.
+
+        Implementation of CrossWindowPreviewMixin hook for PipelineEditor.
+        Handles both dataclass objects (PipelineConfig, GlobalPipelineConfig) and
+        non-dataclass objects (FunctionStep).
+
+        Args:
+            obj: Object to merge (FunctionStep, PipelineConfig, or GlobalPipelineConfig)
+            live_values: Dict of field_name -> value from ParameterFormManager
+
+        Returns:
+            New object with live values merged
+        """
         if not live_values:
-            return step
+            return obj
 
-        try:
-            step_clone = copy.deepcopy(step)
-        except Exception:
-            step_clone = copy.copy(step)
-
+        # Reconstruct live values (handles nested dataclasses)
         reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
-        for field_name, value in reconstructed_values.items():
-            setattr(step_clone, field_name, value)
+        if not reconstructed_values:
+            return obj
 
-        return step_clone
+        # Try dataclasses.replace for dataclasses
+        if dataclasses.is_dataclass(obj):
+            try:
+                return dataclasses.replace(obj, **reconstructed_values)
+            except Exception:
+                return obj
+
+        # For non-dataclass objects (like FunctionStep), use manual merge
+        try:
+            obj_clone = copy.deepcopy(obj)
+        except Exception:
+            obj_clone = copy.copy(obj)
+
+        for field_name, value in reconstructed_values.items():
+            setattr(obj_clone, field_name, value)
+
+        return obj_clone
 
     def _get_step_preview_instance(self, step: FunctionStep, live_context_snapshot) -> FunctionStep:
         """Return a step instance that includes any live overrides for previews."""
@@ -1151,6 +1211,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if token is None:
             return step
 
+        # Token-based caching to avoid redundant merges
         if self._preview_step_cache_token != token:
             self._preview_step_cache.clear()
             self._preview_step_cache_token = token
@@ -1160,23 +1221,16 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if cached_step is not None:
             return cached_step
 
+        # Use generic helper to merge scoped live values
         scope_id = self._build_step_scope_id(step)
-        if not scope_id:
-            self._preview_step_cache[cache_key] = step
-            return step
+        merged_step = self._get_preview_instance_generic(
+            obj=step,
+            obj_type=type(step),
+            scope_id=scope_id,
+            live_context_snapshot=live_context_snapshot,
+            use_global_values=False
+        )
 
-        scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
-        scope_entries = scoped_values.get(scope_id)
-        if not scope_entries:
-            self._preview_step_cache[cache_key] = step
-            return step
-
-        step_live_values = scope_entries.get(type(step))
-        if not step_live_values:
-            self._preview_step_cache[cache_key] = step
-            return step
-
-        merged_step = self._merge_step_with_live_values(step, step_live_values)
         self._preview_step_cache[cache_key] = merged_step
         return merged_step
 
@@ -1225,62 +1279,43 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Now get preview instance with modified snapshot (no step values)
         return self._get_step_preview_instance(step, modified_snapshot)
 
-    def _merge_pipeline_config_with_live_values(self, pipeline_config, live_values):
-        """Return pipeline config merged with live overrides."""
-        if not live_values or not dataclasses.is_dataclass(pipeline_config):
-            return pipeline_config
-
-        reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
-        if not reconstructed_values:
-            return pipeline_config
-
-        try:
-            return dataclasses.replace(pipeline_config, **reconstructed_values)
-        except Exception:
-            return pipeline_config
-
     def _get_pipeline_config_preview_instance(self, live_context_snapshot):
-        """Return pipeline config merged with live overrides for current plate."""
+        """Return pipeline config merged with live overrides for current plate.
+
+        Uses CrossWindowPreviewMixin._get_preview_instance_generic for scoped values.
+        """
         orchestrator = self._get_current_orchestrator()
         if not orchestrator:
             return None
 
         pipeline_config = orchestrator.pipeline_config
-        if live_context_snapshot is None or not self.current_plate:
+        if not self.current_plate:
             return pipeline_config
 
-        scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
-        scope_entries = scoped_values.get(self.current_plate)
-        if not scope_entries:
-            return pipeline_config
-
-        live_values = scope_entries.get(type(pipeline_config))
-        if not live_values:
-            return pipeline_config
-
-        return self._merge_pipeline_config_with_live_values(pipeline_config, live_values)
+        # Use mixin's generic helper (scoped values)
+        return self._get_preview_instance_generic(
+            obj=pipeline_config,
+            obj_type=type(pipeline_config),
+            scope_id=self.current_plate,
+            live_context_snapshot=live_context_snapshot,
+            use_global_values=False
+        )
 
     def _get_global_config_preview_instance(self, live_context_snapshot):
-        """Return global config merged with live overrides."""
+        """Return global config merged with live overrides.
+
+        Uses CrossWindowPreviewMixin._get_preview_instance_generic for global values.
+        """
         from openhcs.core.config import GlobalPipelineConfig
 
-        base_global = self.global_config
-        if live_context_snapshot is None:
-            return base_global
-
-        values = getattr(live_context_snapshot, 'values', {}) or {}
-        live_values = values.get(GlobalPipelineConfig)
-        if not live_values:
-            return base_global
-
-        reconstructed_values = self._live_context_resolver.reconstruct_live_values(live_values)
-        if not reconstructed_values:
-            return base_global
-
-        try:
-            return dataclasses.replace(base_global, **reconstructed_values)
-        except Exception:
-            return base_global
+        # Use mixin's generic helper (global values)
+        return self._get_preview_instance_generic(
+            obj=self.global_config,
+            obj_type=GlobalPipelineConfig,
+            scope_id=None,
+            live_context_snapshot=live_context_snapshot,
+            use_global_values=True
+        )
 
 
 
