@@ -181,38 +181,64 @@ def check_config_has_unsaved_changes(
     if not field_names:
         return False
 
-    # PERFORMANCE: Fast path - check if there's a form manager editing THIS SPECIFIC config field
-    # OR a parent config field that this config inherits from
-    # CRITICAL: Also check if the form manager has EMITTED any changes (has values in _last_emitted_values)
-    # This prevents checking configs that have form managers but haven't been modified
-    # Example: PipelineConfig editor creates form managers for ALL 16 configs, but only well_filter_config was edited
-    has_form_manager_with_changes = False
+    # PERFORMANCE: Fast path - check if there's a form manager that has emitted changes
+    # for a field whose TYPE matches (or is related to) this config's type.
+    #
+    # CRITICAL: Use TYPE-BASED matching, not name-based patterns!
+    # This avoids hardcoding "step_" prefix or specific type names.
+    #
+    # Algorithm:
+    # 1. Direct field match: Check if config_attr is in _last_emitted_values
+    # 2. Type-based match: Check if any emitted value's type matches this config's type
+    #    (handles inheritance: step_well_filter_config inherits from well_filter_config)
+    #
+    # This works because _last_emitted_values contains actual config objects, so we can
+    # check their types using isinstance() and MRO.
     parent_type_name = type(parent_obj).__name__
+    config_type = type(config)
+
+    has_form_manager_with_changes = False
 
     for manager in ParameterFormManager._active_form_managers:
-        # Direct match: manager is editing this exact config field
-        # Check both parent_type_name (e.g., "FunctionStep") and common field_ids (e.g., "step")
-        if config_attr in manager.parameters:
-            # Check if THIS SPECIFIC config field has been emitted (not just if the dict is non-empty)
-            # _last_emitted_values is a dict like {'well_filter_config': LazyWellFilterConfig(...)}
-            if hasattr(manager, '_last_emitted_values') and config_attr in manager._last_emitted_values:
+        if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
+            continue
+
+        # Direct field match: manager is editing this exact config field
+        if config_attr in manager._last_emitted_values:
+            has_form_manager_with_changes = True
+            logger.debug(
+                f"🔍 check_config_has_unsaved_changes: Found direct field match for "
+                f"{config_attr} in manager {manager.field_id}"
+            )
+            break
+
+        # Type-based match: check if any emitted value's type is related to this config's type
+        # This handles inheritance without hardcoding field names
+        for field_name, field_value in manager._last_emitted_values.items():
+            if field_value is None:
+                continue
+
+            field_type = type(field_value)
+
+            # Check if types are related via isinstance (handles MRO inheritance)
+            # Example: LazyStepWellFilterConfig inherits from LazyWellFilterConfig
+            if isinstance(config, field_type) or isinstance(field_value, config_type):
                 has_form_manager_with_changes = True
-                logger.info(f"🔍 check_config_has_unsaved_changes: Found form manager with changes for {parent_type_name}.{config_attr} (manager.field_id={manager.field_id})")
+                logger.debug(
+                    f"🔍 check_config_has_unsaved_changes: Found type match for "
+                    f"{config_attr} (config type={config_type.__name__}, "
+                    f"emitted field={field_name}, field type={field_type.__name__})"
+                )
                 break
 
-        # Inheritance match: manager is editing a parent config that this config inherits from
-        # Example: config_attr="step_well_filter_config" inherits from "well_filter_config"
-        if config_attr.startswith("step_") and manager.field_id == "PipelineConfig":
-            base_config_name = config_attr.replace("step_", "", 1)  # "step_well_filter_config" → "well_filter_config"
-            if base_config_name in manager.parameters:
-                # Check if THIS SPECIFIC config field has been emitted
-                if hasattr(manager, '_last_emitted_values') and base_config_name in manager._last_emitted_values:
-                    has_form_manager_with_changes = True
-                    logger.info(f"🔍 check_config_has_unsaved_changes: Found form manager with changes for {parent_type_name}.{config_attr} via inheritance from {base_config_name}")
-                    break
+        if has_form_manager_with_changes:
+            break
 
     if not has_form_manager_with_changes:
-        logger.debug(f"🔍 check_config_has_unsaved_changes: No form manager with changes for {parent_type_name}.{config_attr} - skipping field resolution")
+        logger.debug(
+            "🔍 check_config_has_unsaved_changes: No form managers with changes for "
+            f"{parent_type_name}.{config_attr} (config type={config_type.__name__}) - skipping field resolution"
+        )
         return False
 
 
@@ -354,6 +380,52 @@ def check_step_has_unsaved_changes(
 
     logger.info(f"🔍 check_step_has_unsaved_changes: Found {len(all_config_attrs)} dataclass configs: {all_config_attrs}")
 
+    # PERFORMANCE: Fast path - check if ANY form manager has changes that could affect this step
+    # Collect all config objects ONCE to avoid repeated getattr() calls
+    step_configs = {}  # config_attr -> config object
+    for config_attr in all_config_attrs:
+        config = getattr(step, config_attr, None)
+        if config is not None:
+            step_configs[config_attr] = config
+
+    has_any_relevant_changes = False
+
+    for manager in ParameterFormManager._active_form_managers:
+        if not hasattr(manager, '_last_emitted_values') or not manager._last_emitted_values:
+            continue
+
+        # Check if any emitted field matches any of this step's configs (by name or type)
+        for field_name, field_value in manager._last_emitted_values.items():
+            # Direct field match
+            if field_name in step_configs:
+                has_any_relevant_changes = True
+                logger.debug(f"🔍 check_step_has_unsaved_changes: Found direct field match for {field_name}")
+                break
+
+            # Type-based match using isinstance()
+            if field_value is not None:
+                for config_attr, config in step_configs.items():
+                    # Check if types are related via isinstance (handles MRO inheritance)
+                    if isinstance(config, type(field_value)) or isinstance(field_value, type(config)):
+                        has_any_relevant_changes = True
+                        logger.debug(
+                            f"🔍 check_step_has_unsaved_changes: Found type match for {config_attr} "
+                            f"(config type={type(config).__name__}, emitted field={field_name}, field type={type(field_value).__name__})"
+                        )
+                        break
+
+            if has_any_relevant_changes:
+                break
+
+        if has_any_relevant_changes:
+            break
+
+    if not has_any_relevant_changes:
+        logger.debug(f"🔍 check_step_has_unsaved_changes: No relevant changes for step '{getattr(step, 'name', 'unknown')}' - skipping")
+        if live_context_snapshot is not None:
+            check_step_has_unsaved_changes._cache[cache_key] = False
+        return False
+
     # Check each config for unsaved changes (exits early on first change)
     for config_attr in all_config_attrs:
         config = getattr(step, config_attr, None)
@@ -418,4 +490,3 @@ def format_config_indicator(
         result = format_generic_config(config_attr, config, resolve_attr)
 
     return result
-
