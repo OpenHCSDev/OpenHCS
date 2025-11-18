@@ -655,3 +655,346 @@ Historical Bug: Unsaved Changes Not Detected
 
 **Lesson**: The existing flash detection code was already using this pattern correctly. When implementing new resolution code, always check if similar code exists and follow the same pattern.
 
+
+Window Close Flash Detection System
+====================================
+
+When a config window closes with unsaved changes, the system must detect which objects (steps, plates) had their resolved values change and flash them to provide visual feedback.
+
+Critical Architecture Insight
+------------------------------
+
+**The before_snapshot must include ALL active form managers, not just the closing window.**
+
+This is counterintuitive but essential for correct flash detection when multiple windows are open from different scopes.
+
+Why This Matters
+~~~~~~~~~~~~~~~~~
+
+When a config window closes, we compare:
+
+- **Before**: All form managers active (including the closing window)
+- **After**: All form managers active (excluding the closing window)
+
+If the before_snapshot only contains the closing window's values, preview instances won't have other open windows' values (like step overrides), causing incorrect flash detection.
+
+**Example Bug Scenario**:
+
+.. code-block:: python
+
+    # Setup:
+    # - PipelineConfig window open with well_filter=2 (plate scope)
+    # - Step_6 window open with well_filter=3 (step scope override)
+    # - User closes PipelineConfig without saving
+
+    # WRONG: before_snapshot only has PipelineConfig values
+    before_snapshot = closing_window._create_snapshot_for_this_manager()
+    # before_snapshot.scoped_values = {"/plate_001": {PipelineConfig: {well_filter: 2}}}
+    # Missing: step_6's override!
+
+    # When creating step_6 preview instance for "before" context:
+    step_6_preview_before = _get_preview_instance_generic(
+        step_6,
+        scope_id="/plate_001::step_6",
+        live_context_snapshot=before_snapshot
+    )
+    # Looks for scoped_values["/plate_001::step_6"] → NOT FOUND
+    # Falls back to plate scope → resolves to 2
+
+    # When creating step_6 preview instance for "after" context:
+    step_6_preview_after = _get_preview_instance_generic(
+        step_6,
+        scope_id="/plate_001::step_6",
+        live_context_snapshot=after_snapshot
+    )
+    # Finds scoped_values["/plate_001::step_6"] → resolves to 3
+
+    # Comparison: 2 != 3 → INCORRECTLY FLASHES step_6!
+    # But step_6's resolved value didn't actually change (it was always 3 due to override)
+
+**Correct Implementation**:
+
+.. code-block:: python
+
+    # CORRECT: before_snapshot includes ALL active form managers
+    before_snapshot = ParameterFormManager.collect_live_context()
+    # before_snapshot.scoped_values = {
+    #     "/plate_001": {PipelineConfig: {well_filter: 2}},
+    #     "/plate_001::step_6": {FunctionStep: {well_filter: 3}}  # Step override included!
+    # }
+
+    # When creating step_6 preview instance for "before" context:
+    step_6_preview_before = _get_preview_instance_generic(
+        step_6,
+        scope_id="/plate_001::step_6",
+        live_context_snapshot=before_snapshot
+    )
+    # Finds scoped_values["/plate_001::step_6"] → resolves to 3
+
+    # When creating step_6 preview instance for "after" context:
+    step_6_preview_after = _get_preview_instance_generic(
+        step_6,
+        scope_id="/plate_001::step_6",
+        live_context_snapshot=after_snapshot
+    )
+    # Finds scoped_values["/plate_001::step_6"] → resolves to 3
+
+    # Comparison: 3 == 3 → NO FLASH (correct!)
+
+Scope Precedence in Resolution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The scope hierarchy determines which value wins during resolution:
+
+1. **Step scope** (``/plate_001::step_6``) - highest precedence
+2. **Plate scope** (``/plate_001``) - middle precedence
+3. **Global scope** (``None``) - lowest precedence
+
+When a step has its own override at step scope, it takes precedence over plate scope and global scope values. This is why the before_snapshot must include step overrides - otherwise resolution incorrectly uses lower-precedence values.
+
+Implementation Pattern
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    # In parameter_form_manager.py, when window closes:
+    def unregister_from_cross_window_updates(self):
+        if self in type(self)._active_form_managers:
+            # CRITICAL: Capture "before" snapshot BEFORE unregistering
+            # This snapshot must include ALL active form managers (not just this one)
+            before_snapshot = type(self).collect_live_context()
+
+            # Remove from registry
+            self._active_form_managers.remove(self)
+
+            # Capture "after" snapshot AFTER unregistering
+            after_snapshot = type(self).collect_live_context()
+
+            # Notify listeners (e.g., pipeline editor) to check for flashes
+            self.window_closed.emit(before_snapshot, after_snapshot, changed_fields)
+
+LiveContextSnapshot Structure
+==============================
+
+The ``LiveContextSnapshot`` dataclass captures the state of all active form managers at a point in time.
+
+Structure
+---------
+
+.. code-block:: python
+
+    @dataclass
+    class LiveContextSnapshot:
+        token: int  # Cache invalidation token
+        values: Dict[type, Dict[str, Any]]  # Global context (for GlobalPipelineConfig)
+        scoped_values: Dict[str, Dict[type, Dict[str, Any]]]  # Scoped context (for PipelineConfig, FunctionStep)
+
+**Key Differences**:
+
+- ``values``: Global context, not scoped. Used for GlobalPipelineConfig.
+
+  - Format: ``{GlobalPipelineConfig: {field_name: value, ...}}``
+  - No scope_id key - these values are visible to all scopes
+
+- ``scoped_values``: Scoped context, keyed by scope_id. Used for PipelineConfig and FunctionStep.
+
+  - Format: ``{scope_id: {obj_type: {field_name: value, ...}}}``
+  - Example: ``{"/plate_001": {PipelineConfig: {well_filter: 2}}}``
+  - Example: ``{"/plate_001::step_6": {FunctionStep: {well_filter: 3}}}``
+
+Usage in Preview Instance Creation
+-----------------------------------
+
+.. code-block:: python
+
+    def _get_preview_instance_generic(
+        self,
+        obj: Any,
+        obj_type: type,
+        scope_id: Optional[str],
+        live_context_snapshot: Optional[LiveContextSnapshot],
+        use_global_values: bool = False
+    ) -> Any:
+        """Extract live values from snapshot and merge into object."""
+
+        if not live_context_snapshot:
+            return obj
+
+        # For GlobalPipelineConfig: use snapshot.values (global context)
+        if use_global_values:
+            live_values = live_context_snapshot.values.get(obj_type, {})
+
+        # For PipelineConfig/FunctionStep: use snapshot.scoped_values[scope_id]
+        else:
+            if scope_id and scope_id in live_context_snapshot.scoped_values:
+                live_values = live_context_snapshot.scoped_values[scope_id].get(obj_type, {})
+            else:
+                live_values = {}
+
+        # Merge live values into object
+        return self._merge_with_live_values(obj, live_values)
+
+Token-Based Cache Invalidation
+===============================
+
+The ``_live_context_token_counter`` is a class-level counter that increments on every parameter change, invalidating all caches globally.
+
+How It Works
+------------
+
+.. code-block:: python
+
+    class ParameterFormManager:
+        _live_context_token_counter: int = 0  # Class-level counter
+
+        def _emit_cross_window_change(self, param_name: str, value: Any):
+            """Emit cross-window change signal and invalidate caches."""
+            # Invalidate live context cache by incrementing token
+            type(self)._live_context_token_counter += 1
+
+            # Emit signal
+            self.context_value_changed.emit(field_path, value, ...)
+
+Every ``LiveContextSnapshot`` captures the current token value:
+
+.. code-block:: python
+
+    @staticmethod
+    def collect_live_context(scope_filter=None) -> LiveContextSnapshot:
+        """Collect live context from all active form managers."""
+        # ... collect values ...
+
+        # Capture current token
+        token = ParameterFormManager._live_context_token_counter
+        return LiveContextSnapshot(token=token, values=..., scoped_values=...)
+
+Caches check if their cached token matches the current token:
+
+.. code-block:: python
+
+    def check_step_has_unsaved_changes(step, live_context_snapshot):
+        """Check if step has unsaved changes (with caching)."""
+        cache_key = (id(step), live_context_snapshot.token)
+
+        # Check cache
+        if cache_key in check_step_has_unsaved_changes._cache:
+            return check_step_has_unsaved_changes._cache[cache_key]
+
+        # Cache miss - compute result
+        result = _compute_unsaved_changes(step, live_context_snapshot)
+
+        # Cache result
+        check_step_has_unsaved_changes._cache[cache_key] = result
+        return result
+
+**Key Insight**: Token-based invalidation is global and immediate. Any parameter change anywhere invalidates all caches, ensuring consistency.
+
+Field Path Format and Fast-Path Optimization
+=============================================
+
+The ``_last_emitted_values`` dictionary tracks the last emitted value for each field in a form manager, enabling fast-path optimization for unsaved changes detection.
+
+Field Path Format
+-----------------
+
+Field paths use dot notation to represent the full path from root object to leaf field:
+
+.. code-block:: python
+
+    # Format: "<RootObjectType>.<config_attr>.<nested_field>..."
+
+    # Examples:
+    "GlobalPipelineConfig.step_materialization_config.well_filter"
+    "PipelineConfig.step_well_filter_config.enabled"
+    "FunctionStep.napari_streaming_config.enabled"
+
+**Structure**:
+
+1. **Root object type**: ``GlobalPipelineConfig``, ``PipelineConfig``, ``FunctionStep``
+2. **Config attribute**: ``step_materialization_config``, ``napari_streaming_config``, etc.
+3. **Nested fields**: ``well_filter``, ``enabled``, etc.
+
+Fast-Path Optimization
+----------------------
+
+Before doing expensive full resolution comparison, check if any form manager has emitted changes for fields relevant to this object:
+
+.. code-block:: python
+
+    def check_step_has_unsaved_changes(step, live_context_snapshot):
+        """Check if step has unsaved changes."""
+
+        # FAST PATH: Check if any form manager has relevant changes
+        has_any_relevant_changes = False
+        for manager in ParameterFormManager._active_form_managers:
+            if not manager._last_emitted_values:
+                continue
+
+            # Check each emitted field path
+            for field_path, field_value in manager._last_emitted_values.items():
+                # Extract config attribute from field path
+                # "GlobalPipelineConfig.step_materialization_config.well_filter" → "step_materialization_config"
+                path_parts = field_path.split('.')
+                if len(path_parts) >= 2:
+                    config_attr_from_path = path_parts[1]
+
+                    # Check if this config attribute exists on the step
+                    if hasattr(step, config_attr_from_path):
+                        has_any_relevant_changes = True
+                        break
+
+        if not has_any_relevant_changes:
+            # No form manager has emitted changes for this step's configs
+            # Skip expensive full resolution comparison
+            return False
+
+        # SLOW PATH: Do full resolution comparison
+        return _check_all_configs_for_unsaved_changes(step, live_context_snapshot)
+
+**Performance Impact**: Fast-path can skip 90%+ of full resolution comparisons when no relevant changes exist.
+
+Scope Matching in Fast-Path
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The fast-path must also check scope matching to prevent step windows from affecting other steps:
+
+.. code-block:: python
+
+    # Build expected step scope for this step
+    expected_step_scope = None
+    if scope_filter and step_token:
+        expected_step_scope = f"{scope_filter}::{step_token}"
+
+    for manager in ParameterFormManager._active_form_managers:
+        # If manager has a step-specific scope (contains ::step_), only consider it
+        # relevant if it matches the current step's expected scope
+        if manager.scope_id and '::step_' in manager.scope_id:
+            if expected_step_scope and manager.scope_id != expected_step_scope:
+                # Different step - skip this manager
+                continue
+
+        # Check for relevant changes...
+
+This prevents a step window from triggering unsaved changes detection for OTHER steps in the same plate.
+
+Cleanup on Window Close
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+When a window closes, its ``_last_emitted_values`` must be cleared to prevent stale fast-path matches:
+
+.. code-block:: python
+
+    def unregister_from_cross_window_updates(self):
+        if self in type(self)._active_form_managers:
+            # ... capture snapshots ...
+
+            # Remove from registry
+            self._active_form_managers.remove(self)
+
+            # CRITICAL: Clear _last_emitted_values
+            self._last_emitted_values.clear()
+
+            # ... emit signals ...
+
+Without this cleanup, other windows would see stale field paths and incorrectly think there are unsaved changes.
+
