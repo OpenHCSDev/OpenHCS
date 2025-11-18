@@ -133,6 +133,7 @@ TUI architecture, UI development patterns, form management systems, and visual f
    service-layer-architecture
    gui_performance_patterns
    cross_window_update_optimization
+   reactive_ui_performance_optimizations
    scope_visual_feedback_system
 
 Development Tools
@@ -158,11 +159,11 @@ Quick Start Paths
 
 **External Integrations?** Start with :doc:`external_integrations_overview` → :doc:`napari_integration_architecture` → :doc:`fiji_streaming_system` → :doc:`omero_backend_system`
 
-**UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`gui_performance_patterns` → :doc:`scope_visual_feedback_system` → :doc:`service-layer-architecture` → :doc:`tui_system` → :doc:`code_ui_interconversion`
+**UI Development?** Start with :doc:`parameter_form_lifecycle` → :doc:`gui_performance_patterns` → :doc:`reactive_ui_performance_optimizations` → :doc:`scope_visual_feedback_system` → :doc:`service-layer-architecture` → :doc:`tui_system` → :doc:`code_ui_interconversion`
 
 **System Integration?** Jump to :doc:`system_integration` → :doc:`special_io_system` → :doc:`microscope_handler_integration`
 
-**Performance Optimization?** Focus on :doc:`gpu_resource_management` → :doc:`compilation_system_detailed` → :doc:`multiprocessing_coordination_system`
+**Performance Optimization?** Focus on :doc:`reactive_ui_performance_optimizations` → :doc:`gpu_resource_management` → :doc:`compilation_system_detailed` → :doc:`multiprocessing_coordination_system`
 
 **Architecture Quick Start**: A short, curated orientation is available at :doc:`quick_start` — three recommended reading paths (Core systems, Integrations, UI) to get developers productive quickly.
 
