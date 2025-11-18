@@ -1188,6 +1188,225 @@ Indicating Unsaved Changes in Labels
 
 **Recommendation**: Implement as optional feature controlled by ``ScopeVisualConfig.SHOW_UNSAVED_INDICATORS`` flag. Start with simple asterisk suffix, add more sophisticated indicators based on user feedback.
 
+Unsaved Changes Indicator Implementation
+=========================================
+
+**Status**: IMPLEMENTED (as of commit e42430c3)
+
+The unsaved changes indicator feature has been implemented using a dagger symbol (†) to mark items with unsaved changes. The indicator appears on:
+
+1. **Plate names** in PlateManager when PipelineConfig has unsaved changes
+2. **Step names** in PipelineEditor when step configs have unsaved changes
+
+Implementation Details
+----------------------
+
+**Core Functions**
+
+Two new functions were added to ``openhcs/pyqt_gui/widgets/config_preview_formatters.py``:
+
+1. ``check_config_has_unsaved_changes(config_attr, config, resolve_attr, parent_obj, live_context_snapshot, scope_filter)``
+
+   - Compares resolved config field values between live context (WITH form managers) and saved context (WITHOUT form managers)
+   - Returns ``True`` if any field differs between live and saved states
+   - **Critical**: Uses ``scope_filter`` parameter to ensure both snapshots use the same scope
+
+2. ``check_step_has_unsaved_changes(step, config_indicators, resolve_attr, live_context_snapshot, scope_filter)``
+
+   - Checks if a step has unsaved changes in ANY of its configs
+   - Iterates through all config attributes and calls ``check_config_has_unsaved_changes()`` for each
+   - Returns ``True`` if any config has unsaved changes
+
+**Scope Filter Requirement**
+
+The ``scope_filter`` parameter is **critical** for correct change detection:
+
+.. code-block:: python
+
+   # WRONG: Different scopes compared
+   live_snapshot = ParameterFormManager.collect_live_context(scope_filter=plate_path)
+   saved_snapshot = ParameterFormManager.collect_live_context()  # No scope filter!
+   # This compares scoped values vs global values - always different!
+
+   # CORRECT: Same scope for both snapshots
+   live_snapshot = ParameterFormManager.collect_live_context(scope_filter=plate_path)
+   saved_snapshot = ParameterFormManager.collect_live_context(scope_filter=plate_path)
+   # This compares scoped values vs scoped values - correct!
+
+**Token Increment for Cache Bypass**
+
+When collecting the saved context snapshot, we must increment the token counter to bypass the cache:
+
+.. code-block:: python
+
+   # Save current state
+   saved_managers = ParameterFormManager._active_form_managers.copy()
+   saved_token = ParameterFormManager._live_context_token_counter
+
+   try:
+       # Clear form managers to get saved values
+       ParameterFormManager._active_form_managers.clear()
+
+       # Increment token to force cache miss
+       ParameterFormManager._live_context_token_counter += 1
+
+       # Collect saved snapshot with SAME scope filter as live snapshot
+       saved_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
+   finally:
+       # Restore original state
+       ParameterFormManager._active_form_managers[:] = saved_managers
+       ParameterFormManager._live_context_token_counter = saved_token
+
+Without the token increment, ``collect_live_context()`` would return the cached live snapshot instead of computing a new saved snapshot.
+
+**PlateManager Integration**
+
+The PlateManager checks for unsaved changes in ``_check_pipeline_config_has_unsaved_changes()``:
+
+.. code-block:: python
+
+   def _check_pipeline_config_has_unsaved_changes(self, orchestrator) -> bool:
+       """Check if PipelineConfig has any unsaved changes."""
+       pipeline_config = orchestrator.pipeline_config
+       live_context_snapshot = ParameterFormManager.collect_live_context(
+           scope_filter=orchestrator.plate_path  # CRITICAL: Pass scope filter
+       )
+
+       # Check each config field in PipelineConfig
+       for field in dataclasses.fields(pipeline_config):
+           config = getattr(pipeline_config, field.name, None)
+           if not dataclasses.is_dataclass(config):
+               continue
+
+           has_changes = check_config_has_unsaved_changes(
+               field.name,
+               config,
+               resolve_attr,
+               pipeline_config,
+               live_context_snapshot,
+               scope_filter=orchestrator.plate_path  # CRITICAL: Pass scope filter
+           )
+
+           if has_changes:
+               return True
+
+       return False
+
+The plate name is then formatted with the dagger symbol if changes are detected:
+
+.. code-block:: python
+
+   has_unsaved_changes = self._check_pipeline_config_has_unsaved_changes(orchestrator)
+   plate_name = f"{plate['name']}†" if has_unsaved_changes else plate['name']
+
+**PipelineEditor Integration**
+
+The PipelineEditor checks for unsaved changes in ``_format_resolved_step_for_display()``:
+
+.. code-block:: python
+
+   def _format_resolved_step_for_display(self, step_for_display, original_step, live_context_snapshot):
+       """Format step for display with unsaved change indicator."""
+       step_name = getattr(step_for_display, 'name', 'Unknown Step')
+
+       # ... build preview parts ...
+
+       # Check for unsaved changes using ORIGINAL step (not merged)
+       has_unsaved = check_step_has_unsaved_changes(
+           original_step,  # Use ORIGINAL step, not step_for_display
+           self.STEP_CONFIG_INDICATORS,
+           resolve_attr,
+           live_context_snapshot,
+           scope_filter=self.current_plate  # CRITICAL: Pass scope filter
+       )
+
+       # Add dagger symbol to step name if unsaved changes detected
+       display_step_name = f"{step_name}†" if has_unsaved else step_name
+
+       return f"▶ {display_step_name}  ({preview})"
+
+**Critical Bug Fix**
+
+The initial implementation had a bug where ``_format_resolved_step_for_display()`` was called with only 2 arguments instead of 3:
+
+.. code-block:: python
+
+   # WRONG: Missing original_step parameter
+   display_text = self._format_resolved_step_for_display(step_after, live_context_snapshot)
+   # This caused original_step to receive live_context_snapshot value!
+
+   # CORRECT: All 3 parameters provided
+   display_text = self._format_resolved_step_for_display(step_after, step, live_context_snapshot)
+
+This bug caused the unsaved changes check to fail because it was checking a ``LiveContextSnapshot`` object instead of a ``FunctionStep`` object.
+
+**Compile Warning Dialog**
+
+The PlateManager also shows a warning dialog before compilation if there are unsaved changes:
+
+.. code-block:: python
+
+   def _check_unsaved_changes_before_compile(self) -> bool:
+       """Check for unsaved changes and show warning dialog."""
+       if not ParameterFormManager._active_form_managers:
+           return True  # No unsaved changes, proceed
+
+       # Build list of editors with unsaved changes
+       editor_descriptions = []
+       for form_manager in ParameterFormManager._active_form_managers:
+           obj_type = type(form_manager.object_instance).__name__
+           if hasattr(form_manager.object_instance, 'name'):
+               editor_descriptions.append(f"{obj_type} ({form_manager.object_instance.name})")
+           else:
+               editor_descriptions.append(obj_type)
+
+       # Show warning dialog
+       msg = QMessageBox(self)
+       msg.setText("You have unsaved changes in open editors.")
+       msg.setInformativeText(
+           f"Compilation will use saved values only.\n\n"
+           f"Open editors:\n" + "\n".join(f"  • {desc}" for desc in editor_descriptions)
+       )
+       # ... show dialog and return user choice ...
+
+This warning is shown BEFORE the async compilation starts to avoid threading issues with QMessageBox.
+
+**Performance Considerations**
+
+The unsaved changes check is performed on every label update (triggered by cross-window preview changes). To minimize performance impact:
+
+1. **Token-based caching**: The saved snapshot collection uses the same token-based cache as live snapshots
+2. **Early returns**: The check returns early if no resolver, parent, or live snapshot is provided
+3. **Field-level comparison**: Only compares fields that actually exist in the config dataclass
+4. **Scope filtering**: Only collects context for the relevant scope (plate/step), not all scopes
+
+**Visual Feedback**
+
+The dagger symbol (†) was chosen because:
+
+- It's visually distinct and easy to spot
+- It doesn't clutter the UI like longer text indicators
+- It's a standard typographic symbol for "note" or "warning"
+- It works well in monospace and proportional fonts
+
+**Debugging Support**
+
+Extensive logging was added to help debug unsaved changes detection:
+
+.. code-block:: python
+
+   logger.info(f"🔍 Comparing {config_attr}.{field_name}:")
+   logger.info(f"   live_value={live_value} (snapshot token={live_context_snapshot.token})")
+   logger.info(f"   saved_value={saved_value} (snapshot token={saved_context_snapshot.token})")
+   logger.info(f"   equal={live_value == saved_value}")
+
+This logging shows:
+
+- Which config fields are being compared
+- The live and saved values
+- The snapshot tokens (to verify cache behavior)
+- Whether the values are equal
+
 Configuration
 =============
 
