@@ -1845,6 +1845,15 @@ class ParameterFormManager(QWidget):
         # CRITICAL: Keep _in_reset=True until AFTER manual refresh to prevent
         # queued parameter_changed signals from triggering automatic refresh
         self._in_reset = True
+
+        # OPTIMIZATION: Block cross-window updates during reset
+        # This prevents multiple context_value_changed emissions from _reset_parameter_impl
+        # and from nested managers during placeholder refresh
+        # We'll emit a single cross-window signal manually after reset completes
+        self._block_cross_window_updates = True
+        # CRITICAL: Also block on ALL nested managers to prevent cascading emissions
+        self._apply_to_nested_managers(lambda name, manager: setattr(manager, '_block_cross_window_updates', True))
+
         try:
             self._reset_parameter_impl(param_name)
 
@@ -1896,18 +1905,22 @@ class ParameterFormManager(QWidget):
             # CRITICAL: Nested managers must trigger refresh on ROOT manager to collect live context
             if self._parent_manager is None:
                 self._refresh_with_live_context()
-                # CRITICAL: Also notify external listeners directly (e.g., PipelineEditor)
-                self._notify_external_listeners_refreshed()
+                # NOTE: No need to call _notify_external_listeners_refreshed() here
+                # We already emitted context_value_changed signal above, which triggers
+                # PlateManager/PipelineEditor updates via handle_cross_window_preview_change
             else:
                 # Nested manager: trigger refresh on root manager
                 root = self._parent_manager
                 while root._parent_manager is not None:
                     root = root._parent_manager
                 root._refresh_with_live_context()
-                # CRITICAL: Also notify external listeners directly (e.g., PipelineEditor)
-                root._notify_external_listeners_refreshed()
+                # NOTE: No need to call _notify_external_listeners_refreshed() here
+                # We already emitted context_value_changed signal above
         finally:
             self._in_reset = False
+            self._block_cross_window_updates = False
+            # CRITICAL: Also unblock on ALL nested managers
+            self._apply_to_nested_managers(lambda name, manager: setattr(manager, '_block_cross_window_updates', False))
 
     def _reset_parameter_impl(self, param_name: str) -> None:
         """Internal reset implementation."""
@@ -3510,6 +3523,7 @@ class ParameterFormManager(QWidget):
         """
         # OPTIMIZATION: Skip cross-window updates during batch operations (e.g., reset_all)
         if getattr(self, '_block_cross_window_updates', False):
+            logger.info(f"🚫 _emit_cross_window_change BLOCKED for {self.field_id}.{param_name} (in reset/batch operation)")
             return
 
         if param_name in self._last_emitted_values:
@@ -3527,6 +3541,7 @@ class ParameterFormManager(QWidget):
         type(self)._live_context_token_counter += 1
 
         field_path = f"{self.field_id}.{param_name}"
+        logger.info(f"📡 _emit_cross_window_change: {field_path} = {value}")
         self.context_value_changed.emit(field_path, value,
                                        self.object_instance, self.context_obj)
 

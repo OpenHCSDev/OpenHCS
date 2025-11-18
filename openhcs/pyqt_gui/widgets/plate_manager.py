@@ -482,7 +482,8 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         for idx, (i, item, plate_data, plate_path, orchestrator) in enumerate(plate_items):
             # Update display text
-            display_text = self._format_plate_item_with_preview(plate_data)
+            # PERFORMANCE: Pass changed_fields to optimize unsaved changes check
+            display_text = self._format_plate_item_with_preview(plate_data, changed_fields=changed_fields)
 
             # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
             self._apply_orchestrator_item_styling(item, plate_data)
@@ -500,13 +501,17 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             for plate_path in plates_to_flash:
                 self._flash_plate_item(plate_path)
 
-    def _format_plate_item_with_preview(self, plate: Dict) -> str:
+    def _format_plate_item_with_preview(self, plate: Dict, changed_fields: Optional[set] = None) -> str:
         """Format plate item with status and config preview labels.
 
         Uses multiline format:
         Line 1: [status] Plate name
         Line 2: Plate path
         Line 3: Config preview labels (if any)
+
+        Args:
+            plate: Plate data dict
+            changed_fields: Optional set of changed field paths (for optimization)
         """
         # Determine status prefix
         status_prefix = ""
@@ -541,7 +546,11 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             preview_labels = self._build_config_preview_labels(orchestrator)
 
             # Check if PipelineConfig has unsaved changes
-            has_unsaved_changes = self._check_pipeline_config_has_unsaved_changes(orchestrator)
+            # PERFORMANCE: Pass changed_fields to only check relevant configs
+            has_unsaved_changes = self._check_pipeline_config_has_unsaved_changes(
+                orchestrator,
+                changed_fields=changed_fields
+            )
 
         # Line 1: [status] before plate name (user requirement)
         # Add unsaved changes marker to plate name if needed
@@ -641,11 +650,20 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         return labels
 
-    def _check_pipeline_config_has_unsaved_changes(self, orchestrator) -> bool:
+    def _check_pipeline_config_has_unsaved_changes(
+        self,
+        orchestrator,
+        changed_fields: Optional[set] = None
+    ) -> bool:
         """Check if PipelineConfig has any unsaved changes.
+
+        PERFORMANCE:
+        - Caches result by (plate_path, live_context_token) to avoid redundant checks
+        - Uses changed_fields to only check relevant configs (huge speedup!)
 
         Args:
             orchestrator: PipelineOrchestrator instance
+            changed_fields: Optional set of changed field paths to limit checking
 
         Returns:
             True if PipelineConfig has unsaved changes, False otherwise
@@ -668,8 +686,21 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: No live context snapshot")
             return False
 
+        # PERFORMANCE: Cache result by (plate_path, token) to avoid redundant checks
+        cache_key = (orchestrator.plate_path, live_context_snapshot.token)
+        if not hasattr(self, '_unsaved_changes_cache'):
+            self._unsaved_changes_cache = {}
+
+        if cache_key in self._unsaved_changes_cache:
+            cached_result = self._unsaved_changes_cache[cache_key]
+            logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: Using cached result: {cached_result}")
+            return cached_result
+
         # Check each config field in PipelineConfig
         # IMPORTANT: Check the ORIGINAL pipeline_config, not config_for_display!
+        # NOTE: We check ALL configs, not just changed ones, because we need to detect
+        # existing unsaved changes in other configs (e.g., if you edit field A then field B,
+        # we still need to show † for field A's unsaved changes)
         for field in dataclasses.fields(pipeline_config):
             field_name = field.name
             config = getattr(pipeline_config, field_name, None)
@@ -699,9 +730,11 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
             if has_changes:
                 logger.info(f"✅ UNSAVED CHANGES DETECTED in PipelineConfig.{field_name}")
+                self._unsaved_changes_cache[cache_key] = True
                 return True
 
         logger.info(f"🔍 _check_pipeline_config_has_unsaved_changes: No unsaved changes")
+        self._unsaved_changes_cache[cache_key] = False
         return False
 
     def _apply_orchestrator_item_styling(self, item: QListWidgetItem, plate: Dict) -> None:

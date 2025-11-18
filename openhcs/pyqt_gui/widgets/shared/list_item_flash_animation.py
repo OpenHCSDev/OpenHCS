@@ -57,7 +57,7 @@ class ListItemFlashAnimator:
         if correct_color is not None:
             # Flash by increasing opacity to 100% (same color, just full opacity)
             flash_color = QColor(correct_color)
-            flash_color.setAlpha(127)  # Full opacity
+            flash_color.setAlpha(95)  # Full opacity
             item.setBackground(flash_color)
 
         if self._is_flashing:
