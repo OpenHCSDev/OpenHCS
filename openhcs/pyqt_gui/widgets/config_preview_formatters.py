@@ -191,12 +191,13 @@ def check_config_has_unsaved_changes(
 
     for manager in ParameterFormManager._active_form_managers:
         # Direct match: manager is editing this exact config field
-        if manager.field_id == parent_type_name and config_attr in manager.parameters:
+        # Check both parent_type_name (e.g., "FunctionStep") and common field_ids (e.g., "step")
+        if config_attr in manager.parameters:
             # Check if THIS SPECIFIC config field has been emitted (not just if the dict is non-empty)
             # _last_emitted_values is a dict like {'well_filter_config': LazyWellFilterConfig(...)}
             if hasattr(manager, '_last_emitted_values') and config_attr in manager._last_emitted_values:
                 has_form_manager_with_changes = True
-                logger.info(f"🔍 check_config_has_unsaved_changes: Found form manager with changes for {parent_type_name}.{config_attr}")
+                logger.info(f"🔍 check_config_has_unsaved_changes: Found form manager with changes for {parent_type_name}.{config_attr} (manager.field_id={manager.field_id})")
                 break
 
         # Inheritance match: manager is editing a parent config that this config inherits from
@@ -213,6 +214,8 @@ def check_config_has_unsaved_changes(
     if not has_form_manager_with_changes:
         logger.debug(f"🔍 check_config_has_unsaved_changes: No form manager with changes for {parent_type_name}.{config_attr} - skipping field resolution")
         return False
+
+
 
     # Collect saved context snapshot if not provided (WITHOUT active form managers)
     # This is the key: temporarily clear form managers to get saved values
@@ -233,7 +236,6 @@ def check_config_has_unsaved_changes(
             ParameterFormManager._live_context_token_counter = saved_token
 
     # PERFORMANCE: Compare each field and exit early on first difference
-    logger.debug(f"🔍 check_config_has_unsaved_changes: Comparing {len(field_names)} fields in {parent_type_name}.{config_attr}")
     for field_name in field_names:
         # Resolve in LIVE context (with form managers = unsaved edits)
         live_value = resolve_attr(parent_obj, config, field_name, live_context_snapshot)
@@ -243,7 +245,6 @@ def check_config_has_unsaved_changes(
 
         # Compare values - exit early on first difference
         if live_value != saved_value:
-            logger.debug(f"✅ CHANGE DETECTED in {parent_type_name}.{config_attr}.{field_name}: live={live_value} vs saved={saved_value}")
             return True
 
     return False

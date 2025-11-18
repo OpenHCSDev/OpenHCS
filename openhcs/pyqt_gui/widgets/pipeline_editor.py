@@ -1054,11 +1054,15 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             if global_config_for_context is None:
                 global_config_for_context = get_current_global_config(GlobalPipelineConfig)
 
-            # Build context stack: GlobalPipelineConfig → PipelineConfig → Step
+            # CRITICAL: Get step preview instance with scoped live values merged in
+            # This ensures step editor changes are included in resolution
+            step_for_context = self._get_step_preview_instance(step, live_context_snapshot)
+
+            # Build context stack: GlobalPipelineConfig → PipelineConfig → Step (with live values)
             context_stack = [
                 global_config_for_context,
                 pipeline_config_for_context,
-                step
+                step_for_context  # Use merged step, not original
             ]
 
             # Resolve using service
