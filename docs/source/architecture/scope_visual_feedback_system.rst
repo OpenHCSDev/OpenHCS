@@ -20,6 +20,36 @@ The scope-based visual feedback system provides immediate visual indication of c
 - **WCAG AA compliance** for accessibility (4.5:1 contrast ratio)
 - **Dual tracking system** separates flash detection from label updates
 
+Design Principle: Live Values, Not Saved Values
+================================================
+
+**Critical concept**: All flashes and labels are based on **live values from open form editors**, not saved values on disk.
+
+When you open a config editor and make changes without saving, those unsaved edits immediately affect:
+
+1. **Flash detection**: Other widgets flash if their resolved values change based on the unsaved edits
+2. **Label text**: Step labels show what the values WOULD BE if the current edits were saved
+3. **Preview rendering**: All previews use the live context with unsaved edits
+
+**Example scenario**:
+
+1. Open PipelineConfig editor
+2. Change ``well_filter`` from 2 to 5 (don't save)
+3. **Immediately**: All steps that inherit ``well_filter`` flash (their resolved value changed from 2 to 5)
+4. **Immediately**: Step labels update to show the new resolved values
+5. Close editor without saving
+6. **Immediately**: All steps flash again (their resolved value reverted from 5 back to 2)
+7. **Immediately**: Step labels revert to show the saved values
+
+**Why this design**:
+
+- **Instant feedback**: Users see the impact of their edits before committing
+- **What-if exploration**: Users can experiment with values and see effects without saving
+- **Consistency**: The UI always shows what WOULD happen if you saved right now
+- **Future feature**: Labels could indicate which steps are resolving unsaved changes (e.g., with an asterisk or different color)
+
+**Architectural implication**: The ``LiveContextSnapshot`` captures ALL active form managers' values, whether saved or not. This is why window close events must capture snapshots BEFORE unregistering the form manager - the "before" snapshot represents the live state with unsaved edits.
+
 Problem Context
 ===============
 
@@ -1107,6 +1137,56 @@ Performance Characteristics
 **Border Rendering**: O(n) where n = number of border layers (typically 1-3)
 
 **Memory**: Minimal overhead (flash animators store only (widget_id, row, scope_id, item_type))
+
+Future Enhancements
+===================
+
+Indicating Unsaved Changes in Labels
+-------------------------------------
+
+**Current behavior**: Labels show resolved values from live context (including unsaved edits), but don't indicate which values are based on unsaved changes.
+
+**Proposed enhancement**: Add visual indicators to labels when resolved values depend on unsaved edits from open form managers.
+
+**Example implementations**:
+
+1. **Asterisk suffix**: ``"Step 0: well_filter=5*"`` (asterisk indicates unsaved)
+2. **Color tint**: Use a different text color for values resolving unsaved changes
+3. **Tooltip**: Hover to see "This value depends on unsaved changes in PipelineConfig editor"
+4. **Icon**: Small icon next to the label indicating unsaved dependency
+
+**Implementation approach**:
+
+.. code-block:: python
+
+   def _generate_step_label(self, step, live_context_snapshot):
+       """Generate step label with unsaved change indicators."""
+       # Resolve value with live context
+       resolved_value = self._resolve_field_value(step, 'well_filter', live_context_snapshot)
+
+       # Check if value differs from saved state
+       saved_snapshot = self._collect_saved_context()  # Without form managers
+       saved_value = self._resolve_field_value(step, 'well_filter', saved_snapshot)
+
+       # Add indicator if values differ
+       if resolved_value != saved_value:
+           return f"Step {step.index}: well_filter={resolved_value}*"
+       else:
+           return f"Step {step.index}: well_filter={resolved_value}"
+
+**Benefits**:
+
+- Users can see at a glance which steps are affected by unsaved edits
+- Helps prevent confusion when labels show values that don't match saved configs
+- Provides clear visual feedback about the scope of unsaved changes
+
+**Challenges**:
+
+- Performance: Requires comparing live context against saved context for every label update
+- UI clutter: Too many indicators could make labels noisy
+- Complexity: Need to track which form managers contribute to each resolved value
+
+**Recommendation**: Implement as optional feature controlled by ``ScopeVisualConfig.SHOW_UNSAVED_INDICATORS`` flag. Start with simple asterisk suffix, add more sophisticated indicators based on user feedback.
 
 Configuration
 =============
