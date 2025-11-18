@@ -266,6 +266,17 @@ The configuration framework includes reusable caching abstractions that eliminat
          live_context={PipelineConfig: {'num_workers': 4}},
          cache_token=current_token
      )
+
+     # Batch resolve ALL lazy dataclass attributes on an object
+     # Works for both dataclass and non-dataclass objects (e.g., FunctionStep)
+     resolved_values = resolver.resolve_all_lazy_attrs(
+         obj=step,  # Can be dataclass or non-dataclass with dataclass attributes
+         context_stack=[global_config, pipeline_config, step],
+         live_context={PipelineConfig: {'num_workers': 4}},
+         cache_token=current_token
+     )
+     # For dataclasses: resolves all fields
+     # For non-dataclasses: introspects to find dataclass attributes and resolves those
      # Returns: {'enabled': True, 'well_filter': 3, 'num_workers': 4}
 
   **Critical None Value Semantics**: The resolver passes ``None`` values through during live context merge. When a field is reset to ``None`` in a form, the ``None`` value overrides the saved concrete value via ``dataclasses.replace()``. This triggers MRO resolution which walks up the context hierarchy to find the inherited value from parent context (e.g., GlobalPipelineConfig).

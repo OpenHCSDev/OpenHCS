@@ -177,6 +177,28 @@ If the notification happened AFTER removing from registry, the snapshot would no
 
 Flash detection uses ``LiveContextResolver`` to resolve field values through the context hierarchy (GlobalPipelineConfig → PipelineConfig → Step). This ensures flash detection sees the same resolved values that the UI displays.
 
+**Batch Resolution for Performance**
+
+Flash detection uses batch resolution to check multiple objects efficiently:
+
+.. code-block:: python
+
+   # Instead of resolving each field individually (O(N) context setups)
+   for field in fields:
+       before_value = resolver.resolve_config_attr(obj_before, field, ...)
+       after_value = resolver.resolve_config_attr(obj_after, field, ...)
+
+   # Batch resolve ALL fields at once (O(1) context setup)
+   before_values = resolver.resolve_all_lazy_attrs(obj_before, ...)
+   after_values = resolver.resolve_all_lazy_attrs(obj_after, ...)
+
+The ``resolve_all_lazy_attrs()`` method works for both dataclass and non-dataclass objects:
+
+- **Dataclass objects** (e.g., PipelineConfig): Uses ``fields()`` to get all field names
+- **Non-dataclass objects** (e.g., FunctionStep): Introspects to find dataclass attributes (e.g., ``fiji_streaming_config``, ``step_well_filter_config``)
+
+This unified approach ensures flash detection works correctly for window close events on both PipelineConfig editors and step editors.
+
 .. code-block:: python
 
    def _build_flash_context_stack(self, obj, live_context_snapshot) -> list:
