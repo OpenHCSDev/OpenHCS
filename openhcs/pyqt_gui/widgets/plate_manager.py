@@ -306,7 +306,7 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
     # ========== CrossWindowPreviewMixin Hooks ==========
 
     def _process_pending_preview_updates(self) -> None:
-        """Apply incremental updates for pending plate keys."""
+        """Apply incremental updates for pending plate keys using BATCH processing."""
         if not self._pending_preview_keys:
             return
 
@@ -325,9 +325,13 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         # Update last snapshot for next comparison
         self._last_live_context_snapshot = live_context_snapshot
 
-        # Update only the affected plate items (before clearing)
-        for plate_path in self._pending_preview_keys:
-            self._update_single_plate_item(plate_path, changed_fields, live_context_before)
+        # Use BATCH update for all pending plates
+        self._update_plate_items_batch(
+            plate_paths=list(self._pending_preview_keys),
+            changed_fields=changed_fields,
+            live_context_before=live_context_before,
+            live_context_after=live_context_snapshot
+        )
 
         # Clear pending updates
         self._pending_preview_keys.clear()
@@ -342,99 +346,159 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         """
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 
-        # Get current live context (after window close/reset)
-        live_context_after = ParameterFormManager.collect_live_context()
+        # CRITICAL: Use saved "after" snapshot if available (from window close)
+        # This snapshot was collected AFTER the form manager was unregistered
+        # If not available, collect a new snapshot (for reset events)
+        live_context_after = getattr(self, '_window_close_after_snapshot', None)
+        if live_context_after is None:
+            live_context_after = ParameterFormManager.collect_live_context()
 
-        # Use saved snapshot if available (from window close), otherwise use last snapshot
+        # Use saved "before" snapshot if available (from window close), otherwise use last snapshot
         live_context_before = getattr(self, '_window_close_before_snapshot', None) or self._last_live_context_snapshot
 
         # Get the user-modified fields from the closed window (if available)
         modified_fields = getattr(self, '_window_close_modified_fields', None)
 
-        # Clear the saved snapshot and modified fields after using them
+        # Clear the saved snapshots and modified fields after using them
         if hasattr(self, '_window_close_before_snapshot'):
             delattr(self, '_window_close_before_snapshot')
+        if hasattr(self, '_window_close_after_snapshot'):
+            delattr(self, '_window_close_after_snapshot')
         if hasattr(self, '_window_close_modified_fields'):
             delattr(self, '_window_close_modified_fields')
 
         # Update last snapshot for next comparison
         self._last_live_context_snapshot = live_context_after
 
-        # Refresh ALL plates with flash detection
+        # Refresh ALL plates with flash detection using BATCH update
         # Pass the modified fields from the closed window (or None for reset events)
+        self._update_all_plate_items_batch(
+            changed_fields=modified_fields,
+            live_context_before=live_context_before,
+            live_context_after=live_context_after
+        )
+
+    def _update_all_plate_items_batch(
+        self,
+        changed_fields: Optional[Set[str]] = None,
+        live_context_before=None,
+        live_context_after=None
+    ):
+        """Update all plate items with batch flash detection.
+
+        This is MUCH faster than updating each plate individually because it uses
+        batch resolution to check all plates at once.
+
+        Args:
+            changed_fields: Set of field names that changed (for flash logic)
+            live_context_before: Live context snapshot before changes (for flash logic)
+            live_context_after: Live context snapshot after changes (for flash logic)
+        """
+        # Update ALL plates
+        self._update_plate_items_batch(
+            plate_paths=None,  # None = all plates
+            changed_fields=changed_fields,
+            live_context_before=live_context_before,
+            live_context_after=live_context_after
+        )
+
+    def _update_plate_items_batch(
+        self,
+        plate_paths: Optional[list[str]] = None,
+        changed_fields: Optional[Set[str]] = None,
+        live_context_before=None,
+        live_context_after=None
+    ):
+        """Update specific plate items (or all if plate_paths=None) with batch flash detection.
+
+        This is MUCH faster than updating each plate individually because it uses
+        batch resolution to check all plates at once.
+
+        Args:
+            plate_paths: List of plate paths to update (None = all plates)
+            changed_fields: Set of field names that changed (for flash logic)
+            live_context_before: Live context snapshot before changes (for flash logic)
+            live_context_after: Live context snapshot after changes (for flash logic)
+        """
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.core.config import PipelineConfig
+
+        # Collect plates to update
+        plate_items = []
         for i in range(self.plate_list.count()):
             item = self.plate_list.item(i)
             plate_data = item.data(Qt.ItemDataRole.UserRole)
             if plate_data:
                 plate_path = plate_data.get('path')
                 if plate_path:
-                    self._update_single_plate_item(
-                        plate_path,
-                        changed_fields=modified_fields,  # Only check modified fields from closed window
-                        live_context_before=live_context_before
-                    )
+                    # Filter by plate_paths if provided
+                    if plate_paths is not None and plate_path not in plate_paths:
+                        continue
+                    orchestrator = self.orchestrators.get(plate_path)
+                    if orchestrator:
+                        plate_items.append((i, item, plate_data, plate_path, orchestrator))
 
-    def _update_single_plate_item(self, plate_path: str, changed_fields: Optional[Set[str]] = None, live_context_before=None):
-        """Update a single plate item's preview text without rebuilding the list.
+        if not plate_items:
+            return
 
-        Args:
-            plate_path: Path of plate to update
-            changed_fields: Set of field names that changed (for flash logic)
-            live_context_before: Live context snapshot before changes (for flash logic)
-        """
-        # Find the item in the list
-        for i in range(self.plate_list.count()):
-            item = self.plate_list.item(i)
-            plate_data = item.data(Qt.ItemDataRole.UserRole)
-            if plate_data and plate_data.get('path') == plate_path:
-                # Rebuild just this item's display text
-                plate = plate_data
+        # Collect live context after if not provided
+        if live_context_after is None:
+            # For batch update, we need a global live context (not per-plate)
+            # This is a simplification - in practice, each plate might have different scoped values
+            live_context_after = ParameterFormManager.collect_live_context()
 
-                # Get orchestrator and pipeline configs (before and after)
-                orchestrator = self.orchestrators.get(plate_path)
-                if not orchestrator:
-                    break
+        # Build before/after config pairs for batch flash detection
+        config_pairs = []
+        plate_indices = []
+        for i, item, plate_data, plate_path, orchestrator in plate_items:
+            config_before = self._get_preview_instance(
+                obj=orchestrator.pipeline_config,
+                live_context_snapshot=live_context_before,
+                scope_id=str(plate_path),
+                obj_type=PipelineConfig
+            ) if live_context_before else None
 
-                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
-                live_context_after = ParameterFormManager.collect_live_context(scope_filter=plate_path)
+            config_after = self._get_preview_instance(
+                obj=orchestrator.pipeline_config,
+                live_context_snapshot=live_context_after,
+                scope_id=str(plate_path),
+                obj_type=PipelineConfig
+            )
 
-                from openhcs.core.config import PipelineConfig
-                config_before = self._get_preview_instance(
-                    obj=orchestrator.pipeline_config,
-                    live_context_snapshot=live_context_before,
-                    scope_id=str(plate_path),
-                    obj_type=PipelineConfig
-                ) if live_context_before else None
+            config_pairs.append((config_before, config_after))
+            plate_indices.append(i)
 
-                config_after = self._get_preview_instance(
-                    obj=orchestrator.pipeline_config,
-                    live_context_snapshot=live_context_after,
-                    scope_id=str(plate_path),
-                    obj_type=PipelineConfig
-                )
+        # Batch check which plates should flash
+        should_flash_list = self._check_resolved_values_changed_batch(
+            config_pairs,
+            changed_fields,
+            live_context_before=live_context_before,
+            live_context_after=live_context_after
+        )
 
-                display_text = self._format_plate_item_with_preview(plate)
+        # PHASE 1: Update all labels and styling (do this BEFORE flashing)
+        # This ensures all flashes start simultaneously
+        plates_to_flash = []
 
-                # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
-                self._apply_orchestrator_item_styling(item, plate)
+        for idx, (i, item, plate_data, plate_path, orchestrator) in enumerate(plate_items):
+            # Update display text
+            display_text = self._format_plate_item_with_preview(plate_data)
 
-                # Only flash if resolved values actually changed
-                should_flash = self._check_resolved_value_changed(
-                    config_before,
-                    config_after,
-                    changed_fields,
-                    live_context_before=live_context_before,
-                    live_context_after=live_context_after
-                )
+            # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
+            self._apply_orchestrator_item_styling(item, plate_data)
 
-                if should_flash:
-                    logger.info(f"✨ FLASHING plate {plate_path} (resolved values changed)")
-                    self._flash_plate_item(plate_path)
+            item.setText(display_text)
+            # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
 
-                item.setText(display_text)
-                # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
+            # Collect plates that need to flash (but don't flash yet!)
+            if should_flash_list[idx]:
+                plates_to_flash.append(plate_path)
 
-                break
+        # PHASE 2: Trigger ALL flashes at once (simultaneously, not sequentially)
+        if plates_to_flash:
+            logger.info(f"✨ FLASHING {len(plates_to_flash)} plates simultaneously: {plates_to_flash}")
+            for plate_path in plates_to_flash:
+                self._flash_plate_item(plate_path)
 
     def _format_plate_item_with_preview(self, plate: Dict) -> str:
         """Format plate item with status and config preview labels.

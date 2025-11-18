@@ -1328,10 +1328,14 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 
-        # Get current live context (after window close/reset)
-        live_context_after = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+        # CRITICAL: Use saved "after" snapshot if available (from window close)
+        # This snapshot was collected AFTER the form manager was unregistered
+        # If not available, collect a new snapshot (for reset events)
+        live_context_after = getattr(self, '_window_close_after_snapshot', None)
+        if live_context_after is None:
+            live_context_after = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
 
-        # Use saved snapshot if available (from window close), otherwise use last snapshot
+        # Use saved "before" snapshot if available (from window close), otherwise use last snapshot
         live_context_before = getattr(self, '_window_close_before_snapshot', None) or self._last_live_context_snapshot
 
         logger.info(f"🔍 _handle_full_preview_refresh: before_token={live_context_before.token if live_context_before else None}, after_token={live_context_after.token}")
@@ -1340,28 +1344,56 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         modified_fields = getattr(self, '_window_close_modified_fields', None)
         logger.info(f"🔍 Window close modified fields: {modified_fields}")
 
-        # Clear the saved snapshot and modified fields after using them
+        # Clear the saved snapshots and modified fields after using them
         if hasattr(self, '_window_close_before_snapshot'):
             logger.info(f"🔍 Using saved _window_close_before_snapshot")
             delattr(self, '_window_close_before_snapshot')
+        if hasattr(self, '_window_close_after_snapshot'):
+            logger.info(f"🔍 Using saved _window_close_after_snapshot")
+            delattr(self, '_window_close_after_snapshot')
         if hasattr(self, '_window_close_modified_fields'):
             delattr(self, '_window_close_modified_fields')
 
         # Update last snapshot for next comparison
         self._last_live_context_snapshot = live_context_after
 
-        # Refresh ALL steps with flash detection
-        # Pass the modified fields from the closed window (or None for reset events)
-        all_indices = list(range(len(self.pipeline_steps)))
+        # CRITICAL: For window close events, only check the step that was actually closed
+        # The "before" snapshot only contains values for the step being edited, not all steps
+        # EXCEPTION: If the scope_id is a plate scope (PipelineConfig), check ALL steps
+        indices_to_check = list(range(len(self.pipeline_steps)))
 
-        logger.info(f"🔍 Full refresh: refreshing {len(all_indices)} steps with flash detection")
+        if live_context_before:
+            # Check if this is a window close event by looking for scope_ids in the before snapshot
+            scoped_values_before = getattr(live_context_before, 'scoped_values', {})
+            if scoped_values_before:
+                # The before snapshot should have exactly one scope_id (the step being edited)
+                # Find which step index matches that scope_id
+                scope_ids = list(scoped_values_before.keys())
+                if len(scope_ids) == 1:
+                    window_close_scope_id = scope_ids[0]
+                    logger.info(f"🔍 _handle_full_preview_refresh: Detected window close for scope_id={window_close_scope_id}")
+
+                    # Check if this is a step scope (contains '::') or a plate scope (no '::')
+                    if '::' in window_close_scope_id:
+                        # Step scope - only check the specific step
+                        for idx, step in enumerate(self.pipeline_steps):
+                            step_scope_id = self._build_step_scope_id(step)
+                            if step_scope_id == window_close_scope_id:
+                                indices_to_check = [idx]
+                                logger.info(f"🔍 _handle_full_preview_refresh: Only checking step index {idx} for window close flash")
+                                break
+                    else:
+                        # Plate scope (PipelineConfig) - check ALL steps
+                        logger.info(f"🔍 _handle_full_preview_refresh: Plate scope detected, checking ALL {len(indices_to_check)} steps")
+
+        logger.info(f"🔍 Full refresh: refreshing {len(indices_to_check)} steps with flash detection")
 
         self._refresh_step_items_by_index(
-            all_indices,
+            indices_to_check,
             live_context_after,
             changed_fields=modified_fields,  # Only check modified fields from closed window
             live_context_before=live_context_before,
-            label_indices=set(all_indices),  # Update all labels
+            label_indices=set(indices_to_check),  # Update labels for checked steps
         )
 
 
@@ -1396,6 +1428,8 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
 
         label_subset = set(label_indices) if label_indices is not None else None
 
+        # BATCH UPDATE: Collect all steps to update
+        step_items = []
         for step_index in sorted(set(indices)):
             if step_index < 0 or step_index >= len(self.pipeline_steps):
                 continue
@@ -1406,16 +1440,71 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             should_update_labels = (
                 label_subset is None or step_index in label_subset
             )
+            step_items.append((step_index, item, step, should_update_labels))
 
+        if not step_items:
+            return
+
+        # Build before/after step pairs for batch flash detection
+        # ALSO store step_after instances to reuse for display formatting
+        step_pairs = []
+        step_after_instances = []
+        for step_index, item, step, should_update_labels in step_items:
             # Get preview instances (before and after)
             # For LABELS: use full live context (includes step editor values)
             step_after = self._get_step_preview_instance(step, live_context_snapshot)
 
             # For FLASH DETECTION: use FULL context (including step's own editor values)
-            # This allows detecting changes in the step itself (when user edits the step)
-            # AND changes in inherited values (when pipeline_config changes)
             step_before_for_flash = self._get_step_preview_instance(step, live_context_before) if live_context_before else None
             step_after_for_flash = step_after  # Reuse the already-computed instance
+
+            step_pairs.append((step_before_for_flash, step_after_for_flash))
+            step_after_instances.append(step_after)
+
+        # Batch check which steps should flash
+        logger.info(f"🔍 _handle_full_preview_refresh: Checking {len(step_pairs)} step pairs for flash")
+        logger.info(f"🔍 _handle_full_preview_refresh: changed_fields={changed_fields}")
+        if step_pairs and step_items:
+            step = step_items[0][2]  # Get first step
+            scope_id = self._build_step_scope_id(step)
+            logger.info(f"🔍 _handle_full_preview_refresh: First step type={type(step).__name__}, scope_id={scope_id}")
+
+            # Check what's in the snapshots
+            if live_context_before:
+                scoped_values_before = getattr(live_context_before, 'scoped_values', {})
+                logger.info(f"🔍 _handle_full_preview_refresh: live_context_before scoped_values keys: {list(scoped_values_before.keys())}")
+                scope_entries_before = scoped_values_before.get(scope_id, {})
+                step_values_before = scope_entries_before.get(type(step))
+                logger.info(f"🔍 _handle_full_preview_refresh: live_context_before has step values for scope_id={scope_id}? {step_values_before is not None}")
+                if step_values_before:
+                    logger.info(f"🔍 _handle_full_preview_refresh: step_values_before keys: {list(step_values_before.keys())}")
+
+            if live_context_snapshot:
+                scoped_values_after = getattr(live_context_snapshot, 'scoped_values', {})
+                logger.info(f"🔍 _handle_full_preview_refresh: live_context_after scoped_values keys: {list(scoped_values_after.keys())}")
+                scope_entries_after = scoped_values_after.get(scope_id, {})
+                step_values_after = scope_entries_after.get(type(step))
+                logger.info(f"🔍 _handle_full_preview_refresh: live_context_after has step values for scope_id={scope_id}? {step_values_after is not None}")
+                if step_values_after:
+                    logger.info(f"🔍 _handle_full_preview_refresh: step_values_after keys: {list(step_values_after.keys())}")
+
+            logger.info(f"🔍 _handle_full_preview_refresh: step_pairs[0] before={step_pairs[0][0]}, after={step_pairs[0][1]}")
+            logger.info(f"🔍 _handle_full_preview_refresh: Are they the same object? {step_pairs[0][0] is step_pairs[0][1]}")
+        should_flash_list = self._check_resolved_values_changed_batch(
+            step_pairs,
+            changed_fields,
+            live_context_before=live_context_before,
+            live_context_after=live_context_snapshot
+        )
+        logger.info(f"🔍 _handle_full_preview_refresh: Batch flash check complete")
+
+        # PHASE 1: Update all labels and styling (this is the slow part - formatting)
+        # Do this BEFORE triggering flashes so all flashes start simultaneously
+        steps_to_flash = []
+
+        for idx, (step_index, item, step, should_update_labels) in enumerate(step_items):
+            # Reuse the step_after instance we already created
+            step_after = step_after_instances[idx]
 
             # Format display text (this is what actually resolves through hierarchy)
             display_text = self._format_resolved_step_for_display(step_after, live_context_snapshot)
@@ -1424,27 +1513,24 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             if should_update_labels:
                 self._apply_step_item_styling(item)
 
-            # Only flash if resolved values actually changed (using flash-specific instances)
-            should_flash = self._check_resolved_value_changed(
-                step_before_for_flash,
-                step_after_for_flash,
-                changed_fields,
-                live_context_before=live_context_before,
-                live_context_after=live_context_snapshot
-            )
-
-            logger.info(f"🔍 Step {step_index}: should_flash={should_flash}")
-
-            if should_flash:
-                logger.info(f"✨ FLASHING step {step_index} (resolved values changed)")
-                self._flash_step_item(step_index)
-
             # Label update
             if should_update_labels:
                 item.setText(display_text)
                 item.setData(Qt.ItemDataRole.UserRole, step_index)
                 item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
                 item.setToolTip(self._create_step_tooltip(step))
+
+            # Collect steps that need to flash (but don't flash yet!)
+            should_flash = should_flash_list[idx]
+            if should_flash:
+                steps_to_flash.append(step_index)
+
+        # PHASE 2: Trigger ALL flashes at once (simultaneously, not sequentially)
+        # This happens AFTER all formatting is done, so all flashes start at the same time
+        if steps_to_flash:
+            logger.info(f"✨ FLASHING {len(steps_to_flash)} steps simultaneously: {steps_to_flash}")
+            for step_index in steps_to_flash:
+                self._flash_step_item(step_index)
 
         # CRITICAL: Update snapshot AFTER all flashes are shown
         # This ensures subsequent edits trigger flashes correctly
