@@ -27,6 +27,192 @@ Traditional GUI systems flash on every field change, creating false positives wh
 
 The scope-based visual feedback system solves this by comparing resolved values (after inheritance resolution) rather than raw field values.
 
+Flash Detection Internals
+==========================
+
+This section documents the internal mechanisms of flash detection to aid maintenance and future refactoring.
+
+LiveContextSnapshot Structure
+------------------------------
+
+The ``LiveContextSnapshot`` is the core data structure for flash detection. It captures the state of all active form managers at a point in time:
+
+.. code-block:: python
+
+   @dataclass
+   class LiveContextSnapshot:
+       """Snapshot of live context values from all active form managers.
+
+       Structure:
+       - values: Dict[Type, Dict[str, Any]]
+           Global context values keyed by type (e.g., PipelineConfig, GlobalPipelineConfig)
+           Example: {PipelineConfig: {'well_filter_config': LazyWellFilterConfig(...)}}
+
+       - scoped_values: Dict[str, Dict[Type, Dict[str, Any]]]
+           Scoped context values keyed by scope_id (e.g., plate_path)
+           Example: {'/home/user/plate': {PipelineConfig: {'well_filter_config': ...}}}
+
+       - token: int
+           Monotonically increasing counter for cache invalidation
+       """
+       values: Dict[Type, Dict[str, Any]]
+       scoped_values: Dict[str, Dict[Type, Dict[str, Any]]]
+       token: int
+
+**When to use which context:**
+
+- **Global context** (``values``): Used for GlobalPipelineConfig and other global state
+- **Scoped context** (``scoped_values``): Used for plate-specific PipelineConfig and step-specific values
+- **Scope ID format**: Plate scope = ``"/path/to/plate"``, Step scope = ``"/path/to/plate::step_0"``
+
+**Critical insight**: When resolving values for flash detection, you must extract the correct scope from ``scoped_values`` based on the object being checked. For steps, use the step's scope_id; for plates, use the plate's scope_id.
+
+.. code-block:: python
+
+   # Extract scoped context for a specific plate
+   scope_id = "/home/user/plate"
+   if scope_id and live_context_snapshot:
+       scoped_values = live_context_snapshot.scoped_values.get(scope_id, {})
+       pipeline_config_values = scoped_values.get(PipelineConfig, {})
+       well_filter_config = pipeline_config_values.get('well_filter_config')
+
+Canonical Root Aliasing System
+-------------------------------
+
+The mixin maintains a ``_preview_scope_aliases`` dict that maps lowercase canonical root names to their original type names. This is necessary because:
+
+1. **Form managers send uppercase type names**: ``"PipelineConfig.well_filter_config"``
+2. **Mixin canonicalizes to lowercase**: ``"pipeline_config.well_filter_config"``
+3. **Both formats must be handled**: Expansion logic checks ``first_part[0].isupper() or first_part in self._preview_scope_aliases.values()``
+
+.. code-block:: python
+
+   # In _canonicalize_root()
+   self._preview_scope_aliases[root_name.lower()] = root_name
+   # Maps: "pipelineconfig" -> "PipelineConfig"
+   #       "pipeline_config" -> "PipelineConfig" (if explicitly set)
+
+**Why this exists**: The form manager uses type names as field_id (e.g., ``type(config).__name__``), but the mixin needs to normalize these for consistent lookup. The aliasing system allows both ``"PipelineConfig"`` and ``"pipeline_config"`` to refer to the same root.
+
+**Maintenance note**: This dual-format system is a source of complexity. Future refactoring should establish a single canonical format (preferably lowercase) used throughout the system.
+
+Batch Resolution Performance
+-----------------------------
+
+Batch resolution is critical for performance when checking multiple fields. The problem:
+
+**Naive approach (O(N) context setups)**:
+
+.. code-block:: python
+
+   for field in fields:
+       # Each call builds context stack: GlobalPipelineConfig → PipelineConfig → Step
+       before_value = resolver.resolve_config_attr(obj_before, field, ...)
+       after_value = resolver.resolve_config_attr(obj_after, field, ...)
+       if before_value != after_value:
+           return True
+
+**Batch approach (O(1) context setup)**:
+
+.. code-block:: python
+
+   # Build context stack ONCE
+   before_attrs = resolver.resolve_all_config_attrs(obj_before, fields, ...)
+   after_attrs = resolver.resolve_all_config_attrs(obj_after, fields, ...)
+
+   # Compare all fields
+   for field in fields:
+       if before_attrs[field] != after_attrs[field]:
+           return True
+
+**Why context setup is expensive**:
+
+1. Walk through inheritance hierarchy (GlobalPipelineConfig → PipelineConfig → Step)
+2. For each level, extract all dataclass fields
+3. Build merged context dict with proper override semantics
+4. Cache the result keyed by (obj_id, token)
+
+For 7 steps × 10 fields = 70 comparisons, batch resolution is ~50x faster.
+
+**Methods**:
+
+- ``resolve_all_lazy_attrs(obj, context_stack, live_ctx, token)``: Resolves ALL fields on a dataclass
+- ``resolve_all_config_attrs(obj, field_names, context_stack, live_ctx, token)``: Resolves SPECIFIC fields (can be on non-dataclass objects like FunctionStep)
+
+The Three Identifier Formats
+-----------------------------
+
+Flash detection handles three distinct identifier formats, each requiring different expansion logic:
+
+**Format 1: Simple field name**
+
+Example: ``"well_filter"``
+
+Expansion: Find all dataclass attributes on the object that have this field.
+
+.. code-block:: python
+
+   # "well_filter" expands to:
+   # - "well_filter_config.well_filter"
+   # - "step_well_filter_config.well_filter"
+   # - "fiji_streaming_config.well_filter"
+   # - "napari_streaming_config.well_filter"
+   # etc.
+
+**Format 2: Nested field path**
+
+Example: ``"well_filter_config.well_filter"``
+
+Expansion: Find all dataclass attributes that have the nested field AND whose type inherits from the config's type.
+
+.. code-block:: python
+
+   # "well_filter_config.well_filter" expands to:
+   # - "well_filter_config.well_filter" (original)
+   # - "step_well_filter_config.well_filter" (StepWellFilterConfig inherits from WellFilterConfig)
+   # - "fiji_streaming_config.well_filter" (FijiStreamingConfig inherits from WellFilterConfig)
+   # etc.
+
+**Format 3: Parent type path**
+
+Example: ``"PipelineConfig.well_filter_config"`` or ``"pipeline_config.well_filter_config"``
+
+Expansion: Find the field's type from live context, then find all dataclass attributes whose type inherits from that type, and expand to ALL nested fields.
+
+.. code-block:: python
+
+   # "PipelineConfig.well_filter_config" expands to:
+   # 1. Look up well_filter_config in live context -> LazyWellFilterConfig
+   # 2. Get all fields from LazyWellFilterConfig -> ['well_filter', 'well_filter_mode']
+   # 3. Find all dataclass attrs that inherit from LazyWellFilterConfig:
+   #    - step_well_filter_config (StepWellFilterConfig inherits from WellFilterConfig)
+   #    - fiji_streaming_config (FijiStreamingConfig inherits from WellFilterConfig)
+   # 4. Expand to all nested fields:
+   #    - "step_well_filter_config.well_filter"
+   #    - "step_well_filter_config.well_filter_mode"
+   #    - "fiji_streaming_config.well_filter"
+   #    - "fiji_streaming_config.well_filter_mode"
+   # etc.
+
+**Why Format 3 exists**: Window close events send ALL fields from the form manager, using the form's field_id as prefix. For PipelineConfig editor, field_id = ``"PipelineConfig"``, so fields are sent as ``"PipelineConfig.well_filter_config"``, ``"PipelineConfig.num_workers"``, etc.
+
+**Detection logic**:
+
+.. code-block:: python
+
+   parts = identifier.split(".")
+   if len(parts) == 2:
+       first_part, second_part = parts
+       # Check if first_part is a type name (uppercase) or canonical root (lowercase)
+       is_type_or_root = first_part[0].isupper() or first_part in self._preview_scope_aliases.values()
+
+       if is_type_or_root:
+           # Format 3: Parent type path
+           # Use live context to find field type and expand
+       else:
+           # Format 2: Nested field path
+           # Use object introspection to expand
+
 Architecture
 ============
 
@@ -194,15 +380,33 @@ This ensures flash detection works correctly when inherited values change, even 
 
 **Window Close Snapshot Timing**
 
-When a window closes with unsaved changes, the system must capture snapshots both BEFORE and AFTER the form manager is unregistered. The critical sequence is:
+Window close events are special because they represent a REVERSION: the user edited values but didn't save, so the system reverts to the saved state. Flash detection must compare the edited values (what the user saw) against the reverted values (what the system now has).
+
+**Why timing is critical**:
+
+1. **Form manager adds live values to context**: When a config editor is open, its form manager registers with ``ParameterFormManager._active_form_managers`` and contributes its edited values to ``LiveContextSnapshot.values`` or ``LiveContextSnapshot.scoped_values``
+2. **Unregistering removes those values**: When the form manager is removed from the registry, subsequent snapshots no longer include the edited values
+3. **Before snapshot = with edited values**: This is what the user saw in the UI before closing
+4. **After snapshot = without edited values**: This is the reverted state after closing without saving
+5. **Comparing these detects the reversion**: Any field that differs between before/after snapshots had its value reverted
+
+**The critical sequence**:
 
 1. Window close signal received
 2. **Before snapshot collected** (with form manager's edited values)
 3. Form manager removed from registry
-4. Token counter incremented
+4. Token counter incremented (invalidates all caches)
 5. **After snapshot collected** (without form manager, reverted to saved values)
 6. External listeners notified with both snapshots via ``handle_window_close()``
 7. Remaining windows refreshed
+
+**Why deferred notification is necessary**:
+
+The form manager uses ``QTimer.singleShot(0)`` to defer listener notification until after the current call stack completes. This ensures:
+
+1. The form manager is fully unregistered before collecting the "after" snapshot
+2. The token counter has been incremented, invalidating all caches
+3. The "after" snapshot truly reflects the reverted state without any lingering form manager values
 
 .. code-block:: python
 
@@ -274,6 +478,55 @@ The ``handle_window_close()`` method receives snapshots as parameters instead of
        )
 
 The snapshots are stored temporarily in ``_pending_window_close_*`` attributes for the timer callback to access, then cleared after use. This avoids polluting listener state with event-specific data.
+
+Scope ID Extraction Logic
+--------------------------
+
+The ``_extract_scope_id_for_preview()`` method determines which scope to use when resolving values from ``LiveContextSnapshot.scoped_values``. Different object types have different scope extraction logic:
+
+**For PipelineConfig objects**:
+
+.. code-block:: python
+
+   def _extract_scope_id_for_preview(self, editing_object, context_object):
+       """Extract scope_id for preview resolution.
+
+       For PipelineConfig: Use the plate_path from context_object (Orchestrator)
+       For FunctionStep: Use step scope (plate_path::step_index)
+       """
+       if isinstance(editing_object, PipelineConfig):
+           # Plate scope: "/path/to/plate"
+           if hasattr(context_object, 'plate_path'):
+               return context_object.plate_path
+           return None
+
+       elif isinstance(editing_object, FunctionStep):
+           # Step scope: "/path/to/plate::step_0"
+           if hasattr(context_object, 'plate_path'):
+               step_index = self._get_step_index(editing_object)
+               return f"{context_object.plate_path}::step_{step_index}"
+           return None
+
+**Why this matters**:
+
+1. **PipelineConfig editors** use plate scope because PipelineConfig is plate-specific
+2. **Step editors** use step scope because steps can have step-specific overrides
+3. **Scope determines which values to use**: When resolving ``well_filter_config.well_filter`` for a step, the system looks in ``scoped_values["/path/to/plate::step_0"][PipelineConfig]['well_filter_config']``
+
+**Critical for window close events**:
+
+When a PipelineConfig editor closes, the form manager's scoped values are keyed by plate_path. The listener must extract the same plate_path to find the correct scoped values in the before/after snapshots.
+
+.. code-block:: python
+
+   # In handle_window_close()
+   scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
+   # For PipelineConfig: scope_id = "/home/user/plate"
+   # For FunctionStep: scope_id = "/home/user/plate::step_0"
+
+   # Use scope_id to extract scoped values
+   if scope_id and live_context_snapshot:
+       scoped_values = live_context_snapshot.scoped_values.get(scope_id, {})
 
 **Context-Aware Resolution**
 
@@ -577,6 +830,272 @@ Plate Manager Integration
                config_before, config_after, self._pending_changed_fields
            ):
                self._flash_plate_item(plate_path)
+
+Common Pitfalls and Maintenance Notes
+======================================
+
+This section documents common mistakes and architectural issues discovered during development.
+
+Using After Snapshot for Expansion (WRONG)
+-------------------------------------------
+
+**Problem**: When expanding identifiers for window close events, using ``live_context_after`` to determine field types fails because the form manager has been unregistered.
+
+.. code-block:: python
+
+   # WRONG: live_context_after has NO values for window close events
+   def _expand_identifiers_for_inheritance(self, obj, changed_fields, live_context_after):
+       field_type = self._get_field_type_from_context(live_context_after)  # Returns None!
+
+**Solution**: Use ``live_context_before`` which still has the form manager's values:
+
+.. code-block:: python
+
+   # CORRECT: live_context_before has form manager's values
+   def _expand_identifiers_for_inheritance(self, obj, changed_fields, live_context_before):
+       field_type = self._get_field_type_from_context(live_context_before)  # Works!
+
+**Why this happens**: The "after" snapshot is collected AFTER the form manager is unregistered, so it doesn't include the form manager's values. The "before" snapshot is collected BEFORE unregistering, so it has all the values needed for type introspection.
+
+Storing Event-Specific State on Listeners (WRONG)
+--------------------------------------------------
+
+**Problem**: Early implementations stored window close snapshots as attributes on listener widgets (``_window_close_before_snapshot``, ``_window_close_after_snapshot``). This caused ``AttributeError`` on long-lived widgets created before the attributes were added.
+
+.. code-block:: python
+
+   # WRONG: Storing event-specific state on listeners
+   def handle_cross_window_preview_change(self, field_path, ...):
+       if self._window_close_before_snapshot is not None:  # AttributeError!
+           # Use window close snapshots
+
+**Solution**: Pass snapshots as parameters to a dedicated ``handle_window_close()`` method:
+
+.. code-block:: python
+
+   # CORRECT: Event data passed as parameters
+   def handle_window_close(self, editing_object, context_object,
+                          before_snapshot, after_snapshot, changed_fields):
+       # Snapshots are parameters, not listener state
+
+**Architectural principle**: Window close is a form manager event, not listener state. Event-specific data should be passed as parameters, not stored on listeners.
+
+Forgetting to Use Scoped Values (WRONG)
+----------------------------------------
+
+**Problem**: When resolving values for plate-specific or step-specific objects, using only ``live_context_snapshot.values`` (global context) misses scoped values.
+
+.. code-block:: python
+
+   # WRONG: Only checks global values
+   pipeline_config_values = live_context_snapshot.values.get(PipelineConfig, {})
+
+**Solution**: Extract scoped values using the object's scope_id:
+
+.. code-block:: python
+
+   # CORRECT: Use scoped values for plate/step-specific objects
+   scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
+   if scope_id and live_context_snapshot:
+       scoped_values = live_context_snapshot.scoped_values.get(scope_id, {})
+       pipeline_config_values = scoped_values.get(PipelineConfig, {})
+
+**When to use scoped values**:
+
+- **PipelineConfig**: Always use scoped values (keyed by plate_path)
+- **FunctionStep**: Always use scoped values (keyed by plate_path::step_index)
+- **GlobalPipelineConfig**: Always use global values
+
+Hardcoding Type Names Instead of Using Canonical Roots (WRONG)
+---------------------------------------------------------------
+
+**Problem**: Checking only for uppercase type names misses canonicalized lowercase roots.
+
+.. code-block:: python
+
+   # WRONG: Only detects uppercase type names
+   if first_part[0].isupper():
+       # Handle parent type format
+
+**Solution**: Check both uppercase type names AND canonical roots:
+
+.. code-block:: python
+
+   # CORRECT: Detects both formats
+   is_type_or_root = first_part[0].isupper() or first_part in self._preview_scope_aliases.values()
+   if is_type_or_root:
+       # Handle parent type format
+
+**Why both are needed**: Form managers send ``"PipelineConfig.well_filter_config"`` but the mixin canonicalizes to ``"pipeline_config.well_filter_config"``. Both formats must be recognized as parent type paths.
+
+Using resolve_all_lazy_attrs for Non-Lazy Fields (WRONG)
+---------------------------------------------------------
+
+**Problem**: ``resolve_all_lazy_attrs()`` only resolves fields that are lazy (None or LazyDataclass). For inherited attributes on non-dataclass objects like FunctionStep, this misses concrete inherited values.
+
+.. code-block:: python
+
+   # WRONG: Misses inherited concrete values
+   before_attrs = resolver.resolve_all_lazy_attrs(step_before, ...)
+   # Only resolves lazy fields, misses step_well_filter_config if it's concrete
+
+**Solution**: Use ``resolve_all_config_attrs()`` which resolves ALL config attributes:
+
+.. code-block:: python
+
+   # CORRECT: Resolves all config attributes (lazy or concrete)
+   before_attrs = resolver.resolve_all_config_attrs(step_before, field_names, ...)
+
+**When to use which**:
+
+- ``resolve_all_lazy_attrs()``: For dataclass objects where you want ALL fields
+- ``resolve_all_config_attrs()``: For specific field names on any object (dataclass or not)
+
+Future Refactoring Opportunities
+---------------------------------
+
+The current system works but has architectural complexity that should be addressed in future refactoring:
+
+1. **Dual identifier format**: Establish single canonical format (lowercase) throughout the system instead of supporting both uppercase type names and lowercase canonical roots
+
+2. **Scope ID extraction**: Move scope extraction logic to a centralized service instead of duplicating it in mixins
+
+3. **Snapshot structure**: Consider flattening ``scoped_values`` to avoid nested dict lookups (``scoped_values[scope_id][Type][field_name]`` → ``scoped_values[(scope_id, Type)][field_name]``)
+
+4. **Expansion logic**: The three identifier formats could be unified with a more generic pattern matching system
+
+5. **Batch resolution API**: The distinction between ``resolve_all_lazy_attrs()`` and ``resolve_all_config_attrs()`` is confusing; consider a single method with a flag
+
+**Important**: These refactorings should only be done after the system is stable and thoroughly documented. The current implementation is production-grade and works correctly; premature refactoring would introduce risk.
+
+Debugging Flash Detection Issues
+=================================
+
+When flash detection doesn't work as expected, use these debugging techniques:
+
+Check the Logs
+--------------
+
+OpenHCS logs are stored in ``~/.local/share/openhcs/logs/``. The most recent log file contains detailed information about flash detection:
+
+.. code-block:: bash
+
+   # Find most recent log
+   ls -t ~/.local/share/openhcs/logs/openhcs_unified_*.log | head -1
+
+   # Check window close events
+   tail -3000 <logfile> | grep -E "(handle_window_close|Using window_close|FLASHING)"
+
+   # Check identifier expansion
+   tail -3000 <logfile> | grep "Expanded to.*identifiers"
+
+   # Check snapshot collection
+   tail -3000 <logfile> | grep "Stored window close snapshots"
+
+**Key log messages**:
+
+- ``"handle_window_close: N changed fields"`` - Window close event received with N fields
+- ``"Stored window close snapshots: before=X, after=Y"`` - Snapshots stored in pending state
+- ``"Using window_close snapshots: before=X, after=Y"`` - Timer callback using snapshots
+- ``"Expanded 'field' to include N identifiers"`` - Identifier expansion results
+- ``"🔥 FLASHING step X"`` - Flash triggered for step X
+- ``"Results: N changed"`` - Batch resolution found N changed fields
+
+Verify Snapshot Contents
+-------------------------
+
+Add debug logging to inspect snapshot contents:
+
+.. code-block:: python
+
+   def handle_window_close(self, editing_object, context_object,
+                          before_snapshot, after_snapshot, changed_fields):
+       logger.debug(f"Before snapshot values: {before_snapshot.values}")
+       logger.debug(f"Before snapshot scoped_values: {before_snapshot.scoped_values}")
+       logger.debug(f"After snapshot values: {after_snapshot.values}")
+       logger.debug(f"After snapshot scoped_values: {after_snapshot.scoped_values}")
+
+**What to check**:
+
+- **Before snapshot should have form manager's values**: Check that ``before_snapshot.scoped_values[scope_id][PipelineConfig]`` contains the edited values
+- **After snapshot should NOT have form manager's values**: Check that ``after_snapshot.scoped_values[scope_id][PipelineConfig]`` has reverted to saved values
+- **Scope ID must match**: The scope_id used to extract values must match the scope_id used by the form manager
+
+Verify Identifier Expansion
+----------------------------
+
+Add debug logging to see what identifiers are being expanded:
+
+.. code-block:: python
+
+   def _expand_identifiers_for_inheritance(self, obj, changed_fields, live_context_snapshot):
+       logger.debug(f"Expanding identifiers: {changed_fields}")
+       expanded = self._do_expansion(...)
+       logger.debug(f"Expanded to {len(expanded)} identifiers: {expanded}")
+       return expanded
+
+**What to check**:
+
+- **Simple fields should expand to nested paths**: ``"well_filter"`` → ``{"well_filter_config.well_filter", "step_well_filter_config.well_filter", ...}``
+- **Parent type paths should expand to all nested fields**: ``"PipelineConfig.well_filter_config"`` → ``{"step_well_filter_config.well_filter", "step_well_filter_config.well_filter_mode", ...}``
+- **Expansion should use live_context_before**: If expansion returns empty set, check that you're using ``live_context_before`` not ``live_context_after``
+
+Verify Batch Resolution
+------------------------
+
+Add debug logging to see what values are being compared:
+
+.. code-block:: python
+
+   def _check_with_batch_resolution(self, obj_before, obj_after, field_names, ...):
+       before_attrs = resolver.resolve_all_config_attrs(obj_before, field_names, ...)
+       after_attrs = resolver.resolve_all_config_attrs(obj_after, field_names, ...)
+
+       logger.debug(f"Before attrs: {before_attrs}")
+       logger.debug(f"After attrs: {after_attrs}")
+
+       for field_name in field_names:
+           if before_attrs[field_name] != after_attrs[field_name]:
+               logger.debug(f"Field '{field_name}' changed: {before_attrs[field_name]} → {after_attrs[field_name]}")
+
+**What to check**:
+
+- **Values should be resolved, not lazy**: If you see ``LazyWellFilterConfig(...)`` in the output, resolution failed
+- **Before/after should differ for changed fields**: If values are identical but flash isn't triggering, check the flash triggering logic
+- **Scoped values should be used**: For plate/step objects, verify that scoped values are being used, not global values
+
+Common Symptoms and Solutions
+------------------------------
+
+**Symptom**: PlateManager flashes but PipelineEditor steps don't
+
+**Cause**: Identifier expansion not finding step-specific fields
+
+**Solution**: Check that expansion logic handles parent type paths (``"PipelineConfig.well_filter_config"``) and expands to step-specific fields (``"step_well_filter_config.well_filter"``)
+
+---
+
+**Symptom**: No flash on window close, but flash works on incremental updates
+
+**Cause**: Window close snapshots not being captured or passed correctly
+
+**Solution**: Verify that ``handle_window_close()`` is being called and that before/after snapshots differ
+
+---
+
+**Symptom**: AttributeError on ``_window_close_before_snapshot``
+
+**Cause**: Old code storing snapshots as listener attributes instead of passing as parameters
+
+**Solution**: Update to use ``handle_window_close()`` method with snapshot parameters
+
+---
+
+**Symptom**: Flash triggers on every window close, even when no values changed
+
+**Cause**: Comparing wrong snapshots or not using scoped values
+
+**Solution**: Verify that before snapshot has form manager values, after snapshot doesn't, and scoped values are being used for plate/step objects
 
 Performance Characteristics
 ===========================
