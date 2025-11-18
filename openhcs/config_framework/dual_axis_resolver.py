@@ -278,14 +278,30 @@ def resolve_field_inheritance(
     if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:
         logger.debug(f"🔍 MRO-INHERITANCE: Resolving {obj_type.__name__}.{field_name}")
         logger.debug(f"🔍 MRO-INHERITANCE: MRO = {[cls.__name__ for cls in obj_type.__mro__]}")
+        logger.debug(f"🔍 MRO-INHERITANCE: available_configs = {list(available_configs.keys())}")
 
     for mro_class in obj_type.__mro__:
         if not is_dataclass(mro_class):
             continue
 
         # Look for a config instance of this MRO class type in the available configs
+        # CRITICAL: Check both exact type match AND base type equivalents (lazy vs non-lazy)
         for config_name, config_instance in available_configs.items():
-            if type(config_instance) == mro_class:
+            instance_type = type(config_instance)
+
+            # Check exact type match
+            if instance_type == mro_class:
+                matches = True
+            # Check if instance is base type of lazy MRO class (e.g., StepWellFilterConfig matches LazyStepWellFilterConfig)
+            elif mro_class.__name__.startswith('Lazy') and instance_type.__name__ == mro_class.__name__[4:]:
+                matches = True
+            # Check if instance is lazy type of non-lazy MRO class (e.g., LazyStepWellFilterConfig matches StepWellFilterConfig)
+            elif instance_type.__name__.startswith('Lazy') and mro_class.__name__ == instance_type.__name__[4:]:
+                matches = True
+            else:
+                matches = False
+
+            if matches:
                 try:
                     value = object.__getattribute__(config_instance, field_name)
                     if field_name in ['output_dir_suffix', 'sub_dir', 'well_filter']:

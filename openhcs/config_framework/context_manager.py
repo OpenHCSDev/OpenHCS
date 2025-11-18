@@ -22,7 +22,7 @@ import dataclasses
 import inspect
 import logging
 from contextlib import contextmanager
-from typing import Any, Dict, Union
+from typing import Any, Dict, Union, Tuple
 from dataclasses import fields, is_dataclass
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # Core contextvar for current merged global config
 # This holds the current context state that resolution functions can access
 current_temp_global = contextvars.ContextVar('current_temp_global')
+
+# Cached extracted configs for the current context
+# This avoids re-extracting configs on every attribute access
+current_extracted_configs: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar('current_extracted_configs', default={})
 
 
 def _merge_nested_dataclass(base, override, mask_with_none: bool = False):
@@ -182,11 +186,17 @@ def config_context(obj, mask_with_none: bool = False):
         merged_config = base_config
         logger.debug(f"Creating config context with no overrides from {type(obj).__name__}")
 
+    # Extract configs ONCE when setting context
+    extracted = extract_all_configs(merged_config)
+
+    # Set both context and extracted configs atomically
     token = current_temp_global.set(merged_config)
+    extracted_token = current_extracted_configs.set(extracted)
     try:
         yield
     finally:
         current_temp_global.reset(token)
+        current_extracted_configs.reset(extracted_token)
 
 
 # Removed: extract_config_overrides - no longer needed with field matching approach
@@ -425,12 +435,48 @@ def extract_all_configs_from_context() -> Dict[str, Any]:
     return extract_all_configs(current)
 
 
+# Cache for extract_all_configs to avoid repeated extraction
+# Content-based cache: (type_name, frozen_field_values) -> extracted_configs
+_extract_configs_cache: Dict[Tuple, Dict[str, Any]] = {}
+
+def _make_cache_key_for_dataclass(obj) -> Tuple:
+    """Create content-based cache key for frozen dataclass."""
+    if not is_dataclass(obj):
+        return (id(obj),)  # Fallback to identity for non-dataclasses
+
+    # Build tuple of (type_name, field_values)
+    type_name = type(obj).__name__
+    field_values = []
+    for field_info in fields(obj):
+        try:
+            value = object.__getattribute__(obj, field_info.name)
+            # Recursively handle nested dataclasses
+            if is_dataclass(value):
+                value = _make_cache_key_for_dataclass(value)
+            elif isinstance(value, (list, tuple)):
+                # Convert lists to tuples for hashability
+                value = tuple(
+                    _make_cache_key_for_dataclass(item) if is_dataclass(item) else item
+                    for item in value
+                )
+            elif isinstance(value, dict):
+                # Convert dicts to sorted tuples
+                value = tuple(sorted(value.items()))
+            field_values.append((field_info.name, value))
+        except AttributeError:
+            field_values.append((field_info.name, None))
+
+    return (type_name, tuple(field_values))
+
 def extract_all_configs(context_obj) -> Dict[str, Any]:
     """
     Extract all config instances from a context object using type-driven approach.
 
     This function leverages dataclass field type annotations to efficiently extract
     config instances, avoiding string matching and runtime attribute scanning.
+
+    PERFORMANCE: Results are cached by CONTENT (not identity) to handle frozen dataclasses
+    that are recreated with dataclasses.replace().
 
     Args:
         context_obj: Object to extract configs from (orchestrator, merged config, etc.)
@@ -441,6 +487,15 @@ def extract_all_configs(context_obj) -> Dict[str, Any]:
     if context_obj is None:
         return {}
 
+    # Build content-based cache key
+    cache_key = _make_cache_key_for_dataclass(context_obj)
+
+    # Check cache first
+    if cache_key in _extract_configs_cache:
+        logger.debug(f"🔍 CACHE HIT: extract_all_configs for {type(context_obj).__name__}")
+        return _extract_configs_cache[cache_key]
+
+    logger.debug(f"🔍 CACHE MISS: extract_all_configs for {type(context_obj).__name__}, cache size={len(_extract_configs_cache)}")
     configs = {}
 
     # Include the context object itself if it's a dataclass
@@ -466,7 +521,7 @@ def extract_all_configs(context_obj) -> Dict[str, Any]:
                         instance_type = type(field_value)
                         configs[instance_type.__name__] = field_value
 
-                        logger.debug(f"Extracted config {instance_type.__name__} from field {field_name}")
+                        logger.debug(f"Extracted config {instance_type.__name__} from field {field_name} on {type(context_obj).__name__}")
 
                 except AttributeError:
                     # Field doesn't exist on instance (shouldn't happen with dataclasses)
@@ -478,6 +533,10 @@ def extract_all_configs(context_obj) -> Dict[str, Any]:
         _extract_from_object_attributes_typed(context_obj, configs)
 
     logger.debug(f"Extracted {len(configs)} configs: {list(configs.keys())}")
+
+    # Store in cache before returning (using content-based key)
+    _extract_configs_cache[cache_key] = configs
+
     return configs
 
 
@@ -515,7 +574,7 @@ def _extract_from_object_attributes_typed(obj, configs: Dict[str, Any]) -> None:
                 attr_value = getattr(obj, attr_name)
                 if attr_value is not None and is_dataclass(attr_value):
                     configs[type(attr_value).__name__] = attr_value
-                    logger.debug(f"Extracted config {type(attr_value).__name__} from attribute {attr_name}")
+                    logger.debug(f"Extracted config {type(attr_value).__name__} from attribute {attr_name} on {type(obj).__name__}")
 
             except (AttributeError, TypeError):
                 # Skip attributes that can't be accessed or aren't relevant

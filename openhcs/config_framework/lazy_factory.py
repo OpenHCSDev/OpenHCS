@@ -93,14 +93,14 @@ class LazyMethodBindings:
     def create_resolver() -> Callable[[Any, str], Any]:
         """Create field resolver method using new pure function interface."""
         from openhcs.config_framework.dual_axis_resolver import resolve_field_inheritance
-        from openhcs.config_framework.context_manager import current_temp_global, extract_all_configs
+        from openhcs.config_framework.context_manager import current_temp_global, current_extracted_configs
 
         def _resolve_field_value(self, field_name: str) -> Any:
             # Get current context from contextvars
             try:
                 current_context = current_temp_global.get()
-                # Extract available configs from current context
-                available_configs = extract_all_configs(current_context)
+                # Get cached extracted configs (already extracted when context was set)
+                available_configs = current_extracted_configs.get()
 
                 # Use pure function for resolution
                 return resolve_field_inheritance(self, field_name, available_configs)
@@ -115,7 +115,7 @@ class LazyMethodBindings:
     def create_getattribute() -> Callable[[Any, str], Any]:
         """Create lazy __getattribute__ method using new context system."""
         from openhcs.config_framework.dual_axis_resolver import resolve_field_inheritance, _has_concrete_field_override
-        from openhcs.config_framework.context_manager import current_temp_global, extract_all_configs
+        from openhcs.config_framework.context_manager import current_temp_global, current_extracted_configs
 
         def _find_mro_concrete_value(base_class, name):
             """Extract common MRO traversal pattern."""
@@ -130,8 +130,8 @@ class LazyMethodBindings:
             # Get current context from contextvars
             try:
                 current_context = current_temp_global.get()
-                # Extract available configs from current context
-                available_configs = extract_all_configs(current_context)
+                # Get cached extracted configs (already extracted when context was set)
+                available_configs = current_extracted_configs.get()
 
                 # Use pure function for resolution
                 resolved_value = resolve_field_inheritance(self, name, available_configs)
@@ -180,7 +180,8 @@ class LazyMethodBindings:
             # Stage 3: Inheritance resolution using same merged context
             try:
                 current_context = current_temp_global.get()
-                available_configs = extract_all_configs(current_context)
+                # Get cached extracted configs (already extracted when context was set)
+                available_configs = current_extracted_configs.get()
                 resolved_value = resolve_field_inheritance(self, name, available_configs)
 
                 if resolved_value is not None:
@@ -349,6 +350,23 @@ class LazyDataclassFactory:
             not has_inherit_as_none_marker
         )
 
+        # CRITICAL: Preserve inheritance hierarchy in lazy versions
+        # If base_class inherits from other dataclasses, make the lazy version inherit from their lazy versions
+        lazy_bases = []
+        if not has_unsafe_metaclass:
+            for base in base_class.__bases__:
+                if base is object:
+                    continue
+                if is_dataclass(base):
+                    # Create or get lazy version of parent class
+                    lazy_parent_name = f"Lazy{base.__name__}"
+                    lazy_parent = LazyDataclassFactory.make_lazy_simple(
+                        base_class=base,
+                        lazy_class_name=lazy_parent_name
+                    )
+                    lazy_bases.append(lazy_parent)
+                    logger.debug(f"Lazy {lazy_class_name} inherits from lazy {lazy_parent_name}")
+
         if has_unsafe_metaclass:
             # Base class has unsafe custom metaclass - don't inherit, just copy interface
             print(f"🔧 LAZY FACTORY: {base_class.__name__} has custom metaclass {base_metaclass.__name__}, avoiding inheritance")
@@ -361,13 +379,14 @@ class LazyDataclassFactory:
                 frozen=True
             )
         else:
-            # Safe to inherit from regular dataclass
+            # Safe to inherit - use lazy parent classes if available, otherwise inherit from base_class
+            bases_to_use = tuple(lazy_bases) if lazy_bases else (base_class,)
             lazy_class = make_dataclass(
                 lazy_class_name,
                 LazyDataclassFactory._introspect_dataclass_fields(
                     base_class, debug_template, global_config_type, parent_field_path, parent_instance_provider
                 ),
-                bases=(base_class,),
+                bases=bases_to_use,
                 frozen=True
             )
 
@@ -437,12 +456,18 @@ class LazyDataclassFactory:
         # Generate class name if not provided
         lazy_class_name = lazy_class_name or f"Lazy{base_class.__name__}"
 
+        # CRITICAL: Check cache by class name BEFORE creating instance_provider
+        # This ensures we return the same lazy class instance when called recursively
+        simple_cache_key = f"{base_class.__module__}.{base_class.__name__}_{lazy_class_name}"
+        if simple_cache_key in _lazy_class_cache:
+            return _lazy_class_cache[simple_cache_key]
+
         # Simple provider that uses new contextvars system
         def simple_provider():
             """Simple provider using new contextvars system."""
             return base_class()  # Lazy __getattribute__ handles resolution
 
-        return LazyDataclassFactory._create_lazy_dataclass_unified(
+        lazy_class = LazyDataclassFactory._create_lazy_dataclass_unified(
             base_class=base_class,
             instance_provider=simple_provider,
             lazy_class_name=lazy_class_name,
@@ -453,6 +478,11 @@ class LazyDataclassFactory:
             parent_field_path=None,
             parent_instance_provider=None
         )
+
+        # Cache with simple key for future lookups
+        _lazy_class_cache[simple_cache_key] = lazy_class
+
+        return lazy_class
 
     # All legacy methods removed - use make_lazy_simple() for all use cases
 

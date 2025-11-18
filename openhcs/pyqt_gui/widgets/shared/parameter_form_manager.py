@@ -9,7 +9,7 @@ import dataclasses
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Type, Optional, Tuple, Union
+from typing import Any, Dict, Type, Optional, Tuple, Union, List
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QLabel, QPushButton,
     QLineEdit, QCheckBox, QComboBox, QGroupBox, QSpinBox, QDoubleSpinBox
@@ -272,6 +272,10 @@ class ParameterFormManager(QWidget):
 
     _live_context_token_counter = 0
 
+    # Class-level mapping from object instances to their form managers
+    # Used to retrieve window_open_snapshot when window closes
+    _object_to_manager: Dict[int, 'ParameterFormManager'] = {}
+
     # Class-level token cache for live context collection
     _live_context_cache: Optional['TokenCache'] = None  # Initialized on first use
 
@@ -516,6 +520,9 @@ class ParameterFormManager(QWidget):
 
             # OPTIMIZATION: Store parent manager reference early so setup_ui() can detect nested configs
             self._parent_manager = parent_manager
+
+            # Register this manager in the object-to-manager mapping
+            type(self)._object_to_manager[id(self.object_instance)] = self
 
             # Track completion callbacks for async widget creation
             self._on_build_complete_callbacks = []
@@ -3547,8 +3554,29 @@ class ParameterFormManager(QWidget):
                         except (TypeError, RuntimeError):
                             pass  # Signal already disconnected or object destroyed
 
+                # CRITICAL: Notify external listeners BEFORE removing from registry
+                # They need to collect snapshot with edited values still present
+                logger.info(f"🔍 Notifying external listeners of window close: {self.field_id}")
+                for listener, value_changed_handler, refresh_handler in self._external_listeners:
+                    if value_changed_handler:
+                        try:
+                            logger.info(f"🔍   Calling value_changed_handler for {listener.__class__.__name__}")
+                            value_changed_handler(
+                                f"{self.field_id}.__WINDOW_CLOSED__",  # Special marker
+                                None,  # new_value not used for window close
+                                self.object_instance,
+                                self.context_obj
+                            )
+                        except Exception as e:
+                            logger.error(f"Error notifying external listener {listener.__class__.__name__}: {e}", exc_info=True)
+
                 # Remove from registry
                 self._active_form_managers.remove(self)
+
+                # Remove from object-to-manager mapping
+                obj_id = id(self.object_instance)
+                if obj_id in type(self)._object_to_manager:
+                    del type(self)._object_to_manager[obj_id]
 
                 # Invalidate live context caches so external listeners drop stale data
                 type(self)._live_context_token_counter += 1
@@ -3559,22 +3587,6 @@ class ParameterFormManager(QWidget):
                     # Refresh immediately (not deferred) since we're in a controlled close event
                     manager._refresh_with_live_context()
 
-                # CRITICAL: Also notify external listeners (like pipeline editor)
-                # They need to refresh their previews to drop this window's live values
-                # Use special field_path to indicate window closed (triggers full refresh)
-                logger.info(f"🔍 Notifying external listeners of window close: {self.field_id}")
-                for listener, value_changed_handler, refresh_handler in self._external_listeners:
-                    if value_changed_handler:
-                        try:
-                            logger.info(f"🔍   Calling value_changed_handler for {listener.__class__.__name__}")
-                            value_changed_handler(
-                                f"{self.field_id}.__WINDOW_CLOSED__",  # Special marker
-                                None,
-                                self.object_instance,
-                                self.context_obj
-                            )
-                        except Exception as e:
-                            logger.warning(f"Failed to notify external listener {listener.__class__.__name__}: {e}")
         except (ValueError, AttributeError):
             pass  # Already removed or list doesn't exist
 
@@ -3610,7 +3622,10 @@ class ParameterFormManager(QWidget):
         # Example: "PipelineConfig.well_filter_config.well_filter"
         #   → Root manager extracts "well_filter_config"
         #   → Nested manager extracts "well_filter"
-        self._schedule_cross_window_refresh(changed_field_path=field_path)
+        # CRITICAL: Don't emit context_refreshed when refreshing due to another window's value change
+        # The other window already emitted context_value_changed, which triggers incremental updates
+        # Emitting context_refreshed here would cause full refreshes in pipeline editor
+        self._schedule_cross_window_refresh(changed_field_path=field_path, emit_signal=False)
 
     def _on_cross_window_context_refreshed(self, editing_object: object, context_object: object):
         """Handle cascading placeholder refreshes from upstream windows.

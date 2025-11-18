@@ -948,6 +948,45 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if plate_path == self.current_plate:
             pass  # Orchestrator config changed for current plate
 
+    def _build_flash_context_stack(self, obj: Any, live_context_snapshot) -> Optional[list]:
+        """Build context stack for flash resolution.
+
+        Builds: GlobalPipelineConfig → PipelineConfig → Step
+
+        Args:
+            obj: Step object (preview instance)
+            live_context_snapshot: Live context snapshot
+
+        Returns:
+            Context stack for resolution, or None if orchestrator not available
+        """
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+        from openhcs.core.config import GlobalPipelineConfig
+        from openhcs.config_framework.global_config import get_current_global_config
+
+        orchestrator = self._get_current_orchestrator()
+        if not orchestrator:
+            return None
+
+        try:
+            # Collect live context if not provided
+            if live_context_snapshot is None:
+                live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+
+            pipeline_config_for_context = self._get_pipeline_config_preview_instance(live_context_snapshot) or orchestrator.pipeline_config
+            global_config_for_context = self._get_global_config_preview_instance(live_context_snapshot)
+            if global_config_for_context is None:
+                global_config_for_context = get_current_global_config(GlobalPipelineConfig)
+
+            # Build context stack: GlobalPipelineConfig → PipelineConfig → Step
+            return [
+                global_config_for_context,
+                pipeline_config_for_context,
+                obj  # The step (preview instance)
+            ]
+        except Exception:
+            return None
+
     def _resolve_config_attr(self, step: FunctionStep, config: object, attr_name: str,
                              live_context_snapshot=None) -> object:
         """
@@ -1104,6 +1143,51 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         self._preview_step_cache[cache_key] = merged_step
         return merged_step
 
+    def _get_step_preview_instance_excluding_self(self, step: FunctionStep, live_context_snapshot) -> FunctionStep:
+        """Return step instance WITHOUT its own editor values (for flash detection).
+
+        This allows flash detection to see inheritance changes even when step editor is open.
+        E.g., if pipeline_config.well_filter changes and step inherits it, the step should flash
+        even if the step editor is currently open with a concrete value.
+        """
+        if live_context_snapshot is None:
+            return step
+
+        # Get the step's scope ID
+        scope_id = self._build_step_scope_id(step)
+        if not scope_id:
+            return step
+
+        # Clone the live context snapshot but exclude this step's values
+        scoped_values = getattr(live_context_snapshot, 'scoped_values', {}) or {}
+        scope_entries = scoped_values.get(scope_id)
+        if not scope_entries:
+            return step
+
+        # Check if this step has live values
+        if type(step) not in scope_entries:
+            return step
+
+        # Create a modified snapshot without this step's values
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import LiveContextSnapshot
+        modified_scoped_values = {
+            scope: {
+                config_type: values
+                for config_type, values in entries.items()
+                if config_type != type(step)  # Exclude step's own type
+            }
+            for scope, entries in scoped_values.items()
+        }
+
+        modified_snapshot = LiveContextSnapshot(
+            token=live_context_snapshot.token,
+            values=getattr(live_context_snapshot, 'values', {}),
+            scoped_values=modified_scoped_values
+        )
+
+        # Now get preview instance with modified snapshot (no step values)
+        return self._get_step_preview_instance(step, modified_snapshot)
+
     def _merge_pipeline_config_with_live_values(self, pipeline_config, live_values):
         """Return pipeline config merged with live overrides."""
         if not live_values or not dataclasses.is_dataclass(pipeline_config):
@@ -1209,8 +1293,10 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Use last snapshot as "before" for comparison
         live_context_before = self._last_live_context_snapshot
 
-        # Update last snapshot for next comparison
-        self._last_live_context_snapshot = live_context_snapshot
+        # CRITICAL: DON'T update _last_live_context_snapshot here!
+        # We want to keep the original "before" state across multiple edits in the same editing session.
+        # Only update it when the editing session ends (window close, focus change, etc.)
+        # This allows flash detection to work for ALL changes in a session, not just the first one.
 
         # Debug logging
         logger.info(f"🔍 Pipeline Editor incremental update: indices={indices}, changed_fields={changed_fields}, has_before={live_context_before is not None}")
@@ -1232,10 +1318,51 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         )
 
     def _handle_full_preview_refresh(self) -> None:
-        """Handle full refresh WITHOUT flash (used for window close/reset events)."""
-        # Full refresh does NOT flash - it's just reverting to saved values
-        # Flash only happens in incremental updates where we know what changed
-        self.update_step_list()
+        """Handle full refresh WITH flash (used for window close/reset events).
+
+        When a window closes with unsaved changes or reset is clicked, values revert
+        to saved state and should flash to indicate the change.
+        """
+        if not self.current_plate:
+            return
+
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        # Get current live context (after window close/reset)
+        live_context_after = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
+
+        # Use saved snapshot if available (from window close), otherwise use last snapshot
+        live_context_before = getattr(self, '_window_close_before_snapshot', None) or self._last_live_context_snapshot
+
+        logger.info(f"🔍 _handle_full_preview_refresh: before_token={live_context_before.token if live_context_before else None}, after_token={live_context_after.token}")
+
+        # Get the user-modified fields from the closed window (if available)
+        modified_fields = getattr(self, '_window_close_modified_fields', None)
+        logger.info(f"🔍 Window close modified fields: {modified_fields}")
+
+        # Clear the saved snapshot and modified fields after using them
+        if hasattr(self, '_window_close_before_snapshot'):
+            logger.info(f"🔍 Using saved _window_close_before_snapshot")
+            delattr(self, '_window_close_before_snapshot')
+        if hasattr(self, '_window_close_modified_fields'):
+            delattr(self, '_window_close_modified_fields')
+
+        # Update last snapshot for next comparison
+        self._last_live_context_snapshot = live_context_after
+
+        # Refresh ALL steps with flash detection
+        # Pass the modified fields from the closed window (or None for reset events)
+        all_indices = list(range(len(self.pipeline_steps)))
+
+        logger.info(f"🔍 Full refresh: refreshing {len(all_indices)} steps with flash detection")
+
+        self._refresh_step_items_by_index(
+            all_indices,
+            live_context_after,
+            changed_fields=modified_fields,  # Only check modified fields from closed window
+            live_context_before=live_context_before,
+            label_indices=set(all_indices),  # Update all labels
+        )
 
 
 
@@ -1280,19 +1407,37 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 label_subset is None or step_index in label_subset
             )
 
-            # Get preview instance (merges step-scoped live values)
-            step_for_display = self._get_step_preview_instance(step, live_context_snapshot)
+            # Get preview instances (before and after)
+            # For LABELS: use full live context (includes step editor values)
+            step_after = self._get_step_preview_instance(step, live_context_snapshot)
+
+            # For FLASH DETECTION: use FULL context (including step's own editor values)
+            # This allows detecting changes in the step itself (when user edits the step)
+            # AND changes in inherited values (when pipeline_config changes)
+            step_before_for_flash = self._get_step_preview_instance(step, live_context_before) if live_context_before else None
+            step_after_for_flash = step_after  # Reuse the already-computed instance
 
             # Format display text (this is what actually resolves through hierarchy)
-            display_text = self._format_resolved_step_for_display(step_for_display, live_context_snapshot)
+            display_text = self._format_resolved_step_for_display(step_after, live_context_snapshot)
 
             # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
             if should_update_labels:
                 self._apply_step_item_styling(item)
 
-            # ALWAYS flash on incremental update (no filtering for now)
-            logger.info(f"✨ FLASHING step {step_index}")
-            self._flash_step_item(step_index)
+            # Only flash if resolved values actually changed (using flash-specific instances)
+            should_flash = self._check_resolved_value_changed(
+                step_before_for_flash,
+                step_after_for_flash,
+                changed_fields,
+                live_context_before=live_context_before,
+                live_context_after=live_context_snapshot
+            )
+
+            logger.info(f"🔍 Step {step_index}: should_flash={should_flash}")
+
+            if should_flash:
+                logger.info(f"✨ FLASHING step {step_index} (resolved values changed)")
+                self._flash_step_item(step_index)
 
             # Label update
             if should_update_labels:
@@ -1300,6 +1445,13 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 item.setData(Qt.ItemDataRole.UserRole, step_index)
                 item.setData(Qt.ItemDataRole.UserRole + 1, not step.enabled)
                 item.setToolTip(self._create_step_tooltip(step))
+
+        # CRITICAL: Update snapshot AFTER all flashes are shown
+        # This ensures subsequent edits trigger flashes correctly
+        # Only update if we have a new snapshot (not None)
+        if live_context_snapshot is not None:
+            logger.info(f"🔍 Updating _last_live_context_snapshot: old_token={self._last_live_context_snapshot.token if self._last_live_context_snapshot else None}, new_token={live_context_snapshot.token}")
+            self._last_live_context_snapshot = live_context_snapshot
 
     def _apply_step_item_styling(self, item: QListWidgetItem) -> None:
         """Apply scope-based background color and layered borders to step list item.

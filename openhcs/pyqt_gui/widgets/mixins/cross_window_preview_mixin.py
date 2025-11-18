@@ -276,6 +276,26 @@ class CrossWindowPreviewMixin:
         Uses trailing debounce: timer restarts on each change, only executes after
         changes stop for PREVIEW_UPDATE_DEBOUNCE_MS milliseconds.
         """
+        # CRITICAL: Check for window close marker - trigger full refresh with flash
+        # When a window closes with unsaved changes, all fields that were inheriting
+        # from that window's live values need to revert and flash
+        if field_path and "__WINDOW_CLOSED__" in field_path:
+            logger.info(f"🔍 Window closed: {field_path} - triggering full refresh with flash")
+
+            # CRITICAL: Collect snapshot NOW (before form managers are unregistered)
+            # This snapshot has the edited values that are about to be discarded
+            from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+            self._window_close_before_snapshot = ParameterFormManager.collect_live_context()
+            logger.info(f"🔍 Collected window_close_before_snapshot: token={self._window_close_before_snapshot.token}")
+
+            # Clear pending state and trigger full refresh
+            # This will cause ALL items to refresh and flash if their resolved values changed
+            self._pending_preview_keys.clear()
+            self._pending_label_keys.clear()
+            self._pending_changed_fields.clear()
+            self._schedule_preview_update(full_refresh=True)
+            return
+
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
         target_keys, requires_full_refresh = self._resolve_scope_targets(scope_id)
 
@@ -340,9 +360,13 @@ class CrossWindowPreviewMixin:
         import logging
         logger = logging.getLogger(__name__)
 
+        logger.info(f"🔥 handle_cross_window_preview_refresh: editing_object={type(editing_object).__name__}, context_object={type(context_object).__name__ if context_object else None}")
+
         # Extract scope ID to determine which item needs refresh
         scope_id = self._extract_scope_id_for_preview(editing_object, context_object)
+        logger.info(f"🔥 handle_cross_window_preview_refresh: scope_id={scope_id}")
         target_keys, requires_full_refresh = self._resolve_scope_targets(scope_id)
+        logger.info(f"🔥 handle_cross_window_preview_refresh: target_keys={target_keys}, requires_full_refresh={requires_full_refresh}")
 
         if requires_full_refresh:
             self._pending_preview_keys.clear()
@@ -540,20 +564,43 @@ class CrossWindowPreviewMixin:
         attributes, subclasses can override _resolve_flash_field_value() to provide
         context-aware resolution (e.g., through LiveContextResolver).
 
+        CRITICAL: For nested dataclass fields (e.g., "well_filter_config.well_filter"),
+        this checks ALL fields on obj that are instances of or subclasses of the changed
+        config type. For example, if "well_filter_config.well_filter" changed, it will
+        check both "well_filter_config.well_filter" AND "step_well_filter_config.well_filter"
+        because StepWellFilterConfig inherits from WellFilterConfig.
+
         Args:
             obj_before: Preview instance before changes
             obj_after: Preview instance after changes
-            changed_fields: Set of field identifiers that changed
+            changed_fields: Set of field identifiers that changed (None = check all enabled preview fields)
             live_context_before: Live context snapshot before changes (for resolution)
             live_context_after: Live context snapshot after changes (for resolution)
 
         Returns:
             True if any resolved value changed
         """
-        if not changed_fields:
+        # If changed_fields is None, check ALL enabled preview fields (full refresh case)
+        if changed_fields is None:
+            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_value_changed: changed_fields=None, checking ALL enabled preview fields")
+            changed_fields = self.get_enabled_preview_fields()
+            if not changed_fields:
+                logger.info(f"🔍 {self.__class__.__name__}._check_resolved_value_changed: No enabled preview fields, returning False")
+                return False
+        elif not changed_fields:
+            logger.info(f"🔍 {self.__class__.__name__}._check_resolved_value_changed: Empty changed_fields, returning False")
             return False
 
-        for identifier in changed_fields:
+        logger.info(f"🔍 {self.__class__.__name__}._check_resolved_value_changed: Checking {len(changed_fields)} identifiers: {changed_fields}")
+
+        # Expand identifiers to include fields that inherit from the changed type
+        expanded_identifiers = self._expand_identifiers_for_inheritance(
+            obj_after, changed_fields, live_context_after
+        )
+
+        logger.info(f"🔍 _check_resolved_value_changed: Expanded to {len(expanded_identifiers)} identifiers: {expanded_identifiers}")
+
+        for identifier in expanded_identifiers:
             if not identifier:
                 continue
 
@@ -565,10 +612,140 @@ class CrossWindowPreviewMixin:
                 obj_after, identifier, live_context_after
             )
 
+            logger.info(f"🔍   identifier='{identifier}': before={before_value}, after={after_value}, changed={before_value != after_value}")
+
             if before_value != after_value:
+                logger.info(f"🔍 _check_resolved_value_changed: CHANGED! identifier='{identifier}'")
                 return True
 
+        logger.info("🔍 _check_resolved_value_changed: No changes detected, returning False")
         return False
+
+    def _expand_identifiers_for_inheritance(
+        self,
+        obj: Any,
+        changed_fields: Set[str],
+        live_context_snapshot,
+    ) -> Set[str]:
+        """Expand field identifiers to include fields that inherit from changed types.
+
+        For example, if "well_filter_config.well_filter" changed, and obj has a field
+        "step_well_filter_config" that is a subclass of WellFilterConfig, this will
+        add "step_well_filter_config.well_filter" to the set.
+
+        Only checks fields that could possibly be affected - i.e., dataclass fields on obj
+        that are instances of (or subclasses of) the changed config type.
+
+        Args:
+            obj: Object to check for inheriting fields (e.g., Step preview instance)
+            changed_fields: Original set of changed field identifiers
+            live_context_snapshot: Live context for type resolution
+            original_obj: Original object before live context merge (to check for override values)
+
+        Returns:
+            Expanded set of identifiers including inherited fields
+        """
+        from dataclasses import fields as dataclass_fields, is_dataclass
+
+        expanded = set(changed_fields)
+
+        logger.info(f"🔍 _expand_identifiers_for_inheritance: obj type={type(obj).__name__}")
+
+        # For each changed field, check if it's a nested dataclass field
+        for identifier in changed_fields:
+            if "." not in identifier:
+                # Simple field name - could be either:
+                # 1. A dataclass attribute on obj (e.g., "napari_streaming_config")
+                # 2. A simple field name (e.g., "well_filter", "enabled")
+
+                # Case 1: Check if identifier is a dataclass attribute on obj
+                # DON'T expand to all fields - just keep the whole dataclass identifier
+                # The comparison will handle checking if the dataclass changed
+                try:
+                    attr_value = getattr(obj, identifier, None)
+                    if attr_value is not None and is_dataclass(attr_value):
+                        # This is a whole dataclass - don't expand, just continue
+                        # We'll compare the whole dataclass object in _check_resolved_value_changed
+                        continue
+                except (AttributeError, Exception):
+                    pass
+
+                # Case 2: Check ALL dataclass attributes on obj for this simple field name
+                for attr_name in dir(obj):
+                    if attr_name.startswith('_'):
+                        continue
+                    try:
+                        attr_value = getattr(obj, attr_name, None)
+                    except (AttributeError, Exception):
+                        continue
+                    if attr_value is None or not is_dataclass(attr_value):
+                        continue
+                    # Check if this dataclass has the simple field
+                    if hasattr(attr_value, identifier):
+                        expanded_identifier = f"{attr_name}.{identifier}"
+                        if expanded_identifier not in expanded:
+                            expanded.add(expanded_identifier)
+                            logger.info(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' (dataclass has field '{identifier}')")
+                continue
+
+            # Parse identifier: "well_filter_config.well_filter" -> ("well_filter_config", "well_filter")
+            parts = identifier.split(".", 1)
+            if len(parts) != 2:
+                continue
+
+            config_field_name = parts[0]
+            nested_attr = parts[1]
+
+            # Find ALL attributes on obj that have the nested attribute
+            # This works even if obj doesn't have the config_field_name itself
+            # For example, Step doesn't have "well_filter_config" but has "step_well_filter_config"
+            # which also has a "well_filter" attribute
+            for attr_name in dir(obj):
+                # Skip private/magic attributes
+                if attr_name.startswith('_'):
+                    continue
+
+                # Get the actual attribute value from obj
+                try:
+                    attr_value = getattr(obj, attr_name, None)
+                except (AttributeError, Exception):
+                    continue
+
+                if attr_value is None or not is_dataclass(attr_value):
+                    continue
+
+                # Check if this attribute has the nested attribute
+                if not hasattr(attr_value, nested_attr):
+                    continue
+
+
+
+                # Add the expanded identifier
+                expanded_identifier = f"{attr_name}.{nested_attr}"
+                if expanded_identifier not in expanded:
+                    expanded.add(expanded_identifier)
+                    logger.info(f"🔍 Expanded '{identifier}' to include '{expanded_identifier}' (field has attribute '{nested_attr}' with None value, will inherit)")
+
+        return expanded
+
+    def _build_flash_context_stack(
+        self,
+        obj: Any,
+        live_context_snapshot,
+    ) -> Optional[list]:
+        """Build context stack for flash resolution.
+
+        Subclasses can override to provide context-aware resolution through
+        config hierarchy (e.g., GlobalPipelineConfig → PipelineConfig → Step).
+
+        Args:
+            obj: Object to build context stack for (preview instance)
+            live_context_snapshot: Live context snapshot for resolution
+
+        Returns:
+            List of context objects for resolution, or None to use simple walk
+        """
+        return None  # Base implementation: no context resolution
 
     def _resolve_flash_field_value(
         self,
@@ -578,8 +755,8 @@ class CrossWindowPreviewMixin:
     ) -> Any:
         """Resolve a field identifier for flash detection.
 
-        Base implementation: simple walk of object graph.
-        Subclasses can override to provide context-aware resolution.
+        Uses context-aware resolution if subclass provides context stack,
+        otherwise falls back to simple object graph walk.
 
         Args:
             obj: Object to resolve field from (preview instance)
@@ -589,7 +766,77 @@ class CrossWindowPreviewMixin:
         Returns:
             Resolved field value
         """
+        # Try context-aware resolution first
+        context_stack = self._build_flash_context_stack(obj, live_context_snapshot)
+
+        if context_stack:
+            # Resolve through context hierarchy
+            return self._resolve_through_context_stack(
+                obj, identifier, context_stack, live_context_snapshot
+            )
+
+        # Fallback to simple walk
         return self._walk_object_path(obj, identifier)
+
+    def _resolve_through_context_stack(
+        self,
+        obj: Any,
+        identifier: str,
+        context_stack: list,
+        live_context_snapshot,
+    ) -> Any:
+        """Resolve field through context stack using LiveContextResolver.
+
+        Args:
+            obj: Object to resolve field from
+            identifier: Dot-separated field path (e.g., "napari_streaming_config.enabled")
+            context_stack: List of context objects for resolution
+            live_context_snapshot: Live context snapshot
+
+        Returns:
+            Resolved field value
+        """
+        from openhcs.config_framework import LiveContextResolver
+
+        # Get or create resolver instance
+        resolver = getattr(self, '_live_context_resolver', None)
+        if resolver is None:
+            resolver = LiveContextResolver()
+
+        # Parse identifier into object path and attribute name
+        # e.g., "napari_streaming_config.enabled" → walk to napari_streaming_config, resolve "enabled"
+        parts = [p for p in identifier.split(".") if p]
+        if not parts:
+            return None
+
+        # Walk to the config object (all parts except last)
+        config_obj = obj
+        for part in parts[:-1]:
+            if config_obj is None:
+                return None
+            try:
+                config_obj = getattr(config_obj, part)
+            except AttributeError:
+                return None
+
+        # Resolve the final attribute through context
+        attr_name = parts[-1]
+
+        try:
+            live_context_values = live_context_snapshot.values if hasattr(live_context_snapshot, 'values') else {}
+            cache_token = live_context_snapshot.token if hasattr(live_context_snapshot, 'token') else 0
+
+            resolved_value = resolver.resolve_config_attr(
+                config_obj=config_obj,
+                attr_name=attr_name,
+                context_stack=context_stack,
+                live_context=live_context_values,
+                cache_token=cache_token
+            )
+            return resolved_value
+        except Exception:
+            # Fallback to simple getattr
+            return self._walk_object_path(obj, identifier)
 
     def _walk_object_path(self, obj: Any, path: str) -> Any:
         """Walk object graph using dotted path notation.

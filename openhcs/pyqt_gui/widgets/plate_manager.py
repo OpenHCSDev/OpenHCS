@@ -311,7 +311,9 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             return
 
         # Copy changed fields before clearing
+        logger.info(f"🔍 PlateManager._process_pending_preview_updates: _pending_changed_fields={self._pending_changed_fields}")
         changed_fields = set(self._pending_changed_fields) if self._pending_changed_fields else None
+        logger.info(f"🔍 PlateManager._process_pending_preview_updates: changed_fields={changed_fields}")
 
         # Get current live context snapshot
         from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
@@ -333,10 +335,44 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
         self._pending_changed_fields.clear()
 
     def _handle_full_preview_refresh(self) -> None:
-        """Fallback when incremental updates not possible - NO flash (used for window close/reset)."""
-        # Full refresh does NOT flash - it's just reverting to saved values
-        # Flash only happens in incremental updates where we know what changed
-        self.update_plate_list()
+        """Handle full refresh WITH flash (used for window close/reset events).
+
+        When a window closes with unsaved changes or reset is clicked, values revert
+        to saved state and should flash to indicate the change.
+        """
+        from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
+        # Get current live context (after window close/reset)
+        live_context_after = ParameterFormManager.collect_live_context()
+
+        # Use saved snapshot if available (from window close), otherwise use last snapshot
+        live_context_before = getattr(self, '_window_close_before_snapshot', None) or self._last_live_context_snapshot
+
+        # Get the user-modified fields from the closed window (if available)
+        modified_fields = getattr(self, '_window_close_modified_fields', None)
+
+        # Clear the saved snapshot and modified fields after using them
+        if hasattr(self, '_window_close_before_snapshot'):
+            delattr(self, '_window_close_before_snapshot')
+        if hasattr(self, '_window_close_modified_fields'):
+            delattr(self, '_window_close_modified_fields')
+
+        # Update last snapshot for next comparison
+        self._last_live_context_snapshot = live_context_after
+
+        # Refresh ALL plates with flash detection
+        # Pass the modified fields from the closed window (or None for reset events)
+        for i in range(self.plate_list.count()):
+            item = self.plate_list.item(i)
+            plate_data = item.data(Qt.ItemDataRole.UserRole)
+            if plate_data:
+                plate_path = plate_data.get('path')
+                if plate_path:
+                    self._update_single_plate_item(
+                        plate_path,
+                        changed_fields=modified_fields,  # Only check modified fields from closed window
+                        live_context_before=live_context_before
+                    )
 
     def _update_single_plate_item(self, plate_path: str, changed_fields: Optional[Set[str]] = None, live_context_before=None):
         """Update a single plate item's preview text without rebuilding the list.
@@ -353,13 +389,47 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
             if plate_data and plate_data.get('path') == plate_path:
                 # Rebuild just this item's display text
                 plate = plate_data
+
+                # Get orchestrator and pipeline configs (before and after)
+                orchestrator = self.orchestrators.get(plate_path)
+                if not orchestrator:
+                    break
+
+                from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+                live_context_after = ParameterFormManager.collect_live_context(scope_filter=plate_path)
+
+                from openhcs.core.config import PipelineConfig
+                config_before = self._get_preview_instance(
+                    obj=orchestrator.pipeline_config,
+                    live_context_snapshot=live_context_before,
+                    scope_id=str(plate_path),
+                    obj_type=PipelineConfig
+                ) if live_context_before else None
+
+                config_after = self._get_preview_instance(
+                    obj=orchestrator.pipeline_config,
+                    live_context_snapshot=live_context_after,
+                    scope_id=str(plate_path),
+                    obj_type=PipelineConfig
+                )
+
                 display_text = self._format_plate_item_with_preview(plate)
 
                 # Reapply scope-based styling BEFORE flash (so flash color isn't overwritten)
                 self._apply_orchestrator_item_styling(item, plate)
 
-                # ALWAYS flash on incremental update (no filtering for now)
-                self._flash_plate_item(plate_path)
+                # Only flash if resolved values actually changed
+                should_flash = self._check_resolved_value_changed(
+                    config_before,
+                    config_after,
+                    changed_fields,
+                    live_context_before=live_context_before,
+                    live_context_after=live_context_after
+                )
+
+                if should_flash:
+                    logger.info(f"✨ FLASHING plate {plate_path} (resolved values changed)")
+                    self._flash_plate_item(plate_path)
 
                 item.setText(display_text)
                 # Height is automatically calculated by MultilinePreviewItemDelegate.sizeHint()
@@ -599,6 +669,30 @@ class PlateManagerWidget(QWidget, CrossWindowPreviewMixin):
 
         # Create new instance with merged values
         return type(obj)(**merged_values)
+
+    def _build_flash_context_stack(self, obj: Any, live_context_snapshot) -> Optional[list]:
+        """Build context stack for flash resolution.
+
+        Builds: GlobalPipelineConfig → PipelineConfig
+
+        Args:
+            obj: PipelineConfig object (preview instance with live values merged)
+            live_context_snapshot: Live context snapshot
+
+        Returns:
+            Context stack for resolution
+        """
+        from openhcs.config_framework.global_config import get_current_global_config
+
+        try:
+            # Build context stack: GlobalPipelineConfig → PipelineConfig
+            # obj is already the pipeline_config_for_display (with live values merged)
+            return [
+                get_current_global_config(GlobalPipelineConfig),
+                obj  # The pipeline config (preview instance)
+            ]
+        except Exception:
+            return None
 
     def _resolve_config_attr(self, pipeline_config_for_display, config: object, attr_name: str,
                              live_context_snapshot=None) -> object:

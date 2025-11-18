@@ -35,6 +35,8 @@ class LiveContextResolver:
 
     def __init__(self):
         self._resolved_value_cache: Dict[Tuple, Any] = {}
+        # Cache merged contexts to avoid creating new dataclass instances
+        self._merged_context_cache: Dict[Tuple, Any] = {}
 
     def resolve_config_attr(
         self,
@@ -77,9 +79,108 @@ class LiveContextResolver:
 
         return resolved_value
 
+    def resolve_all_config_attrs(
+        self,
+        config_obj: object,
+        attr_names: list[str],
+        context_stack: list,
+        live_context: Dict[Type, Dict[str, Any]],
+        cache_token: int
+    ) -> Dict[str, Any]:
+        """
+        Resolve multiple config attributes in one shot (O(1) context setup).
+
+        This is MUCH faster than calling resolve_config_attr() for each attribute
+        because we only build the merged context once and resolve all attributes
+        within that context.
+
+        Args:
+            config_obj: Config object to resolve attributes on
+            attr_names: List of attribute names to resolve
+            context_stack: List of context objects (outermost to innermost)
+            live_context: Dict mapping config types to field values
+            cache_token: Current token for cache invalidation
+
+        Returns:
+            Dict mapping attribute names to resolved values
+        """
+        # Check which attributes are already cached
+        context_ids = tuple(id(ctx) for ctx in context_stack)
+        results = {}
+        uncached_attrs = []
+
+        for attr_name in attr_names:
+            cache_key = (id(config_obj), attr_name, context_ids, cache_token)
+            if cache_key in self._resolved_value_cache:
+                results[attr_name] = self._resolved_value_cache[cache_key]
+            else:
+                uncached_attrs.append(attr_name)
+
+        # If all cached, return immediately
+        if not uncached_attrs:
+            return results
+
+        # Resolve all uncached attributes in one context setup
+        # Build merged contexts once (reuse existing _resolve_uncached logic)
+        # Make live_context hashable (same logic as _resolve_uncached)
+        def make_hashable(obj):
+            if isinstance(obj, dict):
+                return tuple(sorted((str(k), make_hashable(v)) for k, v in obj.items()))
+            elif isinstance(obj, list):
+                return tuple(make_hashable(item) for item in obj)
+            elif isinstance(obj, set):
+                return tuple(sorted(str(make_hashable(item)) for item in obj))
+            elif isinstance(obj, (int, str, float, bool, type(None))):
+                return obj
+            else:
+                return str(obj)
+
+        live_context_key = tuple(
+            (str(type_key), make_hashable(values))
+            for type_key, values in sorted(live_context.items(), key=lambda x: str(x[0]))
+        )
+        merged_cache_key = (context_ids, live_context_key)
+
+        if merged_cache_key in self._merged_context_cache:
+            merged_contexts = self._merged_context_cache[merged_cache_key]
+        else:
+            # Merge live values into each context object
+            merged_contexts = [
+                self._merge_live_values(ctx, live_context.get(type(ctx)))
+                for ctx in context_stack
+            ]
+            self._merged_context_cache[merged_cache_key] = merged_contexts
+
+        # Resolve all uncached attributes in one nested context
+        # Build nested context managers once, then resolve all attributes
+        from openhcs.config_framework.context_manager import config_context
+
+        def resolve_all_in_context(contexts_remaining):
+            if not contexts_remaining:
+                # Innermost level - get all attributes
+                return {attr_name: getattr(config_obj, attr_name) for attr_name in uncached_attrs}
+
+            # Enter context and recurse
+            ctx = contexts_remaining[0]
+            with config_context(ctx):
+                return resolve_all_in_context(contexts_remaining[1:])
+
+        uncached_results = resolve_all_in_context(merged_contexts) if merged_contexts else {
+            attr_name: getattr(config_obj, attr_name) for attr_name in uncached_attrs
+        }
+
+        # Cache and merge results
+        for attr_name, value in uncached_results.items():
+            cache_key = (id(config_obj), attr_name, context_ids, cache_token)
+            self._resolved_value_cache[cache_key] = value
+            results[attr_name] = value
+
+        return results
+
     def invalidate(self) -> None:
         """Invalidate all caches."""
         self._resolved_value_cache.clear()
+        self._merged_context_cache.clear()
 
     def reconstruct_live_values(self, live_values: Dict[str, Any]) -> Dict[str, Any]:
         """Materialize live values by reconstructing nested dataclasses."""
@@ -99,11 +200,42 @@ class LiveContextResolver:
         live_context: Dict[Type, Dict[str, Any]]
     ) -> Any:
         """Resolve config attribute through context hierarchy (uncached)."""
-        # Merge live values into each context object
-        merged_contexts = [
-            self._merge_live_values(ctx, live_context.get(type(ctx)))
-            for ctx in context_stack
-        ]
+        # CRITICAL OPTIMIZATION: Cache merged contexts to avoid creating new dataclass instances
+        # Build cache key for merged contexts
+        context_ids = tuple(id(ctx) for ctx in context_stack)
+
+        # Make live_context hashable by converting lists to tuples recursively
+        def make_hashable(obj):
+            if isinstance(obj, dict):
+                # Sort by string representation of keys to handle unhashable keys
+                return tuple(sorted((str(k), make_hashable(v)) for k, v in obj.items()))
+            elif isinstance(obj, list):
+                return tuple(make_hashable(item) for item in obj)
+            elif isinstance(obj, set):
+                return tuple(sorted(str(make_hashable(item)) for item in obj))
+            elif isinstance(obj, (int, str, float, bool, type(None))):
+                return obj
+            else:
+                # For other types (enums, objects, etc.), use string representation
+                return str(obj)
+
+        live_context_key = tuple(
+            (str(type_key), make_hashable(values))  # Convert type to string for hashability
+            for type_key, values in sorted(live_context.items(), key=lambda x: str(x[0]))
+        )
+        merged_cache_key = (context_ids, live_context_key)
+
+        # Check merged context cache
+        if merged_cache_key in self._merged_context_cache:
+            merged_contexts = self._merged_context_cache[merged_cache_key]
+        else:
+            # Merge live values into each context object
+            merged_contexts = [
+                self._merge_live_values(ctx, live_context.get(type(ctx)))
+                for ctx in context_stack
+            ]
+            # Store in cache
+            self._merged_context_cache[merged_cache_key] = merged_contexts
 
         # Resolve through nested context stack
         return self._resolve_through_contexts(merged_contexts, config_obj, attr_name)
