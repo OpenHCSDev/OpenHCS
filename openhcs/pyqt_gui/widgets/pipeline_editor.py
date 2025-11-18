@@ -495,11 +495,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # IMPORTANT: Check the ORIGINAL step, not step_for_display (which has live values merged)
         from openhcs.pyqt_gui.widgets.config_preview_formatters import check_step_has_unsaved_changes
 
-        logger.info(f"🔍 _format_resolved_step_for_display: About to check unsaved changes for step '{step_name}'")
-        logger.info(f"🔍 _format_resolved_step_for_display: original_step type={type(original_step)}, has step_materialization_config={hasattr(original_step, 'step_materialization_config')}")
-        if hasattr(original_step, 'step_materialization_config'):
-            logger.info(f"🔍 _format_resolved_step_for_display: original_step.step_materialization_config={original_step.step_materialization_config}")
-
         def resolve_attr(parent_obj, config_obj, attr_name, context):
             return self._resolve_config_attr(original_step, config_obj, attr_name, context)
 
@@ -510,8 +505,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             live_context_snapshot,
             scope_filter=self.current_plate  # CRITICAL: Pass scope filter
         )
-
-        logger.info(f"🔍 _format_resolved_step_for_display: has_unsaved={has_unsaved} for step '{step_name}'")
 
         # Add unsaved changes marker to step name if needed
         display_step_name = f"{step_name}†" if has_unsaved else step_name
@@ -1311,14 +1304,11 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         if not self.current_plate:
             return
         live_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=self.current_plate)
-        logger.info(f"🔥 Collected live_context_snapshot with token={live_context_snapshot.token}, active_managers={len(ParameterFormManager._active_form_managers)}")
 
         indices = sorted(
             idx for idx in self._pending_preview_keys if isinstance(idx, int)
         )
         label_indices = {idx for idx in self._pending_label_keys if isinstance(idx, int)}
-
-        logger.info(f"🔥 Computed indices={indices}, label_indices={label_indices}")
 
         # Copy changed fields before clearing
         changed_fields = set(self._pending_changed_fields) if self._pending_changed_fields else None
@@ -1330,9 +1320,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # We want to keep the original "before" state across multiple edits in the same editing session.
         # Only update it when the editing session ends (window close, focus change, etc.)
         # This allows flash detection to work for ALL changes in a session, not just the first one.
-
-        # Debug logging
-        logger.info(f"🔍 Pipeline Editor incremental update: indices={indices}, changed_fields={changed_fields}, has_before={live_context_before is not None}")
 
         # Clear pending updates
         self._pending_preview_keys.clear()
@@ -1371,18 +1358,13 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # Use saved "before" snapshot if available (from window close), otherwise use last snapshot
         live_context_before = getattr(self, '_window_close_before_snapshot', None) or self._last_live_context_snapshot
 
-        logger.info(f"🔍 _handle_full_preview_refresh: before_token={live_context_before.token if live_context_before else None}, after_token={live_context_after.token}")
-
         # Get the user-modified fields from the closed window (if available)
         modified_fields = getattr(self, '_window_close_modified_fields', None)
-        logger.info(f"🔍 Window close modified fields: {modified_fields}")
 
         # Clear the saved snapshots and modified fields after using them
         if hasattr(self, '_window_close_before_snapshot'):
-            logger.info(f"🔍 Using saved _window_close_before_snapshot")
             delattr(self, '_window_close_before_snapshot')
         if hasattr(self, '_window_close_after_snapshot'):
-            logger.info(f"🔍 Using saved _window_close_after_snapshot")
             delattr(self, '_window_close_after_snapshot')
         if hasattr(self, '_window_close_modified_fields'):
             delattr(self, '_window_close_modified_fields')
@@ -1404,7 +1386,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                 scope_ids = list(scoped_values_before.keys())
                 if len(scope_ids) == 1:
                     window_close_scope_id = scope_ids[0]
-                    logger.info(f"🔍 _handle_full_preview_refresh: Detected window close for scope_id={window_close_scope_id}")
 
                     # Check if this is a step scope (contains '::') or a plate scope (no '::')
                     if '::' in window_close_scope_id:
@@ -1413,13 +1394,7 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
                             step_scope_id = self._build_step_scope_id(step)
                             if step_scope_id == window_close_scope_id:
                                 indices_to_check = [idx]
-                                logger.info(f"🔍 _handle_full_preview_refresh: Only checking step index {idx} for window close flash")
                                 break
-                    else:
-                        # Plate scope (PipelineConfig) - check ALL steps
-                        logger.info(f"🔍 _handle_full_preview_refresh: Plate scope detected, checking ALL {len(indices_to_check)} steps")
-
-        logger.info(f"🔍 Full refresh: refreshing {len(indices_to_check)} steps with flash detection")
 
         self._refresh_step_items_by_index(
             indices_to_check,
@@ -1495,66 +1470,12 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
             step_after_instances.append(step_after)
 
         # Batch check which steps should flash
-        logger.info(f"🔍 _handle_full_preview_refresh: Checking {len(step_pairs)} step pairs for flash")
-        logger.info(f"🔍 _handle_full_preview_refresh: changed_fields={changed_fields}")
-
-        # DEBUG: Check what the orchestrator's saved PipelineConfig has
-        if self.current_plate and hasattr(self, 'plate_manager'):
-            orchestrator = self.plate_manager.orchestrators.get(self.current_plate)
-            if orchestrator:
-                saved_wfc = getattr(orchestrator.pipeline_config, 'well_filter_config', None)
-                logger.info(f"🔍 _handle_full_preview_refresh: Orchestrator's SAVED well_filter_config = {saved_wfc}")
-
-                # Check what's in the live context snapshots
-                if live_context_before:
-                    scoped_before = getattr(live_context_before, 'scoped_values', {})
-                    logger.info(f"🔍 _handle_full_preview_refresh: live_context_before scoped_values has plate scope? {self.current_plate in scoped_before}")
-                    if self.current_plate in scoped_before:
-                        from openhcs.core.config import PipelineConfig
-                        has_pc = PipelineConfig in scoped_before[self.current_plate]
-                        logger.info(f"🔍 _handle_full_preview_refresh: live_context_before scoped_values[plate] has PipelineConfig? {has_pc}")
-
-                if live_context_snapshot:
-                    scoped_after = getattr(live_context_snapshot, 'scoped_values', {})
-                    logger.info(f"🔍 _handle_full_preview_refresh: live_context_after scoped_values has plate scope? {self.current_plate in scoped_after}")
-                    if self.current_plate in scoped_after:
-                        from openhcs.core.config import PipelineConfig
-                        has_pc = PipelineConfig in scoped_after[self.current_plate]
-                        logger.info(f"🔍 _handle_full_preview_refresh: live_context_after scoped_values[plate] has PipelineConfig? {has_pc}")
-
-        if step_pairs and step_items:
-            step = step_items[0][2]  # Get first step
-            scope_id = self._build_step_scope_id(step)
-            logger.info(f"🔍 _handle_full_preview_refresh: First step type={type(step).__name__}, scope_id={scope_id}")
-
-            # Check what's in the snapshots
-            if live_context_before:
-                scoped_values_before = getattr(live_context_before, 'scoped_values', {})
-                logger.info(f"🔍 _handle_full_preview_refresh: live_context_before scoped_values keys: {list(scoped_values_before.keys())}")
-                scope_entries_before = scoped_values_before.get(scope_id, {})
-                step_values_before = scope_entries_before.get(type(step))
-                logger.info(f"🔍 _handle_full_preview_refresh: live_context_before has step values for scope_id={scope_id}? {step_values_before is not None}")
-                if step_values_before:
-                    logger.info(f"🔍 _handle_full_preview_refresh: step_values_before keys: {list(step_values_before.keys())}")
-
-            if live_context_snapshot:
-                scoped_values_after = getattr(live_context_snapshot, 'scoped_values', {})
-                logger.info(f"🔍 _handle_full_preview_refresh: live_context_after scoped_values keys: {list(scoped_values_after.keys())}")
-                scope_entries_after = scoped_values_after.get(scope_id, {})
-                step_values_after = scope_entries_after.get(type(step))
-                logger.info(f"🔍 _handle_full_preview_refresh: live_context_after has step values for scope_id={scope_id}? {step_values_after is not None}")
-                if step_values_after:
-                    logger.info(f"🔍 _handle_full_preview_refresh: step_values_after keys: {list(step_values_after.keys())}")
-
-            logger.info(f"🔍 _handle_full_preview_refresh: step_pairs[0] before={step_pairs[0][0]}, after={step_pairs[0][1]}")
-            logger.info(f"🔍 _handle_full_preview_refresh: Are they the same object? {step_pairs[0][0] is step_pairs[0][1]}")
         should_flash_list = self._check_resolved_values_changed_batch(
             step_pairs,
             changed_fields,
             live_context_before=live_context_before,
             live_context_after=live_context_snapshot
         )
-        logger.info(f"🔍 _handle_full_preview_refresh: Batch flash check complete")
 
         # PHASE 1: Update all labels and styling (this is the slow part - formatting)
         # Do this BEFORE triggering flashes so all flashes start simultaneously
@@ -1594,7 +1515,6 @@ class PipelineEditorWidget(QWidget, CrossWindowPreviewMixin):
         # This ensures subsequent edits trigger flashes correctly
         # Only update if we have a new snapshot (not None)
         if live_context_snapshot is not None:
-            logger.info(f"🔍 Updating _last_live_context_snapshot: old_token={self._last_live_context_snapshot.token if self._last_live_context_snapshot else None}, new_token={live_context_snapshot.token}")
             self._last_live_context_snapshot = live_context_snapshot
 
     def _apply_step_item_styling(self, item: QListWidgetItem) -> None:

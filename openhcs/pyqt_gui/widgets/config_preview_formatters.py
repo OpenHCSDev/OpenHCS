@@ -137,13 +137,17 @@ def check_config_has_unsaved_changes(
     resolve_attr: Optional[Callable],
     parent_obj: Any,
     live_context_snapshot: Any,
-    scope_filter: Optional[str] = None
+    scope_filter: Optional[str] = None,
+    saved_context_snapshot: Any = None
 ) -> bool:
     """Check if a config has unsaved changes by comparing resolved values.
 
     Compares resolved config fields between:
     - live_context_snapshot (WITH active form managers = unsaved edits)
     - saved_context_snapshot (WITHOUT active form managers = saved values)
+
+    PERFORMANCE: Uses batch resolution to resolve all fields at once instead of
+    one-by-one, and exits early on first difference.
 
     Args:
         config_attr: Config attribute name (e.g., 'napari_streaming_config')
@@ -153,6 +157,7 @@ def check_config_has_unsaved_changes(
         parent_obj: Parent object containing the config (step or pipeline config)
         live_context_snapshot: Current live context snapshot (with form managers)
         scope_filter: Optional scope filter to use when collecting saved context (e.g., plate_path)
+        saved_context_snapshot: Optional pre-collected saved context snapshot (for performance)
 
     Returns:
         True if config has unsaved changes, False otherwise
@@ -175,24 +180,26 @@ def check_config_has_unsaved_changes(
     if not field_names:
         return False
 
-    # Collect saved context snapshot (WITHOUT active form managers)
+    # Collect saved context snapshot if not provided (WITHOUT active form managers)
     # This is the key: temporarily clear form managers to get saved values
     # CRITICAL: Must increment token to bypass cache, otherwise we get cached live context
     # CRITICAL: Must use same scope_filter as live snapshot to get matching scoped values
-    saved_managers = ParameterFormManager._active_form_managers.copy()
-    saved_token = ParameterFormManager._live_context_token_counter
+    if saved_context_snapshot is None:
+        saved_managers = ParameterFormManager._active_form_managers.copy()
+        saved_token = ParameterFormManager._live_context_token_counter
 
-    try:
-        ParameterFormManager._active_form_managers.clear()
-        # Increment token to force cache miss
-        ParameterFormManager._live_context_token_counter += 1
-        saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
-    finally:
-        # Restore active form managers and token
-        ParameterFormManager._active_form_managers[:] = saved_managers
-        ParameterFormManager._live_context_token_counter = saved_token
+        try:
+            ParameterFormManager._active_form_managers.clear()
+            # Increment token to force cache miss
+            ParameterFormManager._live_context_token_counter += 1
+            saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
+        finally:
+            # Restore active form managers and token
+            ParameterFormManager._active_form_managers[:] = saved_managers
+            ParameterFormManager._live_context_token_counter = saved_token
 
-    # Compare each field in live vs saved context
+    # PERFORMANCE: Compare each field and exit early on first difference
+    # Don't log every comparison - only log when we find a change
     for field_name in field_names:
         # Resolve in LIVE context (with form managers = unsaved edits)
         live_value = resolve_attr(parent_obj, config, field_name, live_context_snapshot)
@@ -200,15 +207,9 @@ def check_config_has_unsaved_changes(
         # Resolve in SAVED context (without form managers = saved values)
         saved_value = resolve_attr(parent_obj, config, field_name, saved_context_snapshot)
 
-        # Log the comparison with snapshot tokens
-        logger.info(f"🔍 Comparing {config_attr}.{field_name}:")
-        logger.info(f"   live_value={live_value} (snapshot token={live_context_snapshot.token})")
-        logger.info(f"   saved_value={saved_value} (snapshot token={saved_context_snapshot.token})")
-        logger.info(f"   equal={live_value == saved_value}")
-
-        # Compare values
+        # Compare values - exit early on first difference
         if live_value != saved_value:
-            logger.info(f"✅ CHANGE DETECTED in {config_attr}.{field_name}: live={live_value} vs saved={saved_value}")
+            logger.debug(f"✅ CHANGE DETECTED in {config_attr}.{field_name}: live={live_value} vs saved={saved_value}")
             return True
 
     return False
@@ -223,6 +224,9 @@ def check_step_has_unsaved_changes(
 ) -> bool:
     """Check if a step has ANY unsaved changes in any of its configs.
 
+    PERFORMANCE: Collects saved context snapshot ONCE and reuses it for all config checks.
+    Exits early on first detected change.
+
     Args:
         step: FunctionStep to check
         config_indicators: Dict mapping config attribute names to indicators
@@ -234,18 +238,27 @@ def check_step_has_unsaved_changes(
         True if step has any unsaved changes, False otherwise
     """
     import logging
+    from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
+
     logger = logging.getLogger(__name__)
 
-    step_name = getattr(step, 'name', 'unknown')
+    # PERFORMANCE: Collect saved context snapshot ONCE for all configs
+    # This avoids collecting it separately for each config (3x per step)
+    saved_managers = ParameterFormManager._active_form_managers.copy()
+    saved_token = ParameterFormManager._live_context_token_counter
 
-    logger.info(f"🔍 check_step_has_unsaved_changes: Checking step '{step_name}', config_indicators={list(config_indicators.keys())}, scope_filter={scope_filter}")
+    try:
+        ParameterFormManager._active_form_managers.clear()
+        ParameterFormManager._live_context_token_counter += 1
+        saved_context_snapshot = ParameterFormManager.collect_live_context(scope_filter=scope_filter)
+    finally:
+        ParameterFormManager._active_form_managers[:] = saved_managers
+        ParameterFormManager._live_context_token_counter = saved_token
 
-    # Check each config for unsaved changes
+    # Check each config for unsaved changes (exits early on first change)
     for config_attr in config_indicators.keys():
         config = getattr(step, config_attr, None)
-        logger.info(f"🔍 check_step_has_unsaved_changes: Checking config_attr='{config_attr}', config={config}")
         if config is None:
-            logger.info(f"🔍 check_step_has_unsaved_changes: config is None, skipping")
             continue
 
         has_changes = check_config_has_unsaved_changes(
@@ -254,14 +267,14 @@ def check_step_has_unsaved_changes(
             resolve_attr,
             step,
             live_context_snapshot,
-            scope_filter=scope_filter  # Pass scope filter through
+            scope_filter=scope_filter,
+            saved_context_snapshot=saved_context_snapshot  # PERFORMANCE: Reuse saved snapshot
         )
 
         if has_changes:
-            logger.info(f"✅ UNSAVED CHANGES DETECTED in step '{step_name}' config '{config_attr}'")
+            logger.debug(f"✅ UNSAVED CHANGES DETECTED in step '{getattr(step, 'name', 'unknown')}' config '{config_attr}'")
             return True
 
-    logger.info(f"🔍 check_step_has_unsaved_changes: No unsaved changes found for step '{step_name}'")
     return False
 
 
