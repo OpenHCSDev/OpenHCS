@@ -2,7 +2,7 @@
 Scope-Based Visual Feedback System
 ====================================
 
-*Module: openhcs.pyqt_gui.widgets.shared.scope_visual_config, scope_color_utils, list_item_flash_animation, widget_flash_animation*  
+*Module: openhcs.pyqt_gui.widgets.shared.scope_visual_config, scope_color_utils, list_item_flash_animation, widget_flash_animation, tree_item_flash_animation, tree_form_flash_mixin*
 *Status: STABLE*
 
 ---
@@ -750,20 +750,103 @@ List items (orchestrators and steps) flash by temporarily increasing background 
 Widget Flash
 ------------
 
-Form widgets (QLineEdit, QComboBox, etc.) flash using QPalette manipulation:
+Form widgets (QLineEdit, QComboBox, etc.) and GroupBoxes flash to indicate value changes:
 
 .. code-block:: python
 
    from openhcs.pyqt_gui.widgets.shared.widget_flash_animation import flash_widget
+   from PyQt6.QtGui import QColor
 
-   # Flash widget to indicate inherited value update
+   # Flash widget to indicate inherited value update (default color)
    flash_widget(line_edit)
+
+   # Flash GroupBox with custom scope border color
+   flash_widget(group_box, flash_color=QColor(255, 100, 50, 180))
 
 **Flash mechanism**:
 
-1. Store original palette
-2. Apply light green flash color (144, 238, 144 RGB at 100 alpha)
-3. Restore original palette after 300ms
+1. **For input widgets** (QLineEdit, QComboBox, etc.): Uses QPalette manipulation
+
+   - Store original palette
+   - Apply flash color to Base role
+   - Restore original palette after 300ms
+
+2. **For GroupBox widgets**: Uses stylesheet manipulation (stylesheets override palettes)
+
+   - Store original stylesheet
+   - Apply flash color via ``QGroupBox { background-color: rgba(...); }``
+   - Restore original stylesheet after 300ms
+
+**Global registry**: All flash animators use a global registry keyed by widget ID to prevent overlapping flashes. If a widget is already flashing, the timer is restarted instead of creating a new animator.
+
+**Custom colors**: The ``flash_color`` parameter allows using scope-specific border colors for visual consistency with window borders.
+
+Tree Item Flash
+---------------
+
+Tree items (QTreeWidgetItem) flash with both background color and bold font for visibility:
+
+.. code-block:: python
+
+   from openhcs.pyqt_gui.widgets.shared.tree_item_flash_animation import flash_tree_item
+   from PyQt6.QtGui import QColor
+
+   # Flash tree item with scope border color
+   flash_tree_item(
+       tree_widget=self.hierarchy_tree,
+       item=tree_item,
+       flash_color=QColor(255, 100, 50, 200)
+   )
+
+**Flash mechanism**:
+
+1. Store original background and font
+2. Apply flash color to background AND make font bold
+3. Force tree widget viewport update
+4. Restore original background and font after 300ms
+
+**Design**: Flash animators do NOT store item references (items can be destroyed during flash). Instead, they store ``(tree_widget_id, item_id)`` and search the tree to find the item before each operation. If the item was destroyed, the flash is gracefully skipped.
+
+**Global registry**: Keyed by ``(tree_widget_id, item_id)`` to prevent overlapping flashes.
+
+TreeFormFlashMixin
+------------------
+
+Widgets that have both a tree and a form (ConfigWindow, StepParameterEditorWidget) use ``TreeFormFlashMixin`` to provide unified flash behavior:
+
+.. code-block:: python
+
+   from openhcs.pyqt_gui.widgets.shared.tree_form_flash_mixin import TreeFormFlashMixin
+
+   class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
+       def __init__(self):
+           super().__init__()
+           # ... create form_manager, tree_widget, scope_id ...
+
+           # Override form manager's tree flash notification
+           self.form_manager._notify_tree_flash = self._flash_tree_item
+
+**Mixin provides**:
+
+1. ``_flash_groupbox_for_field(field_name)``: Flash the GroupBox for a nested config when scrolling to it (double-click tree item)
+2. ``_flash_tree_item(config_name)``: Flash the tree item when a nested config's placeholder changes (cross-window updates)
+3. ``_find_tree_item_by_field_name(field_name, tree_widget, parent_item)``: Recursively search tree for item by field name
+
+**Requirements**:
+
+- Must have ``self.form_manager`` (ParameterFormManager instance)
+- Must have ``self.hierarchy_tree`` or ``self.tree_widget`` (QTreeWidget instance)
+- Must have ``self.scope_id`` (str for scope color scheme)
+
+**Integration with ParameterFormManager**:
+
+When a nested config's placeholder changes (e.g., from cross-window updates), the nested manager calls ``_notify_parent_to_flash_groupbox()``, which:
+
+1. Flashes the GroupBox containing the nested config
+2. If the parent is the root manager, calls ``_notify_tree_flash(config_name)``
+3. The root manager's overridden ``_notify_tree_flash()`` (from mixin) flashes the tree item
+
+This creates a unified visual feedback system where both the GroupBox AND the tree item flash when a nested config's resolved value changes.
 
 Enum-Driven Polymorphic Dispatch
 =================================
@@ -1379,27 +1462,6 @@ The unsaved changes check is performed on every label update (triggered by cross
 2. **Early returns**: The check returns early if no resolver, parent, or live snapshot is provided
 3. **Field-level comparison**: Only compares fields that actually exist in the config dataclass
 4. **Scope filtering**: Only collects context for the relevant scope (plate/step), not all scopes
-5. **Fast path optimization**: Only checks configs that have actually been modified (see below)
-
-**Fast Path Optimization (commit 04a0bfae)**
-
-When a PipelineConfig editor window is open, it creates form managers for ALL nested configs (napari_display_config, fiji_display_config, well_filter_config, etc.). Previously, the unsaved changes check would iterate through all 16+ configs even when only 1 was edited, causing slow reset operations.
-
-The optimization checks if a specific config field is in ``_last_emitted_values`` before performing expensive field resolution:
-
-.. code-block:: python
-
-   # Check if THIS SPECIFIC config field has been emitted
-   if hasattr(manager, '_last_emitted_values') and config_attr in manager._last_emitted_values:
-       has_form_manager_with_changes = True
-       # Proceed with field resolution
-   else:
-       # Skip this config - no changes emitted
-       return False
-
-**Impact**: When you reset ``well_filter``, only ``well_filter_config`` is checked instead of all 16 configs. Reset operations are now as fast as typing in a field (~10-20ms instead of ~500ms).
-
-**Key insight**: ``_last_emitted_values`` is a dict that tracks which config fields have emitted cross-window change signals. Checking if a specific field is in this dict (not just if the dict is non-empty) allows us to skip configs that have form managers but haven't been modified.
 
 **Visual Feedback**
 

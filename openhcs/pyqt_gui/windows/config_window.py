@@ -22,6 +22,7 @@ from PyQt6.QtGui import QFont
 from openhcs.pyqt_gui.widgets.shared.parameter_form_manager import ParameterFormManager
 from openhcs.pyqt_gui.widgets.shared.config_hierarchy_tree import ConfigHierarchyTreeHelper
 from openhcs.pyqt_gui.widgets.shared.collapsible_splitter_helper import CollapsibleSplitterHelper
+from openhcs.pyqt_gui.widgets.shared.tree_form_flash_mixin import TreeFormFlashMixin
 from openhcs.pyqt_gui.shared.style_generator import StyleSheetGenerator
 from openhcs.pyqt_gui.shared.color_scheme import PyQt6ColorScheme
 from openhcs.pyqt_gui.windows.base_form_dialog import BaseFormDialog
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 # Infrastructure classes removed - functionality migrated to ParameterFormManager service layer
 
 
-class ConfigWindow(BaseFormDialog):
+class ConfigWindow(TreeFormFlashMixin, BaseFormDialog):
     """
     PyQt6 Configuration Window.
 
@@ -47,6 +48,8 @@ class ConfigWindow(BaseFormDialog):
 
     Inherits from BaseFormDialog to automatically handle unregistration from
     cross-window placeholder updates when the dialog closes.
+
+    Inherits from TreeFormFlashMixin to provide GroupBox and tree item flash animations.
     """
 
     # Signals
@@ -88,6 +91,10 @@ class ConfigWindow(BaseFormDialog):
         self.style_generator = StyleSheetGenerator(self.color_scheme)
         self.tree_helper = ConfigHierarchyTreeHelper()
 
+        # Import flash config for tree item flashing
+        from openhcs.pyqt_gui.widgets.shared.scope_visual_config import ScopeVisualConfig
+        self.config = ScopeVisualConfig()
+
         # SIMPLIFIED: Use dual-axis resolution
         from openhcs.core.lazy_placeholder import LazyDefaultPlaceholderService
 
@@ -116,6 +123,9 @@ class ConfigWindow(BaseFormDialog):
             context_obj=None,  # Inherit from thread-local GlobalPipelineConfig only
             scope_id=self.scope_id  # Pass scope_id to limit cross-window updates to same orchestrator
         )
+
+        # Override the form manager's tree flash notification to flash tree items
+        self.form_manager._notify_tree_flash = self._flash_tree_item
 
         if self.config_class == GlobalPipelineConfig:
             self._original_global_config_snapshot = copy.deepcopy(current_config)
@@ -265,6 +275,9 @@ class ConfigWindow(BaseFormDialog):
 
         return tree
 
+    # _flash_tree_item() - provided by TreeFormFlashMixin
+    # _find_tree_item_by_field_name() - provided by TreeFormFlashMixin
+
     def _on_tree_item_double_clicked(self, item: QTreeWidgetItem, column: int):
         """Handle tree item double-clicks for navigation."""
         data = item.data(0, Qt.ItemDataRole.UserRole)
@@ -353,6 +366,9 @@ class ConfigWindow(BaseFormDialog):
                 # Scroll to the first widget (this will show the section header too)
                 self.scroll_area.ensureWidgetVisible(first_widget, 100, 100)
                 logger.info(f"✅ Scrolled to {field_name} via first widget")
+
+                # Flash the GroupBox to draw attention
+                self._flash_groupbox_for_field(field_name)
             else:
                 # Fallback: try to find the GroupBox
                 from PyQt6.QtWidgets import QGroupBox
@@ -361,12 +377,17 @@ class ConfigWindow(BaseFormDialog):
                     if isinstance(current, QGroupBox):
                         self.scroll_area.ensureWidgetVisible(current, 50, 50)
                         logger.info(f"✅ Scrolled to {field_name} via GroupBox")
+
+                        # Flash the GroupBox to draw attention
+                        self._flash_groupbox_for_field(field_name)
                         return
                     current = current.parentWidget()
 
                 logger.warning(f"⚠️ Could not find widget or GroupBox for {field_name}")
         else:
             logger.warning(f"❌ Field '{field_name}' not in nested_managers")
+
+    # _flash_groupbox_for_field() - provided by TreeFormFlashMixin
 
 
     

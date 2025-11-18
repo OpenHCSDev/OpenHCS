@@ -13,55 +13,102 @@ logger = logging.getLogger(__name__)
 
 class WidgetFlashAnimator:
     """Manages flash animation for form widget background color changes.
-    
-    Uses QPropertyAnimation for smooth color transitions.
+
+    Uses stylesheet manipulation for GroupBox (since stylesheets override palettes),
+    and palette manipulation for input widgets.
     """
 
-    def __init__(self, widget: QWidget):
+    def __init__(self, widget: QWidget, flash_color: Optional[QColor] = None):
         """Initialize animator.
 
         Args:
             widget: Widget to animate
+            flash_color: Optional custom flash color (defaults to config FLASH_COLOR_RGB)
         """
         self.widget = widget
         self.config = ScopeVisualConfig()
+        self.flash_color = flash_color or QColor(*self.config.FLASH_COLOR_RGB, 180)
         self._original_palette: Optional[QPalette] = None
+        self._original_stylesheet: Optional[str] = None
         self._flash_timer: Optional[QTimer] = None
         self._is_flashing: bool = False
+        self._use_stylesheet: bool = False  # Track which method we used
 
     def flash_update(self) -> None:
         """Trigger flash animation on widget background."""
         if not self.widget or not self.widget.isVisible():
+            logger.info(f"⚠️ Widget not visible or None")
             return
-            
+
         if self._is_flashing:
             # Already flashing - restart timer
+            logger.info(f"⚠️ Already flashing, restarting timer")
             if self._flash_timer:
                 self._flash_timer.stop()
                 self._flash_timer.start(self.config.FLASH_DURATION_MS)
             return
 
         self._is_flashing = True
+        logger.info(f"🎨 Starting flash animation for {type(self.widget).__name__}")
 
-        # Store original palette
-        self._original_palette = self.widget.palette()
+        # Use different approaches depending on widget type
+        # GroupBox: Use stylesheet (stylesheets override palettes)
+        # Input widgets: Use palette (works fine for QLineEdit, QComboBox, etc.)
+        from PyQt6.QtWidgets import QGroupBox
+        if isinstance(self.widget, QGroupBox):
+            self._use_stylesheet = True
+            # Store original stylesheet
+            self._original_stylesheet = self.widget.styleSheet()
+            logger.info(f"   Is GroupBox, using stylesheet approach")
+            logger.info(f"   Original stylesheet: '{self._original_stylesheet}'")
 
-        # Apply flash color
-        flash_palette = self.widget.palette()
-        flash_color = QColor(*self.config.FLASH_COLOR_RGB, 100)
-        flash_palette.setColor(QPalette.ColorRole.Base, flash_color)
-        self.widget.setPalette(flash_palette)
+            # Apply flash color via stylesheet (overrides parent stylesheet)
+            r, g, b, a = self.flash_color.red(), self.flash_color.green(), self.flash_color.blue(), self.flash_color.alpha()
+            flash_style = f"QGroupBox {{ background-color: rgba({r}, {g}, {b}, {a}); }}"
+            logger.info(f"   Applying flash style: '{flash_style}'")
+            self.widget.setStyleSheet(flash_style)
+        else:
+            self._use_stylesheet = False
+            # Store original palette
+            self._original_palette = self.widget.palette()
+            logger.info(f"   Not GroupBox, using palette approach")
 
-        # Setup timer to restore original palette
-        self._flash_timer = QTimer(self.widget)
-        self._flash_timer.setSingleShot(True)
-        self._flash_timer.timeout.connect(self._restore_palette)
+            # Apply flash color via palette
+            flash_palette = self.widget.palette()
+            flash_palette.setColor(QPalette.ColorRole.Base, self.flash_color)
+            self.widget.setPalette(flash_palette)
+
+        # Setup timer to restore original state
+        # CRITICAL: Use widget as parent to prevent garbage collection
+        if self._flash_timer is None:
+            logger.info(f"   Creating new timer")
+            self._flash_timer = QTimer(self.widget)
+            self._flash_timer.setSingleShot(True)
+            self._flash_timer.timeout.connect(self._restore_original)
+
+        logger.info(f"   Starting timer for {self.config.FLASH_DURATION_MS}ms")
         self._flash_timer.start(self.config.FLASH_DURATION_MS)
 
-    def _restore_palette(self) -> None:
-        """Restore original palette."""
-        if self.widget and self._original_palette:
-            self.widget.setPalette(self._original_palette)
+    def _restore_original(self) -> None:
+        """Restore original stylesheet or palette."""
+        logger.info(f"🔄 _restore_original called for {type(self.widget).__name__}")
+        if not self.widget:
+            logger.info(f"   Widget is None, aborting")
+            self._is_flashing = False
+            return
+
+        # Use the flag to determine which method to restore
+        if self._use_stylesheet:
+            # Restore original stylesheet
+            logger.info(f"   Restoring stylesheet: '{self._original_stylesheet}'")
+            self.widget.setStyleSheet(self._original_stylesheet)
+        else:
+            # Restore original palette
+            logger.info(f"   Restoring palette")
+            if self._original_palette:
+                self.widget.setPalette(self._original_palette)
+
+        logger.info(f"✅ Restored original state")
         self._is_flashing = False
 
 
@@ -69,11 +116,12 @@ class WidgetFlashAnimator:
 _widget_animators: dict[int, WidgetFlashAnimator] = {}
 
 
-def flash_widget(widget: QWidget) -> None:
+def flash_widget(widget: QWidget, flash_color: Optional[QColor] = None) -> None:
     """Flash a widget to indicate update.
 
     Args:
         widget: Widget to flash
+        flash_color: Optional custom flash color (defaults to config FLASH_COLOR_RGB)
     """
     config = ScopeVisualConfig()
     if not config.WIDGET_FLASH_ENABLED:
@@ -86,7 +134,11 @@ def flash_widget(widget: QWidget) -> None:
 
     # Get or create animator
     if widget_id not in _widget_animators:
-        _widget_animators[widget_id] = WidgetFlashAnimator(widget)
+        _widget_animators[widget_id] = WidgetFlashAnimator(widget, flash_color=flash_color)
+    else:
+        # Update flash color if provided
+        if flash_color is not None:
+            _widget_animators[widget_id].flash_color = flash_color
 
     animator = _widget_animators[widget_id]
     animator.flash_update()
